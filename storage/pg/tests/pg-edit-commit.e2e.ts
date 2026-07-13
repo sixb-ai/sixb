@@ -10,7 +10,7 @@ import {
   planEditBatch,
   prop,
   type Storage,
-  type StoredObjectUpsertedEvent,
+  type StoredObjectMutationEvent,
 } from "@sixb/core"
 import { type RecordEditsHandler, recordEdits } from "@sixb/core/actions/worker"
 import type { PostgresStorage } from "../src"
@@ -294,10 +294,8 @@ describe("PostgreSQL edit commit", () => {
     const objects = storage.objects
 
     // Seed only the endpoints (no link) so the plan nets to a link `create`.
-    await objects.applyObjectUpserted(
-      objectEvent("Customer", "cus_1", { id: "cus_1", name: "Acme" })
-    )
-    await objects.applyObjectUpserted(
+    await objects.applyObjectUpsert(objectEvent("Customer", "cus_1", { id: "cus_1", name: "Acme" }))
+    await objects.applyObjectUpsert(
       objectEvent("Invoice", "inv_1", { id: "inv_1", status: "draft" })
     )
 
@@ -410,18 +408,18 @@ function objectEvent(
   objectTypeId: string,
   primaryId: string,
   properties: Record<string, unknown>
-): StoredObjectUpsertedEvent {
+): StoredObjectMutationEvent {
   const id = `evt_${objectTypeId}_${primaryId}`
   return {
     id,
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: `${objectTypeId}:${primaryId}`,
     occurredAt: "2026-06-01T00:00:00.000Z",
     cursor: id,
-    payload: { objectTypeId, primaryId, properties },
+    payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
   }
 }
 
@@ -504,11 +502,11 @@ async function queueRunningActionRun(storage: PostgresStorage, runId: string): P
 
 async function seedInvoiceAndCustomers(storage: PostgresStorage): Promise<void> {
   const occurredAt = "2026-06-01T00:00:00.000Z"
-  await storage.objects.applyObjectUpserted({
+  await storage.objects.applyObjectUpsert({
     id: "evt_customer_1",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: "Customer:cus_1",
     occurredAt,
@@ -517,13 +515,14 @@ async function seedInvoiceAndCustomers(storage: PostgresStorage): Promise<void> 
       objectTypeId: "Customer",
       primaryId: "cus_1",
       properties: { id: "cus_1", name: "Acme" },
+      propertyChanges: {},
     },
   })
-  await storage.objects.applyObjectUpserted({
+  await storage.objects.applyObjectUpsert({
     id: "evt_customer_2",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: "Customer:cus_2",
     occurredAt,
@@ -532,13 +531,14 @@ async function seedInvoiceAndCustomers(storage: PostgresStorage): Promise<void> 
       objectTypeId: "Customer",
       primaryId: "cus_2",
       properties: { id: "cus_2", name: "Globex" },
+      propertyChanges: {},
     },
   })
-  await storage.objects.applyObjectUpserted({
+  await storage.objects.applyObjectUpsert({
     id: "evt_invoice_without_customer",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: "Invoice:inv_1",
     occurredAt,
@@ -547,17 +547,18 @@ async function seedInvoiceAndCustomers(storage: PostgresStorage): Promise<void> 
       objectTypeId: "Invoice",
       primaryId: "inv_1",
       properties: { id: "inv_1", status: "draft" },
+      propertyChanges: {},
     },
   })
 }
 
 async function seedGraph(storage: PostgresStorage): Promise<void> {
   const occurredAt = "2026-06-01T00:00:00.000Z"
-  await storage.objects.applyObjectUpserted({
+  await storage.objects.applyObjectUpsert({
     id: "evt_customer",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: "Customer:cus_1",
     occurredAt,
@@ -566,13 +567,14 @@ async function seedGraph(storage: PostgresStorage): Promise<void> {
       objectTypeId: "Customer",
       primaryId: "cus_1",
       properties: { id: "cus_1", name: "Acme" },
+      propertyChanges: {},
     },
   })
-  await storage.objects.applyObjectUpserted({
+  await storage.objects.applyObjectUpsert({
     id: "evt_invoice",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: "Invoice:inv_1",
     occurredAt,
@@ -581,13 +583,14 @@ async function seedGraph(storage: PostgresStorage): Promise<void> {
       objectTypeId: "Invoice",
       primaryId: "inv_1",
       properties: { id: "inv_1", status: "draft" },
+      propertyChanges: {},
     },
   })
-  await storage.objects.applyObjectUpserted({
+  await storage.objects.applyObjectUpsert({
     id: "evt_payment",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: "Payment:pay_1",
     occurredAt,
@@ -596,13 +599,14 @@ async function seedGraph(storage: PostgresStorage): Promise<void> {
       objectTypeId: "Payment",
       primaryId: "pay_1",
       properties: { id: "pay_1" },
+      propertyChanges: {},
     },
   })
-  await storage.objects.applyLinkUpserted({
+  await storage.objects.applyLinkUpsert({
     id: "evt_invoice_customer",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: "Invoice:inv_1:customer",
     occurredAt,
@@ -614,13 +618,14 @@ async function seedGraph(storage: PostgresStorage): Promise<void> {
       targetTypeId: "Customer",
       targetId: "cus_1",
       properties: { role: "billTo" },
+      propertyChanges: {},
     },
   })
-  await storage.objects.applyLinkUpserted({
+  await storage.objects.applyLinkUpsert({
     id: "evt_payment_invoice",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: "Payment:pay_1:invoice",
     occurredAt,
@@ -631,6 +636,7 @@ async function seedGraph(storage: PostgresStorage): Promise<void> {
       linkId: "invoice",
       targetTypeId: "Invoice",
       targetId: "inv_1",
+      propertyChanges: {},
     },
   })
 }

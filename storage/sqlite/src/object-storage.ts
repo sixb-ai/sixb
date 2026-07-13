@@ -19,9 +19,9 @@ import type {
   ObjectStorage,
   QueryObjectsInput,
   QueryObjectsResult,
-  StoredLinkRemovedEvent,
-  StoredLinkUpsertedEvent,
-  StoredObjectUpsertedEvent,
+  StoredLinkDeletedEvent,
+  StoredLinkMutationEvent,
+  StoredObjectMutationEvent,
   StoredTelemetryAppendedEvent,
 } from "@sixb/core"
 import {
@@ -168,7 +168,7 @@ export class SqliteObjectStorage implements ObjectStorage {
     }
   }
 
-  async applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow> {
+  async applyObjectUpsert(event: StoredObjectMutationEvent): Promise<ObjectRow> {
     // Check idempotency
     const applied = this.db
       .query("SELECT 1 FROM applied_events_objects WHERE event_id = ?")
@@ -244,8 +244,8 @@ export class SqliteObjectStorage implements ObjectStorage {
     return this.rowToObject(row)
   }
 
-  async applyObjectUpsertedBatch(
-    events: readonly StoredObjectUpsertedEvent[]
+  async applyObjectUpsertBatch(
+    events: readonly StoredObjectMutationEvent[]
   ): Promise<readonly ObjectRow[]> {
     if (events.length === 0) return []
 
@@ -446,7 +446,7 @@ export class SqliteObjectStorage implements ObjectStorage {
     })()
   }
 
-  async applyLinkUpserted(event: StoredLinkUpsertedEvent): Promise<void> {
+  async applyLinkUpsert(event: StoredLinkMutationEvent): Promise<void> {
     // Check idempotency
     const applied = this.db
       .query("SELECT 1 FROM applied_events_objects WHERE event_id = ?")
@@ -485,7 +485,7 @@ export class SqliteObjectStorage implements ObjectStorage {
       .run(event.id)
   }
 
-  async applyLinkUpsertedBatch(events: readonly StoredLinkUpsertedEvent[]): Promise<void> {
+  async applyLinkUpsertBatch(events: readonly StoredLinkMutationEvent[]): Promise<void> {
     if (events.length === 0) return
 
     this.db.transaction(() => {
@@ -523,7 +523,7 @@ export class SqliteObjectStorage implements ObjectStorage {
     })()
   }
 
-  async applyLinkRemoved(event: StoredLinkRemovedEvent): Promise<void> {
+  async applyLinkDelete(event: StoredLinkDeletedEvent): Promise<void> {
     // Check idempotency
     const applied = this.db
       .query("SELECT 1 FROM applied_events_objects WHERE event_id = ?")

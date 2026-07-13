@@ -6242,13 +6242,10 @@ export type ListEventsData = {
       | "datasets"
       | "rules"
     type?:
-      | "object.upserted"
       | "object.created"
       | "object.updated"
       | "object.deleted"
       | "telemetry.appended"
-      | "link.upserted"
-      | "link.removed"
       | "link.created"
       | "link.updated"
       | "link.deleted"
@@ -6327,13 +6324,10 @@ export type ListEventsResponses = {
         [key: string]: unknown
       }
       type:
-        | "object.upserted"
         | "object.created"
         | "object.updated"
         | "object.deleted"
         | "telemetry.appended"
-        | "link.upserted"
-        | "link.removed"
         | "link.created"
         | "link.updated"
         | "link.deleted"

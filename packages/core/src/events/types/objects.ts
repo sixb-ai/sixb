@@ -1,21 +1,6 @@
 import type { EventEnvelope } from "../envelope"
 import type { PropertyChangeMap } from "../property-changes"
 
-export interface ObjectUpsertedEvent extends EventEnvelope {
-  /**
-   * @deprecated Legacy compatibility event. Use `object.created` or
-   * `object.updated` instead. To be removed in the final migration phase.
-   */
-  type: "object.upserted"
-  topic: "objects"
-  partitionKey: string
-  payload: {
-    objectTypeId: string
-    primaryId: string
-    properties: Record<string, unknown>
-  }
-}
-
 export interface ObjectCreatedEvent extends EventEnvelope {
   type: "object.created"
   topic: "objects"
@@ -51,8 +36,4 @@ export interface ObjectDeletedEvent extends EventEnvelope {
   }
 }
 
-export type ObjectEvent =
-  | ObjectUpsertedEvent
-  | ObjectCreatedEvent
-  | ObjectUpdatedEvent
-  | ObjectDeletedEvent
+export type ObjectEvent = ObjectCreatedEvent | ObjectUpdatedEvent | ObjectDeletedEvent

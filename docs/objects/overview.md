@@ -191,4 +191,4 @@ If you wrote `sixb.objects(...)` you are in the runtime API. If you destructured
 - [Object types](../ontology/object-types.md) — declaring the types these APIs operate on.
 - [Links](../ontology/links.md) — modeling relationships.
 - [Actions](../actions/overview.md) — staged edits and writebacks.
-- [Events](../events/overview.md) — `object.upserted`, `telemetry.appended`, `link.upserted`, `link.removed`.
+- [Events](../events/overview.md) — canonical object, telemetry, and link mutation events.

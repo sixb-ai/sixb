@@ -10,7 +10,7 @@ describe("scopeKeysForEvent", () => {
   test("objects resolve objectTypeId + primaryId", () => {
     expect(
       scopeKeysForEvent(
-        event("objects", "object.upserted", { objectTypeId: "device", primaryId: "fan-1" })
+        event("objects", "object.created", { objectTypeId: "device", primaryId: "fan-1" })
       )
     ).toEqual({ objectTypeId: "device", primaryId: "fan-1" })
   })
@@ -30,7 +30,7 @@ describe("scopeKeysForEvent", () => {
   test("links resolve identity from the source side and carry linkId", () => {
     expect(
       scopeKeysForEvent(
-        event("links", "link.upserted", {
+        event("links", "link.created", {
           sourceTypeId: "device",
           sourceId: "fan-1",
           linkId: "zone",

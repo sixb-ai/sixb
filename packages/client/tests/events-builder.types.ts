@@ -169,12 +169,11 @@ events
     }
   })
 
-// `.linked(token)` validates the token against the type's links and yields the
-// links event. The token does NOT narrow the payload — every link event shares
-// the same shape — so this asserts the event type, not a per-link payload.
+// `.link(token)` validates the token against the type's links and yields the
+// canonical link event union until a terminal operation narrows it.
 events
   .object(Sensor)
-  .linked(Sensor.l.zone)
+  .link(Sensor.l.zone)
   .subscribe((event) => {
     const linkId: string = event.payload.linkId
     const sourceId: string = event.payload.sourceId
@@ -200,8 +199,8 @@ events
     void change
   })
 
-// @ts-expect-error — `.linked` requires a link token, not a property token.
-events.object(Sensor).linked(Sensor.p.indoorTemperature)
+// @ts-expect-error — `.linked` was removed; use `.link(token)`.
+events.object(Sensor).linked(Sensor.l.zone)
 
 // @ts-expect-error — `.link` requires a link token, not a property token.
 events.object(Sensor).link(Sensor.p.indoorTemperature)

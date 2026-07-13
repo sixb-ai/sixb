@@ -41,9 +41,6 @@ the core event registry.
 | `workflow.intervention.*` (requested, submitted, cancelled, expired) | `workflows` | `workflowId`, `runId` |
 | `dataset.version.committed` | `datasets` | `datasetId` |
 
-`object.upserted`, `link.upserted`, and `link.removed` are legacy compatibility events. Prefer
-`created`, `updated`, and `deleted` selectors for new code.
-
 `EVENT_TYPES` and `EVENT_TOPICS` are exported from `@sixb/core` for the canonical lists at
 runtime.
 
@@ -128,11 +125,14 @@ await sixb.events.append({
   actor: { type: "service", id: "erp-sync" },
   events: [
     {
-      type: "object.upserted",
+      type: "object.updated",
       payload: {
         objectTypeId: "invoice",
         primaryId: "INV-1042",
         properties: { status: "paid" },
+        propertyChanges: {
+          status: { operation: "updated", before: "sent", after: "paid" },
+        },
       },
     },
   ],
@@ -146,7 +146,7 @@ The [server](../server/overview.md) exposes the same log over HTTP. Results are
 [Authorization](../auth/authorization.md)).
 
 ```bash
-curl "http://localhost:3000/api/events?type=object.upserted&limit=50"
+curl "http://localhost:3000/api/events?type=object.updated&limit=50"
 ```
 
 | Query param | Notes |

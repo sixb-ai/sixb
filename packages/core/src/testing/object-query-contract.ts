@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { StoredLinkUpsertedEvent, StoredObjectUpsertedEvent } from "../events"
+import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "../events"
 import {
   collectObjectQueryValidationIssues,
   countObjects,
@@ -882,14 +882,14 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
 
     test("scopes search profile defaults by object type for subtype text queries", async () => {
       await withStorage(async (storage) => {
-        await storage.applyObjectUpserted(
+        await storage.applyObjectUpsert(
           objectEvent("101", DefaultTextBase.id, "default-base", {
             id: "default-base",
             name: "ordinary",
             alias: "secret",
           })
         )
-        await storage.applyObjectUpserted(
+        await storage.applyObjectUpsert(
           objectEvent("102", DefaultTextChild.id, "default-child", {
             id: "default-child",
             name: "ordinary",
@@ -1041,7 +1041,7 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
 }
 
 export async function seedObjectQueryContractData(storage: ObjectStorage): Promise<void> {
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("001", Room.id, "room-alpha", {
       id: "room-alpha",
       name: "Alpha Conference",
@@ -1055,7 +1055,7 @@ export async function seedObjectQueryContractData(storage: ObjectStorage): Promi
       embedding: [1, 0],
     })
   )
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("002", Room.id, "room-beta", {
       id: "room-beta",
       name: "Beta Lab",
@@ -1069,7 +1069,7 @@ export async function seedObjectQueryContractData(storage: ObjectStorage): Promi
       embedding: [0.8, 0.2],
     })
   )
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("003", Room.id, "room-gamma", {
       id: "room-gamma",
       name: "Gamma Huddle",
@@ -1083,7 +1083,7 @@ export async function seedObjectQueryContractData(storage: ObjectStorage): Promi
       embedding: [0, 1],
     })
   )
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("004", Room.id, "room-null-floor", {
       id: "room-null-floor",
       name: "Null Floor",
@@ -1096,7 +1096,7 @@ export async function seedObjectQueryContractData(storage: ObjectStorage): Promi
       embedding: [0, 0],
     })
   )
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("005", Room.id, "room-missing-floor", {
       id: "room-missing-floor",
       name: "Missing Floor",
@@ -1108,36 +1108,36 @@ export async function seedObjectQueryContractData(storage: ObjectStorage): Promi
       embedding: [0, 0],
     })
   )
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("006", Device.id, "device-projector", {
       id: "device-projector",
       name: "Projector",
     })
   )
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("007", Device.id, "device-sensor", {
       id: "device-sensor",
       name: "Sensor",
     })
   )
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("008", Asset.id, "asset-base", {
       id: "asset-base",
     })
   )
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("009", LaptopAsset.id, "laptop-1", {
       id: "laptop-1",
     })
   )
-  await storage.applyLinkUpserted(
+  await storage.applyLinkUpsert(
     linkEvent("010", Room.id, "room-alpha", "hasDevice", Device.id, "device-projector")
   )
-  await storage.applyLinkUpserted(
+  await storage.applyLinkUpsert(
     linkEvent("011", Room.id, "room-beta", "hasDevice", Device.id, "device-sensor")
   )
-  await storage.applyObjectUpserted(objectEvent("103", Zone.id, "zone-one", { id: "zone-one" }))
-  await storage.applyLinkUpserted(
+  await storage.applyObjectUpsert(objectEvent("103", Zone.id, "zone-one", { id: "zone-one" }))
+  await storage.applyLinkUpsert(
     linkEvent("012", Zone.id, "zone-one", "hasDevice", Device.id, "device-projector")
   )
 }
@@ -1147,16 +1147,16 @@ function objectEvent(
   objectTypeId: string,
   primaryId: string,
   properties: Record<string, unknown>
-): StoredObjectUpsertedEvent {
+): StoredObjectMutationEvent {
   return {
     id: `object-query-contract-object-${cursor}`,
     cursor,
     schemaVersion: 1,
     projectId,
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: `${objectTypeId}:${primaryId}`,
-    payload: { objectTypeId, primaryId, properties },
+    payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
     occurredAt: `2026-01-01T00:00:${cursor.slice(-2)}.000Z`,
   }
 }
@@ -1168,16 +1168,16 @@ function linkEvent(
   linkId: string,
   targetTypeId: string,
   targetId: string
-): StoredLinkUpsertedEvent {
+): StoredLinkMutationEvent {
   return {
     id: `object-query-contract-link-${cursor}`,
     cursor,
     schemaVersion: 1,
     projectId,
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
-    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId },
+    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
     occurredAt: `2026-01-01T00:00:${cursor.slice(-2)}.000Z`,
   }
 }

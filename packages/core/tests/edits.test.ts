@@ -205,11 +205,11 @@ describe("EditBatch core contract", () => {
   test("derives update and link property update diffs from current storage state", async () => {
     const storage = await createSeededStorage()
 
-    await storage.objects.applyLinkUpserted({
+    await storage.objects.applyLinkUpsert({
       id: "evt_link_1",
       schemaVersion: 1,
       projectId: "project-a",
-      type: "link.upserted",
+      type: "link.created",
       topic: "links",
       partitionKey: "Invoice:inv_1:customer",
       occurredAt: "2026-06-01T00:00:00.000Z",
@@ -221,6 +221,7 @@ describe("EditBatch core contract", () => {
         targetTypeId: "Customer",
         targetId: "cus_1",
         properties: { role: "old" },
+        propertyChanges: {},
       },
     })
 
@@ -398,11 +399,11 @@ describe("EditBatch core contract", () => {
 
   test("enforces refs, required link properties, and cardinality", async () => {
     const storage = await createSeededStorage()
-    await storage.objects.applyObjectUpserted({
+    await storage.objects.applyObjectUpsert({
       id: "evt_customer_2",
       schemaVersion: 1,
       projectId: "project-a",
-      type: "object.upserted",
+      type: "object.created",
       topic: "objects",
       partitionKey: "Customer:cus_2",
       occurredAt: "2026-06-01T00:00:00.000Z",
@@ -414,13 +415,14 @@ describe("EditBatch core contract", () => {
           id: "cus_2",
           name: "Second Customer",
         },
+        propertyChanges: {},
       },
     })
-    await storage.objects.applyLinkUpserted({
+    await storage.objects.applyLinkUpsert({
       id: "evt_link_2",
       schemaVersion: 1,
       projectId: "project-a",
-      type: "link.upserted",
+      type: "link.created",
       topic: "links",
       partitionKey: "Invoice:inv_1:customer",
       occurredAt: "2026-06-01T00:00:00.000Z",
@@ -432,6 +434,7 @@ describe("EditBatch core contract", () => {
         targetTypeId: "Customer",
         targetId: "cus_1",
         properties: { role: "billTo" },
+        propertyChanges: {},
       },
     })
 
@@ -621,11 +624,8 @@ describe("EditBatch core contract", () => {
     })
 
     expect(result.commit.created).toBe(true)
-    expect(result.commit.events.map((event) => event.type)).toEqual([
-      "object.upserted",
-      "object.updated",
-    ])
-    expect(result.commit.events[1]).toMatchObject({
+    expect(result.commit.events.map((event) => event.type)).toEqual(["object.updated"])
+    expect(result.commit.events[0]).toMatchObject({
       type: "object.updated",
       payload: {
         objectTypeId: "Invoice",
@@ -863,11 +863,11 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
 
   test("re-creating a deleted link replaces (does not merge) the prior properties", async () => {
     const storage = await createSeededStorage()
-    await storage.objects.applyLinkUpserted({
+    await storage.objects.applyLinkUpsert({
       id: "evt_link_props",
       schemaVersion: 1,
       projectId: "project-a",
-      type: "link.upserted",
+      type: "link.created",
       topic: "links",
       partitionKey: "Invoice:inv_1:customer",
       occurredAt: "2026-06-01T00:00:00.000Z",
@@ -879,6 +879,7 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
         targetTypeId: "Customer",
         targetId: "cus_1",
         properties: { role: "old" },
+        propertyChanges: {},
       },
     })
 
@@ -951,11 +952,11 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
   test("swapping a cardinality-one target via delete then create is allowed", async () => {
     const storage = await createSeededStorage()
     await seedInvoiceCustomerLink(storage) // inv_1 -> cus_1
-    await storage.objects.applyObjectUpserted({
+    await storage.objects.applyObjectUpsert({
       id: "evt_customer_2",
       schemaVersion: 1,
       projectId: "project-a",
-      type: "object.upserted",
+      type: "object.created",
       topic: "objects",
       partitionKey: "Customer:cus_2",
       occurredAt: "2026-06-01T00:00:00.000Z",
@@ -964,6 +965,7 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
         objectTypeId: "Customer",
         primaryId: "cus_2",
         properties: { id: "cus_2", name: "Second Customer" },
+        propertyChanges: {},
       },
     })
 
@@ -1414,11 +1416,11 @@ async function queueRunningRun(
 }
 
 async function seedSecondCustomer(storage: InMemoryStorage): Promise<void> {
-  await storage.objects.applyObjectUpserted({
+  await storage.objects.applyObjectUpsert({
     id: "evt_customer_2",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: "Customer:cus_2",
     occurredAt: "2026-06-01T00:00:00.000Z",
@@ -1427,6 +1429,7 @@ async function seedSecondCustomer(storage: InMemoryStorage): Promise<void> {
       objectTypeId: "Customer",
       primaryId: "cus_2",
       properties: { id: "cus_2", name: "Globex" },
+      propertyChanges: {},
     },
   })
 }
@@ -1472,11 +1475,11 @@ async function createSeededStorage(): Promise<InMemoryStorage> {
   const storage = new InMemoryStorage()
   const timestamp = new Date("2026-06-01T00:00:00.000Z")
 
-  await storage.objects.applyObjectUpserted({
+  await storage.objects.applyObjectUpsert({
     id: "evt_customer_1",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: "Customer:cus_1",
     occurredAt: timestamp.toISOString(),
@@ -1488,13 +1491,14 @@ async function createSeededStorage(): Promise<InMemoryStorage> {
         id: "cus_1",
         name: "Acme",
       },
+      propertyChanges: {},
     },
   })
-  await storage.objects.applyObjectUpserted({
+  await storage.objects.applyObjectUpsert({
     id: "evt_invoice_1",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: "Invoice:inv_1",
     occurredAt: timestamp.toISOString(),
@@ -1507,13 +1511,14 @@ async function createSeededStorage(): Promise<InMemoryStorage> {
         amount: 120,
         status: "draft",
       },
+      propertyChanges: {},
     },
   })
-  await storage.objects.applyObjectUpserted({
+  await storage.objects.applyObjectUpsert({
     id: "evt_payment_1",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: "Payment:pay_1",
     occurredAt: timestamp.toISOString(),
@@ -1525,6 +1530,7 @@ async function createSeededStorage(): Promise<InMemoryStorage> {
         id: "pay_1",
         status: "pending",
       },
+      propertyChanges: {},
     },
   })
 
@@ -1532,11 +1538,11 @@ async function createSeededStorage(): Promise<InMemoryStorage> {
 }
 
 async function seedInvoiceCustomerLink(storage: InMemoryStorage): Promise<void> {
-  await storage.objects.applyLinkUpserted({
+  await storage.objects.applyLinkUpsert({
     id: "evt_invoice_customer",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: "Invoice:inv_1:customer",
     occurredAt: "2026-06-01T00:00:00.000Z",
@@ -1548,16 +1554,17 @@ async function seedInvoiceCustomerLink(storage: InMemoryStorage): Promise<void> 
       targetTypeId: "Customer",
       targetId: "cus_1",
       properties: { role: "billTo" },
+      propertyChanges: {},
     },
   })
 }
 
 async function seedPaymentInvoiceLink(storage: InMemoryStorage): Promise<void> {
-  await storage.objects.applyLinkUpserted({
+  await storage.objects.applyLinkUpsert({
     id: "evt_payment_invoice",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: "Payment:pay_1:invoice",
     occurredAt: "2026-06-01T00:00:00.000Z",
@@ -1568,6 +1575,7 @@ async function seedPaymentInvoiceLink(storage: InMemoryStorage): Promise<void> {
       linkId: "invoice",
       targetTypeId: "Invoice",
       targetId: "inv_1",
+      propertyChanges: {},
     },
   })
 }

@@ -1151,7 +1151,7 @@ describe("authorized event and workflow routes", () => {
     )
     expect(operatorEvents.status).toBe(200)
     const operatorBody = (await operatorEvents.json()) as { events: { type: string }[] }
-    expect(operatorBody.events.map((event) => event.type)).toContain("object.upserted")
+    expect(operatorBody.events.map((event) => event.type)).toContain("object.created")
 
     // The runner has no object grants, so object events are filtered out.
     const runnerEvents = await app.fetch(
@@ -1159,7 +1159,7 @@ describe("authorized event and workflow routes", () => {
     )
     expect(runnerEvents.status).toBe(200)
     const runnerBody = (await runnerEvents.json()) as { events: { type: string }[] }
-    expect(runnerBody.events.filter((event) => event.type === "object.upserted")).toEqual([])
+    expect(runnerBody.events.filter((event) => event.type === "object.created")).toEqual([])
   })
 
   test("workflow catalog narrows to runnable workflows and hides the rest as 404", async () => {

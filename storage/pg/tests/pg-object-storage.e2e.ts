@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type {
-  StoredLinkRemovedEvent,
-  StoredLinkUpsertedEvent,
-  StoredObjectUpsertedEvent,
+  StoredLinkDeletedEvent,
+  StoredLinkMutationEvent,
+  StoredObjectMutationEvent,
   StoredTelemetryAppendedEvent,
 } from "@sixb/core"
 import type { PostgresStorage } from "../src"
@@ -26,16 +26,16 @@ describe("PgObjectStorage", () => {
     primaryId: string,
     properties: Record<string, unknown>,
     cursor: string
-  ): StoredObjectUpsertedEvent {
+  ): StoredObjectMutationEvent {
     return {
       id: `event-${cursor}`,
       cursor,
       schemaVersion: 1,
       projectId,
-      type: "object.upserted",
+      type: "object.created",
       topic: "objects",
       partitionKey: `${objectTypeId}:${primaryId}`,
-      payload: { objectTypeId, primaryId, properties },
+      payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
       occurredAt: new Date().toISOString(),
     }
   }
@@ -61,7 +61,7 @@ describe("PgObjectStorage", () => {
     }
   }
 
-  function createLinkUpsertedEvent(
+  function createLinkMutationEvent(
     projectId: string,
     sourceTypeId: string,
     sourceId: string,
@@ -69,21 +69,21 @@ describe("PgObjectStorage", () => {
     targetTypeId: string,
     targetId: string,
     cursor: string
-  ): StoredLinkUpsertedEvent {
+  ): StoredLinkMutationEvent {
     return {
       id: `event-${cursor}`,
       cursor,
       schemaVersion: 1,
       projectId,
-      type: "link.upserted",
+      type: "link.created",
       topic: "links",
       partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
-      payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId },
+      payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
       occurredAt: new Date().toISOString(),
     }
   }
 
-  function createLinkRemovedEvent(
+  function createLinkDeletedEvent(
     projectId: string,
     sourceTypeId: string,
     sourceId: string,
@@ -91,23 +91,23 @@ describe("PgObjectStorage", () => {
     targetTypeId: string,
     targetId: string,
     cursor: string
-  ): StoredLinkRemovedEvent {
+  ): StoredLinkDeletedEvent {
     return {
       id: `event-${cursor}`,
       cursor,
       schemaVersion: 1,
       projectId,
-      type: "link.removed",
+      type: "link.deleted",
       topic: "links",
       partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
-      payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId },
+      payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
       occurredAt: new Date().toISOString(),
     }
   }
 
-  test("applyObjectUpserted creates new object", async () => {
+  test("applyObjectUpsert creates new object", async () => {
     const event = createObjectEvent("project-a", "Room", "room:101", { name: "Conference" }, "1")
-    const row = await storage.objects.applyObjectUpserted(event)
+    const row = await storage.objects.applyObjectUpsert(event)
 
     expect(row.primaryId).toBe("room:101")
     expect(row.objectTypeId).toBe("Room")
@@ -117,7 +117,7 @@ describe("PgObjectStorage", () => {
     expect(row.sourceEventId).toBe("event-1")
   })
 
-  test("applyObjectUpserted merges properties", async () => {
+  test("applyObjectUpsert merges properties", async () => {
     const event1 = createObjectEvent(
       "project-a",
       "Room",
@@ -125,10 +125,10 @@ describe("PgObjectStorage", () => {
       { name: "Conference", floor: "2" },
       "1"
     )
-    await storage.objects.applyObjectUpserted(event1)
+    await storage.objects.applyObjectUpsert(event1)
 
     const event2 = createObjectEvent("project-a", "Room", "room:101", { capacity: 20 }, "2")
-    const row = await storage.objects.applyObjectUpserted(event2)
+    const row = await storage.objects.applyObjectUpsert(event2)
 
     expect(row.properties.name).toBe("Conference")
     expect(row.properties.floor).toBe("2")
@@ -136,11 +136,11 @@ describe("PgObjectStorage", () => {
     expect(row.version).toBe(2)
   })
 
-  test("applyObjectUpserted is idempotent", async () => {
+  test("applyObjectUpsert is idempotent", async () => {
     const event = createObjectEvent("project-a", "Room", "room:101", { name: "Conference" }, "1")
 
-    await storage.objects.applyObjectUpserted(event)
-    await storage.objects.applyObjectUpserted(event) // Same event ID
+    await storage.objects.applyObjectUpsert(event)
+    await storage.objects.applyObjectUpsert(event) // Same event ID
 
     const row = await storage.objects.getByPrimaryId({
       projectId: "project-a",
@@ -151,13 +151,13 @@ describe("PgObjectStorage", () => {
   })
 
   test("getByPrimaryId returns correct object", async () => {
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:101", { name: "Room 1" }, "1")
     )
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:102", { name: "Room 2" }, "2")
     )
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-b", "Room", "room:101", { name: "Room 3" }, "3")
     )
 
@@ -180,7 +180,7 @@ describe("PgObjectStorage", () => {
   })
 
   test("applyTelemetryAppended updates object property", async () => {
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:101", { name: "Conference" }, "1")
     )
 
@@ -205,7 +205,7 @@ describe("PgObjectStorage", () => {
   })
 
   test("applyTelemetryAppended is idempotent", async () => {
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:101", {}, "1")
     )
 
@@ -221,8 +221,8 @@ describe("PgObjectStorage", () => {
     expect(row?.version).toBe(2)
   })
 
-  test("applyLinkUpserted creates link", async () => {
-    const event = createLinkUpsertedEvent(
+  test("applyLinkUpsert creates link", async () => {
+    const event = createLinkMutationEvent(
       "project-a",
       "Room",
       "room:101",
@@ -231,7 +231,7 @@ describe("PgObjectStorage", () => {
       "tstat:abc",
       "1"
     )
-    await storage.objects.applyLinkUpserted(event)
+    await storage.objects.applyLinkUpsert(event)
 
     const links = await storage.objects.listLinks({
       projectId: "project-a",
@@ -245,8 +245,8 @@ describe("PgObjectStorage", () => {
     expect(links[0]?.targetId).toBe("tstat:abc")
   })
 
-  test("applyLinkUpserted updates existing link", async () => {
-    const event1 = createLinkUpsertedEvent(
+  test("applyLinkUpsert updates existing link", async () => {
+    const event1 = createLinkMutationEvent(
       "project-a",
       "Room",
       "room:101",
@@ -255,9 +255,9 @@ describe("PgObjectStorage", () => {
       "tstat:abc",
       "1"
     )
-    await storage.objects.applyLinkUpserted(event1)
+    await storage.objects.applyLinkUpsert(event1)
 
-    const event2 = createLinkUpsertedEvent(
+    const event2 = createLinkMutationEvent(
       "project-a",
       "Room",
       "room:101",
@@ -266,7 +266,7 @@ describe("PgObjectStorage", () => {
       "tstat:abc",
       "2"
     )
-    await storage.objects.applyLinkUpserted(event2)
+    await storage.objects.applyLinkUpsert(event2)
 
     const links = await storage.objects.listLinks({
       projectId: "project-a",
@@ -278,9 +278,9 @@ describe("PgObjectStorage", () => {
     expect(links[0]?.sourceEventId).toBe("event-2")
   })
 
-  test("applyLinkRemoved removes link", async () => {
-    await storage.objects.applyLinkUpserted(
-      createLinkUpsertedEvent(
+  test("applyLinkDelete removes link", async () => {
+    await storage.objects.applyLinkUpsert(
+      createLinkMutationEvent(
         "project-a",
         "Room",
         "room:101",
@@ -291,8 +291,8 @@ describe("PgObjectStorage", () => {
       )
     )
 
-    await storage.objects.applyLinkRemoved(
-      createLinkRemovedEvent(
+    await storage.objects.applyLinkDelete(
+      createLinkDeletedEvent(
         "project-a",
         "Room",
         "room:101",
@@ -313,8 +313,8 @@ describe("PgObjectStorage", () => {
   })
 
   test("listLinks filters by linkId", async () => {
-    await storage.objects.applyLinkUpserted(
-      createLinkUpsertedEvent(
+    await storage.objects.applyLinkUpsert(
+      createLinkMutationEvent(
         "project-a",
         "Room",
         "room:101",
@@ -324,8 +324,8 @@ describe("PgObjectStorage", () => {
         "1"
       )
     )
-    await storage.objects.applyLinkUpserted(
-      createLinkUpsertedEvent(
+    await storage.objects.applyLinkUpsert(
+      createLinkMutationEvent(
         "project-a",
         "Room",
         "room:101",
@@ -348,11 +348,11 @@ describe("PgObjectStorage", () => {
   })
 
   test("listLinks supports incoming and both directions", async () => {
-    await storage.objects.applyLinkUpserted(
-      createLinkUpsertedEvent("project-a", "Room", "room:101", "hasSensor", "Sensor", "s1", "1")
+    await storage.objects.applyLinkUpsert(
+      createLinkMutationEvent("project-a", "Room", "room:101", "hasSensor", "Sensor", "s1", "1")
     )
-    await storage.objects.applyLinkUpserted(
-      createLinkUpsertedEvent("project-a", "Sensor", "s1", "installedIn", "Room", "room:101", "2")
+    await storage.objects.applyLinkUpsert(
+      createLinkMutationEvent("project-a", "Sensor", "s1", "installedIn", "Room", "room:101", "2")
     )
 
     const incoming = await storage.objects.listLinks({
@@ -374,7 +374,7 @@ describe("PgObjectStorage", () => {
 
   test("list returns objects with pagination", async () => {
     for (let i = 1; i <= 5; i++) {
-      await storage.objects.applyObjectUpserted(
+      await storage.objects.applyObjectUpsert(
         createObjectEvent("project-a", "Room", `room:10${i}`, { name: `Room ${i}` }, `${i}`)
       )
     }
@@ -401,13 +401,13 @@ describe("PgObjectStorage", () => {
   })
 
   test("list with primaryIdPrefix filter", async () => {
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:101", {}, "1")
     )
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:102", {}, "2")
     )
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "building:a", {}, "3")
     )
 
@@ -421,13 +421,13 @@ describe("PgObjectStorage", () => {
   })
 
   test("list with primaryIdSuffix filter", async () => {
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:101", {}, "1")
     )
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "zone:101", {}, "2")
     )
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:102", {}, "3")
     )
 
@@ -445,10 +445,10 @@ describe("PgObjectStorage", () => {
     const past = new Date(now.getTime() - 10000)
     const future = new Date(now.getTime() + 10000)
 
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:past", {}, "1")
     )
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:future", {}, "2")
     )
 
@@ -463,13 +463,13 @@ describe("PgObjectStorage", () => {
   })
 
   test("list with ordering", async () => {
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:b", {}, "1")
     )
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:a", {}, "2")
     )
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:c", {}, "3")
     )
 
@@ -486,7 +486,7 @@ describe("PgObjectStorage", () => {
   })
 
   test("applyTelemetryAppendedBatch updates multiple properties on same object", async () => {
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:101", { name: "Conference" }, "1")
     )
 
@@ -512,7 +512,7 @@ describe("PgObjectStorage", () => {
   })
 
   test("applyTelemetryAppendedBatch is idempotent", async () => {
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:101", {}, "1")
     )
 
@@ -546,13 +546,13 @@ describe("PgObjectStorage", () => {
     await storage.objects.applyTelemetryAppendedBatch(events)
   })
 
-  test("applyLinkUpserted stores link properties", async () => {
-    const event: StoredLinkUpsertedEvent = {
+  test("applyLinkUpsert stores link properties", async () => {
+    const event: StoredLinkMutationEvent = {
       id: "event-link-props",
       cursor: "1",
       schemaVersion: 1,
       projectId: "project-a",
-      type: "link.upserted",
+      type: "link.created",
       topic: "links",
       partitionKey: "Room:room:101:hasThermostat",
       payload: {
@@ -562,11 +562,12 @@ describe("PgObjectStorage", () => {
         targetTypeId: "Thermostat",
         targetId: "tstat:abc",
         properties: { isPrimary: true, priority: 1 },
+        propertyChanges: {},
       },
       occurredAt: new Date().toISOString(),
     }
 
-    await storage.objects.applyLinkUpserted(event)
+    await storage.objects.applyLinkUpsert(event)
 
     const links = await storage.objects.listLinks({
       projectId: "project-a",
@@ -579,43 +580,45 @@ describe("PgObjectStorage", () => {
     expect(links[0]?.properties).toEqual({ isPrimary: true, priority: 1 })
   })
 
-  test("concurrent applyObjectUpserted on same primaryId produces correct state", async () => {
-    const event1: StoredObjectUpsertedEvent = {
+  test("concurrent applyObjectUpsert on same primaryId produces correct state", async () => {
+    const event1: StoredObjectMutationEvent = {
       id: "concurrent-event-1",
       cursor: "1",
       schemaVersion: 1,
       projectId: "project-a",
-      type: "object.upserted",
+      type: "object.created",
       topic: "objects",
       partitionKey: "Room:room:race",
       payload: {
         objectTypeId: "Room",
         primaryId: "room:race",
         properties: { name: "Race Room", floor: "1" },
+        propertyChanges: {},
       },
       occurredAt: new Date().toISOString(),
     }
 
-    const event2: StoredObjectUpsertedEvent = {
+    const event2: StoredObjectMutationEvent = {
       id: "concurrent-event-2",
       cursor: "2",
       schemaVersion: 1,
       projectId: "project-a",
-      type: "object.upserted",
+      type: "object.created",
       topic: "objects",
       partitionKey: "Room:room:race",
       payload: {
         objectTypeId: "Room",
         primaryId: "room:race",
         properties: { capacity: 20, zone: "B" },
+        propertyChanges: {},
       },
       occurredAt: new Date().toISOString(),
     }
 
     // Fire both concurrently
     await Promise.all([
-      storage.objects.applyObjectUpserted(event1),
-      storage.objects.applyObjectUpserted(event2),
+      storage.objects.applyObjectUpsert(event1),
+      storage.objects.applyObjectUpsert(event2),
     ])
 
     const row = await storage.objects.getByPrimaryId({
@@ -635,14 +638,14 @@ describe("PgObjectStorage", () => {
 
   // ── Batch methods ───────────────────────────────────────────
 
-  test("applyObjectUpsertedBatch — inserts multiple objects", async () => {
+  test("applyObjectUpsertBatch — inserts multiple objects", async () => {
     const events = [
       createObjectEvent("p1", "Room", "r1", { name: "Kitchen" }, "1"),
       createObjectEvent("p1", "Room", "r2", { name: "Bedroom" }, "2"),
       createObjectEvent("p1", "Room", "r3", { name: "Bathroom" }, "3"),
     ]
 
-    const results = await storage.objects.applyObjectUpsertedBatch(events)
+    const results = await storage.objects.applyObjectUpsertBatch(events)
 
     expect(results).toHaveLength(3)
     expect(results[0].primaryId).toBe("r1")
@@ -651,28 +654,28 @@ describe("PgObjectStorage", () => {
     expect(results[0].properties.name).toBe("Kitchen")
   })
 
-  test("applyObjectUpsertedBatch — idempotent on replay", async () => {
+  test("applyObjectUpsertBatch — idempotent on replay", async () => {
     const events = [createObjectEvent("p1", "Room", "r1", { name: "Kitchen" }, "1")]
 
-    await storage.objects.applyObjectUpsertedBatch(events)
-    const results = await storage.objects.applyObjectUpsertedBatch(events)
+    await storage.objects.applyObjectUpsertBatch(events)
+    const results = await storage.objects.applyObjectUpsertBatch(events)
 
     expect(results).toHaveLength(1)
     expect(results[0].primaryId).toBe("r1")
     expect(results[0].version).toBe(1)
   })
 
-  test("applyLinkUpsertedBatch — inserts multiple links", async () => {
-    await storage.objects.applyObjectUpserted(createObjectEvent("p1", "Room", "r1", {}, "1"))
-    await storage.objects.applyObjectUpserted(createObjectEvent("p1", "Sensor", "s1", {}, "2"))
-    await storage.objects.applyObjectUpserted(createObjectEvent("p1", "Sensor", "s2", {}, "3"))
+  test("applyLinkUpsertBatch — inserts multiple links", async () => {
+    await storage.objects.applyObjectUpsert(createObjectEvent("p1", "Room", "r1", {}, "1"))
+    await storage.objects.applyObjectUpsert(createObjectEvent("p1", "Sensor", "s1", {}, "2"))
+    await storage.objects.applyObjectUpsert(createObjectEvent("p1", "Sensor", "s2", {}, "3"))
 
     const events = [
-      createLinkUpsertedEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "4"),
-      createLinkUpsertedEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s2", "5"),
+      createLinkMutationEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "4"),
+      createLinkMutationEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s2", "5"),
     ]
 
-    await storage.objects.applyLinkUpsertedBatch(events)
+    await storage.objects.applyLinkUpsertBatch(events)
 
     const links = await storage.objects.listLinks({
       projectId: "p1",
@@ -684,10 +687,10 @@ describe("PgObjectStorage", () => {
   })
 
   test("getByPrimaryIdBatch — returns found objects, omits missing", async () => {
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("p1", "Room", "r1", { name: "A" }, "1")
     )
-    await storage.objects.applyObjectUpserted(
+    await storage.objects.applyObjectUpsert(
       createObjectEvent("p1", "Room", "r2", { name: "B" }, "2")
     )
 
@@ -707,10 +710,10 @@ describe("PgObjectStorage", () => {
   })
 
   test("listLinksBatch — returns found links, omits missing", async () => {
-    await storage.objects.applyObjectUpserted(createObjectEvent("p1", "Room", "r1", {}, "1"))
-    await storage.objects.applyObjectUpserted(createObjectEvent("p1", "Sensor", "s1", {}, "2"))
-    await storage.objects.applyLinkUpserted(
-      createLinkUpsertedEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "3")
+    await storage.objects.applyObjectUpsert(createObjectEvent("p1", "Room", "r1", {}, "1"))
+    await storage.objects.applyObjectUpsert(createObjectEvent("p1", "Sensor", "s1", {}, "2"))
+    await storage.objects.applyLinkUpsert(
+      createLinkMutationEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "3")
     )
 
     const result = await storage.objects.listLinksBatch({
@@ -727,22 +730,22 @@ describe("PgObjectStorage", () => {
   })
 
   test("listIncidentLinksBatch — both directions, de-duplicated", async () => {
-    await storage.objects.applyObjectUpserted(createObjectEvent("p1", "Room", "r1", {}, "1"))
-    await storage.objects.applyObjectUpserted(createObjectEvent("p1", "Room", "r2", {}, "2"))
-    await storage.objects.applyObjectUpserted(createObjectEvent("p1", "Sensor", "s1", {}, "3"))
-    await storage.objects.applyObjectUpserted(createObjectEvent("p1", "Sensor", "s2", {}, "4"))
+    await storage.objects.applyObjectUpsert(createObjectEvent("p1", "Room", "r1", {}, "1"))
+    await storage.objects.applyObjectUpsert(createObjectEvent("p1", "Room", "r2", {}, "2"))
+    await storage.objects.applyObjectUpsert(createObjectEvent("p1", "Sensor", "s1", {}, "3"))
+    await storage.objects.applyObjectUpsert(createObjectEvent("p1", "Sensor", "s2", {}, "4"))
 
     // r1 as source
-    await storage.objects.applyLinkUpserted(
-      createLinkUpsertedEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "5")
+    await storage.objects.applyLinkUpsert(
+      createLinkMutationEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "5")
     )
     // r1 as target
-    await storage.objects.applyLinkUpserted(
-      createLinkUpsertedEvent("p1", "Sensor", "s2", "installedIn", "Room", "r1", "6")
+    await storage.objects.applyLinkUpsert(
+      createLinkMutationEvent("p1", "Sensor", "s2", "installedIn", "Room", "r1", "6")
     )
     // incident to both listed objects (r1 source, r2 target)
-    await storage.objects.applyLinkUpserted(
-      createLinkUpsertedEvent("p1", "Room", "r1", "relatedTo", "Room", "r2", "7")
+    await storage.objects.applyLinkUpsert(
+      createLinkMutationEvent("p1", "Room", "r1", "relatedTo", "Room", "r2", "7")
     )
 
     const links = await storage.objects.listIncidentLinksBatch({

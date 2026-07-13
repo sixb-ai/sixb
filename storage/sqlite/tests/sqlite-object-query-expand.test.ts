@@ -6,8 +6,8 @@ import {
   link,
   OntologyRegistry,
   prop,
-  type StoredLinkUpsertedEvent,
-  type StoredObjectUpsertedEvent,
+  type StoredLinkMutationEvent,
+  type StoredObjectMutationEvent,
 } from "@sixb/core"
 import { SqliteObjectStorage } from "../src/object-storage"
 
@@ -55,33 +55,29 @@ let cursor = 0
 beforeAll(async () => {
   storage = new SqliteObjectStorage()
 
-  await storage.applyObjectUpserted(objectEvent(Tag.id, "tag-a", { id: "tag-a", label: "Apple" }))
-  await storage.applyObjectUpserted(objectEvent(Tag.id, "tag-b", { id: "tag-b", label: "Banana" }))
-  await storage.applyObjectUpserted(objectEvent(Tag.id, "tag-c", { id: "tag-c", label: "Cherry" }))
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(objectEvent(Tag.id, "tag-a", { id: "tag-a", label: "Apple" }))
+  await storage.applyObjectUpsert(objectEvent(Tag.id, "tag-b", { id: "tag-b", label: "Banana" }))
+  await storage.applyObjectUpsert(objectEvent(Tag.id, "tag-c", { id: "tag-c", label: "Cherry" }))
+  await storage.applyObjectUpsert(
     objectEvent(Author.id, "author-1", { id: "author-1", name: "Alice" })
   )
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent(Author.id, "author-2", { id: "author-2", name: "Bob" })
   )
-  await storage.applyObjectUpserted(
-    objectEvent(Post.id, "post-1", { id: "post-1", title: "First" })
-  )
+  await storage.applyObjectUpsert(objectEvent(Post.id, "post-1", { id: "post-1", title: "First" }))
 
-  await storage.applyLinkUpserted(linkEvent(Post.id, "post-1", "author", Author.id, "author-1"))
-  await storage.applyLinkUpserted(linkEvent(Author.id, "author-1", "favoriteTag", Tag.id, "tag-b"))
+  await storage.applyLinkUpsert(linkEvent(Post.id, "post-1", "author", Author.id, "author-1"))
+  await storage.applyLinkUpsert(linkEvent(Author.id, "author-1", "favoriteTag", Tag.id, "tag-b"))
   // author-1 → manager author-2 → favoriteTag tag-c: the third hop for deep expansion.
-  await storage.applyLinkUpserted(
-    linkEvent(Author.id, "author-1", "manager", Author.id, "author-2")
-  )
-  await storage.applyLinkUpserted(linkEvent(Author.id, "author-2", "favoriteTag", Tag.id, "tag-c"))
+  await storage.applyLinkUpsert(linkEvent(Author.id, "author-1", "manager", Author.id, "author-2"))
+  await storage.applyLinkUpsert(linkEvent(Author.id, "author-2", "favoriteTag", Tag.id, "tag-c"))
   // post-1 → three real tags plus one dangling edge; tag-a carries link properties.
-  await storage.applyLinkUpserted(
+  await storage.applyLinkUpsert(
     linkEvent(Post.id, "post-1", "tags", Tag.id, "tag-a", { weight: 10 })
   )
-  await storage.applyLinkUpserted(linkEvent(Post.id, "post-1", "tags", Tag.id, "tag-b"))
-  await storage.applyLinkUpserted(linkEvent(Post.id, "post-1", "tags", Tag.id, "tag-c"))
-  await storage.applyLinkUpserted(linkEvent(Post.id, "post-1", "tags", Tag.id, "tag-missing"))
+  await storage.applyLinkUpsert(linkEvent(Post.id, "post-1", "tags", Tag.id, "tag-b"))
+  await storage.applyLinkUpsert(linkEvent(Post.id, "post-1", "tags", Tag.id, "tag-c"))
+  await storage.applyLinkUpsert(linkEvent(Post.id, "post-1", "tags", Tag.id, "tag-missing"))
 })
 
 afterAll(() => {
@@ -265,7 +261,7 @@ function objectEvent(
   objectTypeId: string,
   primaryId: string,
   properties: Record<string, unknown>
-): StoredObjectUpsertedEvent {
+): StoredObjectMutationEvent {
   cursor += 1
   const tag = String(cursor).padStart(3, "0")
   return {
@@ -273,10 +269,10 @@ function objectEvent(
     cursor: tag,
     schemaVersion: 1,
     projectId,
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: `${objectTypeId}:${primaryId}`,
-    payload: { objectTypeId, primaryId, properties },
+    payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
     occurredAt: `2026-01-01T00:00:${tag.slice(-2)}.000Z`,
   }
 }
@@ -288,7 +284,7 @@ function linkEvent(
   targetTypeId: string,
   targetId: string,
   properties?: Record<string, unknown>
-): StoredLinkUpsertedEvent {
+): StoredLinkMutationEvent {
   cursor += 1
   const tag = String(cursor).padStart(3, "0")
   return {
@@ -296,7 +292,7 @@ function linkEvent(
     cursor: tag,
     schemaVersion: 1,
     projectId,
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
     payload: {
@@ -306,6 +302,7 @@ function linkEvent(
       targetTypeId,
       targetId,
       ...(properties === undefined ? {} : { properties }),
+      propertyChanges: {},
     },
     occurredAt: `2026-01-01T00:00:${tag.slice(-2)}.000Z`,
   }

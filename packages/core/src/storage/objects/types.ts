@@ -1,8 +1,8 @@
 import type { EditCommitPlan } from "../../edits"
 import type {
-  StoredLinkRemovedEvent,
-  StoredLinkUpsertedEvent,
-  StoredObjectUpsertedEvent,
+  StoredLinkDeletedEvent,
+  StoredLinkMutationEvent,
+  StoredObjectMutationEvent,
   StoredTelemetryAppendedEvent,
 } from "../../events"
 import type {
@@ -172,15 +172,15 @@ export interface ObjectStorage {
   existsObjects?(params: ExistsObjectsInput): Promise<ExistsObjectsResult>
   facetObjects?(params: FacetObjectsInput): Promise<FacetObjectsResult>
 
-  applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow>
-  applyObjectUpsertedBatch(
-    events: readonly StoredObjectUpsertedEvent[]
+  applyObjectUpsert(event: StoredObjectMutationEvent): Promise<ObjectRow>
+  applyObjectUpsertBatch(
+    events: readonly StoredObjectMutationEvent[]
   ): Promise<readonly ObjectRow[]>
   applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void>
   applyTelemetryAppendedBatch(events: readonly StoredTelemetryAppendedEvent[]): Promise<void>
-  applyLinkUpserted(event: StoredLinkUpsertedEvent): Promise<void>
-  applyLinkUpsertedBatch(events: readonly StoredLinkUpsertedEvent[]): Promise<void>
-  applyLinkRemoved(event: StoredLinkRemovedEvent): Promise<void>
+  applyLinkUpsert(event: StoredLinkMutationEvent): Promise<void>
+  applyLinkUpsertBatch(events: readonly StoredLinkMutationEvent[]): Promise<void>
+  applyLinkDelete(event: StoredLinkDeletedEvent): Promise<void>
 
   /**
    * Apply the local object/link writes for a planned EditBatch commit.

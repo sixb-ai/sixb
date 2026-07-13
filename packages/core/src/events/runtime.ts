@@ -135,7 +135,7 @@ export class EventsRuntime {
         streamId: this.stream.id,
         from: input.from,
         afterCursor: input.afterCursor,
-        names: input.types,
+        names: input.types && input.types.length > 0 ? input.types : EVENT_TYPES,
       },
       (records) => {
         const events = records.map(hydrateEventRecord)
@@ -239,14 +239,14 @@ function hydrateEventRecord(record: BrokerRecord): StoredDomainEvent {
 function resolveTypeFilter(input: {
   topics?: readonly DomainEvent["topic"][]
   types?: readonly DomainEvent["type"][]
-}): readonly DomainEvent["type"][] | undefined {
+}): readonly DomainEvent["type"][] {
   const topicTypes =
     input.topics && input.topics.length > 0
       ? EVENT_TYPES.filter((type) => input.topics?.includes(EVENT_DEFINITIONS[type].topic))
       : undefined
 
   if (!topicTypes) {
-    return input.types && input.types.length > 0 ? input.types : undefined
+    return input.types && input.types.length > 0 ? input.types : EVENT_TYPES
   }
 
   if (!input.types || input.types.length === 0) {

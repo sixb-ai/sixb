@@ -1,3 +1,4 @@
+import type { DomainEvent } from "@sixb/core"
 import { requestAction } from "./generated/sdk.gen"
 import type {
   GetProjectInfoResponse,
@@ -90,51 +91,7 @@ export interface EventStreamServerMessage {
   topic?: string | null
   afterCursor?: string | null
   types?: string[] | null
-  event?: {
-    id: string
-    cursor: string
-    type:
-      | "object.upserted"
-      | "object.created"
-      | "object.updated"
-      | "object.deleted"
-      | "telemetry.appended"
-      | "link.upserted"
-      | "link.removed"
-      | "link.created"
-      | "link.updated"
-      | "link.deleted"
-      | "action.requested"
-      | "action.completed"
-      | "action.failed"
-      | "schedule.triggered"
-      | "sync.run.started"
-      | "sync.run.finished"
-      | "pipeline.run.started"
-      | "pipeline.run.step.started"
-      | "pipeline.run.step.finished"
-      | "pipeline.run.finished"
-      | "workflow.run.started"
-      | "workflow.run.node.started"
-      | "workflow.run.node.finished"
-      | "workflow.run.finished"
-      | "dataset.version.committed"
-      | "rule.triggered"
-      | "rule.resolved"
-    topic:
-      | "objects"
-      | "telemetry"
-      | "links"
-      | "actions"
-      | "schedules"
-      | "syncs"
-      | "pipelines"
-      | "workflows"
-      | "datasets"
-      | "rules"
-    occurredAt: string
-    payload: unknown
-  }
+  event?: DomainEvent & { readonly cursor: string }
 }
 
 export function encodeObjectId(objectTypeId: string, primaryId: string): string {

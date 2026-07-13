@@ -17,9 +17,9 @@ import type {
   ObjectStorage,
   QueryObjectsInput,
   QueryObjectsResult,
-  StoredLinkRemovedEvent,
-  StoredLinkUpsertedEvent,
-  StoredObjectUpsertedEvent,
+  StoredLinkDeletedEvent,
+  StoredLinkMutationEvent,
+  StoredObjectMutationEvent,
   StoredTelemetryAppendedEvent,
 } from "@sixb/core"
 import {
@@ -221,7 +221,7 @@ export class PgObjectStorage implements ObjectStorage {
     }
   }
 
-  async applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow> {
+  async applyObjectUpsert(event: StoredObjectMutationEvent): Promise<ObjectRow> {
     const occurredAt = new Date(event.occurredAt)
 
     const row = await runPgTransaction(this.sql, async (tx) => {
@@ -284,8 +284,8 @@ export class PgObjectStorage implements ObjectStorage {
     return row!
   }
 
-  async applyObjectUpsertedBatch(
-    events: readonly StoredObjectUpsertedEvent[]
+  async applyObjectUpsertBatch(
+    events: readonly StoredObjectMutationEvent[]
   ): Promise<readonly ObjectRow[]> {
     if (events.length === 0) return []
     return runPgTransaction(this.sql, async (tx) => {
@@ -472,7 +472,7 @@ export class PgObjectStorage implements ObjectStorage {
     })
   }
 
-  async applyLinkUpserted(event: StoredLinkUpsertedEvent): Promise<void> {
+  async applyLinkUpsert(event: StoredLinkMutationEvent): Promise<void> {
     const occurredAt = new Date(event.occurredAt)
     const linkProperties = event.payload.properties
       ? JSON.stringify(event.payload.properties)
@@ -509,7 +509,7 @@ export class PgObjectStorage implements ObjectStorage {
     })
   }
 
-  async applyLinkUpsertedBatch(events: readonly StoredLinkUpsertedEvent[]): Promise<void> {
+  async applyLinkUpsertBatch(events: readonly StoredLinkMutationEvent[]): Promise<void> {
     if (events.length === 0) return
     await runPgTransaction(this.sql, async (tx) => {
       // 1. Bulk claim: single INSERT returns only the event_ids we now own.
@@ -549,7 +549,7 @@ export class PgObjectStorage implements ObjectStorage {
     })
   }
 
-  async applyLinkRemoved(event: StoredLinkRemovedEvent): Promise<void> {
+  async applyLinkDelete(event: StoredLinkDeletedEvent): Promise<void> {
     await runPgTransaction(this.sql, async (tx) => {
       // Idempotence check inside transaction to prevent race conditions
       const [applied] = await tx`

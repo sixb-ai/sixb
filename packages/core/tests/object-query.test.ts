@@ -30,7 +30,7 @@ import {
   stringEnum,
   validateObjectQuery,
 } from "../src"
-import type { StoredLinkUpsertedEvent, StoredObjectUpsertedEvent } from "../src/events"
+import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "../src/events"
 import type { ObjectStorage } from "../src/storage"
 
 const Order = defineObjectType({
@@ -127,43 +127,43 @@ const ontology = new OntologyRegistry({
   sources: [Customer, Order, WildcardSource, SearchProfileCustomer, TextNoDefault],
 })
 
-function makeObjectUpsertedEvent(
+function makeObjectMutationEvent(
   projectId: string,
   objectTypeId: string,
   primaryId: string,
   properties: Record<string, unknown>
-): StoredObjectUpsertedEvent {
+): StoredObjectMutationEvent {
   return {
     id: `evt-${crypto.randomUUID()}`,
     schemaVersion: 1,
     projectId,
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: `${objectTypeId}:${primaryId}`,
     occurredAt: new Date().toISOString(),
     cursor: crypto.randomUUID(),
-    payload: { objectTypeId, primaryId, properties },
+    payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
   }
 }
 
-function makeLinkUpsertedEvent(
+function makeLinkMutationEvent(
   projectId: string,
   sourceTypeId: string,
   sourceId: string,
   linkId: string,
   targetTypeId: string,
   targetId: string
-): StoredLinkUpsertedEvent {
+): StoredLinkMutationEvent {
   return {
     id: `evt-${crypto.randomUUID()}`,
     schemaVersion: 1,
     projectId,
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
     occurredAt: new Date().toISOString(),
     cursor: crypto.randomUUID(),
-    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId },
+    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
   }
 }
 
@@ -202,8 +202,8 @@ function disableQueryObjects(storage: InMemoryObjectStorage): ObjectStorage {
 }
 
 async function seedCustomers(storage: InMemoryObjectStorage): Promise<void> {
-  await storage.applyObjectUpserted(
-    makeObjectUpsertedEvent("p1", "Customer", "cust-1", {
+  await storage.applyObjectUpsert(
+    makeObjectMutationEvent("p1", "Customer", "cust-1", {
       id: "cust-1",
       name: "Beta Co",
       email: "beta@example.com",
@@ -211,8 +211,8 @@ async function seedCustomers(storage: InMemoryObjectStorage): Promise<void> {
       embedding: [1, 0],
     })
   )
-  await storage.applyObjectUpserted(
-    makeObjectUpsertedEvent("p1", "Customer", "cust-2", {
+  await storage.applyObjectUpsert(
+    makeObjectMutationEvent("p1", "Customer", "cust-2", {
       id: "cust-2",
       name: "Paused Co",
       email: "paused@example.com",
@@ -220,8 +220,8 @@ async function seedCustomers(storage: InMemoryObjectStorage): Promise<void> {
       embedding: [0, 1],
     })
   )
-  await storage.applyObjectUpserted(
-    makeObjectUpsertedEvent("p1", "Customer", "cust-3", {
+  await storage.applyObjectUpsert(
+    makeObjectMutationEvent("p1", "Customer", "cust-3", {
       id: "cust-3",
       name: "Acme Co",
       email: "acme@example.com",
@@ -233,35 +233,35 @@ async function seedCustomers(storage: InMemoryObjectStorage): Promise<void> {
 
 async function seedCustomerOrders(storage: InMemoryObjectStorage): Promise<void> {
   await seedCustomers(storage)
-  await storage.applyObjectUpserted(
-    makeObjectUpsertedEvent("p1", "Order", "order-1", {
+  await storage.applyObjectUpsert(
+    makeObjectMutationEvent("p1", "Order", "order-1", {
       id: "order-1",
       total: 100,
       createdAt: "2026-01-01T00:00:00Z",
     })
   )
-  await storage.applyObjectUpserted(
-    makeObjectUpsertedEvent("p1", "Order", "order-2", {
+  await storage.applyObjectUpsert(
+    makeObjectMutationEvent("p1", "Order", "order-2", {
       id: "order-2",
       total: 200,
       createdAt: "2026-01-02T00:00:00Z",
     })
   )
-  await storage.applyObjectUpserted(
-    makeObjectUpsertedEvent("p1", "Order", "order-3", {
+  await storage.applyObjectUpsert(
+    makeObjectMutationEvent("p1", "Order", "order-3", {
       id: "order-3",
       total: 300,
       createdAt: "2026-01-03T00:00:00Z",
     })
   )
-  await storage.applyLinkUpserted(
-    makeLinkUpsertedEvent("p1", "Customer", "cust-1", "orders", "Order", "order-1")
+  await storage.applyLinkUpsert(
+    makeLinkMutationEvent("p1", "Customer", "cust-1", "orders", "Order", "order-1")
   )
-  await storage.applyLinkUpserted(
-    makeLinkUpsertedEvent("p1", "Customer", "cust-2", "orders", "Order", "order-2")
+  await storage.applyLinkUpsert(
+    makeLinkMutationEvent("p1", "Customer", "cust-2", "orders", "Order", "order-2")
   )
-  await storage.applyLinkUpserted(
-    makeLinkUpsertedEvent("p1", "Customer", "cust-3", "orders", "Order", "order-3")
+  await storage.applyLinkUpsert(
+    makeLinkMutationEvent("p1", "Customer", "cust-3", "orders", "Order", "order-3")
   )
 }
 
@@ -1026,11 +1026,11 @@ describe("object query planner and executor", () => {
     })
     const subtypeOntology = new OntologyRegistry({ sources: [BaseAsset, LaptopAsset] })
     const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "BaseAsset", "asset-1", { id: "asset-1" })
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "BaseAsset", "asset-1", { id: "asset-1" })
     )
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "LaptopAsset", "laptop-1", { id: "laptop-1" })
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "LaptopAsset", "laptop-1", { id: "laptop-1" })
     )
 
     const result = await executeObjectQuery(
@@ -1077,15 +1077,15 @@ describe("object query planner and executor", () => {
       sources: [DefaultTextBase, DefaultTextChild],
     })
     const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "DefaultTextBase", "base-1", {
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "DefaultTextBase", "base-1", {
         id: "base-1",
         name: "ordinary",
         alias: "secret",
       })
     )
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "DefaultTextChild", "child-1", {
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "DefaultTextChild", "child-1", {
         id: "child-1",
         name: "ordinary",
         alias: "secret",
@@ -1121,11 +1121,11 @@ describe("object query planner and executor", () => {
     })
     const subtypeOntology = new OntologyRegistry({ sources: [BaseAsset, LaptopAsset] })
     const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "FallbackBaseAsset", "asset-1", { id: "asset-1" })
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "FallbackBaseAsset", "asset-1", { id: "asset-1" })
     )
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "FallbackLaptopAsset", "laptop-1", { id: "laptop-1" })
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "FallbackLaptopAsset", "laptop-1", { id: "laptop-1" })
     )
 
     const result = await executeObjectQuery(
@@ -1314,11 +1314,11 @@ describe("object query planner and executor", () => {
 
     const storage = new CountingQueryStorage()
     await seedCustomerOrders(storage)
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Reseller", "reseller-1", { id: "reseller-1" })
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "Reseller", "reseller-1", { id: "reseller-1" })
     )
-    await storage.applyLinkUpserted(
-      makeLinkUpsertedEvent("p1", "Reseller", "reseller-1", "orders", "Order", "order-1")
+    await storage.applyLinkUpsert(
+      makeLinkMutationEvent("p1", "Reseller", "reseller-1", "orders", "Order", "order-1")
     )
 
     const orderOneSources: ObjectQuery = {

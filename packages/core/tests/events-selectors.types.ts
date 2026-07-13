@@ -16,6 +16,7 @@ const Invoice = defineObjectType({
 events(Invoice)
 
 events.object(Invoice).created()
+events.object(Invoice).upserted()
 events.object(Invoice).updated()
 events.object(Invoice).deleted()
 events.object(Invoice).byId("inv-1").updated()
@@ -25,7 +26,6 @@ events.object(Invoice).p.amount.cleared()
 events.object(Invoice).link(Invoice.l.payments).created()
 events.object(Invoice).link(Invoice.l.payments).updated()
 events.object(Invoice).link(Invoice.l.payments).deleted()
-events.object(Invoice).link(Invoice.l.payments).removed()
 events.object(Invoice).link(Invoice.l.payments).p.amount.updated()
 
 // @ts-expect-error missing object property

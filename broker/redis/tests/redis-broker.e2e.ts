@@ -44,7 +44,7 @@ describe("RedisBroker", () => {
       const [record] = await broker.append({
         projectId,
         streamId: stream.id,
-        records: [{ name: "object.upserted", payload: { id: "room-1" } }],
+        records: [{ name: "test.record", payload: { id: "room-1" } }],
       })
 
       expect((await broker.read({ projectId, streamId: stream.id })).records).toEqual([record])
@@ -68,7 +68,7 @@ describe("RedisBroker", () => {
         streamId: stream.id,
         records: [
           {
-            name: "object.upserted",
+            name: "test.record",
             payload: { id: "room-1" },
             idempotencyKey: "dedupe-room-1",
           },
@@ -79,7 +79,7 @@ describe("RedisBroker", () => {
         streamId: stream.id,
         records: [
           {
-            name: "object.upserted",
+            name: "test.record",
             payload: { id: "room-2" },
             idempotencyKey: "dedupe-room-1",
           },
@@ -283,7 +283,7 @@ describe("RedisBroker", () => {
     await broker.append({
       projectId,
       streamId: stream.id,
-      records: [{ name: "object.upserted", payload: { id: "room-before-close" } }],
+      records: [{ name: "test.record", payload: { id: "room-before-close" } }],
     })
     await waitUntil(() => received.length === 1, 5_000)
 
@@ -293,7 +293,7 @@ describe("RedisBroker", () => {
       broker.append({
         projectId,
         streamId: stream.id,
-        records: [{ name: "object.upserted", payload: { id: "room-after-close" } }],
+        records: [{ name: "test.record", payload: { id: "room-after-close" } }],
       })
     ).rejects.toThrow("broker has been closed")
 
@@ -329,7 +329,7 @@ describe("RedisBroker", () => {
     const append = broker.append({
       projectId,
       streamId: stream.id,
-      records: [{ name: "object.upserted", payload: { id: "room-after-close" } }],
+      records: [{ name: "test.record", payload: { id: "room-after-close" } }],
     })
 
     await blockedInRequireStream

@@ -99,7 +99,7 @@ describe("upsertObjectBatch", () => {
     expect(results.every((r) => !r.ok)).toBe(true)
 
     // No events should have been created
-    const events = await sixb.events.read({ types: ["object.upserted"] })
+    const events = await sixb.events.read({ types: ["object.created"] })
     expect(events).toHaveLength(0)
   })
 

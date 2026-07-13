@@ -43,6 +43,7 @@ export interface ObjectEventSelectorBuilder<TObjectType extends ObjectTypeWithTo
   /** Scope to a single object instance. */
   byId(primaryId: string): ObjectEventSelectorBuilder<TObjectType>
 
+  upserted(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>>
   created(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>>
   updated(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>>
   deleted(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>>
@@ -64,8 +65,6 @@ export interface LinkEventSelectorBuilder<
   created(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>>
   updated(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>>
   deleted(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>>
-  /** @deprecated Use `.deleted()` instead. */
-  removed(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>>
 }
 
 export interface EventPropertySelector<TContext = unknown> extends EventSelectorSpec<TContext> {
@@ -200,6 +199,14 @@ class ObjectEventSelectorBuilderImpl<TObjectType extends ObjectTypeWithTokens>
     return this.withObjectEventType("object.created")
   }
 
+  upserted(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>> {
+    return {
+      ...this.spec,
+      topic: "objects",
+      types: ["object.created", "object.updated"],
+    }
+  }
+
   updated(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>> {
     return this.withObjectEventType("object.updated")
   }
@@ -274,10 +281,6 @@ class LinkEventSelectorBuilderImpl<
 
   deleted(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>> {
     return this.withLinkEventType("link.deleted")
-  }
-
-  removed(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>> {
-    return this.deleted()
   }
 
   private withLinkEventType(

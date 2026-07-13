@@ -209,18 +209,19 @@ async function withStorage(
 }
 
 async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
-  await storage.objects.applyObjectUpserted({
+  await storage.objects.applyObjectUpsert({
     id: "object-event",
     cursor: "1",
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: "Room:room:101",
     payload: {
       objectTypeId: "Room",
       primaryId: "room:101",
       properties: { name: "Legacy Room" },
+      propertyChanges: {},
     },
     occurredAt: "2026-04-19T12:00:00.000Z",
   })

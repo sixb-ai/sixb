@@ -12,7 +12,7 @@ import {
   OntologyRegistry,
   prop,
 } from "../src"
-import type { StoredLinkUpsertedEvent, StoredObjectUpsertedEvent } from "../src/events"
+import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "../src/events"
 
 // Execution-side tests for `.expand()`: the planner routes expand through the
 // bounded fallback, and the executor hydrates links over the batch storage
@@ -75,17 +75,17 @@ function objectEvent(
   objectTypeId: string,
   primaryId: string,
   properties: Record<string, unknown>
-): StoredObjectUpsertedEvent {
+): StoredObjectMutationEvent {
   return {
     id: `evt-${crypto.randomUUID()}`,
     schemaVersion: 1,
     projectId: PROJECT,
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: `${objectTypeId}:${primaryId}`,
     occurredAt: "2026-01-01T00:00:00.000Z",
     cursor: crypto.randomUUID(),
-    payload: { objectTypeId, primaryId, properties },
+    payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
   }
 }
 
@@ -96,17 +96,25 @@ function linkEvent(
   targetTypeId: string,
   targetId: string,
   properties?: Record<string, unknown>
-): StoredLinkUpsertedEvent {
+): StoredLinkMutationEvent {
   return {
     id: `evt-${crypto.randomUUID()}`,
     schemaVersion: 1,
     projectId: PROJECT,
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
     occurredAt: "2026-01-01T00:00:00.000Z",
     cursor: crypto.randomUUID(),
-    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, properties },
+    payload: {
+      sourceTypeId,
+      sourceId,
+      linkId,
+      targetTypeId,
+      targetId,
+      properties,
+      propertyChanges: {},
+    },
   }
 }
 
@@ -127,54 +135,52 @@ class BatchSpyStorage extends InMemoryObjectStorage {
 }
 
 async function seed(storage: InMemoryObjectStorage): Promise<void> {
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("Contact", "alice", { id: "alice", displayName: "Alice" })
   )
-  await storage.applyObjectUpserted(
-    objectEvent("Contact", "bob", { id: "bob", displayName: "Bob" })
-  )
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(objectEvent("Contact", "bob", { id: "bob", displayName: "Bob" }))
+  await storage.applyObjectUpsert(
     objectEvent("Contact", "carol", { id: "carol", displayName: "Carol" })
   )
 
-  await storage.applyObjectUpserted(objectEvent("Company", "acme", { id: "acme", name: "Acme" }))
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(objectEvent("Company", "acme", { id: "acme", name: "Acme" }))
+  await storage.applyObjectUpsert(
     objectEvent("Company", "globex", { id: "globex", name: "Globex" })
   )
   // acme rolls up to globex — the third hop for the deep-expansion fixture.
-  await storage.applyLinkUpserted(linkEvent("Company", "acme", "parent", "Company", "globex"))
+  await storage.applyLinkUpsert(linkEvent("Company", "acme", "parent", "Company", "globex"))
 
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("Opportunity", "opp-1", { id: "opp-1", title: "Deal A" })
   )
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("Opportunity", "opp-2", { id: "opp-2", title: "Deal B" })
   )
   // Both opportunities point at the same company — the dedup fixture.
-  await storage.applyLinkUpserted(linkEvent("Opportunity", "opp-1", "company", "Company", "acme"))
-  await storage.applyLinkUpserted(linkEvent("Opportunity", "opp-2", "company", "Company", "acme"))
-  await storage.applyLinkUpserted(linkEvent("Opportunity", "opp-1", "contact", "Contact", "alice"))
+  await storage.applyLinkUpsert(linkEvent("Opportunity", "opp-1", "company", "Company", "acme"))
+  await storage.applyLinkUpsert(linkEvent("Opportunity", "opp-2", "company", "Company", "acme"))
+  await storage.applyLinkUpsert(linkEvent("Opportunity", "opp-1", "contact", "Contact", "alice"))
 
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("Project", "proj-1", { id: "proj-1", name: "Proj One" })
   )
-  await storage.applyObjectUpserted(
+  await storage.applyObjectUpsert(
     objectEvent("Project", "proj-2", { id: "proj-2", name: "Proj Two" })
   )
-  await storage.applyLinkUpserted(
+  await storage.applyLinkUpsert(
     linkEvent("Project", "proj-1", "opportunity", "Opportunity", "opp-1")
   )
-  await storage.applyLinkUpserted(
+  await storage.applyLinkUpsert(
     linkEvent("Project", "proj-2", "opportunity", "Opportunity", "opp-2")
   )
   // proj-1 has three members, each edge carries a role.
-  await storage.applyLinkUpserted(
+  await storage.applyLinkUpsert(
     linkEvent("Project", "proj-1", "members", "Contact", "alice", { role: "lead" })
   )
-  await storage.applyLinkUpserted(
+  await storage.applyLinkUpsert(
     linkEvent("Project", "proj-1", "members", "Contact", "bob", { role: "dev" })
   )
-  await storage.applyLinkUpserted(
+  await storage.applyLinkUpsert(
     linkEvent("Project", "proj-1", "members", "Contact", "carol", { role: "qa" })
   )
 }
@@ -367,11 +373,11 @@ describe("object query expand — execution", () => {
   })
 
   test("hydrates a missing 'one' link target to null", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       objectEvent("Project", "proj-3", { id: "proj-3", name: "Proj Three" })
     )
     // Points at an opportunity that was never upserted (dangling link).
-    await storage.applyLinkUpserted(
+    await storage.applyLinkUpsert(
       linkEvent("Project", "proj-3", "opportunity", "Opportunity", "ghost")
     )
 

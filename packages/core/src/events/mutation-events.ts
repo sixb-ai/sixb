@@ -5,7 +5,7 @@ import type { EventDraft, EventOrigin, PropertyChangeMap } from "./types"
 type ObjectUpsertOperation = "create" | "update"
 type LinkUpsertOperation = "create" | "update"
 
-export interface ObjectUpsertEventsInput {
+export interface ObjectUpsertEventInput {
   readonly objectTypeId: string
   readonly primaryId: string
   readonly operation: ObjectUpsertOperation
@@ -15,7 +15,7 @@ export interface ObjectUpsertEventsInput {
   readonly origin?: EventOrigin
 }
 
-export interface ObjectDeletedEventsInput {
+export interface ObjectDeletedEventInput {
   readonly objectTypeId: string
   readonly primaryId: string
   readonly previousProperties?: Record<string, unknown>
@@ -23,7 +23,7 @@ export interface ObjectDeletedEventsInput {
   readonly origin?: EventOrigin
 }
 
-export interface LinkUpsertEventsInput {
+export interface LinkUpsertEventInput {
   readonly sourceTypeId: string
   readonly sourceId: string
   readonly linkId: string
@@ -36,7 +36,7 @@ export interface LinkUpsertEventsInput {
   readonly origin?: EventOrigin
 }
 
-export interface LinkRemovedEventsInput {
+export interface LinkDeletedEventInput {
   readonly sourceTypeId: string
   readonly sourceId: string
   readonly linkId: string
@@ -58,7 +58,7 @@ export function buildEditCommitPlanEvents(input: EditCommitPlanEventsInput): rea
 
   for (const objectDelete of input.plan.objects.deletes) {
     events.push(
-      ...buildObjectDeletedEvents({
+      buildObjectDeletedEvent({
         objectTypeId: objectDelete.objectTypeId,
         primaryId: objectDelete.primaryId,
         previousProperties: objectDelete.previousProperties
@@ -72,7 +72,7 @@ export function buildEditCommitPlanEvents(input: EditCommitPlanEventsInput): rea
 
   for (const objectUpsert of input.plan.objects.upserts) {
     events.push(
-      ...buildObjectUpsertEvents({
+      buildObjectUpsertEvent({
         objectTypeId: objectUpsert.objectTypeId,
         primaryId: objectUpsert.primaryId,
         operation: objectUpsert.operation,
@@ -88,7 +88,7 @@ export function buildEditCommitPlanEvents(input: EditCommitPlanEventsInput): rea
 
   for (const linkDelete of input.plan.links.deletes) {
     events.push(
-      ...buildLinkRemovedEvents({
+      buildLinkDeletedEvent({
         sourceTypeId: linkDelete.source.objectTypeId,
         sourceId: linkDelete.source.primaryId,
         linkId: linkDelete.linkId,
@@ -105,7 +105,7 @@ export function buildEditCommitPlanEvents(input: EditCommitPlanEventsInput): rea
 
   for (const linkUpsert of input.plan.links.upserts) {
     events.push(
-      ...buildLinkUpsertEvents({
+      buildLinkUpsertEvent({
         sourceTypeId: linkUpsert.source.objectTypeId,
         sourceId: linkUpsert.source.primaryId,
         linkId: linkUpsert.linkId,
@@ -127,36 +127,28 @@ export function buildEditCommitPlanEvents(input: EditCommitPlanEventsInput): rea
   return events
 }
 
-export function buildObjectUpsertEvents(
-  input: ObjectUpsertEventsInput
-): readonly [EventDraft, EventDraft] {
-  const legacyPayload = {
+export function buildObjectUpsertEvent(
+  input: ObjectUpsertEventInput
+): Extract<EventDraft, { type: "object.created" | "object.updated" }> {
+  const payload = {
     objectTypeId: input.objectTypeId,
     primaryId: input.primaryId,
     properties: input.properties,
+    propertyChanges: diffPropertyChanges(input.previousProperties, input.properties),
   }
   const idempotencyKeyBase = objectEventKey(input.objectTypeId, input.primaryId)
-
   const eventType = input.operation === "create" ? "object.created" : "object.updated"
 
-  return [
-    {
-      type: "object.upserted",
-      payload: legacyPayload,
-      ...eventOptions(input, `object.upserted:${idempotencyKeyBase}`),
-    },
-    {
-      type: eventType,
-      payload: {
-        ...legacyPayload,
-        propertyChanges: diffPropertyChanges(input.previousProperties, input.properties),
-      },
-      ...eventOptions(input, `${eventType}:${idempotencyKeyBase}`),
-    },
-  ]
+  return {
+    type: eventType,
+    payload,
+    ...eventOptions(input, `${eventType}:${idempotencyKeyBase}`),
+  }
 }
 
-export function buildObjectDeletedEvents(input: ObjectDeletedEventsInput): readonly [EventDraft] {
+export function buildObjectDeletedEvent(
+  input: ObjectDeletedEventInput
+): Extract<EventDraft, { type: "object.deleted" }> {
   const payload = {
     objectTypeId: input.objectTypeId,
     primaryId: input.primaryId,
@@ -164,52 +156,40 @@ export function buildObjectDeletedEvents(input: ObjectDeletedEventsInput): reado
   }
   const idempotencyKeyBase = objectEventKey(input.objectTypeId, input.primaryId)
 
-  return [
-    {
-      type: "object.deleted",
-      payload,
-      ...eventOptions(input, `object.deleted:${idempotencyKeyBase}`),
-    },
-  ]
+  return {
+    type: "object.deleted",
+    payload,
+    ...eventOptions(input, `object.deleted:${idempotencyKeyBase}`),
+  }
 }
 
-export function buildLinkUpsertEvents(
-  input: LinkUpsertEventsInput
-): readonly [EventDraft, EventDraft] {
-  const legacyPayload = {
+export function buildLinkUpsertEvent(
+  input: LinkUpsertEventInput
+): Extract<EventDraft, { type: "link.created" | "link.updated" }> {
+  const payload = {
     sourceTypeId: input.sourceTypeId,
     sourceId: input.sourceId,
     linkId: input.linkId,
     targetTypeId: input.targetTypeId,
     targetId: input.targetId,
     ...(input.properties !== undefined ? { properties: input.properties } : {}),
+    propertyChanges: input.properties
+      ? diffPropertyChanges(input.previousProperties, input.properties)
+      : ({} satisfies PropertyChangeMap),
   }
-  const propertyChanges = input.properties
-    ? diffPropertyChanges(input.previousProperties, input.properties)
-    : ({} satisfies PropertyChangeMap)
   const idempotencyKeyBase = linkEventKey(input)
   const eventType = input.operation === "create" ? "link.created" : "link.updated"
 
-  return [
-    {
-      type: "link.upserted",
-      payload: legacyPayload,
-      ...eventOptions(input, `link.upserted:${idempotencyKeyBase}`),
-    },
-    {
-      type: eventType,
-      payload: {
-        ...legacyPayload,
-        propertyChanges,
-      },
-      ...eventOptions(input, `${eventType}:${idempotencyKeyBase}`),
-    },
-  ]
+  return {
+    type: eventType,
+    payload,
+    ...eventOptions(input, `${eventType}:${idempotencyKeyBase}`),
+  }
 }
 
-export function buildLinkRemovedEvents(
-  input: LinkRemovedEventsInput
-): readonly [EventDraft, EventDraft] {
+export function buildLinkDeletedEvent(
+  input: LinkDeletedEventInput
+): Extract<EventDraft, { type: "link.deleted" }> {
   const payload = {
     sourceTypeId: input.sourceTypeId,
     sourceId: input.sourceId,
@@ -219,21 +199,14 @@ export function buildLinkRemovedEvents(
   }
   const idempotencyKeyBase = linkEventKey(input)
 
-  return [
-    {
-      type: "link.removed",
-      payload,
-      ...eventOptions(input, `link.removed:${idempotencyKeyBase}`),
+  return {
+    type: "link.deleted",
+    payload: {
+      ...payload,
+      propertyChanges: clearedPropertyChanges(input.previousProperties),
     },
-    {
-      type: "link.deleted",
-      payload: {
-        ...payload,
-        propertyChanges: clearedPropertyChanges(input.previousProperties),
-      },
-      ...eventOptions(input, `link.deleted:${idempotencyKeyBase}`),
-    },
-  ]
+    ...eventOptions(input, `link.deleted:${idempotencyKeyBase}`),
+  }
 }
 
 function eventOptions(

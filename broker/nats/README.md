@@ -88,7 +88,7 @@ await broker.ensureStream({
 await broker.append({
   projectId: "acme",
   streamId: "__events",
-  records: [{ name: "object.upserted", payload: { id: "room-1" } }],
+  records: [{ name: "test.record", payload: { id: "room-1" } }],
 })
 ```
 

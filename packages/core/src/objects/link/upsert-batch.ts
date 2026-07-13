@@ -7,12 +7,13 @@
 
 import { assertPrivileged } from "../../authorization"
 import type { EventDraft } from "../../events"
-import { buildLinkUpsertEvents } from "../../events"
+import { buildLinkUpsertEvent } from "../../events"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { validateLinkBatch } from "../../ontology/validation"
 import type { BatchItemResult, SixbRuntimeContext } from "../../runtime/types"
 import { ObjectNotFoundError } from "../../storage/errors"
 import type { ResolvedLinkBatchItem } from "../context"
+import { ObjectError } from "../errors"
 
 export async function upsertLinkBatch(
   ctx: SixbRuntimeContext,
@@ -77,7 +78,7 @@ export async function upsertLinkBatch(
   if (validation.valid.length === 0) return results
 
   // Append events, then project the stored events into object storage.
-  const events: EventDraft[] = validation.valid.flatMap(({ item }) => {
+  const events: EventDraft[] = validation.valid.map(({ item }) => {
     const sameLink = (
       linksMap.get(`${item.objectType.id}:${item.sourceId}:${item.linkId}`) ?? []
     ).find(
@@ -92,7 +93,7 @@ export async function upsertLinkBatch(
           }
         : undefined
 
-    return buildLinkUpsertEvents({
+    return buildLinkUpsertEvent({
       sourceTypeId: item.objectType.id,
       sourceId: item.sourceId,
       linkId: item.linkId,
@@ -106,10 +107,14 @@ export async function upsertLinkBatch(
 
   const appended = await eventsRuntime.append({ events })
   const linkEvents = appended.filter(
-    (e): e is Extract<typeof e, { type: "link.upserted" }> => e.type === "link.upserted"
+    (event): event is Extract<typeof event, { type: "link.created" | "link.updated" }> =>
+      event.type === "link.created" || event.type === "link.updated"
   )
+  if (linkEvents.length !== validation.valid.length) {
+    throw new ObjectError("Failed to append link mutation event batch")
+  }
 
-  await storage.objects.applyLinkUpsertedBatch(linkEvents)
+  await storage.objects.applyLinkUpsertBatch(linkEvents)
 
   for (const entry of validation.valid) {
     results[entry.index] = { ok: true, value: undefined }

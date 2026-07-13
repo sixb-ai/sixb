@@ -1,8 +1,8 @@
 import type { EditCommitPlan } from "../../edits"
 import type {
-  StoredLinkRemovedEvent,
-  StoredLinkUpsertedEvent,
-  StoredObjectUpsertedEvent,
+  StoredLinkDeletedEvent,
+  StoredLinkMutationEvent,
+  StoredObjectMutationEvent,
   StoredTelemetryAppendedEvent,
 } from "../../events"
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "../../objects/query"
@@ -421,7 +421,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
     return [...resultsByKey.values()]
   }
 
-  async applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow> {
+  async applyObjectUpsert(event: StoredObjectMutationEvent): Promise<ObjectRow> {
     const bucketId = objectRowKey(event.projectId, event.payload.objectTypeId)
     const bucket = this.rows.get(bucketId) ?? new Map<string, ObjectRow>()
     this.rows.set(bucketId, bucket)
@@ -452,12 +452,12 @@ export class InMemoryObjectStorage implements ObjectStorage {
     return next
   }
 
-  async applyObjectUpsertedBatch(
-    events: readonly StoredObjectUpsertedEvent[]
+  async applyObjectUpsertBatch(
+    events: readonly StoredObjectMutationEvent[]
   ): Promise<readonly ObjectRow[]> {
     const results: ObjectRow[] = []
     for (const event of events) {
-      results.push(await this.applyObjectUpserted(event))
+      results.push(await this.applyObjectUpsert(event))
     }
     return results
   }
@@ -497,7 +497,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
     }
   }
 
-  async applyLinkUpserted(event: StoredLinkUpsertedEvent): Promise<void> {
+  async applyLinkUpsert(event: StoredLinkMutationEvent): Promise<void> {
     const bucketKey = sourceLinkBucketKey(
       event.projectId,
       event.payload.sourceTypeId,
@@ -531,13 +531,13 @@ export class InMemoryObjectStorage implements ObjectStorage {
     this.appliedEventIds.add(event.id)
   }
 
-  async applyLinkUpsertedBatch(events: readonly StoredLinkUpsertedEvent[]): Promise<void> {
+  async applyLinkUpsertBatch(events: readonly StoredLinkMutationEvent[]): Promise<void> {
     for (const event of events) {
-      await this.applyLinkUpserted(event)
+      await this.applyLinkUpsert(event)
     }
   }
 
-  async applyLinkRemoved(event: StoredLinkRemovedEvent): Promise<void> {
+  async applyLinkDelete(event: StoredLinkDeletedEvent): Promise<void> {
     const bucketKey = sourceLinkBucketKey(
       event.projectId,
       event.payload.sourceTypeId,

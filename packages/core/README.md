@@ -469,7 +469,7 @@ In-memory implementations included: `InMemoryBroker`, `InMemoryObjectStorage`,
 
 ### Events
 
-All domain events include object/link mutations (`object.created`, `object.updated`, `object.deleted`, `link.created`, `link.updated`, `link.deleted`), legacy compatibility events (`object.upserted`, `link.upserted`, `link.removed`), and topic events such as `telemetry.appended`, `action.requested`, `schedule.triggered`, `sync.run.finished`, `pipeline.run.finished`, and `dataset.version.committed`.
+Domain events include object/link mutations (`object.created`, `object.updated`, `object.deleted`, `link.created`, `link.updated`, `link.deleted`) and topic events such as `telemetry.appended`, `action.requested`, `schedule.triggered`, `sync.run.finished`, `pipeline.run.finished`, and `dataset.version.committed`.
 
 ### Units
 

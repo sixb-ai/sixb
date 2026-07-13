@@ -361,18 +361,19 @@ async function seedExistingStoreRows(basePath: string): Promise<void> {
 
   const storage = new SqliteStorage({ path: basePath })
   try {
-    await storage.objects.applyObjectUpserted({
+    await storage.objects.applyObjectUpsert({
       id: "legacy-object-event",
       cursor: "1",
       schemaVersion: 1,
       projectId: "project-a",
-      type: "object.upserted",
+      type: "object.created",
       topic: "objects",
       partitionKey: "Room:room:101",
       payload: {
         objectTypeId: "Room",
         primaryId: "room:101",
         properties: { name: "Legacy Room" },
+        propertyChanges: {},
       },
       occurredAt: "2026-04-06T12:00:00.000Z",
     })
