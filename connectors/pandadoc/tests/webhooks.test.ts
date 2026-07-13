@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
+import { noopLogger } from "@sixb/core"
 import type { PandaDocWebhookEventContext } from "../src"
 import { pandaDocEventsWebhook, pandadoc } from "../src"
 import { CONTEXT, collect, json, mockFetch } from "./helpers"
@@ -100,6 +101,7 @@ describe("pandadoc inbound events webhook", () => {
       request,
       body: webhook.body.parse(JSON.parse(body)),
       sixb,
+      logger: noopLogger,
       client,
     } as unknown as HandleCtx)
 
@@ -108,6 +110,7 @@ describe("pandadoc inbound events webhook", () => {
     expect(received[0]?.event.event).toBe("document_state_changed")
     expect(received[0]?.events).toHaveLength(2)
     expect(received[0]?.sixb).toBe(sixb as never)
+    expect(received[0]?.logger).toBe(noopLogger)
     expect(received[0]?.client).toBe(client)
   })
 

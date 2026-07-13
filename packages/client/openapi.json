@@ -18745,7 +18745,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["sync", "pipeline", "workflow", "action"]
+              "enum": ["sync", "pipeline", "workflow", "action", "webhook"]
             }
           },
           {
@@ -18841,7 +18841,7 @@
                                 "properties": {
                                   "kind": {
                                     "type": "string",
-                                    "enum": ["sync", "pipeline", "workflow", "action"]
+                                    "enum": ["sync", "pipeline", "workflow", "action", "webhook"]
                                   },
                                   "id": {
                                     "type": "string"

@@ -1,4 +1,5 @@
 import type { ConnectorDefinition } from "../connectors/types"
+import type { Logger } from "../logging"
 import type { OntologySource, Sixb } from "../runtime"
 
 export type WebhookBodyFormat = "json" | "text" | "raw"
@@ -48,6 +49,7 @@ export interface WebhookMetadata {
 
 export interface WebhookVerifyContext {
   readonly sixb: Sixb<readonly OntologySource[]>
+  readonly logger: Logger
   readonly connector: ConnectorDefinition
   readonly webhook: WebhookMetadata
   readonly request: Request

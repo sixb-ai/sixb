@@ -7,6 +7,8 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type LogEntry,
+  type LoggerProvider,
   type OntologySource,
   Sixb,
   type SixbOptions,
@@ -29,6 +31,12 @@ describe("webhook routes", () => {
     let rawBodyText = ""
     let requestHeader = ""
     let connected = false
+    const logEntries: LogEntry[] = []
+    const logger: LoggerProvider = {
+      write(entry) {
+        logEntries.push(entry)
+      },
+    }
 
     const connector = defineConnector("github", {
       type: "test",
@@ -44,11 +52,17 @@ describe("webhook routes", () => {
               return { name: value.name }
             },
           })
-          .verify(({ request, rawBody }) => {
+          .verify(({ request, rawBody, logger }) => {
+            logger.info("verified")
             requestHeader = request.headers.get("x-provider") ?? ""
             rawBodyText = new TextDecoder().decode(rawBody)
           })
-          .handle(async ({ body, client, sixb, request, webhook }) => {
+          .idempotencyKey(({ logger }) => {
+            logger.info("resolved idempotency")
+            return null
+          })
+          .handle(async ({ body, client, sixb, request, webhook, logger }) => {
+            logger.info("handled")
             const resolved = (await client()) as { source: string }
             connected = resolved.source === "github"
 
@@ -69,7 +83,7 @@ describe("webhook routes", () => {
     })
 
     const storage = new InMemoryStorage()
-    const app = createWebhookApp([connector], storage)
+    const app = createWebhookApp([connector], storage, logger)
     const payload = JSON.stringify({ name: "issue-opened" })
     const response = await app.fetch(
       new Request("http://localhost/api/webhooks/github/events", {
@@ -107,6 +121,13 @@ describe("webhook routes", () => {
       responseStatus: 201,
     })
     expect(run?.requestBodyBytes).toBe(new TextEncoder().encode(payload).byteLength)
+    expect(logEntries.map((entry) => [entry.message, entry.context.phase])).toEqual([
+      ["verified", "verify"],
+      ["resolved idempotency", "idempotency"],
+      ["handled", "handle"],
+    ])
+    expect(new Set(logEntries.map((entry) => entry.context.run.id))).toEqual(new Set([run?.id]))
+    expect(logEntries.every((entry) => entry.context.run.kind === "webhook")).toBe(true)
   })
 
   test("returns 400 for body validation failures before handlers run", async () => {
@@ -254,6 +275,45 @@ describe("webhook routes", () => {
     })
   })
 
+  test("provides webhook logging when run history storage is not configured", async () => {
+    const logEntries: LogEntry[] = []
+    const connector = defineConnector("github", {
+      type: "test",
+      webhooks: [
+        defineWebhook("events")
+          .post()
+          .json()
+          .handle(({ logger }) => {
+            logger.info("handled without history")
+          }),
+      ],
+      connect() {
+        return {}
+      },
+    })
+    const storage = new InMemoryStorage()
+    Object.defineProperty(storage, "webhookRuns", { value: undefined })
+    const app = createWebhookApp([connector], storage, {
+      write(entry) {
+        logEntries.push(entry)
+      },
+    })
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/webhooks/github/events", {
+        method: "POST",
+        body: JSON.stringify({ ok: true }),
+      })
+    )
+
+    expect(response.status).toBe(202)
+    expect(logEntries).toHaveLength(1)
+    expect(logEntries[0]).toMatchObject({
+      message: "handled without history",
+      context: { run: { kind: "webhook" }, phase: "handle" },
+    })
+  })
+
   test("maps unknown, unsupported, verification, and handler errors", async () => {
     const connector = defineConnector("github", {
       type: "test",
@@ -340,7 +400,8 @@ describe("webhook routes", () => {
 
 function createWebhookApp(
   connectors: SixbOptions<readonly OntologySource[]>["connectors"],
-  storage = new InMemoryStorage()
+  storage = new InMemoryStorage(),
+  logger?: LoggerProvider
 ) {
   const sixb = createSixbInstance<readonly OntologySource[]>({
     id: "test-project",
@@ -351,6 +412,7 @@ function createWebhookApp(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     connectors,
+    logger,
   })
   const server = new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
   return createSixbApi(server)

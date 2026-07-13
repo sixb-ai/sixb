@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { noopLogger } from "@sixb/core"
 import {
   customFieldsByDefinitionId,
   customFieldsByLabel,
@@ -583,6 +584,7 @@ describe("defineTeamleaderWebhook", () => {
       body,
       rawBody: new Uint8Array(),
       request: new Request("https://example.com"),
+      logger: noopLogger,
       sixb: {} as never,
       connector: {} as never,
       webhook: {

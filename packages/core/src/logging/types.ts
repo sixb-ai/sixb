@@ -22,7 +22,7 @@ export interface Logger {
 }
 
 /** The primitive whose execution produced a log line. */
-export const LOG_RUN_KINDS = ["sync", "pipeline", "workflow", "action"] as const
+export const LOG_RUN_KINDS = ["sync", "pipeline", "workflow", "action", "webhook"] as const
 export type LogRunKind = (typeof LOG_RUN_KINDS)[number]
 
 /** Points a log line back at the run that produced it. */

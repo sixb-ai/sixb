@@ -15,7 +15,15 @@ webhookConnector({
     defineWebhook("typed")
       .post()
       .json(schema)
-      .handle(async ({ body, client }) => {
+      .verify(({ logger }) => {
+        logger.debug("verify")
+      })
+      .idempotencyKey(({ body, logger }) => {
+        logger.debug("idempotency")
+        return body.name
+      })
+      .handle(async ({ body, client, logger }) => {
+        logger.info("handle")
         const _name: string = body.name
         const connector = await client()
         const _kind: "webhook" = connector.kind

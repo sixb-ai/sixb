@@ -30,8 +30,8 @@ export function companyCamEventsWebhook(
       }
       verifySignature(options.secret, rawBody, request.headers.get("x-companycam-signature"))
     })
-    .handle<CompanyCamClient>(async ({ body, sixb, client }) => {
-      await options.onEvent({ event: toEvent(body), sixb, client })
+    .handle<CompanyCamClient>(async ({ body, sixb, logger, client }) => {
+      await options.onEvent({ event: toEvent(body), sixb, logger, client })
       return { status: 200 }
     })
 }

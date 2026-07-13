@@ -442,7 +442,7 @@ describe("log metadata", () => {
   })
 
   test("exposes the canonical run kinds", () => {
-    expect(LOG_RUN_KINDS).toEqual(["sync", "pipeline", "workflow", "action"])
+    expect(LOG_RUN_KINDS).toEqual(["sync", "pipeline", "workflow", "action", "webhook"])
   })
 
   test("validates complete log records and stored lines", () => {

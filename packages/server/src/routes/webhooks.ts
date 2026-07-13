@@ -4,6 +4,7 @@ import type {
   ConnectorClient,
   ConnectorDefinition,
   FinishWebhookRunStatus,
+  Logger,
   OntologySource,
   RegisteredWebhook,
   Sixb,
@@ -33,7 +34,7 @@ interface DispatchWebhookOptions {
 
 interface WebhookRunFinishInput {
   readonly sixb: Sixb<readonly OntologySource[]>
-  readonly runId: string | null
+  readonly runId: string
   readonly status: FinishWebhookRunStatus
   readonly requestBodyBytes?: number
   readonly responseStatus?: number
@@ -77,9 +78,25 @@ export function registerWebhookRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
 }
 
 async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown> {
+  const runId = `webhookrun_${randomUUID()}`
+  const logSession = options.sixb.logs.startExecution({ kind: "webhook", id: runId })
+
+  await startWebhookRun(options.sixb, options.registered, options.request, runId)
+
+  try {
+    return await dispatchWebhookRun(options, runId, (phase) => logSession.withContext({ phase }))
+  } finally {
+    await logSession.flush()
+  }
+}
+
+async function dispatchWebhookRun(
+  options: DispatchWebhookOptions,
+  runId: string,
+  loggerForPhase: (phase: string) => Logger
+): Promise<unknown> {
   const { sixb, registered, request, set } = options
   const { connector, webhook, route } = registered
-  const runId = await startWebhookRun(sixb, registered, request)
   const requestMethod = request.method.toUpperCase()
 
   if (requestMethod !== webhook.method) {
@@ -113,12 +130,16 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   }
 
   const metadata = toWebhookMetadata(webhook, route)
-  const verifyContext = {
+  const baseContext = {
     sixb,
     connector,
     webhook: metadata,
     request,
     rawBody,
+  }
+  const verifyContext = {
+    ...baseContext,
+    logger: loggerForPhase("verify"),
   }
 
   try {
@@ -154,9 +175,14 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   }
 
   const handlerContext = {
-    ...verifyContext,
+    ...baseContext,
+    logger: loggerForPhase("handle"),
     body,
     client: createClientResolver(sixb, connector),
+  }
+  const idempotencyContext = {
+    ...handlerContext,
+    logger: loggerForPhase("idempotency"),
   }
 
   // Claim before running the handler so duplicate and concurrent provider
@@ -165,7 +191,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   let idempotencyKey: string | undefined
   let deliveryClaimResult: WebhookDeliveryClaimResult | undefined
   try {
-    const claim = await claimDeliveryKey(sixb, webhook, handlerContext)
+    const claim = await claimDeliveryKey(sixb, webhook, idempotencyContext)
     idempotencyKey = claim.idempotencyKey
     deliveryClaimResult = claim.claimResult
     if (claim.status === "skip") {
@@ -265,14 +291,13 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
 async function startWebhookRun(
   sixb: Sixb<readonly OntologySource[]>,
   registered: RegisteredWebhook,
-  request: Request
-): Promise<string | null> {
+  request: Request,
+  runId: string
+): Promise<void> {
   const storage = sixb.storage.webhookRuns
   if (!storage) {
-    return null
+    return
   }
-
-  const runId = `webhookrun_${randomUUID()}`
 
   try {
     await storage.start({
@@ -283,15 +308,15 @@ async function startWebhookRun(
       method: request.method.toUpperCase(),
       route: registered.route,
     })
-    return runId
   } catch {
-    return null
+    // Webhook run history is observability-only. Logging and dispatch continue
+    // even when history storage is unavailable or temporarily failing.
   }
 }
 
 async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {
   const storage = input.sixb.storage.webhookRuns
-  if (!storage || !input.runId) {
+  if (!storage) {
     return
   }
 

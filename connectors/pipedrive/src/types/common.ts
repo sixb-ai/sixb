@@ -1,5 +1,5 @@
 import type { RestRetryPolicy } from "@sixb/connector-rest"
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { Logger, OntologySource, Sixb } from "@sixb/core"
 import type { PipedriveClient } from "./client"
 
 export type PipedriveTokenResolver = string | (() => string | Promise<string>)
@@ -114,6 +114,7 @@ export interface PipedriveWebhookEvent {
 export interface PipedriveEventContext {
   readonly event: PipedriveWebhookEvent
   readonly sixb: Sixb<readonly OntologySource[]>
+  readonly logger: Logger
   client(): Promise<PipedriveClient>
 }
 

@@ -34,12 +34,12 @@ export function githubEventsWebhook(
       verifySignature(options.secret, rawBody, request.headers.get("x-hub-signature-256"))
     })
     .idempotencyKey(({ request }) => request.headers.get("x-github-delivery"))
-    .handle<GitHubClient>(async ({ request, body, sixb, client }) => {
+    .handle<GitHubClient>(async ({ request, body, sixb, logger, client }) => {
       const name = request.headers.get("x-github-event")
       if (!name) {
         return
       }
-      await options.onEvent({ event: toEvent(name, request, body), sixb, client })
+      await options.onEvent({ event: toEvent(name, request, body), sixb, logger, client })
     })
 }
 

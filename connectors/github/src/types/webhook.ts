@@ -2,7 +2,7 @@ import type {
   WebhookEventMap as GitHubWebhookEventMap,
   WebhookEventName as GitHubWebhookEventName,
 } from "@octokit/webhooks-types"
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { Logger, OntologySource, Sixb } from "@sixb/core"
 import type { GitHubClient } from "./client"
 
 export type { GitHubWebhookEventMap, GitHubWebhookEventName }
@@ -40,6 +40,7 @@ export type GitHubWebhookEvent<Name extends GitHubWebhookEventName = GitHubWebho
 export interface GitHubEventContext<Name extends GitHubWebhookEventName = GitHubWebhookEventName> {
   readonly event: GitHubWebhookEvent<Name>
   readonly sixb: Sixb<readonly OntologySource[]>
+  readonly logger: Logger
   client(): Promise<GitHubClient>
 }
 

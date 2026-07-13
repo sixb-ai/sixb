@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
+import { noopLogger } from "@sixb/core"
 import type { CompanyCamEventContext } from "../src"
 import { companyCamEventsWebhook, companycam } from "../src"
 
@@ -44,6 +45,7 @@ describe("companycam events webhook", () => {
       request: new Request("https://x/hook", { method: "POST" }),
       body: JSON.parse(body),
       sixb,
+      logger: noopLogger,
       client,
     } as unknown as HandleCtx)
 
@@ -54,6 +56,7 @@ describe("companycam events webhook", () => {
     expect(received[0]?.event.webhookId).toBe(7)
     expect(received[0]?.event.payload).toEqual({ id: "p1" })
     expect(received[0]?.sixb).toBe(sixb as never)
+    expect(received[0]?.logger).toBe(noopLogger)
     expect(received[0]?.client).toBe(client)
   })
 
