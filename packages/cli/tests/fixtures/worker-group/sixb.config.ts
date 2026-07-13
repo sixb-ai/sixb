@@ -1,5 +1,4 @@
 import { appendFileSync } from "node:fs"
-import type { LanguageModelV4 } from "@ai-sdk/provider"
 import {
   col,
   defineAgent,
@@ -24,7 +23,7 @@ import {
 
 const assistant = defineAgent("assistant", {
   name: "Assistant",
-  model: {} as LanguageModelV4,
+  model: {} as Parameters<typeof defineAgent>[1]["model"],
   instructions: "Assist the user.",
 })
 

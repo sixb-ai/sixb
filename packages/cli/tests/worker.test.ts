@@ -96,8 +96,8 @@ describe("sixb worker", () => {
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Unknown worker 'missing'")
-    expect(result.stdout).toContain("sync, action, pipeline")
-    expect(result.stdout).toContain("projection, workflow")
+    expect(result.stdout).toContain("sync, action, agent")
+    expect(result.stdout).toContain("pipeline, projection, workflow")
     expect(result.stdout).not.toContain("requires a queue provider")
     expect(result.stderr).toBe("")
   })
@@ -116,7 +116,8 @@ describe("sixb worker", () => {
     const result = runWorkerFixture("valid-project")
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Usage: sixb worker <sync|action|pipeline|projection|workflow>")
+    expect(result.stdout).toContain("Usage: sixb worker")
+    expect(result.stdout).toContain("<sync|action|agent|pipeline|projection|workflow>")
     expect(result.stderr).toBe("")
   })
 
@@ -148,8 +149,8 @@ describe("sixb worker", () => {
     expect(result.stdout).toContain("worker <type>")
     expect(result.stdout).not.toContain("--type <type>")
     expect(result.stdout).not.toContain("--worker <type>")
-    expect(result.stdout).toContain("sync, action, pipeline")
-    expect(result.stdout).toContain("workflow")
+    expect(result.stdout).toContain("sync, action, agent")
+    expect(result.stdout).toContain("pipeline, projection, workflow")
     expect(result.stderr).toBe("")
   })
 
@@ -160,7 +161,7 @@ describe("sixb worker", () => {
 
   test("rejects unknown workers with the known worker list", () => {
     expect(() => resolveWorkerTypeToStart("missing")).toThrow(
-      "Available: sync, action, pipeline, projection, workflow"
+      "Available: sync, action, agent, pipeline, projection, workflow"
     )
   })
 })
