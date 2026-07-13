@@ -18,13 +18,14 @@ events.object(Device).byId(deviceId).telemetry()
 events.object(Device).telemetry(Device.p.temperature)
 events.object(Device).byId(deviceId).created()
 events.object(Device).byId(deviceId).updated()
+events.object(Device).byId(deviceId).upserted()
 events.object(Device).byId(deviceId).deleted()
 events.object(Device).link(Device.l.installedIn).created()
 ```
 
 Object-type builders carry type information. For example, `telemetry(Device.p.temperature)` narrows
 the event payload to that property, and `created()` / `updated()` type `payload.properties` from
-`Device`.
+`Device`. `upserted()` is a selector shortcut for both `object.created` and `object.updated`; it is not a separate domain event type.
 
 Use topic builders when the screen is broader or dynamic:
 

@@ -78,7 +78,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
             stream: eventsStream,
             records: [
               {
-                name: "object.upserted",
+                name: "test.record",
                 key: "Room:room-1",
                 payload: { objectTypeId: "Room", primaryId: "room-1" },
               },
@@ -88,7 +88,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
           expect(records).toHaveLength(1)
           expect(records[0]).toMatchObject({
             streamId: eventsStream.id,
-            name: "object.upserted",
+            name: "test.record",
             key: "Room:room-1",
             payload: { objectTypeId: "Room", primaryId: "room-1" },
           })
@@ -217,16 +217,16 @@ export function runBrokerContractSuite<TBroker extends Broker>(
             projectId: "project-a",
             stream: eventsStream,
             records: [
-              { name: "object.upserted", payload: { id: "room-1" } },
+              { name: "test.record", payload: { id: "room-1" } },
               { name: "telemetry.appended", payload: { id: "temp-1" } },
-              { name: "object.upserted", payload: { id: "room-2" } },
+              { name: "test.record", payload: { id: "room-2" } },
             ],
           })
 
           const records = await readRecords(broker, {
             projectId: "project-a",
             stream: eventsStream,
-            names: ["object.upserted"],
+            names: ["test.record"],
             limit: 2,
           })
 
@@ -242,7 +242,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
           await appendRecords(broker, {
             projectId: "project-a",
             stream: eventsStream,
-            records: [{ name: "object.upserted", payload: { id: "room-1" } }],
+            records: [{ name: "test.record", payload: { id: "room-1" } }],
           })
 
           expect(
@@ -533,9 +533,9 @@ export function runBrokerContractSuite<TBroker extends Broker>(
             projectId: "project-a",
             stream: eventsStream,
             records: [
-              { name: "object.upserted", key: "other", payload: "one" },
+              { name: "test.record", key: "other", payload: "one" },
               { name: "telemetry.appended", key: "target", payload: "two" },
-              { name: "object.upserted", key: "target", payload: "three" },
+              { name: "test.record", key: "target", payload: "three" },
             ],
           })
 
@@ -546,7 +546,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               projectId: "project-a",
               stream: eventsStream,
               afterCursor: first?.cursor,
-              names: ["object.upserted"],
+              names: ["test.record"],
               keys: ["target"],
             },
             (records) => {

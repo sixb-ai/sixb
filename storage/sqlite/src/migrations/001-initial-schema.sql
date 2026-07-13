@@ -328,8 +328,8 @@ CREATE TABLE IF NOT EXISTS rule_states (
 CREATE INDEX IF NOT EXISTS idx_rule_states_project_rule
   ON rule_states(project_id, rule_id);
 
--- Object materialization dedupes re-applied events (object.upserted and
--- telemetry.appended) by id. Timeseries needs no equivalent ledger: its
+-- Object materialization dedupes re-applied object/link mutation events and
+-- telemetry.appended by id. Timeseries needs no equivalent ledger: its
 -- (series, at) upsert is idempotent on its own.
 CREATE TABLE IF NOT EXISTS applied_events_objects (
   event_id TEXT PRIMARY KEY

@@ -54,7 +54,6 @@ export interface EventsFilterSpec extends EventSelectorSpec {}
 type Override<TBase, TPatch> = Omit<TBase, keyof TPatch> & TPatch
 
 type StoredTelemetryEvent = SixbEventOfType<"telemetry.appended">
-type StoredObjectUpsertedEvent = SixbEventOfType<"object.upserted">
 type StoredObjectCreatedEvent = SixbEventOfType<"object.created">
 type StoredObjectUpdatedEvent = SixbEventOfType<"object.updated">
 
@@ -108,17 +107,6 @@ type TelemetryEventForProperty<TToken extends PropertyToken | undefined> =
       >
     : StoredTelemetryEvent
 
-/** An object upsert with ontology-typed `payload.properties`. */
-type ObjectUpsertedEventOf<TObjectType extends ObjectTypeWithTokens> = Override<
-  StoredObjectUpsertedEvent,
-  {
-    payload: Override<
-      StoredObjectUpsertedEvent["payload"],
-      { properties: InferObjectProperties<TObjectType, readonly []> }
-    >
-  }
->
-
 /** An object created/updated fact with ontology-typed `payload.properties`. */
 type ObjectPropertiesEventOf<
   TObjectType extends ObjectTypeWithTokens,
@@ -142,6 +130,10 @@ type ObjectUpdatedEventOf<TObjectType extends ObjectTypeWithTokens> = ObjectProp
   TObjectType,
   StoredObjectUpdatedEvent
 >
+
+type ObjectMutationEventOf<TObjectType extends ObjectTypeWithTokens> =
+  | ObjectCreatedEventOf<TObjectType>
+  | ObjectUpdatedEventOf<TObjectType>
 
 type EventPropertySelectorMap<TTokens, TObjectType extends ObjectTypeWithTokens> = {
   readonly [K in keyof TTokens]: TTokens[K] extends PropertyToken
@@ -194,8 +186,8 @@ export interface EventsBuilder<
     property?: TToken
   ): EventsBuilder<TObjectType, TelemetryEventForProperty<TToken>>
 
-  /** @deprecated Use `.created()` or `.updated()` instead. */
-  upserted(): EventsBuilder<TObjectType, ObjectUpsertedEventOf<TObjectType>>
+  /** Object creation and update facts. */
+  upserted(): EventsBuilder<TObjectType, ObjectMutationEventOf<TObjectType>>
 
   /** Object creation facts. */
   created(): EventsBuilder<TObjectType, ObjectCreatedEventOf<TObjectType>>
@@ -205,9 +197,6 @@ export interface EventsBuilder<
 
   /** Object deletion facts. */
   deleted(): EventsBuilder<TObjectType, SixbEventOfType<"object.deleted">>
-
-  /** @deprecated Use `.link(token).created()`, `.updated()`, or `.deleted()` instead. */
-  linked(link?: LinkToken<TObjectType["id"]>): EventsBuilder<TObjectType, SixbEventOfTopic<"links">>
 
   /** Outgoing link mutation facts scoped to one link token. */
   link<TLink extends LinkToken<TObjectType["id"]>>(
@@ -234,8 +223,6 @@ export interface EventsLinkBuilder<
   created(): EventsLinkBuilder<TObjectType, TLink, SixbEventOfType<"link.created">>
   updated(): EventsLinkBuilder<TObjectType, TLink, SixbEventOfType<"link.updated">>
   deleted(): EventsLinkBuilder<TObjectType, TLink, SixbEventOfType<"link.deleted">>
-  /** @deprecated Use `.deleted()` instead. */
-  removed(): EventsLinkBuilder<TObjectType, TLink, SixbEventOfType<"link.deleted">>
 }
 
 export interface EventPropertyBuilder<
@@ -453,7 +440,11 @@ class EventsBuilderImpl {
   }
 
   upserted(): EventsBuilderImpl {
-    return this.withFilter({ topic: "objects", types: ["object.upserted"] })
+    const selector = this.params.selector
+    if (selector && "upserted" in selector && typeof selector.upserted === "function") {
+      return this.withSelectorSpec(selector.upserted())
+    }
+    return this
   }
 
   created(): EventsBuilderImpl {
@@ -480,14 +471,6 @@ class EventsBuilderImpl {
     return this
   }
 
-  linked(link?: LinkToken): EventsBuilderImpl {
-    return this.withFilter({
-      topic: "links",
-      types: ["link.upserted", "link.removed"],
-      ...(link ? { linkId: link.id } : {}),
-    })
-  }
-
   link(link: LinkToken): EventsBuilderImpl {
     const objectType = this.params.objectType
     if (!objectType) {
@@ -504,10 +487,6 @@ class EventsBuilderImpl {
         types: ["link.created", "link.updated", "link.deleted"],
       },
     })
-  }
-
-  removed(): EventsBuilderImpl {
-    return this.deleted()
   }
 
   cleared(): EventsBuilderImpl {

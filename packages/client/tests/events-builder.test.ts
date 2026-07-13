@@ -93,16 +93,11 @@ describe("events builder filter spec", () => {
     })
   })
 
-  test("upserted / deleted / linked set their types", () => {
-    expect(events.object(Sensor).upserted().ir.types).toEqual(["object.upserted"])
+  test("upserted and deleted set their canonical types", () => {
+    expect(events.object(Sensor).upserted().ir.types).toEqual(["object.created", "object.updated"])
     expect(events.object(Sensor).deleted().ir).toMatchObject({
       topic: "objects",
       types: ["object.deleted"],
-    })
-    expect(events.object(Sensor).linked(Sensor.l.zone).ir).toMatchObject({
-      topic: "links",
-      types: ["link.upserted", "link.removed"],
-      linkId: "zone",
     })
   })
 
@@ -233,10 +228,10 @@ describe("buildEventPredicate", () => {
 
   test("links match on the source side", () => {
     const matches = buildEventPredicate(
-      events.object(Sensor).byId("sensor-1").linked(Sensor.l.zone).ir
+      events.object(Sensor).byId("sensor-1").link(Sensor.l.zone).ir
     )
     const linkEvent = event({
-      type: "link.upserted",
+      type: "link.created",
       topic: "links",
       payload: {
         sourceTypeId: "Sensor",
@@ -244,6 +239,7 @@ describe("buildEventPredicate", () => {
         linkId: "zone",
         targetTypeId: "Zone",
         targetId: "zone-1",
+        propertyChanges: {},
       },
     })
     expect(matches(linkEvent)).toBe(true)

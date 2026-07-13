@@ -7,13 +7,14 @@ import {
   type StoredDomainEvent,
 } from "../src"
 
-function objectUpserted(primaryId: string) {
+function objectCreated(primaryId: string) {
   return {
-    type: "object.upserted" as const,
+    type: "object.created" as const,
     payload: {
       objectTypeId: "Room",
       primaryId,
       properties: { name: primaryId },
+      propertyChanges: { name: { operation: "created" as const, after: primaryId } },
     },
   }
 }
@@ -42,9 +43,9 @@ describe("EventsRuntime broker backing", () => {
       causationId: "cause-1",
       events: [
         {
-          ...objectUpserted("room-1"),
+          ...objectCreated("room-1"),
           metadata: { source: "unit-test" },
-          idempotencyKey: "object.upserted:room-1",
+          idempotencyKey: "object.created:room-1",
         },
       ],
     })
@@ -52,14 +53,14 @@ describe("EventsRuntime broker backing", () => {
     expect(event).toMatchObject({
       cursor: "1",
       projectId: "project-a",
-      type: "object.upserted",
+      type: "object.created",
       topic: "objects",
       partitionKey: "Room:room-1",
       actor: { type: "system", id: "tests" },
       correlationId: "corr-1",
       causationId: "cause-1",
       metadata: { source: "unit-test" },
-      idempotencyKey: "object.upserted:room-1",
+      idempotencyKey: "object.created:room-1",
     })
 
     const { records } = await broker.read({
@@ -70,37 +71,37 @@ describe("EventsRuntime broker backing", () => {
     expect(record).toMatchObject({
       streamId: "__events",
       cursor: "1",
-      name: "object.upserted",
+      name: "object.created",
       key: "Room:room-1",
     })
     expect(record?.payload).toMatchObject({
       id: event?.id,
-      type: "object.upserted",
+      type: "object.created",
       topic: "objects",
       partitionKey: "Room:room-1",
     })
     expect(record?.payload).not.toHaveProperty("cursor")
-    expect(broker.appended[0]?.records[0]?.idempotencyKey).toBe("object.upserted:room-1")
+    expect(broker.appended[0]?.records[0]?.idempotencyKey).toBe("object.created:room-1")
 
     const [readBack] = await runtime.read()
     expect(readBack).toMatchObject({
       cursor: event?.cursor,
       id: event?.id,
       projectId: "project-a",
-      type: "object.upserted",
+      type: "object.created",
       topic: "objects",
       actor: { type: "system", id: "tests" },
       correlationId: "corr-1",
       causationId: "cause-1",
       metadata: { source: "unit-test" },
-      idempotencyKey: "object.upserted:room-1",
+      idempotencyKey: "object.created:room-1",
     })
   })
 
   test("reads with cursor and filter semantics", async () => {
     const runtime = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
     await runtime.append({
-      events: [objectUpserted("room-1"), telemetryAppended("room-1"), objectUpserted("room-2")],
+      events: [objectCreated("room-1"), telemetryAppended("room-1"), objectCreated("room-2")],
     })
 
     const first = (await runtime.read({ limit: 1 }))[0]
@@ -108,14 +109,14 @@ describe("EventsRuntime broker backing", () => {
     expect(afterFirst.map((event) => event.cursor)).toEqual(["2", "3"])
 
     const objects = await runtime.read({ topics: ["objects"] })
-    expect(objects.map((event) => event.type)).toEqual(["object.upserted", "object.upserted"])
+    expect(objects.map((event) => event.type)).toEqual(["object.created", "object.created"])
 
     const telemetry = await runtime.read({ types: ["telemetry.appended"] })
     expect(telemetry.map((event) => event.type)).toEqual(["telemetry.appended"])
 
     const impossible = await runtime.read({
       topics: ["telemetry"],
-      types: ["object.upserted"],
+      types: ["object.created"],
     })
     expect(impossible).toEqual([])
 
@@ -131,10 +132,10 @@ describe("EventsRuntime broker backing", () => {
     })
     await runtime.append({
       events: [
-        objectUpserted("room-1"),
-        objectUpserted("room-2"),
-        objectUpserted("room-3"),
-        objectUpserted("room-4"),
+        objectCreated("room-1"),
+        objectCreated("room-2"),
+        objectCreated("room-3"),
+        objectCreated("room-4"),
       ],
     })
 
@@ -146,8 +147,8 @@ describe("EventsRuntime broker backing", () => {
     const projectA = new EventsRuntime({ projectId: "project-a", broker })
     const projectB = new EventsRuntime({ projectId: "project-b", broker })
 
-    await projectA.append({ events: [objectUpserted("a")] })
-    await projectB.append({ events: [objectUpserted("b")] })
+    await projectA.append({ events: [objectCreated("a")] })
+    await projectB.append({ events: [objectCreated("b")] })
 
     expect((await projectA.read()).map(primaryIds)).toEqual(["a"])
     expect((await projectB.read()).map(primaryIds)).toEqual(["b"])
@@ -162,7 +163,7 @@ describe("EventsRuntime broker backing", () => {
     })
 
     await runtime.append({
-      events: [objectUpserted("room-1"), telemetryAppended("room-1")],
+      events: [objectCreated("room-1"), telemetryAppended("room-1")],
     })
 
     expect(received).toEqual(["telemetry.appended"])
@@ -179,8 +180,30 @@ describe("EventsRuntime broker backing", () => {
       received.push(...batch.map((event) => event.type))
     })
 
-    await expect(runtime.append({ events: [objectUpserted("room-1")] })).resolves.toHaveLength(1)
-    expect(received).toEqual(["object.upserted"])
+    await expect(runtime.append({ events: [objectCreated("room-1")] })).resolves.toHaveLength(1)
+    expect(received).toEqual(["object.created"])
+  })
+
+  test("skips retained event types that are no longer part of the domain contract", async () => {
+    const broker = new InMemoryBroker()
+    const runtime = new EventsRuntime({ projectId: "project-a", broker })
+
+    await broker.ensureStream({ projectId: "project-a", stream: EVENTS_STREAM })
+    await broker.append({
+      projectId: "project-a",
+      streamId: EVENTS_STREAM.id,
+      records: [{ name: "object.upserted", payload: { type: "object.upserted" } }],
+    })
+    await runtime.append({ events: [objectCreated("room-1")] })
+
+    expect((await runtime.read()).map((event) => event.type)).toEqual(["object.created"])
+
+    const received: string[] = []
+    const unsubscribe = await runtime.subscribe({ from: "earliest" }, (batch) => {
+      received.push(...batch.map((event) => event.type))
+    })
+    expect(received).toEqual(["object.created"])
+    unsubscribe()
   })
 
   test("returns empty append batches", async () => {
@@ -202,7 +225,7 @@ describe("EventsRuntime broker backing", () => {
     await broker.append({
       projectId: "project-a",
       streamId: EVENTS_STREAM.id,
-      records: [{ name: "object.upserted", payload: { type: "unknown.event" } }],
+      records: [{ name: "object.created", payload: { type: "unknown.event" } }],
     })
 
     await expect(runtime.read()).rejects.toBeInstanceOf(EventsError)
@@ -215,13 +238,14 @@ describe("EventsRuntime broker backing", () => {
       runtime.append({
         events: [
           {
-            type: "object.upserted",
+            type: "object.created",
             payload: {
               objectTypeId: "Room",
               primaryId: "room-1",
               properties: {
                 observedAt: new Date("2026-01-01T00:00:00.000Z"),
               },
+              propertyChanges: {},
             },
           },
         ],
@@ -231,7 +255,7 @@ describe("EventsRuntime broker backing", () => {
 })
 
 function primaryIds(event: StoredDomainEvent): string | undefined {
-  return event.type === "object.upserted" ? event.payload.primaryId : undefined
+  return event.type === "object.created" ? event.payload.primaryId : undefined
 }
 
 class RecordingBroker extends InMemoryBroker {

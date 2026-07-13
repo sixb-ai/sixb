@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { EVENTS_STREAM, EventsRuntime, InMemoryBroker, type StoredDomainEvent } from "../src"
 
-function objectUpserted(primaryId: string) {
+function objectCreated(primaryId: string) {
   return {
-    type: "object.upserted" as const,
+    type: "object.created" as const,
     payload: {
       objectTypeId: "Room",
       primaryId,
       properties: { name: primaryId },
+      propertyChanges: { name: { operation: "created" as const, after: primaryId } },
     },
   }
 }
@@ -36,9 +37,9 @@ describe("EventsRuntime", () => {
       causationId: "cause-1",
       events: [
         {
-          ...objectUpserted("room-1"),
+          ...objectCreated("room-1"),
           metadata: { source: "unit-test" },
-          idempotencyKey: "object.upserted:room-1",
+          idempotencyKey: "object.created:room-1",
         },
       ],
     })
@@ -46,23 +47,23 @@ describe("EventsRuntime", () => {
     expect(event).toMatchObject({
       cursor: "1",
       projectId: "project-a",
-      type: "object.upserted",
+      type: "object.created",
       topic: "objects",
       partitionKey: "Room:room-1",
       actor: { type: "system", id: "tests" },
       correlationId: "corr-1",
       causationId: "cause-1",
       metadata: { source: "unit-test" },
-      idempotencyKey: "object.upserted:room-1",
+      idempotencyKey: "object.created:room-1",
     })
     expect(broker.appended[0]?.projectId).toBe("project-a")
-    expect(broker.appended[0]?.records[0]?.idempotencyKey).toBe("object.upserted:room-1")
+    expect(broker.appended[0]?.records[0]?.idempotencyKey).toBe("object.created:room-1")
   })
 
   test("reads with Events cursor and filter semantics without a projectId input", async () => {
     const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
     await events.append({
-      events: [objectUpserted("room-1"), telemetryAppended("room-1"), objectUpserted("room-2")],
+      events: [objectCreated("room-1"), telemetryAppended("room-1"), objectCreated("room-2")],
     })
 
     const first = (await events.read({ limit: 1 }))[0]
@@ -70,14 +71,14 @@ describe("EventsRuntime", () => {
     expect(afterFirst.map((event) => event.cursor)).toEqual(["2", "3"])
 
     const objects = await events.read({ topics: ["objects"] })
-    expect(objects.map((event) => event.type)).toEqual(["object.upserted", "object.upserted"])
+    expect(objects.map((event) => event.type)).toEqual(["object.created", "object.created"])
 
     const telemetry = await events.read({ types: ["telemetry.appended"] })
     expect(telemetry.map((event) => event.type)).toEqual(["telemetry.appended"])
 
     const impossible = await events.read({
       topics: ["telemetry"],
-      types: ["object.upserted"],
+      types: ["object.created"],
     })
     expect(impossible).toEqual([])
 
@@ -91,7 +92,7 @@ describe("EventsRuntime", () => {
 
     expect(await events.latestCursor()).toBeUndefined()
     const appended = await events.append({
-      events: [objectUpserted("room-1"), objectUpserted("room-2")],
+      events: [objectCreated("room-1"), objectCreated("room-2")],
     })
 
     expect(await events.latestCursor()).toBe(appended.at(-1)?.cursor)
@@ -104,8 +105,8 @@ describe("EventsRuntime", () => {
     const projectAEvents = new EventsRuntime({ projectId: "project-a", broker })
     const projectBEvents = new EventsRuntime({ projectId: "project-b", broker })
 
-    await projectAEvents.append({ events: [objectUpserted("a")] })
-    await projectBEvents.append({ events: [objectUpserted("b")] })
+    await projectAEvents.append({ events: [objectCreated("a")] })
+    await projectBEvents.append({ events: [objectCreated("b")] })
 
     expect((await projectAEvents.read()).map(primaryIds)).toEqual(["a"])
     expect((await projectBEvents.read()).map(primaryIds)).toEqual(["b"])
@@ -120,7 +121,7 @@ describe("EventsRuntime", () => {
     })
 
     await events.append({
-      events: [objectUpserted("room-1"), telemetryAppended("room-1")],
+      events: [objectCreated("room-1"), telemetryAppended("room-1")],
     })
 
     expect(received).toEqual(["telemetry.appended"])
@@ -128,7 +129,7 @@ describe("EventsRuntime", () => {
 
   test("can subscribe from the earliest retained event", async () => {
     const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
-    await events.append({ events: [objectUpserted("room-1")] })
+    await events.append({ events: [objectCreated("room-1")] })
 
     const received: string[] = []
     const unsubscribe = await events.subscribe({ from: "earliest" }, (batch) => {
@@ -152,7 +153,7 @@ describe("EventsRuntime", () => {
 })
 
 function primaryIds(event: StoredDomainEvent): string | undefined {
-  return event.type === "object.upserted" ? event.payload.primaryId : undefined
+  return event.type === "object.created" ? event.payload.primaryId : undefined
 }
 
 class LatestCursorRecordingBroker extends InMemoryBroker {

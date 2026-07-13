@@ -3,8 +3,8 @@ import {
   type ActionRunStorage,
   type Storage,
   StorageTransactionError,
-  type StoredLinkUpsertedEvent,
-  type StoredObjectUpsertedEvent,
+  type StoredLinkMutationEvent,
+  type StoredObjectMutationEvent,
 } from "@sixb/core"
 import { SqliteStorage } from "../src"
 
@@ -21,7 +21,7 @@ describe("SqliteStorage.transaction", () => {
 
   test("commits writes atomically", async () => {
     await storage.transaction(async (tx) => {
-      await tx.objects.applyObjectUpserted(objectEvent("event_1", "room_1", { name: "Blue" }))
+      await tx.objects.applyObjectUpsert(objectEvent("event_1", "room_1", { name: "Blue" }))
     })
 
     const row = await storage.objects.getByPrimaryId({
@@ -34,14 +34,14 @@ describe("SqliteStorage.transaction", () => {
   })
 
   test("rolls back writes across every mutated table when the transaction fails", async () => {
-    await storage.objects.applyObjectUpserted(objectEvent("event_1", "room_1", { name: "Blue" }))
+    await storage.objects.applyObjectUpsert(objectEvent("event_1", "room_1", { name: "Blue" }))
 
     await expect(
       storage.transaction(async (tx) => {
         // Update an existing object, create a new one, create a link, and write to another store.
-        await tx.objects.applyObjectUpserted(objectEvent("event_2", "room_1", { name: "Red" }))
-        await tx.objects.applyObjectUpserted(objectEvent("event_3", "room_2", { name: "Green" }))
-        await tx.objects.applyLinkUpserted(linkEvent("link_1", "room_1", "room_2"))
+        await tx.objects.applyObjectUpsert(objectEvent("event_2", "room_1", { name: "Red" }))
+        await tx.objects.applyObjectUpsert(objectEvent("event_3", "room_2", { name: "Green" }))
+        await tx.objects.applyLinkUpsert(linkEvent("link_1", "room_1", "room_2"))
         await requireActionRuns(tx).queue({
           id: "run_rollback",
           projectId: "my-app",
@@ -108,19 +108,20 @@ function objectEvent(
   id: string,
   primaryId: string,
   properties: Record<string, unknown>
-): StoredObjectUpsertedEvent {
+): StoredObjectMutationEvent {
   return {
     id,
     cursor: id,
     schemaVersion: 1,
     projectId: "my-app",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: `Room:${primaryId}`,
     payload: {
       objectTypeId: "Room",
       primaryId,
       properties,
+      propertyChanges: {},
     },
     occurredAt: "2026-06-17T10:00:00.000Z",
   }
@@ -133,13 +134,13 @@ function requireActionRuns(tx: Storage): ActionRunStorage {
   return tx.actionRuns
 }
 
-function linkEvent(id: string, sourceId: string, targetId: string): StoredLinkUpsertedEvent {
+function linkEvent(id: string, sourceId: string, targetId: string): StoredLinkMutationEvent {
   return {
     id,
     cursor: id,
     schemaVersion: 1,
     projectId: "my-app",
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: `Room:${sourceId}:neighbour`,
     payload: {
@@ -148,6 +149,7 @@ function linkEvent(id: string, sourceId: string, targetId: string): StoredLinkUp
       linkId: "neighbour",
       targetTypeId: "Room",
       targetId,
+      propertyChanges: {},
     },
     occurredAt: "2026-06-17T10:00:00.000Z",
   }

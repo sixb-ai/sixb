@@ -698,18 +698,19 @@ async function seedObject(
   properties: Record<string, unknown> = {},
   cursor = "1"
 ): Promise<void> {
-  await runtime.storage.objects.applyObjectUpserted({
+  await runtime.storage.objects.applyObjectUpsert({
     id: `seed-object-${cursor}`,
     cursor: `seed-object-${cursor}`,
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: `transaction:${primaryId}`,
     payload: {
       objectTypeId: "transaction",
       primaryId,
       properties,
+      propertyChanges: {},
     },
     occurredAt: "2026-05-07T10:00:00.000Z",
   })
@@ -722,12 +723,12 @@ async function seedLink(
   cursor = "1",
   targetId = "doc-1"
 ): Promise<void> {
-  await runtime.storage.objects.applyLinkUpserted({
+  await runtime.storage.objects.applyLinkUpsert({
     id: `seed-link-${cursor}`,
     cursor: `seed-link-${cursor}`,
     schemaVersion: 1,
     projectId: "project-a",
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: `transaction:${sourceId}:${linkId}`,
     payload: {
@@ -736,6 +737,7 @@ async function seedLink(
       linkId,
       targetTypeId: "document",
       targetId,
+      propertyChanges: {},
     },
     occurredAt: "2026-05-07T10:00:00.000Z",
   })

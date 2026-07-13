@@ -3,7 +3,7 @@
  */
 
 import { assertPrivileged } from "../../authorization"
-import { buildObjectUpsertEvents } from "../../events"
+import { buildObjectUpsertEvent } from "../../events"
 import {
   assertKnownProperties,
   assertRequiredProperties,
@@ -48,19 +48,21 @@ export async function upsertObject(
   assertRequiredProperties(objectType, mergedProperties)
 
   const appended = await events.append({
-    events: buildObjectUpsertEvents({
-      objectTypeId: objectType.id,
-      primaryId,
-      operation: existing ? "update" : "create",
-      previousProperties: existing?.properties,
-      properties: mergedProperties,
-    }),
+    events: [
+      buildObjectUpsertEvent({
+        objectTypeId: objectType.id,
+        primaryId,
+        operation: existing ? "update" : "create",
+        previousProperties: existing?.properties,
+        properties: mergedProperties,
+      }),
+    ],
   })
 
-  const event = appended.find((candidate) => candidate.type === "object.upserted")
-  if (!event) {
-    throw new ObjectError("Failed to append object.upserted event")
+  const [event] = appended
+  if (!event || (event.type !== "object.created" && event.type !== "object.updated")) {
+    throw new ObjectError("Failed to append object mutation event")
   }
 
-  return storage.objects.applyObjectUpserted(event)
+  return storage.objects.applyObjectUpsert(event)
 }

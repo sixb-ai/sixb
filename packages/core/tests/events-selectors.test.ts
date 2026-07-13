@@ -73,6 +73,12 @@ function event(overrides: { type: string; topic: string } & Record<string, unkno
 
 describe("events selector builder", () => {
   test("builds object mutation selectors", () => {
+    expect(eventSelectorSpec(events.object(Invoice).upserted())).toEqual({
+      objectTypeId: "Invoice",
+      topic: "objects",
+      types: ["object.created", "object.updated"],
+    })
+
     expect(eventSelectorSpec(events.object(Invoice).created())).toEqual({
       objectTypeId: "Invoice",
       topic: "objects",

@@ -55,7 +55,7 @@ The two messaging slots are **not** the same thing — keep them distinct.
 | Shape | Append-only event log | Lease-based work lanes |
 | Purpose | Records what happened, fans out to subscribers | Dispatches and retries background jobs |
 | Operations | `append`, `read`, `latestCursor`, `subscribe` | `enqueue`, `claim`, `complete`, `retry`, `fail`, `renewLease` |
-| Carries | Domain [events](../events/overview.md) (`object.upserted`, `telemetry.appended`, `link.upserted`, `action.requested`, …) | Run requests, one per lane |
+| Carries | Domain [events](../events/overview.md) (`object.created`, `object.updated`, `telemetry.appended`, `link.created`, `action.requested`, …) | Run requests, one per lane |
 | Replayable | Yes — retained, ordered history | No — jobs are consumed |
 
 The broker is the source of truth for what occurred. Queues are the execution layer that

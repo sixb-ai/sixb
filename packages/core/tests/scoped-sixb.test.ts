@@ -322,12 +322,12 @@ describe("sixb.as() operational access", () => {
 
     // The operator can view Contract, so it sees the object's event.
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
-    expect((await operator.readEvents()).map((event) => event.type)).toContain("object.upserted")
+    expect((await operator.readEvents()).map((event) => event.type)).toContain("object.created")
 
     // The runner can run workflows but cannot view Contract, so the contract
     // event is filtered out (no workflow has run, so it sees nothing here).
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    expect((await runner.readEvents()).filter((event) => event.type === "object.upserted")).toEqual(
+    expect((await runner.readEvents()).filter((event) => event.type === "object.created")).toEqual(
       []
     )
   })

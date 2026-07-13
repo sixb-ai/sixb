@@ -1583,7 +1583,12 @@ describe("runProjectionJob", () => {
     let aborted = false
     sixb.events.append = async (params) => {
       const events = await originalAppend(params)
-      if (!aborted && params.events.some((event) => event.type === "object.upserted")) {
+      if (
+        !aborted &&
+        params.events.some(
+          (event) => event.type === "object.created" || event.type === "object.updated"
+        )
+      ) {
         aborted = true
         abortController.abort()
       }

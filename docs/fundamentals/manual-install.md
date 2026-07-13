@@ -24,7 +24,7 @@ so you can mix in-memory, local-disk, and hosted backends freely.
 
 | Option | Required | Purpose | In-memory (from `@sixb/core`) |
 | --- | --- | --- | --- |
-| `broker` | yes | Domain-event pub/sub (`object.upserted`, `telemetry.appended`, …) | `InMemoryBroker` |
+| `broker` | yes | Domain-event pub/sub (`object.created`, `object.updated`, `telemetry.appended`, …) | `InMemoryBroker` |
 | `storage` | yes | Objects, telemetry, links, run history | `InMemoryStorage` |
 | `lakeStorage` | yes | Dataset and pipeline lake tables | `InMemoryLakeStorage` |
 | `blobStorage` | yes | Binary blob storage | `InMemoryBlobStorage` |

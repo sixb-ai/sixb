@@ -17682,13 +17682,10 @@
             "schema": {
               "type": "string",
               "enum": [
-                "object.upserted",
                 "object.created",
                 "object.updated",
                 "object.deleted",
                 "telemetry.appended",
-                "link.upserted",
-                "link.removed",
                 "link.created",
                 "link.updated",
                 "link.deleted",
@@ -17814,13 +17811,10 @@
                           "type": {
                             "type": "string",
                             "enum": [
-                              "object.upserted",
                               "object.created",
                               "object.updated",
                               "object.deleted",
                               "telemetry.appended",
-                              "link.upserted",
-                              "link.removed",
                               "link.created",
                               "link.updated",
                               "link.deleted",

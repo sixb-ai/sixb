@@ -483,7 +483,7 @@ export const reviewHighValueTransaction = defineWorkflow("review-high-value-tran
 
       const eventTypes = (await sixb.events.read()).map((event) => event.type)
       expect(eventTypes).toEqual(
-        expect.arrayContaining(["object.upserted", "telemetry.appended", "schedule.triggered"])
+        expect.arrayContaining(["object.created", "telemetry.appended", "schedule.triggered"])
       )
 
       const brokerRecordNames = (

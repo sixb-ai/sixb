@@ -8,9 +8,9 @@ import {
   ObjectQueryExecutionError,
   OntologyRegistry,
   prop,
-  type StoredLinkRemovedEvent,
-  type StoredLinkUpsertedEvent,
-  type StoredObjectUpsertedEvent,
+  type StoredLinkDeletedEvent,
+  type StoredLinkMutationEvent,
+  type StoredObjectMutationEvent,
   type StoredTelemetryAppendedEvent,
 } from "@sixb/core"
 import { SqliteObjectStorage } from "../src"
@@ -96,16 +96,16 @@ describe("SqliteObjectStorage", () => {
     primaryId: string,
     properties: Record<string, unknown>,
     cursor: string
-  ): StoredObjectUpsertedEvent {
+  ): StoredObjectMutationEvent {
     return {
       id: `event-${cursor}`,
       cursor,
       schemaVersion: 1,
       projectId,
-      type: "object.upserted",
+      type: "object.created",
       topic: "objects",
       partitionKey: `${objectTypeId}:${primaryId}`,
-      payload: { objectTypeId, primaryId, properties },
+      payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
       occurredAt: new Date().toISOString(),
     }
   }
@@ -131,7 +131,7 @@ describe("SqliteObjectStorage", () => {
     }
   }
 
-  function createLinkUpsertedEvent(
+  function createLinkMutationEvent(
     projectId: string,
     sourceTypeId: string,
     sourceId: string,
@@ -139,21 +139,21 @@ describe("SqliteObjectStorage", () => {
     targetTypeId: string,
     targetId: string,
     cursor: string
-  ): StoredLinkUpsertedEvent {
+  ): StoredLinkMutationEvent {
     return {
       id: `event-${cursor}`,
       cursor,
       schemaVersion: 1,
       projectId,
-      type: "link.upserted",
+      type: "link.created",
       topic: "links",
       partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
-      payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId },
+      payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
       occurredAt: new Date().toISOString(),
     }
   }
 
-  function createLinkRemovedEvent(
+  function createLinkDeletedEvent(
     projectId: string,
     sourceTypeId: string,
     sourceId: string,
@@ -161,16 +161,16 @@ describe("SqliteObjectStorage", () => {
     targetTypeId: string,
     targetId: string,
     cursor: string
-  ): StoredLinkRemovedEvent {
+  ): StoredLinkDeletedEvent {
     return {
       id: `event-${cursor}`,
       cursor,
       schemaVersion: 1,
       projectId,
-      type: "link.removed",
+      type: "link.deleted",
       topic: "links",
       partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
-      payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId },
+      payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
       occurredAt: new Date().toISOString(),
     }
   }
@@ -203,7 +203,7 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects executes scalar filters, property sorting, and limit in SQLite", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -212,7 +212,7 @@ describe("SqliteObjectStorage", () => {
         "1"
       )
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -221,7 +221,7 @@ describe("SqliteObjectStorage", () => {
         "2"
       )
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -230,7 +230,7 @@ describe("SqliteObjectStorage", () => {
         "3"
       )
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -271,13 +271,13 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects matches null, missing, neq, and in semantics", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:missing", { id: "room:missing" }, "1")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:null", { id: "room:null", floor: null }, "2")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -286,7 +286,7 @@ describe("SqliteObjectStorage", () => {
         "3"
       )
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -340,7 +340,7 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects treats empty in predicates as no matches", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:a", { id: "room:a", floor: "1" }, "1")
     )
 
@@ -358,7 +358,7 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects executes contains predicates in SQLite", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -372,7 +372,7 @@ describe("SqliteObjectStorage", () => {
         "1"
       )
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -413,7 +413,7 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects executes basic text search in SQLite", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -422,7 +422,7 @@ describe("SqliteObjectStorage", () => {
         "1"
       )
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:b", { id: "room:b", name: "South Huddle" }, "2")
     )
 
@@ -447,13 +447,13 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects executes stable keyset page tokens", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:a", { id: "room:a" }, "1")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:b", { id: "room:b" }, "2")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:c", { id: "room:c" }, "3")
     )
 
@@ -465,7 +465,7 @@ describe("SqliteObjectStorage", () => {
         input: { kind: "start", objectTypeId: "Room" },
       },
     })
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:aa", { id: "room:aa" }, "4")
     )
     const page2 = await storage.queryObjects({
@@ -488,13 +488,13 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects executes keyset page tokens over property sorts", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:a", { id: "room:a", capacity: 10 }, "1")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:b", { id: "room:b", capacity: 30 }, "2")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:c", { id: "room:c", capacity: 20 }, "3")
     )
 
@@ -510,7 +510,7 @@ describe("SqliteObjectStorage", () => {
         },
       },
     })
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:bb", { id: "room:bb", capacity: 25 }, "4")
     )
     const page2 = await storage.queryObjects({
@@ -534,13 +534,13 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects preserves keyset page tokens through outer projection", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:a", { id: "room:a", capacity: 10 }, "1")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:b", { id: "room:b", capacity: 30 }, "2")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:c", { id: "room:c", capacity: 20 }, "3")
     )
 
@@ -572,13 +572,13 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects preserves hidden sort keys when paging projected rows", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:a", { id: "room:a", capacity: 10 }, "1")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:b", { id: "room:b", capacity: 30 }, "2")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:c", { id: "room:c", capacity: 20 }, "3")
     )
 
@@ -608,10 +608,10 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects rejects mismatched page tokens as client input", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:a", { id: "room:a", capacity: 10 }, "1")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:b", { id: "room:b", capacity: 30 }, "2")
     )
 
@@ -653,7 +653,7 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects executes set operations in SQLite", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -662,7 +662,7 @@ describe("SqliteObjectStorage", () => {
         "1"
       )
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -671,7 +671,7 @@ describe("SqliteObjectStorage", () => {
         "2"
       )
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -723,7 +723,7 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects projects object properties in SQLite", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -747,10 +747,10 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("executeObjectQuery pushes down includeSubtypes starts as concrete unions", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Asset", "asset:a", { id: "asset:a" }, "1")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Laptop", "laptop:a", { id: "laptop:a" }, "2")
     )
 
@@ -773,23 +773,23 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("queryObjects traverses object links in SQLite", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Department", "dept-eng", { id: "dept-eng" }, "1")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Department", "dept-sales", { id: "dept-sales" }, "2")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Employee", "emp-alice", { id: "emp-alice" }, "3")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Employee", "emp-bob", { id: "emp-bob" }, "4")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Employee", "emp-clara", { id: "emp-clara" }, "5")
     )
-    await storage.applyLinkUpserted(
-      createLinkUpsertedEvent(
+    await storage.applyLinkUpsert(
+      createLinkMutationEvent(
         "project-a",
         "Employee",
         "emp-alice",
@@ -799,8 +799,8 @@ describe("SqliteObjectStorage", () => {
         "6"
       )
     )
-    await storage.applyLinkUpserted(
-      createLinkUpsertedEvent(
+    await storage.applyLinkUpsert(
+      createLinkMutationEvent(
         "project-a",
         "Employee",
         "emp-bob",
@@ -810,8 +810,8 @@ describe("SqliteObjectStorage", () => {
         "7"
       )
     )
-    await storage.applyLinkUpserted(
-      createLinkUpsertedEvent(
+    await storage.applyLinkUpsert(
+      createLinkMutationEvent(
         "project-a",
         "Employee",
         "emp-clara",
@@ -848,7 +848,7 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("executeObjectQuery plans supported SQLite queries as pushdown", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -857,7 +857,7 @@ describe("SqliteObjectStorage", () => {
         "1"
       )
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent(
         "project-a",
         "Room",
@@ -886,9 +886,9 @@ describe("SqliteObjectStorage", () => {
     expect(result.objects.map((row) => row.primaryId)).toEqual(["room:a", "room:b"])
   })
 
-  test("applyObjectUpserted creates new object", async () => {
+  test("applyObjectUpsert creates new object", async () => {
     const event = createObjectEvent("project-a", "Room", "room:101", { name: "Conference" }, "1")
-    const row = await storage.applyObjectUpserted(event)
+    const row = await storage.applyObjectUpsert(event)
 
     expect(row.primaryId).toBe("room:101")
     expect(row.objectTypeId).toBe("Room")
@@ -898,7 +898,7 @@ describe("SqliteObjectStorage", () => {
     expect(row.sourceEventId).toBe("event-1")
   })
 
-  test("applyObjectUpserted merges properties", async () => {
+  test("applyObjectUpsert merges properties", async () => {
     const event1 = createObjectEvent(
       "project-a",
       "Room",
@@ -906,10 +906,10 @@ describe("SqliteObjectStorage", () => {
       { name: "Conference", floor: "2" },
       "1"
     )
-    await storage.applyObjectUpserted(event1)
+    await storage.applyObjectUpsert(event1)
 
     const event2 = createObjectEvent("project-a", "Room", "room:101", { capacity: 20 }, "2")
-    const row = await storage.applyObjectUpserted(event2)
+    const row = await storage.applyObjectUpsert(event2)
 
     expect(row.properties.name).toBe("Conference")
     expect(row.properties.floor).toBe("2")
@@ -917,11 +917,11 @@ describe("SqliteObjectStorage", () => {
     expect(row.version).toBe(2)
   })
 
-  test("applyObjectUpserted is idempotent", async () => {
+  test("applyObjectUpsert is idempotent", async () => {
     const event = createObjectEvent("project-a", "Room", "room:101", { name: "Conference" }, "1")
 
-    await storage.applyObjectUpserted(event)
-    await storage.applyObjectUpserted(event) // Same event ID
+    await storage.applyObjectUpsert(event)
+    await storage.applyObjectUpsert(event) // Same event ID
 
     const row = await storage.getByPrimaryId({
       projectId: "project-a",
@@ -932,13 +932,13 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("getByPrimaryId returns correct object", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:101", { name: "Room 1" }, "1")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:102", { name: "Room 2" }, "2")
     )
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-b", "Room", "room:101", { name: "Room 3" }, "3")
     )
 
@@ -961,7 +961,7 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("applyTelemetryAppended updates object property", async () => {
-    await storage.applyObjectUpserted(
+    await storage.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:101", { name: "Conference" }, "1")
     )
 
@@ -986,7 +986,7 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("applyTelemetryAppended is idempotent", async () => {
-    await storage.applyObjectUpserted(createObjectEvent("project-a", "Room", "room:101", {}, "1"))
+    await storage.applyObjectUpsert(createObjectEvent("project-a", "Room", "room:101", {}, "1"))
 
     const event = createTelemetryEvent("project-a", "Room", "room:101", "temperature", 22.5, "2")
     await storage.applyTelemetryAppended(event)
@@ -1000,8 +1000,8 @@ describe("SqliteObjectStorage", () => {
     expect(row?.version).toBe(2)
   })
 
-  test("applyLinkUpserted creates link", async () => {
-    const event = createLinkUpsertedEvent(
+  test("applyLinkUpsert creates link", async () => {
+    const event = createLinkMutationEvent(
       "project-a",
       "Room",
       "room:101",
@@ -1010,7 +1010,7 @@ describe("SqliteObjectStorage", () => {
       "tstat:abc",
       "1"
     )
-    await storage.applyLinkUpserted(event)
+    await storage.applyLinkUpsert(event)
 
     const links = await storage.listLinks({
       projectId: "project-a",
@@ -1024,8 +1024,8 @@ describe("SqliteObjectStorage", () => {
     expect(links[0]?.targetId).toBe("tstat:abc")
   })
 
-  test("applyLinkUpserted updates existing link", async () => {
-    const event1 = createLinkUpsertedEvent(
+  test("applyLinkUpsert updates existing link", async () => {
+    const event1 = createLinkMutationEvent(
       "project-a",
       "Room",
       "room:101",
@@ -1034,9 +1034,9 @@ describe("SqliteObjectStorage", () => {
       "tstat:abc",
       "1"
     )
-    await storage.applyLinkUpserted(event1)
+    await storage.applyLinkUpsert(event1)
 
-    const event2 = createLinkUpsertedEvent(
+    const event2 = createLinkMutationEvent(
       "project-a",
       "Room",
       "room:101",
@@ -1045,7 +1045,7 @@ describe("SqliteObjectStorage", () => {
       "tstat:abc",
       "2"
     )
-    await storage.applyLinkUpserted(event2)
+    await storage.applyLinkUpsert(event2)
 
     const links = await storage.listLinks({
       projectId: "project-a",
@@ -1057,9 +1057,9 @@ describe("SqliteObjectStorage", () => {
     expect(links[0]?.sourceEventId).toBe("event-2")
   })
 
-  test("applyLinkRemoved removes link", async () => {
-    await storage.applyLinkUpserted(
-      createLinkUpsertedEvent(
+  test("applyLinkDelete removes link", async () => {
+    await storage.applyLinkUpsert(
+      createLinkMutationEvent(
         "project-a",
         "Room",
         "room:101",
@@ -1070,8 +1070,8 @@ describe("SqliteObjectStorage", () => {
       )
     )
 
-    await storage.applyLinkRemoved(
-      createLinkRemovedEvent(
+    await storage.applyLinkDelete(
+      createLinkDeletedEvent(
         "project-a",
         "Room",
         "room:101",
@@ -1092,8 +1092,8 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("listLinks filters by linkId", async () => {
-    await storage.applyLinkUpserted(
-      createLinkUpsertedEvent(
+    await storage.applyLinkUpsert(
+      createLinkMutationEvent(
         "project-a",
         "Room",
         "room:101",
@@ -1103,8 +1103,8 @@ describe("SqliteObjectStorage", () => {
         "1"
       )
     )
-    await storage.applyLinkUpserted(
-      createLinkUpsertedEvent(
+    await storage.applyLinkUpsert(
+      createLinkMutationEvent(
         "project-a",
         "Room",
         "room:101",
@@ -1127,11 +1127,11 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("listLinks supports incoming and both directions", async () => {
-    await storage.applyLinkUpserted(
-      createLinkUpsertedEvent("project-a", "Room", "room:101", "hasSensor", "Sensor", "s1", "1")
+    await storage.applyLinkUpsert(
+      createLinkMutationEvent("project-a", "Room", "room:101", "hasSensor", "Sensor", "s1", "1")
     )
-    await storage.applyLinkUpserted(
-      createLinkUpsertedEvent("project-a", "Sensor", "s1", "installedIn", "Room", "room:101", "2")
+    await storage.applyLinkUpsert(
+      createLinkMutationEvent("project-a", "Sensor", "s1", "installedIn", "Room", "room:101", "2")
     )
 
     const incoming = await storage.listLinks({
@@ -1153,7 +1153,7 @@ describe("SqliteObjectStorage", () => {
 
   test("list returns objects with pagination", async () => {
     for (let i = 1; i <= 5; i++) {
-      await storage.applyObjectUpserted(
+      await storage.applyObjectUpsert(
         createObjectEvent("project-a", "Room", `room:10${i}`, { name: `Room ${i}` }, `${i}`)
       )
     }
@@ -1180,9 +1180,9 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("list with primaryIdPrefix filter", async () => {
-    await storage.applyObjectUpserted(createObjectEvent("project-a", "Room", "room:101", {}, "1"))
-    await storage.applyObjectUpserted(createObjectEvent("project-a", "Room", "room:102", {}, "2"))
-    await storage.applyObjectUpserted(createObjectEvent("project-a", "Room", "building:a", {}, "3"))
+    await storage.applyObjectUpsert(createObjectEvent("project-a", "Room", "room:101", {}, "1"))
+    await storage.applyObjectUpsert(createObjectEvent("project-a", "Room", "room:102", {}, "2"))
+    await storage.applyObjectUpsert(createObjectEvent("project-a", "Room", "building:a", {}, "3"))
 
     const result = await storage.list({
       projectId: "project-a",
@@ -1194,9 +1194,9 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("list with primaryIdSuffix filter", async () => {
-    await storage.applyObjectUpserted(createObjectEvent("project-a", "Room", "room:101", {}, "1"))
-    await storage.applyObjectUpserted(createObjectEvent("project-a", "Room", "zone:101", {}, "2"))
-    await storage.applyObjectUpserted(createObjectEvent("project-a", "Room", "room:102", {}, "3"))
+    await storage.applyObjectUpsert(createObjectEvent("project-a", "Room", "room:101", {}, "1"))
+    await storage.applyObjectUpsert(createObjectEvent("project-a", "Room", "zone:101", {}, "2"))
+    await storage.applyObjectUpsert(createObjectEvent("project-a", "Room", "room:102", {}, "3"))
 
     const result = await storage.list({
       projectId: "project-a",
@@ -1212,10 +1212,8 @@ describe("SqliteObjectStorage", () => {
     const past = new Date(now.getTime() - 10000)
     const future = new Date(now.getTime() + 10000)
 
-    await storage.applyObjectUpserted(createObjectEvent("project-a", "Room", "room:past", {}, "1"))
-    await storage.applyObjectUpserted(
-      createObjectEvent("project-a", "Room", "room:future", {}, "2")
-    )
+    await storage.applyObjectUpsert(createObjectEvent("project-a", "Room", "room:past", {}, "1"))
+    await storage.applyObjectUpsert(createObjectEvent("project-a", "Room", "room:future", {}, "2"))
 
     const result = await storage.list({
       projectId: "project-a",
@@ -1228,9 +1226,9 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("list with ordering", async () => {
-    await storage.applyObjectUpserted(createObjectEvent("project-a", "Room", "room:b", {}, "1"))
-    await storage.applyObjectUpserted(createObjectEvent("project-a", "Room", "room:a", {}, "2"))
-    await storage.applyObjectUpserted(createObjectEvent("project-a", "Room", "room:c", {}, "3"))
+    await storage.applyObjectUpsert(createObjectEvent("project-a", "Room", "room:b", {}, "1"))
+    await storage.applyObjectUpsert(createObjectEvent("project-a", "Room", "room:a", {}, "2"))
+    await storage.applyObjectUpsert(createObjectEvent("project-a", "Room", "room:c", {}, "3"))
 
     const result = await storage.list({
       projectId: "project-a",
@@ -1251,7 +1249,7 @@ describe("SqliteObjectStorage", () => {
 
     // Create and write
     const storage1 = new SqliteObjectStorage({ path: tempFile })
-    await storage1.applyObjectUpserted(
+    await storage1.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:101", { name: "Test Room" }, "1")
     )
     storage1.close()
@@ -1273,14 +1271,14 @@ describe("SqliteObjectStorage", () => {
 
   // ── Batch methods ───────────────────────────────────────────
 
-  test("applyObjectUpsertedBatch — inserts multiple objects in one call", async () => {
+  test("applyObjectUpsertBatch — inserts multiple objects in one call", async () => {
     const events = [
       createObjectEvent("p1", "Room", "r1", { name: "Kitchen" }, "1"),
       createObjectEvent("p1", "Room", "r2", { name: "Bedroom" }, "2"),
       createObjectEvent("p1", "Room", "r3", { name: "Bathroom" }, "3"),
     ]
 
-    const results = await storage.applyObjectUpsertedBatch(events)
+    const results = await storage.applyObjectUpsertBatch(events)
 
     expect(results).toHaveLength(3)
     expect(results[0].primaryId).toBe("r1")
@@ -1289,28 +1287,28 @@ describe("SqliteObjectStorage", () => {
     expect(results[0].properties.name).toBe("Kitchen")
   })
 
-  test("applyObjectUpsertedBatch — idempotent on replay", async () => {
+  test("applyObjectUpsertBatch — idempotent on replay", async () => {
     const events = [createObjectEvent("p1", "Room", "r1", { name: "Kitchen" }, "1")]
 
-    await storage.applyObjectUpsertedBatch(events)
-    const results = await storage.applyObjectUpsertedBatch(events)
+    await storage.applyObjectUpsertBatch(events)
+    const results = await storage.applyObjectUpsertBatch(events)
 
     expect(results).toHaveLength(1)
     expect(results[0].primaryId).toBe("r1")
     expect(results[0].version).toBe(1)
   })
 
-  test("applyLinkUpsertedBatch — inserts multiple links in one call", async () => {
-    await storage.applyObjectUpserted(createObjectEvent("p1", "Room", "r1", {}, "1"))
-    await storage.applyObjectUpserted(createObjectEvent("p1", "Sensor", "s1", {}, "2"))
-    await storage.applyObjectUpserted(createObjectEvent("p1", "Sensor", "s2", {}, "3"))
+  test("applyLinkUpsertBatch — inserts multiple links in one call", async () => {
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Room", "r1", {}, "1"))
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Sensor", "s1", {}, "2"))
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Sensor", "s2", {}, "3"))
 
     const events = [
-      createLinkUpsertedEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "4"),
-      createLinkUpsertedEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s2", "5"),
+      createLinkMutationEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "4"),
+      createLinkMutationEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s2", "5"),
     ]
 
-    await storage.applyLinkUpsertedBatch(events)
+    await storage.applyLinkUpsertBatch(events)
 
     const links = await storage.listLinks({
       projectId: "p1",
@@ -1322,8 +1320,8 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("getByPrimaryIdBatch — returns found objects, omits missing", async () => {
-    await storage.applyObjectUpserted(createObjectEvent("p1", "Room", "r1", { name: "A" }, "1"))
-    await storage.applyObjectUpserted(createObjectEvent("p1", "Room", "r2", { name: "B" }, "2"))
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Room", "r1", { name: "A" }, "1"))
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Room", "r2", { name: "B" }, "2"))
 
     const result = await storage.getByPrimaryIdBatch({
       projectId: "p1",
@@ -1341,10 +1339,10 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("listLinksBatch — returns found links, omits missing", async () => {
-    await storage.applyObjectUpserted(createObjectEvent("p1", "Room", "r1", {}, "1"))
-    await storage.applyObjectUpserted(createObjectEvent("p1", "Sensor", "s1", {}, "2"))
-    await storage.applyLinkUpserted(
-      createLinkUpsertedEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "3")
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Room", "r1", {}, "1"))
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Sensor", "s1", {}, "2"))
+    await storage.applyLinkUpsert(
+      createLinkMutationEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "3")
     )
 
     const result = await storage.listLinksBatch({
@@ -1361,18 +1359,18 @@ describe("SqliteObjectStorage", () => {
   })
 
   test("listIncidentLinksBatch — both directions, de-duplicated", async () => {
-    await storage.applyObjectUpserted(createObjectEvent("p1", "Room", "r1", {}, "1"))
-    await storage.applyObjectUpserted(createObjectEvent("p1", "Room", "r2", {}, "2"))
-    await storage.applyObjectUpserted(createObjectEvent("p1", "Sensor", "s1", {}, "3"))
-    await storage.applyObjectUpserted(createObjectEvent("p1", "Sensor", "s2", {}, "4"))
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Room", "r1", {}, "1"))
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Room", "r2", {}, "2"))
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Sensor", "s1", {}, "3"))
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Sensor", "s2", {}, "4"))
 
-    await storage.applyLinkUpsertedBatch([
+    await storage.applyLinkUpsertBatch([
       // r1 as source
-      createLinkUpsertedEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "5"),
+      createLinkMutationEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "5"),
       // r1 as target
-      createLinkUpsertedEvent("p1", "Sensor", "s2", "installedIn", "Room", "r1", "6"),
+      createLinkMutationEvent("p1", "Sensor", "s2", "installedIn", "Room", "r1", "6"),
       // incident to both listed objects (r1 source, r2 target)
-      createLinkUpsertedEvent("p1", "Room", "r1", "relatedTo", "Room", "r2", "7"),
+      createLinkMutationEvent("p1", "Room", "r1", "relatedTo", "Room", "r2", "7"),
     ])
 
     const links = await storage.listIncidentLinksBatch({

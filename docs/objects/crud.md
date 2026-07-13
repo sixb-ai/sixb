@@ -68,10 +68,7 @@ await invoices.upsert({ properties: { id: "inv-001", issuedAt: "2026-06-23T00:00
 
 ### Events
 
-Each successful upsert appends an `object.upserted` [event](../events/overview.md) carrying the
-object type id, primary id, and the properties you wrote. The object record is projected from
-that event, and [rules](../rules/overview.md) and [workflows](../workflows/overview.md) can
-react to it.
+Each successful upsert appends either an `object.created` or `object.updated` [event](../events/overview.md), including the full resulting properties and their changes. The object record is projected from that event, and [rules](../rules/overview.md) and [workflows](../workflows/overview.md) can react to it.
 
 ## get
 

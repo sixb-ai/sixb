@@ -1,30 +1,30 @@
 import { describe, expect, test } from "bun:test"
 import type {
-  StoredLinkRemovedEvent,
-  StoredLinkUpsertedEvent,
-  StoredObjectUpsertedEvent,
+  StoredLinkDeletedEvent,
+  StoredLinkMutationEvent,
+  StoredObjectMutationEvent,
   StoredTelemetryAppendedEvent,
 } from "../src/events"
 import type { ObjectStorage } from "../src/storage"
 import { InMemoryObjectStorage, InMemoryTimeseriesStorage } from "../src/storage"
 
-function makeObjectUpsertedEvent(
+function makeObjectMutationEvent(
   projectId: string,
   objectTypeId: string,
   primaryId: string,
   properties: Record<string, unknown>,
   cursor = "1"
-): StoredObjectUpsertedEvent {
+): StoredObjectMutationEvent {
   return {
     id: `evt-${crypto.randomUUID()}`,
     schemaVersion: 1,
     projectId,
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: `${objectTypeId}:${primaryId}`,
     occurredAt: new Date().toISOString(),
     cursor,
-    payload: { objectTypeId, primaryId, properties },
+    payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
   }
 }
 
@@ -51,7 +51,7 @@ function makeTelemetryEvent(
   }
 }
 
-function makeLinkUpsertedEvent(
+function makeLinkMutationEvent(
   projectId: string,
   sourceTypeId: string,
   sourceId: string,
@@ -60,21 +60,29 @@ function makeLinkUpsertedEvent(
   targetId: string,
   cursor = "1",
   properties?: Record<string, unknown>
-): StoredLinkUpsertedEvent {
+): StoredLinkMutationEvent {
   return {
     id: `evt-${crypto.randomUUID()}`,
     schemaVersion: 1,
     projectId,
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
     occurredAt: new Date().toISOString(),
     cursor,
-    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, properties },
+    payload: {
+      sourceTypeId,
+      sourceId,
+      linkId,
+      targetTypeId,
+      targetId,
+      properties,
+      propertyChanges: {},
+    },
   }
 }
 
-function makeLinkRemovedEvent(
+function makeLinkDeletedEvent(
   projectId: string,
   sourceTypeId: string,
   sourceId: string,
@@ -82,17 +90,17 @@ function makeLinkRemovedEvent(
   targetTypeId: string,
   targetId: string,
   cursor = "1"
-): StoredLinkRemovedEvent {
+): StoredLinkDeletedEvent {
   return {
     id: `evt-${crypto.randomUUID()}`,
     schemaVersion: 1,
     projectId,
-    type: "link.removed",
+    type: "link.deleted",
     topic: "links",
     partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
     occurredAt: new Date().toISOString(),
     cursor,
-    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId },
+    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
   }
 }
 
@@ -120,24 +128,24 @@ describe("InMemoryObjectStorage", () => {
 
   test("queryObjects executes predicates, sort, limit, and projection", async () => {
     const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Room", "r1", {
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "Room", "r1", {
         name: "Alpha Room",
         status: "paused",
         floor: 1,
         tags: ["office"],
       })
     )
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Room", "r2", {
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "Room", "r2", {
         name: "Beta Lab",
         status: "active",
         floor: 2,
         tags: ["lab"],
       })
     )
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Room", "r3", {
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "Room", "r3", {
         name: "Alpha Lab",
         status: "active",
         floor: 3,
@@ -184,7 +192,7 @@ describe("InMemoryObjectStorage", () => {
   test("queryObjects executes page tokens", async () => {
     const storage = new InMemoryObjectStorage()
     for (const primaryId of ["r1", "r2", "r3"]) {
-      await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", primaryId, {}))
+      await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Room", primaryId, {}))
     }
 
     const page1 = await storage.queryObjects({
@@ -224,20 +232,20 @@ describe("InMemoryObjectStorage", () => {
 
   test("queryObjects executes text and vector search with relevance sort", async () => {
     const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Room", "r1", {
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "Room", "r1", {
         name: "Alpha Alpha",
         embedding: [1, 0],
       })
     )
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Room", "r2", {
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "Room", "r2", {
         name: "Alpha Beta",
         embedding: [0.8, 0.2],
       })
     )
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Room", "r3", {
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "Room", "r3", {
         name: "Gamma",
         embedding: [0, 1],
       })
@@ -276,22 +284,22 @@ describe("InMemoryObjectStorage", () => {
 
   test("queryObjects executes traversal and set operations", async () => {
     const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Room", "r1", { status: "active", tags: ["lab"] })
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "Room", "r1", { status: "active", tags: ["lab"] })
     )
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Room", "r2", { status: "active", tags: ["office"] })
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "Room", "r2", { status: "active", tags: ["office"] })
     )
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Room", "r3", { status: "paused", tags: ["lab"] })
+    await storage.applyObjectUpsert(
+      makeObjectMutationEvent("p1", "Room", "r3", { status: "paused", tags: ["lab"] })
     )
-    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Device", "d1", {}))
-    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Device", "d2", {}))
-    await storage.applyLinkUpserted(
-      makeLinkUpsertedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1")
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Device", "d1", {}))
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Device", "d2", {}))
+    await storage.applyLinkUpsert(
+      makeLinkMutationEvent("p1", "Room", "r1", "hasDevice", "Device", "d1")
     )
-    await storage.applyLinkUpserted(
-      makeLinkUpsertedEvent("p1", "Room", "r2", "hasDevice", "Device", "d2")
+    await storage.applyLinkUpsert(
+      makeLinkMutationEvent("p1", "Room", "r2", "hasDevice", "Device", "d2")
     )
 
     const outgoing = await storage.queryObjects({
@@ -356,27 +364,27 @@ describe("InMemoryObjectStorage", () => {
     expect(subtract.objects.map((row) => row.primaryId)).toEqual(["r1", "r2"])
   })
 
-  test("applyObjectUpserted creates and updates objects", async () => {
+  test("applyObjectUpsert creates and updates objects", async () => {
     const storage = new InMemoryObjectStorage()
 
-    const event1 = makeObjectUpsertedEvent("p1", "Room", "r1", { name: "A" }, "1")
-    const row1 = await storage.applyObjectUpserted(event1)
+    const event1 = makeObjectMutationEvent("p1", "Room", "r1", { name: "A" }, "1")
+    const row1 = await storage.applyObjectUpsert(event1)
     expect(row1.primaryId).toBe("r1")
     expect(row1.properties.name).toBe("A")
     expect(row1.version).toBe(1)
 
-    const event2 = makeObjectUpsertedEvent("p1", "Room", "r1", { name: "B" }, "2")
-    const row2 = await storage.applyObjectUpserted(event2)
+    const event2 = makeObjectMutationEvent("p1", "Room", "r1", { name: "B" }, "2")
+    const row2 = await storage.applyObjectUpsert(event2)
     expect(row2.properties.name).toBe("B")
     expect(row2.version).toBe(2)
   })
 
-  test("applyObjectUpserted is idempotent", async () => {
+  test("applyObjectUpsert is idempotent", async () => {
     const storage = new InMemoryObjectStorage()
-    const event = makeObjectUpsertedEvent("p1", "Room", "r1", { name: "A" }, "1")
+    const event = makeObjectMutationEvent("p1", "Room", "r1", { name: "A" }, "1")
 
-    const row1 = await storage.applyObjectUpserted(event)
-    const row2 = await storage.applyObjectUpserted(event)
+    const row1 = await storage.applyObjectUpsert(event)
+    const row2 = await storage.applyObjectUpsert(event)
     expect(row1.version).toBe(1)
     expect(row2.version).toBe(1)
   })
@@ -394,8 +402,8 @@ describe("InMemoryObjectStorage", () => {
   test("list with pagination", async () => {
     const storage = new InMemoryObjectStorage()
     for (let i = 1; i <= 5; i++) {
-      await storage.applyObjectUpserted(
-        makeObjectUpsertedEvent("p1", "Room", `r${i}`, { name: `Room ${i}` }, `${i}`)
+      await storage.applyObjectUpsert(
+        makeObjectMutationEvent("p1", "Room", `r${i}`, { name: `Room ${i}` }, `${i}`)
       )
     }
 
@@ -416,9 +424,9 @@ describe("InMemoryObjectStorage", () => {
 
   test("list with primaryIdPrefix filter", async () => {
     const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "room:a", {}, "1"))
-    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "room:b", {}, "2"))
-    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "other:c", {}, "3"))
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Room", "room:a", {}, "1"))
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Room", "room:b", {}, "2"))
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Room", "other:c", {}, "3"))
 
     const result = await storage.list({
       projectId: "p1",
@@ -430,8 +438,8 @@ describe("InMemoryObjectStorage", () => {
 
   test("list with primaryIdSuffix filter", async () => {
     const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "room:a", {}, "1"))
-    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "room:b", {}, "2"))
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Room", "room:a", {}, "1"))
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Room", "room:b", {}, "2"))
 
     const result = await storage.list({
       projectId: "p1",
@@ -444,9 +452,9 @@ describe("InMemoryObjectStorage", () => {
 
   test("list orders by key asc", async () => {
     const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "c", {}, "1"))
-    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "a", {}, "2"))
-    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "b", {}, "3"))
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Room", "c", {}, "1"))
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Room", "a", {}, "2"))
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Room", "b", {}, "3"))
 
     const result = await storage.list({
       projectId: "p1",
@@ -459,8 +467,8 @@ describe("InMemoryObjectStorage", () => {
 
   test("list across multiple object types", async () => {
     const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "r1", {}, "1"))
-    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Device", "d1", {}, "2"))
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Room", "r1", {}, "1"))
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Device", "d1", {}, "2"))
 
     const all = await storage.list({ projectId: "p1" })
     expect(all.objects).toHaveLength(2)
@@ -468,9 +476,7 @@ describe("InMemoryObjectStorage", () => {
 
   test("applyTelemetryAppended projects value onto object", async () => {
     const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Room", "r1", { name: "A" }, "1")
-    )
+    await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Room", "r1", { name: "A" }, "1"))
 
     const telEvent = makeTelemetryEvent("p1", "Room", "r1", "temp", 22.5, new Date(), "2")
     await storage.applyTelemetryAppended(telEvent)
@@ -483,10 +489,10 @@ describe("InMemoryObjectStorage", () => {
     expect(row?.properties.temp).toBe(22.5)
   })
 
-  test("applyLinkUpserted and listLinks", async () => {
+  test("applyLinkUpsert and listLinks", async () => {
     const storage = new InMemoryObjectStorage()
-    const event = makeLinkUpsertedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "1")
-    await storage.applyLinkUpserted(event)
+    const event = makeLinkMutationEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "1")
+    await storage.applyLinkUpsert(event)
 
     const links = await storage.listLinks({
       projectId: "p1",
@@ -497,14 +503,14 @@ describe("InMemoryObjectStorage", () => {
     expect(links[0].targetId).toBe("d1")
   })
 
-  test("applyLinkRemoved deletes link", async () => {
+  test("applyLinkDelete deletes link", async () => {
     const storage = new InMemoryObjectStorage()
-    await storage.applyLinkUpserted(
-      makeLinkUpsertedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "1")
+    await storage.applyLinkUpsert(
+      makeLinkMutationEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "1")
     )
 
-    await storage.applyLinkRemoved(
-      makeLinkRemovedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "2")
+    await storage.applyLinkDelete(
+      makeLinkDeletedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "2")
     )
 
     const links = await storage.listLinks({
@@ -517,11 +523,11 @@ describe("InMemoryObjectStorage", () => {
 
   test("listLinks filters by linkId", async () => {
     const storage = new InMemoryObjectStorage()
-    await storage.applyLinkUpserted(
-      makeLinkUpsertedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "1")
+    await storage.applyLinkUpsert(
+      makeLinkMutationEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "1")
     )
-    await storage.applyLinkUpserted(
-      makeLinkUpsertedEvent("p1", "Room", "r1", "hasNeighbor", "Room", "r2", "2")
+    await storage.applyLinkUpsert(
+      makeLinkMutationEvent("p1", "Room", "r1", "hasNeighbor", "Room", "r2", "2")
     )
 
     const deviceLinks = await storage.listLinks({
@@ -536,11 +542,11 @@ describe("InMemoryObjectStorage", () => {
 
   test("listLinks supports incoming and both directions", async () => {
     const storage = new InMemoryObjectStorage()
-    await storage.applyLinkUpserted(
-      makeLinkUpsertedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "1")
+    await storage.applyLinkUpsert(
+      makeLinkMutationEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "1")
     )
-    await storage.applyLinkUpserted(
-      makeLinkUpsertedEvent("p1", "Device", "d1", "installedIn", "Room", "r1", "2")
+    await storage.applyLinkUpsert(
+      makeLinkMutationEvent("p1", "Device", "d1", "installedIn", "Room", "r1", "2")
     )
 
     const incoming = await storage.listLinks({

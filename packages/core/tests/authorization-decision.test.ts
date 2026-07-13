@@ -6,8 +6,8 @@ import {
   isAllowed,
   type StoredActionRequestedEvent,
   type StoredDatasetVersionCommittedEvent,
-  type StoredLinkUpsertedEvent,
-  type StoredObjectUpsertedEvent,
+  type StoredLinkMutationEvent,
+  type StoredObjectMutationEvent,
   type StoredPipelineRunStartedEvent,
   type StoredRuleTriggeredEvent,
   type StoredScheduleTriggeredEvent,
@@ -174,12 +174,12 @@ const envelope = {
   cursor: "c1",
 }
 
-const objectEvent: StoredObjectUpsertedEvent = {
+const objectEvent: StoredObjectMutationEvent = {
   ...envelope,
-  type: "object.upserted",
+  type: "object.created",
   topic: "objects",
   partitionKey: "note/n1",
-  payload: { objectTypeId: "note", primaryId: "n1", properties: {} },
+  payload: { objectTypeId: "note", primaryId: "n1", properties: {}, propertyChanges: {} },
 }
 
 const telemetryEvent: StoredTelemetryAppendedEvent = {
@@ -196,9 +196,9 @@ const telemetryEvent: StoredTelemetryAppendedEvent = {
   },
 }
 
-const linkEvent: StoredLinkUpsertedEvent = {
+const linkEvent: StoredLinkMutationEvent = {
   ...envelope,
-  type: "link.upserted",
+  type: "link.created",
   topic: "links",
   partitionKey: "note/n1",
   payload: {
@@ -207,6 +207,7 @@ const linkEvent: StoredLinkUpsertedEvent = {
     linkId: "author",
     targetTypeId: "user",
     targetId: "u1",
+    propertyChanges: {},
   },
 }
 

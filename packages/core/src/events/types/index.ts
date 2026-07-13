@@ -28,16 +28,13 @@ export type {
   LinkCreatedEvent,
   LinkDeletedEvent,
   LinkEvent,
-  LinkRemovedEvent,
   LinkUpdatedEvent,
-  LinkUpsertedEvent,
 } from "./links"
 export type {
   ObjectCreatedEvent,
   ObjectDeletedEvent,
   ObjectEvent,
   ObjectUpdatedEvent,
-  ObjectUpsertedEvent,
 } from "./objects"
 export type {
   PipelineEvent,
@@ -97,18 +94,17 @@ export type EventDraft = {
   }
 }[DomainEvent["type"]]
 
-export type StoredObjectUpsertedEvent = Extract<StoredDomainEvent, { type: "object.upserted" }>
 export type StoredObjectCreatedEvent = Extract<StoredDomainEvent, { type: "object.created" }>
 export type StoredObjectUpdatedEvent = Extract<StoredDomainEvent, { type: "object.updated" }>
+export type StoredObjectMutationEvent = StoredObjectCreatedEvent | StoredObjectUpdatedEvent
 export type StoredObjectDeletedEvent = Extract<StoredDomainEvent, { type: "object.deleted" }>
 export type StoredTelemetryAppendedEvent = Extract<
   StoredDomainEvent,
   { type: "telemetry.appended" }
 >
-export type StoredLinkUpsertedEvent = Extract<StoredDomainEvent, { type: "link.upserted" }>
-export type StoredLinkRemovedEvent = Extract<StoredDomainEvent, { type: "link.removed" }>
 export type StoredLinkCreatedEvent = Extract<StoredDomainEvent, { type: "link.created" }>
 export type StoredLinkUpdatedEvent = Extract<StoredDomainEvent, { type: "link.updated" }>
+export type StoredLinkMutationEvent = StoredLinkCreatedEvent | StoredLinkUpdatedEvent
 export type StoredLinkDeletedEvent = Extract<StoredDomainEvent, { type: "link.deleted" }>
 export type StoredActionRequestedEvent = Extract<StoredDomainEvent, { type: "action.requested" }>
 export type StoredActionCompletedEvent = Extract<StoredDomainEvent, { type: "action.completed" }>

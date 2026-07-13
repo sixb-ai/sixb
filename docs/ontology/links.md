@@ -199,8 +199,8 @@ await projects.byId("proj-001").link(Project.l.lead, {
 `unlink(...)` removes one exact relationship row. Even for `cardinality: "one"` links, pass the
 current target; when you only know the `linkId`, read it first with `listLinks(Project.l.lead)`.
 
-Writing a link emits a `link.upserted` [event](../events/overview.md); removing one emits
-`link.removed`.
+Writing a new link emits `link.created`; changing an existing link emits `link.updated`.
+Removing one emits `link.deleted`. See [Events](../events/overview.md).
 
 ## List links from an object
 
@@ -266,4 +266,4 @@ them. See [object types](./object-types.md) for inheritance details.
 - [Properties](./properties.md) — values that live on a single object
 - [Querying objects](../objects/querying.md) — filters, ordering, and `traverse`
 - [CRUD](../objects/crud.md) — upsert, link, and unlink from code
-- [Events](../events/overview.md) — `link.upserted` and `link.removed`
+- [Events](../events/overview.md) — `link.created`, `link.updated`, and `link.deleted`

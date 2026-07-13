@@ -2,7 +2,7 @@
  * Leaf operation: upsert a single link.
  */
 import { assertPrivileged } from "../../authorization"
-import { buildLinkUpsertEvents } from "../../events"
+import { buildLinkUpsertEvent } from "../../events"
 import { OntologyValidationError } from "../../ontology/errors"
 import { assertLinkTargetType, validateLinkProperties } from "../../ontology/validation"
 import type { ResolvedLinkContext } from "../context"
@@ -71,22 +71,24 @@ export async function upsertLink(
   }
 
   const appended = await events.append({
-    events: buildLinkUpsertEvents({
-      sourceTypeId: objectType.id,
-      sourceId,
-      linkId,
-      targetTypeId,
-      targetId,
-      operation: sameLink ? "update" : "create",
-      previousProperties: sameLink?.properties,
-      ...(mergedProperties !== undefined ? { properties: mergedProperties } : {}),
-    }),
+    events: [
+      buildLinkUpsertEvent({
+        sourceTypeId: objectType.id,
+        sourceId,
+        linkId,
+        targetTypeId,
+        targetId,
+        operation: sameLink ? "update" : "create",
+        previousProperties: sameLink?.properties,
+        ...(mergedProperties !== undefined ? { properties: mergedProperties } : {}),
+      }),
+    ],
   })
 
-  const event = appended.find((candidate) => candidate.type === "link.upserted")
-  if (!event) {
-    throw new ObjectError("Failed to append link.upserted event")
+  const [event] = appended
+  if (!event || (event.type !== "link.created" && event.type !== "link.updated")) {
+    throw new ObjectError("Failed to append link mutation event")
   }
 
-  await storage.objects.applyLinkUpserted(event)
+  await storage.objects.applyLinkUpsert(event)
 }

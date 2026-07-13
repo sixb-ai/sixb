@@ -547,17 +547,14 @@ describe("Sixb runtime", () => {
 
     const stream = await sixb.events.read()
     expect(stream.map((event) => event.type)).toEqual([
-      "object.upserted",
       "object.created",
       "telemetry.appended",
-      "object.upserted",
       "object.created",
-      "link.upserted",
       "link.created",
     ])
     expect(stream[0]?.topic).toBe("objects")
-    expect(stream[2]?.topic).toBe("telemetry")
-    expect(stream[6]?.topic).toBe("links")
+    expect(stream[1]?.topic).toBe("telemetry")
+    expect(stream[3]?.topic).toBe("links")
 
     const latest = await runtimeDeps.storage.timeseries.getLatest({
       projectId: "project-a",
@@ -866,9 +863,9 @@ describe("Sixb runtime", () => {
     const linksAfter = await sixb.objects(Room).byId("room:101").listLinks(Room.l.hasThermostat)
     expect(linksAfter).toHaveLength(0)
 
-    // Verify link.removed event was emitted
+    // Verify link.deleted event was emitted
     const events = await sixb.events.read({
-      types: ["link.removed"],
+      types: ["link.deleted"],
     })
     expect(events).toHaveLength(1)
   })

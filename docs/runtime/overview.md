@@ -87,13 +87,11 @@ cross-type listing (dashboards, search) the instance also exposes a global `sixb
 
 ### Events
 
-`sixb.events` is the read/append surface for domain events — `object.upserted`,
-`telemetry.appended`, `link.upserted`, `link.removed`, and `action.requested`. It is how the runtime
-records and replays change.
+`sixb.events` is the read/append surface for domain events — `object.created`, `object.updated`, `telemetry.appended`, `link.created`, `link.updated`, `link.deleted`, and `action.requested`. It is how the runtime records and replays change.
 
 ```ts
 const recent = await sixb.events.read({
-  types: ["object.upserted"],
+  types: ["object.created", "object.updated"],
   limit: 50,
 })
 ```

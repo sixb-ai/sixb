@@ -21,19 +21,20 @@ function makeScheduleTriggeredEvent(scheduleId: string): StoredDomainEvent {
   }
 }
 
-function makeObjectUpsertedEvent(): StoredDomainEvent {
+function makeObjectCreatedEvent(): StoredDomainEvent {
   return {
     id: "evt-2",
     schemaVersion: 1,
     projectId: "test-project",
     occurredAt: "2026-04-18T02:00:00.000Z",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: "obj-1",
     payload: {
       objectTypeId: "Room",
       primaryId: "room-1",
       properties: { name: "Room A" },
+      propertyChanges: { name: { operation: "created", after: "Room A" } },
     },
     cursor: "2",
   }
@@ -46,7 +47,7 @@ describe("routeKeyForEvent", () => {
   })
 
   test("other event types return null", () => {
-    const event = makeObjectUpsertedEvent()
+    const event = makeObjectCreatedEvent()
     expect(routeKeyForEvent(event)).toBeNull()
   })
 

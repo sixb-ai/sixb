@@ -99,7 +99,7 @@ describe("auth example Atlas authorization", () => {
     // Event visibility is derived from grants: team members see events for the
     // objects they can view (Note), but not for AdminNote or AccessRequest.
     const teamMemberObjectEvents = (await teamMember.readEvents())
-      .filter((event) => event.type === "object.upserted")
+      .filter((event) => event.type === "object.created" || event.type === "object.updated")
       .map((event) => event.payload.objectTypeId)
     expect(new Set(teamMemberObjectEvents)).toEqual(new Set(["note"]))
 
@@ -129,7 +129,7 @@ describe("auth example Atlas authorization", () => {
         },
       })
     ).resolves.toMatchObject({ runId: expect.any(String) })
-    expect((await admin.readEvents()).map((event) => event.type)).toContain("object.upserted")
+    expect((await admin.readEvents()).map((event) => event.type)).toContain("object.created")
     expect(isAllowed(atlasContext(sixb, ["security-admins"]), { kind: "logs.observe" })).toBe(true)
     expect(isAllowed(atlasContext(sixb, ["team-members"]), { kind: "logs.observe" })).toBe(false)
 

@@ -4,8 +4,8 @@ import {
   InMemoryStorage,
   type Storage,
   StorageTransactionError,
-  type StoredLinkUpsertedEvent,
-  type StoredObjectUpsertedEvent,
+  type StoredLinkMutationEvent,
+  type StoredObjectMutationEvent,
 } from "../src"
 
 describe("InMemoryStorage.transaction", () => {
@@ -13,7 +13,7 @@ describe("InMemoryStorage.transaction", () => {
     const storage = new InMemoryStorage()
 
     await storage.transaction(async (tx) => {
-      await tx.objects.applyObjectUpserted(objectEvent("event_1", "room_1", { name: "Blue" }))
+      await tx.objects.applyObjectUpsert(objectEvent("event_1", "room_1", { name: "Blue" }))
     })
 
     const row = await storage.objects.getByPrimaryId({
@@ -29,16 +29,16 @@ describe("InMemoryStorage.transaction", () => {
     const storage = new InMemoryStorage()
 
     // Baseline state: one object exists before the transaction.
-    await storage.objects.applyObjectUpserted(objectEvent("event_1", "room_1", { name: "Blue" }))
+    await storage.objects.applyObjectUpsert(objectEvent("event_1", "room_1", { name: "Blue" }))
 
     await expect(
       storage.transaction(async (tx) => {
         // 1. Update an existing object.
-        await tx.objects.applyObjectUpserted(objectEvent("event_2", "room_1", { name: "Red" }))
+        await tx.objects.applyObjectUpsert(objectEvent("event_2", "room_1", { name: "Red" }))
         // 2. Create a brand-new object.
-        await tx.objects.applyObjectUpserted(objectEvent("event_3", "room_2", { name: "Green" }))
+        await tx.objects.applyObjectUpsert(objectEvent("event_3", "room_2", { name: "Green" }))
         // 3. Create a link.
-        await tx.objects.applyLinkUpserted(linkEvent("link_1", "room_1", "room_2"))
+        await tx.objects.applyLinkUpsert(linkEvent("link_1", "room_1", "room_2"))
         // 4. Write to a different store entirely.
         await requireActionRuns(tx).queue({
           id: "run_rollback",
@@ -86,12 +86,12 @@ describe("InMemoryStorage.transaction", () => {
 
   test("commits writes across every mutated store atomically", async () => {
     const storage = new InMemoryStorage()
-    await storage.objects.applyObjectUpserted(objectEvent("event_1", "room_1", { name: "Blue" }))
+    await storage.objects.applyObjectUpsert(objectEvent("event_1", "room_1", { name: "Blue" }))
 
     await storage.transaction(async (tx) => {
-      await tx.objects.applyObjectUpserted(objectEvent("event_2", "room_1", { name: "Red" }))
-      await tx.objects.applyObjectUpserted(objectEvent("event_3", "room_2", { name: "Green" }))
-      await tx.objects.applyLinkUpserted(linkEvent("link_1", "room_1", "room_2"))
+      await tx.objects.applyObjectUpsert(objectEvent("event_2", "room_1", { name: "Red" }))
+      await tx.objects.applyObjectUpsert(objectEvent("event_3", "room_2", { name: "Green" }))
+      await tx.objects.applyLinkUpsert(linkEvent("link_1", "room_1", "room_2"))
       await requireActionRuns(tx).queue({
         id: "run_commit",
         projectId: "my-app",
@@ -160,19 +160,20 @@ function objectEvent(
   id: string,
   primaryId: string,
   properties: Record<string, unknown>
-): StoredObjectUpsertedEvent {
+): StoredObjectMutationEvent {
   return {
     id,
     cursor: id,
     schemaVersion: 1,
     projectId: "my-app",
-    type: "object.upserted",
+    type: "object.created",
     topic: "objects",
     partitionKey: `Room:${primaryId}`,
     payload: {
       objectTypeId: "Room",
       primaryId,
       properties,
+      propertyChanges: {},
     },
     occurredAt: "2026-06-17T10:00:00.000Z",
   }
@@ -185,13 +186,13 @@ function requireActionRuns(tx: Storage): ActionRunStorage {
   return tx.actionRuns
 }
 
-function linkEvent(id: string, sourceId: string, targetId: string): StoredLinkUpsertedEvent {
+function linkEvent(id: string, sourceId: string, targetId: string): StoredLinkMutationEvent {
   return {
     id,
     cursor: id,
     schemaVersion: 1,
     projectId: "my-app",
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: `Room:${sourceId}:neighbour`,
     payload: {
@@ -200,6 +201,7 @@ function linkEvent(id: string, sourceId: string, targetId: string): StoredLinkUp
       linkId: "neighbour",
       targetTypeId: "Room",
       targetId,
+      propertyChanges: {},
     },
     occurredAt: "2026-06-17T10:00:00.000Z",
   }
