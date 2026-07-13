@@ -46,16 +46,29 @@ class FakeWebSocket {
 
 const tick = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms))
 
+async function waitFor(condition: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!condition()) {
+    if (Date.now() >= deadline) {
+      throw new Error("Timed out waiting for websocket state.")
+    }
+    await tick(1)
+  }
+}
+
 describe("createEventSocket", () => {
   let originalWebSocket: typeof WebSocket
+  let activeSocket: ReturnType<typeof createEventSocket> | null
 
   beforeEach(() => {
     originalWebSocket = globalThis.WebSocket
+    activeSocket = null
     FakeWebSocket.instances = []
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
   })
 
   afterEach(() => {
+    activeSocket?.close()
     globalThis.WebSocket = originalWebSocket
   })
 
@@ -67,6 +80,7 @@ describe("createEventSocket", () => {
       reconnectDelayMs: 1,
       onEvent: (event) => received.push(event),
     })
+    activeSocket = socket
 
     const ws1 = FakeWebSocket.instances[0]
     if (!ws1) throw new Error("expected a websocket")
@@ -100,6 +114,7 @@ describe("createEventSocket", () => {
       reconnect: false,
       onEvent: () => {},
     })
+    activeSocket = socket
 
     const ws = FakeWebSocket.instances[0]
     if (!ws) throw new Error("expected a websocket")
@@ -125,6 +140,7 @@ describe("createEventSocket", () => {
       onEvent: () => {},
       onStateChange: (state) => states.push(state),
     })
+    activeSocket = socket
 
     const ws = FakeWebSocket.instances[0]
     if (!ws) throw new Error("expected a websocket")
@@ -151,15 +167,15 @@ describe("createEventSocket", () => {
       onEvent: () => {},
       onError: (message) => errors.push(message),
     })
+    activeSocket = socket
 
     const ws1 = FakeWebSocket.instances[0]
     if (!ws1) throw new Error("expected a websocket")
     ws1.onopen?.()
-    await tick(15)
+    await waitFor(() => ws1.closed)
+    await waitFor(() => FakeWebSocket.instances.length === 2)
 
-    expect(ws1.closed).toBe(true)
     expect(errors).toEqual(["Event websocket handshake timed out."])
-    expect(FakeWebSocket.instances).toHaveLength(2)
 
     socket.close()
   })
@@ -168,14 +184,16 @@ describe("createEventSocket", () => {
     const socket = createEventSocket({
       topic: "telemetry",
       reconnect: false,
+      reconnectDelayMs: 1,
       onEvent: () => {},
     })
+    activeSocket = socket
 
     const ws1 = FakeWebSocket.instances[0]
     if (!ws1) throw new Error("expected a websocket")
     ws1.onopen?.()
     ws1.onclose?.()
-    await tick()
+    await tick(10)
 
     expect(FakeWebSocket.instances).toHaveLength(1)
     socket.close()
@@ -188,6 +206,7 @@ describe("createEventSocket", () => {
       reconnectDelayMs: 1,
       onEvent: () => {},
     })
+    activeSocket = socket
 
     const ws1 = FakeWebSocket.instances[0]
     if (!ws1) throw new Error("expected a websocket")
