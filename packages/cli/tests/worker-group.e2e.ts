@@ -36,7 +36,15 @@ async function startThenStop(args: readonly string[], fixture: string) {
   tempDirs.push(tempDir)
 
   return startRoleUntilReadyThenStop({
-    cmd: ["bun", cliEntry, ...args, "--entry", fixtureEntry(fixture)],
+    cmd: [
+      "bun",
+      cliEntry,
+      ...args,
+      "--entry",
+      fixtureEntry(fixture),
+      "--api-public-origin",
+      "http://localhost:3002",
+    ],
     cwd: repoRoot,
     logPath,
     graceMs: CLAIM_GRACE_MS,
@@ -60,6 +68,7 @@ describe("sixb worker-group (e2e)", () => {
       expect(claimed.has("sync")).toBe(true)
       expect(claimed.has("pipeline")).toBe(true)
       expect(claimed.has("projection")).toBe(true)
+      expect(claimed.has("agent")).toBe(true)
       // Does not migrate storage at startup.
       expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
       // Clean shutdown stops queues and lake storage.
@@ -79,6 +88,7 @@ describe("sixb worker-group (e2e)", () => {
       expect(claimed.has("sync")).toBe(true)
       expect(claimed.has("pipeline")).toBe(false)
       expect(claimed.has("projection")).toBe(false)
+      expect(claimed.has("agent")).toBe(false)
       expect(logEntries).toContainEqual({ type: "queues:close" })
       expect(logEntries).toContainEqual({ type: "lake-storage:close" })
     },

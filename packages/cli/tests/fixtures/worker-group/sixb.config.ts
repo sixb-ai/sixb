@@ -1,6 +1,8 @@
 import { appendFileSync } from "node:fs"
+import type { LanguageModelV4 } from "@ai-sdk/provider"
 import {
   col,
+  defineAgent,
   defineConnector,
   defineDataset,
   defineObjectType,
@@ -15,9 +17,22 @@ import {
   InMemoryStorage,
   prop,
   type Queues,
+  type SandboxFactory,
   Sixb,
   type StorageMigrator,
 } from "@sixb/core"
+
+const assistant = defineAgent("assistant", {
+  name: "Assistant",
+  model: {} as LanguageModelV4,
+  instructions: "Assist the user.",
+})
+
+const sandboxes: SandboxFactory = {
+  async create() {
+    throw new Error("The worker-group fixture does not execute agent runs.")
+  },
+}
 
 const Order = defineObjectType({
   id: "Order",
@@ -141,4 +156,6 @@ export const sixb = new Sixb({
   syncs: [ordersSync],
   pipelines: [normalizePipeline],
   projections: [orderProjection],
+  agents: [assistant],
+  sandboxes,
 })

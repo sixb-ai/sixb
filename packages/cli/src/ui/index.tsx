@@ -323,7 +323,8 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           { label: "rules", value: "Start production rules runtime" },
           {
             label: "worker <type>",
-            value: "Start production queue worker: sync, action, pipeline, projection, workflow",
+            value:
+              "Start production queue worker: sync, action, agent, pipeline, projection, workflow",
           },
           {
             label: "worker-group [types...]",

@@ -151,6 +151,7 @@ async function main(): Promise<void> {
       await runWorker({
         entry: getFlag("entry"),
         workerType: getCommandPositionals()[0],
+        apiPublicOrigin: getFlag("api-public-origin"),
       })
       break
     }
@@ -160,6 +161,7 @@ async function main(): Promise<void> {
       await runWorkerGroup({
         entry: getFlag("entry"),
         workerTypes: getCommandPositionals(),
+        apiPublicOrigin: getFlag("api-public-origin"),
       })
       break
     }
