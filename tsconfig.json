@@ -29,6 +29,7 @@
       "@sixb/connector-github": ["./connectors/github/src/index.ts"],
       "@sixb/connector-imap": ["./connectors/imap/src/index.ts"],
       "@sixb/connector-meta": ["./connectors/meta/src/index.ts"],
+      "@sixb/connector-pennylane": ["./connectors/pennylane/src/index.ts"],
       "@sixb/connector-rest": ["./connectors/rest/src/index.ts"],
       "@sixb/connector-sftp": ["./connectors/sftp/src/index.ts"],
       "@sixb/connector-sql": ["./connectors/sql/src/index.ts"],

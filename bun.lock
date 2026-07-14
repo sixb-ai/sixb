@@ -152,6 +152,18 @@
         "typescript": "^5.7.0",
       },
     },
+    "connectors/pennylane": {
+      "name": "@sixb/connector-pennylane",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:*",
+        "@sixb/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
     "connectors/pipedrive": {
       "name": "@sixb/connector-pipedrive",
       "version": "0.1.0",
@@ -1172,6 +1184,8 @@
     "@sixb/connector-meta": ["@sixb/connector-meta@workspace:connectors/meta"],
 
     "@sixb/connector-pandadoc": ["@sixb/connector-pandadoc@workspace:connectors/pandadoc"],
+
+    "@sixb/connector-pennylane": ["@sixb/connector-pennylane@workspace:connectors/pennylane"],
 
     "@sixb/connector-pipedrive": ["@sixb/connector-pipedrive@workspace:connectors/pipedrive"],
 
