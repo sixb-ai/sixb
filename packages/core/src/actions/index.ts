@@ -22,6 +22,7 @@ export { requestAction, requestActionAndWait, waitForActionRun } from "./request
 export { ActionsRuntime } from "./runtime"
 export type {
   ActionBinding,
+  ActionBlobContext,
   ActionBuilder,
   ActionDefinition,
   ActionEditsContext,

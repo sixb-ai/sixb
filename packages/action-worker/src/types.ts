@@ -15,6 +15,7 @@ import type {
 export interface ActionWorkerSixbFacade
   extends Pick<
     Sixb<readonly OntologySource[]>,
+    | "blobStorage"
     | "connector"
     | "appendTelemetry"
     | "getActionsForType"

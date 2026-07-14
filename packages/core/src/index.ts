@@ -115,6 +115,7 @@ export {
 
 export type {
   ActionBinding,
+  ActionBlobContext,
   ActionBuilder,
   ActionDefinition,
   ActionEditCommitResult,

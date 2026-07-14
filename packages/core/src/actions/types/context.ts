@@ -1,3 +1,4 @@
+import type { BlobStorage } from "../../blob-storage"
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../../connectors"
 import type { EditCommitDiff, RecordEditsContext } from "../../edits"
 import type { EventDraft } from "../../events"
@@ -117,9 +118,13 @@ export interface ActionTelemetryObjectSet<
   ): Promise<void>
 }
 
+/** Immutable blob operations available to action writeback and effects handlers. */
+export type ActionBlobContext = Pick<BlobStorage, "put" | "open" | "stat">
+
 export interface ActionRuntimeFacade<
   TValueTypes extends readonly ValueType[] = readonly ValueType[],
 > {
+  readonly blobs: ActionBlobContext
   objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
   ): ActionTelemetryObjectSet<TObjectType, TValueTypes>
