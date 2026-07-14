@@ -51,6 +51,7 @@ export class PgAuthSessionStore implements AuthSessionStore {
         AND audience = ${params.audience}
         AND revoked_at IS NULL
         AND expires_at > ${params.now}
+        AND (absolute_expires_at IS NULL OR absolute_expires_at > ${params.now})
       ORDER BY created_at DESC, id DESC
       LIMIT 1
     `
@@ -70,6 +71,7 @@ export class PgAuthSessionStore implements AuthSessionStore {
         AND user_id = ${params.userId}
         AND revoked_at IS NULL
         AND expires_at > ${params.now}
+        AND (absolute_expires_at IS NULL OR absolute_expires_at > ${params.now})
       ORDER BY COALESCE(last_seen_at, created_at) DESC, created_at DESC, id DESC
     `) as PgAuthSessionRow[]
 
@@ -90,12 +92,44 @@ export class PgAuthSessionStore implements AuthSessionStore {
       row.audience !== params.audience ||
       row.token_hash !== params.tokenHash ||
       row.revoked_at ||
-      new Date(row.expires_at) <= params.now
+      new Date(row.expires_at) <= params.now ||
+      (row.absolute_expires_at !== null && new Date(row.absolute_expires_at) <= params.now)
     ) {
       return null
     }
 
     return rowToSessionRecord(row)
+  }
+
+  async renewIfValid(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly audience: AuthSessionAudience
+    readonly tokenHash: string
+    readonly now: Date
+    readonly expiresAt: Date
+  }): Promise<SessionRecord | null> {
+    const [row] = await this.sql<PgAuthSessionRow[]>`
+      UPDATE auth_sessions
+      SET expires_at = GREATEST(
+            expires_at,
+            LEAST(
+              ${params.expiresAt},
+              COALESCE(absolute_expires_at, ${params.expiresAt})
+            )
+          ),
+          last_seen_at = ${params.now}
+      WHERE project_id = ${params.projectId}
+        AND id = ${params.id}
+        AND audience = ${params.audience}
+        AND token_hash = ${params.tokenHash}
+        AND revoked_at IS NULL
+        AND expires_at > ${params.now}
+        AND (absolute_expires_at IS NULL OR absolute_expires_at > ${params.now})
+      RETURNING *
+    `
+
+    return row ? rowToSessionRecord(row) : null
   }
 
   async revoke(params: {

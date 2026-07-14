@@ -149,6 +149,13 @@ ${layoutImport}
 const runtimeConfig = readSixbBrowserRuntimeConfig({ audience: "app" })
 const browserClient = configureSixbBrowserClient(runtimeConfig)
 
+if (import.meta.hot) {
+  import.meta.hot.accept()
+  import.meta.hot.dispose(() => {
+    browserClient.dispose()
+  })
+}
+
 const authSession = runtimeConfig.auth.enabled
   ? await requireSixbBrowserAuthSession(runtimeConfig, browserClient)
   : null

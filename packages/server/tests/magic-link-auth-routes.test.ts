@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { magicLink, type SendMagicLinkInput } from "@sixb/auth-magic-link"
 import {
+  type AuthSessionOptions,
   defineGroup,
   defineObjectType,
   InMemoryBlobStorage,
@@ -42,10 +43,18 @@ function createRuntime(
     readonly bootstrapUsers?: readonly string[]
     readonly bootstrapGroups?: readonly [typeof securityAdmins]
     readonly rateLimit?: false | { readonly perMinute?: number; readonly perHour?: number }
+    readonly session?: AuthSessionOptions
   } = {}
 ) {
   const storage = new InMemoryStorage()
   const { messages, sendMagicLink } = createSender()
+  const strategy = magicLink({
+    allowedDomains: ["acme.com"],
+    bootstrapUsers: options.bootstrapUsers ?? [],
+    bootstrapGroups: options.bootstrapGroups ?? [],
+    rateLimit: options.rateLimit,
+    sendMagicLink,
+  })
   const sixb = new Sixb<readonly OntologySource[]>({
     id: projectId,
     ontology: [Device],
@@ -55,13 +64,7 @@ function createRuntime(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     groups: [securityAdmins],
-    auth: magicLink({
-      allowedDomains: ["acme.com"],
-      bootstrapUsers: options.bootstrapUsers ?? [],
-      bootstrapGroups: options.bootstrapGroups ?? [],
-      rateLimit: options.rateLimit,
-      sendMagicLink,
-    }),
+    auth: options.session ? { strategy, session: options.session } : strategy,
   })
 
   return {
@@ -180,9 +183,14 @@ describe("magic-link auth routes", () => {
   })
 
   test("callback creates a session, sets cookies, and exposes the session shape", async () => {
-    const { app, messages } = createRuntime({
+    const { app, messages, storage } = createRuntime({
       bootstrapUsers: ["founder@acme.com"],
       bootstrapGroups: [securityAdmins],
+      session: {
+        idleTimeoutMs: 60 * 60 * 1000,
+        renewalWindowMs: 30 * 60 * 1000,
+        absoluteTimeoutMs: 2 * 60 * 60 * 1000,
+      },
     })
 
     await postSignIn(app, {
@@ -221,7 +229,8 @@ describe("magic-link auth routes", () => {
     )
 
     expect(sessionResponse.status).toBe(200)
-    expect(await sessionResponse.json()).toMatchObject({
+    const sessionBody = await sessionResponse.json()
+    expect(sessionBody).toMatchObject({
       authenticated: true,
       user: {
         email: "founder@acme.com",
@@ -231,6 +240,24 @@ describe("magic-link auth routes", () => {
         id: expect.any(String),
       },
     })
+    const user = await storage.auth.users.getByEmail({ projectId, email: "founder@acme.com" })
+    if (!user) throw new Error("Expected callback user to be persisted")
+    const [storedSession] = await storage.auth.sessions.listActiveByUserId({
+      projectId,
+      userId: user.id,
+      now: new Date(),
+    })
+    if (!storedSession) throw new Error("Expected callback session to be persisted")
+    expect(storedSession.absoluteExpiresAt?.getTime()).toBe(
+      storedSession.createdAt.getTime() + 2 * 60 * 60 * 1000
+    )
+    const authCookies = (callback.headers as Headers & { getSetCookie(): string[] })
+      .getSetCookie()
+      .filter((cookie) => /^sixb_(session|csrf)=/.test(cookie))
+    expect(authCookies).toHaveLength(2)
+    for (const cookie of authCookies) {
+      expect(cookie).toContain(`Expires=${storedSession.expiresAt.toUTCString()}`)
+    }
   })
 
   test("GET with a wrong token is rejected without disclosing the email", async () => {

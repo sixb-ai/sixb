@@ -56,6 +56,7 @@ export interface SessionRecord {
   readonly tokenHash: string
   readonly createdAt: Date
   readonly expiresAt: Date
+  readonly absoluteExpiresAt?: Date
   readonly revokedAt?: Date
   readonly lastSeenAt?: Date
   // Best-effort client metadata captured at sign-in, for the active-sessions
@@ -249,6 +250,7 @@ export interface CreateAuthSessionInput {
   readonly tokenHash: string
   readonly createdAt: Date
   readonly expiresAt: Date
+  readonly absoluteExpiresAt?: Date
   readonly userAgent?: string
   readonly ipAddress?: string
 }
@@ -291,6 +293,7 @@ export interface CompleteAuthSessionInput {
   readonly tokenHash: string
   readonly createdAt: Date
   readonly expiresAt: Date
+  readonly absoluteExpiresAt?: Date
   readonly userAgent?: string
   readonly ipAddress?: string
 }
@@ -480,6 +483,14 @@ export interface AuthSessionStore {
     readonly audience: AuthSessionAudience
     readonly tokenHash: string
     readonly now: Date
+  }): Promise<SessionRecord | null>
+  renewIfValid(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly audience: AuthSessionAudience
+    readonly tokenHash: string
+    readonly now: Date
+    readonly expiresAt: Date
   }): Promise<SessionRecord | null>
   revoke(params: {
     readonly projectId: string

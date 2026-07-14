@@ -20,6 +20,7 @@ import {
   type InvitationRecord,
   type ServiceAccountGroupMembershipRecord,
   type ServiceAccountRecord,
+  type SessionRecord,
   type UserRecord,
 } from "../storage/auth"
 import { paginate } from "../storage/pagination"
@@ -103,7 +104,8 @@ import {
 export {
   DEFAULT_AUTH_INVITATION_TTL_MS,
   DEFAULT_AUTH_SESSION_CACHE_TTL_MS,
-  DEFAULT_AUTH_SESSION_TTL_MS,
+  DEFAULT_AUTH_SESSION_IDLE_TIMEOUT_MS,
+  DEFAULT_AUTH_SESSION_RENEWAL_WINDOW_MS,
   MAX_AUTH_INVITATION_TTL_MS,
   resolveAuthConfig,
 } from "./validation"
@@ -152,8 +154,17 @@ export class AuthRuntime {
     return this.config.strategy
   }
 
-  getSessionTtlMs(): number {
-    return this.config.session.ttlMs
+  createSessionDeadlines(now: Date): {
+    readonly expiresAt: Date
+    readonly absoluteExpiresAt?: Date
+  } {
+    const absoluteTimeoutMs = this.config.session.absoluteTimeoutMs
+    return {
+      expiresAt: new Date(now.getTime() + this.config.session.idleTimeoutMs),
+      ...(absoluteTimeoutMs === undefined
+        ? {}
+        : { absoluteExpiresAt: new Date(now.getTime() + absoluteTimeoutMs) }),
+    }
   }
 
   getCookieOptions(options: AuthSessionResolutionOptions = {}): ResolvedAuthCookieOptions {
@@ -231,12 +242,13 @@ export class AuthRuntime {
       }
     }
 
-    return this.resolveCookieSession(request, audience)
+    return this.resolveCookieSession(request, audience, options.sessionActivity)
   }
 
   private async resolveCookieSession(
     request: Request,
-    audience: ReturnType<typeof resolveAuthSessionAudience>
+    audience: ReturnType<typeof resolveAuthSessionAudience>,
+    activity: AuthSessionResolutionOptions["sessionActivity"]
   ): Promise<AuthSessionResult> {
     const cookieOptions = this.getCookieOptions({ audience })
     const cookieValue = getCookie(request, cookieOptions.sessionCookieName)
@@ -259,12 +271,15 @@ export class AuthRuntime {
       nowMs,
     })
     if (cached) {
-      return cached
+      if (activity !== "foreground" || !this.canRenewSession(cached.session, nowMs)) {
+        return cached
+      }
+      this.sessionCache?.invalidate(parts.sessionId)
     }
 
     const storage = this.requireAuthStorage()
     const now = new Date(nowMs)
-    const session = await storage.sessions.findValidByTokenHash({
+    let session = await storage.sessions.findValidByTokenHash({
       projectId: this.projectId,
       id: parts.sessionId,
       audience,
@@ -274,6 +289,24 @@ export class AuthRuntime {
 
     if (!session) {
       return { authenticated: false, reason: "invalid_session" }
+    }
+
+    let sessionRenewed = false
+    if (activity === "foreground" && this.canRenewSession(session, nowMs)) {
+      const renewed = await storage.sessions.renewIfValid({
+        projectId: this.projectId,
+        id: parts.sessionId,
+        audience,
+        tokenHash,
+        now,
+        expiresAt: this.getRenewedSessionExpiresAt(session, nowMs),
+      })
+      if (!renewed) {
+        this.sessionCache?.invalidate(parts.sessionId)
+        return { authenticated: false, reason: "invalid_session" }
+      }
+      session = renewed
+      sessionRenewed = true
     }
 
     const user = await storage.users.getById({
@@ -294,7 +327,9 @@ export class AuthRuntime {
       userId: user.id,
     })
 
-    await this.touchSessionLastSeen(storage, session, now)
+    if (!sessionRenewed) {
+      await this.touchSessionLastSeen(storage, session, now)
+    }
 
     const result: AuthenticatedAuthSession = {
       authenticated: true,
@@ -312,9 +347,27 @@ export class AuthRuntime {
       session: result,
       nowMs,
       sessionExpiresAtMs: session.expiresAt.getTime(),
+      sessionAbsoluteExpiresAtMs: session.absoluteExpiresAt?.getTime(),
     })
 
-    return result
+    return sessionRenewed ? { ...result, sessionRenewed: true } : result
+  }
+
+  private canRenewSession(session: SessionRecord, nowMs: number): boolean {
+    if (session.expiresAt.getTime() - nowMs > this.config.session.renewalWindowMs) {
+      return false
+    }
+
+    return this.getRenewedSessionExpiresAt(session, nowMs).getTime() > session.expiresAt.getTime()
+  }
+
+  private getRenewedSessionExpiresAt(session: SessionRecord, nowMs: number): Date {
+    const idleExpiresAtMs = nowMs + this.config.session.idleTimeoutMs
+    return new Date(
+      session.absoluteExpiresAt
+        ? Math.min(idleExpiresAtMs, session.absoluteExpiresAt.getTime())
+        : idleExpiresAtMs
+    )
   }
 
   private async resolveAccessTokenSession(

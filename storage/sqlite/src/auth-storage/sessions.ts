@@ -48,6 +48,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
           AND audience = ?
           AND revoked_at IS NULL
           AND expires_at > ?
+          AND (absolute_expires_at IS NULL OR absolute_expires_at > ?)
         ORDER BY created_at DESC, id DESC
         LIMIT 1
       `
@@ -56,6 +57,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
         params.projectId,
         params.userId,
         params.audience,
+        toIso(params.now),
         toIso(params.now)
       ) as SqliteAuthSessionRow | null
 
@@ -76,10 +78,16 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
           AND user_id = ?
           AND revoked_at IS NULL
           AND expires_at > ?
+          AND (absolute_expires_at IS NULL OR absolute_expires_at > ?)
         ORDER BY COALESCE(last_seen_at, created_at) DESC, created_at DESC, id DESC
       `
       )
-      .all(params.projectId, params.userId, toIso(params.now)) as SqliteAuthSessionRow[]
+      .all(
+        params.projectId,
+        params.userId,
+        toIso(params.now),
+        toIso(params.now)
+      ) as SqliteAuthSessionRow[]
 
     return rows.map(rowToSessionRecord)
   }
@@ -98,12 +106,58 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
       row.audience !== params.audience ||
       row.token_hash !== params.tokenHash ||
       row.revoked_at ||
-      new Date(row.expires_at) <= params.now
+      new Date(row.expires_at) <= params.now ||
+      (row.absolute_expires_at !== null && new Date(row.absolute_expires_at) <= params.now)
     ) {
       return null
     }
 
     return rowToSessionRecord(row)
+  }
+
+  async renewIfValid(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly audience: AuthSessionAudience
+    readonly tokenHash: string
+    readonly now: Date
+    readonly expiresAt: Date
+  }): Promise<SessionRecord | null> {
+    return runImmediateTransaction(this.db, () => {
+      const now = toIso(params.now)
+      const expiresAt = toIso(params.expiresAt)
+      const result = this.db
+        .query(
+          `
+          UPDATE auth_sessions
+          SET expires_at = MAX(
+                expires_at,
+                MIN(?, COALESCE(absolute_expires_at, ?))
+              ),
+              last_seen_at = ?
+          WHERE project_id = ?
+            AND id = ?
+            AND audience = ?
+            AND token_hash = ?
+            AND revoked_at IS NULL
+            AND expires_at > ?
+            AND (absolute_expires_at IS NULL OR absolute_expires_at > ?)
+        `
+        )
+        .run(
+          expiresAt,
+          expiresAt,
+          now,
+          params.projectId,
+          params.id,
+          params.audience,
+          params.tokenHash,
+          now,
+          now
+        )
+
+      return result.changes === 0 ? null : getSessionById(this.db, params)
+    })
   }
 
   async revoke(params: {

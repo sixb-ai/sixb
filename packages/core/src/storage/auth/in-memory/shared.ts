@@ -153,7 +153,11 @@ export function compareByCreatedAt<T extends { readonly id: string; readonly cre
 }
 
 export function isActiveSession(session: SessionRecord, now: Date): boolean {
-  return !session.revokedAt && session.expiresAt > now
+  return (
+    !session.revokedAt &&
+    session.expiresAt > now &&
+    (!session.absoluteExpiresAt || session.absoluteExpiresAt > now)
+  )
 }
 
 export function isActiveAccessToken(token: AccessTokenRecord, now: Date): boolean {
@@ -306,6 +310,7 @@ export function createSessionRecord(
     tokenHash,
     createdAt: cloneDate(input.createdAt),
     expiresAt: cloneDate(input.expiresAt),
+    absoluteExpiresAt: input.absoluteExpiresAt ? cloneDate(input.absoluteExpiresAt) : undefined,
     userAgent: input.userAgent,
     ipAddress: input.ipAddress,
   }

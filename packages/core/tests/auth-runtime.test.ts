@@ -1,16 +1,21 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { describe, expect, setSystemTime, spyOn, test } from "bun:test"
 import {
+  type AuthSessionOptions,
   type AuthStrategy,
   createAccessTokenCredential,
   createCsrfCookieHeader,
   createSessionCookieHeader,
   createSessionCredential,
+  DEFAULT_AUTH_SESSION_CACHE_TTL_MS,
+  DEFAULT_AUTH_SESSION_IDLE_TIMEOUT_MS,
+  DEFAULT_AUTH_SESSION_RENEWAL_WINDOW_MS,
   defineGroup,
   defineMembershipPolicy,
   formatSessionCookieValue,
   hashSessionSecret,
   type MagicLinkAuthStrategy,
   parseSessionCookieValue,
+  resolveAuthConfig,
   resolveAuthCookieOptions,
   Sixb,
   verifyDoubleSubmitCsrf,
@@ -932,6 +937,189 @@ describe("Sixb auth runtime", () => {
     ).resolves.toEqual({ authenticated: false, reason: "invalid_session" })
   })
 
+  test("resolves sliding session policy defaults", () => {
+    const session = resolveAuthConfig(undefined).session
+
+    expect(session).toEqual({
+      idleTimeoutMs: DEFAULT_AUTH_SESSION_IDLE_TIMEOUT_MS,
+      renewalWindowMs: DEFAULT_AUTH_SESSION_RENEWAL_WINDOW_MS,
+      cacheTtlMs: DEFAULT_AUTH_SESSION_CACHE_TTL_MS,
+    })
+    expect(session.absoluteTimeoutMs).toBeUndefined()
+  })
+
+  test("creates initial session deadlines from the configured policy", () => {
+    const deps = createTestRuntimeDeps()
+    const sixb = new Sixb({
+      ontology: [],
+      ...deps,
+      auth: {
+        strategy: authStrategy,
+        session: {
+          idleTimeoutMs: 30_000,
+          renewalWindowMs: 10_000,
+          absoluteTimeoutMs: 90_000,
+          cacheTtlMs: 1_000,
+        },
+      },
+    })
+
+    const now = new Date("2026-07-01T10:00:00.000Z")
+    expect(sixb.auth.createSessionDeadlines(now)).toEqual({
+      expiresAt: new Date(now.getTime() + 30_000),
+      absoluteExpiresAt: new Date(now.getTime() + 90_000),
+    })
+  })
+
+  test("rejects invalid sliding session policy", () => {
+    const cases: readonly [AuthSessionOptions, string][] = [
+      [{ idleTimeoutMs: 0 }, "idleTimeoutMs must be a positive finite number"],
+      [
+        { idleTimeoutMs: 60_000, renewalWindowMs: 0 },
+        "renewalWindowMs must be a positive finite number",
+      ],
+      [
+        { idleTimeoutMs: 60_000, renewalWindowMs: 60_000 },
+        "renewalWindowMs must be less than idleTimeoutMs",
+      ],
+      [{ absoluteTimeoutMs: 0 }, "absoluteTimeoutMs must be a positive finite number"],
+      [
+        { idleTimeoutMs: 60_000, renewalWindowMs: 10_000, absoluteTimeoutMs: 30_000 },
+        "absoluteTimeoutMs must be greater than or equal to idleTimeoutMs",
+      ],
+      [
+        { idleTimeoutMs: 60_000, renewalWindowMs: 10_000, cacheTtlMs: 10_000 },
+        "cacheTtlMs must be less than renewalWindowMs",
+      ],
+    ]
+
+    for (const [session, message] of cases) {
+      expect(() => resolveAuthConfig({ strategy: authStrategy, session })).toThrow(message)
+    }
+  })
+
+  test("renews a near-expiry session only for foreground activity", async () => {
+    const now = new Date("2026-07-01T10:00:00.000Z")
+    setSystemTime(now)
+    try {
+      const deps = createTestRuntimeDeps()
+      const sixb = new Sixb({
+        ontology: [],
+        ...deps,
+        auth: {
+          strategy: authStrategy,
+          session: {
+            idleTimeoutMs: 30 * 60_000,
+            renewalWindowMs: 10 * 60_000,
+            cacheTtlMs: 0,
+          },
+        },
+      })
+      const credential = createSessionCredential("ses_renew")
+      await deps.storage.auth.users.create({
+        id: "usr_renew",
+        projectId: sixb.id,
+        email: "renew@acme.com",
+      })
+      await deps.storage.auth.sessions.create({
+        id: credential.sessionId,
+        projectId: sixb.id,
+        userId: "usr_renew",
+        strategyId: "test",
+        audience: "atlas",
+        tokenHash: credential.tokenHash,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 5 * 60_000),
+      })
+      const renew = spyOn(deps.storage.auth.sessions, "renewIfValid")
+      const request = () =>
+        new Request("http://localhost/api/project", {
+          headers: { cookie: `sixb_session=${credential.cookieValue}` },
+        })
+
+      const background = await sixb.auth.getSession(request())
+      expect(background).toMatchObject({ authenticated: true })
+      expect(background.authenticated && background.sessionRenewed).toBeUndefined()
+      expect(renew).not.toHaveBeenCalled()
+
+      const foreground = await sixb.auth.getSession(request(), {
+        sessionActivity: "foreground",
+      })
+      expect(foreground).toMatchObject({
+        authenticated: true,
+        sessionRenewed: true,
+        session: { expiresAt: new Date(now.getTime() + 30 * 60_000) },
+      })
+      expect(renew).toHaveBeenCalledTimes(1)
+    } finally {
+      setSystemTime()
+    }
+  })
+
+  test("bypasses a cache hit at the renewal boundary and stops at the absolute cap", async () => {
+    const now = new Date("2026-07-01T10:00:00.000Z")
+    setSystemTime(now)
+    try {
+      const deps = createTestRuntimeDeps()
+      const sixb = new Sixb({
+        ontology: [],
+        ...deps,
+        auth: {
+          strategy: authStrategy,
+          session: {
+            idleTimeoutMs: 30 * 60_000,
+            renewalWindowMs: 10 * 60_000,
+            absoluteTimeoutMs: 30 * 60_000,
+            cacheTtlMs: 8 * 60_000,
+          },
+        },
+      })
+      const credential = createSessionCredential("ses_cached_renew")
+      await deps.storage.auth.users.create({
+        id: "usr_cached_renew",
+        projectId: sixb.id,
+        email: "cached-renew@acme.com",
+      })
+      await deps.storage.auth.sessions.create({
+        id: credential.sessionId,
+        projectId: sixb.id,
+        userId: "usr_cached_renew",
+        strategyId: "test",
+        audience: "atlas",
+        tokenHash: credential.tokenHash,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 12 * 60_000),
+        absoluteExpiresAt: new Date(now.getTime() + 30 * 60_000),
+      })
+      const find = spyOn(deps.storage.auth.sessions, "findValidByTokenHash")
+      const renew = spyOn(deps.storage.auth.sessions, "renewIfValid")
+      const request = () =>
+        new Request("http://localhost/api/project", {
+          headers: { cookie: `sixb_session=${credential.cookieValue}` },
+        })
+
+      await sixb.auth.getSession(request(), { sessionActivity: "foreground" })
+      expect(renew).not.toHaveBeenCalled()
+
+      setSystemTime(new Date(now.getTime() + 2 * 60_000))
+      const renewed = await sixb.auth.getSession(request(), { sessionActivity: "foreground" })
+      expect(renewed).toMatchObject({
+        authenticated: true,
+        sessionRenewed: true,
+        session: { expiresAt: new Date(now.getTime() + 30 * 60_000) },
+      })
+      expect(find).toHaveBeenCalledTimes(2)
+      expect(renew).toHaveBeenCalledTimes(1)
+
+      setSystemTime(new Date(now.getTime() + 21 * 60_000))
+      const capped = await sixb.auth.getSession(request(), { sessionActivity: "foreground" })
+      expect(capped.authenticated && capped.sessionRenewed).toBeUndefined()
+      expect(renew).toHaveBeenCalledTimes(1)
+    } finally {
+      setSystemTime()
+    }
+  })
+
   test("cacheTtlMs: 0 disables session caching", async () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({
@@ -982,12 +1170,13 @@ describe("Sixb auth runtime", () => {
   test("serializes auth cookies with strict same-site defaults", () => {
     const options = resolveAuthCookieOptions(undefined)
     const request = new Request("http://localhost/api/auth/session")
+    const expiresAt = new Date(Date.now() + 60_000)
 
     expect(
       createSessionCookieHeader({
         request,
         value: "ses_1.secret",
-        maxAgeSeconds: 60,
+        expiresAt,
         options,
       })
     ).toContain("SameSite=Strict")
@@ -995,14 +1184,50 @@ describe("Sixb auth runtime", () => {
       createCsrfCookieHeader({
         request,
         value: "csrf_1",
-        maxAgeSeconds: 60,
+        expiresAt,
         options,
       })
     ).toContain("SameSite=Strict")
   })
 
+  test("serializes auth cookie lifetime from the authoritative deadline", () => {
+    const now = new Date("2026-07-01T10:00:00.500Z")
+    const expiresAt = new Date("2026-07-01T10:01:00.000Z")
+    setSystemTime(now)
+    try {
+      const header = createSessionCookieHeader({
+        request: new Request("https://api.example.com/api/auth/session"),
+        value: "ses_1.secret",
+        expiresAt,
+        options: resolveAuthCookieOptions(undefined),
+      })
+
+      expect(header).toContain("Max-Age=59")
+      expect(header).toContain(`Expires=${expiresAt.toUTCString()}`)
+      expect(
+        createCsrfCookieHeader({
+          request: new Request("https://api.example.com/api/auth/session"),
+          value: "csrf_1",
+          expiresAt: new Date(now.getTime() - 1),
+          options: resolveAuthCookieOptions(undefined),
+        })
+      ).toContain("Max-Age=0")
+      expect(() =>
+        createSessionCookieHeader({
+          request: new Request("https://api.example.com/api/auth/session"),
+          value: "ses_1.secret",
+          expiresAt: new Date(Number.NaN),
+          options: resolveAuthCookieOptions(undefined),
+        })
+      ).toThrow("Auth cookie expiresAt must be a valid date")
+    } finally {
+      setSystemTime()
+    }
+  })
+
   test("supports HttpOnly CSRF cookies and validates host-prefixed cookie config", () => {
     const request = new Request("https://api.example.com/api/auth/session")
+    const expiresAt = new Date(Date.now() + 60_000)
     const options = resolveAuthCookieOptions({
       sessionCookieName: "__Host-sixb_session",
       csrfCookieName: "__Host-sixb_csrf",
@@ -1013,7 +1238,7 @@ describe("Sixb auth runtime", () => {
       createCsrfCookieHeader({
         request,
         value: "csrf_1",
-        maxAgeSeconds: 60,
+        expiresAt,
         options,
       })
     ).toContain("HttpOnly")
@@ -1021,7 +1246,7 @@ describe("Sixb auth runtime", () => {
       createSessionCookieHeader({
         request,
         value: "ses_1.secret",
-        maxAgeSeconds: 60,
+        expiresAt,
         options,
       })
     ).toContain("Secure")

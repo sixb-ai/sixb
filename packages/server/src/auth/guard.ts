@@ -15,6 +15,7 @@ import {
   jsonForbiddenResponse,
   websocketAuthFailedResponse,
 } from "./responses"
+import { hasForegroundSessionActivity, isSessionTerminationRequest } from "./session-activity"
 
 export interface ServerAuthGuardOptions {
   readonly sixb: Sixb<readonly OntologySource[]>
@@ -64,7 +65,7 @@ export class ServerAuthGuard {
       return { kind: "deny", response: authContext }
     }
 
-    const session = await this.sixb.auth.getSession(request, {
+    let session = await this.sixb.auth.getSession(request, {
       audience: authContext.audience,
       credentialSource: "any",
     })
@@ -105,6 +106,38 @@ export class ServerAuthGuard {
       !this.verifyCsrf(request, session)
     ) {
       return { kind: "deny", response: jsonCsrfFailedResponse() }
+    }
+
+    if (
+      session.credentialSource === "session" &&
+      route.kind !== "websocket" &&
+      !isSessionTerminationRequest(request) &&
+      hasForegroundSessionActivity(request)
+    ) {
+      const activeSession = await this.sixb.auth.getSession(request, {
+        audience: authContext.audience,
+        credentialSource: "session",
+        sessionActivity: "foreground",
+      })
+      if (!activeSession.authenticated) {
+        if (route.kind === "html") {
+          return {
+            kind: "deny",
+            response: htmlAuthRedirectResponse(request, {
+              absoluteReturnTo: authContext.absoluteReturnTo ?? false,
+              audience: authContext.audience,
+            }),
+          }
+        }
+        return { kind: "deny", response: jsonAuthRequiredResponse() }
+      }
+      if (!sessionCanAccessApplication(this.sixb, activeSession, authContext.audience)) {
+        return {
+          kind: "deny",
+          response: jsonForbiddenResponse("Application access is not allowed"),
+        }
+      }
+      session = activeSession
     }
 
     return { kind: "allow", session }

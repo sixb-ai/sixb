@@ -46,6 +46,20 @@ describe("SessionCache", () => {
     expect(cache.get({ ...base, nowMs: 2_000 })).toBeUndefined()
   })
 
+  test("never serves a cached session past its absolute expiry", () => {
+    const cache = new SessionCache(60_000)
+    cache.set({
+      ...base,
+      session: fakeSession("usr_1"),
+      nowMs: 0,
+      sessionExpiresAtMs: 50_000,
+      sessionAbsoluteExpiresAtMs: 2_000,
+    })
+
+    expect(cache.get({ ...base, nowMs: 1_999 })).toBeDefined()
+    expect(cache.get({ ...base, nowMs: 2_000 })).toBeUndefined()
+  })
+
   test("does not store an already-expired session", () => {
     const cache = new SessionCache(5_000)
     cache.set({ ...base, session: fakeSession("usr_1"), nowMs: 10_000, sessionExpiresAtMs: 9_000 })
