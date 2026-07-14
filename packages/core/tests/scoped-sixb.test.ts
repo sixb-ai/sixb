@@ -424,7 +424,7 @@ describe("sixb.as() operational access", () => {
       agentId: "contract-agent",
       text: "Summarize this account.",
     })
-    expect(result.runId).toBeString()
+    expect(result.run.id).toBeString()
 
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
     expect(

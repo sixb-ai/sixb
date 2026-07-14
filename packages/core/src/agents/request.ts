@@ -3,7 +3,12 @@ import { SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
 import type { SixbRuntimeContext } from "../runtime/types"
-import { type AgentStorage, AgentStorageError, type AgentThreadRecord } from "../storage/agents"
+import {
+  type AgentRunRecord,
+  type AgentStorage,
+  AgentStorageError,
+  type AgentThreadRecord,
+} from "../storage/agents"
 import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
@@ -27,14 +32,8 @@ export interface RequestAgentRunInput {
 }
 
 export interface RequestAgentRunResult {
-  /** The thread the turn runs in (created when no `threadId` was supplied). */
-  readonly threadId: string
-  /** Stable run id minted before enqueue so clients can subscribe before pickup. */
-  readonly runId: string
-  /** The persisted user message that triggers the run. */
-  readonly triggerMessageId: string
-  /** Durable state of the run when the request is accepted. */
-  readonly status: "queued"
+  /** The durable queued run exactly as it was created (`status: "queued"`, attempt 0). */
+  readonly run: AgentRunRecord
   /** The enqueued job id, when the queue returns one. */
   readonly jobId?: string
   /** Whether this call created the thread. */
@@ -78,8 +77,9 @@ export async function requestAgentRun(
 
   const runId = createAgentRunId()
   const triggerMessageId = input.messageId ?? createAgentMessageId()
+  let run: AgentRunRecord
   try {
-    await runtime.storage.transaction(async (tx) => {
+    run = await runtime.storage.transaction(async (tx) => {
       const agents = tx.agents
       if (!agents) {
         throw new AgentRequestError(
@@ -99,7 +99,7 @@ export async function requestAgentRun(
         ],
         authorPrincipal: principal,
       })
-      await agents.runs.create({
+      return agents.runs.create({
         id: runId,
         projectId,
         threadId: thread.id,
@@ -138,10 +138,7 @@ export async function requestAgentRun(
   }
 
   return {
-    threadId: thread.id,
-    runId,
-    triggerMessageId,
-    status: "queued",
+    run,
     ...(jobId ? { jobId } : {}),
     createdThread,
   }
