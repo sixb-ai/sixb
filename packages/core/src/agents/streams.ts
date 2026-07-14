@@ -1,5 +1,6 @@
 import type { Broker, BrokerStreamDefinition } from "../broker"
 import type { JsonValue } from "../json"
+import type { AgentRunRecord } from "../storage/agents/types"
 
 export const AGENT_RUN_STREAM_SCHEMA_VERSION = 1 as const
 export const DEFAULT_AGENT_RUN_STREAM_RETENTION = {
@@ -119,3 +120,75 @@ export type AgentRunStreamEvent =
       readonly finishReason?: string
       readonly error?: string
     })
+
+export type AgentRunFinishedEvent = Extract<AgentRunStreamEvent, { type: "agent.run.finished" }>
+
+// ── Record construction ──────────────────────────────────────────────────────────────────────────
+//
+// The wire format of run stream records — event shape, record name/key, and the idempotency-key
+// vocabulary — is owned here so every producer (the worker's stream sink, the server's queued
+// cancellation) shares one definition and cannot drift.
+
+/** Build the terminal stream event for a finished run. Throws if the run is not terminal. */
+export function agentRunFinishedEvent(
+  run: AgentRunRecord,
+  occurredAt: Date = new Date()
+): AgentRunFinishedEvent {
+  if (run.status === "queued" || run.status === "running") {
+    throw new Error(
+      `[Sixb] Agent run '${run.id}' is not terminal (status '${run.status}'), so it has no finished event.`
+    )
+  }
+  return {
+    schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
+    type: "agent.run.finished",
+    projectId: run.projectId,
+    runId: run.id,
+    threadId: run.threadId,
+    agentId: run.agentId,
+    attempt: run.attempt,
+    status: run.status,
+    ...(run.finishReason === undefined ? {} : { finishReason: run.finishReason }),
+    ...(run.error === undefined ? {} : { error: run.error }),
+    occurredAt: occurredAt.toISOString(),
+  }
+}
+
+/** Single owner of the idempotency-key vocabulary for agent run stream records. */
+export function agentRunStreamIdempotencyKey(event: AgentRunStreamEvent): string {
+  switch (event.type) {
+    case "agent.run.started":
+      return `${event.runId}:${event.attempt}:started`
+    case "agent.ui.chunk":
+      return `${event.runId}:${event.attempt}:chunk:${event.chunkIndex}`
+    case "agent.message.finalized":
+      return `${event.runId}:${event.attempt}:message:${event.messageId}:finalized`
+    case "agent.run.finished":
+      return `${event.runId}:${event.attempt}:finished:${event.status}`
+  }
+}
+
+/**
+ * Ensure the run's stream and append its terminal record — mirrors {@link publishAgentRunCancel}.
+ * Used where a terminal transition happens outside the worker (e.g. cancelling a queued run).
+ */
+export async function publishAgentRunFinished(broker: Broker, run: AgentRunRecord): Promise<void> {
+  const event = agentRunFinishedEvent(run)
+  await broker.ensureStream({
+    projectId: run.projectId,
+    stream: agentRunStreamDefinition(run.id),
+  })
+  await broker.append({
+    projectId: run.projectId,
+    streamId: agentRunStreamId(run.id),
+    records: [
+      {
+        name: event.type,
+        key: event.runId,
+        // The event is built from JSON primitives only, so the round-trip is a safe narrowing.
+        payload: JSON.parse(JSON.stringify(event)) as JsonValue,
+        idempotencyKey: agentRunStreamIdempotencyKey(event),
+      },
+    ],
+  })
+}

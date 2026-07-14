@@ -1,8 +1,10 @@
 import type { AgentRunRecord, AgentRunStreamEvent, Broker, JsonValue } from "@sixb/core"
 import {
   AGENT_RUN_STREAM_SCHEMA_VERSION,
+  agentRunFinishedEvent,
   agentRunStreamDefinition,
   agentRunStreamId,
+  agentRunStreamIdempotencyKey,
 } from "@sixb/core"
 import { AgentWorkerError } from "./errors"
 
@@ -130,19 +132,7 @@ class BrokerStreamSink implements StreamSink {
     if (run.status === "queued" || run.status === "running") {
       return
     }
-    await this.publish({
-      schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
-      type: "agent.run.finished",
-      projectId: this.projectId,
-      runId: run.id,
-      threadId: run.threadId,
-      agentId: run.agentId,
-      attempt: run.attempt,
-      status: run.status,
-      ...(run.finishReason === undefined ? {} : { finishReason: run.finishReason }),
-      ...(run.error === undefined ? {} : { error: run.error }),
-      occurredAt: new Date().toISOString(),
-    })
+    await this.publish(agentRunFinishedEvent(run))
     // This is the last event for the run, so drop its ensured-stream marker to bound the Set over a
     // long-lived worker. Evict only after a successful append, and only on the terminal path.
     this.ensured.delete(agentRunStreamId(run.id))
@@ -167,7 +157,7 @@ class BrokerStreamSink implements StreamSink {
           name: event.type,
           key: event.runId,
           payload,
-          idempotencyKey: idempotencyKeyFor(event),
+          idempotencyKey: agentRunStreamIdempotencyKey(event),
         },
       ],
     })
@@ -195,19 +185,6 @@ async function isolateStreamSinkCall(
     await publish()
   } catch (error) {
     console.error(`[SixbAgentWorker] Agent run '${runId}' ${label} stream publish failed:`, error)
-  }
-}
-
-function idempotencyKeyFor(event: AgentRunStreamEvent): string {
-  switch (event.type) {
-    case "agent.run.started":
-      return `${event.runId}:${event.attempt}:started`
-    case "agent.ui.chunk":
-      return `${event.runId}:${event.attempt}:chunk:${event.chunkIndex}`
-    case "agent.message.finalized":
-      return `${event.runId}:${event.attempt}:message:${event.messageId}:finalized`
-    case "agent.run.finished":
-      return `${event.runId}:${event.attempt}:finished:${event.status}`
   }
 }
 
