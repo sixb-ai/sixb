@@ -1,5 +1,6 @@
 import type { PennylaneHttp } from "../http"
 import { listAllCursor } from "../pagination"
+import { buildListQuery } from "../query"
 import type {
   PennylaneCreateQuoteInput,
   PennylaneCursorOptions,
@@ -14,7 +15,6 @@ import type {
   PennylaneUpdateQuoteInput,
   PennylaneUpdateQuoteStatusInput,
   PennylaneUploadQuoteAppendixInput,
-  QueryParams,
 } from "../types"
 import { assertCursorOptions, pathId } from "../validation"
 
@@ -70,7 +70,7 @@ export function createQuotesResource(http: PennylaneHttp): QuotesResource {
   const resource: QuotesResource = {
     list(options) {
       assertCursorOptions(options, 100)
-      return http.get("quotes", quoteListQuery(options))
+      return http.get("quotes", buildListQuery(options))
     },
     listAll(options) {
       return listAllCursor(resource.list, options)
@@ -82,7 +82,7 @@ export function createQuotesResource(http: PennylaneHttp): QuotesResource {
       assertCursorOptions(options, 100)
       return http.get(
         `quotes/${pathId(quoteId, "quote id")}/invoice_line_sections`,
-        childListQuery(options)
+        buildListQuery(options)
       )
     },
     listAllInvoiceLineSections(quoteId, options) {
@@ -95,7 +95,7 @@ export function createQuotesResource(http: PennylaneHttp): QuotesResource {
       assertCursorOptions(options, 100)
       return http.get(
         `quotes/${pathId(quoteId, "quote id")}/invoice_lines`,
-        childListQuery(options)
+        buildListQuery(options)
       )
     },
     listAllInvoiceLines(quoteId, options) {
@@ -106,7 +106,7 @@ export function createQuotesResource(http: PennylaneHttp): QuotesResource {
     },
     listAppendices(quoteId, options) {
       assertCursorOptions(options, 100)
-      return http.get(`quotes/${pathId(quoteId, "quote id")}/appendices`, cursorQuery(options))
+      return http.get(`quotes/${pathId(quoteId, "quote id")}/appendices`, buildListQuery(options))
     },
     listAllAppendices(quoteId, options) {
       return listAllCursor((pageOptions) => resource.listAppendices(quoteId, pageOptions), options)
@@ -129,29 +129,6 @@ export function createQuotesResource(http: PennylaneHttp): QuotesResource {
   }
 
   return resource
-}
-
-function quoteListQuery(options: PennylaneQuoteListOptions | undefined): QueryParams {
-  return {
-    cursor: options?.cursor,
-    limit: options?.limit,
-    filter: options?.filter?.length ? JSON.stringify(options.filter) : undefined,
-    sort: options?.sort,
-  }
-}
-
-function childListQuery(options: PennylaneQuoteChildListOptions | undefined): QueryParams {
-  return {
-    ...cursorQuery(options),
-    sort: options?.sort,
-  }
-}
-
-function cursorQuery(options: PennylaneCursorOptions | undefined): QueryParams {
-  return {
-    cursor: options?.cursor,
-    limit: options?.limit,
-  }
 }
 
 function appendixFormData(input: PennylaneUploadQuoteAppendixInput): FormData {

@@ -1,13 +1,14 @@
 # @sixb/connector-pennylane
 
-Typed Pennylane Company API v2 connector for Sixb. The first release covers the complete Quotes API
-surface and is structured around independent resources so other Pennylane endpoints can be added
+Typed Pennylane Company API v2 connector for Sixb. It covers the Quotes, Products, and Customers API
+surfaces and is structured around independent resources so other Pennylane endpoints can be added
 without growing a monolithic client.
 
 ## Register
 
-Create a Company API token with `quotes:readonly` for reads or `quotes:all` for writes, then define the
-connector in your project's `connectors/` directory:
+Create a Company API token with the scopes you need — `quotes`, `products`, and `customers`, each in a
+`:readonly` (reads) or `:all` (writes) variant — then define the connector in your project's
+`connectors/` directory:
 
 ```ts
 import { pennylane } from "@sixb/connector-pennylane"
@@ -154,6 +155,77 @@ Pennylane can return `409` from `sendByEmail` while the quote PDF is still being
 connector surfaces that response and does not retry the POST automatically; retry the operation later
 according to your workflow.
 
+## Products API
+
+| Client method | Pennylane endpoint |
+| --- | --- |
+| `pl.products.list(options?)` | `GET /products` |
+| `pl.products.listAll(options?)` | Cursor iterator over `GET /products` |
+| `pl.products.get(id)` | `GET /products/{id}` |
+| `pl.products.create(input)` | `POST /products` |
+| `pl.products.update(id, input)` | `PUT /products/{id}` |
+
+Prices stay decimal strings so the connector never introduces floating-point rounding.
+
+```ts
+const page = await pl.products.list({
+  sort: "-id",
+  filter: [{ field: "label", operator: "in", value: ["Consulting", "Support"] }],
+})
+
+const product = await pl.products.create({
+  label: "Consulting",
+  price_before_tax: "950.00",
+  vat_rate: "FR_200",
+  unit: "day",
+})
+```
+
+## Customers API
+
+Customers are polymorphic. `list` and `get` return a `PennylaneCustomer` union discriminated by
+`customer_type` (`"company"` or `"individual"`); writes map one-to-one to Pennylane's typed endpoints.
+
+| Client method | Pennylane endpoint |
+| --- | --- |
+| `pl.customers.list(options?)` | `GET /customers` |
+| `pl.customers.listAll(options?)` | Cursor iterator over `GET /customers` |
+| `pl.customers.get(id)` | `GET /customers/{id}` |
+| `pl.customers.createCompany(input)` | `POST /company_customers` |
+| `pl.customers.createIndividual(input)` | `POST /individual_customers` |
+| `pl.customers.updateCompany(id, input)` | `PUT /company_customers/{id}` |
+| `pl.customers.updateIndividual(id, input)` | `PUT /individual_customers/{id}` |
+| `pl.customers.listContacts(id, options?)` | `GET /customers/{id}/contacts` |
+| `pl.customers.listAllContacts(id, options?)` | Cursor iterator over contacts |
+| `pl.customers.listCategories(id, options?)` | `GET /customers/{id}/categories` |
+| `pl.customers.listAllCategories(id, options?)` | Cursor iterator over categories |
+| `pl.customers.categorize(id, categories)` | `PUT /customers/{id}/categories` |
+
+```ts
+for await (const customer of pl.customers.listAll({
+  filter: [{ field: "customer_type", operator: "eq", value: "company" }],
+})) {
+  if (customer.customer_type === "company") {
+    // customer.vat_number is available here after narrowing.
+  }
+}
+
+await pl.customers.createIndividual({
+  first_name: "Ada",
+  last_name: "Lovelace",
+  billing_address: {
+    address: "2 avenue Foch",
+    postal_code: "75116",
+    city: "Paris",
+    country_alpha2: "FR",
+  },
+})
+```
+
+Ledger accounts are referenced by account number when writing a customer (`ledger_account: { number }`)
+but by id on products (`ledger_account_id`), mirroring the upstream API. `categorize` replaces the
+customer's categories and returns the resulting list.
+
 ## Errors
 
 Non-successful responses throw `PennylaneApiError` with the status, parsed response body, response
@@ -174,6 +246,8 @@ try {
 ## Official documentation
 
 - [Quotes API reference](https://pennylane.readme.io/reference/listquotes)
+- [Products API reference](https://pennylane.readme.io/reference/getproducts)
+- [Customers API reference](https://pennylane.readme.io/reference/getcustomers)
 - [Cursor pagination](https://pennylane.readme.io/docs/using-cursor-based-pagination)
 - [Filters](https://pennylane.readme.io/docs/setting-up-filters)
 - [Authentication](https://pennylane.readme.io/docs/generating-my-api-token)
@@ -182,6 +256,6 @@ try {
 
 ## Not covered yet
 
-Other Pennylane resources such as customers, products, customer invoices, suppliers, ledger entries,
-and transactions are intentionally deferred. The connector's shared HTTP, retry, error, validation,
-and cursor-pagination layers are ready for those resource modules.
+Other Pennylane resources such as customer invoices, suppliers, ledger entries, and transactions are
+intentionally deferred. The connector's shared HTTP, retry, error, validation, and cursor-pagination
+layers are ready for those resource modules.

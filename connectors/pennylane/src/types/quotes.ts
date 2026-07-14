@@ -1,10 +1,16 @@
 import type {
+  PennylaneCollectionLink,
   PennylaneCurrency,
   PennylaneCursorOptions,
   PennylaneDiscount,
+  PennylaneEqualityFilterOperator,
+  PennylaneIdReference,
   PennylaneIdSort,
   PennylaneLanguage,
+  PennylaneListFilterOperator,
   PennylaneQuoteStatus,
+  PennylaneResourceLink,
+  PennylaneScalarFilterOperator,
   PennylaneVatRate,
 } from "./common"
 
@@ -43,23 +49,6 @@ export interface PennylaneQuote {
   readonly created_at: string
   readonly updated_at: string
 }
-
-export interface PennylaneResourceLink {
-  readonly id: number
-  readonly url: string
-}
-
-export interface PennylaneCollectionLink {
-  readonly url: string
-}
-
-export interface PennylaneIdReference {
-  readonly id: number
-}
-
-type PennylaneScalarFilterOperator = "lt" | "lteq" | "gt" | "gteq" | "eq" | "not_eq"
-type PennylaneEqualityFilterOperator = "eq" | "not_eq"
-type PennylaneListFilterOperator = "in" | "not_in"
 
 export type PennylaneQuoteFilter =
   | {

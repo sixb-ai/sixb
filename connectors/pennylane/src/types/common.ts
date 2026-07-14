@@ -62,3 +62,26 @@ export type PennylaneCurrency = string
 
 /** Pennylane VAT code, including country-specific, exemption, and mixed-rate codes. */
 export type PennylaneVatRate = string
+
+// Filter operator vocabulary shared by every resource filter union. Pennylane pairs each
+// filterable field with a specific subset of these operators.
+export type PennylaneScalarFilterOperator = "lt" | "lteq" | "gt" | "gteq" | "eq" | "not_eq"
+export type PennylaneEqualityFilterOperator = "eq" | "not_eq"
+export type PennylaneListFilterOperator = "in" | "not_in"
+export type PennylanePrefixFilterOperator = "start_with"
+
+/** Link to a single related resource embedded in Pennylane payloads. */
+export interface PennylaneResourceLink {
+  readonly id: number
+  readonly url: string
+}
+
+/** Link to a related collection embedded in Pennylane payloads. */
+export interface PennylaneCollectionLink {
+  readonly url: string
+}
+
+/** Bare identifier reference embedded in Pennylane payloads. */
+export interface PennylaneIdReference {
+  readonly id: number
+}
