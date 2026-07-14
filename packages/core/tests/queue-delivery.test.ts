@@ -47,7 +47,7 @@ describe("QueueDelivery", () => {
     })
     try {
       await Bun.sleep(150)
-      await delivery.complete()
+      expect(await delivery.complete()).toBe("settled")
       expect(delivery.state).toBe("settled")
       expect(renewals).toBeGreaterThanOrEqual(2)
       expect(confirmedExpirations.length).toBeGreaterThanOrEqual(2)
@@ -86,7 +86,7 @@ describe("QueueDelivery", () => {
       await Bun.sleep(25)
       expect(delivery.state).toBe("lost")
       expect(delivery.signal.aborted).toBe(true)
-      await delivery.complete()
+      expect(await delivery.complete()).toBe("lost")
       expect(completeCalls).toBe(0)
     } finally {
       await delivery.close()
@@ -121,7 +121,7 @@ describe("QueueDelivery", () => {
       expect(delivery.state).toBe("active")
       expect(attempts).toBeGreaterThanOrEqual(2)
       expect(reportedErrors).toBe(1)
-      await delivery.complete()
+      expect(await delivery.complete()).toBe("settled")
       expect(delivery.state).toBe("settled")
     } finally {
       await delivery.close()

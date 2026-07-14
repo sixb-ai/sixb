@@ -1141,6 +1141,7 @@ export { InMemoryQueues, QueueError } from "./queues"
 export type {
   QueueDelivery,
   QueueDeliveryState,
+  QueueSettlementResult,
   QueueWorkerConfig,
   QueueWorkerFailureDecision,
 } from "./workers"

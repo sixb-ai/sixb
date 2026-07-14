@@ -1,6 +1,10 @@
 import type { ClaimedQueueJob, Queue, QueueJob, QueueJobError } from "../queues"
 import { WorkerAbortError } from "./errors"
-import { createQueueDelivery, type QueueDelivery } from "./queue-delivery"
+import {
+  createQueueDelivery,
+  type QueueDelivery,
+  type QueueSettlementResult,
+} from "./queue-delivery"
 import { Worker } from "./worker"
 
 export interface QueueWorkerConfig<TJob extends QueueJob> {
@@ -205,9 +209,10 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
 async function settleOrLog<TJob extends QueueJob>(
   delivery: QueueDelivery<TJob>,
   operation: string,
-  settle: () => Promise<void>
+  settle: () => Promise<QueueSettlementResult>
 ): Promise<void> {
   try {
+    // A "lost" result needs no extra logging here: loss is already reported via onLeaseLost.
     await settle()
   } catch (error) {
     logQueueOperationError(operation, delivery.claimed, error)

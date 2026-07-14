@@ -3,6 +3,13 @@ import { WorkerAbortError } from "./errors"
 
 export type QueueDeliveryState = "active" | "lost" | "settled"
 
+/**
+ * Outcome of a settlement call. `"lost"` means the queue job was **not** acknowledged because
+ * ownership was already gone — the job may be redelivered. Settlement never throws for a lost
+ * lease; exceptions are reserved for queue calls that themselves fail (outcome then unknown).
+ */
+export type QueueSettlementResult = "settled" | "lost"
+
 export interface QueueDelivery<TJob extends QueueJob> {
   readonly claimed: ClaimedQueueJob<TJob>
   readonly signal: AbortSignal
@@ -12,9 +19,12 @@ export interface QueueDelivery<TJob extends QueueJob> {
 
   /** Observe successful queue renewals. The listener is not called for failed renewals. */
   onLeaseRenewed(listener: (claimed: ClaimedQueueJob<TJob>) => void): () => void
-  complete(): Promise<void>
-  retry(input?: { readonly availableAt?: string; readonly error?: QueueJobError }): Promise<void>
-  fail(error: QueueJobError): Promise<void>
+  complete(): Promise<QueueSettlementResult>
+  retry(input?: {
+    readonly availableAt?: string
+    readonly error?: QueueJobError
+  }): Promise<QueueSettlementResult>
+  fail(error: QueueJobError): Promise<QueueSettlementResult>
   close(): Promise<void>
 }
 
@@ -91,7 +101,7 @@ class ManagedQueueDelivery<TJob extends QueueJob> implements QueueDelivery<TJob>
     return () => this.leaseRenewedListeners.delete(listener)
   }
 
-  complete(): Promise<void> {
+  complete(): Promise<QueueSettlementResult> {
     return this.settle(() =>
       this.queue.complete({
         projectId: this.claimed.job.projectId,
@@ -103,7 +113,7 @@ class ManagedQueueDelivery<TJob extends QueueJob> implements QueueDelivery<TJob>
 
   retry(
     input: { readonly availableAt?: string; readonly error?: QueueJobError } = {}
-  ): Promise<void> {
+  ): Promise<QueueSettlementResult> {
     return this.settle(() =>
       this.queue.retry({
         projectId: this.claimed.job.projectId,
@@ -115,7 +125,7 @@ class ManagedQueueDelivery<TJob extends QueueJob> implements QueueDelivery<TJob>
     )
   }
 
-  fail(error: QueueJobError): Promise<void> {
+  fail(error: QueueJobError): Promise<QueueSettlementResult> {
     return this.settle(() =>
       this.queue.fail({
         projectId: this.claimed.job.projectId,
@@ -132,8 +142,10 @@ class ManagedQueueDelivery<TJob extends QueueJob> implements QueueDelivery<TJob>
     return this.closing
   }
 
-  private async settle(operation: () => Promise<void>): Promise<void> {
-    if (this.currentState !== "active") return
+  private async settle(operation: () => Promise<void>): Promise<QueueSettlementResult> {
+    if (this.currentState !== "active") {
+      return this.currentState === "settled" ? "settled" : "lost"
+    }
     if (this.settling) {
       throw new Error(`[SixbQueueWorker] Queue job '${this.claimed.job.id}' is already settling.`)
     }
@@ -141,9 +153,10 @@ class ManagedQueueDelivery<TJob extends QueueJob> implements QueueDelivery<TJob>
     this.settling = true
     try {
       await this.stopRenewal()
-      if (!(await this.confirmSettlementLease())) return
+      if (!(await this.confirmSettlementLease())) return "lost"
       await operation()
       this.currentState = "settled"
+      return "settled"
     } finally {
       this.settling = false
     }
