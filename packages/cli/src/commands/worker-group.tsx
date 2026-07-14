@@ -1,7 +1,12 @@
 import type { Worker } from "@sixb/core"
 import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
-import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
+import {
+  runUntilSignal,
+  stopQuietly,
+  stopSixbProviders,
+  waitForWorkerFailure,
+} from "../lib/runtime"
 import {
   createWorkerForType,
   resolveRegisteredWorkerTypes,
@@ -63,10 +68,6 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
 
     app.rerender(<WorkerGroupView name={sixb.id} workerTypes={workerTypes} warnings={warnings} />)
 
-    const workerFailure =
-      workers.length === 0
-        ? new Promise<void>(() => {})
-        : Promise.race(workers.map((worker) => worker.wait()))
     await Promise.race([
       runUntilSignal(async () => {
         app.unmount()
@@ -74,7 +75,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
         await stopWorkersAndProviders()
         sixb = null
       }),
-      workerFailure,
+      ...workers.map(waitForWorkerFailure),
     ])
   } catch (error) {
     app.unmount()

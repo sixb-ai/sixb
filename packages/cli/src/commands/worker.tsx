@@ -1,7 +1,12 @@
 import type { Worker } from "@sixb/core"
 import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
-import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
+import {
+  runUntilSignal,
+  stopQuietly,
+  stopSixbProviders,
+  waitForWorkerFailure,
+} from "../lib/runtime"
 import {
   createWorkerForType,
   resolveWorkerTypeToStart,
@@ -56,7 +61,7 @@ export async function runWorker(options: WorkerOptions = {}) {
         }
         sixb = null
       }),
-      worker.wait(),
+      waitForWorkerFailure(worker),
     ])
   } catch (error) {
     app.unmount()
