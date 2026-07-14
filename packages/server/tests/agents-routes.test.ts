@@ -504,38 +504,40 @@ describe("agent routes", () => {
     const request = await sixb.agents.request({ agentId: "assistant", text: "wait" })
 
     const response = await app.fetch(
-      jsonRequest(`/api/agent-threads/${request.threadId}/cancel`, "POST", {
-        runId: request.runId,
+      jsonRequest(`/api/agent-threads/${request.run.threadId}/cancel`, "POST", {
+        runId: request.run.id,
       })
     )
     expect(response.status).toBe(202)
     expect(await response.json()).toMatchObject({
-      run: { id: request.runId, status: "cancelled", attempt: 0 },
+      run: { id: request.run.id, status: "cancelled", attempt: 0 },
     })
     await expect(
-      storage.agents.runs.getById({ projectId: sixb.id, id: request.runId })
+      storage.agents.runs.getById({ projectId: sixb.id, id: request.run.id })
     ).resolves.toMatchObject({ status: "cancelled", attempt: 0 })
     await expect(
-      storage.agents.threads.getById({ projectId: sixb.id, id: request.threadId })
+      storage.agents.threads.getById({ projectId: sixb.id, id: request.run.threadId })
     ).resolves.toMatchObject({ activeRunId: null })
     const runsResponse = await app.fetch(
-      new Request(`http://localhost/api/agent-threads/${request.threadId}/runs?status=cancelled`)
+      new Request(
+        `http://localhost/api/agent-threads/${request.run.threadId}/runs?status=cancelled`
+      )
     )
     expect(runsResponse.status).toBe(200)
     expect(await runsResponse.json()).toMatchObject({
-      runs: [{ id: request.runId, status: "cancelled", attempt: 0 }],
+      runs: [{ id: request.run.id, status: "cancelled", attempt: 0 }],
       total: 1,
     })
     await expect(
       sixb.broker.read({
         projectId: sixb.id,
-        streamId: agentRunStreamId(request.runId),
+        streamId: agentRunStreamId(request.run.id),
       })
     ).resolves.toMatchObject({
       records: [
         {
           name: "agent.run.finished",
-          payload: { runId: request.runId, status: "cancelled", attempt: 0 },
+          payload: { runId: request.run.id, status: "cancelled", attempt: 0 },
         },
       ],
     })
@@ -551,7 +553,7 @@ describe("agent routes", () => {
         raceStartup = false
         await storage.agents.runs.start({
           projectId: sixb.id,
-          id: request.runId,
+          id: request.run.id,
           execution: testExecution(),
         })
       }
@@ -559,25 +561,25 @@ describe("agent routes", () => {
     }
 
     const response = await app.fetch(
-      jsonRequest(`/api/agent-threads/${request.threadId}/cancel`, "POST", {
-        runId: request.runId,
+      jsonRequest(`/api/agent-threads/${request.run.threadId}/cancel`, "POST", {
+        runId: request.run.id,
       })
     )
 
     expect(response.status).toBe(202)
     expect(await response.json()).toMatchObject({
-      run: { id: request.runId, status: "running", attempt: 1 },
+      run: { id: request.run.id, status: "running", attempt: 1 },
     })
     await expect(
-      storage.agents.runs.getById({ projectId: sixb.id, id: request.runId })
+      storage.agents.runs.getById({ projectId: sixb.id, id: request.run.id })
     ).resolves.toMatchObject({ status: "running", attempt: 1 })
     await expect(
       sixb.broker.read({
         projectId: sixb.id,
-        streamId: agentRunControlStreamId(request.runId),
+        streamId: agentRunControlStreamId(request.run.id),
       })
     ).resolves.toMatchObject({
-      records: [{ name: "agent.run.cancel", payload: { runId: request.runId } }],
+      records: [{ name: "agent.run.cancel", payload: { runId: request.run.id } }],
     })
   })
 
@@ -585,14 +587,18 @@ describe("agent routes", () => {
     const { app, storage, sixb } = createApp()
     const request = await sixb.agents.request({ agentId: "assistant", text: "try this" })
     await storage.agents.runs.finishQueued({
-      id: request.runId,
+      id: request.run.id,
       projectId: sixb.id,
       status: "failed",
       error: "dispatch failed",
     })
 
     const response = await app.fetch(
-      jsonRequest(`/api/agent-threads/${request.threadId}/runs/${request.runId}/retry`, "POST", {})
+      jsonRequest(
+        `/api/agent-threads/${request.run.threadId}/runs/${request.run.id}/retry`,
+        "POST",
+        {}
+      )
     )
     expect(response.status).toBe(202)
     const body = (await response.json()) as {
@@ -600,18 +606,18 @@ describe("agent routes", () => {
     }
     expect(body.run).toMatchObject({
       status: "queued",
-      triggerMessageId: request.triggerMessageId,
+      triggerMessageId: request.run.triggerMessageId,
     })
-    expect(body.run.id).not.toBe(request.runId)
+    expect(body.run.id).not.toBe(request.run.id)
 
     await expect(
-      storage.agents.messages.list({ projectId: sixb.id, threadId: request.threadId })
+      storage.agents.messages.list({ projectId: sixb.id, threadId: request.run.threadId })
     ).resolves.toMatchObject({
-      messages: [{ id: request.triggerMessageId, role: "user" }],
+      messages: [{ id: request.run.triggerMessageId, role: "user" }],
       total: 1,
     })
     await expect(
-      storage.agents.threads.getById({ projectId: sixb.id, id: request.threadId })
+      storage.agents.threads.getById({ projectId: sixb.id, id: request.run.threadId })
     ).resolves.toMatchObject({ activeRunId: body.run.id })
   })
 

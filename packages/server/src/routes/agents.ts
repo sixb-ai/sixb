@@ -614,12 +614,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             : sixb.agents.request(requestInput))
 
           set.status = 202
-          const run = await storage.runs.getById({ projectId: sixb.id, id: result.runId })
-          if (!run) {
-            throw new Error(`[SixbServer] Accepted agent run '${result.runId}' was not found.`)
-          }
-
-          return PostAgentMessageResponseSchema.parse({ run: serializeAgentRun(run) })
+          return PostAgentMessageResponseSchema.parse({ run: serializeAgentRun(result.run) })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
