@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setSystemTime, test } from "bun:test"
 import { createServer } from "node:net"
 import {
+  type AuthSessionOptions,
   applications,
   can,
   createAccessTokenCredential,
@@ -67,6 +68,7 @@ function createRuntime(
     readonly auth?: boolean
     readonly connector?: boolean
     readonly roles?: readonly RoleDefinition[]
+    readonly session?: AuthSessionOptions
   } = {}
 ) {
   const storage = new InMemoryStorage()
@@ -97,7 +99,11 @@ function createRuntime(
     connectors: options.connector ? [connector] : [],
     groups: [securityAdmins, atlasUsers],
     roles: options.roles,
-    auth: options.auth ? authStrategy : undefined,
+    auth: options.auth
+      ? options.session
+        ? { strategy: authStrategy, session: options.session }
+        : authStrategy
+      : undefined,
   })
 
   return { sixb, storage }
@@ -105,7 +111,13 @@ function createRuntime(
 
 async function seedSession(
   storage: InMemoryStorage,
-  params: { readonly audience?: "atlas" | "app"; readonly status?: "active" | "suspended" } = {}
+  params: {
+    readonly audience?: "atlas" | "app"
+    readonly status?: "active" | "suspended"
+    readonly createdAt?: Date
+    readonly expiresAt?: Date
+    readonly absoluteExpiresAt?: Date
+  } = {}
 ) {
   const credential = createSessionCredential("ses_1")
   const audience = params.audience ?? "atlas"
@@ -130,8 +142,9 @@ async function seedSession(
     strategyId: "test",
     audience,
     tokenHash: credential.tokenHash,
-    createdAt: new Date("2026-05-16T10:00:00.000Z"),
-    expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    createdAt: params.createdAt ?? new Date("2026-05-16T10:00:00.000Z"),
+    expiresAt: params.expiresAt ?? new Date("2099-05-16T10:00:00.000Z"),
+    absoluteExpiresAt: params.absoluteExpiresAt,
   })
 
   return {
@@ -140,6 +153,10 @@ async function seedSession(
     csrfCookie: `sixb_csrf${cookieSuffix}=csrf_1`,
     csrfHeader: { "x-sixb-csrf": "csrf_1" },
   }
+}
+
+function getSetCookies(response: Response): string[] {
+  return (response.headers as Headers & { getSetCookie(): string[] }).getSetCookie()
 }
 
 async function seedAccessToken(storage: InMemoryStorage) {
@@ -231,7 +248,10 @@ describe("server auth guard", () => {
     const app = createSixbApi(
       new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
-    const headers = { authorization: `Bearer ${credential.tokenValue}` }
+    const headers = {
+      authorization: `Bearer ${credential.tokenValue}`,
+      "x-sixb-session-activity": "1",
+    }
 
     const accepted = await app.fetch(
       new Request("http://localhost/api/project", {
@@ -265,6 +285,7 @@ describe("server auth guard", () => {
     )
 
     expect(accepted.status).toBe(200)
+    expect(getSetCookies(accepted)).toEqual([])
     expect(await accepted.json()).toEqual({ id: "test-project" })
     expect(acceptedTelemetryRead.status).toBe(404)
     expect(acceptedActionRunDetail.status).toBe(404)
@@ -302,6 +323,134 @@ describe("server auth guard", () => {
       },
     })
     expect(response.headers.get("set-cookie")).toContain("sixb_csrf=")
+  })
+
+  test("renews session and CSRF cookies on foreground protected requests", async () => {
+    const now = new Date("2026-07-01T10:00:00.000Z")
+    setSystemTime(now)
+    try {
+      const { sixb, storage } = createRuntime({
+        auth: true,
+        session: {
+          idleTimeoutMs: 30 * 60_000,
+          renewalWindowMs: 10 * 60_000,
+          cacheTtlMs: 0,
+        },
+      })
+      const seeded = await seedSession(storage, {
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 5 * 60_000),
+      })
+      const app = createSixbApi(
+        new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      )
+
+      const response = await app.fetch(
+        new Request("http://localhost/api/project", {
+          headers: {
+            cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
+            "x-sixb-session-activity": "1",
+          },
+        })
+      )
+
+      expect(response.status).toBe(200)
+      const cookies = getSetCookies(response)
+      expect(cookies).toHaveLength(2)
+      expect(cookies[0]).toContain(`sixb_session=${seeded.credential.cookieValue}`)
+      expect(cookies[1]).toContain("sixb_csrf=csrf_1")
+      for (const cookie of cookies) {
+        expect(cookie).toContain("Max-Age=1800")
+        expect(cookie).toContain("Expires=Wed, 01 Jul 2026 10:30:00 GMT")
+      }
+      await expect(
+        storage.auth.sessions.getById({ projectId: "test-project", id: "ses_1" })
+      ).resolves.toMatchObject({ expiresAt: new Date("2026-07-01T10:30:00.000Z") })
+    } finally {
+      setSystemTime()
+    }
+  })
+
+  test("does not renew cookies without foreground activity", async () => {
+    const now = new Date("2026-07-01T10:00:00.000Z")
+    setSystemTime(now)
+    try {
+      const { sixb, storage } = createRuntime({
+        auth: true,
+        session: {
+          idleTimeoutMs: 30 * 60_000,
+          renewalWindowMs: 10 * 60_000,
+          cacheTtlMs: 0,
+        },
+      })
+      const seeded = await seedSession(storage, {
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 5 * 60_000),
+      })
+      const app = createSixbApi(
+        new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      )
+
+      const response = await app.fetch(
+        new Request("http://localhost/api/project", {
+          headers: { cookie: `${seeded.cookie}; ${seeded.csrfCookie}` },
+        })
+      )
+
+      expect(response.status).toBe(200)
+      expect(getSetCookies(response)).toEqual([])
+    } finally {
+      setSystemTime()
+    }
+  })
+
+  test("renews cookies from the public session endpoint without duplicating CSRF", async () => {
+    const now = new Date("2026-07-01T10:00:00.000Z")
+    setSystemTime(now)
+    try {
+      const { sixb, storage } = createRuntime({
+        auth: true,
+        session: {
+          idleTimeoutMs: 30 * 60_000,
+          renewalWindowMs: 10 * 60_000,
+          cacheTtlMs: 0,
+        },
+      })
+      const seeded = await seedSession(storage, {
+        audience: "app",
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 5 * 60_000),
+      })
+      const app = createSixbApi(
+        new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      )
+
+      const response = await app.fetch(
+        new Request("http://localhost/api/auth/session", {
+          headers: {
+            origin: "http://app.localhost",
+            cookie: seeded.cookie,
+            "x-sixb-session-activity": "1",
+          },
+        })
+      )
+
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as { readonly csrfToken: string }
+      const { csrfToken } = body
+      expect(body).toMatchObject({
+        authenticated: true,
+        csrfToken: expect.any(String),
+        applicationAccess: { audience: "app" },
+        session: { expiresAt: "2026-07-01T10:30:00.000Z" },
+      })
+      const cookies = getSetCookies(response)
+      expect(cookies).toHaveLength(2)
+      expect(cookies[0]).toContain(`sixb_session_app=${seeded.credential.cookieValue}`)
+      expect(cookies[1]).toContain(`sixb_csrf_app=${csrfToken}`)
+    } finally {
+      setSystemTime()
+    }
   })
 
   test("application grants restrict Atlas at the session and API boundaries", async () => {
@@ -470,7 +619,7 @@ describe("server auth guard", () => {
         headers: {
           origin: "http://atlas.localhost",
           "access-control-request-method": "PUT",
-          "access-control-request-headers": "content-type,x-sixb-csrf",
+          "access-control-request-headers": "content-type,x-sixb-csrf,x-sixb-session-activity",
         },
       })
     )
@@ -488,7 +637,7 @@ describe("server auth guard", () => {
     expect(allowed.headers.get("access-control-allow-origin")).toBe("http://atlas.localhost")
     expect(allowed.headers.get("access-control-allow-credentials")).toBe("true")
     expect(allowed.headers.get("access-control-allow-headers")).toBe(
-      "authorization, content-type, x-sixb-csrf"
+      "authorization, content-type, x-sixb-csrf, x-sixb-session-activity"
     )
     expect(rejected.status).toBe(403)
   })
@@ -563,6 +712,48 @@ describe("server auth guard", () => {
     expect(accepted.status).toBe(200)
   })
 
+  test("does not emit renewal cookies for a denied mutation", async () => {
+    const now = new Date("2026-07-01T10:00:00.000Z")
+    setSystemTime(now)
+    try {
+      const { sixb, storage } = createRuntime({
+        auth: true,
+        session: {
+          idleTimeoutMs: 30 * 60_000,
+          renewalWindowMs: 10 * 60_000,
+          cacheTtlMs: 0,
+        },
+      })
+      const seeded = await seedSession(storage, {
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 5 * 60_000),
+      })
+      const app = createSixbApi(
+        new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      )
+
+      const response = await app.fetch(
+        new Request("http://localhost/api/objects/device/fan-1", {
+          method: "PUT",
+          headers: {
+            "content-type": "application/json",
+            cookie: seeded.cookie,
+            "x-sixb-session-activity": "1",
+          },
+          body: JSON.stringify({ properties: { name: "Fan" } }),
+        })
+      )
+
+      expect(response.status).toBe(403)
+      expect(getSetCookies(response)).toEqual([])
+      await expect(
+        storage.auth.sessions.getById({ projectId: "test-project", id: "ses_1" })
+      ).resolves.toMatchObject({ expiresAt: new Date("2026-07-01T10:05:00.000Z") })
+    } finally {
+      setSystemTime()
+    }
+  })
+
   test("sign-out revokes the session and clears cookies", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
@@ -576,6 +767,7 @@ describe("server auth guard", () => {
         headers: {
           cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
           ...seeded.csrfHeader,
+          "x-sixb-session-activity": "1",
         },
       })
     )
@@ -583,6 +775,8 @@ describe("server auth guard", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ success: true })
     expect(response.headers.get("set-cookie")).toContain("sixb_session=")
+    expect(getSetCookies(response)).toHaveLength(2)
+    for (const cookie of getSetCookies(response)) expect(cookie).toContain("Max-Age=0")
     await expect(
       storage.auth.sessions.getById({ projectId: "test-project", id: "ses_1" })
     ).resolves.toMatchObject({

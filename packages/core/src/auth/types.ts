@@ -331,6 +331,8 @@ export type AuthCredentialSource = "session" | "accessToken" | "any"
 
 export interface AuthSessionResolutionOptions extends AuthSessionAudienceOptions {
   readonly credentialSource?: AuthCredentialSource
+  /** Marks this request as eligible to renew a near-expiry browser session. */
+  readonly sessionActivity?: "foreground"
 }
 
 export interface InviteUserOptions extends AuthSessionAudienceOptions {
@@ -433,7 +435,12 @@ export interface RevokeServiceAccountAccessTokenResult {
 }
 
 export interface AuthSessionOptions {
-  readonly ttlMs?: number
+  /** How long a browser session may remain idle before it expires. Defaults to 30 days. */
+  readonly idleTimeoutMs?: number
+  /** How close to idle expiry a foreground request must be before renewal. Defaults to 7 days. */
+  readonly renewalWindowMs?: number
+  /** Optional maximum lifetime that foreground activity cannot extend. Disabled by default. */
+  readonly absoluteTimeoutMs?: number
   /**
    * How long (ms) a resolved session is cached in-process before it is re-validated
    * against storage. Collapses the per-request auth reads (session + user + memberships)
@@ -441,6 +448,13 @@ export interface AuthSessionOptions {
    * Defaults to {@link DEFAULT_AUTH_SESSION_CACHE_TTL_MS}.
    */
   readonly cacheTtlMs?: number
+}
+
+export interface ResolvedAuthSessionOptions {
+  readonly idleTimeoutMs: number
+  readonly renewalWindowMs: number
+  readonly absoluteTimeoutMs?: number
+  readonly cacheTtlMs: number
 }
 
 export interface AuthCookieOptions {
@@ -485,6 +499,8 @@ export interface AuthenticatedAuthSession {
   readonly user: UserRecord
   readonly session: SessionRecord
   readonly groupIds: readonly string[]
+  /** Internal response hint: the rolling session deadline advanced during this request. */
+  readonly sessionRenewed?: true
 }
 
 export interface AuthenticatedUserAccessTokenSession {
@@ -519,7 +535,7 @@ export type AuthRequestResult = UnauthenticatedAuthSession | AuthenticatedReques
 
 export interface ResolvedAuthConfig {
   readonly strategy: AuthStrategy | null
-  readonly session: Required<AuthSessionOptions>
+  readonly session: ResolvedAuthSessionOptions
   readonly cookies: Required<Omit<AuthCookieOptions, "cookieDomain">> & {
     readonly domain?: string
   }

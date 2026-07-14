@@ -10,9 +10,12 @@ import type {
   SixbAuthConfig,
 } from "./types"
 
-export const DEFAULT_AUTH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
-export const DEFAULT_AUTH_INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000
-export const MAX_AUTH_INVITATION_TTL_MS = 30 * 24 * 60 * 60 * 1000
+const DAY = 24 * 60 * 60 * 1000
+
+export const DEFAULT_AUTH_SESSION_IDLE_TIMEOUT_MS = 30 * DAY
+export const DEFAULT_AUTH_SESSION_RENEWAL_WINDOW_MS = 7 * DAY
+export const DEFAULT_AUTH_INVITATION_TTL_MS = 7 * DAY
+export const MAX_AUTH_INVITATION_TTL_MS = 30 * DAY
 /**
  * Default in-process session cache window. Short enough that a revoked session lingers
  * only briefly, long enough to collapse a burst of requests to a single auth resolution.
@@ -121,12 +124,43 @@ export function normalizePagination(input: { readonly limit?: number; readonly o
 
 function resolveAuthSessionOptions(
   options: AuthSessionOptions | undefined
-): Required<AuthSessionOptions> {
-  const ttlMs = options?.ttlMs ?? DEFAULT_AUTH_SESSION_TTL_MS
-  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+): ResolvedAuthConfig["session"] {
+  const idleTimeoutMs = options?.idleTimeoutMs ?? DEFAULT_AUTH_SESSION_IDLE_TIMEOUT_MS
+  if (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0) {
     throw new AuthRuntimeError(
       "invalid_auth_config",
-      "[Sixb] Auth session ttlMs must be a positive finite number."
+      "[Sixb] Auth session idleTimeoutMs must be a positive finite number."
+    )
+  }
+
+  const renewalWindowMs = options?.renewalWindowMs ?? DEFAULT_AUTH_SESSION_RENEWAL_WINDOW_MS
+  if (!Number.isFinite(renewalWindowMs) || renewalWindowMs <= 0) {
+    throw new AuthRuntimeError(
+      "invalid_auth_config",
+      "[Sixb] Auth session renewalWindowMs must be a positive finite number."
+    )
+  }
+  if (renewalWindowMs >= idleTimeoutMs) {
+    throw new AuthRuntimeError(
+      "invalid_auth_config",
+      "[Sixb] Auth session renewalWindowMs must be less than idleTimeoutMs."
+    )
+  }
+
+  const absoluteTimeoutMs = options?.absoluteTimeoutMs
+  if (
+    absoluteTimeoutMs !== undefined &&
+    (!Number.isFinite(absoluteTimeoutMs) || absoluteTimeoutMs <= 0)
+  ) {
+    throw new AuthRuntimeError(
+      "invalid_auth_config",
+      "[Sixb] Auth session absoluteTimeoutMs must be a positive finite number when configured."
+    )
+  }
+  if (absoluteTimeoutMs !== undefined && absoluteTimeoutMs < idleTimeoutMs) {
+    throw new AuthRuntimeError(
+      "invalid_auth_config",
+      "[Sixb] Auth session absoluteTimeoutMs must be greater than or equal to idleTimeoutMs."
     )
   }
 
@@ -137,8 +171,19 @@ function resolveAuthSessionOptions(
       "[Sixb] Auth session cacheTtlMs must be a non-negative finite number."
     )
   }
+  if (cacheTtlMs >= renewalWindowMs) {
+    throw new AuthRuntimeError(
+      "invalid_auth_config",
+      "[Sixb] Auth session cacheTtlMs must be less than renewalWindowMs."
+    )
+  }
 
-  return { ttlMs, cacheTtlMs }
+  return {
+    idleTimeoutMs,
+    renewalWindowMs,
+    ...(absoluteTimeoutMs === undefined ? {} : { absoluteTimeoutMs }),
+    cacheTtlMs,
+  }
 }
 
 export function isMagicLinkAuthStrategy(

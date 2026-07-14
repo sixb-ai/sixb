@@ -522,6 +522,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   token_hash TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
+  absolute_expires_at TIMESTAMPTZ,
   revoked_at TIMESTAMPTZ,
   last_seen_at TIMESTAMPTZ,
   user_agent TEXT,

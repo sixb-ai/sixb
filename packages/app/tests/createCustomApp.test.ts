@@ -297,6 +297,8 @@ describe("createCustomApp.dev", () => {
     expect(main).not.toContain("lazy(")
     expect(main).not.toContain("Suspense")
     expect(main).toContain("requireSixbBrowserAuthSession(runtimeConfig")
+    expect(main).toContain("import.meta.hot.dispose")
+    expect(main).toContain("browserClient.dispose()")
   })
 
   test("renders an access-denied view without starting the application", async () => {

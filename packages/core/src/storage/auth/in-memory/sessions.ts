@@ -83,6 +83,37 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
     return cloneRecord(session)
   }
 
+  async renewIfValid(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly audience: AuthSessionAudience
+    readonly tokenHash: string
+    readonly now: Date
+    readonly expiresAt: Date
+  }): Promise<SessionRecord | null> {
+    const key = sessionKey(params.projectId, params.id)
+    const session = this.state.sessions.get(key)
+    if (
+      !session ||
+      session.audience !== params.audience ||
+      session.tokenHash !== params.tokenHash ||
+      !isActiveSession(session, params.now)
+    ) {
+      return null
+    }
+
+    const requestedExpiresAt = session.absoluteExpiresAt
+      ? new Date(Math.min(params.expiresAt.getTime(), session.absoluteExpiresAt.getTime()))
+      : params.expiresAt
+    const next: SessionRecord = {
+      ...session,
+      expiresAt: new Date(Math.max(session.expiresAt.getTime(), requestedExpiresAt.getTime())),
+      lastSeenAt: cloneDate(params.now),
+    }
+    this.state.sessions.set(key, cloneRecord(next))
+    return cloneRecord(next)
+  }
+
   async revoke(params: {
     readonly projectId: string
     readonly id: string

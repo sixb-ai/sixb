@@ -125,6 +125,7 @@ describe("Postgres storage migrations", () => {
         ])
       )
       expect(sessionColumns).toContain("audience")
+      expect(sessionColumns).toContain("absolute_expires_at")
       expect(sessionColumns).toContain("user_agent")
       expect(sessionColumns).toContain("ip_address")
     })

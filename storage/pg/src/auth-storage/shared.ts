@@ -494,6 +494,7 @@ export async function createSession(
         token_hash,
         created_at,
         expires_at,
+        absolute_expires_at,
         user_agent,
         ip_address
       ) VALUES (
@@ -505,6 +506,7 @@ export async function createSession(
         ${tokenHash},
         ${input.createdAt},
         ${input.expiresAt},
+        ${input.absoluteExpiresAt ?? null},
         ${input.userAgent ?? null},
         ${input.ipAddress ?? null}
       )
@@ -539,6 +541,7 @@ export async function revokeActiveSessionsForUser(
         AND user_id = ${params.userId}
         AND revoked_at IS NULL
         AND expires_at > ${params.revokedAt}
+        AND (absolute_expires_at IS NULL OR absolute_expires_at > ${params.revokedAt})
       ORDER BY created_at ASC, id ASC
       FOR UPDATE
     `
@@ -550,6 +553,7 @@ export async function revokeActiveSessionsForUser(
         AND audience = ${params.audience}
         AND revoked_at IS NULL
         AND expires_at > ${params.revokedAt}
+        AND (absolute_expires_at IS NULL OR absolute_expires_at > ${params.revokedAt})
       ORDER BY created_at ASC, id ASC
       FOR UPDATE
     `
@@ -562,6 +566,7 @@ export async function revokeActiveSessionsForUser(
         AND user_id = ${params.userId}
         AND revoked_at IS NULL
         AND expires_at > ${params.revokedAt}
+        AND (absolute_expires_at IS NULL OR absolute_expires_at > ${params.revokedAt})
     `
   } else {
     await sql`
@@ -572,6 +577,7 @@ export async function revokeActiveSessionsForUser(
         AND audience = ${params.audience}
         AND revoked_at IS NULL
         AND expires_at > ${params.revokedAt}
+        AND (absolute_expires_at IS NULL OR absolute_expires_at > ${params.revokedAt})
     `
   }
 

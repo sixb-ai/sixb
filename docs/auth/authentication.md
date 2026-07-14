@@ -207,14 +207,21 @@ active sessions immediately; reactivation keeps old sessions revoked, so the use
 
 ## Sessions and cookies
 
-A successful sign-in sets a session cookie that the server resolves on every request. Pass the
-object form of `auth` to tune session lifetime or cookie behavior.
+Browser sessions expire after 30 days without foreground activity by default. Active sessions roll
+forward with no absolute lifetime unless you configure one.
+
+Most projects should use the defaults. To customize them:
 
 ```ts
+const DAY = 24 * 60 * 60 * 1000
+
 auth: {
   strategy: magicLink({ /* ... */ }),
   session: {
-    ttlMs: 7 * 24 * 60 * 60 * 1000, // default: 7 days
+    idleTimeoutMs: 30 * DAY,
+    renewalWindowMs: 7 * DAY,
+    // Optional hard cap. Omit it to allow an active session to keep rolling.
+    absoluteTimeoutMs: 90 * DAY,
   },
   cookies: {
     sameSite: "strict",
@@ -225,8 +232,10 @@ auth: {
 
 | Group | Option | Default | Meaning |
 | --- | --- | --- | --- |
-| `session` | `ttlMs` | 7 days | Session lifetime |
-| `session` | `cacheTtlMs` | `5000` (5s) | In-process cache window; `0` disables it |
+| `session` | `idleTimeoutMs` | 30 days | Expire after this much time without qualifying foreground activity |
+| `session` | `renewalWindowMs` | 7 days | Renew only when the idle deadline is this close |
+| `session` | `absoluteTimeoutMs` | none | Optional maximum lifetime that activity cannot extend |
+| `session` | `cacheTtlMs` | `5000` (5s) | In-process session cache window; `0` disables it |
 | `cookies` | `sessionCookieName` | `"sixb_session"` | Session cookie name |
 | `cookies` | `csrfCookieName` | `"sixb_csrf"` | CSRF cookie name |
 | `cookies` | `cookieDomain` | — (host-only) | Cookie domain |
@@ -234,8 +243,21 @@ auth: {
 | `cookies` | `sameSite` | `"strict"` | Only `"strict"` is allowed |
 | `cookies` | `csrfHttpOnly` | `false` | Whether the CSRF cookie is HttpOnly |
 
-Sessions are cached in-process briefly to absorb request bursts. The defaults are sensible, so most
-apps leave `session` and `cookies` unset.
+Constraints: `renewalWindowMs < idleTimeoutMs`, `absoluteTimeoutMs >= idleTimeoutMs`, and
+`cacheTtlMs < renewalWindowMs`. Invalid combinations fail at startup.
+
+### Behavior
+
+- Atlas, generated apps, and `@sixb/client/browser` track activity automatically.
+- Opening, returning to, or interacting with a visible app allows nearby HTTP requests to renew a
+  session inside its renewal window.
+- Hidden-tab polling and WebSocket traffic do not renew sessions.
+- Logout, revocation, `sign-out-all`, suspension, and absolute expiry still end sessions.
+- WebSockets authenticate only when connecting. Use HTTP APIs for sensitive operations.
+- No refresh-token or credential-rotation code is needed in your app.
+
+Use persistent auth storage so sessions survive restarts. SQLite fits a single server; PostgreSQL is
+also supported. Most apps should leave `cacheTtlMs` unchanged.
 
 Users can list their active sessions (`GET /api/auth/sessions`) and revoke one
 (`POST /api/auth/sessions/:sessionId/revoke`), independent of the blanket `sign-out-all`.
@@ -337,7 +359,8 @@ resolved `Principal` is one of `user`, `serviceAccount`, or `system`.
 A few things worth remembering:
 
 - `allowedDomains` is enforced on both sign-in and invitations.
-- Sessions default to a 7-day lifetime; `sign-out-all` revokes them across every device.
+- Sessions expire after 30 days without foreground activity by default; `sign-out-all` revokes
+  them across every device.
 - State-changing API routes are CSRF-protected with a double-submit token.
 
 ## Next
