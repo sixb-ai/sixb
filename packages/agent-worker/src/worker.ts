@@ -37,6 +37,8 @@ const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 4
 const DEFAULT_TURN_TIMEOUT_MS = 5 * 60_000
 const AGENT_DISPATCH_POLL_MS = 1_000
+/** Reconciliation is a safety net for failed request-time publication; an empty scan idles longer. */
+const AGENT_DISPATCH_IDLE_MS = 10_000
 const MAX_AGENT_DISPATCH_BACKOFF_MS = 30_000
 /** Backoff before redelivering a job whose run could not be finalized (storage was unavailable). */
 const FINALIZE_RETRY_BACKOFF_MS = 5_000
@@ -336,12 +338,14 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     let consecutiveFailures = 0
 
     while (!signal.aborted) {
+      let dispatched = 0
       try {
         const result = await dispatchQueuedAgentRuns({
           projectId: context.id,
           storage: context.storage.agents,
           queue: this.sixb.queues.agents,
         })
+        dispatched = result.dispatched.length
         if (result.failures.length === 0) {
           consecutiveFailures = 0
         } else {
@@ -357,12 +361,14 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       }
 
       const delayMs =
-        consecutiveFailures === 0
-          ? AGENT_DISPATCH_POLL_MS
-          : Math.min(
+        consecutiveFailures > 0
+          ? Math.min(
               AGENT_DISPATCH_POLL_MS * 2 ** (consecutiveFailures - 1),
               MAX_AGENT_DISPATCH_BACKOFF_MS
             )
+          : dispatched > 0
+            ? AGENT_DISPATCH_POLL_MS
+            : AGENT_DISPATCH_IDLE_MS
       await waitForAbort(delayMs, signal)
     }
   }
