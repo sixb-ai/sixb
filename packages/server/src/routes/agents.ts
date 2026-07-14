@@ -1,5 +1,4 @@
 import {
-  AGENT_RUN_STREAM_SCHEMA_VERSION,
   type AgentDefinition,
   type AgentMessageRecord,
   AgentRequestError,
@@ -9,16 +8,15 @@ import {
   AgentStorageError,
   type AgentThreadRecord,
   type AuthorizationContext,
-  agentRunStreamDefinition,
   agentRunStreamId,
   createAgentRunId,
   createAgentThreadId,
   dispatchQueuedAgentRuns,
   type FileRef,
-  type JsonValue,
   type OntologySource,
   type Principal,
   publishAgentRunCancel,
+  publishAgentRunFinished,
   type ScopedSixb,
   type Sixb,
   SYSTEM_PRINCIPAL,
@@ -181,39 +179,13 @@ function principalForRequest(authz: AuthorizationContext | null): Principal {
   return authz?.principal ?? SYSTEM_PRINCIPAL
 }
 
+/** Publish the terminal record core owns; stream delivery stays best-effort at this boundary. */
 async function publishQueuedRunCancellation(
   sixb: Sixb<readonly OntologySource[]>,
   run: AgentRunRecord
 ): Promise<void> {
-  const event = {
-    schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
-    type: "agent.run.finished" as const,
-    projectId: sixb.id,
-    runId: run.id,
-    threadId: run.threadId,
-    agentId: run.agentId,
-    attempt: run.attempt,
-    status: "cancelled" as const,
-    occurredAt: new Date().toISOString(),
-  }
-
   try {
-    await sixb.broker.ensureStream({
-      projectId: sixb.id,
-      stream: agentRunStreamDefinition(run.id),
-    })
-    await sixb.broker.append({
-      projectId: sixb.id,
-      streamId: agentRunStreamId(run.id),
-      records: [
-        {
-          name: event.type,
-          key: run.id,
-          payload: event as JsonValue,
-          idempotencyKey: `${run.id}:${run.attempt}:finished:cancelled`,
-        },
-      ],
-    })
+    await publishAgentRunFinished(sixb.broker, run)
   } catch (error) {
     console.error(`[SixbServer] Agent run '${run.id}' cancellation stream publish failed:`, error)
   }

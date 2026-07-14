@@ -70,16 +70,24 @@ export {
 } from "./request"
 export type { ScopedListAgentThreadsInput } from "./runtime"
 export { AgentsRuntime } from "./runtime"
-export type { AgentRunControlStreamId, AgentRunStreamEvent, AgentRunStreamId } from "./streams"
+export type {
+  AgentRunControlStreamId,
+  AgentRunFinishedEvent,
+  AgentRunStreamEvent,
+  AgentRunStreamId,
+} from "./streams"
 export {
   AGENT_RUN_CANCEL_RECORD,
   AGENT_RUN_STREAM_SCHEMA_VERSION,
   agentRunControlStreamDefinition,
   agentRunControlStreamId,
+  agentRunFinishedEvent,
   agentRunStreamDefinition,
   agentRunStreamId,
+  agentRunStreamIdempotencyKey,
   DEFAULT_AGENT_RUN_STREAM_RETENTION,
   publishAgentRunCancel,
+  publishAgentRunFinished,
   subscribeAgentRunCancel,
 } from "./streams"
 export type {
