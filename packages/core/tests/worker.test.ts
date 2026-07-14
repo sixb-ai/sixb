@@ -113,6 +113,9 @@ describe("Worker", () => {
     let runs = 0
 
     class TestWorker extends Worker {
+      // Skip real exponential backoffs so exhausting the 10-restart budget stays instant.
+      protected override readonly restartBackoffMs = 0
+
       protected async run(): Promise<void> {
         runs += 1
         throw new Error("persistent failure")
@@ -126,10 +129,10 @@ describe("Worker", () => {
     await expect(exit).rejects.toBeInstanceOf(WorkerUnhealthyError)
     await expect(exit).rejects.toMatchObject({
       name: "WorkerUnhealthyError",
-      restartCount: 5,
+      restartCount: 10,
       cause: expect.objectContaining({ message: "persistent failure" }),
     })
-    expect(runs).toBe(6)
+    expect(runs).toBe(11)
 
     await worker.stop()
   })
