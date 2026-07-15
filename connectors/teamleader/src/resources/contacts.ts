@@ -6,6 +6,7 @@ import type {
   TeamleaderContactListItem,
   TeamleaderListResponse,
   TeamleaderSingleResponse,
+  TeamleaderTypeAndId,
 } from "../types"
 
 export function createContactsResource(request: TeamleaderRequester): TeamleaderClient["contacts"] {
@@ -26,6 +27,37 @@ export function createContactsResource(request: TeamleaderRequester): Teamleader
         body,
         requestOptions
       )
+    },
+    add(body, requestOptions) {
+      return request<TeamleaderSingleResponse<TeamleaderTypeAndId<"contact">>>(
+        "/contacts.add",
+        body,
+        requestOptions
+      )
+    },
+    update(body, requestOptions) {
+      return request<void>("/contacts.update", body, requestOptions)
+    },
+    delete(body, requestOptions) {
+      return request<void>("/contacts.delete", body, requestOptions)
+    },
+    tag(body, requestOptions) {
+      return request<void>("/contacts.tag", body, requestOptions)
+    },
+    untag(body, requestOptions) {
+      return request<void>("/contacts.untag", body, requestOptions)
+    },
+    linkToCompany(body, requestOptions) {
+      return request<void>("/contacts.linkToCompany", body, requestOptions)
+    },
+    unlinkFromCompany(body, requestOptions) {
+      return request<void>("/contacts.unlinkFromCompany", body, requestOptions)
+    },
+    updateCompanyLink(body, requestOptions) {
+      return request<void>("/contacts.updateCompanyLink", body, requestOptions)
+    },
+    uploadAvatar(body, requestOptions) {
+      return request<void>("/contacts.uploadAvatar", body, requestOptions)
     },
   }
 

@@ -12,6 +12,7 @@ V1 covers:
 - Products
 - Product actions
 - Contacts
+- Contact actions
 - Companies
 - Custom field definitions
 
@@ -96,6 +97,15 @@ client.documentTemplates.list(...)
 client.contacts.list(...)
 client.contacts.listAll(...)
 client.contacts.info(...)
+client.contacts.add(...)
+client.contacts.update(...)
+client.contacts.delete(...)
+client.contacts.tag(...)
+client.contacts.untag(...)
+client.contacts.linkToCompany(...)
+client.contacts.unlinkFromCompany(...)
+client.contacts.updateCompanyLink(...)
+client.contacts.uploadAvatar(...)
 
 client.companies.list(...)
 client.companies.listAll(...)
