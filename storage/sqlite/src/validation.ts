@@ -1,4 +1,4 @@
-import { ProjectionRunError } from "@sixb/core"
+import { ProjectionRunError } from "@sixb/core/storage"
 
 export function assertProjectionRunFieldNonEmpty(value: string, fieldName: string): void {
   if (value.trim().length === 0) {

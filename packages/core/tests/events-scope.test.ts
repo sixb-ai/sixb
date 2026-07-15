@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { type DomainEvent, scopeKeysForEvent } from "../src"
+import type { DomainEvent } from "../src"
+import { scopeKeysForEvent } from "../src/events/scope"
 
 // Loose fixtures: only the topic + payload fields the extractor reads matter.
 function event(topic: string, type: string, payload: Record<string, unknown>): DomainEvent {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { ObjectLinkRow, ObjectRow, RulePredicate } from "@sixb/core"
+import type { RulePredicate } from "@sixb/core"
+import type { ObjectLinkRow, ObjectRow } from "@sixb/core/storage"
 import { evaluateRulePredicate } from "../src/evaluate-predicate"
 import type { RuleLinkMap } from "../src/types"
 

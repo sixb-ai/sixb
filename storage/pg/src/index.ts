@@ -3,15 +3,17 @@
 /// <reference path="./sql.d.ts" />
 
 import { AsyncLocalStorage } from "node:async_hooks"
+import type {
+  MigrationCapableStorage,
+  Storage,
+  StorageMigrator,
+  StorageTransactionOptions,
+} from "@sixb/core"
 import {
   createTransactionStorageProxy,
-  type MigrationCapableStorage,
-  type Storage,
-  type StorageMigrator,
   StorageTransactionError,
-  type StorageTransactionOptions,
   throwNestedStorageTransaction,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import { PgAgentStorage } from "./agents"
 import { PgAuthStorage } from "./auth-storage"
 import { createPostgresStorageMigrators, dropSchema } from "./migrations"

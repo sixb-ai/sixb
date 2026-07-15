@@ -2,15 +2,14 @@ import { randomUUID } from "node:crypto"
 import type { JetStreamClient, OrderedConsumerOptions, StreamInfo } from "@nats-io/jetstream"
 import { DeliverPolicy, jetstream } from "@nats-io/jetstream"
 import type { ConnectionOptions } from "@nats-io/nats-core"
+import { type Broker, cloneJsonValue } from "@sixb/core"
 import {
-  type Broker,
   BrokerCursorExpiredError,
   type BrokerPage,
   type BrokerRecord,
   type BrokerRecordInput,
   type BrokerStreamDefinition,
-  cloneJsonValue,
-} from "@sixb/core"
+} from "@sixb/core/broker"
 import { NatsConnectionManager } from "./connection"
 import { NatsBrokerError } from "./errors"
 import { validateProjectId } from "./project-id"

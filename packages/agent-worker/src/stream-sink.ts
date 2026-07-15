@@ -1,11 +1,13 @@
-import type { AgentRunRecord, AgentRunStreamEvent, Broker, JsonValue } from "@sixb/core"
+import type { Broker, JsonValue } from "@sixb/core"
+import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
 import {
   AGENT_RUN_STREAM_SCHEMA_VERSION,
   agentRunFinishedEvent,
   agentRunStreamDefinition,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
-} from "@sixb/core"
+} from "@sixb/core/agents/streams"
+import type { AgentRunRecord } from "@sixb/core/storage"
 import { AgentWorkerError } from "./errors"
 
 /** Receives live and lifecycle records for one agent run stream. */

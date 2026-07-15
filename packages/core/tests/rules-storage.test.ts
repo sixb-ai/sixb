@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import type { RuleEventSubject, StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../src"
+import type { RuleEventSubject } from "../src"
 import { InMemoryRulesStorage, InMemoryStorage } from "../src"
+import type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../src/events"
 
 const defaultSubject: RuleEventSubject = {
   kind: "object",

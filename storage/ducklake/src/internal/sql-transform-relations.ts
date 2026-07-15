@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto"
-import { LakeStorageError, type SqlTransformBody, type SqlTransformRelation } from "@sixb/core"
+import {
+  LakeStorageError,
+  type SqlTransformBody,
+  type SqlTransformRelation,
+} from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { encodeDatasetTableName } from "./names"
 import { qualifiedTableName } from "./sql"

@@ -344,10 +344,11 @@ const sixb = await createSixb({
 
 ## Migrations
 
-`@sixb/core` provides the storage-provider migration model used by the CLI and durable adapters:
+`@sixb/core/storage` provides the storage-provider migration model used by the CLI and durable adapters (`migrateStorage` itself is also exported from the root):
 
 ```ts
-import { defineMigrations, migrateStorage, runMigrationSet, step } from "@sixb/core"
+import { migrateStorage } from "@sixb/core"
+import { defineMigrations, runMigrationSet, step } from "@sixb/core/storage"
 
 export const objectStorageMigrations = defineMigrations({
   adapterId: "MyObjectStorage",

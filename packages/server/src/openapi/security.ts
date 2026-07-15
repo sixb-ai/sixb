@@ -1,4 +1,4 @@
-import { CSRF_HEADER_NAME } from "@sixb/core"
+import { CSRF_HEADER_NAME } from "@sixb/core/internal/auth"
 
 export const SIXB_CSRF_SECURITY_SCHEME_ID = "sixbCsrf"
 export const SIXB_BEARER_SECURITY_SCHEME_ID = "sixbBearer"

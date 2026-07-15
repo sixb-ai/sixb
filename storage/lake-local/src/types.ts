@@ -1,12 +1,11 @@
+import type { DatasetProducer, DatasetSchema } from "@sixb/core"
 import type {
   BeginDatasetWriteInput,
   CommitDatasetWriteInput,
-  DatasetProducer,
-  DatasetSchema,
   DatasetVersion,
   DatasetVersionMode,
   DatasetVersionRef,
-} from "@sixb/core"
+} from "@sixb/core/lake-storage"
 
 export interface LocalLakeStorageOptions {
   /** Base directory for lake metadata and row files. */

@@ -4,7 +4,7 @@ import {
   formatAccessTokenValue,
   hashAccessTokenSecret,
   parseAccessTokenValue,
-} from "../src"
+} from "../src/auth"
 
 describe("access token credentials", () => {
   test("formats, parses, and hashes personal access tokens", () => {

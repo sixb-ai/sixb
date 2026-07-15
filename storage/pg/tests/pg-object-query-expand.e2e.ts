@@ -1,14 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import {
-  defineObjectType,
-  type ExpandedObjectRow,
-  executeObjectQuery,
-  link,
-  OntologyRegistry,
-  prop,
-  type StoredLinkMutationEvent,
-  type StoredObjectMutationEvent,
-} from "@sixb/core"
+import { defineObjectType, link, OntologyRegistry, prop } from "@sixb/core"
+import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "@sixb/core/internal/events"
+import { executeObjectQuery } from "@sixb/core/internal/query"
+import type { ExpandedObjectRow } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 

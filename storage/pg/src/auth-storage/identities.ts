@@ -2,7 +2,7 @@ import type {
   AuthUserIdentityStore,
   UpsertAuthUserIdentityInput,
   UserIdentityRecord,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { PgStoreClient } from "../transactions"
 import type { PgAuthUserIdentityRow } from "./rows"
 import { rowToIdentityRecord, serializeOptionalRecord } from "./rows"

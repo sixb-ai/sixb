@@ -1,11 +1,9 @@
+import type { DatasetDefinition, OntologySource, Sixb } from "@sixb/core"
 import type {
   DatasetCatalogState,
-  DatasetDefinition,
   DatasetLatestVersionSummary,
   DatasetVersion,
-  OntologySource,
-  Sixb,
-} from "@sixb/core"
+} from "@sixb/core/lake-storage"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"

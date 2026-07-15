@@ -1,4 +1,5 @@
-import { AGENT_REASONING_LEVELS, AGENT_RUN_DIAGNOSTIC_CODES } from "@sixb/core"
+import { AGENT_REASONING_LEVELS } from "@sixb/core"
+import { AGENT_RUN_DIAGNOSTIC_CODES } from "@sixb/core/storage"
 import { z } from "zod"
 import { JsonValueSchema } from "./common"
 import { FileRefSchema } from "./files"

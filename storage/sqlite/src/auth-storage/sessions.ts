@@ -1,11 +1,7 @@
 import type { Database } from "bun:sqlite"
-import type {
-  AuthSessionAudience,
-  AuthSessionStore,
-  CreateAuthSessionInput,
-  SessionRecord,
-} from "@sixb/core"
-import { AuthStorageError } from "@sixb/core"
+import type { AuthSessionAudience } from "@sixb/core"
+import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthSessionRow } from "./rows"
 import { rowToSessionRecord } from "./rows"

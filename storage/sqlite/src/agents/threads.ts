@@ -6,7 +6,7 @@ import {
   type CreateAgentThreadInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { SqliteValue } from "../run-list-query"
 import { isUniqueConstraintError } from "../storage-errors"
 import { type AgentThreadRow, queryAgentList, rowToThreadRecord } from "./rows"

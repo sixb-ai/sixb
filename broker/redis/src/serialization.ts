@@ -1,5 +1,5 @@
-import type { BrokerRecord, BrokerRecordInput } from "@sixb/core"
 import { getInvalidJsonValueReason, type JsonValue } from "@sixb/core"
+import type { BrokerRecord, BrokerRecordInput } from "@sixb/core/broker"
 import { RedisBrokerError } from "./errors"
 
 interface WireBrokerRecord {

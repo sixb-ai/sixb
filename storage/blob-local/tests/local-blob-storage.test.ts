@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { BlobStorageError } from "@sixb/core"
+import { BlobStorageError } from "@sixb/core/blob-storage/server"
 import { LocalBlobStorage } from "../src"
 
 const encoder = new TextEncoder()

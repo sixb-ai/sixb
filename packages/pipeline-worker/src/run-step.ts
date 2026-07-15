@@ -1,10 +1,6 @@
-import type {
-  DatasetDefinition,
-  DatasetVersion,
-  PipelineDefinition,
-  PipelineStepDefinition,
-  PipelineStepRunRecord,
-} from "@sixb/core"
+import type { DatasetDefinition, PipelineDefinition, PipelineStepDefinition } from "@sixb/core"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
+import type { PipelineStepRunRecord } from "@sixb/core/storage"
 import {
   createStepBookkeepingError,
   requireRegisteredDataset,

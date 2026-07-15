@@ -1,13 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import {
-  type AuthorizationContext,
-  canViewProjection,
-  canViewProjectionRun,
-  type LinkProjectionDefinition,
-  type ObjectProjectionDefinition,
-  type ProjectionRunObjectTypes,
-  type TelemetryProjectionDefinition,
+import type {
+  AuthorizationContext,
+  LinkProjectionDefinition,
+  ObjectProjectionDefinition,
+  TelemetryProjectionDefinition,
 } from "../src"
+import { canViewProjection, canViewProjectionRun } from "../src/authorization"
+import type { ProjectionRunObjectTypes } from "../src/storage"
 
 function authzViewing(...objectTypeIds: string[]): AuthorizationContext {
   return {

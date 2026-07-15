@@ -1,4 +1,4 @@
-import type { WorkflowRunStatus } from "@sixb/core"
+import type { WorkflowRunStatus } from "@sixb/core/storage"
 
 export function createAbortError(): Error {
   const error = new Error("Workflow worker aborted.")

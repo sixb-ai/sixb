@@ -1,6 +1,7 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
-import { CSRF_HEADER_NAME, type OntologySource, type Sixb } from "@sixb/core"
+import type { OntologySource, Sixb } from "@sixb/core"
+import { CSRF_HEADER_NAME } from "@sixb/core/internal/auth"
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import { zodToJsonSchema } from "zod-to-json-schema"

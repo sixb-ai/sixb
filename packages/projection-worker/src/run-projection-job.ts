@@ -1,11 +1,8 @@
-import type {
-  DatasetDefinition,
-  DatasetVersion,
-  ProjectionDefinition,
-  ProjectionRunCounters,
-  ProjectionRunRecord,
-} from "@sixb/core"
-import { PROJECTION_COUNTER_KEYS, projectionKindOf, projectionObjectTypeIds } from "@sixb/core"
+import type { DatasetDefinition, ProjectionDefinition } from "@sixb/core"
+import { projectionKindOf, projectionObjectTypeIds } from "@sixb/core"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
+import type { ProjectionRunCounters, ProjectionRunRecord } from "@sixb/core/storage"
+import { PROJECTION_COUNTER_KEYS } from "@sixb/core/storage"
 import { ProjectionWorkerError } from "./errors"
 import { runLinkProjection } from "./run-link-projection"
 import { runObjectProjection } from "./run-object-projection"

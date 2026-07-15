@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import {
-  agentRunQueueJobId,
-  dispatchQueuedAgentRuns,
-  InMemoryQueues,
-  InMemoryStorage,
-} from "../src"
+import { InMemoryQueues, InMemoryStorage } from "../src"
+import { agentRunQueueJobId, dispatchQueuedAgentRuns } from "../src/agents"
 
 const PROJECT_ID = "agent-dispatch-tests"
 

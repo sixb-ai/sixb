@@ -1,18 +1,20 @@
 import { describe, expect, test } from "bun:test"
 import {
-  collectObjectQueryValidationIssues,
   defineObjectType,
   defineOntology,
-  explainObjectQuery,
-  formatObjectQueryExplanation,
   link,
-  normalizeObjectQuery,
   type ObjectQuery,
   OntologyRegistry,
   prop,
   Sixb,
-  validateObjectQuery,
 } from "../src"
+import {
+  collectObjectQueryValidationIssues,
+  explainObjectQuery,
+  formatObjectQueryExplanation,
+  normalizeObjectQuery,
+  validateObjectQuery,
+} from "../src/objects/query"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 // A faithful mirror of the real ADN graph: Project -> { opportunity, projectFolder },

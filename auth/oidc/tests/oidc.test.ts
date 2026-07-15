@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { type CompleteAuthSessionInput, InMemoryAuthStorage } from "@sixb/core"
+import { InMemoryAuthStorage } from "@sixb/core"
+import type { CompleteAuthSessionInput } from "@sixb/core/storage"
 import { OidcAuthError, type OidcClientAdapter, type OidcTokenResponse, oidc } from "../src"
 
 const projectId = "project-a"

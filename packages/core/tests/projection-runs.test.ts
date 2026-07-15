@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryProjectionRunStorage, ProjectionRunError } from "../src"
+import { InMemoryProjectionRunStorage } from "../src"
+import { ProjectionRunError } from "../src/storage"
 
 describe("InMemoryProjectionRunStorage", () => {
   test("starts, updates, and finishes a successful run", async () => {

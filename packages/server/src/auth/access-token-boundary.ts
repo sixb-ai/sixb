@@ -1,9 +1,5 @@
-import {
-  isCsrfExemptMethod,
-  matchesPathPattern,
-  normalizeRoutePath,
-  SIXB_API_ROUTES,
-} from "@sixb/core"
+import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
+import { matchesPathPattern, normalizeRoutePath, SIXB_API_ROUTES } from "@sixb/core/internal/http"
 import {
   SIXB_BEARER_SECURITY_REQUIREMENT,
   SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,

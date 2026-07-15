@@ -2,8 +2,8 @@ import {
   type DatasetDefinition,
   ObjectNotFoundError,
   type ObjectProjectionDefinition,
-  objectService,
 } from "@sixb/core"
+import { objectService } from "@sixb/core/internal/objects"
 import {
   buildObjectProjectionPlan,
   type ProjectedObjectRow,

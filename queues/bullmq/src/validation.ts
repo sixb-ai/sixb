@@ -1,4 +1,4 @@
-import { QueueError } from "@sixb/core"
+import { QueueError } from "@sixb/core/queues"
 
 export function assertNonEmpty(value: string, fieldName: string): void {
   if (typeof value !== "string" || value.trim().length === 0) {

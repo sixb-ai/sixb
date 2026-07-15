@@ -6,7 +6,6 @@ import {
   type SendOidcInvitationInput,
 } from "@sixb/auth-oidc"
 import {
-  createSessionCredential,
   defineGroup,
   defineMembershipPolicy,
   defineObjectType,
@@ -19,6 +18,7 @@ import {
   prop,
   Sixb,
 } from "@sixb/core"
+import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 

@@ -11,9 +11,7 @@ import type {
   DatasetRow,
   FileRef,
   LakeStorage,
-  LakeWriteSession,
   SyncDefinition,
-  SyncRunStorage,
 } from "@sixb/core"
 import {
   col,
@@ -25,6 +23,8 @@ import {
   InMemoryStorage,
   InMemorySyncRunStorage,
 } from "@sixb/core"
+import type { LakeWriteSession } from "@sixb/core/lake-storage"
+import type { SyncRunStorage } from "@sixb/core/storage"
 import { LocalLakeStorage } from "@sixb/lake-local"
 import { runSyncJob } from "../src/run-sync-job"
 import type { SyncWorkerContext } from "../src/types"

@@ -1,13 +1,13 @@
 import type { Database } from "bun:sqlite"
+import { AGENT_MESSAGE_CONTENT_VERSION } from "@sixb/core/internal/agents"
 import {
-  AGENT_MESSAGE_CONTENT_VERSION,
   type AgentMessageRecord,
   type AgentMessageStore,
   AgentStorageError,
   type AppendAgentMessageInput,
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { SqliteValue } from "../run-list-query"
 import { isUniqueConstraintError } from "../storage-errors"
 import { type AgentMessageRow, queryAgentList, rowToMessageRecord } from "./rows"

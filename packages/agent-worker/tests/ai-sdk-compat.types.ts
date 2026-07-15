@@ -5,7 +5,7 @@
 
 import type { LanguageModelV4 } from "@ai-sdk/provider"
 import type { AgentInboundUiMessage, AgentMessage } from "@sixb/core"
-import { toModelMessages } from "@sixb/core"
+import { toModelMessages } from "@sixb/core/internal/agents"
 import type { ModelMessage, streamText, UIMessage } from "ai"
 
 // A real `UIMessage` must assign to `fromAiSdk`'s inbound shape *without a cast* — this is the

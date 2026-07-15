@@ -1,18 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import {
-  commitActionEditBatch,
-  defineObjectType,
-  type EditBatch,
-  link,
-  type ObjectStorage,
-  ObjectStorageError,
-  OntologyRegistry,
-  planEditBatch,
-  prop,
-  type Storage,
-  type StoredObjectMutationEvent,
-} from "@sixb/core"
+import { defineObjectType, link, OntologyRegistry, prop, type Storage } from "@sixb/core"
 import { type RecordEditsHandler, recordEdits } from "@sixb/core/actions/worker"
+import { commitActionEditBatch } from "@sixb/core/internal/actions"
+import { type EditBatch, planEditBatch } from "@sixb/core/internal/edits"
+import type { StoredObjectMutationEvent } from "@sixb/core/internal/events"
+import { type ObjectStorage, ObjectStorageError } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 

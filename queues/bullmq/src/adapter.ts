@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import type { ClaimedQueueJob, NewQueueJob, QueueJob } from "@sixb/core"
+import type { ClaimedQueueJob, NewQueueJob, QueueJob } from "@sixb/core/queues"
 import type { Job as BullJob } from "bullmq"
 import { parseTimestamp } from "./validation"
 

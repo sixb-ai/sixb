@@ -1,5 +1,5 @@
 import type { DatasetColumnDefinition, DatasetSchema } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import { duckDbTypeToDatasetColumnType } from "./schema"
 
 export interface DuckLakeCatalogColumn {

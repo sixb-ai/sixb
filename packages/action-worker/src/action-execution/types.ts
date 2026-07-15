@@ -1,9 +1,5 @@
-import type {
-  ActionDefinition,
-  ActionRunRecord,
-  ActionTargetObject,
-  ObjectTypeWithPropertyTokens,
-} from "@sixb/core"
+import type { ActionDefinition, ActionTargetObject, ObjectTypeWithPropertyTokens } from "@sixb/core"
+import type { ActionRunRecord } from "@sixb/core/storage"
 import type { RunActionJobInput } from "../types"
 
 export type LoadedObjectTarget = {

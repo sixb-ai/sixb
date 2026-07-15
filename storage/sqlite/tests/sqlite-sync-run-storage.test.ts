@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { SyncRunError } from "@sixb/core"
+import { SyncRunError } from "@sixb/core/storage"
 import { SqliteSyncRunStorage } from "../src/sync-run-storage"
 
 describe("SqliteSyncRunStorage", () => {

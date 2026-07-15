@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import {
-  EVENTS_STREAM,
-  EventsError,
-  EventsRuntime,
-  InMemoryBroker,
-  type StoredDomainEvent,
-} from "../src"
+import { InMemoryBroker } from "../src"
+import { EVENTS_STREAM, EventsError, EventsRuntime, type StoredDomainEvent } from "../src/events"
 
 function objectCreated(primaryId: string) {
   return {

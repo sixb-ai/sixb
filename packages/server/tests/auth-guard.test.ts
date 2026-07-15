@@ -5,8 +5,6 @@ import {
   type AuthSessionOptions,
   applications,
   can,
-  createAccessTokenCredential,
-  createSessionCredential,
   defineConnector,
   defineGroup,
   defineObjectType,
@@ -22,6 +20,7 @@ import {
   type RoleDefinition,
   Sixb,
 } from "@sixb/core"
+import { createAccessTokenCredential, createSessionCredential } from "@sixb/core/internal/auth"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../src/auth/csrf"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"

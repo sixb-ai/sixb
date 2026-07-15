@@ -3,9 +3,9 @@ import {
   isAllowed,
   type OntologySource,
   type RuleDefinition,
-  type RuleStateRecord,
   type Sixb,
 } from "@sixb/core"
+import type { RuleStateRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"

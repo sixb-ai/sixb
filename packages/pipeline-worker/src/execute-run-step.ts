@@ -1,11 +1,11 @@
 import type {
   DatasetDefinition,
   DatasetRow,
-  DatasetVersion,
   PipelineDefinition,
   PipelineStepDefinition,
   PipelineStepRunContext,
 } from "@sixb/core"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { PipelineWorkerError, throwIfAborted } from "./errors"
 import { createStepInputs, type ResolvedStepInput } from "./step-inputs"
 import type { PipelineJob, PipelineLogSession, PipelineWorkerContext } from "./types"

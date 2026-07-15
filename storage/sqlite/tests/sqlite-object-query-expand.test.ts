@@ -1,14 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import {
-  defineObjectType,
-  type ExpandedObjectRow,
-  executeObjectQuery,
-  link,
-  OntologyRegistry,
-  prop,
-  type StoredLinkMutationEvent,
-  type StoredObjectMutationEvent,
-} from "@sixb/core"
+import { defineObjectType, link, OntologyRegistry, prop } from "@sixb/core"
+import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "@sixb/core/internal/events"
+import { executeObjectQuery } from "@sixb/core/internal/query"
+import type { ExpandedObjectRow } from "@sixb/core/storage"
 import { SqliteObjectStorage } from "../src/object-storage"
 
 // Self-contained ontology exercising the runtime shapes the in-memory contract

@@ -1,11 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import type { FileRef, FileUploadSessionErrorReason, Principal } from "../src"
-import {
-  DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS,
-  FileUploadSessionError,
-  InMemoryFileUploadSessions,
-  InMemoryStorage,
-} from "../src"
+import type { FileRef, Principal } from "../src"
+import { InMemoryFileUploadSessions, InMemoryStorage } from "../src"
+import type { FileUploadSessionErrorReason } from "../src/storage"
+import { DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS, FileUploadSessionError } from "../src/storage"
 
 const principal: Principal = { type: "system", id: "system" }
 

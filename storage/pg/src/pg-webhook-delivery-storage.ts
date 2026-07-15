@@ -4,7 +4,7 @@ import type {
   WebhookDeliveryKey,
   WebhookDeliveryRecord,
   WebhookDeliveryStorage,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {

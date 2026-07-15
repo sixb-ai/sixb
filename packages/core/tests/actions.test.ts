@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
   ActionDefinitionError,
-  ActionRunError,
   defineAction,
   defineObjectType,
   OntologyValidationError,
@@ -12,6 +11,7 @@ import {
   ref,
   Sixb,
 } from "../src"
+import { ActionRunError } from "../src/storage"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({

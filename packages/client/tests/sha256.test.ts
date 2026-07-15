@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { computeBlobDigest } from "@sixb/core"
+import { computeBlobDigest } from "@sixb/core/blob-storage/server"
 import { computeStreamingBlobDigest } from "../src/sha256"
 
 describe("computeStreamingBlobDigest", () => {

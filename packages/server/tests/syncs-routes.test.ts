@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import type { ListLatestSyncRunsInput, OntologySource, Sixb, SyncRunStorage } from "@sixb/core"
+import type { OntologySource, Sixb } from "@sixb/core"
 import { col, defineConnector, defineDataset, defineSync } from "@sixb/core"
+import type { ListLatestSyncRunsInput, SyncRunStorage } from "@sixb/core/storage"
 import { Elysia } from "elysia"
 import { registerSyncRoutes } from "../src/routes/syncs"
 

@@ -1,12 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import {
-  type ActionRunStorage,
-  InMemoryStorage,
-  type Storage,
-  StorageTransactionError,
-  type StoredLinkMutationEvent,
-  type StoredObjectMutationEvent,
-} from "../src"
+import { InMemoryStorage, type Storage } from "../src"
+import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "../src/events"
+import { type ActionRunStorage, StorageTransactionError } from "../src/storage"
 
 describe("InMemoryStorage.transaction", () => {
   test("commits writes atomically", async () => {

@@ -1,21 +1,20 @@
 import type {
   BlobStorage,
-  ClaimedQueueJob,
   ConnectorAdapter,
   ConnectorClient,
   ConnectorDefinition,
   DatasetDefinition,
-  EventsRuntime,
   LakeStorage,
-  LogsRuntime,
   Queues,
-  QueueWorkerFailureDecision,
   Storage,
   SyncDefinition,
-  SyncRunRecord,
-  SyncRunRequestedQueueJob,
 } from "@sixb/core"
-import { QueueWorker } from "@sixb/core"
+import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
+import { QueueWorker } from "@sixb/core/internal/workers"
+import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "@sixb/core/queues"
+import type { SyncRunRecord } from "@sixb/core/storage"
 import { runSyncJob, SyncRunAlreadyStartedError } from "./run-sync-job"
 import type { SyncJob, SyncRunResult, SyncWorkerContext } from "./types"
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { col, type DatasetColumnType, LakeStorageError } from "@sixb/core"
+import { col, type DatasetColumnType } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import {
   datasetColumnToDuckDbSql,
   datasetColumnTypeToDuckDbSql,

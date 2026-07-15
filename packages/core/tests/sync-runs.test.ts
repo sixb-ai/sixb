@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { InMemorySyncRunStorage, SyncRunError } from "../src"
+import { InMemorySyncRunStorage } from "../src"
+import { SyncRunError } from "../src/storage"
 
 describe("InMemorySyncRunStorage", () => {
   test("starts and finishes a successful run with a checkpoint", async () => {

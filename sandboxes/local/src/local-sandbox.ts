@@ -5,7 +5,6 @@ import { dirname, join, resolve, sep } from "node:path"
 import {
   type CommandResult,
   type CreateSandboxOptions,
-  exec,
   type RunCommandOptions,
   type Sandbox,
   type SandboxFileRecord,
@@ -14,6 +13,7 @@ import {
   SandboxNotRunningError,
   type SandboxStatus,
 } from "@sixb/core"
+import { exec } from "@sixb/core/sandboxes"
 import { buildBwrapArgv } from "./isolation/bwrap"
 import {
   detectIsolation,

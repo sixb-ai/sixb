@@ -9,8 +9,8 @@ import type {
   SuspendUserAndRevokeSessionsInput,
   UserIdentityRecord,
   UserRecord,
-} from "@sixb/core"
-import { AuthStorageError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 import {
   authLockKey,

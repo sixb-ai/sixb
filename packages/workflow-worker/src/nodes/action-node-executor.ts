@@ -1,9 +1,8 @@
-import type { ActionRunFailure, ActionSubject, WorkflowActionNodeDefinition } from "@sixb/core"
-import {
-  ActionRunFailedError,
-  isObjectActionDefinition,
-  snapshotWorkflowActionInput,
-} from "@sixb/core"
+import type { ActionSubject } from "@sixb/core"
+import { ActionRunFailedError, isObjectActionDefinition } from "@sixb/core"
+import type { WorkflowActionNodeDefinition } from "@sixb/core/internal/workflows"
+import { snapshotWorkflowActionInput } from "@sixb/core/internal/workflows"
+import type { ActionRunFailure } from "@sixb/core/storage"
 import { WorkflowWorkerError } from "../errors"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { isRecord } from "../normalize"

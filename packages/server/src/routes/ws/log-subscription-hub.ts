@@ -1,12 +1,12 @@
-import {
-  BrokerCursorExpiredError,
-  type LogLevel,
-  type LogRunKind,
-  type LogRunRef,
-  type OntologySource,
-  type Sixb,
-  type StoredLogLine,
+import type {
+  LogLevel,
+  LogRunKind,
+  LogRunRef,
+  OntologySource,
+  Sixb,
+  StoredLogLine,
 } from "@sixb/core"
+import { BrokerCursorExpiredError } from "@sixb/core/broker"
 
 const MAX_CLIENT_RECORDS = 1_000
 const MAX_CLIENT_BYTES = 1_048_576

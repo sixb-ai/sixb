@@ -1,4 +1,4 @@
-import type { ActionEditCommitResult } from "@sixb/core"
+import type { ActionEditCommitResult } from "@sixb/core/internal/actions"
 import type { RunActionJobInput } from "../types"
 
 export async function emitLocalCommitEvents(

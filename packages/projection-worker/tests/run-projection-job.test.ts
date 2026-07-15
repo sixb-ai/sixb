@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  type BeginDatasetWriteInput,
   col,
   type DatasetDefinition,
   type DatasetRow,
@@ -20,13 +19,13 @@ import {
   type LakeStorage,
   link,
   type ProjectionDefinition,
-  type ProjectionRunStorage,
   prop,
-  type ReadDatasetRowsInput,
   Sixb,
   stringEnum,
   valueTypeRef,
 } from "@sixb/core"
+import type { BeginDatasetWriteInput, ReadDatasetRowsInput } from "@sixb/core/lake-storage"
+import type { ProjectionRunStorage } from "@sixb/core/storage"
 import { ProjectionWorkerError } from "../src/errors"
 import { runProjectionJob } from "../src/run-projection-job"
 import type { ProjectionWorkerContext } from "../src/types"

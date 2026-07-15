@@ -1,9 +1,6 @@
-import {
-  type DomainEvent,
-  type EventSelectorSpec,
-  type StoredDomainEvent,
-  scopeKeysForEvent,
-} from "@sixb/core"
+import type { DomainEvent, EventSelectorSpec } from "@sixb/core"
+import { scopeKeysForEvent } from "@sixb/core/events/scope"
+import type { StoredDomainEvent } from "@sixb/core/internal/events"
 import type { OrchestratorRouteKey } from "./types"
 
 /**

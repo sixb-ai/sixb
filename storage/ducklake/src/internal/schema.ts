@@ -1,10 +1,5 @@
-import {
-  type DatasetColumnDefinition,
-  type DatasetColumnType,
-  type DatasetSchema,
-  type FileRef,
-  LakeStorageError,
-} from "@sixb/core"
+import type { DatasetColumnDefinition, DatasetColumnType, DatasetSchema, FileRef } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import { quoteIdentifier } from "./sql"
 
 /**

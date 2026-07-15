@@ -2,19 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  commitActionEditBatch,
-  defineObjectType,
-  type EditBatch,
-  link,
-  migrateStorage,
-  ObjectStorageError,
-  OntologyRegistry,
-  planEditBatch,
-  prop,
-  type StoredObjectMutationEvent,
-} from "@sixb/core"
+import { defineObjectType, link, migrateStorage, OntologyRegistry, prop } from "@sixb/core"
 import { type RecordEditsHandler, recordEdits } from "@sixb/core/actions/worker"
+import { commitActionEditBatch } from "@sixb/core/internal/actions"
+import { type EditBatch, planEditBatch } from "@sixb/core/internal/edits"
+import type { StoredObjectMutationEvent } from "@sixb/core/internal/events"
+import { ObjectStorageError } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 
 const Customer = defineObjectType({

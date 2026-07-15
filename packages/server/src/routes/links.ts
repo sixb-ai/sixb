@@ -1,4 +1,5 @@
-import { isAllowed, type ObjectLinkRow, type OntologySource, type Sixb } from "@sixb/core"
+import { isAllowed, type OntologySource, type Sixb } from "@sixb/core"
+import type { ObjectLinkRow } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"

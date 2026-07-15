@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite"
+import type { JsonValue } from "@sixb/core"
 import type {
   FinishSyncRunInput,
-  JsonValue,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
@@ -10,8 +10,8 @@ import type {
   SyncRunFailure,
   SyncRunRecord,
   SyncRunStorage,
-} from "@sixb/core"
-import { SyncRunError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { SyncRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {

@@ -1,8 +1,8 @@
 import {
   AGENT_API_GATEWAY_PREFIX,
-  type AgentRunRecord,
   createAgentApiGatewayCapability,
-} from "@sixb/core"
+} from "@sixb/core/internal/agents"
+import type { AgentRunRecord } from "@sixb/core/storage"
 
 export function normalizeApiBaseUrl(value: string): string {
   const withoutTrailingSlash = value.trim().replace(/\/+$/, "")

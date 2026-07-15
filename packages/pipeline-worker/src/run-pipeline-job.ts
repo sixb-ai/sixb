@@ -1,5 +1,6 @@
-import type { DatasetVersion, PipelineRunRecord } from "@sixb/core"
-import { resolveLogsRuntime } from "@sixb/core"
+import { resolveLogsRuntime } from "@sixb/core/internal/logging"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
+import type { PipelineRunRecord } from "@sixb/core/storage"
 import {
   createPipelineBookkeepingError,
   requireFinishedAt,

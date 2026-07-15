@@ -1,4 +1,5 @@
-import type { AgentDefinition, AgentRunRecord, Sandbox } from "@sixb/core"
+import type { AgentDefinition, Sandbox } from "@sixb/core"
+import type { AgentRunRecord } from "@sixb/core/storage"
 import { renderAgentSkillCatalog } from "./agent-skills"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
 import { modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"

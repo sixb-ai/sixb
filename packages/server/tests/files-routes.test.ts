@@ -1,13 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
-  type AbortBlobUploadInput,
-  type BlobUploadSession,
   blobIdFromDigest,
-  type CompleteBlobUploadInput,
-  type CreateBlobUploadInput,
-  computeBlobDigest,
   DEFAULT_SIMPLE_FILE_UPLOAD_BYTES,
-  type DirectUploadBlobStorage,
   defineObjectType,
   type FileRef,
   InMemoryBlobStorage,
@@ -17,10 +11,18 @@ import {
   InMemoryStorage,
   type OntologySource,
   prop,
-  type SignBlobUploadPartInput,
-  type SignedBlobUploadPart,
   Sixb,
 } from "@sixb/core"
+import {
+  type AbortBlobUploadInput,
+  type BlobUploadSession,
+  type CompleteBlobUploadInput,
+  type CreateBlobUploadInput,
+  computeBlobDigest,
+  type DirectUploadBlobStorage,
+  type SignBlobUploadPartInput,
+  type SignedBlobUploadPart,
+} from "@sixb/core/blob-storage/server"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "../src/routes/files"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"

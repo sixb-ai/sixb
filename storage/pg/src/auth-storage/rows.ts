@@ -1,3 +1,4 @@
+import type { Principal } from "@sixb/core"
 import type {
   AccessTokenRecord,
   GroupMembershipRecord,
@@ -6,7 +7,6 @@ import type {
   InvitationStatus,
   MagicLinkRecord,
   OidcAuthorizationAttemptRecord,
-  Principal,
   ServiceAccountGroupMembershipRecord,
   ServiceAccountRecord,
   ServiceAccountStatus,
@@ -14,7 +14,7 @@ import type {
   UserIdentityRecord,
   UserRecord,
   UserStatus,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 
 type PgDate = Date | string
 

@@ -2,13 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  col,
-  type DatasetDefinition,
-  type DatasetRow,
-  type DatasetVersion,
-  defineDataset,
-} from "@sixb/core"
+import { col, type DatasetDefinition, type DatasetRow, defineDataset } from "@sixb/core"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { DuckLakeStorage } from "../src"
 import type { DuckLakeSnapshotReader } from "../src/internal/ducklake-snapshot-reader"
 import { collectRows, createLocalDuckLakeStorage } from "./test-utils"

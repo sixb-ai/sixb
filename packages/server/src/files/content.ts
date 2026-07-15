@@ -1,11 +1,5 @@
-import {
-  type BlobInfo,
-  type BlobStorage,
-  BlobStorageError,
-  type FileRef,
-  isFileRef,
-  supportsRangeRead,
-} from "@sixb/core"
+import { type BlobInfo, type BlobStorage, type FileRef, isFileRef } from "@sixb/core"
+import { BlobStorageError, supportsRangeRead } from "@sixb/core/blob-storage/server"
 import { ZodError } from "zod"
 
 export type FileContentDisposition = "inline" | "attachment"

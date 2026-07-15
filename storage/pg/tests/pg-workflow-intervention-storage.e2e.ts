@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { CreateWorkflowInterventionInput } from "@sixb/core"
-import { WorkflowInterventionError } from "@sixb/core"
+import type { CreateWorkflowInterventionInput } from "@sixb/core/storage"
+import { WorkflowInterventionError } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { PgWorkflowInterventionStorage } from "../src/pg-workflow-intervention-storage"
 import { createTestStorage } from "./helpers"

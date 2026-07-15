@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createHash, randomUUID } from "node:crypto"
-import { BlobStorageError, computeBlobDigest } from "@sixb/core"
+import { BlobStorageError, computeBlobDigest } from "@sixb/core/blob-storage/server"
 import { runBlobStorageContractSuite } from "@sixb/core/testing"
 import { S3Client } from "bun"
 import { S3BlobStorage } from "../src"

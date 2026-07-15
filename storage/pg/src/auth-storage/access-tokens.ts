@@ -4,8 +4,8 @@ import type {
   CreateAuthAccessTokenInput,
   ListAuthAccessTokensInput,
   ListAuthAccessTokensResult,
-} from "@sixb/core"
-import { AuthStorageError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import type { PgStoreClient } from "../transactions"
 import type { PgAuthAccessTokenRow, PgAuthServiceAccountRow, PgAuthUserRow } from "./rows"
 import { rowToAccessTokenRecord, serializeOptionalStringArray } from "./rows"

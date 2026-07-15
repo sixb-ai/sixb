@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { WorkflowRunError } from "@sixb/core"
+import { WorkflowRunError } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import { SqliteWorkflowRunStorage } from "../src/workflow-run-storage"
 

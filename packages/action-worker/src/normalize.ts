@@ -1,5 +1,5 @@
-import type { ActionRunFailure } from "@sixb/core"
-import { WorkerAbortError } from "@sixb/core"
+import { WorkerAbortError } from "@sixb/core/internal/workers"
+import type { ActionRunFailure } from "@sixb/core/storage"
 
 export function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) {

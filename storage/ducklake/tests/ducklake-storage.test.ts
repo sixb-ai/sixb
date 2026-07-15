@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { type DatasetDefinition, LakeStorageError } from "@sixb/core"
+import type { DatasetDefinition } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import { DuckLakeStorage } from "../src"
 import { createDuckDbRuntime } from "../src/internal/duckdb-runtime"
 

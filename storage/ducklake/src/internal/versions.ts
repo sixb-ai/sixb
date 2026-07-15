@@ -1,5 +1,5 @@
-import type { DatasetVersion } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 
 export interface SixbSchemaChangeMetadata {
   readonly addColumns?: readonly string[]

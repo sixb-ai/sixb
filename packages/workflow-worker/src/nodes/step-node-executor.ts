@@ -1,10 +1,10 @@
-import type { WorkflowStepNodeDefinition } from "@sixb/core"
+import type { WorkflowStepNodeDefinition } from "@sixb/core/internal/workflows"
 import {
   snapshotWorkflowStepInput,
   snapshotWorkflowStepOutput,
   validateWorkflowStepInput,
   validateWorkflowStepOutput,
-} from "@sixb/core"
+} from "@sixb/core/internal/workflows"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { throwIfAborted } from "../normalize"
 import { callWorkflowMapper, requireRecordInput } from "./mapper"

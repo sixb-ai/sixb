@@ -2,12 +2,9 @@ import { describe, expect, test } from "bun:test"
 import type {
   DatasetDefinition,
   DatasetRow,
-  DatasetWriteMode,
-  ExecuteSqlTransformInput,
   LakeStorage,
   LakeStorageWithSql,
   PipelineDefinition,
-  PipelineRunStorage,
 } from "@sixb/core"
 import {
   col,
@@ -17,6 +14,8 @@ import {
   InMemoryLakeStorage,
   InMemoryPipelineRunStorage,
 } from "@sixb/core"
+import type { DatasetWriteMode, ExecuteSqlTransformInput } from "@sixb/core/lake-storage"
+import type { PipelineRunStorage } from "@sixb/core/storage"
 import { runPipelineJob } from "../src/run-pipeline-job"
 import type { PipelineWorkerContext } from "../src/types"
 

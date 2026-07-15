@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto"
+import type { GroupDefinition } from "@sixb/core"
 import type {
-  AuthStorage,
-  GroupDefinition,
   InvitationDeliveryInput,
   InviteDeliveryResult,
   MagicLinkAuthStrategy,
@@ -13,7 +12,8 @@ import type {
   MagicLinkPeekResult,
   MagicLinkRequestInput,
   MagicLinkRequestResult,
-} from "@sixb/core"
+} from "@sixb/core/auth/strategy"
+import type { AuthStorage } from "@sixb/core/storage"
 import { createMagicLinkEmail, type SendMagicLinkInput } from "./email"
 import {
   MagicLinkRateLimiter,

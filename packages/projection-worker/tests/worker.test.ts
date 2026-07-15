@@ -13,10 +13,10 @@ import {
   InMemoryStorage,
   type LakeStorage,
   type ProjectionDefinition,
-  type ProjectionRunStorage,
   prop,
   Sixb,
 } from "@sixb/core"
+import type { ProjectionRunStorage } from "@sixb/core/storage"
 import { ProjectionWorker } from "../src"
 
 const Room = defineObjectType({

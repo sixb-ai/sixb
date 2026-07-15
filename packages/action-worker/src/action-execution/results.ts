@@ -1,5 +1,5 @@
-import type { ActionRunFailure, ActionRunRecord } from "@sixb/core"
-import { isTerminalActionRun } from "@sixb/core"
+import type { ActionRunFailure, ActionRunRecord } from "@sixb/core/storage"
+import { isTerminalActionRun } from "@sixb/core/storage"
 import { ActionWorkerError } from "../errors"
 import type { ActionRunResult, RunActionJobInput } from "../types"
 

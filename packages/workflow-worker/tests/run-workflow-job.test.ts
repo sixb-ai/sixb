@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
-  type ActionRunStorage,
   defineAction,
   defineIntervention,
   defineObjectType,
   defineWorkflow,
   defineWorkflowStep,
-  type EventsRuntime,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -20,9 +18,10 @@ import {
   Sixb,
   SYSTEM_PRINCIPAL,
   type WorkflowDefinition,
-  type WorkflowRunStorage,
   WorkflowValidationError,
 } from "@sixb/core"
+import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { ActionRunStorage, WorkflowRunStorage } from "@sixb/core/storage"
 import { WorkflowWorkerError } from "../src/errors"
 import { EventsRuntimeWorkflowRunObserver } from "../src/events"
 import { runWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"

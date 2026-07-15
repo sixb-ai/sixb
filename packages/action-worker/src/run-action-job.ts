@@ -1,5 +1,5 @@
-import type { ActionRunRecord } from "@sixb/core"
-import { isTerminalActionRun } from "@sixb/core"
+import type { ActionRunRecord } from "@sixb/core/storage"
+import { isTerminalActionRun } from "@sixb/core/storage"
 import { executeActionPhases } from "./action-execution/phases"
 import {
   canResumeRunningRun,

@@ -5,7 +5,7 @@ import type {
   WebhookDeliveryKey,
   WebhookDeliveryRecord,
   WebhookDeliveryStorage,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   closeSqliteStoreConnection,

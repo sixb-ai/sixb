@@ -1,8 +1,15 @@
 import type { Database } from "bun:sqlite"
+import type { ObjectQuery } from "@sixb/core"
+import type { EditCommitPlan } from "@sixb/core/internal/edits"
+import type {
+  StoredLinkDeletedEvent,
+  StoredLinkMutationEvent,
+  StoredObjectMutationEvent,
+  StoredTelemetryAppendedEvent,
+} from "@sixb/core/internal/events"
 import type {
   CountObjectsInput,
   CountObjectsResult,
-  EditCommitPlan,
   ExistsObjectsInput,
   ExistsObjectsResult,
   ExpandedLinkValue,
@@ -12,24 +19,19 @@ import type {
   LinkDirection,
   ObjectFacetRequest,
   ObjectLinkRow,
-  ObjectQuery,
   ObjectQueryCapabilities,
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,
   QueryObjectsInput,
   QueryObjectsResult,
-  StoredLinkDeletedEvent,
-  StoredLinkMutationEvent,
-  StoredObjectMutationEvent,
-  StoredTelemetryAppendedEvent,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import {
   editCommitLinkCreateConflict,
   editCommitLinkUpdateMissing,
   editCommitObjectCreateConflict,
   editCommitObjectUpdateMissing,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "./migrations"
 import { type CompiledObjectQuery, compileObjectQuery } from "./object-query-compiler"
 import {

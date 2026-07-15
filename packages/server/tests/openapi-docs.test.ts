@@ -6,11 +6,11 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  isCsrfExemptMethod,
   type OntologySource,
   prop,
   Sixb,
 } from "@sixb/core"
+import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
 import { ACCESS_TOKEN_ROUTES } from "../src/auth/access-token-boundary"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"

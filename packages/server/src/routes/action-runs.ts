@@ -1,4 +1,6 @@
-import { type ActionRunRecord, canViewActionRun, type OntologySource, type Sixb } from "@sixb/core"
+import type { OntologySource, Sixb } from "@sixb/core"
+import { canViewActionRun } from "@sixb/core/internal/authorization"
+import type { ActionRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"

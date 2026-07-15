@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test"
+import type { RuleDefinition, Storage } from "@sixb/core"
+import { InMemoryBroker, InMemoryStorage } from "@sixb/core"
 import type {
-  RuleDefinition,
-  Storage,
   StoredLinkCreatedEvent,
   StoredLinkDeletedEvent,
   StoredObjectCreatedEvent,
   StoredObjectDeletedEvent,
   StoredObjectUpdatedEvent,
-} from "@sixb/core"
-import { EventsRuntime, InMemoryBroker, InMemoryStorage } from "@sixb/core"
+} from "@sixb/core/internal/events"
+import { EventsRuntime } from "@sixb/core/internal/events"
 import {
   buildRuleDependencyIndex,
   evaluateRuleEvents,

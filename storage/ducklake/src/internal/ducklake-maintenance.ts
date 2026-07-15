@@ -1,4 +1,4 @@
-import { LakeStorageError } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import type {
   DuckLakeMaintenanceOptions,
   DuckLakeMaintenanceReport,

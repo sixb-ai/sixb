@@ -1,5 +1,6 @@
 import { posix } from "node:path"
-import type { AgentRunDiagnostic, BlobStorage, CommandResult, FileRef } from "@sixb/core"
+import type { BlobStorage, CommandResult, FileRef } from "@sixb/core"
+import type { AgentRunDiagnostic } from "@sixb/core/storage"
 import type { BashSandboxHandle } from "./bash-tool"
 
 const OUTPUT_COLLECTION_TIMEOUT_MS = 30_000

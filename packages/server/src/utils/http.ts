@@ -1,8 +1,5 @@
-import {
-  AuthorizationError,
-  FileUploadSessionError,
-  type FileUploadSessionErrorReason,
-} from "@sixb/core"
+import { AuthorizationError } from "@sixb/core"
+import { FileUploadSessionError, type FileUploadSessionErrorReason } from "@sixb/core/storage"
 import { RequestBodyTooLargeError } from "./request-body"
 
 export function toIsoString(value: Date): string {

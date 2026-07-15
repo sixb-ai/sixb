@@ -1,18 +1,19 @@
 import {
   type BlobDigest,
-  computeBlobDigest,
-  createFileUploadId,
-  createUploadExpiresAt,
   DEFAULT_SIMPLE_FILE_UPLOAD_BYTES,
   type FileRef,
-  type FileUploadSession,
-  FileUploadSessionError,
   InMemoryFileUploadSessions,
   type OntologySource,
   type Principal,
   type Sixb,
-  supportsDirectUpload,
 } from "@sixb/core"
+import { computeBlobDigest, supportsDirectUpload } from "@sixb/core/blob-storage/server"
+import {
+  createFileUploadId,
+  createUploadExpiresAt,
+  type FileUploadSession,
+  FileUploadSessionError,
+} from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"

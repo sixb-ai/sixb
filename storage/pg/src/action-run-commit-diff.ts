@@ -1,5 +1,5 @@
-import type { ActionRunCommitDiff } from "@sixb/core"
-import { normalizeActionRunCommitDiff } from "@sixb/core"
+import type { ActionRunCommitDiff } from "@sixb/core/storage"
+import { normalizeActionRunCommitDiff } from "@sixb/core/storage"
 import type { SQLClient } from "./pg-client"
 
 export async function insertActionRunCommitDiff(

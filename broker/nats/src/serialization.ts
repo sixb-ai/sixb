@@ -1,5 +1,5 @@
-import type { BrokerRecord, BrokerRecordInput } from "@sixb/core"
 import { getInvalidJsonValueReason, type JsonValue } from "@sixb/core"
+import type { BrokerRecord, BrokerRecordInput } from "@sixb/core/broker"
 import { NatsBrokerError } from "./errors"
 
 const textEncoder = new TextEncoder()

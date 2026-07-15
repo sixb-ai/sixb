@@ -1,15 +1,14 @@
+import type { OntologySource, Sixb, WorkflowDefinition } from "@sixb/core"
+import { canViewWorkflowIntervention, canViewWorkflowRun } from "@sixb/core/internal/authorization"
 import {
-  canViewWorkflowIntervention,
-  canViewWorkflowRun,
-  type OntologySource,
-  type Sixb,
   snapshotWorkflowInterventionResponse,
-  type WorkflowDefinition,
   type WorkflowInterventionNodeDefinition,
-  type WorkflowInterventionRecord,
-  type WorkflowNodeRunRecord,
-  type WorkflowRunRecord,
-} from "@sixb/core"
+} from "@sixb/core/internal/workflows"
+import type {
+  WorkflowInterventionRecord,
+  WorkflowNodeRunRecord,
+  WorkflowRunRecord,
+} from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"

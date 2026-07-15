@@ -1,6 +1,11 @@
 import type { Database } from "bun:sqlite"
-import type { AuthMagicLinkStore, CreateAuthMagicLinkInput, MagicLinkRecord } from "@sixb/core"
-import { AuthStorageError, resolveAuthSessionAudience } from "@sixb/core"
+import { resolveAuthSessionAudience } from "@sixb/core"
+import type {
+  AuthMagicLinkStore,
+  CreateAuthMagicLinkInput,
+  MagicLinkRecord,
+} from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthMagicLinkRow } from "./rows"
 import { rowToMagicLinkRecord } from "./rows"

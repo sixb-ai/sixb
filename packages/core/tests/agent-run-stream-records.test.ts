@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import type { AgentRunRecord } from "../src"
+import { InMemoryBroker } from "../src"
+import { publishAgentRunFinished } from "../src/agents"
 import {
   agentRunFinishedEvent,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
-  InMemoryBroker,
-  publishAgentRunFinished,
-} from "../src"
+} from "../src/agents/streams"
+import type { AgentRunRecord } from "../src/storage"
 
 const OCCURRED_AT = new Date("2026-01-02T03:04:05.000Z")
 

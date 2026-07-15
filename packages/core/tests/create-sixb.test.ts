@@ -19,7 +19,6 @@ import {
   defineValueType,
   defineWorkflow,
   defineWorkflowStep,
-  EVENTS_STREAM,
   events,
   fromForeignKey,
   link,
@@ -28,6 +27,7 @@ import {
   RuntimeError,
   ref,
 } from "../src"
+import { EVENTS_STREAM } from "../src/events"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index.ts")).href

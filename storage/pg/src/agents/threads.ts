@@ -5,7 +5,7 @@ import {
   type CreateAgentThreadInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { SqlParameter } from "../pg-client"
 import { isUniqueViolation } from "../storage-errors"
 import type { PgStoreClient } from "../transactions"

@@ -12,19 +12,21 @@ import {
 } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
 import {
+  type DatasetDefinition,
+  type DatasetRow,
+  getDatasetRowValidationError,
+  type LakeStorage,
+} from "@sixb/core"
+import {
   type BeginDatasetWriteInput,
   type CommitDatasetWriteInput,
   type DatasetCatalogState,
-  type DatasetDefinition,
-  type DatasetRow,
   type DatasetVersion,
-  getDatasetRowValidationError,
-  type LakeStorage,
   LakeStorageError,
   type LakeWriteSession,
   mergeStrictDatasetDefinition,
   type ReadDatasetRowsInput,
-} from "@sixb/core"
+} from "@sixb/core/lake-storage"
 import type {
   CommitWriteInput,
   DatasetState,

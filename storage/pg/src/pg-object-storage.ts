@@ -1,7 +1,14 @@
+import type { ObjectQuery } from "@sixb/core"
+import type { EditCommitPlan } from "@sixb/core/internal/edits"
+import type {
+  StoredLinkDeletedEvent,
+  StoredLinkMutationEvent,
+  StoredObjectMutationEvent,
+  StoredTelemetryAppendedEvent,
+} from "@sixb/core/internal/events"
 import type {
   CountObjectsInput,
   CountObjectsResult,
-  EditCommitPlan,
   ExistsObjectsInput,
   ExistsObjectsResult,
   ExpandedLinkValue,
@@ -10,25 +17,20 @@ import type {
   FacetObjectsResult,
   LinkDirection,
   ObjectLinkRow,
-  ObjectQuery,
   ObjectQueryCapabilities,
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,
   QueryObjectsInput,
   QueryObjectsResult,
-  StoredLinkDeletedEvent,
-  StoredLinkMutationEvent,
-  StoredObjectMutationEvent,
-  StoredTelemetryAppendedEvent,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import {
   editCommitLinkCreateConflict,
   editCommitLinkUpdateMissing,
   editCommitObjectCreateConflict,
   editCommitObjectUpdateMissing,
   ObjectStorageError,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import {
   type CompiledPgObjectQuery,

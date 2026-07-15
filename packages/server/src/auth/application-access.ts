@@ -1,10 +1,10 @@
 import {
-  type AuthenticatedRequestAuthSession,
   type AuthSessionAudience,
   canAccessApplication,
   type OntologySource,
   type Sixb,
 } from "@sixb/core"
+import type { AuthenticatedRequestAuthSession } from "@sixb/core/internal/auth"
 
 export function sessionCanAccessApplication(
   sixb: Sixb<readonly OntologySource[]>,

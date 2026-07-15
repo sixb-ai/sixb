@@ -1,19 +1,19 @@
 import {
   AuthorizationError,
-  countObjects,
-  type ExpandedLinkValue,
-  type ExpandedObjectRow,
-  executeObjectQuery,
-  existsObjects,
-  facetObjects,
   type ObjectQuery,
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
   ObjectQueryValidationError,
-  type ObjectRowLinks,
   type OntologySource,
   type Sixb,
 } from "@sixb/core"
+import {
+  countObjects,
+  executeObjectQuery,
+  existsObjects,
+  facetObjects,
+} from "@sixb/core/internal/query"
+import type { ExpandedLinkValue, ExpandedObjectRow, ObjectRowLinks } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"

@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
   can,
-  createAgentApiGatewayCapability,
-  createAgentRunExecutionToken,
   defineGroup,
   defineObjectType,
   defineRole,
@@ -15,6 +13,10 @@ import {
   prop,
   Sixb,
 } from "@sixb/core"
+import {
+  createAgentApiGatewayCapability,
+  createAgentRunExecutionToken,
+} from "@sixb/core/internal/agents"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 

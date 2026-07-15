@@ -1,14 +1,7 @@
 import { randomUUID } from "node:crypto"
-import {
-  assertAuthorized,
-  canViewPipelineRun,
-  type OntologySource,
-  type PipelineDefinition,
-  type PipelineRunRecord,
-  type PipelineStepExecutor,
-  type PipelineStepRunRecord,
-  type Sixb,
-} from "@sixb/core"
+import type { OntologySource, PipelineDefinition, PipelineStepExecutor, Sixb } from "@sixb/core"
+import { assertAuthorized, canViewPipelineRun } from "@sixb/core/internal/authorization"
+import type { PipelineRunRecord, PipelineStepRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"

@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
+import type { AuthSessionAudience } from "@sixb/core"
 import type {
-  AuthSessionAudience,
   CompleteAuthSessionInput,
   CreateAuthSessionInput,
   GroupMembershipRecord,
@@ -9,8 +9,8 @@ import type {
   OidcAuthorizationAttemptRecord,
   UpsertAuthGroupMembershipInput,
   UserRecord,
-} from "@sixb/core"
-import { AuthStorageError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import { isUniqueConstraintError } from "../storage-errors"
 import type {
   SqliteAuthGroupMembershipRow,

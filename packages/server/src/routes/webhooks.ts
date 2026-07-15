@@ -3,17 +3,19 @@ import type {
   ConnectorAdapter,
   ConnectorClient,
   ConnectorDefinition,
-  FinishWebhookRunStatus,
   Logger,
   OntologySource,
   RegisteredWebhook,
   Sixb,
   WebhookDefinition,
-  WebhookDeliveryClaimResult,
-  WebhookDeliveryKey,
   WebhookMetadata,
   WebhookResponse,
 } from "@sixb/core"
+import type {
+  FinishWebhookRunStatus,
+  WebhookDeliveryClaimResult,
+  WebhookDeliveryKey,
+} from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
 

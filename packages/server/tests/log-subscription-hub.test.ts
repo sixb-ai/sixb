@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import {
-  InMemoryBroker,
-  LOGS_STREAM,
-  LogsRuntime,
-  type OntologySource,
-  type Sixb,
-} from "@sixb/core"
+import { InMemoryBroker, type OntologySource, type Sixb } from "@sixb/core"
+import { LOGS_STREAM, LogsRuntime } from "@sixb/core/internal/logging"
 import { LogSubscriptionHub } from "../src/routes/ws/log-subscription-hub"
 
 const PROJECT_ID = "log-subscription-hub-test"

@@ -1,14 +1,11 @@
+import { type OntologySource, resolveAuthorizationContext, type Sixb } from "@sixb/core"
 import {
   AGENT_API_GATEWAY_PREFIX,
   AGENT_API_ROUTES,
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
-  normalizeRoutePath,
-  type OntologySource,
-  pathSegmentsFor,
-  resolveAuthorizationContext,
-  type Sixb,
-} from "@sixb/core"
+} from "@sixb/core/internal/agents"
+import { normalizeRoutePath, pathSegmentsFor } from "@sixb/core/internal/http"
 import type { Elysia } from "elysia"
 import { registerInternalRequestAuthState } from "../auth/scope"
 

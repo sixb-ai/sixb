@@ -4,14 +4,12 @@ import type {
   ConnectorClient,
   ConnectorDefinition,
   DatasetDefinition,
-  DatasetVersion,
-  DatasetWriteMode,
   LakeStorage,
-  LogsRuntime,
   SyncDefinition,
-  SyncRunRecord,
-  SyncRunStorage,
 } from "@sixb/core"
+import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { DatasetVersion, DatasetWriteMode } from "@sixb/core/lake-storage"
+import type { SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
 
 export interface SyncWorkerContext {
   readonly id: string

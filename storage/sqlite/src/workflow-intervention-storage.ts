@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowInterventionInput,
   CreateWorkflowInterventionInput,
@@ -9,9 +10,8 @@ import type {
   WorkflowInterventionActor,
   WorkflowInterventionRecord,
   WorkflowInterventionStorage,
-  WorkflowIOSnapshot,
-} from "@sixb/core"
-import { WorkflowInterventionError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { WorkflowInterventionError } from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "./migrations"
 import { isUniqueConstraintError } from "./storage-errors"
 import {

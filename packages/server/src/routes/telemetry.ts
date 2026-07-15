@@ -1,4 +1,5 @@
-import { getTelemetryHistoryBatch, isAllowed, type OntologySource, type Sixb } from "@sixb/core"
+import { isAllowed, type OntologySource, type Sixb } from "@sixb/core"
+import { getTelemetryHistoryBatch } from "@sixb/core/internal/objects"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"

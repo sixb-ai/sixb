@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto"
+import type { StorageMigrator } from "@sixb/core"
 import type {
   MigrationHistoryStore,
   MigrationRecord,
   MigrationSet,
   MigrationStep,
   MigrationStepOptions,
-  StorageMigrator,
-} from "@sixb/core"
-import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@sixb/core"
+} from "@sixb/core/storage"
+import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@sixb/core/storage"
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 

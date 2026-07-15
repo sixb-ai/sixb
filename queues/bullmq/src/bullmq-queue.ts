@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto"
+import type { Queue } from "@sixb/core"
 import {
   type ClaimedQueueJob,
   type NewQueueJob,
-  type Queue,
   QueueError,
   type QueueJob,
   type QueueJobError,
-} from "@sixb/core"
+} from "@sixb/core/queues"
 import {
   type Job as BullJob,
   Queue as BullQueue,

@@ -1,32 +1,31 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
+import type { AuthSessionAudience, GroupDefinition, OntologySource, Sixb } from "@sixb/core"
 import {
-  type AccessTokenRecord,
   type AuthenticatedUserRequestSession,
   type AuthRequestResult,
   AuthRuntimeError,
-  type AuthSessionAudience,
-  type AuthStorage,
-  AuthStorageError,
   clearCsrfCookieHeader,
   clearSessionCookieHeader,
   createCsrfCookieHeader,
   createSessionCookieHeader,
   createSessionCredential,
-  type GroupDefinition,
   generateCsrfToken,
   getCookie,
-  type InvitationRecord,
   isMagicLinkAuthStrategy,
   isOidcAuthStrategy,
   type MagicLinkAuthStrategy,
   type MemberSummary,
-  type OntologySource,
-  type ServiceAccountRecord,
-  type Sixb,
   shouldUseSecureCookies,
-  type UserRecord,
   verifyDoubleSubmitCsrf,
-} from "@sixb/core"
+} from "@sixb/core/internal/auth"
+import {
+  type AccessTokenRecord,
+  type AuthStorage,
+  AuthStorageError,
+  type InvitationRecord,
+  type ServiceAccountRecord,
+  type UserRecord,
+} from "@sixb/core/storage"
 import { type Elysia, t } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { sessionCanAccessApplication } from "../auth/application-access"

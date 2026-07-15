@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test"
+import { InMemoryBroker } from "../src"
 import {
   buildLinkDeletedEvent,
   buildObjectDeletedEvent,
   buildObjectUpsertEvent,
   EventsRuntime,
-  InMemoryBroker,
-  scopeKeysForEvent,
-} from "../src"
+} from "../src/events"
+import { scopeKeysForEvent } from "../src/events/scope"
 
 describe("object/link event drafts", () => {
   test("carries typed mutation origin instead of generic metadata", () => {

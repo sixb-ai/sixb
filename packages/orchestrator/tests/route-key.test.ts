@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { StoredDomainEvent } from "@sixb/core"
+import type { StoredDomainEvent } from "@sixb/core/internal/events"
 import { routeKeyForEvent, routeKeysForEvent } from "../src/route-key"
 
 function makeScheduleTriggeredEvent(scheduleId: string): StoredDomainEvent {

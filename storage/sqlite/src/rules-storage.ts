@@ -1,13 +1,12 @@
 import type { Database } from "bun:sqlite"
+import type { RuleEventSubject } from "@sixb/core"
+import type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "@sixb/core/internal/events"
 import type {
   ListActiveRuleStatesInput,
   ListActiveRuleStatesResult,
-  RuleEventSubject,
   RuleStateRecord,
   RulesStorage,
-  StoredRuleResolvedEvent,
-  StoredRuleTriggeredEvent,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   closeSqliteStoreConnection,

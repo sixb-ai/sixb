@@ -3,13 +3,15 @@ import type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
+  SixbRuntimeContext,
+  TelemetryProjectionDefinition,
+} from "@sixb/core"
+import type {
   ProjectionKind,
   ProjectionRunCounters,
   ProjectionRunRecord,
   ProjectionRunStorage,
-  SixbRuntimeContext,
-  TelemetryProjectionDefinition,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 
 export interface ProjectionWorkerContext extends SixbRuntimeContext {
   readonly projectionRunsStorage: ProjectionRunStorage

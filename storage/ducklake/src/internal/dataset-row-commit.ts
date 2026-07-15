@@ -1,4 +1,5 @@
-import { type DatasetDefinition, type DatasetWriteMode, LakeStorageError } from "@sixb/core"
+import type { DatasetDefinition } from "@sixb/core"
+import { type DatasetWriteMode, LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { getBigIntLike } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"

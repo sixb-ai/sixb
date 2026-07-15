@@ -1,4 +1,5 @@
-import type { AgentRunRecord, AuthorizationContext, OntologySource, ScopedSixb } from "@sixb/core"
+import type { AuthorizationContext, OntologySource, ScopedSixb } from "@sixb/core"
+import type { AgentRunRecord } from "@sixb/core/storage"
 
 /**
  * Per-request authorization state attached by the server's auth derive.

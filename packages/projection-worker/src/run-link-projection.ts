@@ -4,8 +4,8 @@ import {
   getDatasetRowValidationError,
   type LinkProjectionDefinition,
   ObjectNotFoundError,
-  objectService,
 } from "@sixb/core"
+import { objectService } from "@sixb/core/internal/objects"
 import { type FlushContext, runStreamingProjection } from "./run-streaming-projection"
 import type {
   ProjectionExecutionResult,

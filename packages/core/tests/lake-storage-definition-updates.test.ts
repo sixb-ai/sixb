@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import type { DatasetDefinition, LakeStorage } from "../src"
+import { col, defineDataset, InMemoryLakeStorage } from "../src"
 import {
   assertLakeDatasetDefinitionsCompatible,
-  col,
-  defineDataset,
-  InMemoryLakeStorage,
   mergeStrictDatasetDefinition,
   planDatasetDefinitionUpdate,
-} from "../src"
+} from "../src/lake-storage"
 
 describe("dataset definition update planning", () => {
   test("returns no change for an unchanged definition", () => {

@@ -4,7 +4,7 @@ import {
   type DuckDBValue,
   type DuckDBAppender as NodeDuckDBAppender,
 } from "@duckdb/node-api"
-import { LakeStorageError } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckDbRuntimeOptions, DuckLakeStorageOptions } from "../types"
 import {
   buildAttachSql,

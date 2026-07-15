@@ -3,7 +3,6 @@ import { dirname } from "node:path"
 import {
   type CommandResult,
   type CreateSandboxOptions,
-  exec,
   type RunCommandOptions,
   type Sandbox,
   SandboxError,
@@ -12,6 +11,7 @@ import {
   SandboxNotRunningError,
   type SandboxStatus,
 } from "@sixb/core"
+import { exec } from "@sixb/core/sandboxes"
 import {
   buildCreateArgv,
   buildExecArgv,

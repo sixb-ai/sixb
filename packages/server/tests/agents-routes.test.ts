@@ -1,12 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
-  type AgentStorage,
-  agentRunControlStreamId,
-  agentRunStreamId,
   agents as agentScope,
   can,
-  createAgentRunExecutionToken,
-  createSessionCredential,
   defineAgent,
   defineGroup,
   defineRole,
@@ -18,6 +13,10 @@ import {
   type OntologySource,
   Sixb,
 } from "@sixb/core"
+import { agentRunControlStreamId, agentRunStreamId } from "@sixb/core/agents/streams"
+import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
+import { createSessionCredential } from "@sixb/core/internal/auth"
+import type { AgentStorage } from "@sixb/core/storage"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 

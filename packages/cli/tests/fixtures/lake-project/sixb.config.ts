@@ -9,10 +9,10 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  LakeStorageError,
   prop,
   Sixb,
 } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 
 const Room = defineObjectType({
   id: "Room",

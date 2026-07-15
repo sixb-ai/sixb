@@ -1,12 +1,12 @@
+import { AGENT_MESSAGE_CONTENT_VERSION } from "@sixb/core/internal/agents"
 import {
-  AGENT_MESSAGE_CONTENT_VERSION,
   type AgentMessageRecord,
   type AgentMessageStore,
   AgentStorageError,
   type AppendAgentMessageInput,
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { SqlParameter } from "../pg-client"
 import { isUniqueViolation } from "../storage-errors"
 import { type PgStoreClient, runPgTransaction } from "../transactions"

@@ -1,10 +1,10 @@
+import type { StoredTelemetryAppendedEvent } from "@sixb/core/internal/events"
 import type {
-  StoredTelemetryAppendedEvent,
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
   TimeseriesPoint,
   TimeseriesStorage,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { SqlParameter } from "./pg-client"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 

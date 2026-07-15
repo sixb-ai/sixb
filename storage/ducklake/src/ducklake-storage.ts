@@ -1,13 +1,11 @@
+import type { DatasetDefinition, DatasetRow, LakeStorageWithSql } from "@sixb/core"
 import type {
   BeginDatasetWriteInput,
   DatasetCatalogState,
-  DatasetDefinition,
-  DatasetRow,
   DatasetVersion,
-  LakeStorageWithSql,
   LakeWriteSession,
   ReadDatasetRowsInput,
-} from "@sixb/core"
+} from "@sixb/core/lake-storage"
 import { DuckLakeConnectionManager } from "./internal/ducklake-connection-manager"
 import { DuckLakeDatasetCatalog } from "./internal/ducklake-dataset-catalog"
 import { DuckLakeMaintenance } from "./internal/ducklake-maintenance"

@@ -4,7 +4,7 @@ import type {
   StoredLinkMutationEvent,
   StoredObjectMutationEvent,
   StoredTelemetryAppendedEvent,
-} from "@sixb/core"
+} from "@sixb/core/internal/events"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 

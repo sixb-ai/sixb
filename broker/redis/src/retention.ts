@@ -1,4 +1,4 @@
-import type { BrokerRetention, BrokerStreamDefinition } from "@sixb/core"
+import type { BrokerRetention, BrokerStreamDefinition } from "@sixb/core/broker"
 import { RedisBrokerError } from "./errors"
 
 export interface NormalizedRetention {

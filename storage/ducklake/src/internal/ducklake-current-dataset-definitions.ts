@@ -1,5 +1,5 @@
 import type { DatasetDefinition } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import {
   getBigIntLike,

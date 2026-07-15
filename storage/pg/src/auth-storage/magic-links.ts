@@ -1,5 +1,10 @@
-import type { AuthMagicLinkStore, CreateAuthMagicLinkInput, MagicLinkRecord } from "@sixb/core"
-import { AuthStorageError, resolveAuthSessionAudience } from "@sixb/core"
+import { resolveAuthSessionAudience } from "@sixb/core"
+import type {
+  AuthMagicLinkStore,
+  CreateAuthMagicLinkInput,
+  MagicLinkRecord,
+} from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import {
   authLockKey,
   lockAdvisoryKeys,

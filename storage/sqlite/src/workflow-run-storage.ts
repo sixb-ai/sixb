@@ -1,4 +1,6 @@
 import type { Database } from "bun:sqlite"
+import type { WorkflowRunSource } from "@sixb/core"
+import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
@@ -14,14 +16,12 @@ import type {
   StartWorkflowRunInput,
   WaitWorkflowNodeRunInput,
   WaitWorkflowRunInput,
-  WorkflowIOSnapshot,
   WorkflowNodeRunRecord,
   WorkflowNodeRunStorage,
   WorkflowRunRecord,
-  WorkflowRunSource,
   WorkflowRunStorage,
-} from "@sixb/core"
-import { WorkflowRunError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { WorkflowRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {

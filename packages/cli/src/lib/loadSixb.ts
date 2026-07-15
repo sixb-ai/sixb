@@ -1,8 +1,6 @@
 import { pathToFileURL } from "node:url"
 import type {
   ActionDefinition,
-  AgentsRuntime,
-  AuthRuntime,
   Broker,
   ConnectorAdapter,
   ConnectorClient,
@@ -11,7 +9,6 @@ import type {
   FunctionDefinition,
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
-  ObjectRow,
   PipelineDefinition,
   ProjectionDefinition,
   RuleDefinition,
@@ -19,8 +16,11 @@ import type {
   SixbRuntimeContext,
   SyncDefinition,
   TelemetryProjectionDefinition,
-  WorkflowsRuntime,
 } from "@sixb/core"
+import type { AgentsRuntime } from "@sixb/core/internal/agents"
+import type { AuthRuntime } from "@sixb/core/internal/auth"
+import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
+import type { ObjectRow } from "@sixb/core/storage"
 
 export interface LoadedSixb extends SixbRuntimeContext {
   readonly id: string

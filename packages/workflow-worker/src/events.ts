@@ -1,10 +1,10 @@
+import type { EventsRuntime } from "@sixb/core/internal/events"
 import type {
-  EventsRuntime,
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
   WorkflowRunStatus,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type {
   WorkflowNodeLifecycleContext,
   WorkflowRunObserver,

@@ -3,7 +3,7 @@ import type {
   ObjectStorage,
   QueryObjectsInput,
   QueryObjectsResult,
-} from "../src"
+} from "../src/storage"
 
 const capabilities: ObjectQueryCapabilities = {
   queryObjects: true,

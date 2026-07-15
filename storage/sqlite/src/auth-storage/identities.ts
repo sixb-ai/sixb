@@ -3,7 +3,7 @@ import type {
   AuthUserIdentityStore,
   UpsertAuthUserIdentityInput,
   UserIdentityRecord,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { SqliteAuthUserIdentityRow } from "./rows"
 import { rowToIdentityRecord, serializeOptionalRecord } from "./rows"
 import { assertNonEmpty, dateOrNow, getIdentityRowBySubject, toIso } from "./shared"
