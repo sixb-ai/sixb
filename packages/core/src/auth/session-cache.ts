@@ -18,6 +18,7 @@ export interface SessionCacheGetInput {
 export interface SessionCacheSetInput extends SessionCacheGetInput {
   readonly session: AuthenticatedAuthSession
   readonly sessionExpiresAtMs: number
+  readonly sessionAbsoluteExpiresAtMs?: number
 }
 
 /**
@@ -30,8 +31,8 @@ export interface SessionCacheSetInput extends SessionCacheGetInput {
  * per session per window.
  *
  * Safety: entries are pinned to the exact token hash + audience that produced them and
- * are never served past the session's real `expiresAt`. The short TTL bounds how long a
- * revoked session can linger; sign-out additionally invalidates eagerly via
+ * are never served past the session's rolling or absolute deadline. The short TTL bounds how long
+ * a revoked session can linger; sign-out additionally invalidates eagerly via
  * {@link SessionCache.invalidate}.
  */
 export class SessionCache {
@@ -62,7 +63,11 @@ export class SessionCache {
 
   set(input: SessionCacheSetInput): void {
     // Never let a cached session outlive the real session it represents.
-    const expiresAtMs = Math.min(input.nowMs + this.ttlMs, input.sessionExpiresAtMs)
+    const expiresAtMs = Math.min(
+      input.nowMs + this.ttlMs,
+      input.sessionExpiresAtMs,
+      input.sessionAbsoluteExpiresAtMs ?? Number.POSITIVE_INFINITY
+    )
     if (expiresAtMs <= input.nowMs) {
       return
     }

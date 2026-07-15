@@ -155,13 +155,16 @@ Each handler receives a context object. Every phase gets `params` (validated), `
 | Phase | Added context fields |
 | --- | --- |
 | `validate` | `target` (object actions) |
-| `writeback` | `target` (object actions), `sixb` (connectors + telemetry) |
+| `writeback` | `target` (object actions), `sixb` (connectors + telemetry + immutable blobs) |
 | `edits` | `objects` (edit facade), `read` (read facade), `writeback` (writeback's return value) |
 | `effects` | `sixb`, `commit` (the committed diff), `writeback` |
 
 `writeback` runs an external call before the local commit, and its return value flows into `edits`
 and `effects` as `writeback` (see the `markPaid` example above, which carries the ERP receipt id
-into the edit). The `edits` handler can also read current committed state through `read` and stage
+into the edit). Writeback and effects handlers can stream immutable file content into Sixb with
+`sixb.blobs.put(...)`, inspect it with `sixb.blobs.stat(...)`, and reopen it with
+`sixb.blobs.open(...)`; the resulting `FileRef` is JSON-safe and can flow into `edits`. The `edits`
+handler can also read current committed state through `read` and stage
 writes through `objects`. This `sendReminder` gates its edit on an approval read at edit time:
 
 ```ts

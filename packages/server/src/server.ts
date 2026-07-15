@@ -24,6 +24,8 @@ import {
 } from "./auth/browser-origin"
 import { ServerAuthGuard } from "./auth/guard"
 import { consumeInternalRequestAuthState } from "./auth/scope"
+import { SESSION_ACTIVITY_HEADER_NAME } from "./auth/session-activity"
+import { createSessionRenewalCookieHeaders } from "./auth/session-cookies"
 import {
   SIXB_BEARER_SECURITY_SCHEME,
   SIXB_BEARER_SECURITY_SCHEME_ID,
@@ -168,7 +170,12 @@ export function createSixbApi(server: SixbServer) {
       origin: (request) => isAllowedApiBrowserOrigin(apiBrowserPolicy, request),
       credentials: true,
       methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["authorization", "content-type", CSRF_HEADER_NAME],
+      allowedHeaders: [
+        "authorization",
+        "content-type",
+        CSRF_HEADER_NAME,
+        SESSION_ACTIVITY_HEADER_NAME,
+      ],
       exposeHeaders: [],
       maxAge: 600,
     })
@@ -193,6 +200,27 @@ export function createSixbApi(server: SixbServer) {
       return { auth, authz, scoped: sixb.as(authz) }
     })
     .onBeforeHandle(({ auth }) => (auth.kind === "deny" ? auth.response : undefined))
+    .mapResponse(({ auth, request, set }) => {
+      if (
+        !auth ||
+        auth.kind !== "allow" ||
+        auth.session?.credentialSource !== "session" ||
+        auth.session.sessionRenewed !== true
+      ) {
+        return
+      }
+
+      const renewal = createSessionRenewalCookieHeaders({
+        sixb,
+        request,
+        session: auth.session,
+      })
+      if (!renewal) {
+        return
+      }
+
+      appendSetCookieHeaders(set, renewal.headers)
+    })
 
   app.use(
     openapi({
@@ -241,6 +269,28 @@ export function createSixbApi(server: SixbServer) {
   registerWebSocketRoutes(app, server)
 
   return app
+}
+
+interface ElysiaSet {
+  headers?: unknown
+}
+
+function appendSetCookieHeaders(set: ElysiaSet, values: readonly string[]): void {
+  if (set.headers instanceof Headers) {
+    for (const value of values) set.headers.append("set-cookie", value)
+    return
+  }
+
+  if (!set.headers || typeof set.headers !== "object" || Array.isArray(set.headers)) {
+    set.headers = {}
+  }
+
+  const headers = set.headers as Record<string, string | number | string[] | undefined>
+  const existing = headers["set-cookie"]
+  headers["set-cookie"] = [
+    ...(existing === undefined ? [] : Array.isArray(existing) ? existing : [String(existing)]),
+    ...values,
+  ]
 }
 
 function rejectDisallowedBrowserOrigin(

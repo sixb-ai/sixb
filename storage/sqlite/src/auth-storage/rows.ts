@@ -67,6 +67,7 @@ export interface SqliteAuthSessionRow {
   readonly token_hash: string
   readonly created_at: string
   readonly expires_at: string
+  readonly absolute_expires_at: string | null
   readonly revoked_at: string | null
   readonly last_seen_at: string | null
   readonly user_agent: string | null
@@ -211,6 +212,7 @@ export function rowToSessionRecord(row: SqliteAuthSessionRow): SessionRecord {
     tokenHash: row.token_hash,
     createdAt: new Date(row.created_at),
     expiresAt: new Date(row.expires_at),
+    absoluteExpiresAt: row.absolute_expires_at ? new Date(row.absolute_expires_at) : undefined,
     revokedAt: row.revoked_at ? new Date(row.revoked_at) : undefined,
     lastSeenAt: row.last_seen_at ? new Date(row.last_seen_at) : undefined,
     userAgent: row.user_agent ?? undefined,

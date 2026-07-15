@@ -39,6 +39,8 @@ import {
   type ResolveAuthRedirectContext,
   type ResolveRequestAuthContext,
 } from "../auth/browser-origin"
+import { hasForegroundSessionActivity } from "../auth/session-activity"
+import { createSessionRenewalCookieHeaders } from "../auth/session-cookies"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
@@ -125,19 +127,52 @@ export function registerAuthRoutes(
       "/api/auth/session",
       async ({ request }) => {
         const authOptions = resolveAuthOptions(options, request)
-        const session = await sixb.auth.getSession(request, authOptions)
+        let session = await sixb.auth.getSession(request, authOptions)
         if (!session.authenticated) {
           return jsonResponse({ authenticated: false as const }, 200)
         }
 
+        let applicationAccessAllowed = sessionCanAccessApplication(
+          sixb,
+          session,
+          authOptions.audience
+        )
+        if (applicationAccessAllowed && hasForegroundSessionActivity(request)) {
+          session = await sixb.auth.getSession(request, {
+            ...authOptions,
+            sessionActivity: "foreground",
+          })
+          if (!session.authenticated) {
+            return jsonResponse({ authenticated: false as const }, 200)
+          }
+          applicationAccessAllowed = sessionCanAccessApplication(
+            sixb,
+            session,
+            authOptions.audience
+          )
+        }
+
         const cookieOptions = sixb.auth.getCookieOptions(authOptions)
-        const csrf = resolveSessionCsrfToken({ sixb, request, cookieOptions })
+        const csrf = resolveSessionCsrfToken({
+          request,
+          cookieOptions,
+          expiresAt: session.session.expiresAt,
+        })
+        const renewal =
+          session.sessionRenewed === true
+            ? createSessionRenewalCookieHeaders({
+                sixb,
+                request,
+                session,
+                csrfToken: csrf.token,
+              })
+            : null
         return authSessionJsonResponse(
           {
             authenticated: true as const,
             csrfToken: csrf.token,
             applicationAccess: {
-              allowed: sessionCanAccessApplication(sixb, session, authOptions.audience),
+              allowed: applicationAccessAllowed,
               audience: authOptions.audience,
             },
             user: {
@@ -152,7 +187,7 @@ export function registerAuthRoutes(
               expiresAt: toIsoString(session.session.expiresAt),
             },
           },
-          csrf.setCookie
+          renewal?.headers ?? (csrf.setCookie ? [csrf.setCookie] : [])
         )
       },
       {
@@ -1372,7 +1407,7 @@ export function registerAuthRoutes(
                 audience: authOptions.audience,
                 tokenHash: sessionCredential.tokenHash,
                 createdAt: now,
-                expiresAt: new Date(now.getTime() + sixb.auth.getSessionTtlMs()),
+                ...sixb.auth.createSessionDeadlines(now),
                 ...device,
               },
             })
@@ -1383,6 +1418,7 @@ export function registerAuthRoutes(
               apiOrigin: options.resolveAuthRequestOrigin(request),
               sessionCredential,
               audience: result.session.audience,
+              expiresAt: result.session.expiresAt,
               returnTo: result.returnTo,
             })
           } catch (error) {
@@ -1505,7 +1541,7 @@ async function completeMagicLinkCallback(input: {
         audience: authOptions.audience,
         tokenHash: sessionCredential.tokenHash,
         createdAt: now,
-        expiresAt: new Date(now.getTime() + input.sixb.auth.getSessionTtlMs()),
+        ...input.sixb.auth.createSessionDeadlines(now),
         ...device,
       },
     })
@@ -1516,6 +1552,7 @@ async function completeMagicLinkCallback(input: {
       apiOrigin: input.options.resolveAuthRequestOrigin(input.request),
       sessionCredential,
       audience: result.session.audience,
+      expiresAt: result.session.expiresAt,
       returnTo: result.returnTo,
     })
     if (input.clearPendingCookie) {
@@ -1557,6 +1594,7 @@ function sessionCallbackCompletionResponse(input: {
   readonly apiOrigin: string
   readonly sessionCredential: ReturnType<typeof createSessionCredential>
   readonly audience: AuthSessionAudience
+  readonly expiresAt: Date
   readonly returnTo: string
 }): Response {
   const cookieOptions = input.sixb.auth.getCookieOptions({ audience: input.audience })
@@ -1568,7 +1606,7 @@ function sessionCallbackCompletionResponse(input: {
     createSessionCookieHeader({
       request: input.request,
       value: input.sessionCredential.cookieValue,
-      maxAgeSeconds: Math.trunc(input.sixb.auth.getSessionTtlMs() / 1000),
+      expiresAt: input.expiresAt,
       options: cookieOptions,
     })
   )
@@ -1577,7 +1615,7 @@ function sessionCallbackCompletionResponse(input: {
     createCsrfCookieHeader({
       request: input.request,
       value: generateCsrfToken(),
-      maxAgeSeconds: Math.trunc(input.sixb.auth.getSessionTtlMs() / 1000),
+      expiresAt: input.expiresAt,
       options: cookieOptions,
     })
   )
@@ -1685,9 +1723,9 @@ function resolveInvitationDeliveryContext(
 }
 
 function resolveSessionCsrfToken(input: {
-  readonly sixb: Sixb<readonly OntologySource[]>
   readonly request: Request
   readonly cookieOptions: ResolvedCookieOptions
+  readonly expiresAt: Date
 }): { readonly token: string; readonly setCookie?: string } {
   const existing = getCookie(input.request, input.cookieOptions.csrfCookieName)
   if (existing) {
@@ -1700,7 +1738,7 @@ function resolveSessionCsrfToken(input: {
     setCookie: createCsrfCookieHeader({
       request: input.request,
       value: token,
-      maxAgeSeconds: Math.trunc(input.sixb.auth.getSessionTtlMs() / 1000),
+      expiresAt: input.expiresAt,
       options: input.cookieOptions,
     }),
   }
@@ -1708,14 +1746,14 @@ function resolveSessionCsrfToken(input: {
 
 function authSessionJsonResponse(
   body: AuthenticatedAuthSessionResponse,
-  csrfSetCookie: string | undefined
+  setCookies: readonly string[]
 ): Response {
-  if (!csrfSetCookie) {
+  if (setCookies.length === 0) {
     return jsonResponse(body, 200)
   }
 
   const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
-  headers.append("set-cookie", csrfSetCookie)
+  for (const setCookie of setCookies) headers.append("set-cookie", setCookie)
   return jsonResponse(body, 200, headers)
 }
 

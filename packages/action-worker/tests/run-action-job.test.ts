@@ -46,6 +46,7 @@ interface DeviceObjectSet {
 
 interface TestSixb {
   readonly id: string
+  readonly blobStorage: InMemoryBlobStorage
   readonly events: EventsRuntime
   readonly storage: InMemoryStorage
   upsertObject(objectTypeId: string, properties: Record<string, unknown>): Promise<ObjectRow>
@@ -218,6 +219,57 @@ describe("runActionJob", () => {
     expect(run?.commit).toBeUndefined()
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("old")
+  })
+
+  test("exposes immutable blob operations inside action writeback", async () => {
+    const persistPayload = defineAction("persistPayload")
+      .params({})
+      .writeback(async ({ sixb, signal }) => {
+        const fileRef = await sixb.blobs.put({
+          body: new TextEncoder().encode("action payload"),
+          expectedSizeBytes: 14,
+          signal,
+          fileName: "payload.txt",
+          mediaType: "text/plain",
+        })
+        const stat = await sixb.blobs.stat(fileRef.blobId)
+        const content = await new Response(await sixb.blobs.open(fileRef.blobId)).text()
+
+        return { fileRef, stat, content }
+      })
+
+    const sixb = createSixb([persistPayload])
+    await queueActionRun(sixb, {
+      id: "act_blob",
+      actionId: "persistPayload",
+      subject: { kind: "none" },
+      params: {},
+    })
+
+    const result = await runActionJob({
+      runtime: createContext(sixb),
+      job: {
+        id: "act_blob",
+        actionId: "persistPayload",
+      },
+    })
+
+    expect(result.status).toBe("succeeded")
+    const run = await sixb.storage.actionRuns!.getById({
+      projectId: sixb.id,
+      id: "act_blob",
+    })
+    expect(run?.writeback?.result).toMatchObject({
+      content: "action payload",
+      fileRef: {
+        fileName: "payload.txt",
+        mediaType: "text/plain",
+        sizeBytes: 14,
+      },
+      stat: {
+        sizeBytes: 14,
+      },
+    })
   })
 
   test("skips duplicate terminal run ids without invoking phases twice", async () => {

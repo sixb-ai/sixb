@@ -183,24 +183,33 @@ latest telemetry hooks, and cache invalidation patterns.
 
 ## /browser: auth bootstrap
 
-`@sixb/client/browser` wires the transport for browser use: it reads runtime
-config handed off via `window.__SIXB_RUNTIME__`, configures the shared `client`
-with `credentials: "include"`, installs a CSRF request interceptor, and resolves
-the auth session.
+Sixb-generated apps configure the browser client for you. Use `@sixb/client/browser` only when
+bootstrapping a standalone app:
 
-| Function | Purpose |
-| --- | --- |
-| `readSixbBrowserRuntimeConfig(defaults)` | Read `__SIXB_RUNTIME__` (or defaults) into a config object |
-| `configureSixbBrowserClient(config)` | Set base URL + credentials, install the CSRF interceptor; returns a controller |
-| `requireSixbBrowserAuthSession(config, controller)` | Fetch the session, set the CSRF token, or redirect to sign-in |
-| `renderSixbBrowserRuntimeScript(config)` | Server-side: emit the `<script>window.__SIXB_RUNTIME__ = …</script>` handoff |
-| `createSixbSignInUrl(config, returnTo)` | Build the `/auth/sign-in` redirect URL |
+```ts
+import {
+  configureSixbBrowserClient,
+  readSixbBrowserRuntimeConfig,
+  requireSixbBrowserAuthSession,
+} from "@sixb/client/browser"
 
-The controller exposes `setCsrfToken`, `getCsrfToken`, and `dispose`. CSRF
-tokens are attached via the `x-sixb-csrf` header on non-`GET`/`HEAD`/`OPTIONS`
-requests. In a Sixb-served app this runs automatically; reach for `/browser`
-only when bootstrapping a standalone browser client. See
-[authentication](../auth/authentication.md).
+const config = readSixbBrowserRuntimeConfig({ audience: "app" })
+const browserClient = configureSixbBrowserClient(config)
+
+if (config.auth.enabled) {
+  await requireSixbBrowserAuthSession(config, browserClient)
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => browserClient.dispose())
+}
+```
+
+After setup, use the generated SDK, hooks, and query client normally. Sixb handles cookies, CSRF,
+session activity, and sign-in redirects. Expired sessions return users to their current page, but
+failed requests are not replayed; users must submit failed mutations again.
+
+See [authentication](../auth/authentication.md) to configure session timeouts.
 
 ## /models: ids and actions
 

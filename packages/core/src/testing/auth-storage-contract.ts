@@ -24,7 +24,8 @@ function at(value: string): Date {
 function sessionInput(
   id: string,
   tokenHash = `${id}-hash`,
-  audience: CompleteAuthSessionInput["audience"] = "atlas"
+  audience: CompleteAuthSessionInput["audience"] = "atlas",
+  absoluteExpiresAt?: Date
 ): CompleteAuthSessionInput {
   return {
     id,
@@ -32,6 +33,7 @@ function sessionInput(
     tokenHash,
     createdAt: at("2026-05-14T10:10:00.000Z"),
     expiresAt: at("2026-05-21T10:10:00.000Z"),
+    absoluteExpiresAt,
   }
 }
 
@@ -285,6 +287,166 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             now: at("2026-05-14T10:11:00.000Z"),
           })
         ).resolves.toBeNull()
+      })
+    })
+
+    test("persists and enforces an optional absolute session deadline", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        const capped = await storage.sessions.create({
+          id: "ses_capped",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "atlas",
+          tokenHash: "hash-capped",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-21T10:00:00.000Z"),
+          absoluteExpiresAt: at("2026-05-16T10:00:00.000Z"),
+        })
+        const uncapped = await storage.sessions.create({
+          id: "ses-uncapped",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "app",
+          tokenHash: "hash-uncapped",
+          createdAt: at("2026-05-14T10:01:00.000Z"),
+          expiresAt: at("2026-05-21T10:01:00.000Z"),
+        })
+
+        expect(capped.absoluteExpiresAt?.toISOString()).toBe("2026-05-16T10:00:00.000Z")
+        expect(uncapped.absoluteExpiresAt).toBeUndefined()
+        await expect(
+          storage.sessions.findValidByTokenHash({
+            projectId,
+            id: capped.id,
+            audience: "atlas",
+            tokenHash: "hash-capped",
+            now: at("2026-05-16T09:59:59.999Z"),
+          })
+        ).resolves.toMatchObject({ id: capped.id })
+        await expect(
+          storage.sessions.findValidByTokenHash({
+            projectId,
+            id: capped.id,
+            audience: "atlas",
+            tokenHash: "hash-capped",
+            now: at("2026-05-16T10:00:00.000Z"),
+          })
+        ).resolves.toBeNull()
+        const active = await storage.sessions.listActiveByUserId({
+          projectId,
+          userId: "usr_1",
+          now: at("2026-05-16T10:00:00.000Z"),
+        })
+        expect(active.map((session) => session.id)).toEqual([uncapped.id])
+        await expect(
+          storage.sessions.getActiveByUserId({
+            projectId,
+            userId: "usr_1",
+            audience: "atlas",
+            now: at("2026-05-16T10:00:00.000Z"),
+          })
+        ).resolves.toBeNull()
+        await expect(
+          storage.sessions.revokeActiveForUser({
+            projectId,
+            userId: "usr_1",
+            audience: "atlas",
+            revokedAt: at("2026-05-16T10:00:00.000Z"),
+          })
+        ).resolves.toEqual([])
+      })
+    })
+
+    test("atomically renews valid sessions without exceeding the absolute deadline", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.sessions.create({
+          id: "ses_renew",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "atlas",
+          tokenHash: "hash-renew",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-15T10:00:00.000Z"),
+          absoluteExpiresAt: at("2026-05-20T10:00:00.000Z"),
+        })
+
+        const renewed = await storage.sessions.renewIfValid({
+          projectId,
+          id: "ses_renew",
+          audience: "atlas",
+          tokenHash: "hash-renew",
+          now: at("2026-05-14T11:00:00.000Z"),
+          expiresAt: at("2026-05-25T10:00:00.000Z"),
+        })
+        expect(renewed?.expiresAt.toISOString()).toBe("2026-05-20T10:00:00.000Z")
+        expect(renewed?.lastSeenAt?.toISOString()).toBe("2026-05-14T11:00:00.000Z")
+
+        const monotonic = await storage.sessions.renewIfValid({
+          projectId,
+          id: "ses_renew",
+          audience: "atlas",
+          tokenHash: "hash-renew",
+          now: at("2026-05-14T12:00:00.000Z"),
+          expiresAt: at("2026-05-18T10:00:00.000Z"),
+        })
+        expect(monotonic?.expiresAt.toISOString()).toBe("2026-05-20T10:00:00.000Z")
+
+        await expect(
+          storage.sessions.renewIfValid({
+            projectId,
+            id: "ses_renew",
+            audience: "atlas",
+            tokenHash: "wrong-hash",
+            now: at("2026-05-14T13:00:00.000Z"),
+            expiresAt: at("2026-05-19T10:00:00.000Z"),
+          })
+        ).resolves.toBeNull()
+        await expect(
+          storage.sessions.renewIfValid({
+            projectId,
+            id: "ses_renew",
+            audience: "atlas",
+            tokenHash: "hash-renew",
+            now: at("2026-05-20T10:00:00.000Z"),
+            expiresAt: at("2026-05-21T10:00:00.000Z"),
+          })
+        ).resolves.toBeNull()
+
+        await storage.sessions.create({
+          id: "ses_concurrent",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "atlas",
+          tokenHash: "hash-concurrent",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-15T10:00:00.000Z"),
+        })
+        await Promise.all([
+          storage.sessions.renewIfValid({
+            projectId,
+            id: "ses_concurrent",
+            audience: "atlas",
+            tokenHash: "hash-concurrent",
+            now: at("2026-05-14T11:00:00.000Z"),
+            expiresAt: at("2026-05-18T10:00:00.000Z"),
+          }),
+          storage.sessions.renewIfValid({
+            projectId,
+            id: "ses_concurrent",
+            audience: "atlas",
+            tokenHash: "hash-concurrent",
+            now: at("2026-05-14T11:00:00.000Z"),
+            expiresAt: at("2026-05-19T10:00:00.000Z"),
+          }),
+        ])
+        const concurrent = await storage.sessions.getById({ projectId, id: "ses_concurrent" })
+        expect(concurrent?.expiresAt.toISOString()).toBe("2026-05-19T10:00:00.000Z")
       })
     })
 
@@ -1168,7 +1330,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           tokenHash: "link-hash",
           completedAt: at("2026-05-14T10:02:00.000Z"),
           newUserId: "usr_unused",
-          session: sessionInput("ses_new", "session-hash"),
+          session: sessionInput("ses_new", "session-hash", "atlas", at("2026-06-21T10:10:00.000Z")),
         })
 
         expect(result.user.id).toBe("usr_1")
@@ -1176,6 +1338,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "ses_new",
           strategyId: "magic-link",
           tokenHash: "session-hash",
+          absoluteExpiresAt: at("2026-06-21T10:10:00.000Z"),
         })
         // Signing in again keeps the user's existing session active; concurrent
         // sessions are allowed.

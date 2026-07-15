@@ -204,4 +204,14 @@ function assertActionWorkerSixbFacade(
       throw new ActionWorkerError(`Action worker runtime is missing sixb.${method}(...).`)
     }
   }
+
+  const blobStorage = (sixb as { readonly blobStorage?: Record<string, unknown> }).blobStorage
+  if (
+    !blobStorage ||
+    typeof blobStorage.put !== "function" ||
+    typeof blobStorage.open !== "function" ||
+    typeof blobStorage.stat !== "function"
+  ) {
+    throw new ActionWorkerError("Action worker runtime is missing sixb.blobStorage support.")
+  }
 }

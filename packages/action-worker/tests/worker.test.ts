@@ -47,6 +47,7 @@ interface DeviceObjectSet {
 
 interface TestSixb {
   readonly id: string
+  readonly blobStorage: InMemoryBlobStorage
   readonly events: EventsRuntime
   readonly storage: InMemoryStorage
   readonly queues: InMemoryQueues
@@ -121,6 +122,20 @@ describe("ActionWorker", () => {
           },
         })
     ).toThrow(ActionWorkerError)
+  })
+
+  test("throws ActionWorkerError when blob storage is missing", () => {
+    const noop = defineAction("noop")
+      .on(Device)
+      .params({})
+      .writeback(() => {})
+    const sixb = createSixb([noop])
+    const runtimeWithoutBlobStorage = Object.create(sixb) as TestSixb
+    Object.defineProperty(runtimeWithoutBlobStorage, "blobStorage", { value: undefined })
+
+    expect(() => new ActionWorker(runtimeWithoutBlobStorage)).toThrow(
+      "Action worker runtime is missing sixb.blobStorage support."
+    )
   })
 
   test("streams a run-scoped log line to the broker", async () => {

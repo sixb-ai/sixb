@@ -86,6 +86,7 @@ describe("SQLite storage migrations", () => {
     expect(tables).toContain("auth_magic_links")
     expect(tables).toContain("auth_oidc_authorization_attempts")
     expect(sessionColumns).toContain("audience")
+    expect(sessionColumns).toContain("absolute_expires_at")
     expect(sessionColumns).toContain("user_agent")
     expect(sessionColumns).toContain("ip_address")
   })

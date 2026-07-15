@@ -95,6 +95,17 @@ const runtimeFacade = defineAction("runtimeFacade")
   .on(Room)
   .params({})
   .writeback(({ sixb, read }) => {
+    sixb.blobs.put({
+      body: new Uint8Array([1, 2, 3]),
+      expectedSizeBytes: 3,
+      fileName: "payload.bin",
+    })
+    sixb.blobs.open("blob_id")
+    sixb.blobs.stat("blob_id")
+
+    // @ts-expect-error action blob capabilities do not expose destructive operations
+    sixb.blobs.delete("blob_id")
+
     sixb.objects(Room).appendTelemetryBatch([{ id: "room:1", properties: {}, at: new Date() }])
 
     // @ts-expect-error the runtime (telemetry) facade cannot perform local object writes

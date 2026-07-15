@@ -445,9 +445,10 @@ export function createSession(
       token_hash,
       created_at,
       expires_at,
+      absolute_expires_at,
       user_agent,
       ip_address
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `
   ).run(
     projectId,
@@ -458,6 +459,7 @@ export function createSession(
     tokenHash,
     toIso(input.createdAt),
     toIso(input.expiresAt),
+    input.absoluteExpiresAt ? toIso(input.absoluteExpiresAt) : null,
     input.userAgent ?? null,
     input.ipAddress ?? null
   )
@@ -485,12 +487,12 @@ export function revokeActiveSessionsForUser(
   const audienceCondition = params.audience === undefined ? "" : "AND audience = ?"
   const selectArgs =
     params.audience === undefined
-      ? [params.projectId, params.userId, revokedAt]
-      : [params.projectId, params.userId, params.audience, revokedAt]
+      ? [params.projectId, params.userId, revokedAt, revokedAt]
+      : [params.projectId, params.userId, params.audience, revokedAt, revokedAt]
   const updateArgs =
     params.audience === undefined
-      ? [revokedAt, params.projectId, params.userId, revokedAt]
-      : [revokedAt, params.projectId, params.userId, params.audience, revokedAt]
+      ? [revokedAt, params.projectId, params.userId, revokedAt, revokedAt]
+      : [revokedAt, params.projectId, params.userId, params.audience, revokedAt, revokedAt]
   const rows = db
     .query(
       `
@@ -501,6 +503,7 @@ export function revokeActiveSessionsForUser(
         ${audienceCondition}
         AND revoked_at IS NULL
         AND expires_at > ?
+        AND (absolute_expires_at IS NULL OR absolute_expires_at > ?)
       ORDER BY created_at ASC, id ASC
     `
     )
@@ -515,6 +518,7 @@ export function revokeActiveSessionsForUser(
       ${audienceCondition}
       AND revoked_at IS NULL
       AND expires_at > ?
+      AND (absolute_expires_at IS NULL OR absolute_expires_at > ?)
   `
   ).run(...updateArgs)
 

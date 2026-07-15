@@ -19,6 +19,17 @@ import type { LoadedObjectTarget } from "./types"
 
 export function toActionRuntimeFacade(runtime: RunActionJobInput["runtime"]): ActionRuntimeFacade {
   return {
+    blobs: {
+      put(input) {
+        return runtime.sixb.blobStorage.put(input)
+      },
+      open(blobId) {
+        return runtime.sixb.blobStorage.open(blobId)
+      },
+      stat(blobId) {
+        return runtime.sixb.blobStorage.stat(blobId)
+      },
+    },
     objects(objectType) {
       return {
         appendTelemetryBatch(items) {

@@ -140,14 +140,15 @@ export function shouldUseSecureCookies(
 export function createSessionCookieHeader(params: {
   readonly request: Request
   readonly value: string
-  readonly maxAgeSeconds: number
+  readonly expiresAt: Date
   readonly options: ResolvedAuthCookieOptions
 }): string {
+  const lifetime = resolveCookieLifetime(params.expiresAt)
   return serializeCookie({
     name: params.options.sessionCookieName,
     value: params.value,
     httpOnly: true,
-    maxAge: params.maxAgeSeconds,
+    ...lifetime,
     domain: params.options.domain,
     secure: shouldUseSecureCookies(params.request, params.options),
     sameSite: params.options.sameSite,
@@ -157,18 +158,34 @@ export function createSessionCookieHeader(params: {
 export function createCsrfCookieHeader(params: {
   readonly request: Request
   readonly value: string
-  readonly maxAgeSeconds: number
+  readonly expiresAt: Date
   readonly options: ResolvedAuthCookieOptions
 }): string {
+  const lifetime = resolveCookieLifetime(params.expiresAt)
   return serializeCookie({
     name: params.options.csrfCookieName,
     value: params.value,
     httpOnly: params.options.csrfHttpOnly,
-    maxAge: params.maxAgeSeconds,
+    ...lifetime,
     domain: params.options.domain,
     secure: shouldUseSecureCookies(params.request, params.options),
     sameSite: params.options.sameSite,
   })
+}
+
+function resolveCookieLifetime(expiresAt: Date): {
+  readonly maxAge: number
+  readonly expires: Date
+} {
+  const expiresAtMs = expiresAt.getTime()
+  if (!Number.isFinite(expiresAtMs)) {
+    throw new Error("[Sixb] Auth cookie expiresAt must be a valid date.")
+  }
+
+  return {
+    maxAge: Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000)),
+    expires: new Date(expiresAtMs),
+  }
 }
 
 export function clearSessionCookieHeader(params: {
