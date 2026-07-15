@@ -80,6 +80,14 @@ shared source (notably `@sixb/core`) once per dependent, which made the step the
 - Generated client files live in `packages/client/src/generated/`.
 - If routes, schemas, or public contracts change, run `bun run generate:client`.
 
+## Export Surfaces
+
+- Exports are curated — never re-export something from a barrel just because it exists.
+- A package root (`.`) is for app authors: `@sixb/core` exports the authoring API (`define*`, `createSixb`, config types, `InMemory*` providers); other packages export only what consumers call (workers export just their `*Worker` class).
+- `@sixb/core/{storage,broker,queues,sandboxes,lake-storage,blob-storage/server,auth/strategy}` are the public contracts that providers implement.
+- `@sixb/core/internal/*` is for this repo's packages only — no compatibility promise.
+- Export types freely (users need them to annotate their own code); keep runtime values minimal. Connectors export all their wire types on purpose.
+
 ## Code Style
 
 - Biome uses 2 spaces, LF endings, 100 column width, double quotes, ES5 trailing commas, and no semicolons unless required.
