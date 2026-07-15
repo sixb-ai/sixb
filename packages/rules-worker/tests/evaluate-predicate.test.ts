@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { ObjectLinkRow, ObjectRow, RulePredicate } from "@sixb/core"
-import type { RuleLinkMap } from "../src"
-import { evaluateRulePredicate } from "../src"
+import { evaluateRulePredicate } from "../src/evaluate-predicate"
+import type { RuleLinkMap } from "../src/types"
 
 const now = new Date("2026-05-07T10:00:00.000Z")
 

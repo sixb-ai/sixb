@@ -27,7 +27,9 @@ import {
   stringEnum,
   valueTypeRef,
 } from "@sixb/core"
-import { type ProjectionWorkerContext, ProjectionWorkerError, runProjectionJob } from "../src"
+import { ProjectionWorkerError } from "../src/errors"
+import { runProjectionJob } from "../src/run-projection-job"
+import type { ProjectionWorkerContext } from "../src/types"
 
 const Building = defineObjectType({
   id: "Building",

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { WorkflowRunError } from "@sixb/core"
 import type { PostgresStorage } from "../src"
-import { PgWorkflowRunStorage } from "../src"
+import { PgWorkflowRunStorage } from "../src/pg-workflow-run-storage"
 import { createTestStorage } from "./helpers"
 
 describe("PgWorkflowRunStorage", () => {

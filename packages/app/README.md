@@ -91,24 +91,9 @@ await app.build({ outdir: ".sixb/dist/app" })
 await app.start({ port: 3001, outdir: ".sixb/dist/app", apiBaseUrl: "http://localhost:3000" })
 ```
 
-Low-level pipeline:
-
-```typescript
-import {
-  buildApp,
-  generateAppEntry,
-  generateRouteManifest,
-  scanPages,
-} from "@sixb/app"
-
-const appDir = "./app"
-const generatedDir = "./.sixb/generated"
-
-const routes = await scanPages(appDir)
-await generateRouteManifest(routes, generatedDir)
-const { htmlPath, manifestPath } = await generateAppEntry(".", generatedDir, { appDir })
-await buildApp({ entryPath: htmlPath, manifestPath })
-```
+The low-level pipeline (`scanPages`, `generateRouteManifest`, `generateAppEntry`,
+`buildApp`) is internal — `createCustomApp` composes it. Only the surface above is
+exported.
 
 ## Public Assets
 
@@ -136,11 +121,6 @@ A file at `app/public/app.webmanifest` is ignored because the generated manifest
 | Export | Description |
 | --- | --- |
 | `createCustomApp(options)` | High-level custom app toolkit for dev/build/start |
-| `scanPages(appDir)` | Scan `app/` for page files and return `PageRoute[]` |
-| `generateRouteManifest(routes, generatedDir)` | Write `routes.ts` with static (eager) route imports |
-| `generateAppEntry(projectRoot, generatedDir, options)` | Write `index.html` and `main.tsx` entry points |
-| `@sixb/app/agents` | Default mounted agent chat page used by generated custom app routes |
-| `buildApp(options)` | Bundle the generated entry point for production |
-| `resolveCustomAppStylesheet(input)` | Decide whether `app/globals.css` is plain CSS or Tailwind source |
+| `AppMetadata` | Metadata shape exported by `app/layout.tsx` |
 | `createTailwindCssCompiler(options)` | Shared Tailwind v4 build pipeline (also used by Atlas) |
-| `resolveTailwindCliEntry(resolveFrom)` | Locate `@tailwindcss/cli` in a directory's dependency tree |
+| `@sixb/app/agents` | Default mounted agent chat page used by generated custom app routes |

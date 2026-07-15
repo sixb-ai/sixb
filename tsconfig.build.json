@@ -104,6 +104,18 @@
       "path": "queues/bullmq/tsconfig.build.json"
     },
     {
+      "path": "sandboxes/apple-container/tsconfig.build.json"
+    },
+    {
+      "path": "sandboxes/local/tsconfig.build.json"
+    },
+    {
+      "path": "sandboxes/smolvm/tsconfig.build.json"
+    },
+    {
+      "path": "sandboxes/vercel/tsconfig.build.json"
+    },
+    {
       "path": "storage/blob-local/tsconfig.build.json"
     },
     {

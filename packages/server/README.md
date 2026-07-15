@@ -85,18 +85,12 @@ Events are delivered as:
 ## Exports
 
 ```typescript
-import {
-  createSixbApi,
-  createSixbServer,
-  SixbServer,
-} from "@sixb/server"
-import type { SixbApp, SixbServerOptions } from "@sixb/server"
+import { createSixbServer, SixbServer } from "@sixb/server"
+import type { SixbServerOptions } from "@sixb/server"
 ```
 
-- **`createSixbServer(options)`** -- Preferred entrypoint for starting the API/auth/ws/docs server.
+- **`createSixbServer(options)`** -- Entrypoint for starting the API/auth/ws/docs server.
 - **`SixbServer`** -- Manages the server lifecycle (`start`, `stop`).
-- **`createSixbApi(server)`** -- Creates the raw Elysia app with all API and WebSocket routes.
-- **`SixbApp`** -- Type alias for the Elysia app returned by `createSixbApi`.
 - **`SixbServerOptions`** -- Config: `sixb` and `browser` (required), `port` (default 3000), `host` (default `"0.0.0.0"`), `quiet`.
 
 ## OpenAPI

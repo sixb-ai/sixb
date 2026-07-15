@@ -1,5 +1,5 @@
 /**
- * Telemetry overlay model (`@sixb/client/events`).
+ * Telemetry overlay model (exported via `@sixb/client` and `/hooks`).
  *
  * A normalized "latest value" shape derived from a `telemetry.appended` event,
  * shared by `useLatest`/`useLatestByObject` and the apps that render live

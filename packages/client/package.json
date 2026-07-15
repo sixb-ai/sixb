@@ -18,18 +18,6 @@
       "import": "./dist/browser.js",
       "default": "./dist/browser.js"
     },
-    "./agent-streams": {
-      "types": "./dist/agent-streams.d.ts",
-      "bun": "./src/agent-streams.ts",
-      "import": "./dist/agent-streams.js",
-      "default": "./dist/agent-streams.js"
-    },
-    "./events": {
-      "types": "./dist/events.d.ts",
-      "bun": "./src/events.ts",
-      "import": "./dist/events.js",
-      "default": "./dist/events.js"
-    },
     "./logs": {
       "types": "./dist/logs.d.ts",
       "bun": "./src/logs.ts",

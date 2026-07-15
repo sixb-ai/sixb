@@ -17,7 +17,8 @@ import {
   InMemoryLakeStorage,
   InMemoryPipelineRunStorage,
 } from "@sixb/core"
-import { type PipelineWorkerContext, runPipelineJob } from "../src"
+import { runPipelineJob } from "../src/run-pipeline-job"
+import type { PipelineWorkerContext } from "../src/types"
 
 const rawCustomersDataset = defineDataset("raw.customers", {
   schema: [col("id", "string"), col("name", "string"), col("email", "string", { nullable: true })],

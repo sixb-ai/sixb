@@ -15,7 +15,7 @@ import {
   evaluateRuleForSubject,
   matchRuleEvent,
   matchRuleEvents,
-} from "../src"
+} from "../src/evaluate-rule-event"
 
 const postedRule = rule("transaction.posted", {
   kind: "property",

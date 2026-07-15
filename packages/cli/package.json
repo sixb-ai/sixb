@@ -6,8 +6,6 @@
     "sixb": "./src/index.tsx",
     "create-sixb": "./src/index.tsx"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
@@ -47,14 +45,6 @@
     "src",
     "README.md"
   ],
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "bun": "./src/index.tsx",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    }
-  },
   "sixbBuild": {
     "assets": [
       {

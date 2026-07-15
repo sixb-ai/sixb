@@ -13,9 +13,9 @@ import {
   throwNestedStorageTransaction,
 } from "@sixb/core"
 import { PgAgentStorage } from "./agents"
+import { PgAuthStorage } from "./auth-storage"
 import { createPostgresStorageMigrators, dropSchema } from "./migrations"
 import { PgActionRunStorage } from "./pg-action-run-storage"
-import { PgAuthStorage } from "./pg-auth-storage"
 import { createPgClient, type SQL } from "./pg-client"
 import { PgObjectStorage } from "./pg-object-storage"
 import { PgPipelineRunStorage } from "./pg-pipeline-run-storage"
@@ -296,35 +296,4 @@ function resolveTimeoutMillis(value: number | undefined, label: string): number 
   return Math.trunc(value)
 }
 
-export type { PgAgentStorageOptions } from "./agents"
-export {
-  PgAgentMessageStore,
-  PgAgentRunStore,
-  PgAgentStorage,
-  PgAgentThreadStore,
-} from "./agents"
-export type { PostgresMigrationContext } from "./migrations"
-export {
-  createPostgresMigrator,
-  createPostgresStorageMigrators,
-  dropSchema,
-  migratePostgresStorage,
-  POSTGRES_STORAGE_ADAPTER_ID,
-  pgSql,
-  pgStep,
-  postgresStorageMigrations,
-  quoteIdent,
-} from "./migrations"
-export { PgActionRunStorage } from "./pg-action-run-storage"
-export type { PgAuthStorageOptions } from "./pg-auth-storage"
-export { PgAuthStorage } from "./pg-auth-storage"
-export { PgObjectStorage } from "./pg-object-storage"
-export { PgPipelineRunStorage } from "./pg-pipeline-run-storage"
-export { PgProjectionRunStorage } from "./pg-projection-run-storage"
-export { PgRulesStorage } from "./pg-rules-storage"
-export { PgSyncRunStorage } from "./pg-sync-run-storage"
-export { PgTimeseriesStorage } from "./pg-timeseries-storage"
-export { PgWebhookDeliveryStorage } from "./pg-webhook-delivery-storage"
-export { PgWebhookRunStorage } from "./pg-webhook-run-storage"
-export { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storage"
-export { PgWorkflowNodeRunStorage, PgWorkflowRunStorage } from "./pg-workflow-run-storage"
+export { migratePostgresStorage } from "./migrations"

@@ -304,7 +304,7 @@ import {
   ThemeSwitcher,
 } from "@sixb/ui/components"
 import { ThemeProvider, useTheme, useIsMobile } from "@sixb/ui/hooks"
-import { cn } from "@sixb/ui/lib"
+import { cn } from "@sixb/ui/lib/utils"
 ```
 
 Treat this package as the maintained shared UI foundation for Sixb apps and packages. Keep

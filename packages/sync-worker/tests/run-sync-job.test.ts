@@ -26,7 +26,8 @@ import {
   InMemorySyncRunStorage,
 } from "@sixb/core"
 import { LocalLakeStorage } from "@sixb/lake-local"
-import { runSyncJob, type SyncWorkerContext } from "../src"
+import { runSyncJob } from "../src/run-sync-job"
+import type { SyncWorkerContext } from "../src/types"
 
 const tempDirs: string[] = []
 

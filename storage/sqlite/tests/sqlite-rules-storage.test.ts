@@ -4,7 +4,8 @@ import type {
   StoredRuleResolvedEvent,
   StoredRuleTriggeredEvent,
 } from "@sixb/core"
-import { SqliteRulesStorage, SqliteStorage } from "../src"
+import { SqliteStorage } from "../src"
+import { SqliteRulesStorage } from "../src/rules-storage"
 
 const defaultSubject: RuleEventSubject = {
   kind: "object",

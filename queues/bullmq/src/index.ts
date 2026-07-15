@@ -1,5 +1,3 @@
-export { QueueError } from "@sixb/core"
-export type { KeepJobs } from "bullmq"
 export { type BullMqLaneShared, BullMqQueue } from "./bullmq-queue"
 export { BullMqQueues, type BullMqQueuesOptions } from "./bullmq-queues"
 export type { BullMqConnectionInput, BullMqConnections } from "./connection"

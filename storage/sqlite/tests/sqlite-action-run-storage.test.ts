@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { ActionRunError } from "@sixb/core"
-import { SqliteActionRunStorage } from "../src"
+import { SqliteActionRunStorage } from "../src/action-run-storage"
 
 describe("SqliteActionRunStorage", () => {
   let storage: SqliteActionRunStorage

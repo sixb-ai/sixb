@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { CreateWorkflowInterventionInput } from "@sixb/core"
 import { WorkflowInterventionError } from "@sixb/core"
-import { SqliteStorage, SqliteWorkflowInterventionStorage } from "../src"
+import { SqliteStorage } from "../src"
+import { SqliteWorkflowInterventionStorage } from "../src/workflow-intervention-storage"
 
 describe("SqliteWorkflowInterventionStorage", () => {
   let storage: SqliteWorkflowInterventionStorage

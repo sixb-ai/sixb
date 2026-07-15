@@ -34,17 +34,7 @@ import {
   type Storage,
   type WorkflowDefinition,
 } from "@sixb/core"
-import {
-  SqliteActionRunStorage,
-  SqliteObjectStorage,
-  SqlitePipelineRunStorage,
-  SqliteRulesStorage,
-  SqliteSyncRunStorage,
-  SqliteTimeseriesStorage,
-  SqliteWebhookRunStorage,
-  SqliteWorkflowInterventionStorage,
-  SqliteWorkflowRunStorage,
-} from "@sixb/sqlite"
+import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -313,18 +303,7 @@ describe("SixbServer HTTP contract", () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "sixb-http-contract-"))
 
     const lakeStorage = new InMemoryLakeStorage()
-    const storage: Storage = {
-      objects: new SqliteObjectStorage(),
-      timeseries: new SqliteTimeseriesStorage(),
-      syncRuns: new SqliteSyncRunStorage(),
-      pipelineRuns: new SqlitePipelineRunStorage(),
-      workflowRuns: new SqliteWorkflowRunStorage(),
-      workflowInterventions: new SqliteWorkflowInterventionStorage(),
-      webhookRuns: new SqliteWebhookRunStorage(),
-      actionRuns: new SqliteActionRunStorage(),
-      rules: new SqliteRulesStorage(),
-      transaction: (run) => Promise.resolve(run(storage)),
-    }
+    const storage: Storage = new SqliteStorage()
     const sixb = createSixbInstance<readonly OntologySource[]>({
       id: "contract-project",
       ontology: [Space, Device],

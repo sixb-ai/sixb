@@ -199,46 +199,4 @@ interface SqliteStoreSet {
   readonly rules: SqliteRulesStorage
 }
 
-export type { SqliteActionRunStorageOptions } from "./action-run-storage"
-export { SqliteActionRunStorage } from "./action-run-storage"
-export type { SqliteAgentStorageOptions } from "./agents"
-export {
-  SqliteAgentMessageStore,
-  SqliteAgentRunStore,
-  SqliteAgentStorage,
-  SqliteAgentThreadStore,
-} from "./agents"
-export type { SqliteAuthStorageOptions } from "./auth-storage"
-export { SqliteAuthStorage } from "./auth-storage"
-export {
-  createSqliteMigrator,
-  createSqliteStorageMigrators,
-  migrateSqliteDatabase,
-  migrateSqliteStorage,
-  SQLITE_STORAGE_ADAPTER_ID,
-  SQLITE_STORAGE_FILE,
-  sqliteSql,
-  sqliteStep,
-  sqliteStorageMigrations,
-  sqliteStoragePath,
-} from "./migrations"
-export type { SqliteObjectStorageOptions } from "./object-storage"
-export { SqliteObjectStorage } from "./object-storage"
-export type { SqlitePipelineRunStorageOptions } from "./pipeline-run-storage"
-export { SqlitePipelineRunStorage } from "./pipeline-run-storage"
-export type { SqliteProjectionRunStorageOptions } from "./projection-run-storage"
-export { SqliteProjectionRunStorage } from "./projection-run-storage"
-export type { SqliteRulesStorageOptions } from "./rules-storage"
-export { SqliteRulesStorage } from "./rules-storage"
-export type { SqliteSyncRunStorageOptions } from "./sync-run-storage"
-export { SqliteSyncRunStorage } from "./sync-run-storage"
-export type { SqliteTimeseriesStorageOptions } from "./timeseries-storage"
-export { SqliteTimeseriesStorage } from "./timeseries-storage"
-export type { SqliteWebhookDeliveryStorageOptions } from "./webhook-delivery-storage"
-export { SqliteWebhookDeliveryStorage } from "./webhook-delivery-storage"
-export type { SqliteWebhookRunStorageOptions } from "./webhook-run-storage"
-export { SqliteWebhookRunStorage } from "./webhook-run-storage"
-export type { SqliteWorkflowInterventionStorageOptions } from "./workflow-intervention-storage"
-export { SqliteWorkflowInterventionStorage } from "./workflow-intervention-storage"
-export type { SqliteWorkflowRunStorageOptions } from "./workflow-run-storage"
-export { SqliteWorkflowNodeRunStorage, SqliteWorkflowRunStorage } from "./workflow-run-storage"
+export { migrateSqliteStorage } from "./migrations"

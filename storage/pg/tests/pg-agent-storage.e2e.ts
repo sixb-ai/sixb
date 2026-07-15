@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentStorage } from "@sixb/core"
 import { runAgentStorageContractSuite } from "@sixb/core/testing"
-import { PgAgentStorage, type PostgresStorage } from "../src"
+import type { PostgresStorage } from "../src"
+import { PgAgentStorage } from "../src/agents"
 import { createTestStorage } from "./helpers"
 
 // Each contract case gets its own throwaway schema; map the returned sub-store back to its bundle
