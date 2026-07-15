@@ -1,15 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import {
-  type AgentInboundUiMessage,
-  type AgentMessage,
-  AgentMessageAdapterError,
-  type AgentMessagePart,
-  type AgentMessageRole,
-  type FileRef,
-  fromAiSdk,
-  toModelMessages,
-  toUiMessage,
+import type {
+  AgentInboundUiMessage,
+  AgentMessage,
+  AgentMessagePart,
+  AgentMessageRole,
+  FileRef,
 } from "../src"
+import { AgentMessageAdapterError, fromAiSdk, toModelMessages, toUiMessage } from "../src/agents"
 
 function sixbMessage(role: AgentMessageRole, parts: AgentMessagePart[]): AgentMessage {
   return { role, parts }

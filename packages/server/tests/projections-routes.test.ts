@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test"
 import type {
   AuthorizationContext,
-  ListLatestProjectionRunsInput,
-  ListProjectionRunsInput,
   ObjectProjectionDefinition,
   OntologySource,
-  ProjectionRunRecord,
-  ProjectionRunStorage,
   Sixb,
 } from "@sixb/core"
+import type {
+  ListLatestProjectionRunsInput,
+  ListProjectionRunsInput,
+  ProjectionRunRecord,
+  ProjectionRunStorage,
+} from "@sixb/core/storage"
 import { Elysia } from "elysia"
 import { registerProjectionRoutes } from "../src/routes/projections"
 

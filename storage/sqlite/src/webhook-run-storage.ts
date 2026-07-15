@@ -6,8 +6,8 @@ import type {
   StartWebhookRunInput,
   WebhookRunRecord,
   WebhookRunStorage,
-} from "@sixb/core"
-import { WebhookRunError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { WebhookRunError } from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   appendRunListFilters,

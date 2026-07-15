@@ -1,10 +1,7 @@
-import type {
-  ClaimedQueueJob,
-  PipelineRunRequestedQueueJob,
-  PipelineRunStorage,
-  QueueWorkerFailureDecision,
-} from "@sixb/core"
-import { QueueWorker } from "@sixb/core"
+import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
+import { QueueWorker } from "@sixb/core/internal/workers"
+import type { ClaimedQueueJob, PipelineRunRequestedQueueJob } from "@sixb/core/queues"
+import type { PipelineRunStorage } from "@sixb/core/storage"
 import {
   emitDatasetVersionCommitted,
   emitPipelineRunFinished,

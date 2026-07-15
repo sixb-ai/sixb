@@ -1,9 +1,10 @@
+import { resolveAuthSessionAudience } from "@sixb/core"
 import type {
   AuthOidcAuthorizationAttemptStore,
   CreateOidcAuthorizationAttemptInput,
   OidcAuthorizationAttemptRecord,
-} from "@sixb/core"
-import { AuthStorageError, resolveAuthSessionAudience } from "@sixb/core"
+} from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import { type PgStoreClient, runPgTransaction } from "../transactions"
 import type { PgAuthOidcAttemptRow } from "./rows"
 import { rowToOidcAuthorizationAttemptRecord } from "./rows"

@@ -1,12 +1,11 @@
+import type { OntologySource, Sixb } from "@sixb/core"
 import {
   type AuthenticatedAuthSession,
   createCsrfCookieHeader,
   createSessionCookieHeader,
   generateCsrfToken,
   getCookie,
-  type OntologySource,
-  type Sixb,
-} from "@sixb/core"
+} from "@sixb/core/internal/auth"
 
 export function createSessionRenewalCookieHeaders(input: {
   readonly sixb: Sixb<readonly OntologySource[]>

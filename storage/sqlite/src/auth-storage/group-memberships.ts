@@ -3,7 +3,7 @@ import type {
   AuthGroupMembershipStore,
   GroupMembershipRecord,
   UpsertAuthGroupMembershipInput,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthGroupMembershipRow } from "./rows"
 import { rowToGroupMembershipRecord } from "./rows"

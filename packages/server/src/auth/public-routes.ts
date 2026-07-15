@@ -1,4 +1,5 @@
-import { AGENT_API_GATEWAY_PREFIX, isCsrfExemptMethod } from "@sixb/core"
+import { AGENT_API_GATEWAY_PREFIX } from "@sixb/core/internal/agents"
+import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
 
 export type RouteAccessKind = "public" | "api" | "html" | "websocket"
 

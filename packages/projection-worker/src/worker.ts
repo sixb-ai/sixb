@@ -1,9 +1,6 @@
-import type {
-  ClaimedQueueJob,
-  ProjectionRunRequestedQueueJob,
-  ProjectionRunStorage,
-} from "@sixb/core"
-import { QueueWorker } from "@sixb/core"
+import { QueueWorker } from "@sixb/core/internal/workers"
+import type { ClaimedQueueJob, ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
+import type { ProjectionRunStorage } from "@sixb/core/storage"
 import { runProjectionJob } from "./run-projection-job"
 import type { ProjectionWorkerContext, ProjectionWorkerSixb } from "./types"
 

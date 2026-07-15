@@ -1,5 +1,6 @@
-import { defineObjectType, type EditBatch, link, prop } from "../src"
+import { defineObjectType, link, prop } from "../src"
 import { recordEdits } from "../src/actions/worker"
+import type { EditBatch } from "../src/edits"
 
 const Customer = defineObjectType({
   id: "Customer",

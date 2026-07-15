@@ -2,7 +2,7 @@ import type {
   AuthGroupMembershipStore,
   GroupMembershipRecord,
   UpsertAuthGroupMembershipInput,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { PgStoreClient } from "../transactions"
 import type { PgAuthGroupMembershipRow } from "./rows"
 import { rowToGroupMembershipRecord } from "./rows"

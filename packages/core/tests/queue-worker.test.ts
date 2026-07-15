@@ -1,11 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import {
-  type ClaimedQueueJob,
-  InMemoryQueues,
-  QueueWorker,
-  type QueueWorkerFailureDecision,
-  type SyncRunRequestedQueueJob,
-} from "../src"
+import { InMemoryQueues } from "../src"
+import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "../src/queues"
+import { QueueWorker, type QueueWorkerFailureDecision } from "../src/workers"
 
 const PROJECT_ID = "queue-worker-tests"
 

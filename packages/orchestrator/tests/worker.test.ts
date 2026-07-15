@@ -11,14 +11,13 @@ import {
   defineSync,
   defineWorkflow,
   defineWorkflowStep,
-  type EventDraft,
-  EventsRuntime,
   events,
   InMemoryBroker,
   InMemoryQueues,
   prop,
   SYSTEM_PRINCIPAL,
 } from "@sixb/core"
+import { type EventDraft, EventsRuntime } from "@sixb/core/internal/events"
 import { compileRoutes } from "../src/compile-routes"
 import type { OrchestratorRoutes } from "../src/types"
 import { OrchestratorWorker } from "../src/worker"

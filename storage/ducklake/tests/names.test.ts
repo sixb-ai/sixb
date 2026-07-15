@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { LakeStorageError } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import {
   DATASET_TABLE_PREFIX,
   decodeDatasetTableName,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { AgentStorage } from "@sixb/core"
+import type { AgentStorage } from "@sixb/core/storage"
 import { runAgentStorageContractSuite } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { PgAgentStorage } from "../src/agents"

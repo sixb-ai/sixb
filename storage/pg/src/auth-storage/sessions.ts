@@ -1,10 +1,6 @@
-import type {
-  AuthSessionAudience,
-  AuthSessionStore,
-  CreateAuthSessionInput,
-  SessionRecord,
-} from "@sixb/core"
-import { AuthStorageError } from "@sixb/core"
+import type { AuthSessionAudience } from "@sixb/core"
+import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import {
   authLockKey,
   lockAdvisoryKeys,

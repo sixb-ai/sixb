@@ -5,7 +5,7 @@ import {
   RetentionPolicy,
   StorageType,
 } from "@nats-io/jetstream"
-import type { BrokerRetention, BrokerStreamDefinition } from "@sixb/core"
+import type { BrokerRetention, BrokerStreamDefinition } from "@sixb/core/broker"
 import type { NatsConnectionManager } from "./connection"
 import { NatsBrokerError } from "./errors"
 import { validateProjectId } from "./project-id"

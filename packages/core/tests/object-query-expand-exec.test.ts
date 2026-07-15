@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import {
-  countObjects,
   defineObjectType,
-  type ExpandedLinkValue,
-  type ExpandedObjectRow,
-  executeObjectQuery,
   InMemoryObjectStorage,
   link,
   type ObjectExpansion,
@@ -13,6 +9,8 @@ import {
   prop,
 } from "../src"
 import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "../src/events"
+import { countObjects, executeObjectQuery } from "../src/objects/query"
+import type { ExpandedLinkValue, ExpandedObjectRow } from "../src/storage"
 
 // Execution-side tests for `.expand()`: the planner routes expand through the
 // bounded fallback, and the executor hydrates links over the batch storage

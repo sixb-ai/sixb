@@ -1,16 +1,18 @@
 import type {
   DatasetDefinition,
-  DatasetVersion,
-  EventsRuntime,
   LakeStorage,
-  LogsRuntime,
   PipelineDefinition,
-  PipelineRunRecord,
-  PipelineRunStorage,
-  PipelineStepRunRecord,
   Queues,
   Storage,
 } from "@sixb/core"
+import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
+import type {
+  PipelineRunRecord,
+  PipelineRunStorage,
+  PipelineStepRunRecord,
+} from "@sixb/core/storage"
 
 export type PipelineLogSession = ReturnType<LogsRuntime["startExecution"]>
 

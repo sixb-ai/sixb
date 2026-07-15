@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "../src"
 import { InMemoryQueues } from "../src"
+import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "../src/queues"
 import { createQueueDelivery } from "../src/workers/queue-delivery"
 
 const PROJECT_ID = "queue-delivery-tests"

@@ -4,10 +4,10 @@ import {
   getDatasetRowValidationError,
   ObjectNotFoundError,
   OntologyValidationError,
-  objectService,
   type Schema,
   type TelemetryProjectionDefinition,
 } from "@sixb/core"
+import { objectService } from "@sixb/core/internal/objects"
 import { ProjectionWorkerError } from "./errors"
 import { resolveProjectionSchema } from "./projection-schema"
 import { normalizeProjectedValue } from "./projection-value-coercion"

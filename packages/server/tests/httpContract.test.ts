@@ -18,7 +18,6 @@ import {
   defineWebhook,
   defineWorkflow,
   defineWorkflowStep,
-  type EventsRuntime,
   events,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -34,6 +33,7 @@ import {
   type Storage,
   type WorkflowDefinition,
 } from "@sixb/core"
+import type { EventsRuntime } from "@sixb/core/internal/events"
 import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"

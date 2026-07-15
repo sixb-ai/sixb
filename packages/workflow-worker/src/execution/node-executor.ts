@@ -1,12 +1,6 @@
-import type {
-  ValueType,
-  WorkflowDefinition,
-  WorkflowInterventionRecord,
-  WorkflowIOSnapshot,
-  WorkflowNodeDefinition,
-  WorkflowNodeRunRecord,
-  WorkflowStepOutputs,
-} from "@sixb/core"
+import type { ValueType, WorkflowDefinition, WorkflowStepOutputs } from "@sixb/core"
+import type { WorkflowIOSnapshot, WorkflowNodeDefinition } from "@sixb/core/internal/workflows"
+import type { WorkflowInterventionRecord, WorkflowNodeRunRecord } from "@sixb/core/storage"
 import type { WorkflowJob, WorkflowLogSession, WorkflowWorkerContext } from "../types"
 
 export interface WorkflowExecutionState {

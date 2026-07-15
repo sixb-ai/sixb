@@ -1,4 +1,5 @@
-import type { OntologySource, Sixb, WebhookRunRecord } from "@sixb/core"
+import type { OntologySource, Sixb } from "@sixb/core"
+import type { WebhookRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"

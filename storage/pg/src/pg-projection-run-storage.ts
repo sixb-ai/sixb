@@ -11,8 +11,8 @@ import type {
   ProjectionRunStorage,
   StartProjectionRunInput,
   UpdateProjectionRunInput,
-} from "@sixb/core"
-import { PROJECTION_COUNTER_KEYS, ProjectionRunError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { PROJECTION_COUNTER_KEYS, ProjectionRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"

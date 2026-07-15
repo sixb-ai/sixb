@@ -1,4 +1,4 @@
-import type { Worker } from "@sixb/core"
+import type { Worker } from "@sixb/core/internal/workers"
 import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
 import {

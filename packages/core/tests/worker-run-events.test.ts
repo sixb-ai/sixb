@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { EventsRuntime, InMemoryBroker, toStoredEvent } from "../src"
+import { InMemoryBroker } from "../src"
+import { EventsRuntime, toStoredEvent } from "../src/events"
 
 describe("worker run lifecycle events", () => {
   test("stores sync run lifecycle events with sync topic and run partition", () => {

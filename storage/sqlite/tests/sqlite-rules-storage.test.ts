@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type {
-  RuleEventSubject,
-  StoredRuleResolvedEvent,
-  StoredRuleTriggeredEvent,
-} from "@sixb/core"
+import type { RuleEventSubject } from "@sixb/core"
+import type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "@sixb/core/internal/events"
 import { SqliteStorage } from "../src"
 import { SqliteRulesStorage } from "../src/rules-storage"
 

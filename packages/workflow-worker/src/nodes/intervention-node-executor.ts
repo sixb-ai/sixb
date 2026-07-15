@@ -1,9 +1,9 @@
-import type { WorkflowInterventionNodeDefinition } from "@sixb/core"
+import type { WorkflowInterventionNodeDefinition } from "@sixb/core/internal/workflows"
 import {
   snapshotWorkflowInterventionDefaultResponse,
   snapshotWorkflowInterventionInput,
   validateWorkflowInterventionInput,
-} from "@sixb/core"
+} from "@sixb/core/internal/workflows"
 import { WorkflowWorkerError } from "../errors"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { throwIfAborted } from "../normalize"

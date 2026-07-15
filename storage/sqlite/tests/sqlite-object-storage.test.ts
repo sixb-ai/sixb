@@ -2,17 +2,19 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
 import {
   defineObjectType,
-  executeObjectQuery,
   link,
   type ObjectQuery,
   ObjectQueryExecutionError,
   OntologyRegistry,
   prop,
-  type StoredLinkDeletedEvent,
-  type StoredLinkMutationEvent,
-  type StoredObjectMutationEvent,
-  type StoredTelemetryAppendedEvent,
 } from "@sixb/core"
+import type {
+  StoredLinkDeletedEvent,
+  StoredLinkMutationEvent,
+  StoredObjectMutationEvent,
+  StoredTelemetryAppendedEvent,
+} from "@sixb/core/internal/events"
+import { executeObjectQuery } from "@sixb/core/internal/query"
 import { migrateSqliteDatabase } from "../src/migrations"
 import { SqliteObjectStorage } from "../src/object-storage"
 

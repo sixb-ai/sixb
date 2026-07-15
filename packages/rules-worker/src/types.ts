@@ -1,18 +1,14 @@
+import type { RuleDefinition, RuleEventSubject, RulePredicate, Storage } from "@sixb/core"
 import type {
   EventsRuntime,
-  ObjectLinkRow,
-  ObjectRow,
-  RuleDefinition,
-  RuleEventSubject,
-  RulePredicate,
-  Storage,
   StoredLinkCreatedEvent,
   StoredLinkDeletedEvent,
   StoredLinkUpdatedEvent,
   StoredObjectCreatedEvent,
   StoredObjectDeletedEvent,
   StoredObjectUpdatedEvent,
-} from "@sixb/core"
+} from "@sixb/core/internal/events"
+import type { ObjectLinkRow, ObjectRow } from "@sixb/core/storage"
 
 export type OntologyRuleEvent =
   | StoredObjectCreatedEvent

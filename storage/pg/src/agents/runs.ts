@@ -10,7 +10,7 @@ import {
   type ListAgentRunsResult,
   type ReclaimAgentRunInput,
   type StartAgentRunInput,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "../pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "../run-list-query"
 import { isUniqueViolation } from "../storage-errors"

@@ -1,4 +1,5 @@
-import type { WorkflowNodeDefinition, WorkflowRunRecord } from "@sixb/core"
+import type { WorkflowNodeDefinition } from "@sixb/core/internal/workflows"
+import type { WorkflowRunRecord } from "@sixb/core/storage"
 import { WorkflowWorkerError } from "../errors"
 import { throwIfAborted } from "../normalize"
 import type { WorkflowRunRecorder } from "../recorder"

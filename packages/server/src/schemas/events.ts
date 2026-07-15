@@ -1,8 +1,8 @@
+import type { DomainEvent } from "@sixb/core"
 import {
   EVENT_TOPICS as CORE_EVENT_TOPICS,
   EVENT_TYPES as CORE_EVENT_TYPES,
-  type DomainEvent,
-} from "@sixb/core"
+} from "@sixb/core/internal/events"
 import { z } from "zod"
 
 // z.enum expects a non-empty tuple; the core registry exposes readonly arrays.

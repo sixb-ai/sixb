@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
-import type { ActionRunCommitDiff } from "@sixb/core"
-import { normalizeActionRunCommitDiff } from "@sixb/core"
+import type { ActionRunCommitDiff } from "@sixb/core/storage"
+import { normalizeActionRunCommitDiff } from "@sixb/core/storage"
 
 export function insertActionRunCommitDiff(
   db: Database,

@@ -1,17 +1,19 @@
 import type {
-  LogsRuntime,
   OntologySource,
   Sixb,
   SixbRuntimeContext,
   WorkflowDefinition,
+  WorkflowRunSource,
+  WorkflowStepOutputs,
+} from "@sixb/core"
+import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
+import type {
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
-  WorkflowRunSource,
   WorkflowRunStorage,
-  WorkflowStepOutputs,
-  WorkflowsRuntime,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 
 export type WorkflowLogSession = ReturnType<LogsRuntime["startExecution"]>
 

@@ -1,4 +1,4 @@
-import { QueueError } from "@sixb/core"
+import { QueueError } from "@sixb/core/queues"
 import IORedis, { type Redis, type RedisOptions } from "ioredis"
 
 export type BullMqConnectionInput = string | RedisOptions | Redis

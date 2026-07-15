@@ -1,11 +1,7 @@
 import { randomUUID } from "node:crypto"
-import type {
-  DatasetDefinition,
-  DatasetDefinitionUpdatePlan,
-  DatasetSchema,
-  DatasetSchemaUpdatePlan,
-} from "@sixb/core"
-import { LakeStorageError, planDatasetDefinitionUpdate } from "@sixb/core"
+import type { DatasetDefinition, DatasetSchema } from "@sixb/core"
+import type { DatasetDefinitionUpdatePlan, DatasetSchemaUpdatePlan } from "@sixb/core/lake-storage"
+import { LakeStorageError, planDatasetDefinitionUpdate } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { getBigIntLike, getBoolean, getOptionalBigIntLike, getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"

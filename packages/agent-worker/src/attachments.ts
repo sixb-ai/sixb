@@ -2,11 +2,11 @@ import { posix } from "node:path"
 import type {
   AgentFileDataProjection,
   AgentMessagePart,
-  AgentMessageRecord,
   BlobInfo,
   BlobStorage,
   FileRef,
 } from "@sixb/core"
+import type { AgentMessageRecord } from "@sixb/core/storage"
 import { type AgentAttachmentLimits, processAgentImageAttachment } from "./image-attachments"
 
 const DEFAULT_AGENT_ATTACHMENT_LIMITS: AgentAttachmentLimits = {

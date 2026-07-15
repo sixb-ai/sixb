@@ -1,6 +1,6 @@
+import type { JsonValue } from "@sixb/core"
 import type {
   FinishSyncRunInput,
-  JsonValue,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
@@ -9,8 +9,8 @@ import type {
   SyncRunFailure,
   SyncRunRecord,
   SyncRunStorage,
-} from "@sixb/core"
-import { SyncRunError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { SyncRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"

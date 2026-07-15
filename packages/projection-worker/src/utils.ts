@@ -1,4 +1,5 @@
-import { type DatasetRow, type ProjectionRunCounters, zeroProjectionRunCounters } from "@sixb/core"
+import type { DatasetRow } from "@sixb/core"
+import { type ProjectionRunCounters, zeroProjectionRunCounters } from "@sixb/core/storage"
 
 // A writable view of the canonical counter shape, derived so the field set
 // stays in lockstep with ProjectionRunCounters.

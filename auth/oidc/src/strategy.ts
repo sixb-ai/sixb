@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto"
+import type { AuthSessionAudience, GroupDefinition } from "@sixb/core"
 import type {
-  AuthSessionAudience,
-  AuthStorage,
-  GroupDefinition,
   InvitationDeliveryInput,
   InvitationRecipientInput,
   InvitationRecipientResult,
@@ -12,7 +10,8 @@ import type {
   OidcCallbackResult,
   OidcStartSignInInput,
   OidcStartSignInResult,
-} from "@sixb/core"
+} from "@sixb/core/auth/strategy"
+import type { AuthStorage } from "@sixb/core/storage"
 import { resolveOidcProfile } from "./claims"
 import { defaultOidcClientAdapter, type OidcClientAdapter } from "./client"
 import { createOidcInvitationEmail, type SendOidcInvitationInput } from "./email"

@@ -1,9 +1,5 @@
-import type {
-  AgentDefinition,
-  Principal,
-  ServiceAccountGroupMembershipRecord,
-  ServiceAccountRecord,
-} from "@sixb/core"
+import type { AgentDefinition, Principal } from "@sixb/core"
+import type { ServiceAccountGroupMembershipRecord, ServiceAccountRecord } from "@sixb/core/storage"
 import type { AgentWorkerStorage } from "./types"
 
 /**

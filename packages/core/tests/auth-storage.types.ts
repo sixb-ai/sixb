@@ -1,11 +1,11 @@
+import { InMemoryAuthStorage, InMemoryStorage } from "../src"
 import type {
   AuthStorage,
   CompleteMagicLinkSignInInput,
   GroupMembershipRecord,
   SessionRecord,
   UserRecord,
-} from "../src"
-import { InMemoryAuthStorage, InMemoryStorage } from "../src"
+} from "../src/storage"
 
 const authStorage: AuthStorage = new InMemoryAuthStorage()
 const storage = new InMemoryStorage()

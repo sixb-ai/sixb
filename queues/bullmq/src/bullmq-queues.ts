@@ -1,12 +1,12 @@
+import type { Queues } from "@sixb/core"
 import type {
   ActionRunRequestedQueueJob,
   AgentRunRequestedQueueJob,
   PipelineRunRequestedQueueJob,
   ProjectionRunRequestedQueueJob,
-  Queues,
   SyncRunRequestedQueueJob,
   WorkflowQueueJob,
-} from "@sixb/core"
+} from "@sixb/core/queues"
 import type { KeepJobs } from "bullmq"
 import { type BullMqLaneShared, BullMqQueue } from "./bullmq-queue"
 import {

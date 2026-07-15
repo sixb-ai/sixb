@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto"
+import type { DatasetDefinition } from "@sixb/core"
 import type {
   BeginDatasetWriteInput,
-  DatasetDefinition,
   DatasetVersion,
   DatasetWriteMode,
   LakeWriteSession,
-} from "@sixb/core"
-import { LakeStorageError } from "@sixb/core"
+} from "@sixb/core/lake-storage"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { localCatalogCoordinationKey } from "./catalog-key"
 import {

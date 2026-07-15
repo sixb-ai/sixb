@@ -11,17 +11,42 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./ontology": {
-      "types": "./dist/ontology/index.d.ts",
-      "bun": "./src/ontology/index.ts",
-      "import": "./dist/ontology/index.js",
-      "default": "./dist/ontology/index.js"
+    "./actions/worker": {
+      "types": "./dist/actions/worker.d.ts",
+      "bun": "./src/actions/worker.ts",
+      "import": "./dist/actions/worker.js",
+      "default": "./dist/actions/worker.js"
     },
-    "./query": {
-      "types": "./dist/query.d.ts",
-      "bun": "./src/query.ts",
-      "import": "./dist/query.js",
-      "default": "./dist/query.js"
+    "./agents/streams": {
+      "types": "./dist/agents/streams.d.ts",
+      "bun": "./src/agents/streams.ts",
+      "import": "./dist/agents/streams.js",
+      "default": "./dist/agents/streams.js"
+    },
+    "./auth/strategy": {
+      "types": "./dist/auth/strategy.d.ts",
+      "bun": "./src/auth/strategy.ts",
+      "import": "./dist/auth/strategy.js",
+      "default": "./dist/auth/strategy.js"
+    },
+    "./blob-storage": {
+      "types": "./dist/blob-storage/browser.d.ts",
+      "browser": "./src/blob-storage/browser.ts",
+      "bun": "./src/blob-storage/browser.ts",
+      "import": "./dist/blob-storage/browser.js",
+      "default": "./dist/blob-storage/browser.js"
+    },
+    "./blob-storage/server": {
+      "types": "./dist/blob-storage/index.d.ts",
+      "bun": "./src/blob-storage/index.ts",
+      "import": "./dist/blob-storage/index.js",
+      "default": "./dist/blob-storage/index.js"
+    },
+    "./broker": {
+      "types": "./dist/broker/index.d.ts",
+      "bun": "./src/broker/index.ts",
+      "import": "./dist/broker/index.js",
+      "default": "./dist/broker/index.js"
     },
     "./events/scope": {
       "types": "./dist/events/scope.d.ts",
@@ -36,6 +61,102 @@
       "import": "./dist/events/selectors/index.js",
       "default": "./dist/events/selectors/index.js"
     },
+    "./internal/actions": {
+      "types": "./dist/actions/index.d.ts",
+      "bun": "./src/actions/index.ts",
+      "import": "./dist/actions/index.js",
+      "default": "./dist/actions/index.js"
+    },
+    "./internal/agents": {
+      "types": "./dist/agents/index.d.ts",
+      "bun": "./src/agents/index.ts",
+      "import": "./dist/agents/index.js",
+      "default": "./dist/agents/index.js"
+    },
+    "./internal/auth": {
+      "types": "./dist/auth/index.d.ts",
+      "bun": "./src/auth/index.ts",
+      "import": "./dist/auth/index.js",
+      "default": "./dist/auth/index.js"
+    },
+    "./internal/authorization": {
+      "types": "./dist/authorization/index.d.ts",
+      "bun": "./src/authorization/index.ts",
+      "import": "./dist/authorization/index.js",
+      "default": "./dist/authorization/index.js"
+    },
+    "./internal/bootstrap": {
+      "types": "./dist/bootstrap/index.d.ts",
+      "bun": "./src/bootstrap/index.ts",
+      "import": "./dist/bootstrap/index.js",
+      "default": "./dist/bootstrap/index.js"
+    },
+    "./internal/edits": {
+      "types": "./dist/edits/index.d.ts",
+      "bun": "./src/edits/index.ts",
+      "import": "./dist/edits/index.js",
+      "default": "./dist/edits/index.js"
+    },
+    "./internal/events": {
+      "types": "./dist/events/index.d.ts",
+      "bun": "./src/events/index.ts",
+      "import": "./dist/events/index.js",
+      "default": "./dist/events/index.js"
+    },
+    "./internal/http": {
+      "types": "./dist/http/index.d.ts",
+      "bun": "./src/http/index.ts",
+      "import": "./dist/http/index.js",
+      "default": "./dist/http/index.js"
+    },
+    "./internal/logging": {
+      "types": "./dist/logging/index.d.ts",
+      "bun": "./src/logging/index.ts",
+      "import": "./dist/logging/index.js",
+      "default": "./dist/logging/index.js"
+    },
+    "./internal/objects": {
+      "types": "./dist/objects/index.d.ts",
+      "bun": "./src/objects/index.ts",
+      "import": "./dist/objects/index.js",
+      "default": "./dist/objects/index.js"
+    },
+    "./internal/query": {
+      "types": "./dist/objects/query/index.d.ts",
+      "bun": "./src/objects/query/index.ts",
+      "import": "./dist/objects/query/index.js",
+      "default": "./dist/objects/query/index.js"
+    },
+    "./internal/scheduler": {
+      "types": "./dist/scheduler/index.d.ts",
+      "bun": "./src/scheduler/index.ts",
+      "import": "./dist/scheduler/index.js",
+      "default": "./dist/scheduler/index.js"
+    },
+    "./internal/schedules": {
+      "types": "./dist/schedules/index.d.ts",
+      "bun": "./src/schedules/index.ts",
+      "import": "./dist/schedules/index.js",
+      "default": "./dist/schedules/index.js"
+    },
+    "./internal/workers": {
+      "types": "./dist/workers/index.d.ts",
+      "bun": "./src/workers/index.ts",
+      "import": "./dist/workers/index.js",
+      "default": "./dist/workers/index.js"
+    },
+    "./internal/workflows": {
+      "types": "./dist/workflows/index.d.ts",
+      "bun": "./src/workflows/index.ts",
+      "import": "./dist/workflows/index.js",
+      "default": "./dist/workflows/index.js"
+    },
+    "./lake-storage": {
+      "types": "./dist/lake-storage/index.d.ts",
+      "bun": "./src/lake-storage/index.ts",
+      "import": "./dist/lake-storage/index.js",
+      "default": "./dist/lake-storage/index.js"
+    },
     "./logging": {
       "types": "./dist/logging/types.d.ts",
       "browser": "./src/logging/types.ts",
@@ -43,24 +164,35 @@
       "import": "./dist/logging/types.js",
       "default": "./dist/logging/types.js"
     },
-    "./actions/worker": {
-      "types": "./dist/actions/worker.d.ts",
-      "bun": "./src/actions/worker.ts",
-      "import": "./dist/actions/worker.js",
-      "default": "./dist/actions/worker.js"
+    "./ontology": {
+      "types": "./dist/ontology/index.d.ts",
+      "bun": "./src/ontology/index.ts",
+      "import": "./dist/ontology/index.js",
+      "default": "./dist/ontology/index.js"
     },
-    "./agents/streams": {
-      "types": "./dist/agents/streams.d.ts",
-      "bun": "./src/agents/streams.ts",
-      "import": "./dist/agents/streams.js",
-      "default": "./dist/agents/streams.js"
+    "./query": {
+      "types": "./dist/query.d.ts",
+      "bun": "./src/query.ts",
+      "import": "./dist/query.js",
+      "default": "./dist/query.js"
     },
-    "./blob-storage": {
-      "types": "./dist/blob-storage/browser.d.ts",
-      "browser": "./src/blob-storage/browser.ts",
-      "bun": "./src/blob-storage/browser.ts",
-      "import": "./dist/blob-storage/browser.js",
-      "default": "./dist/blob-storage/browser.js"
+    "./queues": {
+      "types": "./dist/queues/index.d.ts",
+      "bun": "./src/queues/index.ts",
+      "import": "./dist/queues/index.js",
+      "default": "./dist/queues/index.js"
+    },
+    "./sandboxes": {
+      "types": "./dist/sandboxes/index.d.ts",
+      "bun": "./src/sandboxes/index.ts",
+      "import": "./dist/sandboxes/index.js",
+      "default": "./dist/sandboxes/index.js"
+    },
+    "./storage": {
+      "types": "./dist/storage/index.d.ts",
+      "bun": "./src/storage/index.ts",
+      "import": "./dist/storage/index.js",
+      "default": "./dist/storage/index.js"
     },
     "./testing": {
       "types": "./dist/testing/index.d.ts",

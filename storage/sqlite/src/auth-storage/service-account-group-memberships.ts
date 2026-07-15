@@ -4,8 +4,8 @@ import type {
   ReconcileAuthServiceAccountGroupMembershipsInput,
   ServiceAccountGroupMembershipRecord,
   UpsertAuthServiceAccountGroupMembershipInput,
-} from "@sixb/core"
-import { AuthStorageError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import type {
   SqliteAuthServiceAccountGroupMembershipRow,
   SqliteAuthServiceAccountRow,

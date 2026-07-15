@@ -1,7 +1,6 @@
 import type {
   DatasetColumnDefinition,
   DatasetDefinition,
-  DatasetVersion,
   ObjectLink,
   ObjectTypeWithPropertyTokens,
   OntologyRegistry,
@@ -11,6 +10,7 @@ import type {
   ValueType,
 } from "@sixb/core"
 import { validateTelemetryProjectionFieldMapping } from "@sixb/core"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { ProjectionWorkerError } from "./errors"
 import { isIntegerEnumSchema, resolveProjectionSchema } from "./projection-schema"
 

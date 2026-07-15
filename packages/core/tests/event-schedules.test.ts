@@ -4,8 +4,6 @@ import {
   defineObjectType,
   defineRule,
   defineSchedule,
-  EventsRuntime,
-  evaluateEventSchedule,
   events,
   InMemoryBroker,
   link,
@@ -13,8 +11,9 @@ import {
   param,
   prop,
   ScheduleValidationError,
-  validateSchedulesAtStartup,
 } from "../src"
+import { EventsRuntime } from "../src/events"
+import { evaluateEventSchedule, validateSchedulesAtStartup } from "../src/schedules"
 
 const Payment = defineObjectType({
   id: "Payment",

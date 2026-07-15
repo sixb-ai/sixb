@@ -1,37 +1,41 @@
 import { describe, expect, test } from "bun:test"
 import {
-  type CountObjectsInput,
-  type CountObjectsResult,
-  collectObjectQueryValidationIssues,
-  countObjects,
   defineObjectType,
-  type ExistsObjectsInput,
-  type ExistsObjectsResult,
-  executeObjectQuery,
-  existsObjects,
-  explainObjectQuery,
-  type FacetObjectsInput,
-  type FacetObjectsResult,
-  facetObjects,
-  formatObjectQueryExplanation,
   InMemoryObjectStorage,
   link,
-  normalizeObjectQuery,
   type ObjectQuery,
-  type ObjectQueryCapabilities,
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
   ObjectQueryValidationError,
   OntologyRegistry,
-  planObjectQuery,
   prop,
-  type QueryObjectsInput,
-  type QueryObjectsResult,
   stringEnum,
-  validateObjectQuery,
 } from "../src"
 import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "../src/events"
-import type { ObjectStorage } from "../src/storage"
+import {
+  collectObjectQueryValidationIssues,
+  countObjects,
+  executeObjectQuery,
+  existsObjects,
+  explainObjectQuery,
+  facetObjects,
+  formatObjectQueryExplanation,
+  normalizeObjectQuery,
+  planObjectQuery,
+  validateObjectQuery,
+} from "../src/objects/query"
+import type {
+  CountObjectsInput,
+  CountObjectsResult,
+  ExistsObjectsInput,
+  ExistsObjectsResult,
+  FacetObjectsInput,
+  FacetObjectsResult,
+  ObjectQueryCapabilities,
+  ObjectStorage,
+  QueryObjectsInput,
+  QueryObjectsResult,
+} from "../src/storage"
 
 const Order = defineObjectType({
   id: "Order",

@@ -2,16 +2,14 @@ import {
   assertJsonValue,
   type BlobStorage,
   cloneJsonValue,
-  type DatasetVersion,
   type FileRef,
   getDatasetRowValidationError,
   isFileRef,
   type JsonValue,
-  type LakeWriteSession,
-  resolveLogsRuntime,
-  type SyncRunFailure,
-  type SyncRunRecord,
 } from "@sixb/core"
+import { resolveLogsRuntime } from "@sixb/core/internal/logging"
+import type { DatasetVersion, LakeWriteSession } from "@sixb/core/lake-storage"
+import type { SyncRunFailure, SyncRunRecord } from "@sixb/core/storage"
 import { assertDatasetRow, normalizeReadResult, throwIfAborted } from "./normalize"
 import type { RunSyncJobInput, SyncRunResult } from "./types"
 

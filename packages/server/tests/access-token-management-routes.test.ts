@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  createAccessTokenCredential,
-  createSessionCredential,
   defineGroup,
   defineObjectType,
   InMemoryBlobStorage,
@@ -13,6 +11,7 @@ import {
   prop,
   Sixb,
 } from "@sixb/core"
+import { createAccessTokenCredential, createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 

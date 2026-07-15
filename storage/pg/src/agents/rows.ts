@@ -1,14 +1,12 @@
+import { type AgentMessagePart, type Principal, SYSTEM_PRINCIPAL } from "@sixb/core"
 import {
-  type AgentMessagePart,
   type AgentMessageRecord,
   type AgentRunDiagnostic,
   type AgentRunRecord,
   type AgentRunUsage,
   type AgentThreadRecord,
   coerceAgentRunFinishReason,
-  type Principal,
-  SYSTEM_PRINCIPAL,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "../pg-client"
 
 // ── row shapes (porsager returns timestamptz as Date, jsonb parsed, int as number — typed loosely

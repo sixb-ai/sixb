@@ -6,8 +6,8 @@ import type {
   UpdateAuthUserProfileInput,
   UpdateAuthUserStatusInput,
   UserRecord,
-} from "@sixb/core"
-import { AuthStorageError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import type { PgStoreClient } from "../transactions"
 import type { PgAuthUserRow } from "./rows"
 import { rowToUserRecord } from "./rows"

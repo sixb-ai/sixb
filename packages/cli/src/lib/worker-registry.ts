@@ -1,6 +1,7 @@
 import { ActionWorker } from "@sixb/action-worker"
 import { AgentWorker } from "@sixb/agent-worker"
-import { InMemoryQueues, type Worker } from "@sixb/core"
+import { InMemoryQueues } from "@sixb/core"
+import type { Worker } from "@sixb/core/internal/workers"
 import { PipelineWorker } from "@sixb/pipeline-worker"
 import { ProjectionWorker } from "@sixb/projection-worker"
 import { SyncWorker } from "@sixb/sync-worker"

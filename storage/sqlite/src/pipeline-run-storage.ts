@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
+import type { DatasetVersionRef } from "@sixb/core/lake-storage"
 import type {
-  DatasetVersionRef,
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
   ListLatestPipelineRunsInput,
@@ -15,8 +15,8 @@ import type {
   PipelineStepRunRecord,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
-} from "@sixb/core"
-import { PipelineRunError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { PipelineRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {

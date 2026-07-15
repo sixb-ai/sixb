@@ -11,10 +11,10 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  LOGS_STREAM,
   prop,
   Sixb,
 } from "@sixb/core"
+import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import { PipelineWorker } from "../src"
 
 const Room = defineObjectType({

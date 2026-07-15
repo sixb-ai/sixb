@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { generateOntologyTypeManifest } from "../src"
+import { generateOntologyTypeManifest } from "../src/bootstrap"
 
 describe("ontology type manifest", () => {
   const tempDirs: string[] = []

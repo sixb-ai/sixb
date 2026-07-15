@@ -2,9 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { createServer } from "node:net"
 import {
   type AuthorizationContext,
-  type BrokerRecord,
   can,
-  createSessionCredential,
   defineGroup,
   defineRole,
   InMemoryBlobStorage,
@@ -18,6 +16,8 @@ import {
   Sixb,
   type SixbOptions,
 } from "@sixb/core"
+import type { BrokerRecord } from "@sixb/core/broker"
+import { createSessionCredential } from "@sixb/core/internal/auth"
 import { Elysia } from "elysia"
 import { registerLogRoutes } from "../src/routes/logs"
 import { parseLogSubscriptionMessage } from "../src/routes/ws/logs"

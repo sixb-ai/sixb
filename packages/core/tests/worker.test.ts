@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Worker, WorkerUnhealthyError } from "../src"
+import { Worker, WorkerUnhealthyError } from "../src/workers"
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void

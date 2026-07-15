@@ -1,9 +1,8 @@
+import type { OntologySource, Sixb } from "@sixb/core"
 import {
   type AuthenticatedRequestAuthSession,
-  type OntologySource,
-  type Sixb,
   verifyDoubleSubmitCsrf,
-} from "@sixb/core"
+} from "@sixb/core/internal/auth"
 import { isAccessTokenRoute, shouldVerifyCsrfForAuthSource } from "./access-token-boundary"
 import { sessionCanAccessApplication } from "./application-access"
 import { BrowserOriginError, type ResolveRequestAuthContext } from "./browser-origin"

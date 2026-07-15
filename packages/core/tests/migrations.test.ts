@@ -1,14 +1,12 @@
 import { describe, expect, test } from "bun:test"
+import { InMemoryStorage, migrateStorage, type StorageMigrator } from "../src"
 import {
   defineMigrations,
-  InMemoryStorage,
   type MigrationHistoryStore,
   type MigrationRecord,
-  migrateStorage,
   runMigrationSet,
-  type StorageMigrator,
   step,
-} from "../src"
+} from "../src/storage"
 
 interface FakeStorageDb {
   tables: Set<string>

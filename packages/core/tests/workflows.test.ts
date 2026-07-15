@@ -17,10 +17,10 @@ import {
   ref,
   Sixb,
   stringEnum,
-  validateWorkflowDefinition,
   type WorkflowDefinition,
   WorkflowDefinitionError,
 } from "../src"
+import { validateWorkflowDefinition } from "../src/workflows"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Transaction = defineObjectType({

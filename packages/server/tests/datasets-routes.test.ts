@@ -1,12 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import type {
-  DatasetCatalogState,
-  DatasetDefinition,
-  LakeStorage,
-  OntologySource,
-  Sixb,
-} from "@sixb/core"
+import type { DatasetDefinition, LakeStorage, OntologySource, Sixb } from "@sixb/core"
 import { col, defineDataset } from "@sixb/core"
+import type { DatasetCatalogState } from "@sixb/core/lake-storage"
 import { Elysia } from "elysia"
 import { registerDatasetRoutes } from "../src/routes/datasets"
 

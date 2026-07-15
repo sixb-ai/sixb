@@ -1,4 +1,4 @@
-import { LakeStorageError } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 
 export type DuckDbRow = Readonly<Record<string, unknown>>
 

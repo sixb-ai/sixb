@@ -1,7 +1,9 @@
 import { appendFileSync } from "node:fs"
 import { ActionWorker } from "@sixb/action-worker"
 import { AgentWorker } from "@sixb/agent-worker"
-import { assertLakeDatasetDefinitionsCompatible, migrateStorage, type Worker } from "@sixb/core"
+import { migrateStorage } from "@sixb/core"
+import type { Worker } from "@sixb/core/internal/workers"
+import { assertLakeDatasetDefinitionsCompatible } from "@sixb/core/lake-storage"
 import {
   type CompileRoutesDiagnostic,
   compileRoutesWithDiagnostics,

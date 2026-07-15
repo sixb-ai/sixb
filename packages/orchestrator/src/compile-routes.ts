@@ -1,10 +1,10 @@
 import {
   type DomainEvent,
-  eventScheduleSubscribedEventTypes,
   projectionKindOf,
   type ScheduleDefinition,
   type ScheduleReference,
 } from "@sixb/core"
+import { eventScheduleSubscribedEventTypes } from "@sixb/core/internal/schedules"
 import { OrchestratorError } from "./errors"
 import { eventScheduleRouteKeyForSelector } from "./route-key"
 import type {

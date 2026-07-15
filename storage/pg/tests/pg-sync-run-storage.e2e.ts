@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { SyncRunError } from "@sixb/core"
+import { SyncRunError } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 

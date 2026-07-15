@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
   can,
-  createSessionCredential,
   defineAction,
   defineGroup,
   defineObjectType,
@@ -18,6 +17,7 @@ import {
   prop,
   Sixb,
 } from "@sixb/core"
+import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 

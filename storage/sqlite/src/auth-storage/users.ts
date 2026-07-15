@@ -7,8 +7,8 @@ import type {
   UpdateAuthUserProfileInput,
   UpdateAuthUserStatusInput,
   UserRecord,
-} from "@sixb/core"
-import { AuthStorageError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import type { SqliteAuthUserRow } from "./rows"
 import { rowToUserRecord } from "./rows"
 import {

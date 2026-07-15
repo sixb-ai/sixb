@@ -1,5 +1,5 @@
+import type { DatasetVersionRef } from "@sixb/core/lake-storage"
 import type {
-  DatasetVersionRef,
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
   ListLatestPipelineRunsInput,
@@ -14,8 +14,8 @@ import type {
   PipelineStepRunRecord,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
-} from "@sixb/core"
-import { PipelineRunError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { PipelineRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"

@@ -1,22 +1,24 @@
 import type {
   DatasetVersionCommittedEvent,
   DomainEvent,
-  EventsRuntime,
-  NewQueueJob,
   PipelineDefinition,
-  PipelineRunRequestedQueueJob,
   ProjectionDefinition,
-  ProjectionRunRequestedQueueJob,
   Queues,
-  RuntimeEventScheduleDefinition,
   ScheduleDefinition,
   ScheduleTriggeredEvent,
   SyncDefinition,
-  SyncRunRequestedQueueJob,
   WorkflowDefinition,
-  WorkflowRunRequestedQueueJob,
   WorkflowScheduleTriggerDefinition,
 } from "@sixb/core"
+import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { RuntimeEventScheduleDefinition } from "@sixb/core/internal/schedules"
+import type {
+  NewQueueJob,
+  PipelineRunRequestedQueueJob,
+  ProjectionRunRequestedQueueJob,
+  SyncRunRequestedQueueJob,
+  WorkflowRunRequestedQueueJob,
+} from "@sixb/core/queues"
 
 export type RoutableProjectionDefinition = ProjectionDefinition
 

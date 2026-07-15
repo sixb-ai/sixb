@@ -1,28 +1,27 @@
 import { describe, expect, test } from "bun:test"
 import {
-  type ActionRunStorage,
-  commitActionEditBatch,
   defineObjectType,
   defineValueType,
-  deriveEditCommitDiff,
-  type EditBatch,
-  type EditObjectRef,
   InMemoryStorage,
   link,
   type ObjectLink,
-  ObjectStorageError,
   type ObjectTypeWithPropertyTokens,
   OntologyRegistry,
-  planEditBatch,
   prop,
-  type SerializationRetryOptions,
   type Storage,
-  StorageTransactionError,
   type StorageTransactionOptions,
-  validateEditBatch,
   valueTypeRef,
 } from "../src"
+import { commitActionEditBatch, type SerializationRetryOptions } from "../src/actions"
 import { type RecordEditsOptions, recordEdits } from "../src/actions/worker"
+import {
+  deriveEditCommitDiff,
+  type EditBatch,
+  type EditObjectRef,
+  planEditBatch,
+  validateEditBatch,
+} from "../src/edits"
+import { type ActionRunStorage, ObjectStorageError, StorageTransactionError } from "../src/storage"
 
 const Customer = defineObjectType({
   id: "Customer",

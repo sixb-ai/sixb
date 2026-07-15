@@ -10,12 +10,12 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  LOGS_STREAM,
   prop,
   ref,
   Sixb,
   type WorkflowDefinition,
 } from "@sixb/core"
+import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import { WorkflowWorker } from "../src"
 
 const Transaction = defineObjectType({

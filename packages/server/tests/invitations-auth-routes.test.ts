@@ -5,7 +5,6 @@ import {
   type AuthStrategy,
   applications,
   can,
-  createSessionCredential,
   defineGroup,
   defineMembershipPolicy,
   defineObjectType,
@@ -22,6 +21,7 @@ import {
   Sixb,
   type SixbAuthConfig,
 } from "@sixb/core"
+import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
 import { confirmCallback, createTestBrowserPolicy, linkFromLatestMessage } from "./helpers"
 

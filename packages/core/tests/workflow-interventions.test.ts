@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import type { CreateWorkflowInterventionInput } from "../src"
-import {
-  InMemoryStorage,
-  InMemoryWorkflowInterventionStorage,
-  WorkflowInterventionError,
-} from "../src"
+import { InMemoryStorage, InMemoryWorkflowInterventionStorage } from "../src"
+import type { CreateWorkflowInterventionInput } from "../src/storage"
+import { WorkflowInterventionError } from "../src/storage"
 
 describe("InMemoryWorkflowInterventionStorage", () => {
   test("creates pending interventions and lists them with filters", async () => {

@@ -1,10 +1,11 @@
 import type { Database } from "bun:sqlite"
+import { resolveAuthSessionAudience } from "@sixb/core"
 import type {
   AuthOidcAuthorizationAttemptStore,
   CreateOidcAuthorizationAttemptInput,
   OidcAuthorizationAttemptRecord,
-} from "@sixb/core"
-import { AuthStorageError, resolveAuthSessionAudience } from "@sixb/core"
+} from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import { runImmediateTransaction } from "../transactions"
 import {
   assertNonEmpty,

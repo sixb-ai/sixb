@@ -1,4 +1,4 @@
-import type { AgentStorage } from "@sixb/core"
+import type { AgentStorage } from "@sixb/core/storage"
 import type { PgStoreClient } from "../transactions"
 import { PgAgentMessageStore } from "./messages"
 import { PgAgentRunStore } from "./runs"

@@ -1,4 +1,4 @@
-import { BrokerError } from "@sixb/core"
+import { BrokerError } from "@sixb/core/broker"
 
 /** Error class for NATS-backed broker failures. */
 export class NatsBrokerError extends BrokerError {

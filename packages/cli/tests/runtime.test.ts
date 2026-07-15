@@ -13,7 +13,6 @@ import {
   defineSync,
   defineWorkflow,
   defineWorkflowStep,
-  type EventsRuntime,
   events,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -27,6 +26,7 @@ import {
   Sixb,
   type StorageMigrator,
 } from "@sixb/core"
+import type { EventsRuntime } from "@sixb/core/internal/events"
 import {
   checkRuntimeLakeDefinitions,
   migrateRuntimeStorage,

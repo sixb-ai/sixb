@@ -1,9 +1,9 @@
+import type { EventsRuntime } from "@sixb/core/internal/events"
 import type {
-  EventsRuntime,
   PipelineRunRecord,
   PipelineRunStatus,
   PipelineStepRunRecord,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type {
   PipelineJob,
   PipelineStepLifecycleContext,

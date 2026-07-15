@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { clearedPropertyChanges, diffPropertyChanges } from "../src"
+import { clearedPropertyChanges, diffPropertyChanges } from "../src/events"
 
 describe("diffPropertyChanges", () => {
   test("marks provided properties as created when there is no previous row", () => {

@@ -9,13 +9,13 @@ import {
   defineObjectType,
   defineRule,
   deriveRuleEventDependencies,
-  EventsRuntime,
   InMemoryBroker,
   link,
   prop,
   RuleValidationError,
   Sixb,
 } from "../src"
+import { EventsRuntime } from "../src/events"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index.ts")).href

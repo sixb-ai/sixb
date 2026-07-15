@@ -5,8 +5,8 @@ import type {
   StartWebhookRunInput,
   WebhookRunRecord,
   WebhookRunStorage,
-} from "@sixb/core"
-import { WebhookRunError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { WebhookRunError } from "@sixb/core/storage"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"

@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto"
+import type { DatasetColumnDefinition, DatasetDefinition, DatasetRow } from "@sixb/core"
 import {
-  type DatasetColumnDefinition,
-  type DatasetDefinition,
-  type DatasetRow,
   type DatasetVersion,
   type DatasetVersionRef,
   type DatasetWriteMode,
@@ -10,7 +8,7 @@ import {
   type LakeSqlExecutor,
   LakeStorageError,
   type PreviewSqlTransformInput,
-} from "@sixb/core"
+} from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import {
   type ApplyDatasetRowsResult,

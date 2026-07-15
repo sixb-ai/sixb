@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto"
+import type { DatasetRow } from "@sixb/core"
+import { getDatasetRowValidationError } from "@sixb/core"
 import type {
   BeginDatasetWriteInput,
   CommitDatasetWriteInput,
-  DatasetRow,
   DatasetVersion,
   LakeWriteSession,
-} from "@sixb/core"
-import { getDatasetRowValidationError, LakeStorageError } from "@sixb/core"
+} from "@sixb/core/lake-storage"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckDbRuntime } from "./duckdb-runtime"
 import { appendDatasetRow } from "./row-appender"
 import { datasetSchemaToDuckDbColumnsSql } from "./schema"

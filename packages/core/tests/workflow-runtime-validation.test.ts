@@ -7,6 +7,10 @@ import {
   interventionField,
   prop,
   ref,
+  stringEnum,
+  WorkflowValidationError,
+} from "../src"
+import {
   snapshotWorkflowActionInput,
   snapshotWorkflowInput,
   snapshotWorkflowInterventionDefaultResponse,
@@ -14,15 +18,13 @@ import {
   snapshotWorkflowInterventionResponse,
   snapshotWorkflowStepInput,
   snapshotWorkflowStepOutput,
-  stringEnum,
   validateWorkflowInput,
   validateWorkflowInterventionDefaultResponse,
   validateWorkflowInterventionInput,
   validateWorkflowInterventionResponse,
   validateWorkflowStepInput,
   validateWorkflowStepOutput,
-  WorkflowValidationError,
-} from "../src"
+} from "../src/workflows"
 
 const valueTypesById = new Map<string, never>()
 

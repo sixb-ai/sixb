@@ -1,11 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import {
-  type ActionRunStorage,
-  type Storage,
-  StorageTransactionError,
-  type StoredLinkMutationEvent,
-  type StoredObjectMutationEvent,
-} from "@sixb/core"
+import type { Storage } from "@sixb/core"
+import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "@sixb/core/internal/events"
+import { type ActionRunStorage, StorageTransactionError } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 
 describe("SqliteStorage.transaction", () => {

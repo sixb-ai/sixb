@@ -1,10 +1,6 @@
-import type {
-  DatasetDefinition,
-  DatasetVersion,
-  PipelineDefinition,
-  PipelineRunFailure,
-  PipelineRunStatus,
-} from "@sixb/core"
+import type { DatasetDefinition, PipelineDefinition } from "@sixb/core"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
+import type { PipelineRunFailure, PipelineRunStatus } from "@sixb/core/storage"
 import type { PipelineJob } from "./types"
 
 export class PipelineWorkerError extends Error {

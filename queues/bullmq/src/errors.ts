@@ -1,4 +1,4 @@
-import { QueueError } from "@sixb/core"
+import { QueueError } from "@sixb/core/queues"
 
 export { QueueError }
 

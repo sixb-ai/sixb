@@ -1,4 +1,4 @@
-import { LakeStorageError } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 
 /**
  * Prefix used for all Sixb dataset tables inside the DuckLake schema.

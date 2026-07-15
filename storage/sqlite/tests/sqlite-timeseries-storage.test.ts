@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
-import type { StoredTelemetryAppendedEvent } from "@sixb/core"
+import type { StoredTelemetryAppendedEvent } from "@sixb/core/internal/events"
 import { migrateSqliteDatabase } from "../src/migrations"
 import { SqliteTimeseriesStorage } from "../src/timeseries-storage"
 

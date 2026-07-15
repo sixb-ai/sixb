@@ -1,4 +1,4 @@
-import { BrokerError } from "@sixb/core"
+import { BrokerError } from "@sixb/core/broker"
 
 /** Error class for Redis Streams-backed broker failures. */
 export class RedisBrokerError extends BrokerError {

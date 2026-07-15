@@ -10,11 +10,11 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  LOGS_STREAM,
   prop,
   Sixb,
   type SyncDefinition,
 } from "@sixb/core"
+import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import { SyncWorker } from "../src"
 
 const Room = defineObjectType({

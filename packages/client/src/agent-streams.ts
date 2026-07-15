@@ -1,7 +1,8 @@
-import type { AgentRunStreamEvent, BrokerRecord } from "@sixb/core"
+import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
 // Import the schema-version value from the browser-safe streams subpath: the `@sixb/core` root pulls
 // in node-only runtime (e.g. `node:crypto`), which breaks the Atlas browser bundle.
 import { AGENT_RUN_STREAM_SCHEMA_VERSION } from "@sixb/core/agents/streams"
+import type { BrokerRecord } from "@sixb/core/broker"
 import type { GetAgentRunResponses } from "./generated/types.gen"
 import {
   createReconnectingSocket,
@@ -10,7 +11,7 @@ import {
   type ReconnectingSocketState,
 } from "./ws-socket"
 
-export type { AgentRunStreamEvent } from "@sixb/core"
+export type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
 export type { ReconnectingSocket, ReconnectingSocketState } from "./ws-socket"
 
 export type AgentRunSnapshot = GetAgentRunResponses[200]

@@ -1,4 +1,4 @@
-import type { AgentStorage } from "@sixb/core"
+import type { AgentStorage } from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "../migrations"
 import {
   closeSqliteStoreConnection,

@@ -5,8 +5,8 @@ import type {
   ListAuthServiceAccountsResult,
   ServiceAccountRecord,
   UpdateAuthServiceAccountInput,
-} from "@sixb/core"
-import { AuthStorageError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import type { PgStoreClient } from "../transactions"
 import type { PgAuthServiceAccountRow } from "./rows"
 import { rowToServiceAccountRecord } from "./rows"

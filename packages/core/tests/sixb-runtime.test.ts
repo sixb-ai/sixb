@@ -11,16 +11,14 @@ import {
   ObjectNotFoundError,
   type ObjectQuery,
   ObjectQueryPlanningError,
-  type ObjectStorage,
   OntologyValidationError,
   optional,
   param,
   prop,
-  type QueryObjectsInput,
-  type QueryObjectsResult,
   Sixb,
   valueTypeRef,
 } from "../src"
+import type { ObjectStorage, QueryObjectsInput, QueryObjectsResult } from "../src/storage"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({

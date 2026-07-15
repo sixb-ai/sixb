@@ -1,13 +1,15 @@
 import type {
   DatasetDefinition,
-  DatasetVersion,
-  DatasetVersionRef,
   PipelineDefinition,
   PipelineStepDefinition,
   PipelineStepInput,
   PipelineStepRunContext,
-  ReadDatasetRowsInput,
 } from "@sixb/core"
+import type {
+  DatasetVersion,
+  DatasetVersionRef,
+  ReadDatasetRowsInput,
+} from "@sixb/core/lake-storage"
 import { PipelineWorkerError, requireRegisteredDataset } from "./errors"
 import type { PipelineWorkerContext } from "./types"
 

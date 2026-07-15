@@ -4,7 +4,6 @@ import {
   actions,
   can,
   col,
-  createSessionCredential,
   datasets,
   defineAction,
   defineConnector,
@@ -36,6 +35,7 @@ import {
   type WorkflowDefinition,
   workflows,
 } from "@sixb/core"
+import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 

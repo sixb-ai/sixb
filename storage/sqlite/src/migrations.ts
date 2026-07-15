@@ -2,15 +2,15 @@ import { Database } from "bun:sqlite"
 import { createHash } from "node:crypto"
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
+import type { StorageMigrator } from "@sixb/core"
 import type {
   MigrationHistoryStore,
   MigrationRecord,
   MigrationSet,
   MigrationStep,
   MigrationStepOptions,
-  StorageMigrator,
-} from "@sixb/core"
-import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@sixb/core"
+} from "@sixb/core/storage"
+import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@sixb/core/storage"
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `

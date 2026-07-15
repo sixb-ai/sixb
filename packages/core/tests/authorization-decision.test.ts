@@ -1,20 +1,18 @@
 import { describe, expect, test } from "bun:test"
-import {
-  type AuthorizationContext,
-  canViewEvent,
-  evaluate,
-  isAllowed,
-  type StoredActionRequestedEvent,
-  type StoredDatasetVersionCommittedEvent,
-  type StoredLinkMutationEvent,
-  type StoredObjectMutationEvent,
-  type StoredPipelineRunStartedEvent,
-  type StoredRuleTriggeredEvent,
-  type StoredScheduleTriggeredEvent,
-  type StoredSyncRunStartedEvent,
-  type StoredTelemetryAppendedEvent,
-  type StoredWorkflowRunStartedEvent,
-} from "../src"
+import { type AuthorizationContext, isAllowed } from "../src"
+import { canViewEvent, evaluate } from "../src/authorization"
+import type {
+  StoredActionRequestedEvent,
+  StoredDatasetVersionCommittedEvent,
+  StoredLinkMutationEvent,
+  StoredObjectMutationEvent,
+  StoredPipelineRunStartedEvent,
+  StoredRuleTriggeredEvent,
+  StoredScheduleTriggeredEvent,
+  StoredSyncRunStartedEvent,
+  StoredTelemetryAppendedEvent,
+  StoredWorkflowRunStartedEvent,
+} from "../src/events"
 
 function context(grants: {
   applications?: readonly string[]

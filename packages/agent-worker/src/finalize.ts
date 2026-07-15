@@ -1,11 +1,11 @@
+import type { Storage } from "@sixb/core"
 import type {
   AgentRunRecord,
   AgentStorage,
   AppendAgentMessageInput,
   FinishAgentRunInput,
-  Storage,
-} from "@sixb/core"
-import { AgentStorageError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { AgentStorageError } from "@sixb/core/storage"
 import { AgentExecutionLostError, AgentFinalizationError } from "./errors"
 
 /** Short in-place retries that absorb a transient storage blip without re-running the model. */

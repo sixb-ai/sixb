@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
-import { EventsRuntime, InMemoryBroker } from "../src"
+import { InMemoryBroker } from "../src"
 import type { StoredScheduleTriggeredEvent } from "../src/events"
+import { EventsRuntime } from "../src/events"
 import { SchedulerRuntime, SchedulerValidationError } from "../src/scheduler"
 import { defineSchedule } from "../src/schedules"
 

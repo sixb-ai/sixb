@@ -1,12 +1,12 @@
+import type { DatasetDefinition } from "@sixb/core"
 import type {
   DatasetCatalogState,
-  DatasetDefinition,
   DatasetLatestVersionSummary,
   DatasetVersion,
   DatasetVersionMode,
   DatasetVersionRef,
-} from "@sixb/core"
-import { LakeStorageError } from "@sixb/core"
+} from "@sixb/core/lake-storage"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { getBigIntLike, getBoolean, getDate, getOptionalString, getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"

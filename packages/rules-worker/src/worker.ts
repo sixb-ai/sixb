@@ -1,5 +1,6 @@
-import type { DomainEvent, RuleDefinition, StoredDomainEvent } from "@sixb/core"
-import { Worker } from "@sixb/core"
+import type { DomainEvent, RuleDefinition } from "@sixb/core"
+import type { StoredDomainEvent } from "@sixb/core/internal/events"
+import { Worker } from "@sixb/core/internal/workers"
 import { buildRuleDependencyIndex, evaluateRuleEvents } from "./evaluate-rule-event"
 import type { OntologyRuleEvent, RuleDependencyIndex, RulesWorkerSixb } from "./types"
 

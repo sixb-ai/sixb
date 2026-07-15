@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, type DatasetDefinition, defineDataset, LakeStorageError } from "@sixb/core"
+import { col, type DatasetDefinition, defineDataset } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorage } from "../src"
 import {
   createDuckDbRuntime,

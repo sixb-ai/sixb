@@ -1,12 +1,11 @@
+import type { WorkflowDefinition, WorkflowRunSource } from "@sixb/core"
+import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
-  WorkflowDefinition,
   WorkflowInterventionRecord,
-  WorkflowIOSnapshot,
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
-  WorkflowRunSource,
   WorkflowRunStorage,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { WorkflowNodeLifecycleContext, WorkflowRunObserver } from "./types"
 
 export const noopWorkflowRunObserver: WorkflowRunObserver = {

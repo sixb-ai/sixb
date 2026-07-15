@@ -6,7 +6,6 @@ import {
   can,
   canAccessApplication,
   col,
-  createSessionCredential,
   datasets,
   defineAction,
   defineAgent,
@@ -24,11 +23,12 @@ import {
   prop,
   type RoleDefinition,
   resolveAuthorizationContext,
-  resolveRoleGrants,
   Sixb,
   syncs,
   workflows,
 } from "../src"
+import { createSessionCredential } from "../src/auth"
+import { resolveRoleGrants } from "../src/authorization"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Contract = defineObjectType({

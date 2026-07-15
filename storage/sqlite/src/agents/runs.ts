@@ -11,7 +11,7 @@ import {
   type ListAgentRunsResult,
   type ReclaimAgentRunInput,
   type StartAgentRunInput,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import {
   appendRunListFilters,
   hasEmptyStatuses,

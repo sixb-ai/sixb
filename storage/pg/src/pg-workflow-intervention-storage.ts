@@ -1,3 +1,4 @@
+import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowInterventionInput,
   CreateWorkflowInterventionInput,
@@ -8,9 +9,8 @@ import type {
   WorkflowInterventionActor,
   WorkflowInterventionRecord,
   WorkflowInterventionStorage,
-  WorkflowIOSnapshot,
-} from "@sixb/core"
-import { WorkflowInterventionError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { WorkflowInterventionError } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"

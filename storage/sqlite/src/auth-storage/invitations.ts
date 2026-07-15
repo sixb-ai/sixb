@@ -5,8 +5,8 @@ import type {
   InvitationRecord,
   ListAuthInvitationsInput,
   ListAuthInvitationsResult,
-} from "@sixb/core"
-import { AuthStorageError } from "@sixb/core"
+} from "@sixb/core/storage"
+import { AuthStorageError } from "@sixb/core/storage"
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthInvitationRow } from "./rows"
 import { rowToInvitationRecord } from "./rows"

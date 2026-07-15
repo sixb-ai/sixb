@@ -1,16 +1,12 @@
+import type { ActionDefinition, ActionSubject, OntologySource, Sixb, Storage } from "@sixb/core"
+import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { LogsRuntime } from "@sixb/core/internal/logging"
 import type {
-  ActionDefinition,
   ActionRunFailure,
   ActionRunRecord,
   ActionRunStorage,
-  ActionSubject,
-  EventsRuntime,
-  LogsRuntime,
   ObjectRow,
-  OntologySource,
-  Sixb,
-  Storage,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 
 export interface ActionWorkerSixbFacade
   extends Pick<

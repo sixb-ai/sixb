@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { FileRef } from "../src"
-import { BlobStorageError, fileNameFor, InMemoryBlobStorage, isFileRef } from "../src"
+import { fileNameFor, InMemoryBlobStorage, isFileRef } from "../src"
+import { BlobStorageError } from "../src/blob-storage"
 
 const encoder = new TextEncoder()
 

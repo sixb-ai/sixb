@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { EventsRuntime, InMemoryBroker } from "../src"
+import { InMemoryBroker } from "../src"
 import type { StoredScheduleTriggeredEvent } from "../src/events"
+import { EventsRuntime } from "../src/events"
 
 function createEvents(projectId: string) {
   return new EventsRuntime({ projectId, broker: new InMemoryBroker() })

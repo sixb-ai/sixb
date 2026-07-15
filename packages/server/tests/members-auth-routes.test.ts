@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { magicLink } from "@sixb/auth-magic-link"
 import {
-  createSessionCredential,
   defineGroup,
   defineMembershipPolicy,
   defineObjectType,
@@ -15,6 +14,7 @@ import {
   prop,
   Sixb,
 } from "@sixb/core"
+import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 

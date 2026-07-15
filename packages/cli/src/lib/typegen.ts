@@ -1,5 +1,5 @@
 import { dirname, resolve } from "node:path"
-import { generateOntologyTypeManifest } from "@sixb/core"
+import { generateOntologyTypeManifest } from "@sixb/core/internal/bootstrap"
 
 export interface GenerateProjectTypesOptions {
   readonly entry?: string

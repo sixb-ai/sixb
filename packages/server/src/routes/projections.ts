@@ -1,14 +1,13 @@
-import {
-  canViewProjection,
-  canViewProjectionRun,
-  type LinkProjectionDefinition,
-  type ObjectProjectionDefinition,
-  type OntologySource,
-  type ProjectionDefinition,
-  type ProjectionRunRecord,
-  type Sixb,
-  type TelemetryProjectionDefinition,
+import type {
+  LinkProjectionDefinition,
+  ObjectProjectionDefinition,
+  OntologySource,
+  ProjectionDefinition,
+  Sixb,
+  TelemetryProjectionDefinition,
 } from "@sixb/core"
+import { canViewProjection, canViewProjectionRun } from "@sixb/core/internal/authorization"
+import type { ProjectionRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"

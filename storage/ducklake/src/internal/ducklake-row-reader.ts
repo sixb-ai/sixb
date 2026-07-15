@@ -1,10 +1,6 @@
-import type {
-  DatasetColumnDefinition,
-  DatasetRow,
-  DatasetVersion,
-  ReadDatasetRowsInput,
-} from "@sixb/core"
-import { LakeStorageError } from "@sixb/core"
+import type { DatasetColumnDefinition, DatasetRow } from "@sixb/core"
+import type { DatasetVersion, ReadDatasetRowsInput } from "@sixb/core/lake-storage"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"

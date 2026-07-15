@@ -1,15 +1,13 @@
 import type { Database } from "bun:sqlite"
+import { type AgentMessagePart, type Principal, SYSTEM_PRINCIPAL } from "@sixb/core"
 import {
-  type AgentMessagePart,
   type AgentMessageRecord,
   type AgentRunDiagnostic,
   type AgentRunRecord,
   type AgentRunUsage,
   type AgentThreadRecord,
   coerceAgentRunFinishReason,
-  type Principal,
-  SYSTEM_PRINCIPAL,
-} from "@sixb/core"
+} from "@sixb/core/storage"
 import type { SqliteValue } from "../run-list-query"
 
 // ── row shapes (snake_case, as stored) ──────────────────────────────────────────────────────────

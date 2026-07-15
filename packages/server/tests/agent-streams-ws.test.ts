@@ -1,12 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createServer } from "node:net"
 import {
-  AGENT_RUN_STREAM_SCHEMA_VERSION,
-  type AgentRunStreamEvent,
-  type AgentStorage,
   type AuthorizationContext,
-  agentRunStreamDefinition,
-  agentRunStreamId,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -18,6 +13,13 @@ import {
   Sixb,
   type SixbOptions,
 } from "@sixb/core"
+import {
+  AGENT_RUN_STREAM_SCHEMA_VERSION,
+  type AgentRunStreamEvent,
+  agentRunStreamDefinition,
+  agentRunStreamId,
+} from "@sixb/core/agents/streams"
+import type { AgentStorage } from "@sixb/core/storage"
 import { canAccessAgentRunStream, parseAgentStreamMessage } from "../src/routes/ws/agents"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"

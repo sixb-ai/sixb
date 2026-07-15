@@ -2,6 +2,11 @@ import { describe, expect, setSystemTime, spyOn, test } from "bun:test"
 import {
   type AuthSessionOptions,
   type AuthStrategy,
+  defineGroup,
+  defineMembershipPolicy,
+  Sixb,
+} from "../src"
+import {
   createAccessTokenCredential,
   createCsrfCookieHeader,
   createSessionCookieHeader,
@@ -9,17 +14,14 @@ import {
   DEFAULT_AUTH_SESSION_CACHE_TTL_MS,
   DEFAULT_AUTH_SESSION_IDLE_TIMEOUT_MS,
   DEFAULT_AUTH_SESSION_RENEWAL_WINDOW_MS,
-  defineGroup,
-  defineMembershipPolicy,
   formatSessionCookieValue,
   hashSessionSecret,
   type MagicLinkAuthStrategy,
   parseSessionCookieValue,
   resolveAuthConfig,
   resolveAuthCookieOptions,
-  Sixb,
   verifyDoubleSubmitCsrf,
-} from "../src"
+} from "../src/auth"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const authStrategy = {
