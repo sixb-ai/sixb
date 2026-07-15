@@ -1,5 +1,5 @@
 /**
- * React-free event stream transport (`@sixb/client/events`).
+ * React-free event stream transport (exported via `@sixb/client` and `/hooks`).
  *
  * `createEventSocket` owns the full WebSocket lifecycle: connect, subscribe,
  * advance the cursor, reconnect, and tear down.

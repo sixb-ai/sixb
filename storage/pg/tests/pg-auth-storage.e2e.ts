@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { runAuthStorageContractSuite } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { PgAuthStorage } from "../src"
+import { PgAuthStorage } from "../src/auth-storage"
 import { createTestStorage } from "./helpers"
 
 const owners = new WeakMap<PgAuthStorage, PostgresStorage>()

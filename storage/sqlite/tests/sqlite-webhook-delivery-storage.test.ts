@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { SqliteWebhookDeliveryStorage } from "../src"
+import { SqliteWebhookDeliveryStorage } from "../src/webhook-delivery-storage"
 
 const deliveryKey = {
   projectId: "project-1",

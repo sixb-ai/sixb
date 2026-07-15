@@ -7,6 +7,7 @@ type PackageJson = {
   main?: string
   types?: string
   exports?: unknown
+  bin?: Record<string, string>
   files?: string[]
   license?: string
   publishConfig?: { access?: string }
@@ -14,7 +15,16 @@ type PackageJson = {
 }
 
 const root = process.cwd()
-const workspaceRoots = ["auth", "packages", "connectors", "broker", "queues", "storage"]
+const workspaceRoots = [
+  "auth",
+  "packages",
+  "connectors",
+  "broker",
+  "loggers",
+  "queues",
+  "sandboxes",
+  "storage",
+]
 const packages = await discoverPublishablePackages()
 
 for (const packageInfo of packages) {
@@ -54,15 +64,19 @@ function validatePackage(packageInfo: { dir: string; packageJson: PackageJson })
   const name = packageName(packageInfo)
   const { packageJson } = packageInfo
 
-  if (!packageJson.main?.startsWith("./dist/")) {
+  // Bin-only packages (e.g. @sixb/cli) expose commands, not importable modules,
+  // so they carry no main/types/exports.
+  const binOnly = Boolean(packageJson.bin) && !packageJson.exports
+
+  if (!binOnly && !packageJson.main?.startsWith("./dist/")) {
     throw new Error(`[SixbPublish] ${name} must publish main from ./dist/.`)
   }
 
-  if (!packageJson.types?.startsWith("./dist/")) {
+  if (!binOnly && !packageJson.types?.startsWith("./dist/")) {
     throw new Error(`[SixbPublish] ${name} must publish types from ./dist/.`)
   }
 
-  if (!packageJson.exports) {
+  if (!binOnly && !packageJson.exports) {
     throw new Error(`[SixbPublish] ${name} must define package exports.`)
   }
 

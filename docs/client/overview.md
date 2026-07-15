@@ -34,17 +34,15 @@ layer and never touch the transport directly. In a standalone app, configure
 
 | Import | What it gives you |
 | --- | --- |
-| `@sixb/client` | Generated per-route SDK functions, terminal action wait helpers, the shared `client`, and the UI models from `/models` |
+| `@sixb/client` | Generated per-route SDK functions, terminal action wait helpers, the shared `client`, the `SixbEvent` types and `events.object(...)` builder, and the UI models from `/models` |
 | `@sixb/client/query` | `objects(Type).query()` — typed object-query builder over HTTP |
-| `@sixb/client/hooks` | TanStack Query hooks and `*Options` factories, plus `SixbProvider` |
-| `@sixb/client/events` | `SixbEvent` types and the `events.object(...)` builder |
+| `@sixb/client/hooks` | TanStack Query hooks and `*Options` factories, `SixbProvider`, the events layer, and `useAgentRunStream` |
 | `@sixb/client/logs` | The `logs` builder — read, tail, and subscribe to run logs |
-| `@sixb/client/agent-streams` | `useAgentRunStream` — stream a live agent run's messages |
 | `@sixb/client/browser` | CSRF/auth bootstrap and `__SIXB_RUNTIME__` handoff |
 | `@sixb/client/models` | `encode`/`decodeObjectId`, `executeAction`, UI shape mappers |
 
-> `@sixb/client/hooks` re-exports `@sixb/client/events` and the typed-query
-> hooks, so a React app usually only imports from `/hooks`.
+> `@sixb/client/hooks` re-exports the events layer and the typed-query hooks,
+> so a React app usually only imports from `/hooks`.
 
 ## Root: generated SDK
 
@@ -161,11 +159,12 @@ a commit diff exists, object detail caches plus the typed object-query cache
 group. See [running actions from apps](../apps/actions.md) for loading, error,
 high-frequency control, and manual invalidation patterns.
 
-## /events: live WebSocket
+## Events: live WebSocket
 
-`@sixb/client/events` carries the `SixbEvent` union types, the `isSixbEvent`
-guard, and the fluent `events.object(...)` builder. React apps use the builder through
-hooks re-exported from `/hooks`: `useEvents`, `useLatest`, `useLatestByObject`,
+The events layer carries the `SixbEvent` union types, the `isSixbEvent`
+guard, and the fluent `events.object(...)` builder — all exported from the root
+and re-exported by `/hooks`. React apps use the builder through the `/hooks`
+event hooks: `useEvents`, `useLatest`, `useLatestByObject`,
 and `useInvalidateOnEvent`.
 
 ```tsx
@@ -246,7 +245,7 @@ so they are safe to pass through URLs and route params.
 | React action button with terminal loading/error state | `useActionRunMutation` (`@sixb/client/hooks`) |
 | Live updates in React | `events.object(...)` with `useEvents` / `useLatest` (`@sixb/client/hooks`) |
 | Live run logs in an app | `logs.actions()`/`.syncs()`/… `.subscribe()` (`@sixb/client/logs`) |
-| Stream a live agent run | `useAgentRunStream` (`@sixb/client/agent-streams`) |
+| Stream a live agent run | `useAgentRunStream` (`@sixb/client/hooks`) |
 | Bootstrap a standalone browser client | `@sixb/client/browser` |
 | Encode/decode ids or fire actions | `@sixb/client/models` |
 

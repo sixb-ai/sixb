@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { PipelineRunError } from "@sixb/core"
-import { SqlitePipelineRunStorage, SqliteStorage } from "../src"
+import { SqliteStorage } from "../src"
+import { SqlitePipelineRunStorage } from "../src/pipeline-run-storage"
 
 describe("SqlitePipelineRunStorage", () => {
   let storage: SqlitePipelineRunStorage

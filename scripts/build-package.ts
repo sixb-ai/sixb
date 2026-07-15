@@ -88,7 +88,11 @@ async function resolveEntrypoints(exportsMap: ExportsMap | undefined): Promise<s
   const sourceTargets = new Set<string>()
 
   if (!exportsMap) {
-    sourceTargets.add("./src/index.ts")
+    // Bin-only packages (e.g. @sixb/cli) have no exports and nothing to bundle;
+    // their build still runs for copyAssets.
+    if (await Bun.file(join(srcRoot, "index.ts")).exists()) {
+      sourceTargets.add("./src/index.ts")
+    }
   } else if (typeof exportsMap === "string" || Array.isArray(exportsMap)) {
     collectSourceTargets(exportsMap, sourceTargets)
   } else {

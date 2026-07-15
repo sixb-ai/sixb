@@ -1,9 +1,2 @@
-export { ActionWorkerError } from "./errors"
-export { runActionJob } from "./run-action-job"
-export type {
-  ActionJob,
-  ActionRunResult,
-  ActionWorkerContext,
-  RunActionJobInput,
-} from "./types"
+export type { ActionWorkerOptions, ActionWorkerSixb } from "./worker"
 export { ActionWorker } from "./worker"

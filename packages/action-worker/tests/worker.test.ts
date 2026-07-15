@@ -18,7 +18,8 @@ import {
   Sixb,
   type Storage,
 } from "@sixb/core"
-import { ActionWorker, ActionWorkerError } from "../src"
+import { ActionWorker } from "../src"
+import { ActionWorkerError } from "../src/errors"
 import { waitFor } from "./helpers"
 
 const Device = defineObjectType({

@@ -1,12 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { migrateStorage } from "@sixb/core"
 import { SQL } from "bun"
-import {
-  POSTGRES_STORAGE_ADAPTER_ID,
-  PostgresStorage,
-  type PostgresStorage as PostgresStorageType,
-  quoteIdent,
-} from "../src"
+import { PostgresStorage, type PostgresStorage as PostgresStorageType } from "../src"
+import { POSTGRES_STORAGE_ADAPTER_ID, quoteIdent } from "../src/migrations"
 import { createTestStorage } from "./helpers"
 
 describe("Postgres storage migrations", () => {

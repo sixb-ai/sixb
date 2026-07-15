@@ -23,14 +23,10 @@ import {
   type WorkflowRunStorage,
   WorkflowValidationError,
 } from "@sixb/core"
-import {
-  EventsRuntimeWorkflowRunObserver,
-  runWorkflowJob,
-  runWorkflowResumeJob,
-  type WorkflowRunObserver,
-  type WorkflowWorkerContext,
-  WorkflowWorkerError,
-} from "../src"
+import { WorkflowWorkerError } from "../src/errors"
+import { EventsRuntimeWorkflowRunObserver } from "../src/events"
+import { runWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"
+import type { WorkflowRunObserver, WorkflowWorkerContext } from "../src/types"
 
 const Transaction = defineObjectType({
   id: "Transaction",

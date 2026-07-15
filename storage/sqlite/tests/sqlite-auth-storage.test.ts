@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { runAuthStorageContractSuite } from "@sixb/core/testing"
-import { SqliteAuthStorage, SqliteStorage } from "../src"
+import { SqliteStorage } from "../src"
+import { SqliteAuthStorage } from "../src/auth-storage"
 
 runAuthStorageContractSuite("SqliteAuthStorage", {
   createStorage: () => new SqliteAuthStorage(),

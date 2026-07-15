@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { WorkflowRunError } from "@sixb/core"
-import { SqliteStorage, SqliteWorkflowRunStorage } from "../src"
+import { SqliteStorage } from "../src"
+import { SqliteWorkflowRunStorage } from "../src/workflow-run-storage"
 
 describe("SqliteWorkflowRunStorage", () => {
   let storage: SqliteWorkflowRunStorage

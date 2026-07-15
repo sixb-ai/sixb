@@ -42,14 +42,7 @@ import {
 } from "@sixb/core"
 import { jsonSchema, type ToolSet, tool } from "ai"
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
-import {
-  AgentWorker,
-  type AgentWorkerContext,
-  type AgentWorkerOptions,
-  type AgentWorkerStorage,
-  createBrokerStreamSink,
-  NOOP_STREAM_SINK,
-} from "../src"
+import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
@@ -58,6 +51,8 @@ import { finishRunOrThrow } from "../src/finalize"
 import { reconcileAgentExecutionIdentity } from "../src/identity"
 import { runAgentTurn } from "../src/run-agent-turn"
 import { createAgentRunEnvironment } from "../src/run-environment"
+import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
+import type { AgentWorkerContext, AgentWorkerStorage } from "../src/types"
 import { waitFor, writeProjectSkill } from "./helpers"
 
 const PROJECT_ID = "agent-worker-tests"

@@ -3,15 +3,9 @@
   "version": "0.1.0",
   "description": "Shared Sixb UI foundations and components",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/components/index.js",
+  "types": "./dist/components/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "bun": "./src/index.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    },
     "./components": {
       "types": "./dist/components/index.d.ts",
       "bun": "./src/components/index.ts",
@@ -50,12 +44,6 @@
       ],
       "import": "./dist/hooks/*.js",
       "default": "./dist/hooks/*.js"
-    },
-    "./lib": {
-      "types": "./dist/lib/index.d.ts",
-      "bun": "./src/lib/index.ts",
-      "import": "./dist/lib/index.js",
-      "default": "./dist/lib/index.js"
     },
     "./lib/shiki": {
       "types": "./dist/lib/shiki.d.ts",

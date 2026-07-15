@@ -17,7 +17,9 @@ import {
   prop,
   Sixb,
 } from "@sixb/core"
-import { type ActionWorkerContext, ActionWorkerError, runActionJob } from "../src"
+import { ActionWorkerError } from "../src/errors"
+import { runActionJob } from "../src/run-action-job"
+import type { ActionWorkerContext } from "../src/types"
 
 const Device = defineObjectType({
   id: "Device",

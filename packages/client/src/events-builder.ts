@@ -1,5 +1,5 @@
 /**
- * Fluent event-subscription builder (`@sixb/client/events`).
+ * Fluent event-subscription builder (exported via `@sixb/client` and `/hooks`).
  *
  * `events.object(Type)` creates an immutable, generic-threaded builder
  * that accumulates an event-filter spec and types the payload from the same

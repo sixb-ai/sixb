@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { ProjectionRunError } from "@sixb/core"
-import { SqliteProjectionRunStorage } from "../src"
+import { SqliteProjectionRunStorage } from "../src/projection-run-storage"
 
 describe("SqliteProjectionRunStorage", () => {
   let storage: SqliteProjectionRunStorage

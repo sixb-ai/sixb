@@ -13,8 +13,8 @@ import {
   type StoredObjectMutationEvent,
   type StoredTelemetryAppendedEvent,
 } from "@sixb/core"
-import { SqliteObjectStorage } from "../src"
 import { migrateSqliteDatabase } from "../src/migrations"
+import { SqliteObjectStorage } from "../src/object-storage"
 
 const Room = defineObjectType({
   id: "Room",

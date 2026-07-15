@@ -3,7 +3,7 @@
   // build graph. Package `src` is NOT checked here — that happens in
   // `tsconfig.build.json` (`bun run build:types`), which runs first. The globs
   // below cover all build-graph workspace roots, so new packages are picked up
-  // automatically. Examples/docs/sandbox keep their own `typegen && tsc`.
+  // automatically. Examples/docs keep their own `typegen && tsc`.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "types": ["bun"],
@@ -22,6 +22,7 @@
     "storage/*/tests/**/*.ts",
     "broker/*/tests/**/*.ts",
     "queues/*/tests/**/*.ts",
+    "sandboxes/*/tests/**/*.ts",
     "loggers/*/tests/**/*.ts",
     "auth/*/tests/**/*.ts"
   ]

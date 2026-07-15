@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { runAgentStorageContractSuite } from "@sixb/core/testing"
-import { SqliteAgentStorage, SqliteStorage } from "../src"
+import { SqliteStorage } from "../src"
+import { SqliteAgentStorage } from "../src/agents"
 
 runAgentStorageContractSuite("SqliteAgentStorage", {
   createStorage: () => new SqliteAgentStorage(),
