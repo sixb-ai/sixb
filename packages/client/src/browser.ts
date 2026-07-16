@@ -1,5 +1,9 @@
 import type { AuthSessionAudience } from "@sixb/core"
-import { configureSixbClient as configureGeneratedSixbClient, normalizeSixbApiBaseUrl } from "./api"
+import {
+  configureSixbClient as configureGeneratedSixbClient,
+  normalizeSixbApiBaseUrl,
+  SIXB_CSRF_TOKEN_RESPONSE_HEADER_NAME,
+} from "./api"
 import { client } from "./generated/client.gen"
 
 export type { SixbApiErrorInit } from "./api"
@@ -127,10 +131,15 @@ export function configureSixbBrowserClient(
     return request
   })
   const authResponseInterceptorId = client.interceptors.response.use((response, request) => {
+    const responseCsrfToken = response.headers.get(SIXB_CSRF_TOKEN_RESPONSE_HEADER_NAME)
+    if (responseCsrfToken) {
+      csrfToken = responseCsrfToken
+    }
+
     if (
       !config.auth.enabled ||
       response.status !== 401 ||
-      isAuthApiRequest(config, request) ||
+      isAuthRedirectExcludedRequest(config, request) ||
       request.headers.has("authorization")
     ) {
       return response
@@ -200,14 +209,18 @@ export function configureSixbBrowserClient(
   return controller
 }
 
-function isAuthApiRequest(config: SixbBrowserRuntimeConfig, request: Request): boolean {
+function isAuthRedirectExcludedRequest(
+  config: SixbBrowserRuntimeConfig,
+  request: Request
+): boolean {
   const requestUrl = new URL(request.url)
   const apiUrl = new URL(normalizeSixbApiBaseUrl(config.api.baseUrl), requestUrl)
   const apiPath = apiUrl.pathname.replace(/\/+$/, "")
-  const authPath = `${apiPath}/api/auth`
+  const method = request.method.toUpperCase()
   return (
     requestUrl.origin === apiUrl.origin &&
-    (requestUrl.pathname === authPath || requestUrl.pathname.startsWith(`${authPath}/`))
+    ((method === "GET" && requestUrl.pathname === `${apiPath}/api/auth/session`) ||
+      (method === "POST" && requestUrl.pathname === `${apiPath}/api/auth/sign-out`))
   )
 }
 

@@ -299,6 +299,11 @@ describe("createCustomApp.dev", () => {
     expect(main).toContain("requireSixbBrowserAuthSession(runtimeConfig")
     expect(main).toContain("import.meta.hot.dispose")
     expect(main).toContain("browserClient.dispose()")
+    expect(main).toContain("import.meta.hot.data as CustomAppHotData")
+    expect(main).toContain("data.root ??= createRoot(element)")
+    expect(main).toContain("data.queryClient ??= createQueryClient()")
+    expect(main).toContain("getRoot().render(<App />)")
+    expect(main).not.toContain('createRoot(document.getElementById("root")!).render')
   })
 
   test("renders an access-denied view without starting the application", async () => {

@@ -3,6 +3,7 @@ import {
   createSixbAgentsWebSocketUrl,
   parseAgentRunStreamServerMessage,
 } from "../src/agent-streams"
+import { SIXB_CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../src/api"
 import {
   configureSixbBrowserClient,
   createSixbSignInUrl,
@@ -14,7 +15,12 @@ import {
 } from "../src/browser"
 import { createSixbEventsWebSocketUrl } from "../src/events-transport"
 import { client } from "../src/generated/client.gen"
-import { requestSyncRun, signOut } from "../src/generated/sdk.gen"
+import {
+  listAuthMembers,
+  listAuthSessions,
+  requestSyncRun,
+  signOut,
+} from "../src/generated/sdk.gen"
 
 const runtimeConfig: SixbBrowserRuntimeConfig = {
   api: { baseUrl: "http://localhost:3002" },
@@ -331,7 +337,7 @@ describe("browser client auth", () => {
     expect(secondRedirects).toHaveLength(1)
   })
 
-  test("does not auto-redirect auth API requests", async () => {
+  test("does not auto-redirect explicit sign-out requests", async () => {
     const redirects: string[] = []
     const controller = configureBrowserClient({
       getCurrentUrl: () => "http://localhost:3001/devices",
@@ -349,7 +355,7 @@ describe("browser client auth", () => {
     expect(redirects).toEqual([])
   })
 
-  test("does not auto-redirect auth API requests under a path-prefixed API base", async () => {
+  test("does not auto-redirect path-prefixed sign-out requests", async () => {
     const redirects: string[] = []
     configureBrowserClient(
       {
@@ -371,6 +377,55 @@ describe("browser client auth", () => {
 
     expect(new URL(requestUrl).pathname).toBe("/platform/api/auth/sign-out")
     expect(redirects).toEqual([])
+  })
+
+  test("auto-redirects protected auth session management requests", async () => {
+    const redirects: string[] = []
+    configureBrowserClient({
+      getCurrentUrl: () => "http://localhost:3001/settings/sessions",
+      redirect: (url) => redirects.push(url),
+    })
+    const fetchMock = Object.assign(
+      async () => Response.json({ error: "Authentication required" }, { status: 401 }),
+      { preconnect: fetch.preconnect }
+    ) satisfies typeof fetch
+
+    await listAuthSessions({ fetch: fetchMock })
+
+    expect(redirects).toHaveLength(1)
+  })
+
+  test("auto-redirects protected auth member management requests", async () => {
+    const redirects: string[] = []
+    configureBrowserClient({
+      getCurrentUrl: () => "http://localhost:3001/settings/members",
+      redirect: (url) => redirects.push(url),
+    })
+    const fetchMock = Object.assign(
+      async () => Response.json({ error: "Authentication required" }, { status: 401 }),
+      { preconnect: fetch.preconnect }
+    ) satisfies typeof fetch
+
+    await listAuthMembers({ fetch: fetchMock })
+
+    expect(redirects).toHaveLength(1)
+  })
+
+  test("synchronizes CSRF state from a response header", async () => {
+    const controller = configureBrowserClient()
+    controller.setCsrfToken("csrf_stale")
+    const fetchMock = Object.assign(
+      async () =>
+        Response.json(
+          { id: "run_1", syncId: "sync_1", status: "queued" },
+          { headers: { [SIXB_CSRF_TOKEN_RESPONSE_HEADER_NAME]: "csrf_current" } }
+        ),
+      { preconnect: fetch.preconnect }
+    ) satisfies typeof fetch
+
+    await requestSyncRun({ body: {}, path: { syncId: "sync_1" }, fetch: fetchMock })
+
+    expect(controller.getCsrfToken()).toBe("csrf_current")
   })
 
   test("does not auto-redirect bearer requests", async () => {

@@ -439,7 +439,11 @@ export interface AuthSessionOptions {
   readonly idleTimeoutMs?: number
   /** How close to idle expiry a foreground request must be before renewal. Defaults to 7 days. */
   readonly renewalWindowMs?: number
-  /** Optional maximum lifetime that foreground activity cannot extend. Disabled by default. */
+  /**
+   * Optional maximum lifetime that foreground activity cannot extend. Captured when the session
+   * is created, so later configuration changes affect only newly issued sessions. Disabled by
+   * default.
+   */
   readonly absoluteTimeoutMs?: number
   /**
    * How long (ms) a resolved session is cached in-process before it is re-validated

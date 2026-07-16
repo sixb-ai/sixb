@@ -132,7 +132,7 @@ export async function generateAppEntry(
 
   // Generate main.tsx
   const mainContent = `import React from "react"
-import { createRoot } from "react-dom/client"
+import { createRoot, type Root } from "react-dom/client"
 import { signOut } from "@sixb/client"
 import { BrowserRouter, Routes, Route, matchPath, useNavigate, useLocation } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -145,6 +145,11 @@ import {
 import { routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
+
+interface CustomAppHotData {
+  root?: Root
+  queryClient?: QueryClient
+}
 
 const runtimeConfig = readSixbBrowserRuntimeConfig({ audience: "app" })
 const browserClient = configureSixbBrowserClient(runtimeConfig)
@@ -165,14 +170,43 @@ const canRenderApp =
   !runtimeConfig.auth.enabled ||
   (authSession?.authenticated === true && authSession.applicationAccess.allowed)
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      refetchOnWindowFocus: false,
-      retry: 1,
+const queryClient = getQueryClient()
+
+function getRoot(): Root {
+  const element = document.getElementById("root")
+  if (!element) {
+    throw new Error("[SixbApp] Could not find the root element.")
+  }
+
+  if (import.meta.hot) {
+    const data = import.meta.hot.data as CustomAppHotData
+    data.root ??= createRoot(element)
+    return data.root
+  }
+
+  return createRoot(element)
+}
+
+function getQueryClient(): QueryClient {
+  if (import.meta.hot) {
+    const data = import.meta.hot.data as CustomAppHotData
+    data.queryClient ??= createQueryClient()
+    return data.queryClient
+  }
+
+  return createQueryClient()
+}
+
+function createQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        refetchOnWindowFocus: false,
+        retry: 1,
+      },
     },
-  },
-})
+  })
+}
 
 const RESERVED_PATH_PREFIXES = ["/api", "/auth", "/ws", "/docs"]
 
@@ -433,9 +467,9 @@ function App() {
 }
 
 if (canRenderApp) {
-  createRoot(document.getElementById("root")!).render(<App />)
+  getRoot().render(<App />)
 } else if (applicationAccessDenied) {
-  createRoot(document.getElementById("root")!).render(<AccessDeniedView />)
+  getRoot().render(<AccessDeniedView />)
 }
 `
 

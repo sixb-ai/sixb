@@ -39,6 +39,7 @@ import {
   type ResolveAuthRedirectContext,
   type ResolveRequestAuthContext,
 } from "../auth/browser-origin"
+import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../auth/csrf"
 import { hasForegroundSessionActivity } from "../auth/session-activity"
 import { createSessionRenewalCookieHeaders } from "../auth/session-cookies"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
@@ -1748,11 +1749,10 @@ function authSessionJsonResponse(
   body: AuthenticatedAuthSessionResponse,
   setCookies: readonly string[]
 ): Response {
-  if (setCookies.length === 0) {
-    return jsonResponse(body, 200)
-  }
-
-  const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
+  const headers = new Headers({
+    "content-type": "application/json; charset=utf-8",
+    [CSRF_TOKEN_RESPONSE_HEADER_NAME]: body.csrfToken,
+  })
   for (const setCookie of setCookies) headers.append("set-cookie", setCookie)
   return jsonResponse(body, 200, headers)
 }
