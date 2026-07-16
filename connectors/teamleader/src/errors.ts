@@ -16,8 +16,18 @@ function formatTeamleaderApiError(
   status: number,
   errors: readonly TeamleaderApiErrorItem[]
 ): string {
-  const title = errors.find((error) => error.title)?.title
-  return title
-    ? `[SixbTeamleader] API request failed with ${status}: ${title}`
+  const details = errors.map(formatTeamleaderApiErrorItem).filter(Boolean)
+  return details.length > 0
+    ? `[SixbTeamleader] API request failed with ${status}: ${details.join("; ")}`
     : `[SixbTeamleader] API request failed with ${status}.`
+}
+
+function formatTeamleaderApiErrorItem(error: TeamleaderApiErrorItem): string {
+  const message = error.title ?? error.detail ?? error.key ?? error.code
+  if (!message) {
+    return ""
+  }
+
+  const field = error.meta?.field
+  return field ? `${field}: ${message}` : message
 }
