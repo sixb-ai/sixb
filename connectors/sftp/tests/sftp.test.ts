@@ -234,6 +234,48 @@ describe("sftp connector", () => {
     }
   })
 
+  test("aborts read-ahead before returning a queued chunk", async () => {
+    await writeFile(
+      join(server.rootDir, "files", "abort-queued-read-ahead.bin"),
+      Buffer.alloc(256 * 1024)
+    )
+    server.configureReads({
+      delayMs: (offset) => (offset === 0 ? 30 : 0),
+    })
+    const adapter = sftp(
+      {
+        host: server.host,
+        port: server.port,
+        username: server.username,
+        password: server.password,
+      },
+      { readAheadRequests: 4 }
+    )
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+    const abort = new AbortController()
+
+    try {
+      const reader = (
+        await client.open("/files/abort-queued-read-ahead.bin", { signal: abort.signal })
+      ).getReader()
+      const firstRead = await reader.read()
+      expect(firstRead.done).toBe(false)
+
+      // Later prefetched ranges finish before the delayed first range. Yield so the stream's
+      // automatic pull can enqueue the next range while the consumer is paused between reads.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      abort.abort(new Error("stop queued read-ahead"))
+
+      await expect(reader.read()).rejects.toThrow("stop queued read-ahead")
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
   test("cancels read-ahead and closes its remote handle", async () => {
     await writeFile(
       join(server.rootDir, "files", "cancel-read-ahead.bin"),

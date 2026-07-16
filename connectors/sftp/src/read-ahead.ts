@@ -27,8 +27,8 @@ export async function openSftpReadAheadStream(
   const source = new SftpReadAheadSource(sftpClient, handle, readAheadRequests, signal)
 
   return new ReadableStream<Uint8Array>({
-    start() {
-      source.start()
+    start(controller) {
+      source.start(controller)
     },
     pull(controller) {
       return source.pull(controller)
@@ -43,6 +43,7 @@ class SftpReadAheadSource {
   private readonly pendingReads = new Map<number, ScheduledRead>()
   private readonly abortPromise: Promise<never>
   private rejectAbort: ((reason: unknown) => void) | undefined
+  private controller: ReadableStreamDefaultController<Uint8Array> | undefined
   private nextRequestOffset = 0
   private nextOutputOffset = 0
   private terminal = false
@@ -61,7 +62,8 @@ class SftpReadAheadSource {
     this.signal?.addEventListener("abort", this.onAbort, { once: true })
   }
 
-  start(): void {
+  start(controller: ReadableStreamDefaultController<Uint8Array>): void {
+    this.controller = controller
     this.scheduleWindow()
   }
 
@@ -99,8 +101,7 @@ class SftpReadAheadSource {
 
       controller.enqueue(result.bytes)
     } catch (error) {
-      this.fail()
-      controller.error(error)
+      this.fail(error)
     }
   }
 
@@ -115,7 +116,7 @@ class SftpReadAheadSource {
     const reason = this.signal ? abortError(this.signal) : new Error("SFTP read aborted.")
     this.rejectAbort?.(reason)
     this.rejectAbort = undefined
-    void this.closeHandle().catch(() => {})
+    this.fail(reason)
   }
 
   private scheduleWindow(): void {
@@ -147,10 +148,11 @@ class SftpReadAheadSource {
     }
   }
 
-  private fail(): void {
+  private fail(error: unknown): void {
     this.terminal = true
     this.cleanupAbortListener()
     this.pendingReads.clear()
+    this.controller?.error(error)
     void this.closeHandle().catch(() => {})
   }
 
