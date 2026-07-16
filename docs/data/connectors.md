@@ -134,7 +134,7 @@ When a system fits a common protocol, use a packaged adapter instead of writing 
 | --- | --- | --- | --- |
 | `@sixb/connector-sql` | `sql(connection)` | `"sql"` | Bun `SQL` (Postgres, MySQL, SQLite) |
 | `@sixb/connector-rest` | `rest(options)` | `"rest"` | `RestClient` (`request`/`get`/`post`) |
-| `@sixb/connector-sftp` | `sftp(connection)` | `"sftp"` | `SftpClient` (`list`/`open`/`read`/`write`/…) |
+| `@sixb/connector-sftp` | `sftp(connection, options?)` | `"sftp"` | `SftpClient` (`list`/`open`/`read`/`write`/…) |
 | `@sixb/connector-imap` | `imap(connection)` | `"imap"` | Read-only `ImapClient` (mailboxes/messages/MIME parts) |
 
 If the ERP were a real Postgres database, the connector would be one line:
@@ -175,14 +175,16 @@ rest({
 | `onUnauthorized` | `(ctx) => void \| Promise<void>` | Hook to refresh credentials on a 401. |
 | `retry` | `RestRetryPolicy` | `{ maxRetries, shouldRetry?, delayMs? }`. |
 
-### `sql(connection)` and `sftp(connection)`
+### `sql(connection)` and `sftp(connection, options?)`
 
 `sql` takes a connection string, a `URL`, or a Bun `SQL.Options` object; the connected client is the
 native Bun SQL client, shared across Postgres, MySQL, and SQLite. `sftp` takes an ssh2
 `ConnectConfig`; its `SftpClient` exposes `list`, `stat`, `exists`, `ensureDir`, `open`, `read`,
 `write`, `rename`, `delete`, `mkdir`, and `rmdir`. `open(path, { signal? })` returns a backpressured
 `ReadableStream<Uint8Array>` for large files; `read(path)` remains the buffered convenience for
-small files. Both adapters close their client on `disconnect`.
+small files. Set `options.readAheadRequests` to an integer from `1` to `64` to keep that many
+ordered reads in flight per open stream; it defaults to sequential reads (`1`). Both adapters close
+their client on `disconnect`.
 
 ### Hosted-service connectors
 

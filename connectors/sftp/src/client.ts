@@ -1,9 +1,17 @@
 import { posix } from "node:path"
 import { Readable } from "node:stream"
 import type { Callback, SFTPWrapper, ReadStream as Ssh2ReadStream } from "ssh2"
+import { openSftpReadAheadStream } from "./read-ahead"
 import type { SftpClient, SftpOpenOptions, SftpStats, SftpWriteData } from "./types"
 
-export function createSftpClient(sftpClient: SFTPWrapper): SftpClient {
+type SftpClientOptions = {
+  readonly readAheadRequests: number
+}
+
+export function createSftpClient(
+  sftpClient: SFTPWrapper,
+  clientOptions: SftpClientOptions
+): SftpClient {
   return {
     list(path) {
       return callResult((callback) => sftpClient.readdir(path, callback))
@@ -19,8 +27,8 @@ export function createSftpClient(sftpClient: SFTPWrapper): SftpClient {
     ensureDir(path) {
       return ensureSftpDirectory(sftpClient, path)
     },
-    open(path, options) {
-      return openSftpStream(sftpClient, path, options)
+    open(path, openOptions) {
+      return openSftpStream(sftpClient, path, clientOptions, openOptions)
     },
     read(path) {
       return callResult((callback) => sftpClient.readFile(path, callback))
@@ -46,8 +54,18 @@ export function createSftpClient(sftpClient: SFTPWrapper): SftpClient {
 async function openSftpStream(
   sftpClient: SFTPWrapper,
   path: string,
+  clientOptions: SftpClientOptions,
   options: SftpOpenOptions = {}
 ): Promise<ReadableStream<Uint8Array>> {
+  if (clientOptions.readAheadRequests > 1) {
+    return openSftpReadAheadStream(
+      sftpClient,
+      path,
+      clientOptions.readAheadRequests,
+      options.signal
+    )
+  }
+
   options.signal?.throwIfAborted()
   const nodeStream = sftpClient.createReadStream(path)
 

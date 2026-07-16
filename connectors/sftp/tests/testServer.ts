@@ -38,8 +38,22 @@ export interface TestSftpServer {
   readonly username: string
   readonly password: string
   readonly rootDir: string
+  configureReads(behavior?: TestSftpReadBehavior): void
+  readMetrics(): TestSftpReadMetrics
   waitForIdle(): Promise<void>
   close(): Promise<void>
+}
+
+export type TestSftpReadBehavior = {
+  readonly delayMs?: (offset: number) => number
+  readonly failAtOffset?: number
+  readonly maxResponseBytes?: number
+}
+
+export type TestSftpReadMetrics = {
+  readonly maxConcurrentRequests: number
+  readonly offsets: readonly number[]
+  readonly totalRequests: number
 }
 
 export async function startTestSftpServer(): Promise<TestSftpServer> {
@@ -48,8 +62,22 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
   mkdirSync(join(rootDir, "files"), { recursive: true })
   let activeConnections = 0
   let idleWaiters: Array<() => void> = []
+  let readBehavior: TestSftpReadBehavior = {}
+  let activeReadRequests = 0
+  let maxConcurrentReadRequests = 0
+  let readOffsets: number[] = []
+  const resolveIdleWaiters = () => {
+    if (activeConnections !== 0 || activeReadRequests !== 0) {
+      return
+    }
+
+    for (const resolveIdle of idleWaiters) {
+      resolveIdle()
+    }
+    idleWaiters = []
+  }
   const waitForIdle = () => {
-    if (activeConnections === 0) {
+    if (activeConnections === 0 && activeReadRequests === 0) {
       return Promise.resolve()
     }
 
@@ -80,20 +108,24 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
 
           session.on("sftp", (acceptSftp) => {
             const sftp = acceptSftp()
-            bindSftpHandlers(sftp, rootDir)
+            bindSftpHandlers(sftp, rootDir, {
+              behavior: () => readBehavior,
+              finishRequest() {
+                activeReadRequests -= 1
+                resolveIdleWaiters()
+              },
+              startRequest(offset) {
+                activeReadRequests += 1
+                maxConcurrentReadRequests = Math.max(maxConcurrentReadRequests, activeReadRequests)
+                readOffsets.push(offset)
+              },
+            })
           })
         })
       })
       .on("close", () => {
         activeConnections -= 1
-
-        if (activeConnections === 0) {
-          for (const resolveIdle of idleWaiters) {
-            resolveIdle()
-          }
-
-          idleWaiters = []
-        }
+        resolveIdleWaiters()
       })
       .on("end", () => {
         // Bun can leave ssh2's accepted socket half-open after the peer ends
@@ -113,6 +145,21 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
     username: USERNAME,
     password: PASSWORD,
     rootDir,
+    configureReads(behavior = {}) {
+      if (activeReadRequests !== 0) {
+        throw new Error("[SixbSftpTest] Cannot reconfigure active read requests.")
+      }
+      readBehavior = behavior
+      maxConcurrentReadRequests = 0
+      readOffsets = []
+    },
+    readMetrics() {
+      return {
+        maxConcurrentRequests: maxConcurrentReadRequests,
+        offsets: [...readOffsets],
+        totalRequests: readOffsets.length,
+      }
+    },
     waitForIdle,
     async close() {
       await waitForIdle()
@@ -133,7 +180,15 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
   }
 }
 
-function bindSftpHandlers(sftp: SFTPWrapper, rootDir: string): void {
+function bindSftpHandlers(
+  sftp: SFTPWrapper,
+  rootDir: string,
+  readControl: {
+    readonly behavior: () => TestSftpReadBehavior
+    readonly finishRequest: () => void
+    readonly startRequest: (offset: number) => void
+  }
+): void {
   const handles = new Map<number, OpenHandle>()
   let nextHandle = 1
 
@@ -202,15 +257,27 @@ function bindSftpHandlers(sftp: SFTPWrapper, rootDir: string): void {
       }
     })
     .on("READ", async (reqid, handle, offset, length) => {
-      const entry = getHandle(handle)
-      if (!entry || entry.kind !== "file") {
-        sftp.status(reqid, utils.sftp.STATUS_CODE.FAILURE)
-        return
-      }
-
+      readControl.startRequest(offset)
       try {
-        const buffer = Buffer.alloc(length)
-        const { bytesRead } = await entry.handle.read(buffer, 0, length, offset)
+        const entry = getHandle(handle)
+        if (!entry || entry.kind !== "file") {
+          sftp.status(reqid, utils.sftp.STATUS_CODE.FAILURE)
+          return
+        }
+
+        const behavior = readControl.behavior()
+        const delayMs = behavior.delayMs?.(offset) ?? 0
+        if (delayMs > 0) {
+          await delay(delayMs)
+        }
+        if (behavior.failAtOffset === offset) {
+          sftp.status(reqid, utils.sftp.STATUS_CODE.FAILURE)
+          return
+        }
+
+        const responseBytes = Math.min(length, behavior.maxResponseBytes ?? length)
+        const buffer = Buffer.alloc(responseBytes)
+        const { bytesRead } = await entry.handle.read(buffer, 0, responseBytes, offset)
 
         if (bytesRead === 0) {
           sftp.status(reqid, utils.sftp.STATUS_CODE.EOF)
@@ -220,6 +287,8 @@ function bindSftpHandlers(sftp: SFTPWrapper, rootDir: string): void {
         sftp.data(reqid, buffer.subarray(0, bytesRead))
       } catch (error) {
         sftp.status(reqid, mapErrorToStatus(error))
+      } finally {
+        readControl.finishRequest()
       }
     })
     .on("WRITE", async (reqid, handle, offset, data) => {
@@ -318,6 +387,10 @@ function bindSftpHandlers(sftp: SFTPWrapper, rootDir: string): void {
         sftp.status(reqid, mapErrorToStatus(error))
       }
     })
+}
+
+function delay(durationMs: number): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, durationMs))
 }
 
 async function respondWithStats(

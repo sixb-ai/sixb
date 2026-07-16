@@ -1,7 +1,10 @@
 import type { SFTPWrapper } from "ssh2"
 import { Client } from "ssh2"
 import { createSftpClient } from "./client"
-import type { SftpClient, SftpConnection, SftpConnector } from "./types"
+import type { SftpClient, SftpConnection, SftpConnector, SftpOptions } from "./types"
+
+const DEFAULT_READ_AHEAD_REQUESTS = 1
+const MAX_READ_AHEAD_REQUESTS = 64
 
 type ConnectionState = {
   client: Client
@@ -16,8 +19,9 @@ const connections = new WeakMap<SftpClient, ConnectionState>()
  * The connected client exposes a small promise-based file API over a single
  * SSH connection and SFTP session.
  */
-export function sftp(connection: SftpConnection): SftpConnector {
+export function sftp(connection: SftpConnection, options: SftpOptions = {}): SftpConnector {
   assertConnection(connection)
+  const readAheadRequests = resolveReadAheadRequests(options.readAheadRequests)
 
   return {
     type: "sftp",
@@ -28,7 +32,7 @@ export function sftp(connection: SftpConnection): SftpConnector {
 
       const sshClient = new Client()
       const sftpSession = await connectSftpClient(sshClient, connection, context.signal)
-      const sftpClient = createSftpClient(sftpSession)
+      const sftpClient = createSftpClient(sftpSession, { readAheadRequests })
       const state = {
         client: sshClient,
         closed: false,
@@ -51,6 +55,21 @@ export function sftp(connection: SftpConnection): SftpConnector {
       connections.delete(client)
     },
   }
+}
+
+function resolveReadAheadRequests(value: number | undefined): number {
+  const resolved = value ?? DEFAULT_READ_AHEAD_REQUESTS
+  if (
+    !Number.isSafeInteger(resolved) ||
+    resolved < DEFAULT_READ_AHEAD_REQUESTS ||
+    resolved > MAX_READ_AHEAD_REQUESTS
+  ) {
+    throw new Error(
+      `[SixbSftp] readAheadRequests must be an integer between ${DEFAULT_READ_AHEAD_REQUESTS} and ${MAX_READ_AHEAD_REQUESTS}.`
+    )
+  }
+
+  return resolved
 }
 
 async function connectSftpClient(

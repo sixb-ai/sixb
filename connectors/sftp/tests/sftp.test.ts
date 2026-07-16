@@ -18,6 +18,7 @@ describe("sftp connector", () => {
   beforeEach(async () => {
     await rm(join(server.rootDir, "files"), { force: true, recursive: true })
     await mkdir(join(server.rootDir, "files"), { recursive: true })
+    server.configureReads()
   })
 
   afterEach(async () => {
@@ -102,6 +103,212 @@ describe("sftp connector", () => {
     } finally {
       await adapter.disconnect?.(client)
     }
+  })
+
+  test("opens remote files with bounded read-ahead", async () => {
+    const content = Buffer.alloc(256 * 1024 + 17)
+    for (let index = 0; index < content.length; index += 1) {
+      content[index] = index % 251
+    }
+    await writeFile(join(server.rootDir, "files", "read-ahead.bin"), content)
+    await writeFile(join(server.rootDir, "files", "empty-read-ahead.bin"), Buffer.alloc(0))
+    server.configureReads({
+      delayMs: (offset) => (offset === 0 ? 30 : 5),
+    })
+    const adapter = sftp(
+      {
+        host: server.host,
+        port: server.port,
+        username: server.username,
+        password: server.password,
+      },
+      { readAheadRequests: 4 }
+    )
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+
+    try {
+      const stream = await client.open("/files/read-ahead.bin")
+      expect(Buffer.from(await new Response(stream).arrayBuffer())).toEqual(content)
+      expect(server.readMetrics().maxConcurrentRequests).toBeGreaterThan(1)
+      expect(server.readMetrics().maxConcurrentRequests).toBeLessThanOrEqual(4)
+      expect(
+        (await new Response(await client.open("/files/empty-read-ahead.bin")).arrayBuffer())
+          .byteLength
+      ).toBe(0)
+      await expect(client.open("/files/missing-read-ahead.bin")).rejects.toThrow()
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("fills short SFTP responses without gaps or duplicate bytes", async () => {
+    const content = Buffer.alloc(96 * 1024 + 31)
+    for (let index = 0; index < content.length; index += 1) {
+      content[index] = index % 239
+    }
+    await writeFile(join(server.rootDir, "files", "short-reads.bin"), content)
+    server.configureReads({ maxResponseBytes: 4 * 1024 + 3 })
+    const adapter = sftp(
+      {
+        host: server.host,
+        port: server.port,
+        username: server.username,
+        password: server.password,
+      },
+      { readAheadRequests: 4 }
+    )
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+
+    try {
+      const stream = await client.open("/files/short-reads.bin")
+      expect(Buffer.from(await new Response(stream).arrayBuffer())).toEqual(content)
+      expect(server.readMetrics().totalRequests).toBeGreaterThan(4)
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("surfaces a read-ahead request failure without returning partial success", async () => {
+    await writeFile(join(server.rootDir, "files", "failed-read.bin"), Buffer.alloc(128 * 1024, 1))
+    server.configureReads({ failAtOffset: 32 * 1024 })
+    const adapter = sftp(
+      {
+        host: server.host,
+        port: server.port,
+        username: server.username,
+        password: server.password,
+      },
+      { readAheadRequests: 4 }
+    )
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+
+    try {
+      const stream = await client.open("/files/failed-read.bin")
+      await expect(new Response(stream).arrayBuffer()).rejects.toThrow()
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("aborts read-ahead while requests are in flight", async () => {
+    await writeFile(join(server.rootDir, "files", "abort-read-ahead.bin"), Buffer.alloc(256 * 1024))
+    server.configureReads({ delayMs: () => 100 })
+    const adapter = sftp(
+      {
+        host: server.host,
+        port: server.port,
+        username: server.username,
+        password: server.password,
+      },
+      { readAheadRequests: 4 }
+    )
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+    const abort = new AbortController()
+
+    try {
+      const reader = (
+        await client.open("/files/abort-read-ahead.bin", { signal: abort.signal })
+      ).getReader()
+      const firstRead = reader.read()
+      abort.abort(new Error("stop read-ahead"))
+
+      await expect(firstRead).rejects.toThrow("stop read-ahead")
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("cancels read-ahead and closes its remote handle", async () => {
+    await writeFile(
+      join(server.rootDir, "files", "cancel-read-ahead.bin"),
+      Buffer.alloc(256 * 1024)
+    )
+    server.configureReads({ delayMs: () => 25 })
+    const adapter = sftp(
+      {
+        host: server.host,
+        port: server.port,
+        username: server.username,
+        password: server.password,
+      },
+      { readAheadRequests: 4 }
+    )
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+
+    try {
+      const reader = (await client.open("/files/cancel-read-ahead.bin")).getReader()
+      await reader.cancel("consumer stopped")
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("disconnects while a read-ahead stream is active", async () => {
+    await writeFile(
+      join(server.rootDir, "files", "disconnect-read-ahead.bin"),
+      Buffer.alloc(256 * 1024)
+    )
+    server.configureReads({ delayMs: () => 100 })
+    const adapter = sftp(
+      {
+        host: server.host,
+        port: server.port,
+        username: server.username,
+        password: server.password,
+      },
+      { readAheadRequests: 4 }
+    )
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+    const reader = (await client.open("/files/disconnect-read-ahead.bin")).getReader()
+    const firstRead = reader.read()
+
+    await adapter.disconnect?.(client)
+
+    await expect(firstRead).rejects.toThrow()
+  })
+
+  test("validates read-ahead configuration before connecting", () => {
+    const connection = {
+      host: "127.0.0.1",
+      username: "demo",
+      password: "demo",
+    }
+
+    expect(() => sftp(connection, { readAheadRequests: 1 })).not.toThrow()
+    expect(() => sftp(connection, { readAheadRequests: 64 })).not.toThrow()
+    expect(() => sftp(connection, { readAheadRequests: 0 })).toThrow(
+      "readAheadRequests must be an integer between 1 and 64"
+    )
+    expect(() => sftp(connection, { readAheadRequests: 65 })).toThrow(
+      "readAheadRequests must be an integer between 1 and 64"
+    )
+    expect(() => sftp(connection, { readAheadRequests: 1.5 })).toThrow(
+      "readAheadRequests must be an integer between 1 and 64"
+    )
   })
 
   test("aborts an active remote file stream", async () => {
