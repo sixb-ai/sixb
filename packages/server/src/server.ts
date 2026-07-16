@@ -22,6 +22,7 @@ import {
   resolveApiBrowserPublicOrigin,
   type SixbApiBrowserPolicy,
 } from "./auth/browser-origin"
+import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "./auth/csrf"
 import { ServerAuthGuard } from "./auth/guard"
 import { consumeInternalRequestAuthState } from "./auth/scope"
 import { SESSION_ACTIVITY_HEADER_NAME } from "./auth/session-activity"
@@ -176,7 +177,7 @@ export function createSixbApi(server: SixbServer) {
         CSRF_HEADER_NAME,
         SESSION_ACTIVITY_HEADER_NAME,
       ],
-      exposeHeaders: [],
+      exposeHeaders: [CSRF_TOKEN_RESPONSE_HEADER_NAME],
       maxAge: 600,
     })
   )
@@ -220,6 +221,7 @@ export function createSixbApi(server: SixbServer) {
       }
 
       appendSetCookieHeaders(set, renewal.headers)
+      setResponseHeader(set, CSRF_TOKEN_RESPONSE_HEADER_NAME, renewal.csrfToken)
     })
 
   app.use(
@@ -291,6 +293,20 @@ function appendSetCookieHeaders(set: ElysiaSet, values: readonly string[]): void
     ...(existing === undefined ? [] : Array.isArray(existing) ? existing : [String(existing)]),
     ...values,
   ]
+}
+
+function setResponseHeader(set: ElysiaSet, name: string, value: string): void {
+  if (set.headers instanceof Headers) {
+    set.headers.set(name, value)
+    return
+  }
+
+  if (!set.headers || typeof set.headers !== "object" || Array.isArray(set.headers)) {
+    set.headers = {}
+  }
+
+  const headers = set.headers as Record<string, string | number | string[] | undefined>
+  headers[name] = value
 }
 
 function rejectDisallowedBrowserOrigin(

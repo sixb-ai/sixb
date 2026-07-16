@@ -246,6 +246,9 @@ auth: {
 Constraints: `renewalWindowMs < idleTimeoutMs`, `absoluteTimeoutMs >= idleTimeoutMs`, and
 `cacheTtlMs < renewalWindowMs`. Invalid combinations fail at startup.
 
+The absolute deadline is captured when a session is created. Changing `absoluteTimeoutMs` affects newly issued sessions only; revoke or explicitly backfill existing sessions when a stricter
+absolute lifetime must apply immediately.
+
 ### Behavior
 
 - Atlas, generated apps, and `@sixb/client/browser` track activity automatically.

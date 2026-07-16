@@ -1,6 +1,7 @@
 import { describe, expect, setSystemTime, test } from "bun:test"
 import { createServer } from "node:net"
 import {
+  type AuthCookieOptions,
   type AuthSessionOptions,
   applications,
   can,
@@ -21,6 +22,7 @@ import {
   type RoleDefinition,
   Sixb,
 } from "@sixb/core"
+import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../src/auth/csrf"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -67,6 +69,7 @@ function createRuntime(
   options: {
     readonly auth?: boolean
     readonly connector?: boolean
+    readonly cookies?: AuthCookieOptions
     readonly roles?: readonly RoleDefinition[]
     readonly session?: AuthSessionOptions
   } = {}
@@ -100,8 +103,12 @@ function createRuntime(
     groups: [securityAdmins, atlasUsers],
     roles: options.roles,
     auth: options.auth
-      ? options.session
-        ? { strategy: authStrategy, session: options.session }
+      ? options.session || options.cookies
+        ? {
+            strategy: authStrategy,
+            ...(options.session ? { session: options.session } : {}),
+            ...(options.cookies ? { cookies: options.cookies } : {}),
+          }
         : authStrategy
       : undefined,
   })
@@ -346,8 +353,9 @@ describe("server auth guard", () => {
       )
 
       const response = await app.fetch(
-        new Request("http://localhost/api/project", {
+        new Request("http://api.localhost/api/project", {
           headers: {
+            origin: "http://atlas.localhost",
             cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
             "x-sixb-session-activity": "1",
           },
@@ -359,6 +367,10 @@ describe("server auth guard", () => {
       expect(cookies).toHaveLength(2)
       expect(cookies[0]).toContain(`sixb_session=${seeded.credential.cookieValue}`)
       expect(cookies[1]).toContain("sixb_csrf=csrf_1")
+      expect(response.headers.get(CSRF_TOKEN_RESPONSE_HEADER_NAME)).toBe("csrf_1")
+      expect(response.headers.get("access-control-expose-headers")).toContain(
+        CSRF_TOKEN_RESPONSE_HEADER_NAME
+      )
       for (const cookie of cookies) {
         expect(cookie).toContain("Max-Age=1800")
         expect(cookie).toContain("Expires=Wed, 01 Jul 2026 10:30:00 GMT")
@@ -366,6 +378,45 @@ describe("server auth guard", () => {
       await expect(
         storage.auth.sessions.getById({ projectId: "test-project", id: "ses_1" })
       ).resolves.toMatchObject({ expiresAt: new Date("2026-07-01T10:30:00.000Z") })
+    } finally {
+      setSystemTime()
+    }
+  })
+
+  test("repairs a missing CSRF cookie during session renewal", async () => {
+    const now = new Date("2026-07-01T10:00:00.000Z")
+    setSystemTime(now)
+    try {
+      const { sixb, storage } = createRuntime({
+        auth: true,
+        session: {
+          idleTimeoutMs: 30 * 60_000,
+          renewalWindowMs: 10 * 60_000,
+          cacheTtlMs: 0,
+        },
+      })
+      const seeded = await seedSession(storage, {
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 5 * 60_000),
+      })
+      const app = createSixbApi(
+        new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      )
+
+      const response = await app.fetch(
+        new Request("http://localhost/api/project", {
+          headers: {
+            cookie: seeded.cookie,
+            "x-sixb-session-activity": "1",
+          },
+        })
+      )
+
+      expect(response.status).toBe(200)
+      const csrfCookie = getSetCookies(response).find((cookie) => cookie.startsWith("sixb_csrf="))
+      const csrfToken = csrfCookie?.match(/^sixb_csrf=([^;]+)/)?.[1]
+      if (!csrfToken) throw new Error("Expected the renewed CSRF cookie to contain a token")
+      expect(response.headers.get(CSRF_TOKEN_RESPONSE_HEADER_NAME)).toBe(csrfToken)
     } finally {
       setSystemTime()
     }
@@ -410,6 +461,7 @@ describe("server auth guard", () => {
     try {
       const { sixb, storage } = createRuntime({
         auth: true,
+        cookies: { csrfHttpOnly: true },
         session: {
           idleTimeoutMs: 30 * 60_000,
           renewalWindowMs: 10 * 60_000,
@@ -448,6 +500,8 @@ describe("server auth guard", () => {
       expect(cookies).toHaveLength(2)
       expect(cookies[0]).toContain(`sixb_session_app=${seeded.credential.cookieValue}`)
       expect(cookies[1]).toContain(`sixb_csrf_app=${csrfToken}`)
+      expect(cookies[1]).toContain("HttpOnly")
+      expect(response.headers.get(CSRF_TOKEN_RESPONSE_HEADER_NAME)).toBe(csrfToken)
     } finally {
       setSystemTime()
     }

@@ -971,6 +971,59 @@ describe("Sixb auth runtime", () => {
     })
   })
 
+  test("does not retroactively add an absolute deadline to an existing session", async () => {
+    const now = new Date("2026-07-01T10:00:00.000Z")
+    setSystemTime(now)
+    try {
+      const deps = createTestRuntimeDeps()
+      const sixb = new Sixb({
+        ontology: [],
+        ...deps,
+        auth: {
+          strategy: authStrategy,
+          session: {
+            idleTimeoutMs: 30 * 60_000,
+            renewalWindowMs: 10 * 60_000,
+            absoluteTimeoutMs: 60 * 60_000,
+            cacheTtlMs: 0,
+          },
+        },
+      })
+      const credential = createSessionCredential("ses_existing_policy")
+      await deps.storage.auth.users.create({
+        id: "usr_existing_policy",
+        projectId: sixb.id,
+        email: "existing-policy@acme.com",
+      })
+      await deps.storage.auth.sessions.create({
+        id: credential.sessionId,
+        projectId: sixb.id,
+        userId: "usr_existing_policy",
+        strategyId: "test",
+        audience: "atlas",
+        tokenHash: credential.tokenHash,
+        createdAt: new Date(now.getTime() - 2 * 60 * 60_000),
+        expiresAt: new Date(now.getTime() + 5 * 60_000),
+      })
+      const request = new Request("http://localhost/api/project", {
+        headers: { cookie: `sixb_session=${credential.cookieValue}` },
+      })
+
+      const session = await sixb.auth.getSession(request, { sessionActivity: "foreground" })
+
+      expect(session).toMatchObject({
+        authenticated: true,
+        sessionRenewed: true,
+        session: {
+          expiresAt: new Date(now.getTime() + 30 * 60_000),
+        },
+      })
+      expect(session.authenticated && session.session.absoluteExpiresAt).toBeUndefined()
+    } finally {
+      setSystemTime()
+    }
+  })
+
   test("rejects invalid sliding session policy", () => {
     const cases: readonly [AuthSessionOptions, string][] = [
       [{ idleTimeoutMs: 0 }, "idleTimeoutMs must be a positive finite number"],
