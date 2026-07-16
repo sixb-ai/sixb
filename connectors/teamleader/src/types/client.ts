@@ -16,8 +16,15 @@ import type {
 } from "./companies"
 import type {
   TeamleaderContact,
+  TeamleaderContactAddRequest,
+  TeamleaderContactLinkToCompanyRequest,
   TeamleaderContactListItem,
   TeamleaderContactListRequest,
+  TeamleaderContactTagRequest,
+  TeamleaderContactUnlinkFromCompanyRequest,
+  TeamleaderContactUpdateCompanyLinkRequest,
+  TeamleaderContactUpdateRequest,
+  TeamleaderContactUploadAvatarRequest,
 } from "./contacts"
 import type {
   TeamleaderCustomFieldDefinition,
@@ -210,6 +217,33 @@ export interface TeamleaderClient {
       request: TeamleaderInfoRequest,
       options?: TeamleaderRequestOptions
     ): Promise<TeamleaderSingleResponse<TeamleaderContact>>
+    add(
+      request: TeamleaderContactAddRequest,
+      options?: TeamleaderRequestOptions
+    ): Promise<TeamleaderSingleResponse<TeamleaderTypeAndId<"contact">>>
+    update(
+      request: TeamleaderContactUpdateRequest,
+      options?: TeamleaderRequestOptions
+    ): Promise<void>
+    delete(request: TeamleaderInfoRequest, options?: TeamleaderRequestOptions): Promise<void>
+    tag(request: TeamleaderContactTagRequest, options?: TeamleaderRequestOptions): Promise<void>
+    untag(request: TeamleaderContactTagRequest, options?: TeamleaderRequestOptions): Promise<void>
+    linkToCompany(
+      request: TeamleaderContactLinkToCompanyRequest,
+      options?: TeamleaderRequestOptions
+    ): Promise<void>
+    unlinkFromCompany(
+      request: TeamleaderContactUnlinkFromCompanyRequest,
+      options?: TeamleaderRequestOptions
+    ): Promise<void>
+    updateCompanyLink(
+      request: TeamleaderContactUpdateCompanyLinkRequest,
+      options?: TeamleaderRequestOptions
+    ): Promise<void>
+    uploadAvatar(
+      request: TeamleaderContactUploadAvatarRequest,
+      options?: TeamleaderRequestOptions
+    ): Promise<void>
   }
   readonly companies: {
     list(

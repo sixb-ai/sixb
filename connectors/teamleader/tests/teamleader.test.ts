@@ -353,6 +353,148 @@ describe("teamleader connector", () => {
     ])
   })
 
+  test("supports every documented contact endpoint", async () => {
+    const requests: CapturedRequest[] = []
+    const client = createTeamleaderClient({
+      accessToken: "test-token",
+      fetch: mockFetch((input, init) => {
+        requests.push({ input, init })
+        const path = new URL(String(input)).pathname
+
+        if (path === "/contacts.list") {
+          return Promise.resolve(jsonResponse({ data: [] }))
+        }
+
+        if (path === "/contacts.info") {
+          return Promise.resolve(jsonResponse({ data: { id: "contact-1" } }))
+        }
+
+        if (path === "/contacts.add") {
+          return Promise.resolve(
+            jsonResponse({ data: { type: "contact", id: "contact-1" } }, { status: 201 })
+          )
+        }
+
+        return Promise.resolve(new Response(undefined, { status: 204 }))
+      }),
+    })
+
+    const addRequest = {
+      first_name: "John",
+      last_name: "Smith",
+      emails: [{ type: "primary", email: "john@example.com" }],
+      salutation: "Mr",
+      telephones: [{ type: "mobile", number: "+32470000000" }],
+      website: "https://example.com",
+      addresses: [
+        {
+          type: "invoicing",
+          address: {
+            addressee: "John Smith",
+            line_1: "Dok Noord 3A 101",
+            postal_code: "9000",
+            city: "Ghent",
+            country: "BE",
+            area_level_two_id: "area-1",
+          },
+        },
+      ],
+      language: "en",
+      gender: "prefers_not_to_say",
+      birthdate: "1989-08-19",
+      iban: "BE12123412341234",
+      bic: "BICBANK",
+      national_identification_number: "01234567-X",
+      remarks: "Met at expo",
+      tags: ["prospect", "expo"],
+      custom_fields: [{ id: "field-1", value: "external-reference" }],
+      marketing_mails_consent: false,
+    } as const
+    const updateRequest = {
+      id: "contact-1",
+      first_name: null,
+      last_name: "Jones",
+      salutation: null,
+      emails: [{ type: "primary", email: null }],
+      telephones: null,
+      website: null,
+      addresses: [],
+      language: "fr",
+      gender: null,
+      birthdate: null,
+      iban: null,
+      bic: null,
+      national_identification_number: "19346758-T",
+      remarks: null,
+      tags: [],
+      custom_fields: [{ id: "field-1", value: "updated-reference" }],
+      custom_fields_update_strategy: "partial",
+      marketing_mails_consent: true,
+    } as const
+    const tagRequest = { id: "contact-1", tags: ["customer", "newsletter"] } as const
+    const untagRequest = { id: "contact-1", tags: ["prospect"] } as const
+    const linkRequest = {
+      id: "contact-1",
+      company_id: "company-1",
+      position: "CEO",
+      decision_maker: true,
+    } as const
+    const unlinkRequest = { id: "contact-1", company_id: "company-1" } as const
+    const updateLinkRequest = {
+      id: "contact-1",
+      company_id: "company-1",
+      position: "CTO",
+      decision_maker: false,
+    } as const
+    const uploadAvatarRequest = { id: "contact-1", image: null } as const
+
+    await client.contacts.list({
+      filter: { status: "active", marketing_mails_consent: true },
+      includes: "custom_fields,price_list",
+    })
+    await client.contacts.info({ id: "contact-1" })
+    const added = await client.contacts.add(addRequest)
+    await client.contacts.update(updateRequest)
+    await client.contacts.delete({ id: "contact-1" })
+    await client.contacts.tag(tagRequest)
+    await client.contacts.untag(untagRequest)
+    await client.contacts.linkToCompany(linkRequest)
+    await client.contacts.unlinkFromCompany(unlinkRequest)
+    await client.contacts.updateCompanyLink(updateLinkRequest)
+    await client.contacts.uploadAvatar(uploadAvatarRequest)
+
+    expect(added.data).toEqual({ type: "contact", id: "contact-1" })
+    expect(requests.map((request) => new URL(String(request.input)).pathname)).toEqual([
+      "/contacts.list",
+      "/contacts.info",
+      "/contacts.add",
+      "/contacts.update",
+      "/contacts.delete",
+      "/contacts.tag",
+      "/contacts.untag",
+      "/contacts.linkToCompany",
+      "/contacts.unlinkFromCompany",
+      "/contacts.updateCompanyLink",
+      "/contacts.uploadAvatar",
+    ])
+    expect(requests.map((request) => JSON.parse(String(request.init?.body)))).toEqual([
+      {
+        filter: { status: "active", marketing_mails_consent: true },
+        includes: "custom_fields,price_list",
+      },
+      { id: "contact-1" },
+      addRequest,
+      updateRequest,
+      { id: "contact-1" },
+      tagRequest,
+      untagRequest,
+      linkRequest,
+      unlinkRequest,
+      updateLinkRequest,
+      uploadAvatarRequest,
+    ])
+  })
+
   test("exposes quotation reference endpoints", async () => {
     const requests: CapturedRequest[] = []
     const client = createTeamleaderClient({
