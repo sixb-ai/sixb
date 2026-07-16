@@ -85,3 +85,28 @@ export interface PennylaneCollectionLink {
 export interface PennylaneIdReference {
   readonly id: number
 }
+
+/** Operation recorded in a Pennylane change log (`/changelogs/*`). */
+export type PennylaneChangeOperation = "insert" | "update" | "delete"
+
+/**
+ * One entry from a Pennylane change log. `id` is the changed record's id. Pennylane retains change
+ * events for four weeks; every resource's change log shares this shape.
+ */
+export interface PennylaneChange {
+  readonly id: number
+  readonly operation: PennylaneChangeOperation
+  /** When the event arrived in the change-log pipeline. */
+  readonly processed_at: string
+  readonly created_at: string
+  readonly updated_at: string
+}
+
+/**
+ * Change-log list options. `cursor` and `start_date` are mutually exclusive: `start_date`
+ * (RFC 3339) seeds the first page, then pagination continues via `cursor`.
+ */
+export type PennylaneChangeListOptions = { readonly limit?: number } & (
+  | { readonly cursor?: string; readonly start_date?: never }
+  | { readonly cursor?: never; readonly start_date?: string }
+)

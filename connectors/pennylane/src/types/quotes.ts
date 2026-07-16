@@ -226,18 +226,3 @@ export interface PennylaneUploadQuoteAppendixInput {
   /** Filename sent in the multipart request. Defaults to File.name when available. */
   readonly filename?: string
 }
-
-export type PennylaneQuoteChangeOperation = "insert" | "update" | "delete"
-
-export interface PennylaneQuoteChange {
-  readonly id: number
-  readonly operation: PennylaneQuoteChangeOperation
-  readonly processed_at: string
-  readonly updated_at: string
-  readonly created_at: string
-}
-
-export type PennylaneQuoteChangeListOptions = { readonly limit?: number } & (
-  | { readonly cursor?: string; readonly start_date?: never }
-  | { readonly cursor?: never; readonly start_date?: string }
-)
