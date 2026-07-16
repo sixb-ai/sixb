@@ -64,8 +64,6 @@ duplicate data.
 | `pl.quotes.sendByEmail(id, input?)` | `POST /quotes/{id}/send_by_email` |
 | `pl.quotes.update(id, input)` | `PUT /quotes/{id}` |
 | `pl.quotes.updateStatus(id, input)` | `PUT /quotes/{id}/update_status` |
-| `pl.quoteChanges.list(options?)` | `GET /changelogs/quotes` |
-| `pl.quoteChanges.listAll(options?)` | Cursor iterator over quote changes |
 
 ### List and filter
 
@@ -90,19 +88,6 @@ for await (const quote of pl.quotes.listAll({
   filter: [{ field: "status", operator: "eq", value: "accepted" }],
 })) {
   // Map the upstream quote into a dataset or object.
-}
-```
-
-Quote change events are retained by Pennylane for four weeks. `cursor` and `start_date` are mutually
-exclusive in both the TypeScript contract and runtime validation:
-
-```ts
-for await (const change of pl.quoteChanges.listAll({
-  start_date: "2026-07-01T00:00:00Z",
-  limit: 1000,
-})) {
-  const quote = change.operation === "delete" ? null : await pl.quotes.get(change.id)
-  // Apply the change.
 }
 ```
 
@@ -225,6 +210,29 @@ await pl.customers.createIndividual({
 Ledger accounts are referenced by account number when writing a customer (`ledger_account: { number }`)
 but by id on products (`ledger_account_id`), mirroring the upstream API. `categorize` replaces the
 customer's categories and returns the resulting list.
+
+## Change logs
+
+Every resource exposes an incremental change log at `/changelogs/{resource}`, surfaced through one
+shared resource shape. Pennylane retains change events for four weeks; `cursor` and `start_date`
+(RFC 3339) are mutually exclusive in both the TypeScript contract and runtime validation, and
+`start_date` seeds only the first page.
+
+| Client method | Pennylane endpoint |
+| --- | --- |
+| `pl.quoteChanges.list / listAll(options?)` | `GET /changelogs/quotes` |
+| `pl.productChanges.list / listAll(options?)` | `GET /changelogs/products` |
+| `pl.customerChanges.list / listAll(options?)` | `GET /changelogs/customers` |
+
+```ts
+for await (const change of pl.productChanges.listAll({
+  start_date: "2026-07-01T00:00:00Z",
+  limit: 1000,
+})) {
+  const product = change.operation === "delete" ? null : await pl.products.get(change.id)
+  // Apply the change.
+}
+```
 
 ## Errors
 
