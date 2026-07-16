@@ -7,6 +7,16 @@ export type SftpStats = Stats
 
 export type SftpWriteData = string | Buffer | ArrayBuffer | ArrayBufferView
 
+export interface SftpOptions {
+  /**
+   * Maximum number of read requests kept in flight for each streamed file.
+   *
+   * `1` preserves sequential reads. Values from `2` to `64` enable bounded
+   * read-ahead while preserving stream order and backpressure. Defaults to `1`.
+   */
+  readonly readAheadRequests?: number
+}
+
 export interface SftpOpenOptions {
   readonly signal?: AbortSignal
 }
