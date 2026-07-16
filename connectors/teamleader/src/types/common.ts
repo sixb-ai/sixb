@@ -130,8 +130,15 @@ export interface TeamleaderAddress {
 
 export interface TeamleaderApiErrorItem {
   readonly title?: string
+  readonly key?: string
   readonly code?: string
   readonly status?: string
   readonly detail?: string
+  readonly meta?: TeamleaderApiErrorMeta
   readonly source?: TeamleaderJsonObject
+}
+
+export interface TeamleaderApiErrorMeta {
+  readonly field?: string
+  readonly [key: string]: TeamleaderJsonValue | undefined
 }

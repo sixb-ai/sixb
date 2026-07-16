@@ -19,6 +19,8 @@ export type TeamleaderContactTelephoneType = "phone" | "mobile" | "fax"
 
 export type TeamleaderContactAddressType = "primary" | "invoicing" | "delivery" | "visiting"
 
+export type TeamleaderContactAddressInputType = Exclude<TeamleaderContactAddressType, "primary">
+
 export interface TeamleaderContactEmail {
   readonly type?: "primary"
   readonly email?: string
@@ -127,9 +129,11 @@ export interface TeamleaderContactTelephoneInput {
 }
 
 export interface TeamleaderContactAddressInput {
-  readonly type: TeamleaderContactAddressType
+  readonly type: TeamleaderContactAddressInputType
   readonly address: {
     readonly addressee?: string
+    /** Teamleader rejects this generic field; use the structured address fields below. */
+    readonly address?: never
     readonly line_1: string | null
     readonly postal_code: string | null
     readonly city: string | null

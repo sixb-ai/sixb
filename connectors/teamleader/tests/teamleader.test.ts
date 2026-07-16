@@ -7,7 +7,26 @@ import {
   teamleader,
 } from "../src"
 import { createTeamleaderClient } from "../src/client"
-import type { TeamleaderCustomField, TeamleaderCustomFieldDefinition } from "../src/types"
+import type {
+  TeamleaderContactAddressInput,
+  TeamleaderCustomField,
+  TeamleaderCustomFieldDefinition,
+} from "../src/types"
+
+type IsExact<TActual, TExpected> = [TActual] extends [TExpected]
+  ? [TExpected] extends [TActual]
+    ? true
+    : false
+  : false
+
+const contactAddressInputTypesAreExact: IsExact<
+  TeamleaderContactAddressInput["type"],
+  "invoicing" | "delivery" | "visiting"
+> = true
+const genericContactAddressFieldIsForbidden: IsExact<
+  TeamleaderContactAddressInput["address"]["address"],
+  undefined
+> = true
 
 type CapturedRequest = {
   readonly input: RequestInfo | URL
@@ -354,6 +373,9 @@ describe("teamleader connector", () => {
   })
 
   test("supports every documented contact endpoint", async () => {
+    expect(contactAddressInputTypesAreExact).toBe(true)
+    expect(genericContactAddressFieldIsForbidden).toBe(true)
+
     const requests: CapturedRequest[] = []
     const client = createTeamleaderClient({
       accessToken: "test-token",
@@ -598,29 +620,36 @@ describe("teamleader connector", () => {
     expect(contacts.map((contact) => contact.id)).toEqual(["contact-1", "contact-2", "contact-3"])
   })
 
-  test("throws TeamleaderApiError for API errors", async () => {
+  test("preserves and formats every Teamleader API error", async () => {
+    const errors = [
+      {
+        title: "address must not be present",
+        key: "validation_error",
+        meta: { field: "addresses[0].address.address" },
+      },
+      {
+        title: 'type must be in { "invoicing", "delivery", "visiting" }',
+        key: "validation_error",
+        meta: { field: "addresses[0].type" },
+      },
+    ]
     const client = createTeamleaderClient({
       accessToken: "test-token",
-      fetch: mockFetch(() =>
-        Promise.resolve(
-          jsonResponse(
-            {
-              errors: [{ title: "Deal not found" }],
-            },
-            { status: 404 }
-          )
-        )
-      ),
+      fetch: mockFetch(() => Promise.resolve(jsonResponse({ errors }, { status: 400 }))),
     })
 
     try {
-      await client.deals.info({ id: "missing" })
+      await client.contacts.add({ last_name: "Smith" })
       throw new Error("Expected request to fail")
     } catch (error) {
       expect(error).toBeInstanceOf(TeamleaderApiError)
-      expect((error as TeamleaderApiError).status).toBe(404)
-      expect((error as TeamleaderApiError).errors).toEqual([{ title: "Deal not found" }])
-      expect((error as Error).message).toContain("Deal not found")
+      expect((error as TeamleaderApiError).status).toBe(400)
+      expect((error as TeamleaderApiError).errors).toEqual(errors)
+      expect((error as Error).message).toBe(
+        "[SixbTeamleader] API request failed with 400: " +
+          "addresses[0].address.address: address must not be present; " +
+          'addresses[0].type: type must be in { "invoicing", "delivery", "visiting" }'
+      )
     }
   })
 
