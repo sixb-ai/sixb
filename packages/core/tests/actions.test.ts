@@ -10,6 +10,7 @@ import {
   prop,
   ref,
   Sixb,
+  stringEnum,
 } from "../src"
 import { ActionRunError } from "../src/storage"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -79,6 +80,19 @@ const attachRelatedRoom = defineAction("attachRelatedRoom")
   })
   .writeback(async () => {})
 
+const updateRoomCategory = defineAction("updateRoomCategory")
+  .on(Room)
+  .params({
+    category: optional(param(stringEnum(["general_services", "construction"]), { nullable: true })),
+    relatedRoom: optional(param(ref(Room), { nullable: true })),
+    reviewedAt: optional(param("timestamp", { nullable: true })),
+  })
+  .writeback(async () => {})
+
+const recordNullableNote = defineAction("recordNullableNote")
+  .params({ note: param("string", { nullable: true }) })
+  .writeback(async () => {})
+
 function actionDefinition(action: unknown): ActionDefinition {
   return action as ActionDefinition
 }
@@ -94,6 +108,13 @@ describe("defineAction", () => {
     expect(setTemperature.phases.validate).toHaveLength(1)
     expect(typeof setTemperature.phases.writeback).toBe("function")
     expect(setTemperature.description).toBe("Set room temperature.")
+  })
+
+  test("preserves nullable action param metadata", () => {
+    expect(updateRoomCategory.params.category).toMatchObject({
+      required: false,
+      nullable: true,
+    })
   })
 
   test("builds global action definitions without a target", () => {
@@ -383,6 +404,103 @@ describe("requestAction", () => {
         params: { target: 72, bogus: "nope" },
       })
     ).rejects.toThrow("Unknown param 'bogus'")
+  })
+
+  test("preserves omitted and null params as distinct values", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const sixb = new Sixb({
+      id: "nullable-action-test",
+      ontology: [Room],
+      actions: [actionDefinition(updateRoomCategory)],
+      ...runtimeDeps,
+    })
+
+    const omitted = await sixb.objects(Room).requestAction({
+      id: "room:1",
+      action: updateRoomCategory,
+      params: {},
+      runId: "act_nullable_omitted",
+    })
+    const cleared = await sixb.objects(Room).requestAction({
+      id: "room:1",
+      action: updateRoomCategory,
+      params: { category: null, relatedRoom: null, reviewedAt: null },
+      runId: "act_nullable_cleared",
+    })
+
+    const omittedRun = await runtimeDeps.storage.actionRuns!.getById({
+      projectId: "nullable-action-test",
+      id: omitted.runId,
+    })
+    const clearedRun = await runtimeDeps.storage.actionRuns!.getById({
+      projectId: "nullable-action-test",
+      id: cleared.runId,
+    })
+    const events = await sixb.events.read({ types: ["action.requested"] })
+
+    expect(omittedRun?.params).toEqual({})
+    expect(clearedRun?.params).toEqual({
+      category: null,
+      relatedRoom: null,
+      reviewedAt: null,
+    })
+    await expect(
+      sixb.objects(Room).requestAction({
+        id: "room:1",
+        action: updateRoomCategory,
+        params: { category: null, relatedRoom: null, reviewedAt: null },
+        runId: cleared.runId,
+      })
+    ).resolves.toMatchObject({ created: false })
+    expect(
+      events.map((event) => (event.type === "action.requested" ? event.payload.params : null))
+    ).toEqual([{}, { category: null, relatedRoom: null, reviewedAt: null }])
+
+    await expect(
+      sixb.objects(Room).requestAction({
+        id: "room:1",
+        action: updateRoomCategory,
+        params: { category: null },
+        runId: omitted.runId,
+      })
+    ).rejects.toThrow("different request payload")
+  })
+
+  test("enforces required and nullable validation independently", async () => {
+    const sixb = new Sixb({
+      id: "nullable-action-test",
+      ontology: [Room],
+      actions: [
+        actionDefinition(setTemperature),
+        actionDefinition(updateRoomCategory),
+        actionDefinition(recordNullableNote),
+      ],
+      ...createTestRuntimeDeps(),
+    })
+
+    await expect(
+      sixb.actions.request({ actionId: "recordNullableNote", params: {} })
+    ).rejects.toThrow("Missing required param 'note'")
+
+    await expect(
+      sixb.actions.request({ actionId: "recordNullableNote", params: { note: null } })
+    ).resolves.toMatchObject({ created: true })
+
+    await expect(
+      sixb.actions.request({
+        actionId: "setTemperature",
+        subject: { kind: "object", objectTypeId: "Room", primaryId: "room:1" },
+        params: { target: null },
+      })
+    ).rejects.toThrow("Action param Room.setTemperature.target cannot be null")
+
+    await expect(
+      sixb.actions.request({
+        actionId: "updateRoomCategory",
+        subject: { kind: "object", objectTypeId: "Room", primaryId: "room:1" },
+        params: { category: "unsupported" },
+      })
+    ).rejects.toThrow("must be one of: general_services, construction")
   })
 
   test("accepts object ref params", async () => {

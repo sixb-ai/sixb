@@ -75,6 +75,16 @@ export function normalizeActionParams(
       continue
     }
 
+    if (value === null) {
+      if (!paramDef.nullable) {
+        throw new OntologyValidationError(
+          `[Sixb] Action param ${pathPrefix}.${paramId} cannot be null`
+        )
+      }
+      normalized[paramId] = null
+      continue
+    }
+
     validateSchemaOrRefValue(
       paramDef.schema,
       value,

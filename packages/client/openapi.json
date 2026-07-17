@@ -11227,6 +11227,9 @@
                                   "required": {
                                     "type": "boolean"
                                   },
+                                  "nullable": {
+                                    "type": "boolean"
+                                  },
                                   "semanticType": {
                                     "type": "string"
                                   },
@@ -11533,6 +11536,9 @@
                                   "type": "string"
                                 },
                                 "required": {
+                                  "type": "boolean"
+                                },
+                                "nullable": {
                                   "type": "boolean"
                                 },
                                 "semanticType": {
@@ -12482,6 +12488,9 @@
                             "required": {
                               "type": "boolean"
                             },
+                            "nullable": {
+                              "type": "boolean"
+                            },
                             "semanticType": {
                               "type": "string"
                             },
@@ -12577,6 +12586,9 @@
                             "type": "string"
                           },
                           "required": {
+                            "type": "boolean"
+                          },
+                          "nullable": {
                             "type": "boolean"
                           },
                           "semanticType": {

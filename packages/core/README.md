@@ -409,8 +409,8 @@ src/
 | Export | Description |
 |---|---|
 | `defineAction(id)` | Define a first-class phased action contract |
-| `param(schema, options?)` | Define a required action parameter inside `.params({...})` |
-| `optional(param(...))` | Mark an action parameter as optional |
+| `param(schema, options?)` | Define a required action parameter; `{ nullable: true }` accepts explicit `null` |
+| `optional(param(...))` | Mark an action parameter as optional while preserving nullable/value semantics |
 
 ### Runtime
 

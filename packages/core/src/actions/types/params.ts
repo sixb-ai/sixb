@@ -12,6 +12,7 @@ type Simplify<T> = { [K in keyof T]: T[K] } & {}
 export interface ActionParamConfig {
   readonly schema: SchemaOrRef
   readonly required?: boolean
+  readonly nullable?: boolean
   readonly description?: string
   readonly semanticType?: QuantitativeTypeId
 }
@@ -52,12 +53,19 @@ type InferActionStructuredParamValue<
     ? ObjectRef<TObjectTypeId>
     : InferSchemaOrRef<TSchema, TValueTypes>
 
-type InferActionParamValue<
+type InferActionParamSchemaValue<
   TSchema extends SchemaOrRef,
   TValueTypes extends readonly ValueType[] = [],
 > = TSchema extends keyof ActionPrimitiveSchemaValues
   ? ActionPrimitiveSchemaValues[TSchema]
   : InferActionStructuredParamValue<TSchema, TValueTypes>
+
+type InferActionParamValue<
+  TParam extends ActionParamConfig,
+  TValueTypes extends readonly ValueType[] = [],
+> = TParam["nullable"] extends true
+  ? InferActionParamSchemaValue<TParam["schema"], TValueTypes> | null
+  : InferActionParamSchemaValue<TParam["schema"], TValueTypes>
 
 export type InferActionParams<
   TParams extends ActionParamsConfig,
@@ -66,8 +74,8 @@ export type InferActionParams<
   ? Record<string, unknown>
   : Simplify<
       {
-        [K in RequiredParamKeys<TParams>]: InferActionParamValue<TParams[K]["schema"], TValueTypes>
+        [K in RequiredParamKeys<TParams>]: InferActionParamValue<TParams[K], TValueTypes>
       } & {
-        [K in OptionalParamKeys<TParams>]?: InferActionParamValue<TParams[K]["schema"], TValueTypes>
+        [K in OptionalParamKeys<TParams>]?: InferActionParamValue<TParams[K], TValueTypes>
       }
     >

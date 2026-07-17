@@ -118,14 +118,28 @@ Each entry in `.params({ ... })` is built with `param(schema, options?)`, which 
   approved: param("boolean"),                       // required
   message: param("string"),                         // required
   reviewerNote: optional(param("string")),          // optional
+  category: optional(param(stringEnum(["general", "services"]), { nullable: true })),
   currency: param(stringEnum(["EUR", "USD", "GBP"])),
   customer: param(ref(Customer)),                   // object reference param
 })
 ```
 
+Presence and nullability are independent. A required nullable param must be present but may be
+`null`; wrapping it in `optional(...)` adds the omitted state:
+
+| Declaration | Omitted / `undefined` | `null` | Value |
+| --- | --- | --- | --- |
+| `param(schema)` | rejected | rejected | validated |
+| `optional(param(schema))` | omitted | rejected | validated |
+| `param(schema, { nullable: true })` | rejected | accepted | validated |
+| `optional(param(schema, { nullable: true }))` | omitted | accepted | validated |
+
+This makes partial update actions explicit: omitted means “leave unchanged,” while `null` means
+“clear the value.”
+
 `param` schemas include the primitives `"string"`, `"uuid"`, `"boolean"`, `"integer"`,
 `"double"`, `"decimal"`, `"date"`, `"timestamp"`, plus `stringEnum([...])` and `ref(ObjectType)`.
-`param` options are `description` and `semanticType`. Handlers receive params validated and
+`param` options are `description`, `semanticType`, and `nullable`. Handlers receive params validated and
 narrowed to TypeScript types — `date`/`timestamp` arrive as `Date`, `ref(...)` as an `ObjectRef`
 (read `.primaryId` to resolve it). See [properties](../ontology/properties.md) and
 [value types](../ontology/value-types.md).

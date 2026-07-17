@@ -27,6 +27,7 @@ export interface RelationshipEdge {
 export interface ActionParam {
   type: "string" | "number" | "boolean" | "fileRef"
   required?: boolean
+  nullable?: boolean
   description?: string
   enum?: Array<string | number | boolean>
 }
@@ -192,6 +193,7 @@ function mapActionParams(
     result[param.id] = {
       type: inferPrimitiveType(param.schema),
       required: param.required,
+      nullable: param.nullable,
       description: param.description,
       enum: enumValues,
     }

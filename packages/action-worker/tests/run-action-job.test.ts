@@ -128,6 +128,30 @@ describe("runActionJob", () => {
     ).rejects.toBeInstanceOf(ActionWorkerError)
   })
 
+  test("passes nullable params to action handlers unchanged", async () => {
+    let received: Date | null = new Date(0)
+    const captureNullable = defineAction("captureNullable")
+      .params({ reviewedAt: param("timestamp", { nullable: true }) })
+      .writeback(({ params }) => {
+        received = params.reviewedAt
+      })
+    const sixb = createSixb([captureNullable])
+    await queueActionRun(sixb, {
+      id: "act_nullable",
+      actionId: "captureNullable",
+      subject: { kind: "none" },
+      params: { reviewedAt: null },
+    })
+
+    const result = await runActionJob({
+      runtime: createContext(sixb),
+      job: { id: "act_nullable", actionId: "captureNullable" },
+    })
+
+    expect(result.status).toBe("succeeded")
+    expect(received).toBeNull()
+  })
+
   test("commits edits and stores a succeeded run", async () => {
     const setStatus = defineAction("setStatus")
       .on(Device)
