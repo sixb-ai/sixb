@@ -350,6 +350,64 @@ describe("runActionJob", () => {
     expect(created?.properties.status).toBe("created")
   })
 
+  test("resolves staged upserts inside the action commit", async () => {
+    const syncDevice = defineAction("syncDevice")
+      .params({ id: param("string"), name: param("string"), status: param("string") })
+      .edits(({ objects, params }) => {
+        objects(Device).upsert({
+          id: params.id,
+          name: params.name,
+          status: params.status,
+        })
+      })
+    const sixb = createSixb([syncDevice])
+
+    await queueActionRun(sixb, {
+      id: "act_upsert_create",
+      actionId: "syncDevice",
+      subject: { kind: "none" },
+      params: { id: "device-1", name: "Device 1", status: "created" },
+    })
+    const created = await runActionJob({
+      runtime: createContext(sixb),
+      job: { id: "act_upsert_create", actionId: "syncDevice" },
+    })
+
+    await queueActionRun(sixb, {
+      id: "act_upsert_update",
+      actionId: "syncDevice",
+      subject: { kind: "none" },
+      params: { id: "device-1", name: "Renamed Device", status: "updated" },
+    })
+    const updated = await runActionJob({
+      runtime: createContext(sixb),
+      job: { id: "act_upsert_update", actionId: "syncDevice" },
+    })
+
+    expect(created.status).toBe("succeeded")
+    expect(updated.status).toBe("succeeded")
+    const createdRun = await sixb.storage.actionRuns!.getById({
+      projectId: sixb.id,
+      id: "act_upsert_create",
+    })
+    const updatedRun = await sixb.storage.actionRuns!.getById({
+      projectId: sixb.id,
+      id: "act_upsert_update",
+    })
+    expect(createdRun?.commit?.diff.objects[0]?.operation).toBe("create")
+    expect(updatedRun?.commit?.diff.objects[0]?.operation).toBe("update")
+    expect((await deviceObjects(sixb).get("device-1"))?.properties).toMatchObject({
+      id: "device-1",
+      name: "Renamed Device",
+      status: "updated",
+    })
+
+    const mutationEvents = await sixb.events.read({
+      types: ["object.created", "object.updated"],
+    })
+    expect(mutationEvents.map((event) => event.type)).toEqual(["object.created", "object.updated"])
+  })
+
   test("exposes object link reads inside action edits", async () => {
     const detachSensor = defineAction("detachSensor")
       .on(Device)

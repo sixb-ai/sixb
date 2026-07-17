@@ -8,6 +8,7 @@ import type {
   EditObjectCreateOperation,
   EditObjectProperties,
   EditObjectUpdateOperation,
+  EditObjectUpsertOperation,
   EditOperation,
 } from "./types"
 
@@ -46,6 +47,8 @@ export function normalizeEditOperationInput(input: EditOperation): EditOperation
       return normalizeObjectCreateOperation(input)
     case "object.update":
       return normalizeObjectUpdateOperation(input)
+    case "object.upsert":
+      return normalizeObjectUpsertOperation(input)
     case "object.delete":
       return {
         kind: "object.delete",
@@ -84,6 +87,17 @@ function normalizeObjectUpdateOperation(
 ): EditObjectUpdateOperation {
   return {
     kind: "object.update",
+    objectTypeId: assertNonEmptyString(input.objectTypeId, "operation.objectTypeId"),
+    primaryId: assertNonEmptyString(input.primaryId, "operation.primaryId"),
+    properties: cloneProperties(input.properties, "operation.properties"),
+  }
+}
+
+function normalizeObjectUpsertOperation(
+  input: EditObjectUpsertOperation
+): EditObjectUpsertOperation {
+  return {
+    kind: "object.upsert",
     objectTypeId: assertNonEmptyString(input.objectTypeId, "operation.objectTypeId"),
     primaryId: assertNonEmptyString(input.primaryId, "operation.primaryId"),
     properties: cloneProperties(input.properties, "operation.properties"),

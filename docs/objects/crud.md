@@ -56,6 +56,10 @@ await invoices.upsert({ properties: { id: "inv-001", status: "paid" } })
 Required properties are checked against the merged result, not just the incoming fields, so a
 later partial update of an existing object need not repeat required values.
 
+Inside an action's `.edits(...)` phase, the staged facade uses the flat
+`objects(Invoice).upsert({ id: "inv-001", status: "paid" })` form. It has the same merge behavior,
+but the create-or-update decision is made when the action's full edit batch commits atomically.
+
 ### Dates are normalized
 
 The typed surface accepts `Date | string` for `date` and `timestamp` properties. Before storage,

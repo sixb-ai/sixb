@@ -27,6 +27,13 @@ export interface EditObjectUpdateOperation {
   readonly properties: EditObjectProperties
 }
 
+export interface EditObjectUpsertOperation {
+  readonly kind: "object.upsert"
+  readonly objectTypeId: string
+  readonly primaryId: string
+  readonly properties: EditObjectProperties
+}
+
 export interface EditObjectDeleteOperation {
   readonly kind: "object.delete"
   readonly objectTypeId: string
@@ -51,6 +58,7 @@ export interface EditLinkDeleteOperation {
 export type EditOperation =
   | EditObjectCreateOperation
   | EditObjectUpdateOperation
+  | EditObjectUpsertOperation
   | EditObjectDeleteOperation
   | EditLinkCreateOperation
   | EditLinkDeleteOperation
@@ -116,6 +124,28 @@ export type EditUpdateProperties<
   TObjectType extends ObjectType,
   TValueTypes extends readonly ValueType[] = [],
 > = StaticPropertyMap<TObjectType["properties"], TValueTypes, "update">
+
+type UpsertPropertyMap<
+  TProperties extends readonly Property[],
+  TValueTypes extends readonly ValueType[],
+> = string extends TProperties[number]["id"]
+  ? Record<string, unknown>
+  : Simplify<
+      {
+        [TProp in TProperties[number] as TProp extends { primary: true }
+          ? CreatablePropertyId<TProp>
+          : never]: InferPropertyValue<TProp, TValueTypes>
+      } & {
+        [TProp in TProperties[number] as TProp extends { primary: true }
+          ? never
+          : CreatablePropertyId<TProp>]?: InferPropertyValue<TProp, TValueTypes>
+      }
+    >
+
+export type EditUpsertProperties<
+  TObjectType extends ObjectType,
+  TValueTypes extends readonly ValueType[] = [],
+> = UpsertPropertyMap<TObjectType["properties"], TValueTypes>
 
 type LinkProperties<TLink extends { properties?: readonly Property[] }> = TLink extends {
   properties: infer TProperties extends readonly Property[]
@@ -218,6 +248,10 @@ export interface EditObjectSetRecorder<
   TValueTypes extends readonly ValueType[] = [],
 > {
   byId(primaryId: string): EditObjectHandle<TObjectType, TValueTypes>
+
+  upsert(
+    properties: EditUpsertProperties<TObjectType, TValueTypes>
+  ): EditObjectHandle<TObjectType, TValueTypes>
 
   create(
     properties: EditCreateProperties<TObjectType, TValueTypes>

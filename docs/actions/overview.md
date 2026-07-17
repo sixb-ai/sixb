@@ -207,6 +207,27 @@ export const sendReminder = defineAction("sendReminder", {
 
 The runtime commits every staged edit in a single atomic batch once the handler returns.
 
+### Staged object upsert
+
+Use `objects(Type).upsert(properties)` when an action synchronizes an object that may or may not
+exist. The primary property is required; other properties are merged over an existing object or
+validated as a complete create when the object is absent:
+
+```ts
+.edits(({ objects, params }) => {
+  objects(Contact).upsert({
+    id: params.id,
+    name: params.name,
+    category: params.category,
+  })
+})
+```
+
+The create/update decision is made inside the serializable commit transaction, so no handler-side
+read is needed. Omitted properties are preserved on update. If the object is absent and a required
+property was omitted, the entire action commit fails. Multiple staged edits collapse to one net
+change; an unchanged upsert emits no mutation event.
+
 The normal link rules apply inside `edits(...)`. For `cardinality: "one"` links, `link(...)` does not replace a different existing target. To reassign one, read the current link and stage `unlink(...)`
 followed by `link(...)`; the two staged edits commit atomically:
 

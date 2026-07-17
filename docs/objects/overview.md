@@ -161,8 +161,8 @@ most common mistake.
 | Where | functions, syncs, schedules, app code | inside an action's `.edits(...)` handler |
 | Timing | **async, immediate** — writes apply now | **sync, staged** — applied atomically on commit |
 | `await` | every method returns a promise | edit calls are synchronous |
-| Create | `upsert({ properties })` | `create(properties)` |
-| Update | `upsert(...)` (merge over existing) | `byId(id).update({ ... })` |
+| Create | `upsert({ properties })` | `create(properties)` or `upsert(properties)` |
+| Update | `upsert(...)` (merge over existing) | `byId(id).update({ ... })` or `upsert(properties)` |
 | Reads | `get` / `query` / `list` | `read.objects(Type)` |
 
 ```ts
@@ -173,6 +173,9 @@ await sixb.objects(Invoice).upsert({
 
 // Action .edits() — synchronous, staged, no await
 objects(Invoice).byId(subject.primaryId).update({ status: "paid" })
+
+// Staged create-or-update; the primary property is required
+objects(Invoice).upsert({ id: params.id, status: "paid" })
 ```
 
 If you wrote `sixb.objects(...)` you are in the runtime API. If you destructured
