@@ -26,6 +26,7 @@ export function FileRefUploadField({
   const generatedId = useId()
   const inputId = id ?? generatedId
   const inputRef = useRef<HTMLInputElement>(null)
+  const activeRef = useRef(true)
   const onPendingChangeRef = useRef(onPendingChange)
   const [dragging, setDragging] = useState(false)
   const [uploadingFileName, setUploadingFileName] = useState<string | null>(null)
@@ -38,6 +39,13 @@ export function FileRefUploadField({
   useEffect(() => {
     onPendingChangeRef.current = onPendingChange
   }, [onPendingChange])
+
+  useEffect(() => {
+    activeRef.current = true
+    return () => {
+      activeRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     onPendingChangeRef.current?.(isBusy)
@@ -55,7 +63,9 @@ export function FileRefUploadField({
           ? `${logicalPathPrefix.replace(/\/$/, "")}/${file.name}`
           : file.name,
       })
-      onChange(fileRef)
+      if (activeRef.current) {
+        onChange(fileRef)
+      }
     } catch {
       // The mutation stores the error for rendering below.
     } finally {
