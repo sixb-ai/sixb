@@ -18,6 +18,7 @@ import type {
   EditObjectHandle,
   EditObjectRef,
   EditObjectUpdateOperation,
+  EditObjectUpsertOperation,
   EditOperation,
   RecordEditsContext,
   RecordEditsHandler,
@@ -54,6 +55,37 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
     return {
       byId(primaryId: string) {
         return createObjectHandle(objectType, createRef(objectType.id, primaryId))
+      },
+
+      upsert(properties: unknown) {
+        const primaryProperty = getPrimaryProperty(objectType)
+        const rawProperties = assertRecord(properties, `${objectType.id}.upsert.properties`)
+        const primaryValue = rawProperties[primaryProperty.id]
+
+        if (typeof primaryValue !== "string" || !primaryValue.trim()) {
+          throw new EditBatchError(
+            `[Sixb] EditBatch upsert '${objectType.id}' primary property '${primaryProperty.id}' must be a non-empty string.`
+          )
+        }
+
+        const normalizedProperties = normalizeObjectEditProperties({
+          objectType,
+          properties: rawProperties,
+          valueTypesById,
+          path: `${objectType.id}.upsert`,
+        })
+
+        const operation: EditObjectUpsertOperation = {
+          kind: "object.upsert",
+          objectTypeId: objectType.id,
+          primaryId: primaryValue,
+          properties: normalizedProperties,
+        }
+        operations.push(operation)
+        return createObjectHandle(objectType, {
+          objectTypeId: objectType.id,
+          primaryId: primaryValue,
+        })
       },
 
       create(properties: unknown) {

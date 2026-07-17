@@ -25,6 +25,7 @@ import type {
   EditObjectDeleteOperation,
   EditObjectRef,
   EditObjectUpdateOperation,
+  EditObjectUpsertOperation,
   EditOperation,
 } from "./types"
 
@@ -222,6 +223,7 @@ export function collectEditBatchLoadRequests(batchInput: EditBatchInput): EditBa
     switch (operation.kind) {
       case "object.create":
       case "object.update":
+      case "object.upsert":
         objects.set(objectKey(operation.objectTypeId, operation.primaryId), {
           objectTypeId: operation.objectTypeId,
           primaryId: operation.primaryId,
@@ -309,6 +311,7 @@ function normalizeOperationWithOntology(
       })
       assertRequiredProperties(objectType, properties)
       assertPrimaryPropertyMatchesRef(
+        "create",
         objectType,
         primaryProperty.id,
         operation.primaryId,
@@ -333,6 +336,27 @@ function normalizeOperationWithOntology(
         path: `${objectType.id}.set`,
       })
       assertPrimaryPropertyNotUpdated(objectType, properties)
+      return {
+        ...operation,
+        properties,
+      }
+    }
+    case "object.upsert": {
+      const objectType = ctx.ontology.resolveObjectType(operation.objectTypeId)
+      const primaryProperty = getPrimaryProperty(objectType)
+      const properties = normalizeObjectEditProperties({
+        objectType,
+        properties: operation.properties,
+        valueTypesById,
+        path: `${objectType.id}.upsert`,
+      })
+      assertPrimaryPropertyMatchesRef(
+        "upsert",
+        objectType,
+        primaryProperty.id,
+        operation.primaryId,
+        properties
+      )
       return {
         ...operation,
         properties,
@@ -393,6 +417,9 @@ function analyzeEditBatch(input: EditAnalysisInput): EditCommitPlan {
         break
       case "object.update":
         applyObjectUpdate(operation, objectStates, valueTypesById)
+        break
+      case "object.upsert":
+        applyObjectUpsert(input, operation, objectStates)
         break
       case "object.delete":
         applyObjectDelete(operation, objectStates, linkIndex)
@@ -503,6 +530,44 @@ function applyObjectCreate(
     objectTypeId: operation.objectTypeId,
     primaryId: operation.primaryId,
     objectType: input.ontology.resolveObjectType(operation.objectTypeId),
+    baselineExists: false,
+    present: true,
+    properties,
+  })
+}
+
+function applyObjectUpsert(
+  input: Pick<ValidateEditBatchInput, "ontology">,
+  operation: EditObjectUpsertOperation,
+  states: Map<string, ObjectState>
+): void {
+  const key = objectKey(operation.objectTypeId, operation.primaryId)
+  const existing = states.get(key)
+
+  if (existing?.present) {
+    existing.properties = {
+      ...existing.properties,
+      ...operation.properties,
+    }
+    assertRequiredProperties(existing.objectType, existing.properties)
+    return
+  }
+
+  const objectType =
+    existing?.objectType ?? input.ontology.resolveObjectType(operation.objectTypeId)
+  const properties = { ...operation.properties }
+  assertRequiredProperties(objectType, properties)
+
+  if (existing) {
+    existing.present = true
+    existing.properties = properties
+    return
+  }
+
+  states.set(key, {
+    objectTypeId: operation.objectTypeId,
+    primaryId: operation.primaryId,
+    objectType,
     baselineExists: false,
     present: true,
     properties,
@@ -857,6 +922,7 @@ function normalizeComparableProperty(
 }
 
 function assertPrimaryPropertyMatchesRef(
+  operation: "create" | "upsert",
   objectType: ObjectTypeWithPropertyTokens,
   primaryPropertyId: string,
   primaryId: string,
@@ -864,7 +930,7 @@ function assertPrimaryPropertyMatchesRef(
 ): void {
   if (properties[primaryPropertyId] !== primaryId) {
     throw new EditBatchError(
-      `[Sixb] EditBatch create '${objectType.id}:${primaryId}' must include matching primary property '${primaryPropertyId}'.`
+      `[Sixb] EditBatch ${operation} '${objectType.id}:${primaryId}' must include matching primary property '${primaryPropertyId}'.`
     )
   }
 }

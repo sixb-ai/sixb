@@ -20,6 +20,15 @@ const Payment = defineObjectType({
   ],
 })
 
+const Contact = defineObjectType({
+  id: "Contact",
+  name: "Contact",
+  properties: [
+    prop("externalId", "string", { required: true, primary: true }),
+    prop("name", "string", { required: true }),
+  ],
+})
+
 const Invoice = defineObjectType({
   id: "Invoice",
   name: "Invoice",
@@ -44,6 +53,8 @@ const batch: Promise<EditBatch> = recordEdits({ runId: "act_1" }, ({ objects }) 
     status: "draft",
   })
   const existingInvoice = objects(Invoice).byId("inv_1")
+  const upsertedInvoice = objects(Invoice).upsert({ id: "inv_upsert" })
+  const upsertedContact = objects(Contact).upsert({ externalId: "contact_1" })
   const customer = objects(Customer).byId("cus_1")
   const payment = objects(Payment).byId("pay_1")
 
@@ -55,6 +66,32 @@ const batch: Promise<EditBatch> = recordEdits({ runId: "act_1" }, ({ objects }) 
   existingInvoice.update({
     status: "sent",
   })
+  upsertedInvoice.update({ status: "sent" })
+  upsertedContact.update({ name: "Ada" })
+
+  // @ts-expect-error staged upsert requires the actual primary property
+  objects(Invoice).upsert({ status: "draft" })
+
+  objects(Invoice).upsert({
+    id: "inv_bad_amount",
+    // @ts-expect-error amount expects a number
+    amount: "120",
+  })
+
+  objects(Invoice).upsert({
+    id: "inv_bad_telemetry",
+    // @ts-expect-error telemetry properties cannot be upserted
+    temperature: 22,
+  })
+
+  objects(Invoice).upsert({
+    id: "inv_bad_property",
+    // @ts-expect-error Invoice has no bogus property
+    bogus: true,
+  })
+
+  // @ts-expect-error Contact uses externalId as its primary property
+  objects(Contact).upsert({ id: "contact_2" })
   invoice.link(Invoice.l.customer, customer, {
     properties: {
       role: "billTo",

@@ -41,6 +41,7 @@ const Invoice = defineObjectType({
     prop("amount", "double", { required: true }),
     prop("status", "string", { required: true }),
     prop("paidAt", "timestamp"),
+    prop("category", "string", { nullable: true }),
     prop("temperature", "double", { mode: "telemetry" }),
   ],
   links: [
@@ -109,6 +110,7 @@ type RuntimeEditHandle = EditObjectRef & {
 
 type RuntimeRecordObjects = (objectType: ObjectTypeWithPropertyTokens) => {
   byId(primaryId: string): RuntimeEditHandle
+  upsert(properties: Record<string, unknown>): RuntimeEditHandle
   create(properties: Record<string, unknown>): RuntimeEditHandle
 }
 
@@ -811,6 +813,194 @@ describe("EditBatch core contract", () => {
   })
 })
 
+describe("EditBatch staged object upsert", () => {
+  test("records create-or-merge intent and returns an editable handle", async () => {
+    const storage = await createSeededStorage()
+    const batch = await recordRuntimeEdits({ runId: "act_upsert" }, ({ objects }) => {
+      objects(Invoice).upsert({
+        id: "inv_1",
+        status: "paid",
+        category: null,
+      })
+      objects(Payment).upsert({ id: "pay_2", status: "pending" }).update({ status: "settled" })
+    })
+
+    expect(batch.operations).toEqual([
+      {
+        kind: "object.upsert",
+        objectTypeId: "Invoice",
+        primaryId: "inv_1",
+        properties: { id: "inv_1", status: "paid", category: null },
+      },
+      {
+        kind: "object.upsert",
+        objectTypeId: "Payment",
+        primaryId: "pay_2",
+        properties: { id: "pay_2", status: "pending" },
+      },
+      {
+        kind: "object.update",
+        objectTypeId: "Payment",
+        primaryId: "pay_2",
+        properties: { status: "settled" },
+      },
+    ])
+
+    const plan = await planEditBatch({ projectId: "project-a", ontology, storage, batch })
+    expect(plan.diff.objects).toEqual([
+      {
+        objectTypeId: "Invoice",
+        primaryId: "inv_1",
+        operation: "update",
+        changedProperties: ["category", "status"],
+      },
+      {
+        objectTypeId: "Payment",
+        primaryId: "pay_2",
+        operation: "create",
+        changedProperties: ["id", "status"],
+      },
+    ])
+    expect(plan.objects.upserts).toEqual([
+      {
+        objectTypeId: "Invoice",
+        primaryId: "inv_1",
+        properties: { id: "inv_1", amount: 120, status: "paid", category: null },
+        previousProperties: { id: "inv_1", amount: 120, status: "draft" },
+        operation: "update",
+      },
+      {
+        objectTypeId: "Payment",
+        primaryId: "pay_2",
+        properties: { id: "pay_2", status: "settled" },
+        operation: "create",
+      },
+    ])
+  })
+
+  test("checks identity and create requirements only when the object is absent", async () => {
+    const storage = await createSeededStorage()
+
+    await expect(
+      recordRuntimeEdits({ runId: "act_missing_upsert_id" }, ({ objects }) => {
+        objects(Invoice).upsert({ status: "draft" })
+      })
+    ).rejects.toThrow("primary property 'id' must be a non-empty string")
+
+    await expect(
+      validateEditBatch({
+        projectId: "project-a",
+        ontology,
+        storage,
+        batch: {
+          kind: "object.upsert",
+          objectTypeId: "Invoice",
+          primaryId: "inv_1",
+          properties: { id: "inv_other", status: "paid" },
+        },
+      })
+    ).rejects.toThrow("upsert 'Invoice:inv_1' must include matching primary property 'id'")
+
+    const existingPlan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: await recordRuntimeEdits({ runId: "act_partial_upsert" }, ({ objects }) => {
+        objects(Invoice).upsert({ id: "inv_1", status: "paid" })
+      }),
+    })
+    expect(existingPlan.objects.upserts[0]?.properties).toEqual({
+      id: "inv_1",
+      amount: 120,
+      status: "paid",
+    })
+
+    await expect(
+      planEditBatch({
+        projectId: "project-a",
+        ontology,
+        storage,
+        batch: await recordRuntimeEdits({ runId: "act_incomplete_upsert" }, ({ objects }) => {
+          objects(Invoice).upsert({ id: "inv_missing", status: "draft" })
+        }),
+      })
+    ).rejects.toThrow("Missing required property 'amount' for object type 'Invoice'")
+  })
+
+  test("uses ordered working state and does not resurrect deleted properties", async () => {
+    const storage = await createSeededStorage()
+    const createdPlan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: await recordRuntimeEdits({ runId: "act_ordered_upsert" }, ({ objects }) => {
+        objects(Invoice).upsert({ id: "inv_2", amount: 20, status: "draft" })
+        objects(Invoice).upsert({ id: "inv_2", status: "sent" })
+      }),
+    })
+    expect(createdPlan.objects.upserts[0]?.properties).toEqual({
+      id: "inv_2",
+      amount: 20,
+      status: "sent",
+    })
+
+    await expect(
+      planEditBatch({
+        projectId: "project-a",
+        ontology,
+        storage,
+        batch: await recordRuntimeEdits({ runId: "act_delete_upsert" }, ({ objects }) => {
+          objects(Invoice).byId("inv_1").delete()
+          objects(Invoice).upsert({ id: "inv_1", status: "recreated" })
+        }),
+      })
+    ).rejects.toThrow("Missing required property 'amount' for object type 'Invoice'")
+  })
+
+  test("collapses unchanged upserts and emits events for committed net changes", async () => {
+    const storage = await createSeededStorage()
+    const noOp = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: await recordRuntimeEdits({ runId: "act_noop_upsert" }, ({ objects }) => {
+        objects(Invoice).upsert({ id: "inv_1", status: "draft" })
+      }),
+    })
+    expect(noOp.diff).toEqual({ objects: [], links: [] })
+
+    await queueRunningRun(storage, "run_upsert_events", "syncObjects")
+    const result = await commitActionEditBatch({
+      storage,
+      projectId: "project-a",
+      runId: "run_upsert_events",
+      actionId: "syncObjects",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      ontology,
+      batch: await recordRuntimeEdits({ runId: "run_upsert_events" }, ({ objects }) => {
+        objects(Invoice).upsert({ id: "inv_1", status: "paid" })
+        objects(Payment).upsert({ id: "pay_2", status: "pending" })
+      }),
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    expect(result.commit.events.map((event) => event.type)).toEqual([
+      "object.updated",
+      "object.created",
+    ])
+    expect(result.commit.events).toEqual([
+      expect.objectContaining({
+        type: "object.updated",
+        payload: expect.objectContaining({ objectTypeId: "Invoice", primaryId: "inv_1" }),
+      }),
+      expect.objectContaining({
+        type: "object.created",
+        payload: expect.objectContaining({ objectTypeId: "Payment", primaryId: "pay_2" }),
+      }),
+    ])
+  })
+})
+
 describe("EditBatch net diff (delete then re-create within one batch)", () => {
   test("re-creating a deleted existing link nets to an update of the live row", async () => {
     const storage = await createSeededStorage()
@@ -1331,6 +1521,52 @@ describe("commitActionEditBatch serialization retry", () => {
 })
 
 describe("commitActionEditBatch concurrency (provider serialization)", () => {
+  test("serializes concurrent upserts of the same object", async () => {
+    const storage = await createSeededStorage()
+    await queueRunningRun(storage, "run_upsert_pending", "syncPayment")
+    await queueRunningRun(storage, "run_upsert_settled", "syncPayment")
+
+    const subject = { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" } as const
+    const batchA = await recordRuntimeEdits({ runId: "run_upsert_pending" }, ({ objects }) => {
+      objects(Payment).upsert({ id: "pay_race", status: "pending" })
+    })
+    const batchB = await recordRuntimeEdits({ runId: "run_upsert_settled" }, ({ objects }) => {
+      objects(Payment).upsert({ id: "pay_race", status: "settled" })
+    })
+
+    const results = await Promise.allSettled([
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_upsert_pending",
+        actionId: "syncPayment",
+        subject,
+        ontology,
+        batch: batchA,
+      }),
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_upsert_settled",
+        actionId: "syncPayment",
+        subject,
+        ontology,
+        batch: batchB,
+      }),
+    ])
+
+    expect(results.every((result) => result.status === "fulfilled")).toBe(true)
+    const payment = await storage.objects.getByPrimaryId({
+      projectId: "project-a",
+      objectTypeId: "Payment",
+      primaryId: "pay_race",
+    })
+    expect(payment?.version).toBe(2)
+    expect(
+      payment?.properties.status === "pending" || payment?.properties.status === "settled"
+    ).toBe(true)
+  })
+
   // In-memory and SQLite serialize transactions on a single connection/lock, so the PG e2e's
   // barrier (which waits for both commits to reach `applyEditCommitPlan`) would deadlock here — the
   // second transaction cannot start until the first finishes. That serialization *is* the guarantee
