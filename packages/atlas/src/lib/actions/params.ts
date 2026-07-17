@@ -1,8 +1,15 @@
-import type { ListActionsResponse } from "@sixb/client"
+import type {
+  ListActionsResponse,
+  ObjectAction,
+  ActionParam as ObjectActionParam,
+} from "@sixb/client"
 import { isFileRef } from "@sixb/core/blob-storage"
 
 type ActionCatalogItem = ListActionsResponse[number]
 type ActionParam = ActionCatalogItem["params"][number]
+
+export type ActionParamFormValue = string | null
+export type ActionParamFormValues = Record<string, ActionParamFormValue | undefined>
 
 export type ActionRequestPayload = {
   path: { actionId: string }
@@ -22,12 +29,22 @@ export type ActionParamInputDescriptor =
   | { kind: "enum"; values: readonly unknown[]; valueType: "string" | "integer" }
   | { kind: "objectRef"; objectTypeId: string }
 
-export function buildActionParams(action: ActionCatalogItem, values: Record<string, string>) {
+export function buildActionParams(action: ActionCatalogItem, values: ActionParamFormValues) {
   const params: Record<string, unknown> = {}
   const errors: Record<string, string> = {}
 
   for (const param of action.params) {
-    const rawValue = values[param.id]?.trim() ?? ""
+    const formValue = values[param.id]
+    if (formValue === null) {
+      if (param.nullable) {
+        params[param.id] = null
+      } else {
+        errors[param.id] = "This parameter cannot be null."
+      }
+      continue
+    }
+
+    const rawValue = formValue?.trim() ?? ""
     if (!rawValue) {
       if (param.required) {
         errors[param.id] = "Required."
@@ -43,6 +60,43 @@ export function buildActionParams(action: ActionCatalogItem, values: Record<stri
   }
 
   return { params, errors }
+}
+
+export function buildObjectActionParams(action: ObjectAction, values: ActionParamFormValues) {
+  const params: Record<string, unknown> = {}
+  const errors: Record<string, string> = {}
+
+  for (const [paramId, param] of Object.entries(action.params ?? {})) {
+    const formValue = values[paramId]
+    if (formValue === null) {
+      if (param.nullable) {
+        params[paramId] = null
+      } else {
+        errors[paramId] = "This parameter cannot be null."
+      }
+      continue
+    }
+
+    const rawValue = formValue?.trim() ?? ""
+    if (!rawValue) {
+      if (param.required) errors[paramId] = "Required."
+      continue
+    }
+
+    try {
+      params[paramId] = parseObjectActionParamValue(param, rawValue)
+    } catch (error) {
+      errors[paramId] = error instanceof Error ? error.message : "Invalid value."
+    }
+  }
+
+  return { params, errors }
+}
+
+export function actionNeedsParamDialog(action: ObjectAction): boolean {
+  return Object.values(action.params ?? {}).some(
+    (param) => param.required || param.nullable || param.type === "fileRef"
+  )
 }
 
 export function describeActionParamInput(schema: unknown): ActionParamInputDescriptor {
@@ -77,6 +131,27 @@ export function describeActionParamInput(schema: unknown): ActionParamInputDescr
     return { kind: "json" }
   }
   return { kind: "text" }
+}
+
+function parseObjectActionParamValue(param: ObjectActionParam, rawValue: string): unknown {
+  if (param.type === "number") {
+    const value = Number(rawValue)
+    if (!Number.isFinite(value)) {
+      throw new Error("Expected a number.")
+    }
+    return value
+  }
+  if (param.type === "boolean") {
+    return rawValue === "true"
+  }
+  if (param.type === "fileRef") {
+    const fileRef = JSON.parse(rawValue) as unknown
+    if (!isFileRef(fileRef)) {
+      throw new Error("Expected an uploaded file.")
+    }
+    return fileRef
+  }
+  return rawValue
 }
 
 function parseActionParamValue(param: ActionParam, rawValue: string): unknown {

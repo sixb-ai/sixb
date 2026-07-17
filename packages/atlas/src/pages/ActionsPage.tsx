@@ -51,6 +51,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { AlertCircle, ArrowRight, CheckCircle2, Loader2, Play, SquareActivity } from "lucide-react"
 import { type SyntheticEvent, useCallback, useMemo, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { ActionParamNullControl } from "../components/ActionParamNullControl"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import {
   FileRefUploadField,
@@ -60,6 +61,8 @@ import {
 import { useActionLiveUpdates } from "../features/actions/hooks/useActionLiveUpdates"
 import { formatDate, formatRelativeTime } from "../features/workflows/utils/workflows"
 import {
+  type ActionParamFormValue,
+  type ActionParamFormValues,
   type ActionRequestPayload,
   buildActionParams,
   describeActionParamInput,
@@ -298,7 +301,7 @@ function ActionRequestDialog({
 }) {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
-  const [values, setValues] = useState<Record<string, string>>({})
+  const [values, setValues] = useState<ActionParamFormValues>({})
   const [subjectPrimaryId, setSubjectPrimaryId] = useState(subject?.primaryId ?? "")
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [pendingFileUploads, setPendingFileUploads] = useState<ReadonlySet<string>>(() => new Set())
@@ -324,7 +327,7 @@ function ActionRequestDialog({
     requestAction.reset()
   }
 
-  function handleParamChange(paramId: string, value: string) {
+  function handleParamChange(paramId: string, value: ActionParamFormValue) {
     setValues((current) => ({ ...current, [paramId]: value }))
     setFieldErrors(({ [paramId]: _param, ...rest }) => rest)
     requestAction.reset()
@@ -425,6 +428,7 @@ function ActionRequestDialog({
               action={action}
               values={values}
               errors={fieldErrors}
+              pendingFileUploads={pendingFileUploads}
               onChange={handleParamChange}
               onFileUploadPendingChange={handleFileUploadPendingChange}
             />
@@ -468,13 +472,15 @@ function ActionParamFields({
   action,
   values,
   errors,
+  pendingFileUploads,
   onChange,
   onFileUploadPendingChange,
 }: {
   action: ActionCatalogItem
-  values: Record<string, string>
+  values: ActionParamFormValues
   errors: Record<string, string>
-  onChange: (paramId: string, value: string) => void
+  pendingFileUploads: ReadonlySet<string>
+  onChange: (paramId: string, value: ActionParamFormValue) => void
   onFileUploadPendingChange?: (paramId: string, pending: boolean) => void
 }) {
   if (action.params.length === 0) {
@@ -485,8 +491,12 @@ function ActionParamFields({
     <div className="space-y-3">
       {action.params.map((param) => {
         const input = describeActionParamInput(param.schema)
-        const value = values[param.id] ?? ""
+        const formValue = values[param.id]
+        const isNull = formValue === null
+        const value = typeof formValue === "string" ? formValue : ""
         const fieldId = `action-${action.id}-${param.id}`
+        const fieldDisabled = isNull
+        const fieldRequired = Boolean(param.required && !isNull)
 
         return (
           <div key={param.id} className="space-y-1.5">
@@ -499,6 +509,14 @@ function ActionParamFields({
                   Required
                 </Badge>
               ) : null}
+              {param.nullable ? (
+                <ActionParamNullControl
+                  paramName={param.id}
+                  isNull={isNull}
+                  disabled={pendingFileUploads.has(param.id)}
+                  onNullChange={(nextIsNull) => onChange(param.id, nextIsNull ? null : "")}
+                />
+              ) : null}
             </div>
             {param.description ? (
               <p className="text-[11px] text-muted-foreground">{param.description}</p>
@@ -510,9 +528,11 @@ function ActionParamFields({
                 value={value}
                 onChange={(next) => onChange(param.id, next)}
                 fieldId={fieldId}
+                disabled={fieldDisabled}
               />
             ) : input.kind === "fileRef" ? (
               <FileRefUploadField
+                key={`${param.id}:${isNull ? "null" : "value"}`}
                 id={fieldId}
                 value={parseFileRefFormValue(value)}
                 onChange={(fileRef) =>
@@ -520,10 +540,16 @@ function ActionParamFields({
                 }
                 errorId={errors[param.id] ? `${fieldId}-error` : undefined}
                 logicalPathPrefix={`actions/${action.id}/${param.id}`}
+                disabled={fieldDisabled}
                 onPendingChange={(pending) => onFileUploadPendingChange?.(param.id, pending)}
               />
             ) : input.kind === "enum" ? (
-              <Select value={value} onValueChange={(next) => onChange(param.id, next)}>
+              <Select
+                value={value}
+                onValueChange={(next) => onChange(param.id, next)}
+                required={fieldRequired}
+                disabled={fieldDisabled}
+              >
                 <SelectTrigger id={fieldId} className="w-full">
                   <SelectValue placeholder="Select..." />
                 </SelectTrigger>
@@ -536,7 +562,12 @@ function ActionParamFields({
                 </SelectContent>
               </Select>
             ) : input.kind === "boolean" ? (
-              <Select value={value} onValueChange={(next) => onChange(param.id, next)}>
+              <Select
+                value={value}
+                onValueChange={(next) => onChange(param.id, next)}
+                required={fieldRequired}
+                disabled={fieldDisabled}
+              >
                 <SelectTrigger id={fieldId} className="w-full">
                   <SelectValue placeholder="Select..." />
                 </SelectTrigger>
@@ -550,7 +581,8 @@ function ActionParamFields({
                 id={fieldId}
                 value={value}
                 onChange={(event) => onChange(param.id, event.target.value)}
-                required={param.required}
+                required={fieldRequired}
+                disabled={fieldDisabled}
                 placeholder='{"objectTypeId":"Customer","primaryId":"cus_1"}'
                 className="min-h-24 font-mono text-xs"
               />
@@ -560,7 +592,8 @@ function ActionParamFields({
                 type={input.kind === "number" ? "number" : "text"}
                 value={value}
                 onChange={(event) => onChange(param.id, event.target.value)}
-                required={param.required}
+                required={fieldRequired}
+                disabled={fieldDisabled}
               />
             )}
 
