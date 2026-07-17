@@ -26,6 +26,7 @@ export async function runBuild(options: BuildOptions = {}) {
     sourcemap: "external",
     minify: false,
     packages: "external",
+    external: ["@sixb/*"],
   })
 
   if (!result.success) {
