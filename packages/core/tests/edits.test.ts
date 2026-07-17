@@ -47,8 +47,9 @@ const Invoice = defineObjectType({
   links: [
     link("customer", Customer, {
       cardinality: "one",
-      properties: [prop("role", "string", { required: true })],
+      properties: [prop("role", "string", { required: true }), prop("since", "timestamp")],
     }),
+    link("reviewers", Customer, { cardinality: "many" }),
   ],
 })
 
@@ -106,6 +107,12 @@ type RuntimeEditHandle = EditObjectRef & {
     options?: { properties?: Record<string, unknown> }
   ): void
   unlink(link: { objectTypeId: string; id: string; link: ObjectLink }, target: EditObjectRef): void
+  setLink(
+    link: { objectTypeId: string; id: string; link: ObjectLink },
+    target: EditObjectRef,
+    options?: { properties?: Record<string, unknown> }
+  ): void
+  clearLink(link: { objectTypeId: string; id: string; link: ObjectLink }): void
 }
 
 type RuntimeRecordObjects = (objectType: ObjectTypeWithPropertyTokens) => {
@@ -1001,6 +1008,201 @@ describe("EditBatch staged object upsert", () => {
   })
 })
 
+describe("EditBatch cardinality-one link assignment", () => {
+  test("records set and clear intent without reading the current target", async () => {
+    const batch = await recordRuntimeEdits({ runId: "act_assign_link" }, ({ objects }) => {
+      const invoice = objects(Invoice).byId("inv_1")
+      invoice.setLink(Invoice.l.customer, objects(Customer).byId("cus_1"), {
+        properties: { role: "billTo" },
+      })
+      invoice.clearLink(Invoice.l.customer)
+    })
+
+    expect(batch.operations).toEqual([
+      {
+        kind: "link.set",
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        properties: { role: "billTo" },
+      },
+      {
+        kind: "link.clear",
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+      },
+    ])
+
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage: await createSeededStorage(),
+      batch,
+    })
+    expect(plan.diff.links).toEqual([])
+  })
+
+  test("creates, updates, and preserves a same-target link", async () => {
+    const storage = await createSeededStorage()
+    const createPlan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: await recordRuntimeEdits({ runId: "act_set_absent" }, ({ objects }) => {
+        objects(Invoice)
+          .byId("inv_1")
+          .setLink(Invoice.l.customer, objects(Customer).byId("cus_1"), {
+            properties: { role: "billTo" },
+          })
+      }),
+    })
+    expect(createPlan.diff.links).toEqual([
+      {
+        operation: "create",
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_1" },
+      },
+    ])
+
+    await seedInvoiceCustomerLink(storage, {
+      role: "billTo",
+      since: "2026-06-01T00:00:00.000Z",
+    })
+    const updatePlan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: await recordRuntimeEdits({ runId: "act_set_same" }, ({ objects }) => {
+        objects(Invoice)
+          .byId("inv_1")
+          .setLink(Invoice.l.customer, objects(Customer).byId("cus_1"), {
+            properties: { role: "shipTo" },
+          })
+      }),
+    })
+    expect(updatePlan.diff.links[0]?.operation).toBe("update")
+    expect(updatePlan.links.upserts[0]?.properties).toEqual({
+      role: "shipTo",
+      since: "2026-06-01T00:00:00.000Z",
+    })
+
+    const noOpPlan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: await recordRuntimeEdits({ runId: "act_set_noop" }, ({ objects }) => {
+        objects(Invoice)
+          .byId("inv_1")
+          .setLink(Invoice.l.customer, objects(Customer).byId("cus_1"), {
+            properties: { role: "billTo" },
+          })
+      }),
+    })
+    expect(noOpPlan.diff.links).toEqual([])
+  })
+
+  test("atomically replaces and clears the current target with existing event types", async () => {
+    const storage = await createSeededStorage()
+    await seedSecondCustomer(storage)
+    await seedInvoiceCustomerLink(storage)
+    await queueRunningRun(storage, "run_replace_customer", "assignCustomer")
+
+    const result = await commitActionEditBatch({
+      storage,
+      projectId: "project-a",
+      runId: "run_replace_customer",
+      actionId: "assignCustomer",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      ontology,
+      batch: await recordRuntimeEdits({ runId: "run_replace_customer" }, ({ objects }) => {
+        objects(Invoice)
+          .byId("inv_1")
+          .setLink(Invoice.l.customer, objects(Customer).byId("cus_2"), {
+            properties: { role: "shipTo" },
+          })
+      }),
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    expect(result.commit.events.map((event) => event.type)).toEqual([
+      "link.deleted",
+      "link.created",
+    ])
+    const links = await storage.objects.listLinks({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      objectId: "inv_1",
+      linkId: "customer",
+    })
+    expect(links).toHaveLength(1)
+    expect(links[0]).toMatchObject({ targetId: "cus_2", properties: { role: "shipTo" } })
+
+    const clearPlan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: await recordRuntimeEdits({ runId: "act_clear_customer" }, ({ objects }) => {
+        objects(Invoice).byId("inv_1").clearLink(Invoice.l.customer)
+      }),
+    })
+    expect(clearPlan.diff.links).toEqual([
+      {
+        operation: "delete",
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_2" },
+      },
+    ])
+  })
+
+  test("applies assignments in order and rejects assignment semantics on many links", async () => {
+    const storage = await createSeededStorage()
+    await seedSecondCustomer(storage)
+    const orderedPlan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: await recordRuntimeEdits({ runId: "act_ordered_links" }, ({ objects }) => {
+        const invoice = objects(Invoice).byId("inv_1")
+        invoice.setLink(Invoice.l.customer, objects(Customer).byId("cus_1"), {
+          properties: { role: "first" },
+        })
+        invoice.setLink(Invoice.l.customer, objects(Customer).byId("cus_2"), {
+          properties: { role: "second" },
+        })
+      }),
+    })
+    expect(orderedPlan.diff.links).toEqual([
+      {
+        operation: "create",
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_2" },
+      },
+    ])
+
+    await expect(
+      recordRuntimeEdits({ runId: "act_set_many" }, ({ objects }) => {
+        objects(Invoice).byId("inv_1").setLink(Invoice.l.reviewers, objects(Customer).byId("cus_1"))
+      })
+    ).rejects.toThrow("setLink requires cardinality 'one' link 'Invoice.reviewers'")
+
+    await expect(
+      validateEditBatch({
+        projectId: "project-a",
+        ontology,
+        storage,
+        batch: {
+          kind: "link.clear",
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "reviewers",
+        },
+      })
+    ).rejects.toThrow("does not have cardinality 'one'")
+  })
+})
+
 describe("EditBatch net diff (delete then re-create within one batch)", () => {
   test("re-creating a deleted existing link nets to an update of the live row", async () => {
     const storage = await createSeededStorage()
@@ -1567,6 +1769,60 @@ describe("commitActionEditBatch concurrency (provider serialization)", () => {
     ).toBe(true)
   })
 
+  test("serializes concurrent assignments as last-committed-writer-wins", async () => {
+    const storage = await createSeededStorage()
+    await seedSecondCustomer(storage)
+    await queueRunningRun(storage, "run_set_cus_1", "assignCustomer")
+    await queueRunningRun(storage, "run_set_cus_2", "assignCustomer")
+
+    const subject = { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" } as const
+    const batchA = await recordRuntimeEdits({ runId: "run_set_cus_1" }, ({ objects }) => {
+      objects(Invoice)
+        .byId("inv_1")
+        .setLink(Invoice.l.customer, objects(Customer).byId("cus_1"), {
+          properties: { role: "payer" },
+        })
+    })
+    const batchB = await recordRuntimeEdits({ runId: "run_set_cus_2" }, ({ objects }) => {
+      objects(Invoice)
+        .byId("inv_1")
+        .setLink(Invoice.l.customer, objects(Customer).byId("cus_2"), {
+          properties: { role: "payer" },
+        })
+    })
+
+    const results = await Promise.allSettled([
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_set_cus_1",
+        actionId: "assignCustomer",
+        subject,
+        ontology,
+        batch: batchA,
+      }),
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_set_cus_2",
+        actionId: "assignCustomer",
+        subject,
+        ontology,
+        batch: batchB,
+      }),
+    ])
+
+    expect(results.every((result) => result.status === "fulfilled")).toBe(true)
+    const links = await storage.objects.listLinks({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      objectId: "inv_1",
+      linkId: "customer",
+    })
+    expect(links).toHaveLength(1)
+    expect(links[0]?.targetId === "cus_1" || links[0]?.targetId === "cus_2").toBe(true)
+  })
+
   // In-memory and SQLite serialize transactions on a single connection/lock, so the PG e2e's
   // barrier (which waits for both commits to reach `applyEditCommitPlan`) would deadlock here — the
   // second transaction cannot start until the first finishes. That serialization *is* the guarantee
@@ -1772,7 +2028,10 @@ async function createSeededStorage(): Promise<InMemoryStorage> {
   return storage
 }
 
-async function seedInvoiceCustomerLink(storage: InMemoryStorage): Promise<void> {
+async function seedInvoiceCustomerLink(
+  storage: InMemoryStorage,
+  properties: Record<string, unknown> = { role: "billTo" }
+): Promise<void> {
   await storage.objects.applyLinkUpsert({
     id: "evt_invoice_customer",
     schemaVersion: 1,
@@ -1788,7 +2047,7 @@ async function seedInvoiceCustomerLink(storage: InMemoryStorage): Promise<void> 
       linkId: "customer",
       targetTypeId: "Customer",
       targetId: "cus_1",
-      properties: { role: "billTo" },
+      properties,
       propertyChanges: {},
     },
   })

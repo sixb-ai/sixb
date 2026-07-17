@@ -1,5 +1,5 @@
 import type { JsonValue } from "../json"
-import type { ObjectRef, ObjectType, Property, ValueType } from "../ontology"
+import type { ObjectLink, ObjectRef, ObjectType, Property, ValueType } from "../ontology"
 import type { InferPropertyValue } from "../ontology/inference"
 import type { LinkToken, ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 
@@ -55,6 +55,20 @@ export interface EditLinkDeleteOperation {
   readonly target: EditObjectRef
 }
 
+export interface EditLinkSetOperation {
+  readonly kind: "link.set"
+  readonly source: EditObjectRef
+  readonly linkId: string
+  readonly target: EditObjectRef
+  readonly properties?: EditObjectProperties
+}
+
+export interface EditLinkClearOperation {
+  readonly kind: "link.clear"
+  readonly source: EditObjectRef
+  readonly linkId: string
+}
+
 export type EditOperation =
   | EditObjectCreateOperation
   | EditObjectUpdateOperation
@@ -62,6 +76,8 @@ export type EditOperation =
   | EditObjectDeleteOperation
   | EditLinkCreateOperation
   | EditLinkDeleteOperation
+  | EditLinkSetOperation
+  | EditLinkClearOperation
 
 export interface EditBatch {
   readonly version: EditBatchVersion
@@ -199,6 +215,13 @@ type ResolveTargetObjectTypeId<TTargetObjectTypeId> =
       ? TTargetObjectTypeId
       : never
 
+type CardinalityOneLinkToken<TObjectTypeId extends string> = LinkToken<
+  TObjectTypeId,
+  string,
+  string | readonly string[],
+  ObjectLink & { cardinality: "one" }
+>
+
 type EditLinkTargetRef<TLinkToken extends LinkToken<string, string, string | readonly string[]>> =
   string extends TLinkToken["id"]
     ? EditObjectRef<string>
@@ -275,6 +298,16 @@ export interface EditObjectHandle<
   unlink<const TLinkToken extends LinkToken<TObjectType["id"], string, string | readonly string[]>>(
     link: TLinkToken,
     target: EditLinkTargetRef<TLinkToken>
+  ): void
+
+  setLink<const TLinkToken extends CardinalityOneLinkToken<TObjectType["id"]>>(
+    link: TLinkToken,
+    target: EditLinkTargetRef<TLinkToken>,
+    ...options: EditLinkOptionsArg<TLinkToken, TValueTypes>
+  ): void
+
+  clearLink<const TLinkToken extends CardinalityOneLinkToken<TObjectType["id"]>>(
+    link: TLinkToken
   ): void
 }
 

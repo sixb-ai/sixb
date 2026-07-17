@@ -20,8 +20,10 @@ import type {
   EditBatch,
   EditBatchInput,
   EditCommitDiff,
+  EditLinkClearOperation,
   EditLinkCreateOperation,
   EditLinkDeleteOperation,
+  EditLinkSetOperation,
   EditObjectDeleteOperation,
   EditObjectRef,
   EditObjectUpdateOperation,
@@ -241,6 +243,7 @@ export function collectEditBatchLoadRequests(batchInput: EditBatchInput): EditBa
         break
       case "link.create":
       case "link.delete":
+      case "link.set":
         objects.set(objectKey(operation.source.objectTypeId, operation.source.primaryId), {
           objectTypeId: operation.source.objectTypeId,
           primaryId: operation.source.primaryId,
@@ -248,6 +251,24 @@ export function collectEditBatchLoadRequests(batchInput: EditBatchInput): EditBa
         objects.set(objectKey(operation.target.objectTypeId, operation.target.primaryId), {
           objectTypeId: operation.target.objectTypeId,
           primaryId: operation.target.primaryId,
+        })
+        sourceLinks.set(
+          sourceLinkKey(
+            operation.source.objectTypeId,
+            operation.source.primaryId,
+            operation.linkId
+          ),
+          {
+            objectTypeId: operation.source.objectTypeId,
+            objectId: operation.source.primaryId,
+            linkId: operation.linkId,
+          }
+        )
+        break
+      case "link.clear":
+        objects.set(objectKey(operation.source.objectTypeId, operation.source.primaryId), {
+          objectTypeId: operation.source.objectTypeId,
+          primaryId: operation.source.primaryId,
         })
         sourceLinks.set(
           sourceLinkKey(
@@ -402,6 +423,38 @@ function normalizeOperationWithOntology(
       )
       return operation
     }
+    case "link.set": {
+      const sourceObjectType = ctx.ontology.resolveObjectType(operation.source.objectTypeId)
+      const linkDefinition = requireLinkDefinition(sourceObjectType, operation.linkId)
+      assertCardinalityOneLinkDefinition(sourceObjectType, linkDefinition, "set")
+      assertLinkTargetType(
+        sourceObjectType.id,
+        operation.linkId,
+        linkDefinition,
+        operation.target.objectTypeId,
+        (expected, actual) => ctx.ontology.isValidLinkTarget(expected, actual)
+      )
+      const properties =
+        operation.properties === undefined
+          ? undefined
+          : normalizeLinkEditProperties({
+              sourceObjectTypeId: sourceObjectType.id,
+              linkId: operation.linkId,
+              linkDefinition,
+              properties: operation.properties,
+              valueTypesById,
+            })
+      return {
+        ...operation,
+        ...(properties !== undefined ? { properties } : {}),
+      }
+    }
+    case "link.clear": {
+      const sourceObjectType = ctx.ontology.resolveObjectType(operation.source.objectTypeId)
+      const linkDefinition = requireLinkDefinition(sourceObjectType, operation.linkId)
+      assertCardinalityOneLinkDefinition(sourceObjectType, linkDefinition, "clear")
+      return operation
+    }
   }
 }
 
@@ -429,6 +482,12 @@ function analyzeEditBatch(input: EditAnalysisInput): EditCommitPlan {
         break
       case "link.delete":
         applyLinkDelete(operation, objectStates, linkIndex)
+        break
+      case "link.set":
+        applyLinkSet(input, operation, objectStates, linkIndex, valueTypesById)
+        break
+      case "link.clear":
+        applyLinkClear(operation, objectStates, linkIndex)
         break
     }
   }
@@ -614,9 +673,58 @@ function applyObjectDelete(
   )
 }
 
+function applyLinkSet(
+  input: Pick<ValidateEditBatchInput, "projectId" | "ontology">,
+  operation: EditLinkSetOperation,
+  objectStates: Map<string, ObjectState>,
+  linkIndex: LinkStateIndex,
+  valueTypesById: ReadonlyMap<string, ValueType>
+): void {
+  requireActiveObjectState(objectStates, operation.source)
+  requireActiveObjectState(objectStates, operation.target)
+
+  const keys = linkIndex.bySourceLink.get(
+    sourceLinkKey(operation.source.objectTypeId, operation.source.primaryId, operation.linkId)
+  )
+  for (const key of [...(keys ?? [])]) {
+    const state = linkIndex.byKey.get(key)
+    if (!state || !state.present) continue
+    if (
+      state.target.objectTypeId === operation.target.objectTypeId &&
+      state.target.primaryId === operation.target.primaryId
+    ) {
+      continue
+    }
+    removeLinkFromIndexes(linkIndex, key, state)
+    state.present = false
+    state.properties = undefined
+  }
+
+  applyLinkCreate(input, operation, objectStates, linkIndex, valueTypesById)
+}
+
+function applyLinkClear(
+  operation: EditLinkClearOperation,
+  objectStates: Map<string, ObjectState>,
+  linkIndex: LinkStateIndex
+): void {
+  requireActiveObjectState(objectStates, operation.source)
+
+  const keys = linkIndex.bySourceLink.get(
+    sourceLinkKey(operation.source.objectTypeId, operation.source.primaryId, operation.linkId)
+  )
+  for (const key of [...(keys ?? [])]) {
+    const state = linkIndex.byKey.get(key)
+    if (!state || !state.present) continue
+    removeLinkFromIndexes(linkIndex, key, state)
+    state.present = false
+    state.properties = undefined
+  }
+}
+
 function applyLinkCreate(
   input: Pick<ValidateEditBatchInput, "projectId" | "ontology">,
-  operation: EditLinkCreateOperation,
+  operation: EditLinkCreateOperation | EditLinkSetOperation,
   objectStates: Map<string, ObjectState>,
   linkIndex: LinkStateIndex,
   valueTypesById: ReadonlyMap<string, ValueType>
@@ -727,7 +835,7 @@ function requireActiveObjectState(
 }
 
 function assertLinkCardinality(
-  operation: EditLinkCreateOperation,
+  operation: EditLinkCreateOperation | EditLinkSetOperation,
   linkDefinition: ObjectLink,
   linkIndex: LinkStateIndex
 ): void {
@@ -931,6 +1039,18 @@ function assertPrimaryPropertyMatchesRef(
   if (properties[primaryPropertyId] !== primaryId) {
     throw new EditBatchError(
       `[Sixb] EditBatch ${operation} '${objectType.id}:${primaryId}' must include matching primary property '${primaryPropertyId}'.`
+    )
+  }
+}
+
+function assertCardinalityOneLinkDefinition(
+  objectType: ObjectTypeWithPropertyTokens,
+  linkDefinition: ObjectLink,
+  operation: "set" | "clear"
+): void {
+  if (linkDefinition.cardinality !== "one") {
+    throw new EditBatchError(
+      `[Sixb] EditBatch cannot ${operation} link '${objectType.id}.${linkDefinition.id}' because it does not have cardinality 'one'.`
     )
   }
 }

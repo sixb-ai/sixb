@@ -11,15 +11,6 @@ const Customer = defineObjectType({
   ],
 })
 
-const Payment = defineObjectType({
-  id: "Payment",
-  name: "Payment",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("status", "string", { required: true }),
-  ],
-})
-
 const Contact = defineObjectType({
   id: "Contact",
   name: "Contact",
@@ -44,7 +35,18 @@ const Invoice = defineObjectType({
       cardinality: "one",
       properties: [prop("role", "string", { required: true }), prop("since", "timestamp")],
     }),
+    link("reviewers", Customer, { cardinality: "many" }),
   ],
+})
+
+const Payment = defineObjectType({
+  id: "Payment",
+  name: "Payment",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("status", "string", { required: true }),
+  ],
+  links: [link("invoice", Invoice, { cardinality: "one" })],
 })
 
 const batch: Promise<EditBatch> = recordEdits({ runId: "act_1" }, ({ objects }) => {
@@ -99,6 +101,28 @@ const batch: Promise<EditBatch> = recordEdits({ runId: "act_1" }, ({ objects }) 
     },
   })
   invoice.unlink(Invoice.l.customer, customer)
+  invoice.setLink(Invoice.l.customer, customer, {
+    properties: {
+      role: "shipTo",
+      since: new Date("2026-06-02T10:00:00.000Z"),
+    },
+  })
+  invoice.clearLink(Invoice.l.customer)
+  payment.setLink(Payment.l.invoice, invoice)
+  payment.clearLink(Payment.l.invoice)
+
+  // @ts-expect-error setLink only accepts cardinality-one links
+  invoice.setLink(Invoice.l.reviewers, customer)
+
+  // @ts-expect-error clearLink only accepts cardinality-one links
+  invoice.clearLink(Invoice.l.reviewers)
+
+  // @ts-expect-error Invoice.customer must target Customer refs
+  invoice.setLink(Invoice.l.customer, payment, { properties: { role: "billTo" } })
+
+  // @ts-expect-error Invoice.customer requires link properties when assigning
+  invoice.setLink(Invoice.l.customer, customer)
+
   payment.delete()
 
   invoice.update({

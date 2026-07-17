@@ -199,6 +199,10 @@ await projects.byId("proj-001").link(Project.l.lead, {
 `unlink(...)` removes one exact relationship row. Even for `cardinality: "one"` links, pass the
 current target; when you only know the `linkId`, read it first with `listLinks(Project.l.lead)`.
 
+Inside an action's staged `.edits(...)` facade, `setLink(...)` and `clearLink(...)` provide
+assignment semantics for cardinality-one links. They resolve the current target inside the atomic
+action commit; the immediate runtime API shown above intentionally retains `link`/`unlink`.
+
 Writing a new link emits `link.created`; changing an existing link emits `link.updated`.
 Removing one emits `link.deleted`. See [Events](../events/overview.md).
 
