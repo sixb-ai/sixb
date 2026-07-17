@@ -71,9 +71,9 @@ describe("sixb build", () => {
     expect(html).toContain('<div id="root"></div>')
   })
 
-  test("externalizes DuckDB native bindings when bundling runtime config", async () => {
+  test("externalizes package dependencies when bundling runtime config", async () => {
     const repoRoot = resolve(import.meta.dir, "..", "..", "..")
-    const tempDir = await mkdtemp(join(repoRoot, ".tmp-sixb-cli-build-duckdb-"))
+    const tempDir = await mkdtemp(join(repoRoot, ".tmp-sixb-cli-build-packages-"))
     tempDirs.push(tempDir)
     const entry = join(tempDir, "sixb.config.ts")
     const outdir = join(tempDir, "dist")
@@ -82,8 +82,10 @@ describe("sixb build", () => {
       entry,
       [
         'import { DuckLakeStorage } from "@sixb/ducklake"',
+        'import { sftp } from "@sixb/connector-sftp"',
         "",
         "export const duckLakeStorageConstructor = DuckLakeStorage",
+        'export const sftpAdapter = sftp({ host: "example.com", username: "demo" })',
       ].join("\n")
     )
 
@@ -96,6 +98,11 @@ describe("sixb build", () => {
 
     const builtJs = await readFile(builtEntry, "utf-8")
     expect(builtJs).toContain('"@sixb/ducklake"')
+    expect(builtJs).toContain('"@sixb/connector-sftp"')
     expect(builtJs).not.toContain("@duckdb/node-api")
+    expect(builtJs).not.toContain("sshcrypto")
+
+    const outputFiles = await readdir(outdir)
+    expect(outputFiles.some((file) => file.endsWith(".node"))).toBe(false)
   })
 })

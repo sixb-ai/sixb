@@ -1,4 +1,5 @@
 export { sftp } from "./sftp"
+export { createSshClient } from "./ssh"
 export type {
   SftpClient,
   SftpConnection,
