@@ -25,7 +25,7 @@ export async function runBuild(options: BuildOptions = {}) {
     target: "bun",
     sourcemap: "external",
     minify: false,
-    external: ["@sixb/ducklake"],
+    packages: "external",
   })
 
   if (!result.success) {

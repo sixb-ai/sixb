@@ -1,5 +1,4 @@
-import type { SFTPWrapper } from "ssh2"
-import { Client } from "ssh2"
+import type { SFTPWrapper, Client as SshClient } from "ssh2"
 import { createSftpClient } from "./client"
 import type { SftpClient, SftpConnection, SftpConnector, SftpOptions } from "./types"
 
@@ -7,11 +6,12 @@ const DEFAULT_READ_AHEAD_REQUESTS = 1
 const MAX_READ_AHEAD_REQUESTS = 64
 
 type ConnectionState = {
-  client: Client
+  client: SshClient
   closed: boolean
 }
 
 const connections = new WeakMap<SftpClient, ConnectionState>()
+let ssh2ModulePromise: Promise<typeof import("ssh2")> | undefined
 
 /**
  * Create an SFTP connector backed by ssh2.
@@ -26,6 +26,11 @@ export function sftp(connection: SftpConnection, options: SftpOptions = {}): Sft
   return {
     type: "sftp",
     async connect(context) {
+      if (context.signal.aborted) {
+        throw new Error("[SixbSftp] Connection aborted before it started.")
+      }
+
+      const { Client } = await loadSsh2()
       if (context.signal.aborted) {
         throw new Error("[SixbSftp] Connection aborted before it started.")
       }
@@ -57,6 +62,11 @@ export function sftp(connection: SftpConnection, options: SftpOptions = {}): Sft
   }
 }
 
+function loadSsh2(): Promise<typeof import("ssh2")> {
+  ssh2ModulePromise ??= import("ssh2")
+  return ssh2ModulePromise
+}
+
 function resolveReadAheadRequests(value: number | undefined): number {
   const resolved = value ?? DEFAULT_READ_AHEAD_REQUESTS
   if (
@@ -73,7 +83,7 @@ function resolveReadAheadRequests(value: number | undefined): number {
 }
 
 async function connectSftpClient(
-  client: Client,
+  client: SshClient,
   connection: SftpConnection,
   signal: AbortSignal
 ): Promise<SFTPWrapper> {
