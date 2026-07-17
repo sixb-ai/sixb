@@ -9,6 +9,10 @@ export type PropertyChange =
 
 export type PropertyChangeMap = Record<string, PropertyChange>
 
+export function hasPropertyChanges(changes: PropertyChangeMap): boolean {
+  return Object.keys(changes).length > 0
+}
+
 export function diffPropertyChanges(
   before: Record<string, unknown> | undefined,
   afterPatch: Record<string, unknown> | undefined
