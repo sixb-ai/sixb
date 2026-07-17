@@ -53,4 +53,38 @@ describe("sftp connector module loading", () => {
     expect(Buffer.from(subprocess.stderr).toString("utf8")).toBe("")
     expect(subprocess.exitCode).toBe(0)
   })
+
+  test("uses ssh2 JavaScript crypto under Bun", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sftp-js-crypto-"))
+    tempDirs.push(tempDir)
+    const sshModule = resolve(import.meta.dir, "..", "src", "ssh.ts")
+    const sshModuleUrl = pathToFileURL(sshModule).href
+    const runner = join(tempDir, "runner.ts")
+
+    await writeFile(
+      runner,
+      [
+        'import { createRequire } from "node:module"',
+        'import { dirname, join } from "node:path"',
+        `import { createSshClient } from ${JSON.stringify(sshModuleUrl)}`,
+        "",
+        "const client = await createSshClient()",
+        "client.end()",
+        `const localRequire = createRequire(${JSON.stringify(sshModuleUrl)})`,
+        'const ssh2Entry = localRequire.resolve("ssh2")',
+        'const crypto = localRequire(join(dirname(ssh2Entry), "protocol", "crypto.js"))',
+        'if (crypto.bindingAvailable !== false) throw new Error("ssh2 native crypto was loaded")',
+      ].join("\n")
+    )
+
+    const subprocess = Bun.spawnSync({
+      cmd: [process.execPath, runner],
+      cwd: resolve(import.meta.dir, "..", "..", ".."),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    expect(Buffer.from(subprocess.stderr).toString("utf8")).toBe("")
+    expect(subprocess.exitCode).toBe(0)
+  })
 })

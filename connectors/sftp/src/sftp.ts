@@ -1,5 +1,6 @@
 import type { SFTPWrapper, Client as SshClient } from "ssh2"
 import { createSftpClient } from "./client"
+import { createSshClient } from "./ssh"
 import type { SftpClient, SftpConnection, SftpConnector, SftpOptions } from "./types"
 
 const DEFAULT_READ_AHEAD_REQUESTS = 1
@@ -11,7 +12,6 @@ type ConnectionState = {
 }
 
 const connections = new WeakMap<SftpClient, ConnectionState>()
-let ssh2ModulePromise: Promise<typeof import("ssh2")> | undefined
 
 /**
  * Create an SFTP connector backed by ssh2.
@@ -30,12 +30,11 @@ export function sftp(connection: SftpConnection, options: SftpOptions = {}): Sft
         throw new Error("[SixbSftp] Connection aborted before it started.")
       }
 
-      const { Client } = await loadSsh2()
+      const sshClient = await createSshClient()
       if (context.signal.aborted) {
         throw new Error("[SixbSftp] Connection aborted before it started.")
       }
 
-      const sshClient = new Client()
       const sftpSession = await connectSftpClient(sshClient, connection, context.signal)
       const sftpClient = createSftpClient(sftpSession, { readAheadRequests })
       const state = {
@@ -60,11 +59,6 @@ export function sftp(connection: SftpConnection, options: SftpOptions = {}): Sft
       connections.delete(client)
     },
   }
-}
-
-function loadSsh2(): Promise<typeof import("ssh2")> {
-  ssh2ModulePromise ??= import("ssh2")
-  return ssh2ModulePromise
 }
 
 function resolveReadAheadRequests(value: number | undefined): number {

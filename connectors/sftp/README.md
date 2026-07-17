@@ -47,3 +47,17 @@ additional work for the SFTP server.
 Read-ahead applies only to `open(...)`. It preserves output order, backpressure, cancellation, and
 remote-handle cleanup. Choose the value for the target server and remember that concurrent file
 streams each receive their own read-ahead window.
+
+### Raw SSH clients
+
+Use `createSshClient()` when an integration needs an SSH channel without SFTP:
+
+```ts
+import { createSshClient } from "@sixb/connector-sftp"
+
+const client = await createSshClient()
+client.connect(connection)
+```
+
+This factory also keeps `ssh2` on its JavaScript crypto implementation under Bun. The optional
+`sshcrypto` and `cpu-features` native addons remain available under Node, where they are supported.
