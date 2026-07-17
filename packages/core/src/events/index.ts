@@ -32,7 +32,11 @@ export {
   buildObjectDeletedEvent,
   buildObjectUpsertEvent,
 } from "./mutation-events"
-export { clearedPropertyChanges, diffPropertyChanges } from "./property-changes"
+export {
+  clearedPropertyChanges,
+  diffPropertyChanges,
+  hasPropertyChanges,
+} from "./property-changes"
 export {
   DEFAULT_EVENTS_RETENTION_MS,
   EVENTS_STREAM,

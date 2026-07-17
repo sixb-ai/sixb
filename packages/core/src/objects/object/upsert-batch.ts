@@ -2,8 +2,7 @@
  * Leaf operation: batch upsert objects of a single type.
  */
 import { assertPrivileged } from "../../authorization"
-import type { EventDraft } from "../../events"
-import { buildObjectUpsertEvent } from "../../events"
+import { buildObjectUpsertEvent, hasPropertyChanges } from "../../events"
 import { validateObjectBatch } from "../../ontology/validation"
 import type { BatchItemResult } from "../../runtime/types"
 import type { ObjectRow } from "../../storage"
@@ -43,35 +42,50 @@ export async function upsertObjectBatch(
   for (const { index, error } of validation.errors) results[index] = { ok: false, error }
   if (validation.valid.length === 0) return results
 
-  // Append events, then project the stored events into object storage.
-  const events: EventDraft[] = validation.valid.map(({ item }) => {
+  // Plan mutations and resolve unchanged items before touching the event stream.
+  const mutations: {
+    index: number
+    event: ReturnType<typeof buildObjectUpsertEvent>
+  }[] = []
+
+  for (const { index, item } of validation.valid) {
     const existing = existingMap.get(`${objectType.id}:${item.primaryId}`)
     const properties = {
       ...(existing?.properties ?? {}),
       ...item.properties,
     }
-    return buildObjectUpsertEvent({
+    const event = buildObjectUpsertEvent({
       objectTypeId: objectType.id,
       primaryId: item.primaryId,
       operation: existing ? "update" : "create",
       previousProperties: existing?.properties,
       properties,
     })
-  })
 
-  const appended = await eventsRuntime.append({ events })
+    if (existing && !hasPropertyChanges(event.payload.propertyChanges)) {
+      results[index] = { ok: true, value: existing }
+      continue
+    }
+
+    mutations.push({ index, event })
+  }
+
+  if (mutations.length === 0) return results
+
+  // Append changed events, then project the stored events into object storage.
+  const appended = await eventsRuntime.append({ events: mutations.map(({ event }) => event) })
   const objectEvents = appended.filter(
     (event): event is Extract<typeof event, { type: "object.created" | "object.updated" }> =>
       event.type === "object.created" || event.type === "object.updated"
   )
-  if (objectEvents.length !== validation.valid.length) {
+  if (objectEvents.length !== mutations.length) {
     throw new ObjectError("Failed to append object mutation event batch")
   }
 
   const rows = await storage.objects.applyObjectUpsertBatch(objectEvents)
 
-  for (let i = 0; i < validation.valid.length; i++) {
-    results[validation.valid[i].index] = { ok: true, value: rows[i] }
+  for (let i = 0; i < mutations.length; i++) {
+    results[mutations[i].index] = { ok: true, value: rows[i] }
   }
 
   return results
