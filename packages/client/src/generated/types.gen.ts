@@ -3916,6 +3916,7 @@ export type ListObjectTypesResponses = {
         name: string
         description?: string
         required?: boolean
+        nullable?: boolean
         semanticType?: string
         schema?: unknown
       }>
@@ -4022,6 +4023,7 @@ export type GetObjectTypeResponses = {
         name: string
         description?: string
         required?: boolean
+        nullable?: boolean
         semanticType?: string
         schema?: unknown
       }>
@@ -4413,6 +4415,7 @@ export type ListActionsResponses = {
       name: string
       description?: string
       required?: boolean
+      nullable?: boolean
       semanticType?: string
       schema?: unknown
     }>
@@ -4461,6 +4464,7 @@ export type GetActionResponses = {
       name: string
       description?: string
       required?: boolean
+      nullable?: boolean
       semanticType?: string
       schema?: unknown
     }>

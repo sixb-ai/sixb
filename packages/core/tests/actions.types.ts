@@ -12,6 +12,7 @@ import {
   prop,
   ref,
   Sixb,
+  stringEnum,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -151,6 +152,71 @@ const assignRelatedRoom = defineAction("assignRelatedRoom")
     void fallbackRoom
     void suiteRoomRef
   })
+
+const updateRoomCategory = defineAction("updateRoomCategory")
+  .on(Room)
+  .params({
+    requiredValue: param("string"),
+    optionalValue: optional(param("string")),
+    requiredNullable: param(stringEnum(["general_services", "construction"]), {
+      nullable: true,
+    }),
+    optionalNullable: optional(param("timestamp", { nullable: true })),
+    nullableRoom: optional(param(ref(Room), { nullable: true })),
+  })
+  .writeback(({ params }) => {
+    const requiredValue: string = params.requiredValue
+    const optionalValue: string | undefined = params.optionalValue
+    const requiredNullable: "general_services" | "construction" | null = params.requiredNullable
+    const optionalNullable: Date | null | undefined = params.optionalNullable
+    const nullableRoom: ObjectRef<"Room"> | null | undefined = params.nullableRoom
+
+    // @ts-expect-error non-nullable params cannot be null
+    const invalidRequiredValue: null = params.requiredValue
+
+    void requiredValue
+    void optionalValue
+    void requiredNullable
+    void optionalNullable
+    void nullableRoom
+    void invalidRequiredValue
+  })
+
+type UpdateRoomCategoryParams = InferActionParams<(typeof updateRoomCategory)["params"]>
+type _updateRoomCategoryParams = Expect<
+  Equal<
+    UpdateRoomCategoryParams,
+    {
+      requiredValue: string
+      requiredNullable: "general_services" | "construction" | null
+      optionalValue?: string
+      optionalNullable?: Date | null
+      nullableRoom?: ObjectRef<"Room"> | null
+    }
+  >
+>
+
+const maybeNullableOptions: { nullable: true } | undefined =
+  Math.random() > 0.5 ? { nullable: true } : undefined
+param("string", maybeNullableOptions)
+
+const validNullableParams: UpdateRoomCategoryParams = {
+  requiredValue: "required",
+  requiredNullable: null,
+  optionalNullable: null,
+}
+
+const missingRequiredNullable: UpdateRoomCategoryParams = {
+  requiredValue: "required",
+  // @ts-expect-error required nullable params may be null but cannot be omitted
+  requiredNullable: undefined,
+}
+
+const invalidNonNullableParam: UpdateRoomCategoryParams = {
+  // @ts-expect-error non-nullable params cannot be null
+  requiredValue: null,
+  requiredNullable: "general_services",
+}
 
 const createRoom = defineAction("createRoom")
   .params({
@@ -317,3 +383,6 @@ const invalidRequestTemperatureParams: InferActionParams<(typeof setRequestTempe
 void validAssignRelatedRoomParams
 void invalidAssignRelatedRoomParams
 void invalidRequestTemperatureParams
+void validNullableParams
+void missingRequiredNullable
+void invalidNonNullableParam

@@ -161,7 +161,7 @@ const reviewDeviceHealthWorkflow: WorkflowDefinition = defineWorkflow(
 
 const setSpeed = defineAction("setSpeed")
   .on(Device)
-  .params({ speed: param("double") })
+  .params({ speed: param("double", { nullable: true }) })
   .writeback(async () => {})
 
 const renameDevice = defineAction("renameDevice")
@@ -1147,10 +1147,13 @@ describe("SixbServer HTTP contract", () => {
       expect(objectTypeResponse.status).toBe(200)
       const objectType = (await objectTypeResponse.json()) as {
         id: string
-        actions: Array<{ id: string }>
+        actions: Array<{ id: string; params: Array<{ id: string; nullable?: boolean }> }>
       }
       expect(objectType.id).toBe("device")
-      expect(objectType.actions[0]?.id).toBe("setSpeed")
+      expect(objectType.actions[0]).toMatchObject({
+        id: "setSpeed",
+        params: [{ id: "speed", nullable: true }],
+      })
 
       const actionsResponse = await fetch(`${baseUrl}/api/actions`)
       expect(actionsResponse.status).toBe(200)
@@ -1165,6 +1168,7 @@ describe("SixbServer HTTP contract", () => {
               name: "speed",
               schema: "double",
               required: true,
+              nullable: true,
             },
           ],
           phases: {
@@ -1892,7 +1896,7 @@ describe("SixbServer HTTP contract", () => {
             objectTypeId: "device",
             primaryId: "fan-2",
           },
-          params: { speed: 950 },
+          params: { speed: null },
         }),
       })
       expect(requestActionResponse.status).toBe(202)
@@ -1976,7 +1980,7 @@ describe("SixbServer HTTP contract", () => {
           primaryId: "fan-2",
         },
         status: "queued",
-        params: { speed: 950 },
+        params: { speed: null },
       })
 
       const completedActionRunResponse = await fetch(
@@ -2077,7 +2081,7 @@ describe("SixbServer HTTP contract", () => {
               objectTypeId: "device",
               primaryId: "fan-2",
             },
-            params: { speed: 950 },
+            params: { speed: null },
             runId: requestActionBody.runId,
           },
         }),

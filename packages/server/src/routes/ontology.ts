@@ -77,6 +77,7 @@ function serializeObjectType(
           name: id,
           schema: config.schema,
           required: config.required ?? false,
+          nullable: config.nullable,
           description: config.description,
           semanticType: config.semanticType,
         })),

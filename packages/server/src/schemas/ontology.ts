@@ -40,6 +40,7 @@ export const ActionParamSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   required: z.boolean().optional(),
+  nullable: z.boolean().optional(),
   semanticType: z.string().optional(),
   schema: z.unknown(),
 })
