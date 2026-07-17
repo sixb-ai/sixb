@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer"
-import { createHash, randomUUID } from "node:crypto"
+import { randomUUID } from "node:crypto"
 import {
   type BlobByteRange,
   type BlobDigest,
@@ -26,6 +26,7 @@ import {
   streamBlobBody,
 } from "@sixb/core/blob-storage/server"
 import { S3Client } from "bun"
+import { writeBlobStreamToS3 } from "./s3-stream-upload"
 import { encodeRfc3986, encodeS3Path, presignS3Url } from "./sigv4"
 import type { S3BlobStorageAcl, S3BlobStorageOptions } from "./types"
 
@@ -182,41 +183,25 @@ export class S3BlobStorage
     assertValidExpectedBlobSize(input.expectedSizeBytes, "BlobS3")
     input.signal?.throwIfAborted()
     const stagingKey = this.uploadKeyForId(`put_${randomUUID().replaceAll("-", "")}`)
-    const hash = createHash("sha256")
-    let sizeBytes = 0
 
     try {
-      const trackedBody = streamBlobBody(input.body).pipeThrough(
-        new TransformStream<Uint8Array, Uint8Array>({
-          transform(chunk, controller) {
-            hash.update(chunk)
-            sizeBytes += chunk.byteLength
-            if (input.expectedSizeBytes !== undefined && sizeBytes > input.expectedSizeBytes) {
-              assertExpectedBlobSize(input.expectedSizeBytes, sizeBytes, "BlobS3")
-            }
-            controller.enqueue(chunk)
-          },
-        })
-      )
-      const uploadBody = input.signal
-        ? trackedBody.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), {
-            signal: input.signal,
-          })
-        : trackedBody
-
-      await this.client.write(stagingKey, new Response(uploadBody), {
+      const writer = this.client.file(stagingKey).writer({
         type: input.mediaType,
         partSize: this.putPartSizeBytes,
         queueSize: this.putConcurrency,
         retry: this.putRetries,
       })
+      const { digest, sizeBytes } = await writeBlobStreamToS3({
+        stream: streamBlobBody(input.body),
+        writer,
+        expectedSizeBytes: input.expectedSizeBytes,
+        signal: input.signal,
+      })
 
-      assertExpectedBlobSize(input.expectedSizeBytes, sizeBytes, "BlobS3")
       const staged = await this.client.stat(stagingKey)
       assertExpectedBlobSize(sizeBytes, staged.size, "BlobS3")
       input.signal?.throwIfAborted()
 
-      const digest = `sha256:${hash.digest("hex")}` as BlobDigest
       const info: BlobInfo = {
         blobId: blobIdFromDigest(digest),
         digest,
