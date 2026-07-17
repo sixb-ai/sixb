@@ -432,6 +432,98 @@ describe("runActionJob", () => {
     expect(mutationEvents.map((event) => event.type)).toEqual(["object.created", "object.updated"])
   })
 
+  test("assigns and clears cardinality-one links without handler-side reads", async () => {
+    const assignSensor = defineAction("assignSensor")
+      .on(Device)
+      .params({ sensorId: param("string") })
+      .edits(({ objects, params, subject }) => {
+        objects(Device)
+          .byId(subject.primaryId)
+          .setLink(Device.l.sensor, objects(Sensor).byId(params.sensorId))
+      })
+    const clearSensor = defineAction("clearSensor")
+      .on(Device)
+      .params({})
+      .edits(({ objects, subject }) => {
+        objects(Device).byId(subject.primaryId).clearLink(Device.l.sensor)
+      })
+    const sixb = createSixb(
+      [assignSensor as ActionDefinition, clearSensor as ActionDefinition],
+      [Device, Sensor]
+    )
+    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
+    await sixb.upsertObject("Sensor", { id: "sensor-1", name: "Sensor 1" })
+    await sixb.upsertObject("Sensor", { id: "sensor-2", name: "Sensor 2" })
+    await (
+      sixb as unknown as {
+        objects(objectType: typeof Device): {
+          byId(id: string): {
+            link(
+              linkToken: typeof Device.l.sensor,
+              target: { objectTypeId: "Sensor"; primaryId: string }
+            ): Promise<void>
+          }
+        }
+      }
+    )
+      .objects(Device)
+      .byId("device-1")
+      .link(Device.l.sensor, { objectTypeId: "Sensor", primaryId: "sensor-1" })
+
+    await queueActionRun(sixb, {
+      id: "act_assign_sensor",
+      actionId: "assignSensor",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: { sensorId: "sensor-2" },
+    })
+    expect(
+      (
+        await runActionJob({
+          runtime: createContext(sixb),
+          job: { id: "act_assign_sensor", actionId: "assignSensor" },
+        })
+      ).status
+    ).toBe("succeeded")
+    let links = await sixb.storage.objects.listLinks({
+      projectId: sixb.id,
+      objectTypeId: "Device",
+      objectId: "device-1",
+      linkId: "sensor",
+    })
+    expect(links).toHaveLength(1)
+    expect(links[0]?.targetId).toBe("sensor-2")
+
+    const assignmentEvents = await sixb.events.read({
+      types: ["link.created", "link.deleted"],
+    })
+    expect(assignmentEvents.slice(-2).map((event) => event.type)).toEqual([
+      "link.deleted",
+      "link.created",
+    ])
+
+    await queueActionRun(sixb, {
+      id: "act_clear_sensor",
+      actionId: "clearSensor",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+    expect(
+      (
+        await runActionJob({
+          runtime: createContext(sixb),
+          job: { id: "act_clear_sensor", actionId: "clearSensor" },
+        })
+      ).status
+    ).toBe("succeeded")
+    links = await sixb.storage.objects.listLinks({
+      projectId: sixb.id,
+      objectTypeId: "Device",
+      objectId: "device-1",
+      linkId: "sensor",
+    })
+    expect(links).toEqual([])
+  })
+
   test("exposes object link reads inside action edits", async () => {
     const detachSensor = defineAction("detachSensor")
       .on(Device)

@@ -13,6 +13,8 @@ import {
 } from "./properties"
 import type {
   EditBatch,
+  EditLinkClearOperation,
+  EditLinkSetOperation,
   EditObjectCreateOperation,
   EditObjectDeleteOperation,
   EditObjectHandle,
@@ -187,11 +189,7 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
           target: EditObjectRef,
           linkOptions?: { readonly properties?: Readonly<Record<string, unknown>> }
         ) {
-          if (ref.objectTypeId !== link.objectTypeId) {
-            throw new OntologyValidationError(
-              `[Sixb] Link token ${link.objectTypeId}.${link.id} cannot be used with ${ref.objectTypeId}`
-            )
-          }
+          assertLinkTokenSource(ref, link)
 
           const properties =
             linkOptions?.properties === undefined
@@ -215,11 +213,7 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
       },
       unlink: {
         value(link: { objectTypeId: string; id: string; link: ObjectLink }, target: EditObjectRef) {
-          if (ref.objectTypeId !== link.objectTypeId) {
-            throw new OntologyValidationError(
-              `[Sixb] Link token ${link.objectTypeId}.${link.id} cannot be used with ${ref.objectTypeId}`
-            )
-          }
+          assertLinkTokenSource(ref, link)
 
           operations.push({
             kind: "link.delete",
@@ -227,6 +221,45 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
             linkId: link.id,
             target: toPlainRef(target),
           })
+        },
+      },
+      setLink: {
+        value(
+          link: { objectTypeId: string; id: string; link: ObjectLink },
+          target: EditObjectRef,
+          linkOptions?: { readonly properties?: Readonly<Record<string, unknown>> }
+        ) {
+          assertCardinalityOneLinkToken(ref, link, "setLink")
+          const properties =
+            linkOptions?.properties === undefined
+              ? undefined
+              : normalizeLinkEditProperties({
+                  sourceObjectTypeId: ref.objectTypeId,
+                  linkId: link.id,
+                  linkDefinition: link.link,
+                  properties: linkOptions.properties,
+                  valueTypesById,
+                })
+
+          const operation: EditLinkSetOperation = {
+            kind: "link.set",
+            source: toPlainRef(ref),
+            linkId: link.id,
+            target: toPlainRef(target),
+            ...(properties !== undefined ? { properties } : {}),
+          }
+          operations.push(operation)
+        },
+      },
+      clearLink: {
+        value(link: { objectTypeId: string; id: string; link: ObjectLink }) {
+          assertCardinalityOneLinkToken(ref, link, "clearLink")
+          const operation: EditLinkClearOperation = {
+            kind: "link.clear",
+            source: toPlainRef(ref),
+            linkId: link.id,
+          }
+          operations.push(operation)
         },
       },
     })
@@ -237,6 +270,30 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
   return {
     objects,
     toEditBatch,
+  }
+}
+
+function assertLinkTokenSource(
+  source: EditObjectRef,
+  link: { readonly objectTypeId: string; readonly id: string }
+): void {
+  if (source.objectTypeId !== link.objectTypeId) {
+    throw new OntologyValidationError(
+      `[Sixb] Link token ${link.objectTypeId}.${link.id} cannot be used with ${source.objectTypeId}`
+    )
+  }
+}
+
+function assertCardinalityOneLinkToken(
+  source: EditObjectRef,
+  link: { readonly objectTypeId: string; readonly id: string; readonly link: ObjectLink },
+  operation: "setLink" | "clearLink"
+): void {
+  assertLinkTokenSource(source, link)
+  if (link.link.cardinality !== "one") {
+    throw new OntologyValidationError(
+      `[Sixb] ${operation} requires cardinality 'one' link '${link.objectTypeId}.${link.id}'`
+    )
   }
 }
 

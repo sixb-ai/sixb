@@ -242,28 +242,33 @@ read is needed. Omitted properties are preserved on update. If the object is abs
 property was omitted, the entire action commit fails. Multiple staged edits collapse to one net
 change; an unchanged upsert emits no mutation event.
 
-The normal link rules apply inside `edits(...)`. For `cardinality: "one"` links, `link(...)` does not replace a different existing target. To reassign one, read the current link and stage `unlink(...)`
-followed by `link(...)`; the two staged edits commit atomically:
+### Cardinality-one link assignment
+
+For a `cardinality: "one"` link, use `setLink(...)` to assign a target without reading and unlinking
+the current edge yourself:
 
 ```ts
-.edits(async ({ objects, read, subject, params }) => {
-  const [currentProject] = await read
-    .objects(Transcript)
+.edits(({ objects, subject, params }) => {
+  objects(Transcript)
     .byId(subject.primaryId)
-    .listLinks(Transcript.l.project)
-
-  const transcript = objects(Transcript).byId(subject.primaryId)
-
-  if (currentProject) {
-    transcript.unlink(Transcript.l.project, {
-      objectTypeId: currentProject.targetTypeId,
-      primaryId: currentProject.targetId,
-    })
-  }
-
-  transcript.link(Transcript.l.project, params.project)
+    .setLink(Transcript.l.project, params.project)
 })
 ```
+
+`setLink(...)` creates the edge when absent, keeps or updates the same target, and atomically
+replaces a different target. Supplied properties merge into a same-target edge; a replacement edge
+starts with only the supplied properties. Link properties use the same options shape as `link(...)`:
+
+```ts
+invoice.setLink(Invoice.l.customer, params.customer, {
+  properties: { role: "billTo" },
+})
+```
+
+Use `clearLink(token)` to remove whichever target is currently assigned. Both methods accept only
+explicit `cardinality: "one"` tokens. `link(...)` remains additive and `unlink(...)` continues to
+remove one exact target. Replacing a target emits the existing `link.deleted` and `link.created`
+events from the same atomic commit; no new replacement event type is introduced.
 
 ## Requesting actions
 

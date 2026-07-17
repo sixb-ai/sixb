@@ -4,7 +4,9 @@ import type {
   EditBatch,
   EditBatchInput,
   EditBatchProducer,
+  EditLinkClearOperation,
   EditLinkCreateOperation,
+  EditLinkSetOperation,
   EditObjectCreateOperation,
   EditObjectProperties,
   EditObjectUpdateOperation,
@@ -64,6 +66,10 @@ export function normalizeEditOperationInput(input: EditOperation): EditOperation
         linkId: assertNonEmptyString(input.linkId, "operation.linkId"),
         target: normalizeRef(input.target, "operation.target"),
       }
+    case "link.set":
+      return normalizeLinkSetOperation(input)
+    case "link.clear":
+      return normalizeLinkClearOperation(input)
   }
 
   throw new EditBatchError(
@@ -113,6 +119,26 @@ function normalizeLinkCreateOperation(input: EditLinkCreateOperation): EditLinkC
     ...(input.properties !== undefined
       ? { properties: cloneProperties(input.properties, "operation.properties") }
       : {}),
+  }
+}
+
+function normalizeLinkSetOperation(input: EditLinkSetOperation): EditLinkSetOperation {
+  return {
+    kind: "link.set",
+    source: normalizeRef(input.source, "operation.source"),
+    linkId: assertNonEmptyString(input.linkId, "operation.linkId"),
+    target: normalizeRef(input.target, "operation.target"),
+    ...(input.properties !== undefined
+      ? { properties: cloneProperties(input.properties, "operation.properties") }
+      : {}),
+  }
+}
+
+function normalizeLinkClearOperation(input: EditLinkClearOperation): EditLinkClearOperation {
+  return {
+    kind: "link.clear",
+    source: normalizeRef(input.source, "operation.source"),
+    linkId: assertNonEmptyString(input.linkId, "operation.linkId"),
   }
 }
 
