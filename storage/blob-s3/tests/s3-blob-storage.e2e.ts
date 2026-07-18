@@ -71,6 +71,19 @@ describe("S3BlobStorage", () => {
     expect(third.blobId).not.toBe(first.blobId)
   })
 
+  test("stores empty blobs without opening a multipart upload", async () => {
+    const storage = createStorage()
+
+    const fileRef = await storage.put({
+      body: new Uint8Array(),
+      expectedSizeBytes: 0,
+      fileName: "empty.txt",
+    })
+
+    expect(fileRef.sizeBytes).toBe(0)
+    expect(await new Response(await storage.open(fileRef.blobId)).bytes()).toEqual(new Uint8Array())
+  })
+
   test("streams multipart bodies through bounded staging", async () => {
     const storage = createStorage()
     const chunk = new Uint8Array(1024 * 1024).fill(7)

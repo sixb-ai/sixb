@@ -30,10 +30,10 @@ export interface S3BlobStorageOptions {
   readonly pathStyle?: boolean
   /** Key prefix that contains the blobs/sha256 object layout. Defaults to "sixb". */
   readonly basePath?: string
-  /** Multipart part size for streamed `put(...)` calls. Defaults to 8 MiB. */
+  /** Part size and small-object threshold for streamed `put(...)` calls. Defaults to 8 MiB. */
   readonly putPartSizeBytes?: number
   /** Maximum parallel multipart parts per streamed `put(...)`. Defaults to 2. */
   readonly putConcurrency?: number
-  /** Retry attempts for streamed multipart parts. Defaults to 3. */
+  /** Retry attempts for replayable streamed upload requests. Defaults to 3. */
   readonly putRetries?: number
 }

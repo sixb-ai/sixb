@@ -2,9 +2,8 @@
 
 S3-compatible `BlobStorage` provider for Sixb `fileRef` payloads.
 
-This package uses Bun's native `S3Client`, so it does not need the AWS SDK or another object storage
-dependency. It works with AWS S3 and S3-compatible services such as Cloudflare R2, MinIO, DigitalOcean
-Spaces, Backblaze B2, and Google Cloud Storage's S3-compatible API.
+It works with AWS S3 and S3-compatible services such as Cloudflare R2, MinIO, DigitalOcean Spaces,
+Backblaze B2, and Google Cloud Storage's S3-compatible API. Streamed writes use the official AWS S3 client, loaded lazily on the first `put(...)`; reads and metadata operations continue to use Bun's native `S3Client`.
 
 ## Install
 
@@ -40,10 +39,15 @@ const stream = await blobStorage.open(fileRef.blobId)
 ```
 
 `put(...)` streams bodies to a temporary S3 object while computing SHA-256, then promotes the
-completed object into the content-addressed layout with a server-side copy. `putPartSizeBytes` and
-`putConcurrency` bound multipart upload memory per active write; their defaults are 8 MiB and 2.
-Failed and canceled writes attempt to remove their staging object. Byte arrays and `Blob` bodies
-remain supported for small or already-materialized payloads.
+completed object into the content-addressed layout with a server-side copy. Bodies no larger than
+one part use one bounded `PutObject`; larger bodies use multipart upload. `putPartSizeBytes` and
+`putConcurrency` bound provider-owned part buffers per active write; their defaults are 8 MiB and 2.
+Approximate upload-buffer memory is therefore `putPartSizeBytes * putConcurrency`, plus one source
+chunk and HTTP client overhead. `putRetries` controls retries of replayable parts and defaults to 3.
+
+Failed and canceled multipart writes cancel the source, wait for in-flight requests, abort the S3
+multipart upload, and remove any completed staging object. Byte arrays and `Blob` bodies remain
+supported for small or already-materialized payloads.
 
 ## Staged Direct Uploads
 

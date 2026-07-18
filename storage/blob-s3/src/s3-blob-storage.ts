@@ -25,8 +25,8 @@ import {
   type SignedBlobUploadPart,
   streamBlobBody,
 } from "@sixb/core/blob-storage/server"
-import { S3Client } from "bun"
-import { writeBlobStreamToS3 } from "./s3-stream-upload"
+import { S3Client as BunS3Client } from "bun"
+import { type S3UploadApi, uploadBlobStreamToS3 } from "./s3-multipart-upload"
 import { encodeRfc3986, encodeS3Path, presignS3Url } from "./sigv4"
 import type { S3BlobStorageAcl, S3BlobStorageOptions } from "./types"
 
@@ -134,7 +134,8 @@ export class S3BlobStorage
   private readonly putPartSizeBytes: number
   private readonly putConcurrency: number
   private readonly putRetries: number
-  private readonly client: S3Client
+  private readonly client: BunS3Client
+  private putApiPromise: Promise<S3UploadApi> | undefined
 
   constructor(options: S3BlobStorageOptions = {}) {
     this.basePath = normalizeS3BlobBasePath(options.basePath ?? "sixb")
@@ -168,7 +169,7 @@ export class S3BlobStorage
       0,
       255
     )
-    this.client = new S3Client({
+    this.client = new BunS3Client({
       bucket: this.bucket,
       region: this.region,
       endpoint: this.endpoint,
@@ -185,17 +186,17 @@ export class S3BlobStorage
     const stagingKey = this.uploadKeyForId(`put_${randomUUID().replaceAll("-", "")}`)
 
     try {
-      const writer = this.client.file(stagingKey).writer({
-        type: input.mediaType,
-        partSize: this.putPartSizeBytes,
-        queueSize: this.putConcurrency,
-        retry: this.putRetries,
-      })
-      const { digest, sizeBytes } = await writeBlobStreamToS3({
+      const api = await this.putApi()
+      const { digest, sizeBytes } = await uploadBlobStreamToS3({
         stream: streamBlobBody(input.body),
-        writer,
+        api,
+        key: stagingKey,
+        partSizeBytes: this.putPartSizeBytes,
+        concurrency: this.putConcurrency,
+        retries: this.putRetries,
         expectedSizeBytes: input.expectedSizeBytes,
         signal: input.signal,
+        mediaType: input.mediaType,
       })
 
       const staged = await this.client.stat(stagingKey)
@@ -400,6 +401,26 @@ export class S3BlobStorage
     return this.basePath
       ? `${this.basePath}/uploads/${uploadId}/object`
       : `uploads/${uploadId}/object`
+  }
+
+  private putApi(): Promise<S3UploadApi> {
+    const bucket = this.bucket
+    if (!bucket) {
+      throw new BlobStorageError("[BlobS3] Streamed uploads require an S3 bucket configuration.")
+    }
+
+    this.putApiPromise ??= import("./aws-s3-upload-api").then(({ createAwsS3UploadApi }) =>
+      createAwsS3UploadApi({
+        bucket,
+        region: this.region,
+        pathStyle: this.pathStyle,
+        ...(this.endpoint === undefined ? {} : { endpoint: this.endpoint }),
+        ...(this.accessKeyId === undefined ? {} : { accessKeyId: this.accessKeyId }),
+        ...(this.secretAccessKey === undefined ? {} : { secretAccessKey: this.secretAccessKey }),
+        ...(this.sessionToken === undefined ? {} : { sessionToken: this.sessionToken }),
+      })
+    )
+    return this.putApiPromise
   }
 
   private async deleteStagedObjectQuietly(stagingKey: string): Promise<void> {
