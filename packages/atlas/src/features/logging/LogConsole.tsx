@@ -14,7 +14,6 @@ import {
   InputGroupButton,
   InputGroupInput,
   MessageScroller,
-  MessageScrollerButton,
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerProvider,
@@ -24,16 +23,29 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  useMessageScroller,
+  useMessageScrollerScrollable,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ArrowDown, Check, Copy, ListFilter, Search, SearchX, Trash2, X } from "lucide-react"
+import {
+  ArrowUp,
+  Check,
+  ChevronRight,
+  Copy,
+  ListFilter,
+  Search,
+  SearchX,
+  Trash2,
+  X,
+} from "lucide-react"
 import type { ReactNode } from "react"
-import { useDeferredValue, useEffect, useMemo, useState } from "react"
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 /**
  * A live log console over a `logs` builder: loads retained history, tails new
- * lines, and pins to the newest line unless the reader scrolls up. Shared by the
- * Logs page. The parent sets the height through `className`.
+ * lines, and streams the newest line in at the top, pinning there unless the
+ * reader scrolls down into history. Shared by the Logs page. The parent sets the
+ * height through `className`.
  */
 export interface LogConsoleProps {
   readonly builder: LogsBuilder
@@ -84,6 +96,8 @@ export function LogConsole({
         : retainedLines,
     [deferredSearch, retainedLines]
   )
+  // `useSixbLogs` accumulates oldest-first; the console reads newest-first.
+  const orderedLines = useMemo(() => [...visibleLines].reverse(), [visibleLines])
 
   const clearView = () => {
     setHiddenCursors((current) => {
@@ -150,11 +164,11 @@ export function LogConsole({
 
         <div className="flex min-h-8 items-center border-b border-border/60 bg-background px-3 py-1.5">
           <span className="text-[11px] font-medium text-muted-foreground tabular-nums">
-            {formatEntryCount(visibleLines.length, retainedLines.length, Boolean(deferredSearch))}
+            {formatEntryCount(orderedLines.length, retainedLines.length, Boolean(deferredSearch))}
           </span>
         </div>
 
-        {visibleLines.length === 0 ? (
+        {orderedLines.length === 0 ? (
           <LogEmptyState
             error={error}
             emptyLabel={emptyLabel}
@@ -163,7 +177,7 @@ export function LogConsole({
             viewWasCleared={hiddenCursors.size > 0}
           />
         ) : (
-          <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+          <MessageScrollerProvider defaultScrollPosition="start">
             <MessageScroller className="flex-1">
               <MessageScrollerViewport
                 className="bg-background"
@@ -172,33 +186,98 @@ export function LogConsole({
                 aria-live="off"
               >
                 <MessageScrollerContent className="gap-0">
-                  {visibleLines.map((line, index) => {
+                  {orderedLines.map((line, index) => {
+                    const previous = orderedLines[index - 1]
                     const startsDateGroup =
-                      index === 0 ||
-                      localDateKey(visibleLines[index - 1].at) !== localDateKey(line.at)
+                      index === 0 || localDateKey(previous.at) !== localDateKey(line.at)
+                    const startsRunGroup =
+                      startsDateGroup || previous.context.run.id !== line.context.run.id
                     return (
                       <MessageScrollerItem
                         key={line.cursor}
                         messageId={line.cursor}
-                        scrollAnchor={index === visibleLines.length - 1}
                         style={{ containIntrinsicSize: "auto 3rem" }}
                       >
                         {startsDateGroup ? <DateGroup value={line.at} /> : null}
-                        <LogLineRow line={line} showKind={showKind} showRun={showRun} />
+                        <LogLineRow
+                          line={line}
+                          showKind={showKind}
+                          showRun={showRun}
+                          startsRunGroup={startsRunGroup}
+                        />
                       </MessageScrollerItem>
                     )
                   })}
                 </MessageScrollerContent>
               </MessageScrollerViewport>
-              <MessageScrollerButton direction="end" variant="outline" size="sm">
-                <ArrowDown />
-                Jump to latest
-              </MessageScrollerButton>
+              <LogTail
+                latestCursor={orderedLines[0]?.cursor ?? null}
+                lineCount={orderedLines.length}
+              />
             </MessageScroller>
           </MessageScrollerProvider>
         )}
       </Card>
     </TooltipProvider>
+  )
+}
+
+/**
+ * Keeps the console pinned to the newest line at the top and surfaces a
+ * jump-to-latest pill while the reader is scrolled down into history.
+ *
+ * The underlying scroller is a bottom-anchored chat component, so there is no
+ * native "follow the top edge" mode. We drive it manually: capture whether the
+ * reader is at the top before a new line prepends, then re-pin after the
+ * scroller's own prepend-restore runs (`requestAnimationFrame` fires after that
+ * synchronous adjustment, so our `scrollToStart` wins before paint). When the
+ * reader has scrolled down, we leave their position alone — `preserveScrollOnPrepend`
+ * (on by default) holds it steady — and count the unread arrivals instead.
+ */
+function LogTail({ latestCursor, lineCount }: { latestCursor: string | null; lineCount: number }) {
+  const { scrollToStart } = useMessageScroller()
+  const scrollable = useMessageScrollerScrollable()
+  const atTop = !scrollable.start
+
+  const pinnedRef = useRef(true)
+  const prevCursorRef = useRef(latestCursor)
+  const baselineRef = useRef(lineCount)
+
+  // While the newest line is unchanged, track the live pin state. Freeze it across
+  // the render that introduces a new newest line so the effect reads the pre-append value.
+  if (latestCursor === prevCursorRef.current) {
+    pinnedRef.current = atTop
+  }
+
+  useLayoutEffect(() => {
+    if (latestCursor === prevCursorRef.current) return
+    prevCursorRef.current = latestCursor
+    if (!pinnedRef.current) return
+    const raf = requestAnimationFrame(() => scrollToStart({ behavior: "auto" }))
+    return () => cancelAnimationFrame(raf)
+  }, [latestCursor, scrollToStart])
+
+  // The unread count is the number of lines that have arrived since the reader left the top.
+  useEffect(() => {
+    if (atTop) baselineRef.current = lineCount
+  }, [atTop, lineCount])
+  const newCount = atTop ? 0 : Math.max(0, lineCount - baselineRef.current)
+
+  if (atTop) return null
+
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => scrollToStart({ behavior: "smooth" })}
+        className="pointer-events-auto gap-1.5 rounded-full shadow-sm"
+      >
+        <ArrowUp />
+        {newCount > 0 ? `${newCount} new ${newCount === 1 ? "log" : "logs"}` : "Jump to latest"}
+      </Button>
+    </div>
   )
 }
 
@@ -209,55 +288,107 @@ const logLevelClasses: Record<LogLevel, string> = {
   error: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
 }
 
-const logRowClasses: Partial<Record<LogLevel, string>> = {
-  warn: "bg-amber-500/[0.025] hover:bg-amber-500/[0.06]",
-  error: "bg-red-500/[0.03] hover:bg-red-500/[0.07]",
+// Every row carries a 2px left rail so the message column stays aligned; only
+// warnings and errors get a visible accent + tint so problems stand out while a
+// quiet run reads calmly.
+const logRowAccent: Record<LogLevel, string> = {
+  debug: "border-l-transparent",
+  info: "border-l-transparent",
+  warn: "border-l-amber-500 bg-amber-500/[0.06] hover:bg-amber-500/[0.10]",
+  error: "border-l-red-500 bg-red-500/[0.07] hover:bg-red-500/[0.12]",
+}
+
+const kindClasses: Record<string, string> = {
+  sync: "text-violet-600 dark:text-violet-400",
+  pipeline: "text-cyan-600 dark:text-cyan-400",
+  workflow: "text-emerald-600 dark:text-emerald-400",
+  action: "text-fuchsia-600 dark:text-fuchsia-400",
+  webhook: "text-orange-600 dark:text-orange-400",
 }
 
 function LogLineRow({
   line,
   showKind,
   showRun,
+  startsRunGroup,
 }: {
   line: SixbLogLine
   showKind: boolean
   showRun: boolean
+  startsRunGroup: boolean
 }) {
+  const [expanded, setExpanded] = useState(false)
   const fields =
     line.fields && Object.keys(line.fields).length > 0
       ? (line.fields as Record<string, unknown>)
       : null
+  const { error: errorField, entries } = useMemo(() => splitLogFields(fields), [fields])
+
+  const showRunMeta = startsRunGroup && (showKind || showRun)
   const showMeta =
-    showKind ||
-    showRun ||
+    showRunMeta ||
     line.context.stepId !== undefined ||
     line.context.phase !== undefined ||
     line.context.attempt !== undefined
+  const previewEntries = entries.slice(0, 2)
+  const hasHiddenDetail =
+    entries.length > previewEntries.length ||
+    Boolean(errorField?.stack) ||
+    entries.some(([, value]) => isComplexValue(value))
+  // Whether anything renders on its own line under the message. When nothing does,
+  // the row is a single line and its content is vertically centered (not top-pinned).
+  const hasBody = showMeta || Boolean(errorField) || entries.length > 0
+  const { head, tail } = formatLogTime(line.at)
 
   return (
     <div
       className={cn(
-        "grid grid-cols-[5.75rem_minmax(0,1fr)] items-start gap-x-2 border-b border-border/50 px-3 py-2 transition-colors hover:bg-muted/35 sm:grid-cols-[6.5rem_3.25rem_minmax(0,1fr)] sm:gap-x-3 sm:px-4",
-        logRowClasses[line.level]
+        "border-b border-l-2 border-border/50 px-3 py-2 transition-colors hover:bg-muted/35 sm:px-4",
+        logRowAccent[line.level]
       )}
     >
-      <time
-        dateTime={line.at}
-        title={formatAbsolute(line.at)}
-        className="col-start-1 row-start-1 pt-0.5 font-mono text-[11px] leading-5 tabular-nums text-muted-foreground sm:text-right"
-      >
-        {formatLogTime(line.at)}
-      </time>
-      <div className="col-start-2 row-start-1 pt-0.5">
-        <LogLevelBadge level={line.level} />
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[6rem_minmax(0,1fr)_auto]">
+        <time
+          dateTime={line.at}
+          title={formatAbsolute(line.at)}
+          className="col-start-1 row-start-1 whitespace-nowrap font-mono text-[11px] leading-5 tabular-nums text-muted-foreground"
+        >
+          {head}
+          {tail ? <span className="text-muted-foreground/60">{tail}</span> : null}
+        </time>
+        <div className="col-span-2 col-start-1 row-start-2 min-w-0 sm:col-span-1 sm:col-start-2 sm:row-start-1">
+          <div className="flex items-start gap-2">
+            <p className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-xs leading-5 text-foreground">
+              {line.message}
+            </p>
+            {hasHiddenDetail ? (
+              <button
+                type="button"
+                onClick={() => setExpanded((value) => !value)}
+                aria-expanded={expanded}
+                aria-label={expanded ? "Hide details" : "Show details"}
+                className="-mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <ChevronRight
+                  className={cn("size-3.5 transition-transform", expanded && "rotate-90")}
+                />
+              </button>
+            ) : null}
+          </div>
+        </div>
+        <div className="col-start-2 row-start-1 justify-self-end sm:col-start-3">
+          <LogLevelBadge level={line.level} />
+        </div>
       </div>
-      <div className="col-span-2 col-start-1 row-start-2 mt-1 min-w-0 space-y-1.5 sm:col-span-1 sm:col-start-3 sm:row-start-1 sm:mt-0">
-        <p className="whitespace-pre-wrap break-words font-mono text-xs leading-5 text-foreground">
-          {line.message}
-        </p>
-        {showMeta ? <LogMetadata line={line} showKind={showKind} showRun={showRun} /> : null}
-        {fields ? <LogFieldList fields={fields} /> : null}
-      </div>
+      {hasBody ? (
+        <div className="mt-1.5 min-w-0 space-y-1.5 sm:pl-[6.75rem]">
+          {showMeta ? <LogMetadata line={line} showKind={showKind} showRun={showRunMeta} /> : null}
+          {!expanded && (errorField || previewEntries.length > 0) ? (
+            <LogFieldPreview errorField={errorField} entries={previewEntries} />
+          ) : null}
+          {expanded ? <LogFieldDetails errorField={errorField} entries={entries} /> : null}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -294,7 +425,14 @@ function LogMetadata({
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
       {showKind ? (
-        <span className="font-medium uppercase tracking-wide">{line.context.run.kind}</span>
+        <span
+          className={cn(
+            "font-semibold uppercase tracking-wide",
+            kindClasses[line.context.run.kind] ?? "text-muted-foreground"
+          )}
+        >
+          {line.context.run.kind}
+        </span>
       ) : null}
       {showKind && (showRun || metadata.length > 0) ? <MetadataSeparator /> : null}
       {showRun ? <RunRef run={line.context.run} /> : null}
@@ -313,16 +451,72 @@ function MetadataSeparator() {
   return <span className="text-muted-foreground/40">·</span>
 }
 
-function LogFieldList({ fields }: { fields: Record<string, unknown> }) {
+/** A one-line teaser of a row's structured detail, shown while the row is collapsed. */
+function LogFieldPreview({
+  errorField,
+  entries,
+}: {
+  errorField: LogErrorField | null
+  entries: [string, unknown][]
+}) {
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px] leading-4 text-muted-foreground">
-      {Object.entries(fields).map(([key, value]) => (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[11px] leading-4 text-muted-foreground">
+      {errorField ? (
+        <span className="inline-flex min-w-0 items-baseline gap-1 text-red-600 dark:text-red-400">
+          <span className="opacity-75">error</span>
+          <span className="opacity-40">=</span>
+          <span className="truncate">{errorField.name ?? "Error"}</span>
+        </span>
+      ) : null}
+      {entries.map(([key, value]) => (
         <span key={key} className="inline-flex min-w-0 items-baseline gap-1">
           <span className="text-muted-foreground/75">{key}</span>
           <span className="text-muted-foreground/40">=</span>
-          <span className="break-all text-foreground/80">{formatFieldValue(value)}</span>
+          <span className="max-w-[24rem] truncate text-foreground/80">
+            {formatFieldValue(value)}
+          </span>
         </span>
       ))}
+    </div>
+  )
+}
+
+/** The full structured detail of a row: every field plus any error stack. */
+function LogFieldDetails({
+  errorField,
+  entries,
+}: {
+  errorField: LogErrorField | null
+  entries: [string, unknown][]
+}) {
+  return (
+    <div className="mt-1.5 space-y-2 rounded-md border border-border/60 bg-muted/25 p-2.5">
+      {entries.length > 0 ? (
+        <dl className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-x-3 gap-y-1 font-mono text-[11px] leading-5">
+          {entries.map(([key, value]) => (
+            <div key={key} className="col-span-2 grid grid-cols-subgrid">
+              <dt className="truncate text-muted-foreground/75">{key}</dt>
+              <dd className="min-w-0 whitespace-pre-wrap break-words text-foreground/85">
+                {formatFieldValue(value, true)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {errorField ? (
+        <div className="space-y-1">
+          {errorField.name ? (
+            <p className="font-mono text-[11px] font-medium text-red-600 dark:text-red-400">
+              {errorField.name}
+            </p>
+          ) : null}
+          {errorField.stack ? (
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2 font-mono text-[10px] leading-4 text-muted-foreground">
+              {errorField.stack}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -460,15 +654,59 @@ function formatEntryCount(visible: number, retained: number, filtered: boolean):
   return `${visible} ${visible === 1 ? "entry" : "entries"}`
 }
 
-function formatFieldValue(value: unknown): string {
+interface LogErrorField {
+  readonly name?: string
+  readonly stack?: string
+}
+
+/** Split a line's fields into a recognized error object and the remaining entries. */
+function splitLogFields(fields: Record<string, unknown> | null): {
+  error: LogErrorField | null
+  entries: [string, unknown][]
+} {
+  if (!fields) return { error: null, entries: [] }
+  const rawError = fields.error
+  const errorObject =
+    rawError && typeof rawError === "object" && !Array.isArray(rawError)
+      ? (rawError as Record<string, unknown>)
+      : null
+  if (!errorObject) return { error: null, entries: Object.entries(fields) }
+  const { error: _error, ...rest } = fields
+  return {
+    error: {
+      name: typeof errorObject.name === "string" ? errorObject.name : undefined,
+      stack: typeof errorObject.stack === "string" ? errorObject.stack : undefined,
+    },
+    entries: Object.entries(rest),
+  }
+}
+
+function isComplexValue(value: unknown): boolean {
+  if (typeof value === "string") return value.length > 80 || value.includes("\n")
+  return typeof value === "object" && value !== null
+}
+
+function formatFieldValue(value: unknown, pretty = false): string {
   if (typeof value === "string") return value
+  if (pretty && typeof value === "object" && value !== null) {
+    return JSON.stringify(value, null, 2)
+  }
   return JSON.stringify(value) ?? String(value)
 }
 
-function formatLogTime(value: string): string {
+/** Split a timestamp into its formatted `HH:MM:SS` head and locale tail (e.g. " PM"). */
+function formatLogTime(value: string): { head: string; tail: string } {
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(date)
+  if (Number.isNaN(date.getTime())) return { head: value, tail: "" }
+  // 2-digit hour keeps the column a fixed width so times align cleanly down the gutter.
+  const formatted = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date)
+  const match = formatted.match(/^(.*\d{1,2}:\d{2}:\d{2})(.*)$/)
+  if (!match) return { head: formatted, tail: "" }
+  return { head: match[1], tail: match[2] }
 }
 
 function formatDateGroup(value: string): string {
@@ -510,7 +748,14 @@ function isSameLocalDay(left: Date, right: Date): boolean {
 function formatAbsolute(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(
-    date
-  )
+  // The row shows seconds precision; the hover tooltip keeps the milliseconds.
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    fractionalSecondDigits: 3,
+  }).format(date)
 }
