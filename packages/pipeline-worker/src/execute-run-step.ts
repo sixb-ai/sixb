@@ -19,7 +19,11 @@ export async function executeRunStep(input: {
   readonly logSession: PipelineLogSession
   readonly outputDataset: DatasetDefinition
   readonly resolvedInputs: readonly ResolvedStepInput[]
-}): Promise<{ readonly version: DatasetVersion; readonly rowsWritten: number }> {
+}): Promise<{
+  readonly version: DatasetVersion
+  readonly versionCreated: boolean
+  readonly rowsWritten: number
+}> {
   const { runtime, pipeline, step, job, signal, outputDataset, resolvedInputs } = input
 
   if (step.executor.kind !== "run") {
@@ -65,12 +69,14 @@ export async function executeRunStep(input: {
     await step.executor.handler(context)
     throwIfAborted(signal)
 
-    const version = await write.commit({
+    const commit = await write.commit({
       commitMessage: `pipeline ${pipeline.id} step ${step.id} run ${job.id}`,
     })
+    const { outcome, ...version } = commit
 
     return {
       version,
+      versionCreated: outcome === "created",
       rowsWritten,
     }
   } catch (error) {

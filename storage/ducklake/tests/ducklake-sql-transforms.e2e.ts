@@ -479,6 +479,7 @@ describe("DuckLake SQL transforms", () => {
       `,
     })
 
+    expect(emptyAppendVersion.outcome).toBe("unchanged")
     expect(emptyAppendVersion.versionId).toBe(seedVersion.versionId)
     await expect(
       collectRows(storage.readRows({ datasetId: customerInsightsDataset.id }))
@@ -497,6 +498,7 @@ describe("DuckLake SQL transforms", () => {
       `,
     })
 
+    expect(emptySnapshotVersion.outcome).toBe("created")
     expect(emptySnapshotVersion.versionId).not.toBe(seedVersion.versionId)
     expect(emptySnapshotVersion.rowCount).toBe(0)
     await expect(

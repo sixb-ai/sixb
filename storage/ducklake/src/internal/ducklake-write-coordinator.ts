@@ -3,6 +3,7 @@ import type { DatasetDefinition } from "@sixb/core"
 import type {
   BeginDatasetWriteInput,
   DatasetVersion,
+  DatasetWriteCommitResult,
   DatasetWriteMode,
   LakeWriteSession,
 } from "@sixb/core/lake-storage"
@@ -89,7 +90,7 @@ export class DuckLakeWriteCoordinator {
     })
   }
 
-  private async commitWrite(input: DuckLakeCommitWriteInput): Promise<DatasetVersion> {
+  private async commitWrite(input: DuckLakeCommitWriteInput): Promise<DatasetWriteCommitResult> {
     const definition = await this.datasets.getDataset(input.write.dataset.id)
     if (!definition) {
       throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.write.dataset.id}'.`)
@@ -114,7 +115,9 @@ export class DuckLakeWriteCoordinator {
     })
   }
 
-  async commitDatasetVersion(input: DuckLakeCommitDatasetVersionInput): Promise<DatasetVersion> {
+  async commitDatasetVersion(
+    input: DuckLakeCommitDatasetVersionInput
+  ): Promise<DatasetWriteCommitResult> {
     return this.withCommitRuntime((runtime) =>
       this.commitDatasetVersionOnExclusiveRuntime(runtime, input)
     )
@@ -131,7 +134,7 @@ export class DuckLakeWriteCoordinator {
   async commitDatasetVersionOnExclusiveRuntime(
     runtime: DuckDbQueryRuntime,
     input: DuckLakeCommitDatasetVersionInput
-  ): Promise<DatasetVersion> {
+  ): Promise<DatasetWriteCommitResult> {
     const runtimeInput = { ...input, runtime }
     return this.withGuardedRetrySetting(runtimeInput, () =>
       this.commitDatasetVersionUnlocked(runtimeInput)
@@ -183,7 +186,7 @@ export class DuckLakeWriteCoordinator {
 
   private async commitDatasetVersionUnlocked(
     input: DuckLakeCommitDatasetVersionRuntimeInput
-  ): Promise<DatasetVersion> {
+  ): Promise<DatasetWriteCommitResult> {
     // Capture the write connection's last committed DuckLake snapshot before
     // and after COMMIT. The commitId in DuckLake commit_extra_info proves
     // which snapshot belongs to this transaction.
@@ -244,7 +247,7 @@ export class DuckLakeWriteCoordinator {
       readonly committedWriteSnapshotId: string | null
       readonly changeResult: ApplyDatasetRowsResult
     }
-  ): Promise<DatasetVersion> {
+  ): Promise<DatasetWriteCommitResult> {
     // Hydrate the committed version on the same exclusive runtime. That keeps
     // snapshot matching and row-count fallback inside the same serialized
     // connection state that just committed.
@@ -263,7 +266,7 @@ export class DuckLakeWriteCoordinator {
         ownSnapshotId
       )
       if (version) {
-        return version
+        return { ...version, outcome: "created" }
       }
 
       throw new LakeStorageError(
@@ -272,7 +275,10 @@ export class DuckLakeWriteCoordinator {
     }
 
     if (!input.changeResult.dataChangeExpected) {
-      return this.versionForNoOpCommit(input.runtime, input.dataset)
+      return {
+        ...(await this.versionForNoOpCommit(input.runtime, input.dataset)),
+        outcome: "unchanged",
+      }
     }
 
     if (input.committedWriteSnapshotId === input.previousWriteSnapshotId) {

@@ -38,6 +38,7 @@ export type {
   DatasetVersion,
   DatasetVersionMode,
   DatasetVersionRef,
+  DatasetWriteCommitResult,
   DatasetWriteMode,
   LakeStandardDescriptor,
   LakeStandardId,

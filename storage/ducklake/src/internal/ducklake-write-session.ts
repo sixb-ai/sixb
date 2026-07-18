@@ -4,7 +4,7 @@ import { getDatasetRowValidationError } from "@sixb/core"
 import type {
   BeginDatasetWriteInput,
   CommitDatasetWriteInput,
-  DatasetVersion,
+  DatasetWriteCommitResult,
   LakeWriteSession,
 } from "@sixb/core/lake-storage"
 import { LakeStorageError } from "@sixb/core/lake-storage"
@@ -20,7 +20,7 @@ export interface DuckLakeCommitWriteInput {
   readonly rowsWritten: number
 }
 
-type DuckLakeCommitWrite = (options: DuckLakeCommitWriteInput) => Promise<DatasetVersion>
+type DuckLakeCommitWrite = (options: DuckLakeCommitWriteInput) => Promise<DatasetWriteCommitResult>
 
 // Rows are staged in bounded in-memory batches so a slow source iterable never
 // holds the DuckDB runtime queue. Only the per-batch appender flush takes a
@@ -110,13 +110,13 @@ class DuckLakeWriteSession implements LakeWriteSession {
     this.rowsWritten += batch.length
   }
 
-  async commit(input?: CommitDatasetWriteInput): Promise<DatasetVersion> {
+  async commit(input?: CommitDatasetWriteInput): Promise<DatasetWriteCommitResult> {
     this.assertOpen()
     this.closed = true
 
     let committed = false
     try {
-      const version = await this.commitWrite({
+      const result = await this.commitWrite({
         write: this.input,
         commit: input,
         rowsWritten: this.rowsWritten,
@@ -126,7 +126,7 @@ class DuckLakeWriteSession implements LakeWriteSession {
       // Even successful commits no longer need the staging table once rows
       // have been inserted into the durable DuckLake table.
       await this.cleanup()
-      return version
+      return result
     } catch (error) {
       if (!committed) {
         await this.cleanup()

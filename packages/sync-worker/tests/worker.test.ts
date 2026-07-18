@@ -15,6 +15,7 @@ import {
   type SyncDefinition,
 } from "@sixb/core"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
+import type { BeginDatasetWriteInput, LakeWriteSession } from "@sixb/core/lake-storage"
 import { SyncWorker } from "../src"
 
 const Room = defineObjectType({
@@ -55,7 +56,35 @@ async function waitFor<T>(
   throw new Error("Timed out waiting for condition.")
 }
 
-function createSixbForSync(sync: SyncDefinition) {
+class ReusingVersionLakeStorage extends InMemoryLakeStorage {
+  private reuseNext = false
+
+  reuseNextCommittedVersion(): void {
+    this.reuseNext = true
+  }
+
+  override async beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession> {
+    const write = await super.beginWrite(input)
+    if (!this.reuseNext) return write
+    this.reuseNext = false
+
+    return {
+      writeRows: (rows) => write.writeRows(rows),
+      commit: async () => {
+        await write.abort()
+        const latest = await this.getLatestVersion(input.dataset.id)
+        if (!latest) throw new Error("Expected a committed version to reuse.")
+        return { ...latest, outcome: "unchanged" }
+      },
+      abort: () => write.abort(),
+    }
+  }
+}
+
+function createSixbForSync(
+  sync: SyncDefinition,
+  lakeStorage: InMemoryLakeStorage = new InMemoryLakeStorage()
+) {
   const storage = new InMemoryStorage()
 
   return new Sixb({
@@ -64,7 +93,7 @@ function createSixbForSync(sync: SyncDefinition) {
     connectors: [erpDb],
     broker: new InMemoryBroker(),
     storage,
-    lakeStorage: new InMemoryLakeStorage(),
+    lakeStorage,
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     datasets: [sync.target.dataset],
@@ -367,41 +396,49 @@ describe("SyncWorker", () => {
     expect(payload.versionId).toBe(datasetPayload.versionId)
   })
 
-  test("treats duplicate deterministic run ids as no-op deliveries", async () => {
-    const sync = defineSync("sync-orders")
+  test("does not emit a dataset event when storage reuses an existing version", async () => {
+    const dataset = defineDataset("raw.erp.orders", { schema: [col("orderId", "string")] })
+    const sync = defineSync("sync-orders", { mode: "append" })
       .from(erpDb)
-      .read(() => [{ orderId: "ord_1" }])
-      .intoDataset(defineDataset("raw.erp.orders", { schema: [col("orderId", "string")] }))
-    const sixb = createSixbForSync(sync)
-    const worker = new SyncWorker(sixb)
+      .read(() => [])
+      .intoDataset(dataset)
+    const lakeStorage = new ReusingVersionLakeStorage()
+    await lakeStorage.createDataset(dataset)
+    const seed = await lakeStorage.beginWrite({ dataset, mode: "snapshot" })
+    await seed.writeRows([{ orderId: "ord_1" }])
+    const previous = await seed.commit()
+    lakeStorage.reuseNextCommittedVersion()
 
+    const sixb = createSixbForSync(sync, lakeStorage)
+    const worker = new SyncWorker(sixb)
     await sixb.queues.syncRuns.enqueue({
       projectId: sixb.id,
       jobs: [
         {
           type: "sync.run.requested",
-          payload: { syncId: sync.id, runId: "schedule-run" },
-        },
-        {
-          type: "sync.run.requested",
-          payload: { syncId: sync.id, runId: "schedule-run" },
+          payload: { syncId: sync.id, runId: "run-no-op" },
         },
       ],
     })
 
     await worker.start()
     await waitFor(
-      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "schedule-run" }),
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-no-op" }),
       (run) => run?.status === "succeeded"
     )
     await Bun.sleep(50)
     await worker.stop()
 
     const events = await sixb.events.read({
-      types: ["sync.run.started", "sync.run.finished"],
+      types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
     })
     expect(events.map((event) => event.type)).toEqual(["sync.run.started", "sync.run.finished"])
-    expect(events[1]?.payload).toMatchObject({ status: "succeeded" })
+    expect(events[1]?.payload).toMatchObject({
+      syncId: sync.id,
+      runId: "run-no-op",
+      status: "succeeded",
+      versionId: previous.versionId,
+    })
   })
 
   test("does not crash when retry fails on shutdown", async () => {

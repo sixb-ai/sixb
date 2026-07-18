@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
 import type { DatasetColumnDefinition, DatasetDefinition, DatasetRow } from "@sixb/core"
 import {
-  type DatasetVersion,
   type DatasetVersionRef,
+  type DatasetWriteCommitResult,
   type DatasetWriteMode,
   type ExecuteSqlTransformInput,
   type LakeSqlExecutor,
@@ -82,7 +82,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     }
   }
 
-  async execute(input: ExecuteSqlTransformInput<"duckdb">): Promise<DatasetVersion> {
+  async execute(input: ExecuteSqlTransformInput<"duckdb">): Promise<DatasetWriteCommitResult> {
     this.connections.assertOpen()
     assertDatasetWriteMode(input.mode, "SQL transform")
 

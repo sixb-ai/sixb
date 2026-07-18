@@ -38,6 +38,10 @@ const writeDataset = defineDataset("contract.writes.orders", {
   schema: [col("orderId", "string"), col("customerName", "string")],
 })
 
+const nullableWriteDataset = defineDataset("contract.writes.nullable_orders", {
+  schema: [col("orderId", "string"), col("note", "string", { nullable: true })],
+})
+
 const fileRefDataset = defineDataset("contract.files.documents", {
   schema: [col("id", "string"), col("attachment", "fileRef", { nullable: true })],
 })
@@ -56,7 +60,8 @@ const invoiceRef: FileRef = {
  *
  * The suite covers provider-independent Lake semantics: definition
  * materialization and compatibility checks, versioned writes and reads,
- * optimistic commits, write-session lifecycle, and row validation.
+ * optimistic commits, unchanged-write detection, write-session lifecycle,
+ * and row validation.
  */
 export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
   label: string,
@@ -204,7 +209,9 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
             { orderId: "ord_1", customerName: "Ada" },
             { orderId: "ord_2", customerName: "Grace" },
           ])
-          const version = await write.commit()
+          const commit = await write.commit()
+          expect(commit.outcome).toBe("created")
+          const version = commit
 
           await storage.createDataset(definitionDataset)
 
@@ -272,7 +279,9 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
             { orderId: "ord_1", customerName: "Ada" },
             { orderId: "ord_2", customerName: "Grace" },
           ])
-          const version1 = await snapshotWrite.commit({ commitMessage: "snapshot orders" })
+          const snapshotCommit = await snapshotWrite.commit({ commitMessage: "snapshot orders" })
+          expect(snapshotCommit.outcome).toBe("created")
+          const version1 = snapshotCommit
 
           expect(version1).toMatchObject({
             datasetId: writeDataset.id,
@@ -300,9 +309,11 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
             inputs: [{ datasetId: writeDataset.id, versionId: version1.versionId }],
           })
           await appendWrite.writeRows([{ orderId: "ord_3", customerName: "Katherine" }])
-          const version2 = await appendWrite.commit({
+          const appendCommit = await appendWrite.commit({
             expectedLatestVersionId: version1.versionId,
           })
+          expect(appendCommit.outcome).toBe("created")
+          const version2 = appendCommit
 
           expect(version2).toMatchObject({
             datasetId: writeDataset.id,
@@ -397,6 +408,124 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
             collectRows(
               storage.readRows({ datasetId: writeDataset.id, versionId: firstVersion.versionId })
             )
+          ).resolves.toEqual([{ orderId: "ord_1", customerName: "Ada" }])
+        })
+      })
+
+      test("reuses the latest version when a snapshot commits identical content", async () => {
+        await withStorage(async (storage) => {
+          await storage.createDataset(writeDataset)
+
+          const seedWrite = await storage.beginWrite({ dataset: writeDataset, mode: "snapshot" })
+          await seedWrite.writeRows([
+            { orderId: "ord_1", customerName: "Ada" },
+            { orderId: "ord_2", customerName: "Grace" },
+          ])
+          const seedVersion = await seedWrite.commit()
+          expect(seedVersion.outcome).toBe("created")
+
+          // Identical rows in a different order are the same snapshot content.
+          const identicalWrite = await storage.beginWrite({
+            dataset: writeDataset,
+            mode: "snapshot",
+          })
+          await identicalWrite.writeRows([
+            { orderId: "ord_2", customerName: "Grace" },
+            { orderId: "ord_1", customerName: "Ada" },
+          ])
+          const identicalVersion = await identicalWrite.commit()
+
+          expect(identicalVersion.outcome).toBe("unchanged")
+          expect(identicalVersion.versionId).toBe(seedVersion.versionId)
+          expect(
+            (await storage.listVersions(writeDataset.id)).map((version) => version.versionId)
+          ).toEqual([seedVersion.versionId])
+          expect(await storage.getLatestVersion(writeDataset.id)).toMatchObject({
+            versionId: seedVersion.versionId,
+          })
+
+          await Bun.sleep(2)
+
+          const changedWrite = await storage.beginWrite({ dataset: writeDataset, mode: "snapshot" })
+          await changedWrite.writeRows([
+            { orderId: "ord_1", customerName: "Ada" },
+            { orderId: "ord_2", customerName: "Hopper" },
+          ])
+          const changedVersion = await changedWrite.commit()
+
+          expect(changedVersion.outcome).toBe("created")
+          expect(changedVersion.versionId).not.toBe(seedVersion.versionId)
+          expect(
+            (await storage.listVersions(writeDataset.id)).map((version) => version.versionId)
+          ).toEqual([changedVersion.versionId, seedVersion.versionId])
+        })
+      })
+
+      test("snapshot content comparison respects row multiplicities", async () => {
+        await withStorage(async (storage) => {
+          await storage.createDataset(writeDataset)
+          const rowA = { orderId: "ord_1", customerName: "Ada" }
+          const rowB = { orderId: "ord_2", customerName: "Grace" }
+
+          const seedWrite = await storage.beginWrite({ dataset: writeDataset, mode: "snapshot" })
+          await seedWrite.writeRows([rowA, rowA, rowB])
+          const seedVersion = await seedWrite.commit()
+
+          await Bun.sleep(2)
+
+          // Same distinct rows and row count, but different duplicate counts:
+          // this is new content, not a no-op.
+          const shiftedWrite = await storage.beginWrite({ dataset: writeDataset, mode: "snapshot" })
+          await shiftedWrite.writeRows([rowA, rowB, rowB])
+          const shiftedVersion = await shiftedWrite.commit()
+
+          expect(shiftedVersion.outcome).toBe("created")
+          expect(shiftedVersion.versionId).not.toBe(seedVersion.versionId)
+        })
+      })
+
+      test("treats omitted and null nullable values as the same snapshot content", async () => {
+        await withStorage(async (storage) => {
+          await storage.createDataset(nullableWriteDataset)
+
+          const seedWrite = await storage.beginWrite({
+            dataset: nullableWriteDataset,
+            mode: "snapshot",
+          })
+          await seedWrite.writeRows([{ orderId: "ord_1", note: null }])
+          const seedVersion = await seedWrite.commit()
+
+          const omittedWrite = await storage.beginWrite({
+            dataset: nullableWriteDataset,
+            mode: "snapshot",
+          })
+          await omittedWrite.writeRows([{ orderId: "ord_1" }])
+          const omittedVersion = await omittedWrite.commit()
+
+          expect(omittedVersion.outcome).toBe("unchanged")
+          expect(omittedVersion.versionId).toBe(seedVersion.versionId)
+        })
+      })
+
+      test("reuses the latest version when an append commits zero rows", async () => {
+        await withStorage(async (storage) => {
+          await storage.createDataset(writeDataset)
+
+          const seedWrite = await storage.beginWrite({ dataset: writeDataset, mode: "snapshot" })
+          await seedWrite.writeRows([{ orderId: "ord_1", customerName: "Ada" }])
+          const seedVersion = await seedWrite.commit()
+
+          const emptyAppend = await storage.beginWrite({ dataset: writeDataset, mode: "append" })
+          const appendVersion = await emptyAppend.commit()
+
+          expect(appendVersion.outcome).toBe("unchanged")
+          expect(appendVersion.versionId).toBe(seedVersion.versionId)
+          expect(appendVersion.rowCount).toBe(1)
+          expect(
+            (await storage.listVersions(writeDataset.id)).map((version) => version.versionId)
+          ).toEqual([seedVersion.versionId])
+          await expect(
+            collectRows(storage.readRows({ datasetId: writeDataset.id }))
           ).resolves.toEqual([{ orderId: "ord_1", customerName: "Ada" }])
         })
       })

@@ -242,10 +242,11 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
 
     throwIfAborted(signal)
 
-    const version = await write.commit({
+    const commit = await write.commit({
       expectedLatestVersionId: job.expectedLatestVersionId,
       commitMessage: job.commitMessage ?? `sync ${sync.id} run ${job.id}`,
     })
+    const { outcome, ...version } = commit
     committedVersion = version
     let finishedRun: SyncRunRecord
 
@@ -279,6 +280,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
       finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
       rowsRead,
       version,
+      versionCreated: outcome === "created",
     }
   } catch (error) {
     if (!committedVersion) {

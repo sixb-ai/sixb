@@ -71,9 +71,21 @@ export interface CommitDatasetWriteInput {
   readonly commitMessage?: string
 }
 
+export interface DatasetWriteCommitResult extends DatasetVersion {
+  /**
+   * Whether this operation created the returned version or reused the
+   * unchanged latest version. When a latest version exists, providers must
+   * report `unchanged` and reuse it for commits that cannot change visible
+   * dataset content: a snapshot whose rows equal the latest visible rows
+   * (order-insensitive, with equal duplicate counts), or an append of zero
+   * rows.
+   */
+  readonly outcome: "created" | "unchanged"
+}
+
 export interface LakeWriteSession {
   writeRows(rows: Iterable<DatasetRow> | AsyncIterable<DatasetRow>): Promise<void>
-  commit(input?: CommitDatasetWriteInput): Promise<DatasetVersion>
+  commit(input?: CommitDatasetWriteInput): Promise<DatasetWriteCommitResult>
   abort(): Promise<void>
 }
 

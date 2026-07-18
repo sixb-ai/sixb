@@ -22,6 +22,7 @@ import type {
 
 type StepExecutionResult = {
   readonly version: DatasetVersion
+  readonly versionCreated: boolean
   readonly rowsWritten?: number
 }
 
@@ -111,6 +112,7 @@ export async function runStep(input: {
     return {
       run: stepRun,
       version: committedVersion,
+      versionCreated: execution.versionCreated,
     }
   } catch (error) {
     if (!committedVersion) {

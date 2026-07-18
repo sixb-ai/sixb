@@ -51,4 +51,6 @@ export interface SyncRunResult {
   readonly finishedAt: Date
   readonly rowsRead: number
   readonly version: DatasetVersion
+  /** True only when this run created the returned dataset version. */
+  readonly versionCreated: boolean
 }

@@ -2,7 +2,7 @@ import type { DatasetDefinition } from "../datasets"
 import type {
   DatasetProducer,
   DatasetRow,
-  DatasetVersion,
+  DatasetWriteCommitResult,
   DatasetWriteMode,
   LakeStorage,
 } from "./types"
@@ -24,7 +24,7 @@ export interface LakeSqlExecutor<TSqlDialect extends SqlDialect = SqlDialect> {
   readonly capabilities: LakeSqlTransformCapabilities
 
   preview(input: PreviewSqlTransformInput<TSqlDialect>): AsyncIterable<DatasetRow>
-  execute(input: ExecuteSqlTransformInput<TSqlDialect>): Promise<DatasetVersion>
+  execute(input: ExecuteSqlTransformInput<TSqlDialect>): Promise<DatasetWriteCommitResult>
 }
 
 export interface LakeSqlTransformCapabilities {

@@ -26,7 +26,11 @@ export async function executeSqlStep(input: {
   readonly signal: AbortSignal
   readonly outputDataset: DatasetDefinition
   readonly resolvedInputs: readonly ResolvedStepInput[]
-}): Promise<{ readonly version: DatasetVersion; readonly rowsWritten?: number }> {
+}): Promise<{
+  readonly version: DatasetVersion
+  readonly versionCreated: boolean
+  readonly rowsWritten?: number
+}> {
   const { runtime, pipeline, step, job, signal, outputDataset, resolvedInputs } = input
 
   if (step.executor.kind !== "sql") {
@@ -43,7 +47,7 @@ export async function executeSqlStep(input: {
 
   throwIfAborted(signal)
 
-  const version = await runtime.lakeStorage.sql.execute({
+  const commit = await runtime.lakeStorage.sql.execute({
     sources: Object.fromEntries(
       resolvedInputs.map((input) => [
         input.name,
@@ -66,9 +70,11 @@ export async function executeSqlStep(input: {
   })
 
   throwIfAborted(signal)
+  const { outcome, ...version } = commit
 
   return {
     version,
+    versionCreated: outcome === "created",
     rowsWritten: version.rowCount,
   }
 }
