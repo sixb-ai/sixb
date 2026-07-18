@@ -17,6 +17,11 @@ export interface QueueJob<TType extends string = string, TPayload = unknown>
   readonly payload: TPayload
 }
 
+export interface QueueJobCoalescing {
+  /** Queue-scoped key for state-refresh work that must not build an unbounded backlog. */
+  readonly key: string
+}
+
 export type NewQueueJob<TQueueJob extends QueueJob> =
   TQueueJob extends QueueJob<infer TType, infer TPayload>
     ? {
@@ -26,6 +31,11 @@ export type NewQueueJob<TQueueJob extends QueueJob> =
         readonly payload: TPayload
         readonly availableAt?: string
         readonly metadata?: Readonly<Record<string, JsonValue>>
+        /**
+         * Keeps at most one pending delivery for this key. If one is active, repeated enqueues
+         * retain only one successor carrying the latest payload.
+         */
+        readonly coalesce?: QueueJobCoalescing
       }
     : never
 
@@ -47,6 +57,7 @@ export interface Queue<TQueueJob extends QueueJob> {
   /**
    * Adds durable work to the lane. Jobs become claimable at `availableAt`, or immediately.
    * Repeating a caller-supplied job id is idempotent while that job remains in the provider.
+   * Coalesced jobs are intended for refresh commands whose handler reads current durable state.
    */
   enqueue(params: {
     projectId: string

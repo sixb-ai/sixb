@@ -9,6 +9,7 @@ export type {
   ProjectionRunRequestedQueueJob,
   Queue,
   QueueJob,
+  QueueJobCoalescing,
   QueueJobEnvelope,
   QueueJobError,
   Queues,

@@ -74,6 +74,8 @@ export type PipelineStepFinishedHandler = (
 export interface PipelineStepRunResult {
   readonly run: PipelineStepRunRecord
   readonly version: DatasetVersion
+  /** True only when this step created the returned dataset version. */
+  readonly versionCommitted: boolean
 }
 
 export interface PipelineRunResult {

@@ -327,6 +327,45 @@ describe("OrchestratorWorker", () => {
     })
   })
 
+  test("coalesces repeated triggers for the same pipeline", async () => {
+    const datasetSchedule = defineSchedule("raw-invoices-updated").on(
+      events.dataset(rawInvoices).updated()
+    )
+    const pipeline = definePipeline("clean-invoices")
+      .when(datasetSchedule)
+      .then(
+        definePipelineStep("clean")
+          .inputs({ invoices: rawInvoices })
+          .output(cleanInvoices)
+          .run(() => {})
+      )
+    const routes = compileRoutes({
+      schedules: [datasetSchedule],
+      syncs: [],
+      pipelines: [pipeline],
+    })
+    const eventRuntime = createEvents()
+    const queues = new InMemoryQueues()
+    await startWorker(eventRuntime, queues, routes)
+
+    await eventRuntime.append({
+      events: [
+        makeDatasetVersionCommittedEvent("version-1"),
+        makeDatasetVersionCommittedEvent("version-2"),
+        makeDatasetVersionCommittedEvent("version-3"),
+      ],
+    })
+    await Bun.sleep(50)
+
+    const claimed = await queues.pipelines.claim({
+      projectId: PROJECT_ID,
+      workerId: "pipeline",
+      limit: 3,
+    })
+    expect(claimed).toHaveLength(1)
+    expect(claimed[0]?.job.payload.pipelineId).toBe(pipeline.id)
+  })
+
   test("sync outcome selectors only dispatch the selected status", async () => {
     const upstream = defineSync("upstream")
       .from(connector)

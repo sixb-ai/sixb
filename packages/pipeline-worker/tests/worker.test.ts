@@ -15,6 +15,7 @@ import {
   Sixb,
 } from "@sixb/core"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
+import type { BeginDatasetWriteInput, LakeWriteSession } from "@sixb/core/lake-storage"
 import { PipelineWorker } from "../src"
 
 const Room = defineObjectType({
@@ -53,18 +54,44 @@ async function waitFor<T>(
 function createSixbForPipeline(options: {
   readonly pipeline: PipelineDefinition
   readonly datasets: readonly DatasetDefinition[]
+  readonly lakeStorage?: InMemoryLakeStorage
 }) {
   return new Sixb({
     id: "pipeline-worker-tests",
     ontology: [Room],
     broker: new InMemoryBroker(),
     storage: new InMemoryStorage(),
-    lakeStorage: new InMemoryLakeStorage(),
+    lakeStorage: options.lakeStorage ?? new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     datasets: options.datasets,
     pipelines: [options.pipeline],
   })
+}
+
+class ReusingVersionLakeStorage extends InMemoryLakeStorage {
+  private reuseNext = false
+
+  reuseNextCommittedVersion(): void {
+    this.reuseNext = true
+  }
+
+  override async beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession> {
+    const write = await super.beginWrite(input)
+    if (!this.reuseNext) return write
+    this.reuseNext = false
+
+    return {
+      writeRows: (rows) => write.writeRows(rows),
+      commit: async () => {
+        await write.abort()
+        const latest = await this.getLatestVersion(input.dataset.id)
+        if (!latest) throw new Error("Expected a committed version to reuse.")
+        return latest
+      },
+      abort: () => write.abort(),
+    }
+  }
 }
 
 async function seedDatasetVersion(
@@ -291,6 +318,59 @@ describe("PipelineWorker", () => {
       status: "succeeded",
       datasetId: "customers",
       versionId: datasetPayload.versionId,
+    })
+  })
+
+  test("does not emit a dataset event when a step reuses an existing version", async () => {
+    const step = definePipelineStep("copy-customers")
+      .inputs({ rawCustomers: rawCustomersDataset })
+      .output(customersDataset)
+      .run(async ({ inputs, output }) => {
+        await output.writeRows(inputs.rawCustomers.readRows())
+      })
+    const pipeline = definePipeline("customers").then(step)
+    const lakeStorage = new ReusingVersionLakeStorage()
+    await seedDatasetVersion(lakeStorage, rawCustomersDataset, [{ id: "cust_1", name: "Ada" }])
+    const previous = await seedDatasetVersion(lakeStorage, customersDataset, [
+      { id: "cust_1", name: "Ada" },
+    ])
+    lakeStorage.reuseNextCommittedVersion()
+    const sixb = createSixbForPipeline({
+      pipeline,
+      datasets: [rawCustomersDataset, customersDataset],
+      lakeStorage,
+    })
+    const worker = new PipelineWorker(sixb)
+    await sixb.queues.pipelines.enqueue({
+      projectId: sixb.id,
+      jobs: [
+        {
+          type: "pipeline.run.requested",
+          payload: { pipelineId: pipeline.id, runId: "run-no-op" },
+        },
+      ],
+    })
+
+    await worker.start()
+    await waitFor(
+      () => sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "run-no-op" }),
+      (run) => run?.status === "succeeded"
+    )
+    await Bun.sleep(50)
+    await worker.stop()
+
+    const events = await sixb.events.read({
+      types: ["pipeline.run.started", "dataset.version.committed", "pipeline.run.finished"],
+    })
+    expect(events.map((event) => event.type)).toEqual([
+      "pipeline.run.started",
+      "pipeline.run.finished",
+    ])
+    expect(events[1]?.payload).toMatchObject({
+      pipelineId: pipeline.id,
+      runId: "run-no-op",
+      status: "succeeded",
+      versionId: previous.versionId,
     })
   })
 

@@ -119,7 +119,7 @@ export async function emitDatasetVersionCommitted(
   job: PipelineJob,
   step: PipelineStepRunResult
 ): Promise<void> {
-  if (!sixb.events) return
+  if (!sixb.events || !step.versionCommitted) return
 
   try {
     // Emit step outputs immediately so dataset event schedules can react before later steps finish.

@@ -65,6 +65,7 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     if (params.jobs.length === 0) return []
     for (const job of params.jobs) {
       if (job.id !== undefined) assertNonEmpty(job.id, "job.id")
+      if (job.coalesce !== undefined) assertNonEmpty(job.coalesce.key, "job.coalesce.key")
     }
 
     const envelopes = params.jobs.map((job) => buildEnvelope<TQueueJob>(params.projectId, job))
@@ -84,6 +85,14 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
           attempts: 1,
           removeOnComplete: this.shared.removeOnComplete,
           removeOnFail: this.shared.removeOnFail,
+          ...(envelope.coalesceKey
+            ? {
+                deduplication: {
+                  id: envelope.coalesceKey,
+                  keepLastIfActive: true,
+                },
+              }
+            : {}),
         },
       })) as unknown as AddBulkArg
     )

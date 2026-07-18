@@ -127,18 +127,22 @@ async function emitSyncSucceededEvents(
   try {
     await sixb.events.append({
       events: [
-        {
-          type: "dataset.version.committed",
-          payload: {
-            datasetId: result.datasetId,
-            versionId: result.version.versionId,
-            producer: {
-              kind: "sync",
-              id: job.syncId,
-              runId: job.id,
-            },
-          },
-        },
+        ...(result.versionCommitted
+          ? [
+              {
+                type: "dataset.version.committed" as const,
+                payload: {
+                  datasetId: result.datasetId,
+                  versionId: result.version.versionId,
+                  producer: {
+                    kind: "sync" as const,
+                    id: job.syncId,
+                    runId: job.id,
+                  },
+                },
+              },
+            ]
+          : []),
         {
           type: "sync.run.finished",
           payload: {

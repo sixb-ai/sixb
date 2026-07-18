@@ -26,7 +26,11 @@ export async function executeSqlStep(input: {
   readonly signal: AbortSignal
   readonly outputDataset: DatasetDefinition
   readonly resolvedInputs: readonly ResolvedStepInput[]
-}): Promise<{ readonly version: DatasetVersion; readonly rowsWritten?: number }> {
+}): Promise<{
+  readonly version: DatasetVersion
+  readonly versionCommitted: boolean
+  readonly rowsWritten?: number
+}> {
   const { runtime, pipeline, step, job, signal, outputDataset, resolvedInputs } = input
 
   if (step.executor.kind !== "sql") {
@@ -69,6 +73,11 @@ export async function executeSqlStep(input: {
 
   return {
     version,
+    versionCommitted:
+      version.producer?.kind === "pipeline" &&
+      version.producer.id === pipeline.id &&
+      version.producer.runId === job.id &&
+      version.producer.stepId === step.id,
     rowsWritten: version.rowCount,
   }
 }
