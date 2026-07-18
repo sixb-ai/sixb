@@ -40,13 +40,13 @@ import {
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { PipelineDefinition } from "../pipelines/types"
 import { categorizeProjections } from "../projections/builders"
+import { ProjectionRegistry } from "../projections/registry"
 import type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
   TelemetryProjectionDefinition,
 } from "../projections/types"
-import { validateProjectionsAtStartup } from "../projections/validation"
 import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
 import { validateRulesAtStartup } from "../rules"
@@ -310,6 +310,25 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       }
       workflowIds.add(workflow.id)
     }
+
+    const { objectProjections, linkProjections, telemetryProjections } = categorizeProjections(
+      options.projections ?? []
+    )
+    this.objectProjections = objectProjections
+    this.linkProjections = linkProjections
+    this.telemetryProjections = telemetryProjections
+    for (const projection of [...objectProjections, ...linkProjections, ...telemetryProjections]) {
+      if (this.projectionsById.has(projection.id)) {
+        throw new RuntimeError(`Duplicate projection id: ${projection.id}`)
+      }
+      this.projectionsById.set(projection.id, projection)
+    }
+    new ProjectionRegistry({
+      projections: [...objectProjections, ...linkProjections, ...telemetryProjections],
+      ontology: this.ontology,
+      datasetsById: this.datasetsById,
+    })
+
     this.runtimeContext = {
       projectId: this.projectId,
       ontology: this.ontology,
@@ -334,26 +353,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     }
     validateAgentGroupReferences(agents, this.security)
     this.agents = new AgentsRuntime(this.runtimeContext, agents)
-
-    const { objectProjections, linkProjections, telemetryProjections } = categorizeProjections(
-      options.projections ?? []
-    )
-    this.objectProjections = objectProjections
-    this.linkProjections = linkProjections
-    this.telemetryProjections = telemetryProjections
-    for (const projection of [...objectProjections, ...linkProjections, ...telemetryProjections]) {
-      if (this.projectionsById.has(projection.id)) {
-        throw new RuntimeError(`Duplicate projection id: ${projection.id}`)
-      }
-      this.projectionsById.set(projection.id, projection)
-    }
-    validateProjectionsAtStartup(
-      objectProjections,
-      linkProjections,
-      telemetryProjections,
-      this.ontology,
-      this.datasetsById
-    )
   }
 
   get id(): string {

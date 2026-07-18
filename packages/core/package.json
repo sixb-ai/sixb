@@ -115,6 +115,12 @@
       "import": "./dist/logging/index.js",
       "default": "./dist/logging/index.js"
     },
+    "./internal/materializer": {
+      "types": "./dist/materializer/index.d.ts",
+      "bun": "./src/materializer/index.ts",
+      "import": "./dist/materializer/index.js",
+      "default": "./dist/materializer/index.js"
+    },
     "./internal/objects": {
       "types": "./dist/objects/index.d.ts",
       "bun": "./src/objects/index.ts",

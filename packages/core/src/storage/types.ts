@@ -3,6 +3,7 @@ import type { AgentStorage } from "./agents"
 import type { AuthStorage } from "./auth"
 import type { FileUploadSessionStore } from "./file-upload-sessions"
 import type { ObjectStorage } from "./objects/types"
+import type { OntologyStorage } from "./ontology"
 import type { PipelineRunStorage } from "./pipeline-runs"
 import type { ProjectionRunStorage } from "./projection-runs"
 import type { RulesStorage } from "./rules"
@@ -230,6 +231,8 @@ export interface StorageTransactionOptions {
 export interface Storage {
   objects: ObjectStorage
   timeseries: TimeseriesStorage
+  /** Temporary Phase 1 bridge while storage providers adopt ontology capabilities. */
+  ontology?: OntologyStorage
   auth?: AuthStorage
   agents?: AgentStorage
   actionRuns?: ActionRunStorage

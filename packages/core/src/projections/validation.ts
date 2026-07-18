@@ -9,6 +9,7 @@ import type { DatasetDefinition } from "../datasets"
 import type { OntologyRegistry } from "../ontology"
 import type { ObjectType, Property } from "../ontology/types"
 import { ProjectionValidationError } from "./errors"
+import { validateProjectionOwnership } from "./ownership"
 import type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
@@ -148,7 +149,19 @@ export function validateAndLowerLinkMapping(
     }
   }
 
-  return { ...linkMapping }
+  return Object.fromEntries(
+    Object.entries(linkMapping).map(([linkId, descriptor]) => [
+      linkId,
+      {
+        linkId: descriptor.linkId,
+        ...(descriptor.sourcePropertyId !== undefined
+          ? { sourcePropertyId: descriptor.sourcePropertyId }
+          : {}),
+        ...(descriptor.sourceField !== undefined ? { sourceField: descriptor.sourceField } : {}),
+        targetObjectTypeId: descriptor.targetObjectTypeId,
+      },
+    ])
+  )
 }
 
 /**
@@ -257,6 +270,8 @@ export function validateProjectionsAtStartup(
   const objectTypesById = ontology.getObjectTypesById()
   const primaryByTypeId = ontology.getPrimaryByTypeId()
 
+  validateMaterializationOntologyConstraints(ontology)
+
   for (const projection of objectProjections) {
     const prefix = `Projection "${projection.id}"`
     const dataset = datasetsById.get(projection.datasetId)
@@ -288,6 +303,12 @@ export function validateProjectionsAtStartup(
             `on dataset "${projection.datasetId}"`
         )
       }
+      const property = objectType.properties.find((candidate) => candidate.id === propId)
+      if (property?.mode === "telemetry") {
+        throw new ProjectionValidationError(
+          `[Sixb] ${prefix}: source mappings cannot own telemetry property "${projection.objectTypeId}.${propId}"`
+        )
+      }
     }
 
     const primaryId = primaryByTypeId.get(projection.objectTypeId)!
@@ -302,6 +323,11 @@ export function validateProjectionsAtStartup(
       if (!linkIds.has(linkId)) {
         throw new ProjectionValidationError(
           `${prefix}: FK link "${linkId}" references unknown link on type "${projection.objectTypeId}"`
+        )
+      }
+      if (fk.linkId !== linkId) {
+        throw new ProjectionValidationError(
+          `${prefix}: FK link mapping key "${linkId}" does not match descriptor linkId "${fk.linkId}"`
         )
       }
       const sourcePropertyId = fk.sourcePropertyId
@@ -341,6 +367,12 @@ export function validateProjectionsAtStartup(
           `${prefix}: FK link "${linkId}" target type "${fk.targetObjectTypeId}" has no primary property`
         )
       }
+      const link = objectType.links.find((candidate) => candidate.id === linkId)!
+      if (!ontology.isValidLinkTarget(link.targetObjectTypeId, fk.targetObjectTypeId)) {
+        throw new ProjectionValidationError(
+          `${prefix}: FK link "${linkId}" target type "${fk.targetObjectTypeId}" is not compatible with its declared target`
+        )
+      }
     }
   }
 
@@ -365,10 +397,15 @@ export function validateProjectionsAtStartup(
       )
     }
     const sourceType = objectTypesById.get(projection.sourceObjectTypeId)!
-    const linkIds = new Set(sourceType.links.map((l) => l.id))
-    if (!linkIds.has(projection.linkId)) {
+    const link = sourceType.links.find((candidate) => candidate.id === projection.linkId)
+    if (!link) {
       throw new ProjectionValidationError(
         `${prefix}: link "${projection.linkId}" does not exist on source type "${projection.sourceObjectTypeId}"`
+      )
+    }
+    if (!ontology.isValidLinkTarget(link.targetObjectTypeId, projection.targetObjectTypeId)) {
+      throw new ProjectionValidationError(
+        `${prefix}: target type "${projection.targetObjectTypeId}" is not compatible with link "${projection.linkId}"`
       )
     }
     const datasetColumnNames = new Set(dataset.schema.columns.map((column) => column.name))
@@ -415,5 +452,31 @@ export function validateProjectionsAtStartup(
 
     const datasetColumnNames = new Set(dataset.schema.columns.map((column) => column.name))
     validateTelemetryProjectionFieldMapping(projection, objectType, datasetColumnNames, prefix)
+  }
+
+  validateProjectionOwnership(
+    [...objectProjections, ...linkProjections, ...telemetryProjections],
+    ontology
+  )
+}
+
+function validateMaterializationOntologyConstraints(ontology: OntologyRegistry): void {
+  for (const objectType of ontology.getObjectTypesById().values()) {
+    for (const property of objectType.properties) {
+      if (property.mode === "telemetry" && property.required === true) {
+        throw new ProjectionValidationError(
+          `[Sixb] Telemetry property '${objectType.id}.${property.id}' cannot be required.`
+        )
+      }
+    }
+    for (const link of objectType.links) {
+      for (const property of link.properties ?? []) {
+        if (property.mode === "telemetry") {
+          throw new ProjectionValidationError(
+            `[Sixb] Link property '${objectType.id}.${link.id}.${property.id}' cannot use telemetry mode.`
+          )
+        }
+      }
+    }
   }
 }
