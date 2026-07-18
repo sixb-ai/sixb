@@ -6,8 +6,7 @@
  */
 
 import { assertPrivileged } from "../../authorization"
-import type { EventDraft } from "../../events"
-import { buildLinkUpsertEvent } from "../../events"
+import { buildLinkUpsertEvent, hasPropertyChanges } from "../../events"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { validateLinkBatch } from "../../ontology/validation"
 import type { BatchItemResult, SixbRuntimeContext } from "../../runtime/types"
@@ -77,8 +76,13 @@ export async function upsertLinkBatch(
   for (const { index, error } of validation.errors) results[index] = { ok: false, error }
   if (validation.valid.length === 0) return results
 
-  // Append events, then project the stored events into object storage.
-  const events: EventDraft[] = validation.valid.map(({ item }) => {
+  // Plan mutations and resolve unchanged items before touching the event stream.
+  const mutations: {
+    index: number
+    event: ReturnType<typeof buildLinkUpsertEvent>
+  }[] = []
+
+  for (const { index, item } of validation.valid) {
     const sameLink = (
       linksMap.get(`${item.objectType.id}:${item.sourceId}:${item.linkId}`) ?? []
     ).find(
@@ -93,7 +97,7 @@ export async function upsertLinkBatch(
           }
         : undefined
 
-    return buildLinkUpsertEvent({
+    const event = buildLinkUpsertEvent({
       sourceTypeId: item.objectType.id,
       sourceId: item.sourceId,
       linkId: item.linkId,
@@ -103,21 +107,31 @@ export async function upsertLinkBatch(
       previousProperties: sameLink?.properties,
       ...(mergedProperties !== undefined ? { properties: mergedProperties } : {}),
     })
-  })
 
-  const appended = await eventsRuntime.append({ events })
+    if (sameLink && !hasPropertyChanges(event.payload.propertyChanges)) {
+      results[index] = { ok: true, value: undefined }
+      continue
+    }
+
+    mutations.push({ index, event })
+  }
+
+  if (mutations.length === 0) return results
+
+  // Append changed events, then project the stored events into object storage.
+  const appended = await eventsRuntime.append({ events: mutations.map(({ event }) => event) })
   const linkEvents = appended.filter(
     (event): event is Extract<typeof event, { type: "link.created" | "link.updated" }> =>
       event.type === "link.created" || event.type === "link.updated"
   )
-  if (linkEvents.length !== validation.valid.length) {
+  if (linkEvents.length !== mutations.length) {
     throw new ObjectError("Failed to append link mutation event batch")
   }
 
   await storage.objects.applyLinkUpsertBatch(linkEvents)
 
-  for (const entry of validation.valid) {
-    results[entry.index] = { ok: true, value: undefined }
+  for (const { index } of mutations) {
+    results[index] = { ok: true, value: undefined }
   }
 
   return results

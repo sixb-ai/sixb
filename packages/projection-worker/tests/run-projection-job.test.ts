@@ -340,6 +340,58 @@ describe("runProjectionJob", () => {
     expect(room?.properties.name).toBe("Kitchen")
   })
 
+  test("replays an object projection without emitting no-op mutations", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomsDataset],
+        projections: [roomProjection],
+      },
+      deps
+    )
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+    ])
+
+    await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-object-first",
+        projectionId: "room-proj",
+        projectionKind: "object",
+        datasetId: roomsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+    const rowBeforeReplay = await deps.storage.objects.getByPrimaryId({
+      projectId: sixb.id,
+      objectTypeId: Room.id,
+      primaryId: "r1",
+    })
+
+    const replay = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-object-replay",
+        projectionId: "room-proj",
+        projectionKind: "object",
+        datasetId: roomsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(replay.run.status).toBe("succeeded")
+    expect(
+      await deps.storage.objects.getByPrimaryId({
+        projectId: sixb.id,
+        objectTypeId: Room.id,
+        primaryId: "r1",
+      })
+    ).toEqual(rowBeforeReplay)
+    expect(await sixb.events.read({ types: ["object.created"] })).toHaveLength(1)
+    expect(await sixb.events.read({ types: ["object.updated"] })).toHaveLength(0)
+  })
+
   test("materializes a telemetry projection from the exact dataset version", async () => {
     const deps = createDeps()
     const sixb = createSixb(

@@ -2,7 +2,7 @@
  * Leaf operation: upsert a single link.
  */
 import { assertPrivileged } from "../../authorization"
-import { buildLinkUpsertEvent } from "../../events"
+import { buildLinkUpsertEvent, hasPropertyChanges } from "../../events"
 import { OntologyValidationError } from "../../ontology/errors"
 import { assertLinkTargetType, validateLinkProperties } from "../../ontology/validation"
 import type { ResolvedLinkContext } from "../context"
@@ -70,20 +70,22 @@ export async function upsertLink(
     }
   }
 
-  const appended = await events.append({
-    events: [
-      buildLinkUpsertEvent({
-        sourceTypeId: objectType.id,
-        sourceId,
-        linkId,
-        targetTypeId,
-        targetId,
-        operation: sameLink ? "update" : "create",
-        previousProperties: sameLink?.properties,
-        ...(mergedProperties !== undefined ? { properties: mergedProperties } : {}),
-      }),
-    ],
+  const mutationEvent = buildLinkUpsertEvent({
+    sourceTypeId: objectType.id,
+    sourceId,
+    linkId,
+    targetTypeId,
+    targetId,
+    operation: sameLink ? "update" : "create",
+    previousProperties: sameLink?.properties,
+    ...(mergedProperties !== undefined ? { properties: mergedProperties } : {}),
   })
+
+  if (sameLink && !hasPropertyChanges(mutationEvent.payload.propertyChanges)) {
+    return
+  }
+
+  const appended = await events.append({ events: [mutationEvent] })
 
   const [event] = appended
   if (!event || (event.type !== "link.created" && event.type !== "link.updated")) {
