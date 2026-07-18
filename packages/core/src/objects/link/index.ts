@@ -1,3 +1,5 @@
 export { removeLink } from "./remove"
+export type { SetLinkBatchOptions } from "./set-batch"
+export { setLinkBatch } from "./set-batch"
 export { upsertLink } from "./upsert"
 export { upsertLinkBatch } from "./upsert-batch"

@@ -1,3 +1,5 @@
+export type { SerializationRetryOptions } from "./commit"
+export { runWithStorageSerializationRetry } from "./commit"
 export { EditBatchError } from "./errors"
 export { normalizeEditBatch, normalizeEditOperationInput } from "./normalize"
 export type {

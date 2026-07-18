@@ -16,7 +16,8 @@ export type {
 } from "./context"
 export { requireLinkDefinition, resolveLinkContext, resolveObjectContext } from "./context"
 export { ObjectError } from "./errors"
-export { removeLink, upsertLink, upsertLinkBatch } from "./link"
+export type { SetLinkBatchOptions } from "./link"
+export { removeLink, setLinkBatch, upsertLink, upsertLinkBatch } from "./link"
 export { upsertObject, upsertObjectBatch } from "./object"
 // SDK adapters (typed ObjectSet / ObjectByIdHandle)
 export { createObjectSet } from "./sdk"

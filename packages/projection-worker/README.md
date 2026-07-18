@@ -48,6 +48,8 @@ await runProjectionJob({
 
 - The worker executes the projection named by the job. It does not resolve projection dependencies.
 - V1 materialization is set-only: projected rows upsert state, missing rows do not delete state.
+- A nonblank FK assigns a cardinality-one link, atomically replacing a different current target.
+  Blank FKs remain no-ops; cardinality-many FK links remain additive.
 - V1 traceability lives in dataset versions and projection run records; object writes do not carry
   projection-specific metadata.
 

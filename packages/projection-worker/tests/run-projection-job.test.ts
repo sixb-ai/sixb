@@ -92,6 +92,14 @@ const roomProjectionWithFk = roomProjection.withLinks({
   }),
 })
 
+const roomProjectionWithManyFk = roomProjection.withLinks({
+  hasSensors: fromForeignKey({
+    link: Room.l.hasSensors,
+    sourceField: "building_ref",
+    target: Sensor,
+  }),
+})
+
 const roomProjectionWithDatasetFieldFk = defineProjection("room-dataset-field-fk-proj", Room)
   .fromDataset(roomsDataset)
   .properties({ id: "room_id", name: "room_name" })
@@ -958,6 +966,220 @@ describe("runProjectionJob", () => {
     })
     expect(links).toHaveLength(1)
     expect(links[0]?.targetId).toBe("b1")
+  })
+
+  test("atomically reassigns cardinality-one FK links", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomsDataset],
+        projections: [roomProjectionWithFk],
+      },
+      deps
+    )
+    await sixb.upsertObject("Building", { id: "b1", name: "Old HQ" })
+    await sixb.upsertObject("Building", { id: "b2", name: "New HQ" })
+    await sixb.upsertObject("Room", { id: "r1", name: "Kitchen", buildingRef: "b1" })
+    await sixb.upsertLink("Room", "r1", "inBuilding", {
+      targetTypeId: "Building",
+      targetId: "b1",
+    })
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: "b2" },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-reassign-fk",
+        projectionId: "room-proj",
+        projectionKind: "object",
+        datasetId: "canonical.rooms",
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.run.status).toBe("succeeded")
+    expect(result.linksUpserted).toBe(1)
+
+    const links = await deps.storage.objects.listLinks({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      objectId: "r1",
+      linkId: "inBuilding",
+    })
+    expect(links).toHaveLength(1)
+    expect(links[0]?.targetId).toBe("b2")
+
+    const repeated = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-reassign-fk-repeated",
+        projectionId: "room-proj",
+        projectionKind: "object",
+        datasetId: "canonical.rooms",
+        versionId: version.versionId,
+      },
+    })
+    expect(repeated.run.status).toBe("succeeded")
+    expect(repeated.linksUpserted).toBe(1)
+    expect(
+      await deps.storage.objects.listLinks({
+        projectId: sixb.id,
+        objectTypeId: "Room",
+        objectId: "r1",
+        linkId: "inBuilding",
+      })
+    ).toHaveLength(1)
+  })
+
+  test("keeps cardinality-many FK links additive", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomsDataset],
+        projections: [roomProjectionWithManyFk],
+      },
+      deps
+    )
+    for (const sensorId of ["s1", "s2"]) {
+      await sixb.upsertObject("Sensor", { id: sensorId, name: sensorId })
+    }
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: "s1" },
+      { room_id: "r1", room_name: "Kitchen", building_ref: "s2" },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-many-fk",
+        projectionId: "room-proj",
+        projectionKind: "object",
+        datasetId: "canonical.rooms",
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.run.status).toBe("succeeded")
+    expect(result.linksUpserted).toBe(2)
+    const links = await deps.storage.objects.listLinks({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      objectId: "r1",
+      linkId: "hasSensors",
+    })
+    expect(links.map((link) => link.targetId).sort()).toEqual(["s1", "s2"])
+  })
+
+  test("uses flush-scoped idempotency keys for repeated FK edges", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomsDataset],
+        projections: [roomProjectionWithFk],
+      },
+      deps
+    )
+    for (const buildingId of ["b1", "b2"]) {
+      await sixb.upsertObject("Building", { id: buildingId, name: buildingId })
+    }
+
+    const originalAppend = sixb.events.append.bind(sixb.events)
+    const seenKeys = new Set<string>()
+    const publishedB1Creates: string[] = []
+    sixb.events.append = async (params) => {
+      const uniqueEvents = params.events.filter((event) => {
+        const key = event.idempotencyKey
+        if (key === undefined) return true
+        if (seenKeys.has(key)) return false
+        seenKeys.add(key)
+        return true
+      })
+      for (const event of uniqueEvents) {
+        if (event.type === "link.created" && event.payload.targetId === "b1") {
+          publishedB1Creates.push(event.idempotencyKey ?? "")
+        }
+      }
+      return originalAppend({ events: uniqueEvents })
+    }
+
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
+      { room_id: "r1", room_name: "Kitchen", building_ref: "b2" },
+      { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
+    ])
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-repeated-edge",
+        projectionId: "room-proj",
+        projectionKind: "object",
+        datasetId: "canonical.rooms",
+        versionId: version.versionId,
+      },
+      batchSize: 1,
+    })
+
+    expect(result.run.status).toBe("succeeded")
+    expect(result.linksUpserted).toBe(3)
+    expect(publishedB1Creates).toHaveLength(2)
+    expect(new Set(publishedB1Creates).size).toBe(2)
+
+    const links = await deps.storage.objects.listLinks({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      objectId: "r1",
+      linkId: "inBuilding",
+    })
+    expect(links.map((link) => link.targetId)).toEqual(["b1"])
+  })
+
+  test("preserves cardinality-one links for blank or missing FK targets", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomsDataset],
+        projections: [roomProjectionWithFk],
+      },
+      deps
+    )
+    await sixb.upsertObject("Building", { id: "b1", name: "HQ" })
+    for (const roomId of ["r1", "r2"]) {
+      await sixb.upsertObject("Room", { id: roomId, name: roomId, buildingRef: "b1" })
+      await sixb.upsertLink("Room", roomId, "inBuilding", {
+        targetTypeId: "Building",
+        targetId: "b1",
+      })
+    }
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+      { room_id: "r2", room_name: "Office", building_ref: "missing-building" },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-preserve-fk",
+        projectionId: "room-proj",
+        projectionKind: "object",
+        datasetId: "canonical.rooms",
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.run.status).toBe("succeeded")
+    expect(result.linksUpserted).toBe(0)
+    for (const roomId of ["r1", "r2"]) {
+      const links = await deps.storage.objects.listLinks({
+        projectId: sixb.id,
+        objectTypeId: "Room",
+        objectId: roomId,
+        linkId: "inBuilding",
+      })
+      expect(links).toHaveLength(1)
+      expect(links[0]?.targetId).toBe("b1")
+    }
   })
 
   test("materializes FK links from dataset fields without storing FK properties", async () => {

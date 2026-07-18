@@ -1,33 +1,14 @@
-import type { EditBatchInput, EditCommitDiff } from "../edits"
-import { planEditBatch } from "../edits"
+import type { EditBatchInput, EditCommitDiff, SerializationRetryOptions } from "../edits"
+import { planEditBatch, runWithStorageSerializationRetry } from "../edits"
 import { buildEditCommitPlanEvents, type EventDraft } from "../events"
 import type { OntologyRegistry } from "../ontology/registry"
 import type { ActionRunRecord, ActionRunStorage } from "../storage/action-runs"
 import { actionSubjectsEqual } from "../storage/action-runs"
-import { isStorageSerializationFailure } from "../storage/errors"
 import type { Storage } from "../storage/types"
 import { ActionEditCommitError } from "./errors"
 import type { ActionSubject } from "./types"
 
-const DEFAULT_MAX_SERIALIZATION_ATTEMPTS = 3
-const SERIALIZATION_BASE_DELAY_MS = 10
-const SERIALIZATION_MAX_DELAY_MS = 200
-
-/**
- * Tunes the serialization-failure retry. Both fields are optional and injectable so tests stay
- * deterministic: a no-op `sleep` removes wall-clock delay.
- */
-export interface SerializationRetryOptions {
-  /** Total attempts, including the first. Defaults to 3; values below 1 are clamped to 1. */
-  readonly maxAttempts?: number
-  /** Awaited before each retry. Defaults to a real timer. */
-  readonly sleep?: (ms: number) => Promise<void>
-}
-
-interface ResolvedSerializationRetryPolicy {
-  readonly maxAttempts: number
-  readonly sleep: (ms: number) => Promise<void>
-}
+export type { SerializationRetryOptions } from "../edits"
 
 export interface CommitActionEditBatchInput {
   readonly storage: Storage
@@ -86,54 +67,10 @@ export async function commitActionEditBatch(
   input: CommitActionEditBatchInput
 ): Promise<CommitActionEditBatchResult> {
   const committedAt = input.committedAt ?? new Date()
-  const policy = resolveSerializationRetryPolicy(input.serializationRetry)
-  return commitActionEditBatchWithSerializationRetry(input, committedAt, policy)
-}
-
-async function commitActionEditBatchWithSerializationRetry(
-  input: CommitActionEditBatchInput,
-  committedAt: Date,
-  policy: ResolvedSerializationRetryPolicy
-): Promise<CommitActionEditBatchResult> {
-  for (let failures = 0; ; failures++) {
-    try {
-      return await commitActionEditBatchOnce(input, committedAt)
-    } catch (error) {
-      const attempted = failures + 1
-      if (!isStorageSerializationFailure(error) || attempted >= policy.maxAttempts) {
-        throw error
-      }
-
-      await policy.sleep(serializationBackoffMs(attempted))
-    }
-  }
-}
-
-function resolveSerializationRetryPolicy(
-  options: SerializationRetryOptions = {}
-): ResolvedSerializationRetryPolicy {
-  return {
-    maxAttempts: Math.max(1, Math.trunc(options.maxAttempts ?? DEFAULT_MAX_SERIALIZATION_ATTEMPTS)),
-    sleep: options.sleep ?? defaultSerializationSleep,
-  }
-}
-
-/**
- * Full-jitter exponential backoff (AWS "Exponential Backoff And Jitter"): a uniformly random delay
- * in `[0, cap]` where `cap = min(SERIALIZATION_MAX_DELAY_MS, SERIALIZATION_BASE_DELAY_MS * 2 ** (failures - 1))`.
- * Full jitter de-synchronizes a thundering herd better than fixed or equal-jittered backoff.
- * `failures` is the number of attempts that have already failed (≥ 1).
- */
-function serializationBackoffMs(failures: number): number {
-  const cap = Math.min(
-    SERIALIZATION_MAX_DELAY_MS,
-    SERIALIZATION_BASE_DELAY_MS * 2 ** (failures - 1)
+  return runWithStorageSerializationRetry(
+    () => commitActionEditBatchOnce(input, committedAt),
+    input.serializationRetry
   )
-  return Math.random() * cap
-}
-
-function defaultSerializationSleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 async function commitActionEditBatchOnce(
