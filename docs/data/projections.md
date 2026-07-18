@@ -231,6 +231,8 @@ sixb worker projection
 - `.properties(...)` checks that mapped properties and columns exist and that their types are
   compatible. The primary property must be mapped.
 - Projections are set-only: missing rows do not delete existing objects or links.
+- A nonblank FK assigns a cardinality-one link, replacing a different current target atomically.
+  Blank FKs are no-ops; cardinality-many FK links remain additive.
 - Link projections require string source and target fields.
 - For an FK descriptor, `target` must be the link's declared target type or a subtype (via
   `extends`).

@@ -21,6 +21,7 @@ import {
   planEditBatch,
   validateEditBatch,
 } from "../src/edits"
+import { buildLinkUpsertEvent } from "../src/events"
 import { type ActionRunStorage, ObjectStorageError, StorageTransactionError } from "../src/storage"
 
 const Customer = defineObjectType({
@@ -1009,6 +1010,24 @@ describe("EditBatch staged object upsert", () => {
 })
 
 describe("EditBatch cardinality-one link assignment", () => {
+  test("builds unambiguous event keys for primary IDs containing delimiters", () => {
+    const event = (sourceId: string, targetId: string) =>
+      buildLinkUpsertEvent({
+        sourceTypeId: "Invoice",
+        sourceId,
+        linkId: "customer",
+        targetTypeId: "Customer",
+        targetId,
+        operation: "create",
+        idempotencyKeyPrefix: "commit",
+      })
+    const delimiter = ":customer:Customer:"
+
+    expect(event("inv", `cus${delimiter}1`).idempotencyKey).not.toBe(
+      event(`inv${delimiter}cus`, "1").idempotencyKey
+    )
+  })
+
   test("records set and clear intent without reading the current target", async () => {
     const batch = await recordRuntimeEdits({ runId: "act_assign_link" }, ({ objects }) => {
       const invoice = objects(Invoice).byId("inv_1")

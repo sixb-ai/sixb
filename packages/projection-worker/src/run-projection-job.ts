@@ -156,6 +156,7 @@ async function executeProjection(input: {
       runtime,
       projection,
       dataset,
+      runId: job.id,
       versionId: job.versionId,
       signal,
       batchSize,

@@ -232,5 +232,14 @@ function linkEventKey(input: {
   readonly targetTypeId: string
   readonly targetId: string
 }): string {
-  return `${input.sourceTypeId}:${input.sourceId}:${input.linkId}:${input.targetTypeId}:${input.targetId}`
+  // Idempotency keys are compared as opaque strings. Delimiter joining is ambiguous when IDs
+  // contain that delimiter: ["a", "b:c"] and ["a:b", "c"] both become "a:b:c". JSON preserves
+  // each field's boundary, so different links cannot accidentally produce the same key.
+  return JSON.stringify([
+    input.sourceTypeId,
+    input.sourceId,
+    input.linkId,
+    input.targetTypeId,
+    input.targetId,
+  ])
 }
