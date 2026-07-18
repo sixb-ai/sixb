@@ -3,7 +3,21 @@
 S3-compatible `BlobStorage` provider for Sixb `fileRef` payloads.
 
 It works with AWS S3 and S3-compatible services such as Cloudflare R2, MinIO, DigitalOcean Spaces,
-Backblaze B2, and Google Cloud Storage's S3-compatible API. Streamed writes use the official AWS S3 client, loaded lazily on the first `put(...)`; reads and metadata operations continue to use Bun's native `S3Client`.
+Backblaze B2, and Google Cloud Storage's S3-compatible API. Streamed writes use the official AWS S3
+client, loaded lazily on the first `put(...)`; reads and metadata operations continue to use Bun's
+native `S3Client`.
+
+## Why not just use `Bun.S3Client`?
+
+On Bun 1.3.14/Linux, the native S3 multipart writer can retain native allocations after completed
+parts. Across many uploads, process RSS can therefore keep growing even while the JavaScript heap
+stays stable. Stream backpressure limits in-flight data, but it does not control the lifetime of
+those native allocations.
+
+Streamed writes use replayable, fixed-size `Uint8Array` parts through the AWS SDK instead. This lets
+the provider bound concurrency, retry individual parts, and abort incomplete multipart uploads
+without relying on Bun's native writer. The AWS client is loaded lazily on the first `put(...)`;
+`Bun.S3Client` remains in use for reads and metadata operations.
 
 ## Install
 
