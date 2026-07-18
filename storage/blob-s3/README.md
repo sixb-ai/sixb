@@ -2,9 +2,21 @@
 
 S3-compatible `BlobStorage` provider for Sixb `fileRef` payloads.
 
-This package uses Bun's native `S3Client`, so it does not need the AWS SDK or another object storage
-dependency. It works with AWS S3 and S3-compatible services such as Cloudflare R2, MinIO, DigitalOcean
-Spaces, Backblaze B2, and Google Cloud Storage's S3-compatible API.
+It works with AWS S3 and S3-compatible services such as Cloudflare R2, MinIO, DigitalOcean Spaces,
+Backblaze B2, and Google Cloud Storage's S3-compatible API. One official AWS SDK client handles
+writes, reads, metadata, server-side copies, cleanup, and direct-upload URL signing.
+
+## Why not just use `Bun.S3Client`?
+
+On Bun 1.3.14/Linux, the native S3 multipart writer can retain native allocations after completed
+parts. Across many uploads, process RSS can therefore keep growing even while the JavaScript heap
+stays stable. Stream backpressure limits in-flight data, but it does not control the lifetime of
+those native allocations.
+
+The provider uses replayable, fixed-size `Uint8Array` parts through the AWS SDK instead. This lets it
+bound concurrency, retry individual requests, and abort incomplete multipart uploads without
+relying on Bun's native writer. A single long-lived client also keeps credentials, endpoints,
+connection reuse, retries, and error behavior consistent across every operation.
 
 ## Install
 
@@ -40,10 +52,16 @@ const stream = await blobStorage.open(fileRef.blobId)
 ```
 
 `put(...)` streams bodies to a temporary S3 object while computing SHA-256, then promotes the
-completed object into the content-addressed layout with a server-side copy. `putPartSizeBytes` and
-`putConcurrency` bound multipart upload memory per active write; their defaults are 8 MiB and 2.
-Failed and canceled writes attempt to remove their staging object. Byte arrays and `Blob` bodies
-remain supported for small or already-materialized payloads.
+completed object into the content-addressed layout with a server-side copy. Bodies no larger than
+one part use one bounded `PutObject`; larger bodies use multipart upload. `putPartSizeBytes` and
+`putConcurrency` bound provider-owned part buffers per active write; their defaults are 8 MiB and 2.
+Approximate upload-buffer memory is therefore `putPartSizeBytes * putConcurrency`, plus one source
+chunk and HTTP client overhead. `putRetries` controls retries of replayable AWS requests and
+defaults to 3; the same policy applies to reads and metadata requests.
+
+Failed and canceled multipart writes cancel the source, wait for in-flight requests, abort the S3
+multipart upload, and remove any completed staging object. Byte arrays and `Blob` bodies remain
+supported for small or already-materialized payloads.
 
 ## Staged Direct Uploads
 
@@ -84,10 +102,10 @@ The signed upload includes an `x-amz-checksum-sha256` header so the storage prov
 bytes uploaded by the browser. Bucket CORS must allow `PUT`, `x-amz-checksum-sha256`, and
 `content-type` for browser direct uploads.
 
-`completeUpload` fails closed on integrity: it issues a signed `HEAD` with
-`x-amz-checksum-mode: ENABLED` and refuses to promote the staged object unless the backend reports
-the same `x-amz-checksum-sha256` it verified on upload. Backends that do not store/return object
-checksums cannot be used for direct uploads.
+`completeUpload` fails closed on integrity: it requests checksum metadata with `HeadObject` and
+refuses to promote the staged object unless the backend reports the same
+`x-amz-checksum-sha256` it verified on upload. Backends that do not store/return object checksums
+cannot be used for direct uploads.
 
 ### Staging cleanup
 
@@ -108,8 +126,9 @@ const blobStorage = new S3BlobStorage({
 })
 ```
 
-Bun can also read credentials from environment variables, so constructor credentials are optional
-when the runtime environment is already configured.
+When constructor credentials are omitted, the AWS SDK credential provider chain is used. This
+supports environment variables, shared configuration, container credentials, and instance or
+workload roles.
 
 ## Object Layout
 

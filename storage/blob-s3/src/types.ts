@@ -9,31 +9,31 @@ export type S3BlobStorageAcl =
   | "log-delivery-write"
 
 export interface S3BlobStorageOptions {
-  /** S3 bucket name. When omitted, Bun can read S3_BUCKET from the environment. */
+  /** S3 bucket name. When omitted, S3_BUCKET or AWS_BUCKET is read from the environment. */
   readonly bucket?: string
   /** AWS region. For non-AWS providers, use endpoint instead. */
   readonly region?: string
   /** S3-compatible endpoint such as an R2, Spaces, or MinIO URL. */
   readonly endpoint?: string
-  /** Access key id. When omitted, Bun can read S3_ACCESS_KEY_ID or AWS_ACCESS_KEY_ID. */
+  /** Access key id. When omitted, the AWS SDK credential provider chain is used. */
   readonly accessKeyId?: string
-  /** Secret access key. When omitted, Bun can read S3_SECRET_ACCESS_KEY or AWS_SECRET_ACCESS_KEY. */
+  /** Secret access key. When omitted, the AWS SDK credential provider chain is used. */
   readonly secretAccessKey?: string
   /** Optional session token for temporary credentials. */
   readonly sessionToken?: string
-  /** Optional ACL forwarded to Bun's S3Client. */
+  /** Optional canned ACL applied to staged and content-addressed objects. */
   readonly acl?: S3BlobStorageAcl
   /**
-   * Force path-style object URLs for signed direct-upload requests.
+   * Force path-style S3 requests.
    * Defaults to true for localhost/IP endpoints and false otherwise.
    */
   readonly pathStyle?: boolean
   /** Key prefix that contains the blobs/sha256 object layout. Defaults to "sixb". */
   readonly basePath?: string
-  /** Multipart part size for streamed `put(...)` calls. Defaults to 8 MiB. */
+  /** Part size and small-object threshold for streamed `put(...)` calls. Defaults to 8 MiB. */
   readonly putPartSizeBytes?: number
   /** Maximum parallel multipart parts per streamed `put(...)`. Defaults to 2. */
   readonly putConcurrency?: number
-  /** Retry attempts for streamed multipart parts. Defaults to 3. */
+  /** Retry attempts for replayable AWS SDK requests. Defaults to 3. */
   readonly putRetries?: number
 }

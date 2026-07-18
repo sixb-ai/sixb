@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { createHash, randomUUID } from "node:crypto"
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
 import { BlobStorageError, computeBlobDigest } from "@sixb/core/blob-storage/server"
 import { runBlobStorageContractSuite } from "@sixb/core/testing"
-import { S3Client } from "bun"
 import { S3BlobStorage } from "../src"
 
 const encoder = new TextEncoder()
@@ -20,11 +20,14 @@ function createStorage(): S3BlobStorage {
 
 function rawS3Client(): S3Client {
   return new S3Client({
-    bucket: process.env.SIXB_S3_BUCKET,
     endpoint: process.env.SIXB_S3_ENDPOINT,
-    accessKeyId: process.env.SIXB_S3_ACCESS_KEY_ID,
-    secretAccessKey: process.env.SIXB_S3_SECRET_ACCESS_KEY,
     region: "us-east-1",
+    forcePathStyle: true,
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    credentials: {
+      accessKeyId: process.env.SIXB_S3_ACCESS_KEY_ID ?? "",
+      secretAccessKey: process.env.SIXB_S3_SECRET_ACCESS_KEY ?? "",
+    },
   })
 }
 
@@ -69,6 +72,19 @@ describe("S3BlobStorage", () => {
     expect(second.blobId).toBe(first.blobId)
     expect(second.digest).toBe(first.digest)
     expect(third.blobId).not.toBe(first.blobId)
+  })
+
+  test("stores empty blobs without opening a multipart upload", async () => {
+    const storage = createStorage()
+
+    const fileRef = await storage.put({
+      body: new Uint8Array(),
+      expectedSizeBytes: 0,
+      fileName: "empty.txt",
+    })
+
+    expect(fileRef.sizeBytes).toBe(0)
+    expect(await new Response(await storage.open(fileRef.blobId)).bytes()).toEqual(new Uint8Array())
   })
 
   test("streams multipart bodies through bounded staging", async () => {
@@ -187,7 +203,14 @@ describe("S3BlobStorage", () => {
 
     // Stage the bytes with a plain PUT (no x-amz-checksum-sha256), so the backend stores no
     // verified checksum. Completion must fail closed rather than trust the client-declared digest.
-    await rawS3Client().write(upload.stagingKey, body)
+    await rawS3Client().send(
+      new PutObjectCommand({
+        Bucket: process.env.SIXB_S3_BUCKET,
+        Key: upload.stagingKey,
+        Body: body,
+        ContentLength: body.byteLength,
+      })
+    )
 
     await expect(
       storage.completeUpload({
