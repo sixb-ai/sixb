@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { readFile, rename, stat, writeFile } from "node:fs/promises"
-import type { DatasetRow } from "@sixb/core"
+import type { DatasetRow, DatasetSchema } from "@sixb/core"
 import { type DatasetVersion, LakeStorageError } from "@sixb/core/lake-storage"
 import type { StoredDatasetVersionManifest, StoredManifestInput } from "./types"
 
@@ -31,6 +31,25 @@ export function selectColumns(row: DatasetRow, columns?: readonly string[]): Dat
     selected[column] = row[column]
   }
   return selected
+}
+
+// Canonical content key for unchanged-write detection. JSON.stringify
+// serializes Date values via toJSON, matching the persisted JSONL rows;
+// missing and undefined nullable values normalize to null. The unchanged-write
+// semantics are pinned by the shared lake-storage contract suite.
+export function rowContentKey(row: DatasetRow, schema: DatasetSchema): string {
+  return JSON.stringify(schema.columns.map((column) => row[column.name] ?? null))
+}
+
+// Order-insensitive multiset equality over canonical row keys.
+export function sameRowContent(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  const sortedLeft = [...left].sort()
+  const sortedRight = [...right].sort()
+  return sortedLeft.every((key, index) => key === sortedRight[index])
 }
 
 export async function pathExists(path: string): Promise<boolean> {

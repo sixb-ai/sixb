@@ -23,6 +23,7 @@ import {
   type DatasetCatalogState,
   type DatasetVersion,
   type DatasetWriteCommitResult,
+  type DatasetWriteMode,
   LakeStorageError,
   type LakeWriteSession,
   mergeStrictDatasetDefinition,
@@ -39,6 +40,8 @@ import {
   encodeSegment,
   pathExists,
   readJsonFile,
+  rowContentKey,
+  sameRowContent,
   selectColumns,
   toDatasetVersion,
   toStoredManifest,
@@ -47,7 +50,7 @@ import {
 
 class LocalLakeWriteSession implements LakeWriteSession {
   private closed = false
-  private rowCount = 0
+  private readonly rowKeys: string[] = []
 
   constructor(
     private readonly storage: LocalLakeStorage,
@@ -66,7 +69,7 @@ class LocalLakeWriteSession implements LakeWriteSession {
         throw new LakeStorageError(`[LakeLocal] ${validationError}`)
       }
       lines.push(`${JSON.stringify(row)}\n`)
-      this.rowCount += 1
+      this.rowKeys.push(rowContentKey(row, this.input.dataset.schema))
     }
 
     if (lines.length > 0) {
@@ -82,7 +85,7 @@ class LocalLakeWriteSession implements LakeWriteSession {
       return await this.storage.commitWrite({
         write: this.input,
         commit: input,
-        rowCount: this.rowCount,
+        rowKeys: this.rowKeys,
         sessionDir: this.sessionDir,
         tempRowsPath: this.tempRowsPath,
       })
@@ -338,9 +341,17 @@ export class LocalLakeStorage implements LakeStorage {
       }
     }
 
+    const mode = options.write.mode ?? "snapshot"
+
+    // Content-identical snapshots and empty appends reuse the latest version
+    // instead of creating a new one.
+    if (latestVersion && (await this.isUnchangedWrite(mode, options, latestVersion, definition))) {
+      await rm(options.sessionDir, { recursive: true, force: true })
+      return { ...latestVersion, outcome: "unchanged" }
+    }
+
     const versionId = `ver_${randomUUID()}`
     const versionRowsPath = this.rowsPath(options.write.dataset.id, versionId)
-    const mode = options.write.mode ?? "snapshot"
 
     if (mode === "append" && latestVersion?.versionId) {
       await this.materializeAppendRows({
@@ -366,7 +377,9 @@ export class LocalLakeStorage implements LakeStorage {
       producer: options.write.producer ? structuredClone(options.write.producer) : undefined,
       inputs: options.write.inputs ? structuredClone(options.write.inputs) : undefined,
       rowCount:
-        mode === "append" ? (latestVersion?.rowCount ?? 0) + options.rowCount : options.rowCount,
+        mode === "append"
+          ? (latestVersion?.rowCount ?? 0) + options.rowKeys.length
+          : options.rowKeys.length,
       sizeBytes: versionRowsStat.size,
     }
 
@@ -383,6 +396,36 @@ export class LocalLakeStorage implements LakeStorage {
     })
 
     return { ...version, outcome: "created" }
+  }
+
+  private async isUnchangedWrite(
+    mode: DatasetWriteMode,
+    options: CommitWriteInput,
+    latestVersion: DatasetVersion,
+    definition: DatasetDefinition
+  ): Promise<boolean> {
+    if (mode === "append") {
+      return options.rowKeys.length === 0
+    }
+
+    if (latestVersion.rowCount !== undefined && latestVersion.rowCount !== options.rowKeys.length) {
+      return false
+    }
+
+    const previousRowsPath = this.rowsPath(latestVersion.datasetId, latestVersion.versionId)
+    if (!(await pathExists(previousRowsPath))) {
+      return false
+    }
+
+    const previousKeys: string[] = []
+    const content = await readFile(previousRowsPath, "utf8")
+    for (const line of content.split("\n")) {
+      if (line) {
+        previousKeys.push(rowContentKey(JSON.parse(line) as DatasetRow, definition.schema))
+      }
+    }
+
+    return sameRowContent(options.rowKeys, previousKeys)
   }
 
   private async ensureBaseDirs(): Promise<void> {

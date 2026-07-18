@@ -35,7 +35,8 @@ export interface StoredDatasetVersionManifest {
 export interface CommitWriteInput {
   readonly write: BeginDatasetWriteInput
   readonly commit?: CommitDatasetWriteInput
-  readonly rowCount: number
+  /** Canonical content key per staged row, used for row counts and unchanged-write detection. */
+  readonly rowKeys: readonly string[]
   readonly sessionDir: string
   readonly tempRowsPath: string
 }

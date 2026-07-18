@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import type { DatasetDefinition } from "../datasets"
+import type { DatasetDefinition, DatasetSchema } from "../datasets"
 import { getDatasetRowValidationError } from "../datasets/validation"
 import { mergeStrictDatasetDefinition } from "./definition-updates"
 import { LakeStorageError } from "./errors"
@@ -10,6 +10,7 @@ import type {
   DatasetRow,
   DatasetVersion,
   DatasetWriteCommitResult,
+  DatasetWriteMode,
   LakeStorage,
   LakeWriteSession,
   ReadDatasetRowsInput,
@@ -40,6 +41,25 @@ function selectColumns(row: DatasetRow, columns?: readonly string[]): DatasetRow
     selected[column] = row[column]
   }
   return selected
+}
+
+// Canonical content key for unchanged-write detection. JSON.stringify
+// serializes Date values via toJSON, matching how rows persist as JSON;
+// missing and undefined nullable values normalize to null. The unchanged-write
+// semantics are pinned by the shared lake-storage contract suite.
+function rowContentKey(row: DatasetRow, schema: DatasetSchema): string {
+  return JSON.stringify(schema.columns.map((column) => row[column.name] ?? null))
+}
+
+// Order-insensitive multiset equality over canonical row keys.
+function sameRowContent(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  const sortedLeft = [...left].sort()
+  const sortedRight = [...right].sort()
+  return sortedLeft.every((key, index) => key === sortedRight[index])
 }
 
 function assertDatasetId(datasetId: string): void {
@@ -265,6 +285,15 @@ export class InMemoryLakeStorage implements LakeStorage {
       }
     }
 
+    // Content-identical snapshots and empty appends reuse the latest version
+    // instead of creating a new one.
+    if (
+      latestVersion &&
+      this.isUnchangedWrite(mode, latestVersion, options.rows, definition.schema)
+    ) {
+      return { ...latestVersion, outcome: "unchanged" }
+    }
+
     const versionId = `ver_${randomUUID()}`
     const visibleRows =
       mode === "append"
@@ -298,5 +327,22 @@ export class InMemoryLakeStorage implements LakeStorage {
     this.latestVersionIdByDataset.set(options.write.dataset.id, versionId)
 
     return { ...cloneDatasetVersion(version), outcome: "created" }
+  }
+
+  private isUnchangedWrite(
+    mode: DatasetWriteMode,
+    latestVersion: DatasetVersion,
+    rows: readonly DatasetRow[],
+    schema: DatasetSchema
+  ): boolean {
+    if (mode === "append") {
+      return rows.length === 0
+    }
+
+    const previousRows = this.rowsByVersionId.get(latestVersion.versionId) ?? []
+    return sameRowContent(
+      rows.map((row) => rowContentKey(row, schema)),
+      previousRows.map((row) => rowContentKey(row, schema))
+    )
   }
 }
