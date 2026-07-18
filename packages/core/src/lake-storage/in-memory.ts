@@ -9,6 +9,7 @@ import type {
   DatasetCatalogState,
   DatasetRow,
   DatasetVersion,
+  DatasetWriteCommitResult,
   LakeStorage,
   LakeWriteSession,
   ReadDatasetRowsInput,
@@ -73,7 +74,7 @@ class InMemoryLakeWriteSession implements LakeWriteSession {
     }
   }
 
-  async commit(input?: CommitDatasetWriteInput): Promise<DatasetVersion> {
+  async commit(input?: CommitDatasetWriteInput): Promise<DatasetWriteCommitResult> {
     this.assertOpen()
     this.closed = true
     return this.storage.commitWrite({
@@ -246,7 +247,7 @@ export class InMemoryLakeStorage implements LakeStorage {
     write: BeginDatasetWriteInput
     rows: readonly DatasetRow[]
     commit?: CommitDatasetWriteInput
-  }): Promise<DatasetVersion> {
+  }): Promise<DatasetWriteCommitResult> {
     const definition = this.datasets.get(options.write.dataset.id)
     if (!definition) {
       throw new LakeStorageError(`[LakeStorage] Unknown dataset '${options.write.dataset.id}'`)
@@ -296,6 +297,6 @@ export class InMemoryLakeStorage implements LakeStorage {
     )
     this.latestVersionIdByDataset.set(options.write.dataset.id, versionId)
 
-    return cloneDatasetVersion(version)
+    return { ...cloneDatasetVersion(version), outcome: "created" }
   }
 }

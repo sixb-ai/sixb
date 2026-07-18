@@ -204,7 +204,9 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
             { orderId: "ord_1", customerName: "Ada" },
             { orderId: "ord_2", customerName: "Grace" },
           ])
-          const version = await write.commit()
+          const commit = await write.commit()
+          expect(commit.outcome).toBe("created")
+          const version = commit
 
           await storage.createDataset(definitionDataset)
 
@@ -272,7 +274,9 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
             { orderId: "ord_1", customerName: "Ada" },
             { orderId: "ord_2", customerName: "Grace" },
           ])
-          const version1 = await snapshotWrite.commit({ commitMessage: "snapshot orders" })
+          const snapshotCommit = await snapshotWrite.commit({ commitMessage: "snapshot orders" })
+          expect(snapshotCommit.outcome).toBe("created")
+          const version1 = snapshotCommit
 
           expect(version1).toMatchObject({
             datasetId: writeDataset.id,
@@ -300,9 +304,11 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
             inputs: [{ datasetId: writeDataset.id, versionId: version1.versionId }],
           })
           await appendWrite.writeRows([{ orderId: "ord_3", customerName: "Katherine" }])
-          const version2 = await appendWrite.commit({
+          const appendCommit = await appendWrite.commit({
             expectedLatestVersionId: version1.versionId,
           })
+          expect(appendCommit.outcome).toBe("created")
+          const version2 = appendCommit
 
           expect(version2).toMatchObject({
             datasetId: writeDataset.id,

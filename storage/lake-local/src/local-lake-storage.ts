@@ -22,6 +22,7 @@ import {
   type CommitDatasetWriteInput,
   type DatasetCatalogState,
   type DatasetVersion,
+  type DatasetWriteCommitResult,
   LakeStorageError,
   type LakeWriteSession,
   mergeStrictDatasetDefinition,
@@ -73,7 +74,7 @@ class LocalLakeWriteSession implements LakeWriteSession {
     }
   }
 
-  async commit(input?: CommitDatasetWriteInput): Promise<DatasetVersion> {
+  async commit(input?: CommitDatasetWriteInput): Promise<DatasetWriteCommitResult> {
     this.assertOpen()
     this.closed = true
 
@@ -319,7 +320,7 @@ export class LocalLakeStorage implements LakeStorage {
     }
   }
 
-  async commitWrite(options: CommitWriteInput): Promise<DatasetVersion> {
+  async commitWrite(options: CommitWriteInput): Promise<DatasetWriteCommitResult> {
     const definition = await this.getDataset(options.write.dataset.id)
     if (!definition) {
       throw new LakeStorageError(`[LakeLocal] Unknown dataset '${options.write.dataset.id}'`)
@@ -381,7 +382,7 @@ export class LocalLakeStorage implements LakeStorage {
       latestVersionId: versionId,
     })
 
-    return version
+    return { ...version, outcome: "created" }
   }
 
   private async ensureBaseDirs(): Promise<void> {

@@ -26,7 +26,6 @@ interface QueueRecord<TQueueJob extends QueueJob = QueueJob> {
   leaseId: string | null
   claimedAt: string | null
   leaseExpiresAt: string | null
-  readonly coalesceKey: string | null
 }
 
 function assertNonEmpty(value: string, fieldName: string): void {
@@ -125,12 +124,7 @@ class InMemoryQueueStore {
   private readonly recordsByProject = new Map<string, QueueRecord[]>()
   private nextSequence = 1
 
-  add<TQueueJob extends QueueJob>(
-    projectId: string,
-    queueId: string,
-    job: TQueueJob,
-    coalesceKey: string | null = null
-  ): void {
+  add<TQueueJob extends QueueJob>(projectId: string, queueId: string, job: TQueueJob): void {
     const records = this.getOrCreateRecords(projectId)
     records.push({
       sequence: this.nextSequence,
@@ -140,39 +134,8 @@ class InMemoryQueueStore {
       leaseId: null,
       claimedAt: null,
       leaseExpiresAt: null,
-      coalesceKey,
     })
     this.nextSequence += 1
-  }
-
-  coalesce<TQueueJob extends QueueJob>(
-    projectId: string,
-    queueId: string,
-    coalesceKey: string,
-    job: TQueueJob
-  ): TQueueJob {
-    const matching = this.list<TQueueJob>(projectId, queueId).filter(
-      (record) => record.state === "queued" && record.coalesceKey === coalesceKey
-    )
-    const active = matching.find((record) => record.leaseId !== null)
-    const pending = matching.find((record) => record.leaseId === null)
-
-    if (!active && pending) {
-      return pending.job
-    }
-
-    if (active && pending) {
-      pending.job = {
-        ...job,
-        id: pending.job.id,
-        createdAt: pending.job.createdAt,
-        attempt: pending.job.attempt,
-      }
-      return pending.job
-    }
-
-    this.add(projectId, queueId, job, coalesceKey)
-    return job
   }
 
   list<TQueueJob extends QueueJob>(projectId: string, queueId: string): QueueRecord<TQueueJob>[] {
@@ -222,16 +185,12 @@ class InMemoryQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob> {
 
     const createdJobs = params.jobs.map((job) => {
       if (job.id !== undefined) assertNonEmpty(job.id, "job.id")
-      if (job.coalesce !== undefined) assertNonEmpty(job.coalesce.key, "job.coalesce.key")
       const existing = job.id
         ? this.store.find<TQueueJob>(params.projectId, this.queueId, job.id)
         : null
       if (existing) return existing.job
 
       const created = createQueueJob(params.projectId, job)
-      if (job.coalesce) {
-        return this.store.coalesce(params.projectId, this.queueId, job.coalesce.key, created)
-      }
       this.store.add(params.projectId, this.queueId, created)
       return created
     })

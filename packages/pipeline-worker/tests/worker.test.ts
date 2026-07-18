@@ -87,7 +87,7 @@ class ReusingVersionLakeStorage extends InMemoryLakeStorage {
         await write.abort()
         const latest = await this.getLatestVersion(input.dataset.id)
         if (!latest) throw new Error("Expected a committed version to reuse.")
-        return latest
+        return { ...latest, outcome: "unchanged" }
       },
       abort: () => write.abort(),
     }
@@ -372,55 +372,6 @@ describe("PipelineWorker", () => {
       status: "succeeded",
       versionId: previous.versionId,
     })
-  })
-
-  test("treats duplicate deterministic run ids as no-op deliveries", async () => {
-    const step = definePipelineStep("copy-customers")
-      .inputs({ rawCustomers: rawCustomersDataset })
-      .output(customersDataset)
-      .run(async ({ inputs, output }) => {
-        await output.writeRows(inputs.rawCustomers.readRows())
-      })
-    const pipeline = definePipeline("customers").then(step)
-    const sixb = createSixbForPipeline({
-      pipeline,
-      datasets: [rawCustomersDataset, customersDataset],
-    })
-    await seedDatasetVersion(sixb.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
-      { id: "cust_1", name: "Ada" },
-    ])
-    const worker = new PipelineWorker(sixb)
-
-    await sixb.queues.pipelines.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "pipeline.run.requested",
-          payload: { pipelineId: pipeline.id, runId: "schedule-run" },
-        },
-        {
-          type: "pipeline.run.requested",
-          payload: { pipelineId: pipeline.id, runId: "schedule-run" },
-        },
-      ],
-    })
-
-    await worker.start()
-    await waitFor(
-      () => sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "schedule-run" }),
-      (run) => run?.status === "succeeded"
-    )
-    await Bun.sleep(50)
-    await worker.stop()
-
-    const events = await sixb.events.read({
-      types: ["pipeline.run.started", "pipeline.run.finished"],
-    })
-    expect(events.map((event) => event.type)).toEqual([
-      "pipeline.run.started",
-      "pipeline.run.finished",
-    ])
-    expect(events[1]?.payload).toMatchObject({ status: "succeeded" })
   })
 
   test("emits committed step events before failing a later step", async () => {

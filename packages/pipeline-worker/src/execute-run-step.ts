@@ -21,7 +21,7 @@ export async function executeRunStep(input: {
   readonly resolvedInputs: readonly ResolvedStepInput[]
 }): Promise<{
   readonly version: DatasetVersion
-  readonly versionCommitted: boolean
+  readonly versionCreated: boolean
   readonly rowsWritten: number
 }> {
   const { runtime, pipeline, step, job, signal, outputDataset, resolvedInputs } = input
@@ -69,17 +69,14 @@ export async function executeRunStep(input: {
     await step.executor.handler(context)
     throwIfAborted(signal)
 
-    const version = await write.commit({
+    const commit = await write.commit({
       commitMessage: `pipeline ${pipeline.id} step ${step.id} run ${job.id}`,
     })
+    const { outcome, ...version } = commit
 
     return {
       version,
-      versionCommitted:
-        version.producer?.kind === "pipeline" &&
-        version.producer.id === pipeline.id &&
-        version.producer.runId === job.id &&
-        version.producer.stepId === step.id,
+      versionCreated: outcome === "created",
       rowsWritten,
     }
   } catch (error) {

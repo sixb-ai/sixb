@@ -219,21 +219,18 @@ async function enqueueDirectJob(
         ],
       })
       return
-    case "pipelines": {
-      const payload = withPipelineScheduleRunId(item.job.payload, sourceEvent)
+    case "pipelines":
       await options.queues.pipelines.enqueue({
         projectId: options.projectId,
         jobs: [
           {
             ...item.job,
-            payload,
-            coalesce: { key: pipelineCoalesceKey(payload.pipelineId) },
+            payload: withPipelineScheduleRunId(item.job.payload, sourceEvent),
             metadata,
           },
         ],
       })
       return
-    }
     case "projections":
       if (sourceEvent.type !== "dataset.version.committed") {
         throw new OrchestratorError(
@@ -310,8 +307,7 @@ async function enqueueEventScheduleTarget(
         ],
       })
       return
-    case "pipelines": {
-      const runId = scheduleConsumerRunId("pipeline", target.pipelineId, scheduleId, sourceEvent.id)
+    case "pipelines":
       await options.queues.pipelines.enqueue({
         projectId: options.projectId,
         jobs: [
@@ -319,15 +315,18 @@ async function enqueueEventScheduleTarget(
             type: "pipeline.run.requested",
             payload: {
               pipelineId: target.pipelineId,
-              runId,
+              runId: scheduleConsumerRunId(
+                "pipeline",
+                target.pipelineId,
+                scheduleId,
+                sourceEvent.id
+              ),
             },
-            coalesce: { key: pipelineCoalesceKey(target.pipelineId) },
             metadata,
           },
         ],
       })
       return
-    }
     case "workflows": {
       const input = target.mapper ? target.mapper({ event } as never) : {}
       if (!isRecord(input)) {
@@ -414,10 +413,6 @@ function scheduleConsumerRunId(
   eventId: string
 ): string {
   return `${kind}:${consumerId}:schedule:${scheduleId}:event:${eventId}`
-}
-
-function pipelineCoalesceKey(pipelineId: string): string {
-  return `pipeline:${pipelineId}`
 }
 
 function buildMetadata(event: StoredDomainEvent): Record<string, string> {

@@ -44,7 +44,7 @@ export function buildEnvelope<TQueueJob extends QueueJob>(
 
   const delayMs = Math.max(0, availableAtMs - Date.now())
 
-  return { job, data, delayMs, coalesceKey: newJob.coalesce?.key }
+  return { job, data, delayMs }
 }
 
 /**

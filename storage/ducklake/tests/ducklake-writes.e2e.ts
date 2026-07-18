@@ -539,6 +539,7 @@ describe("DuckLakeStorage writes and latest reads", () => {
     })
     await seed.writeRows(seedRows)
     const seedVersion = await seed.commit()
+    expect(seedVersion.outcome).toBe("created")
     const snapshotCountAfterSeed = await duckLakeSnapshotCount(storage, rootDir)
 
     const identical = await storage.beginWrite({
@@ -548,6 +549,7 @@ describe("DuckLakeStorage writes and latest reads", () => {
     await identical.writeRows(seedRows)
     const identicalVersion = await identical.commit()
 
+    expect(identicalVersion.outcome).toBe("unchanged")
     expect(identicalVersion.versionId).toBe(seedVersion.versionId)
     expect(await duckLakeSnapshotCount(storage, rootDir)).toBe(snapshotCountAfterSeed)
 
@@ -558,6 +560,7 @@ describe("DuckLakeStorage writes and latest reads", () => {
     await reordered.writeRows([...seedRows].reverse())
     const reorderedVersion = await reordered.commit()
 
+    expect(reorderedVersion.outcome).toBe("unchanged")
     expect(reorderedVersion.versionId).toBe(seedVersion.versionId)
     expect(await duckLakeSnapshotCount(storage, rootDir)).toBe(snapshotCountAfterSeed)
 
@@ -576,6 +579,7 @@ describe("DuckLakeStorage writes and latest reads", () => {
     ])
     const changedVersion = await changed.commit()
 
+    expect(changedVersion.outcome).toBe("created")
     expect(changedVersion.versionId).not.toBe(seedVersion.versionId)
     expect(await duckLakeSnapshotCount(storage, rootDir)).toBe(snapshotCountAfterSeed + 1)
     await expect(collectRows(storage.readRows({ datasetId: ordersDataset.id }))).resolves.toEqual([
@@ -653,6 +657,7 @@ describe("DuckLakeStorage writes and latest reads", () => {
     })
     const result = await append.commit()
 
+    expect(result.outcome).toBe("unchanged")
     expect(result.versionId).toBe(previous.versionId)
     expect(result.rowCount).toBe(1)
     expect(

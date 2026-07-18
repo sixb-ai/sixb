@@ -127,7 +127,7 @@ async function emitSyncSucceededEvents(
   try {
     await sixb.events.append({
       events: [
-        ...(result.versionCommitted
+        ...(result.versionCreated
           ? [
               {
                 type: "dataset.version.committed" as const,
