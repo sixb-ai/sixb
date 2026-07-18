@@ -25,13 +25,11 @@ import {
   type SignedBlobUploadPart,
   streamBlobBody,
 } from "@sixb/core/blob-storage/server"
-import { S3Client as BunS3Client } from "bun"
-import { type S3UploadApi, uploadBlobStreamToS3 } from "./s3-multipart-upload"
-import { encodeRfc3986, encodeS3Path, presignS3Url } from "./sigv4"
-import type { S3BlobStorageAcl, S3BlobStorageOptions } from "./types"
+import { createAwsS3Api, type S3Api } from "./aws-s3-api"
+import { uploadBlobStreamToS3 } from "./s3-multipart-upload"
+import type { S3BlobStorageOptions } from "./types"
 
 const MAX_PRESIGNED_URL_EXPIRES_SECONDS = 7 * 24 * 60 * 60 // 7 days
-const READ_URL_EXPIRES_SECONDS = 60
 const MIN_S3_MULTIPART_PART_SIZE_BYTES = 5 * 1024 * 1024
 const DEFAULT_PUT_PART_SIZE_BYTES = 8 * 1024 * 1024
 const DEFAULT_PUT_CONCURRENCY = 2
@@ -64,8 +62,10 @@ function isMissingS3ObjectError(error: unknown): boolean {
 
   const record = error as Record<string, unknown>
   const metadata = record.$metadata as { httpStatusCode?: unknown } | undefined
-  // Bun and S3-compatible backends surface missing objects with slightly different shapes.
+  // AWS and S3-compatible backends surface missing objects with slightly different names.
   return (
+    record.name === "NoSuchKey" ||
+    record.name === "NotFound" ||
     record.code === "NoSuchKey" ||
     record.status === 404 ||
     record.statusCode === 404 ||
@@ -123,35 +123,24 @@ export class S3BlobStorage
   implements BlobStorage, DirectUploadBlobStorage, RangeReadableBlobStorage
 {
   private readonly basePath: string
-  private readonly bucket: string | undefined
-  private readonly region: string
-  private readonly endpoint: string | undefined
-  private readonly accessKeyId: string | undefined
-  private readonly secretAccessKey: string | undefined
-  private readonly sessionToken: string | undefined
-  private readonly acl: S3BlobStorageAcl | undefined
-  private readonly pathStyle: boolean
   private readonly putPartSizeBytes: number
   private readonly putConcurrency: number
-  private readonly putRetries: number
-  private readonly client: BunS3Client
-  private putApiPromise: Promise<S3UploadApi> | undefined
+  private readonly api: S3Api
 
   constructor(options: S3BlobStorageOptions = {}) {
     this.basePath = normalizeS3BlobBasePath(options.basePath ?? "sixb")
-    this.bucket = options.bucket ?? envValue("S3_BUCKET", "AWS_BUCKET")
-    this.endpoint = options.endpoint ?? envValue("S3_ENDPOINT", "AWS_ENDPOINT")
-    this.region =
+    const bucket = options.bucket ?? envValue("S3_BUCKET", "AWS_BUCKET")
+    const endpoint = options.endpoint ?? envValue("S3_ENDPOINT", "AWS_ENDPOINT")
+    const region =
       options.region ??
       envValue("S3_REGION", "AWS_REGION") ??
-      inferRegionFromEndpoint(this.endpoint) ??
+      inferRegionFromEndpoint(endpoint) ??
       "us-east-1"
-    this.accessKeyId = options.accessKeyId ?? envValue("S3_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID")
-    this.secretAccessKey =
+    const accessKeyId = options.accessKeyId ?? envValue("S3_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID")
+    const secretAccessKey =
       options.secretAccessKey ?? envValue("S3_SECRET_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY")
-    this.sessionToken = options.sessionToken ?? envValue("S3_SESSION_TOKEN", "AWS_SESSION_TOKEN")
-    this.acl = options.acl
-    this.pathStyle = options.pathStyle ?? defaultPathStyle(this.endpoint)
+    const sessionToken = options.sessionToken ?? envValue("S3_SESSION_TOKEN", "AWS_SESSION_TOKEN")
+    const pathStyle = options.pathStyle ?? defaultPathStyle(endpoint)
     this.putPartSizeBytes = requireIntegerOption(
       "putPartSizeBytes",
       options.putPartSizeBytes ?? DEFAULT_PUT_PART_SIZE_BYTES,
@@ -163,20 +152,22 @@ export class S3BlobStorage
       1,
       255
     )
-    this.putRetries = requireIntegerOption(
+    const putRetries = requireIntegerOption(
       "putRetries",
       options.putRetries ?? DEFAULT_PUT_RETRIES,
       0,
       255
     )
-    this.client = new BunS3Client({
-      bucket: this.bucket,
-      region: this.region,
-      endpoint: this.endpoint,
-      accessKeyId: this.accessKeyId,
-      secretAccessKey: this.secretAccessKey,
-      sessionToken: this.sessionToken,
-      acl: this.acl,
+    this.api = createAwsS3Api({
+      bucket,
+      region,
+      retries: putRetries,
+      pathStyle,
+      ...(endpoint === undefined ? {} : { endpoint }),
+      ...(accessKeyId === undefined ? {} : { accessKeyId }),
+      ...(secretAccessKey === undefined ? {} : { secretAccessKey }),
+      ...(sessionToken === undefined ? {} : { sessionToken }),
+      ...(options.acl === undefined ? {} : { acl: options.acl }),
     })
   }
 
@@ -186,21 +177,19 @@ export class S3BlobStorage
     const stagingKey = this.uploadKeyForId(`put_${randomUUID().replaceAll("-", "")}`)
 
     try {
-      const api = await this.putApi()
       const { digest, sizeBytes } = await uploadBlobStreamToS3({
         stream: streamBlobBody(input.body),
-        api,
+        api: this.api,
         key: stagingKey,
         partSizeBytes: this.putPartSizeBytes,
         concurrency: this.putConcurrency,
-        retries: this.putRetries,
         expectedSizeBytes: input.expectedSizeBytes,
         signal: input.signal,
         mediaType: input.mediaType,
       })
 
-      const staged = await this.client.stat(stagingKey)
-      assertExpectedBlobSize(sizeBytes, staged.size, "BlobS3")
+      const staged = await this.api.headObject({ key: stagingKey })
+      assertExpectedBlobSize(sizeBytes, staged.sizeBytes, "BlobS3")
       input.signal?.throwIfAborted()
 
       const info: BlobInfo = {
@@ -210,7 +199,7 @@ export class S3BlobStorage
       }
 
       await this.copyObject(stagingKey, this.contentKeyForHex(blobDigestHex(digest)))
-      await this.client.delete(stagingKey)
+      await this.api.deleteObject(stagingKey)
       return createFileRef(input, info)
     } catch (error) {
       await this.deleteStagedObjectQuietly(stagingKey)
@@ -227,18 +216,19 @@ export class S3BlobStorage
 
     const stagingKey = this.uploadKeyForId(input.uploadId)
     const expiresIn = this.expiresInSeconds(input.expiresAt)
-    const headers: Record<string, string> = {
-      "x-amz-checksum-sha256": checksumBase64(input.expectedDigest),
-      ...(input.mediaType === undefined ? {} : { "content-type": input.mediaType }),
-      ...(this.acl === undefined ? {} : { "x-amz-acl": this.acl }),
-    }
+    const signed = await this.api.presignPutObject({
+      key: stagingKey,
+      checksumSha256: checksumBase64(input.expectedDigest),
+      expiresInSeconds: expiresIn,
+      ...(input.mediaType === undefined ? {} : { mediaType: input.mediaType }),
+    })
 
     return {
       strategy: "direct-put",
       uploadId: input.uploadId,
       method: "PUT",
-      url: this.presignUrl("PUT", stagingKey, headers, expiresIn),
-      headers,
+      url: signed.url,
+      headers: signed.headers,
       expiresAt: input.expiresAt,
       stagingKey,
     }
@@ -284,7 +274,7 @@ export class S3BlobStorage
 
     const finalKey = this.contentKeyForHex(blobDigestHex(input.expectedDigest))
     await this.copyObject(input.stagingKey, finalKey)
-    await this.client.delete(input.stagingKey)
+    await this.api.deleteObject(input.stagingKey)
 
     return {
       blobId: blobIdFromDigest(input.expectedDigest),
@@ -298,7 +288,7 @@ export class S3BlobStorage
 
   async abortUpload(input: AbortBlobUploadInput): Promise<void> {
     try {
-      await this.client.delete(input.stagingKey)
+      await this.api.deleteObject(input.stagingKey)
     } catch (error) {
       if (!isMissingS3ObjectError(error)) {
         throw error
@@ -331,11 +321,11 @@ export class S3BlobStorage
     }
 
     try {
-      const stat = await this.client.stat(this.contentKeyForHex(hex))
+      const stat = await this.api.headObject({ key: this.contentKeyForHex(hex) })
       return {
         blobId,
         digest: `sha256:${hex}`,
-        sizeBytes: stat.size,
+        sizeBytes: stat.sizeBytes,
       }
     } catch (error) {
       if (isMissingS3ObjectError(error)) {
@@ -346,50 +336,40 @@ export class S3BlobStorage
     }
   }
 
-  // Single-request read: a signed GET (plus an optional, unsigned Range header) whose 404 maps to a
-  // clean not-found before any body is streamed, avoiding the extra HEAD round-trip a pre-stat adds.
+  // Single-request read whose 404 maps to a clean not-found before any body is streamed, avoiding
+  // the extra HEAD round-trip a pre-stat adds.
   private async streamObject(
     blobId: string,
     key: string,
     range?: BlobByteRange
   ): Promise<ReadableStream<Uint8Array>> {
-    const url = this.presignUrl("GET", key, {}, READ_URL_EXPIRES_SECONDS)
-    const response = await fetch(url, {
-      headers: range ? { range: `bytes=${range.start}-${range.endInclusive}` } : {},
-    })
-
-    if (response.status === 404) {
-      throw new BlobStorageError(`[BlobS3] Unknown blob '${blobId}'`)
+    try {
+      return await this.api.getObject({
+        key,
+        ...(range === undefined ? {} : { range }),
+      })
+    } catch (error) {
+      if (isMissingS3ObjectError(error)) {
+        throw new BlobStorageError(`[BlobS3] Unknown blob '${blobId}'`)
+      }
+      throw error
     }
-    if (!response.ok || !response.body) {
-      throw new BlobStorageError(
-        `[BlobS3] Failed to read blob '${blobId}': HTTP ${response.status}.`
-      )
-    }
-
-    return response.body
   }
 
   private async headStagedObject(
     stagingKey: string
   ): Promise<{ readonly sizeBytes: number; readonly checksumSha256: string | null }> {
-    const headers = { "x-amz-checksum-mode": "ENABLED" }
-    const url = this.presignUrl("HEAD", stagingKey, headers, READ_URL_EXPIRES_SECONDS)
-    const response = await fetch(url, { method: "HEAD", headers })
-
-    if (response.status === 404) {
-      throw new BlobStorageError(`[BlobS3] Staged upload object '${stagingKey}' was not found.`)
-    }
-    if (!response.ok) {
-      throw new BlobStorageError(
-        `[BlobS3] Failed to inspect staged upload '${stagingKey}': HTTP ${response.status}.`
-      )
-    }
-
-    const contentLength = response.headers.get("content-length")
-    return {
-      sizeBytes: contentLength === null ? Number.NaN : Number(contentLength),
-      checksumSha256: response.headers.get("x-amz-checksum-sha256"),
+    try {
+      const head = await this.api.headObject({ key: stagingKey, checksumMode: true })
+      return {
+        sizeBytes: head.sizeBytes,
+        checksumSha256: head.checksumSha256 ?? null,
+      }
+    } catch (error) {
+      if (isMissingS3ObjectError(error)) {
+        throw new BlobStorageError(`[BlobS3] Staged upload object '${stagingKey}' was not found.`)
+      }
+      throw error
     }
   }
 
@@ -403,56 +383,16 @@ export class S3BlobStorage
       : `uploads/${uploadId}/object`
   }
 
-  private putApi(): Promise<S3UploadApi> {
-    const bucket = this.bucket
-    if (!bucket) {
-      throw new BlobStorageError("[BlobS3] Streamed uploads require an S3 bucket configuration.")
-    }
-
-    this.putApiPromise ??= import("./aws-s3-upload-api").then(({ createAwsS3UploadApi }) =>
-      createAwsS3UploadApi({
-        bucket,
-        region: this.region,
-        pathStyle: this.pathStyle,
-        ...(this.endpoint === undefined ? {} : { endpoint: this.endpoint }),
-        ...(this.accessKeyId === undefined ? {} : { accessKeyId: this.accessKeyId }),
-        ...(this.secretAccessKey === undefined ? {} : { secretAccessKey: this.secretAccessKey }),
-        ...(this.sessionToken === undefined ? {} : { sessionToken: this.sessionToken }),
-      })
-    )
-    return this.putApiPromise
-  }
-
   private async deleteStagedObjectQuietly(stagingKey: string): Promise<void> {
     try {
-      await this.client.delete(stagingKey)
+      await this.api.deleteObject(stagingKey)
     } catch {
       // Preserve the upload failure. Bucket lifecycle rules are the final cleanup safety net.
     }
   }
 
   private async copyObject(sourceKey: string, destinationKey: string): Promise<void> {
-    const headers: Record<string, string> = {
-      "x-amz-copy-source": this.copySourceHeader(sourceKey),
-      ...(this.acl === undefined ? {} : { "x-amz-acl": this.acl }),
-    }
-    const url = this.presignUrl("PUT", destinationKey, headers, 60)
-    const response = await fetch(url, {
-      method: "PUT",
-      headers,
-    })
-
-    if (!response.ok) {
-      const message = await response.text().catch(() => "")
-      throw new BlobStorageError(
-        `[BlobS3] Failed to promote staged upload with S3 CopyObject: HTTP ${response.status}${message ? ` ${message}` : ""}`
-      )
-    }
-  }
-
-  private copySourceHeader(key: string): string {
-    const { bucket } = this.requireSigningConfig()
-    return `/${encodeRfc3986(bucket)}/${encodeS3Path(key)}`
+    await this.api.copyObject(sourceKey, destinationKey)
   }
 
   private expiresInSeconds(expiresAt: Date): number {
@@ -460,47 +400,6 @@ export class S3BlobStorage
       MAX_PRESIGNED_URL_EXPIRES_SECONDS,
       Math.max(1, Math.ceil((expiresAt.getTime() - Date.now()) / 1000))
     )
-  }
-
-  private presignUrl(
-    method: string,
-    key: string,
-    headers: Readonly<Record<string, string>>,
-    expiresInSeconds: number
-  ): string {
-    const config = this.requireSigningConfig()
-    return presignS3Url({
-      method,
-      key,
-      headers,
-      expiresInSeconds,
-      bucket: config.bucket,
-      accessKeyId: config.accessKeyId,
-      secretAccessKey: config.secretAccessKey,
-      region: this.region,
-      endpoint: this.endpoint,
-      pathStyle: this.pathStyle,
-      ...(this.sessionToken === undefined ? {} : { sessionToken: this.sessionToken }),
-      now: new Date(),
-    })
-  }
-
-  private requireSigningConfig(): {
-    readonly bucket: string
-    readonly accessKeyId: string
-    readonly secretAccessKey: string
-  } {
-    if (!this.bucket || !this.accessKeyId || !this.secretAccessKey) {
-      throw new BlobStorageError(
-        "[BlobS3] Direct staged uploads require bucket, access key id, and secret access key configuration."
-      )
-    }
-
-    return {
-      bucket: this.bucket,
-      accessKeyId: this.accessKeyId,
-      secretAccessKey: this.secretAccessKey,
-    }
   }
 }
 

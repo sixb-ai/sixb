@@ -2,9 +2,6 @@ import { createHash } from "node:crypto"
 import type { BlobDigest } from "@sixb/core"
 import { assertExpectedBlobSize, BlobStorageError } from "@sixb/core/blob-storage/server"
 
-const RETRY_BASE_DELAY_MS = 250
-const RETRY_MAX_DELAY_MS = 2_000
-
 export interface S3UploadPart {
   readonly partNumber: number
   readonly etag: string
@@ -64,11 +61,9 @@ interface S3StreamUploadInput {
   readonly key: string
   readonly partSizeBytes: number
   readonly concurrency: number
-  readonly retries: number
   readonly expectedSizeBytes?: number
   readonly signal?: AbortSignal
   readonly mediaType?: string
-  readonly retryDelay?: (failedAttempt: number, signal?: AbortSignal) => Promise<void>
 }
 
 interface TrackedPartUpload {
@@ -138,20 +133,15 @@ export async function uploadBlobStreamToS3(
 
     const partNumber = nextPartNumber
     nextPartNumber += 1
-    const promise = retryUpload(
-      () =>
-        input.api.uploadPart({
-          key: input.key,
-          uploadId: currentUploadId,
-          partNumber,
-          body,
-          contentMd5: md5Base64(body),
-          signal: input.signal,
-        }),
-      input.retries,
-      input.signal,
-      input.retryDelay
-    )
+    const promise = input.api
+      .uploadPart({
+        key: input.key,
+        uploadId: currentUploadId,
+        partNumber,
+        body,
+        contentMd5: md5Base64(body),
+        signal: input.signal,
+      })
       .then((etag) => ({ partNumber, etag }))
       .catch((error) => {
         if (!partUploadFailed) {
@@ -243,19 +233,13 @@ export async function uploadBlobStreamToS3(
     if (uploadId === undefined) {
       const body =
         pendingSinglePart ?? currentBuffer?.subarray(0, currentLength) ?? new Uint8Array()
-      await retryUpload(
-        () =>
-          input.api.putObject({
-            key: input.key,
-            body,
-            contentMd5: md5Base64(body),
-            mediaType: input.mediaType,
-            signal: input.signal,
-          }),
-        input.retries,
-        input.signal,
-        input.retryDelay
-      )
+      await input.api.putObject({
+        key: input.key,
+        body,
+        contentMd5: md5Base64(body),
+        mediaType: input.mediaType,
+        signal: input.signal,
+      })
     } else {
       if (currentLength > 0 && currentBuffer) {
         await schedulePart(currentBuffer.subarray(0, currentLength))
@@ -291,104 +275,6 @@ export async function uploadBlobStreamToS3(
 
 function md5Base64(value: Uint8Array): string {
   return createHash("md5").update(value).digest("base64")
-}
-
-async function retryUpload<T>(
-  operation: () => Promise<T>,
-  retries: number,
-  signal: AbortSignal | undefined,
-  retryDelay: S3StreamUploadInput["retryDelay"]
-): Promise<T> {
-  for (let failedAttempt = 0; ; failedAttempt += 1) {
-    signal?.throwIfAborted()
-    try {
-      return await operation()
-    } catch (error) {
-      if (failedAttempt >= retries || signal?.aborted || !isRetryableS3UploadError(error)) {
-        throw error
-      }
-
-      await (retryDelay ?? defaultRetryDelay)(failedAttempt + 1, signal)
-    }
-  }
-}
-
-export function isRetryableS3UploadError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false
-
-  const record = error as Record<string, unknown>
-  const name = stringValue(record.name) ?? stringValue(record.code) ?? stringValue(record.Code)
-  if (
-    name === "AbortError" ||
-    name === "AccessDenied" ||
-    name === "InvalidAccessKeyId" ||
-    name === "SignatureDoesNotMatch" ||
-    name === "BadDigest" ||
-    name === "EntityTooSmall" ||
-    name === "InvalidPart" ||
-    name === "InvalidPartOrder" ||
-    name === "NoSuchUpload"
-  ) {
-    return false
-  }
-
-  const metadata = record.$metadata as { readonly httpStatusCode?: unknown } | undefined
-  const status = metadata?.httpStatusCode ?? record.statusCode ?? record.status
-  if (typeof status === "number") {
-    return (
-      status === 400 ||
-      status === 408 ||
-      status === 409 ||
-      status === 425 ||
-      status === 429 ||
-      status >= 500
-    )
-  }
-
-  if (record.$retryable !== undefined || error instanceof TypeError) return true
-  if (
-    name === "TimeoutError" ||
-    name === "RequestTimeout" ||
-    name === "ECONNRESET" ||
-    name === "ETIMEDOUT" ||
-    name === "EPIPE" ||
-    name === "ECONNREFUSED" ||
-    name === "ENETUNREACH" ||
-    name === "EAI_AGAIN"
-  ) {
-    return true
-  }
-
-  return record.cause === undefined ? false : isRetryableS3UploadError(record.cause)
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined
-}
-
-async function defaultRetryDelay(failedAttempt: number, signal?: AbortSignal): Promise<void> {
-  const maximum = Math.min(RETRY_BASE_DELAY_MS * 2 ** (failedAttempt - 1), RETRY_MAX_DELAY_MS)
-  await abortableDelay(Math.floor(Math.random() * maximum), signal)
-}
-
-async function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
-  signal?.throwIfAborted()
-  if (delayMs === 0) return
-
-  await new Promise<void>((resolve, reject) => {
-    let settled = false
-    const finish = (complete: () => void) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      signal?.removeEventListener("abort", onAbort)
-      complete()
-    }
-    const timer = setTimeout(() => finish(resolve), delayMs)
-    const onAbort = () => finish(() => reject(signal?.reason))
-    signal?.addEventListener("abort", onAbort, { once: true })
-    if (signal?.aborted) onAbort()
-  })
 }
 
 function waitWithSignal<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {

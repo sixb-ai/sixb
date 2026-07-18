@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
 import { computeBlobDigest } from "@sixb/core/blob-storage/server"
-import {
-  isRetryableS3UploadError,
-  type S3UploadApi,
-  uploadBlobStreamToS3,
-} from "../src/s3-multipart-upload"
+import { type S3UploadApi, uploadBlobStreamToS3 } from "../src/s3-multipart-upload"
 
 const encoder = new TextEncoder()
 
@@ -56,7 +52,6 @@ describe("uploadBlobStreamToS3", () => {
       key: "sixb/uploads/put-1/object",
       partSizeBytes: 8,
       concurrency: 2,
-      retries: 3,
       expectedSizeBytes: bytes.byteLength,
       mediaType: "text/plain",
     })
@@ -93,7 +88,6 @@ describe("uploadBlobStreamToS3", () => {
       key: "sixb/uploads/put-2/object",
       partSizeBytes: 4,
       concurrency: 2,
-      retries: 0,
     })
 
     expect(result.digest).toBe(computeBlobDigest(bytes))
@@ -111,40 +105,6 @@ describe("uploadBlobStreamToS3", () => {
       { partNumber: 2, etag: '"etag-2"' },
       { partNumber: 3, etag: '"etag-3"' },
     ])
-  })
-
-  test("retries replayable parts up to the configured limit", async () => {
-    const api = new RecordingUploadApi()
-    const attempts = new Map<number, number>()
-    const retryDelays: number[] = []
-
-    api.uploadPart = async (input: UploadPartInput) => {
-      const attempt = (attempts.get(input.partNumber) ?? 0) + 1
-      attempts.set(input.partNumber, attempt)
-      if (input.partNumber === 1 && attempt < 3) {
-        throw Object.assign(new Error("temporary S3 failure"), {
-          $metadata: { httpStatusCode: 503 },
-        })
-      }
-      return `"etag-${input.partNumber}"`
-    }
-
-    await uploadBlobStreamToS3({
-      stream: streamFrom([encoder.encode("abcde")]),
-      api,
-      key: "sixb/uploads/put-3/object",
-      partSizeBytes: 4,
-      concurrency: 2,
-      retries: 2,
-      retryDelay: async (failedAttempt) => {
-        retryDelays.push(failedAttempt)
-      },
-    })
-
-    expect(attempts.get(1)).toBe(3)
-    expect(attempts.get(2)).toBe(1)
-    expect(retryDelays).toEqual([1, 2])
-    expect(api.aborts).toHaveLength(0)
   })
 
   test("cancels the source and aborts multipart state on a permanent part failure", async () => {
@@ -167,10 +127,6 @@ describe("uploadBlobStreamToS3", () => {
       key: "sixb/uploads/put-4/object",
       partSizeBytes: 4,
       concurrency: 1,
-      retries: 3,
-      retryDelay: async () => {
-        throw new Error("permanent errors must not retry")
-      },
     })
 
     await expect(upload).rejects.toThrow("forbidden")
@@ -201,7 +157,6 @@ describe("uploadBlobStreamToS3", () => {
       key: "sixb/uploads/put-5/object",
       partSizeBytes: 4,
       concurrency: 1,
-      retries: 3,
       signal: abort.signal,
     })
 
@@ -223,22 +178,11 @@ describe("uploadBlobStreamToS3", () => {
         key: "sixb/uploads/put-6/object",
         partSizeBytes: 4,
         concurrency: 1,
-        retries: 0,
         expectedSizeBytes: 4,
       })
     ).rejects.toThrow("expected 4 bytes, received 3")
     expect(api.puts).toHaveLength(0)
     expect(api.creates).toHaveLength(0)
-  })
-})
-
-describe("isRetryableS3UploadError", () => {
-  test("retries transient transport and service errors only", () => {
-    expect(isRetryableS3UploadError(new TypeError("fetch failed"))).toBe(true)
-    expect(isRetryableS3UploadError({ $metadata: { httpStatusCode: 503 } })).toBe(true)
-    expect(isRetryableS3UploadError({ code: "ECONNRESET" })).toBe(true)
-    expect(isRetryableS3UploadError({ $metadata: { httpStatusCode: 403 } })).toBe(false)
-    expect(isRetryableS3UploadError({ name: "BadDigest", statusCode: 400 })).toBe(false)
   })
 })
 
