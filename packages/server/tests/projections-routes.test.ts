@@ -141,6 +141,27 @@ describe("projection routes", () => {
     expect(body.runs[0]?.id).toBe("run-1")
   })
 
+  test("serializes only the public run schema even if a provider returns internal fields", async () => {
+    const internalRun = {
+      ...makeRun({ status: "running" }),
+      executionToken: "secret-capability",
+      ontologyRevision: "internal-revision",
+    } as ProjectionRunRecord
+    const sixb = createSixbStub({
+      async list() {
+        return { runs: [internalRun], hasMore: false, total: 1 }
+      },
+    })
+
+    const response = await appWithAuthz(sixb, authzViewing("room")).handle(
+      new Request("http://localhost/api/projection-runs")
+    )
+    const body = (await response.json()) as { runs: Record<string, unknown>[] }
+
+    expect(body.runs[0]).not.toHaveProperty("executionToken")
+    expect(body.runs[0]).not.toHaveProperty("ontologyRevision")
+  })
+
   test("run detail is hidden when the run's object type is not viewable", async () => {
     const sixb = createSixbStub({
       async getById() {

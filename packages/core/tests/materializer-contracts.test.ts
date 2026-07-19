@@ -26,7 +26,8 @@ import * as rootExports from "../src"
 import {
   createCommitId,
   createEventId,
-  createFixedCommitIdentity,
+  createOntologyMaterializer,
+  createTimedCommitIdentity,
   linkRefKey,
   normalizeOntologyEditCommit,
   normalizeProjectionSourceEntry,
@@ -36,11 +37,12 @@ import {
   projectionEntityKey,
   sha256Canonical,
 } from "../src/materializer"
+import { planStream } from "../src/materializer/execution/plan-stream"
 import {
   DEFAULT_MATERIALIZATION_BATCHING,
   resolveMaterializationBatching,
-} from "../src/materializer/batching"
-import { planStream } from "../src/materializer/plan-stream"
+} from "../src/materializer/shared/batching"
+import { createMaterializerFixture } from "./materializer-fixture"
 
 const leftObject = { objectTypeId: "a:b", primaryId: "c" }
 const rightObject = { objectTypeId: "a", primaryId: "b:c" }
@@ -99,6 +101,45 @@ class FakeMaterializationStorage implements OntologyMaterializationStorage {
 }
 
 describe("materializer canonical contracts", () => {
+  test("rejects storage without ontology capabilities at construction", () => {
+    const { ontology, projections, storage } = createMaterializerFixture()
+    const malformedStorage = { ...storage, ontology: undefined }
+
+    expect(() =>
+      createOntologyMaterializer({
+        projectId: "project",
+        ontology,
+        projections,
+        storage: malformedStorage as never,
+      })
+    ).toThrow("Storage does not provide ontology capabilities")
+  })
+
+  test("rejects an Ontology that differs from the projection registry", () => {
+    const { projections, storage } = createMaterializerFixture()
+    const incompatibleOntology = new rootExports.OntologyRegistry({
+      sources: [
+        rootExports.defineObjectType({
+          id: "Device",
+          name: "Device",
+          properties: [
+            rootExports.prop("id", "string", { primary: true, required: true }),
+            rootExports.prop("name", "double", { required: true }),
+          ],
+        }),
+      ],
+    })
+
+    expect(() =>
+      createOntologyMaterializer({
+        projectId: "project",
+        ontology: incompatibleOntology,
+        projections,
+        storage,
+      })
+    ).toThrow("does not match the Ontology pinned by its projection registry")
+  })
+
   test("uses unambiguous JSON-array keys for every entity kind", () => {
     expect(objectRefKey(leftObject)).toBe('["a:b","c"]')
     expect(objectRefKey(leftObject)).not.toBe(objectRefKey(rightObject))
@@ -275,7 +316,7 @@ describe("materializer canonical contracts", () => {
           versionId: "version-1",
           createdAt: "2026-01-02T03:04:05Z",
         },
-        projectionRunId: "run-1",
+        execution: { projectionRunId: "run-1", executionToken: "execution-1" },
         batchOrdinal: 2,
       },
       points: [point],
@@ -297,13 +338,16 @@ describe("materializer canonical contracts", () => {
       kind: "projection",
       protocol: "replacement",
       projectionId: "rooms",
-      runId: "run-1",
+      projectionKind: "object",
+      execution: { projectionRunId: "run-1", executionToken: "execution-1" },
       datasetVersion: {
         datasetId: "rooms",
         versionId: "version-1",
         createdAt: "2026-01-02T03:04:05.000Z",
       },
+      ontologyRevision: "ontology-1",
       projectionRevision: "revision-1",
+      ownershipHash: "ownership-1",
       commitId: "commit-1",
       stagedRootCount: 2,
       stagedAssertionCount: 3,
@@ -324,17 +368,22 @@ describe("materializer canonical contracts", () => {
       kind: "projection",
       protocol: "telemetry",
       projectionId: "temperatures",
-      runId: "run-2",
+      projectionKind: "telemetry",
+      execution: { projectionRunId: "run-2", executionToken: "execution-2" },
       datasetVersion: replacementBookkeeping.datasetVersion,
+      ontologyRevision: "ontology-1",
       projectionRevision: "revision-2",
+      ownershipHash: "ownership-2",
       commitId: "commit-2",
       batchOrdinal: 4,
+      batchInputCount: 512,
       batchPointCount: 412,
       pointsCreated: 400,
       pointsUpdated: 10,
       pointsUnchanged: 2,
       latestObjectsChanged: 20,
     } satisfies MaterializationRunBookkeeping
+    expect(telemetryBookkeeping.batchInputCount).toBe(512)
     expect(telemetryBookkeeping.batchPointCount).toBe(412)
 
     type ActiveSource = Awaited<ReturnType<OntologySourceStorage["getActive"]>>
@@ -356,7 +405,6 @@ describe("materializer canonical contracts", () => {
         committedAt: "2026-01-02T03:04:05.000Z",
       },
       expected: {
-        ontologyRevision: "ontology-revision",
         sources: [],
         objects: [],
         links: [],
@@ -466,7 +514,7 @@ describe("materializer canonical contracts", () => {
     )
     expect(createEventId("project", "commit", 1)).not.toBe(createEventId("project", "commit", 2))
     expect(
-      createFixedCommitIdentity({
+      createTimedCommitIdentity({
         projectId: "project",
         idempotencyKey: "runtime:request",
         normalizedCallerIntent: { operation: "empty" },

@@ -1,6 +1,7 @@
 import type { InMemoryObjectStorage } from "../../objects"
 import type { InMemoryTimeseriesStorage } from "../../timeseries"
 import type { OntologyStorage } from ".."
+import type { AssertSourceMaterializationExecution } from "../sources"
 import { InMemoryOntologyCommitStorage } from "./commits"
 import { InMemoryOntologyMaterializationStorage } from "./materializations"
 import { InMemoryOntologyOutboxStorage } from "./outbox"
@@ -19,6 +20,7 @@ export type InMemoryOntologyStorageSnapshot = InMemoryOntologyState
 interface InMemoryOntologyStorageOptions {
   readonly runRootOperation: <T>(run: () => Promise<T> | T) => Promise<T>
   readonly getTransactionToken: () => object | null
+  readonly assertSourceMaterializationExecution: AssertSourceMaterializationExecution
   readonly applyBookkeeping?: InMemoryOntologyStorageTestHooks["applyBookkeeping"]
 }
 
@@ -36,7 +38,11 @@ export class InMemoryOntologyStorage implements OntologyStorage {
     options: InMemoryOntologyStorageOptions
   ) {
     this.commits = new InMemoryOntologyCommitStorage(this.state, options.runRootOperation)
-    this.sources = new InMemoryOntologySourceStorage(this.state, options.runRootOperation)
+    this.sources = new InMemoryOntologySourceStorage(
+      this.state,
+      options.runRootOperation,
+      options.assertSourceMaterializationExecution
+    )
     this.outbox = new InMemoryOntologyOutboxStorage(this.state, options.runRootOperation)
     this.materializations = new InMemoryOntologyMaterializationStorage(
       this.state,

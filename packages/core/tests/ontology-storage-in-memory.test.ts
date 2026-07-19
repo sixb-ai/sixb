@@ -6,200 +6,28 @@ import {
   createOntologyMaterializer,
   ProjectionRegistry,
 } from "../src/materializer"
+import { planWork } from "../src/materializer/execution/work-records"
 import {
   type MaterializationPlanChunk,
   type MaterializationPlanFinalization,
   type MaterializationPlanHeader,
+  type MaterializationPlanWorkItem,
   StorageTransactionError,
 } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
-import { atomic, createMaterializerFixture, replacement, sourceEntry } from "./materializer-fixture"
+import {
+  atomic,
+  claimProjectionExecution,
+  createMaterializerFixture,
+  replacement,
+  sourceEntry,
+} from "./materializer-fixture"
 
 describe("in-memory ontology storage", () => {
-  test("keeps candidates invisible, enforces root/entity uniqueness, and protects active generations", async () => {
-    const storage = new InMemoryStorage()
-    const source = { projectionId: "devices" }
-    const row = {
-      root: {
-        kind: "object" as const,
-        ref: { objectTypeId: "Device", primaryId: "one" },
-      },
-      assertion: {
-        kind: "object" as const,
-        ref: { objectTypeId: "Device", primaryId: "one" },
-        properties: { name: "one" },
-      },
-      stagingOrdinal: 0,
-    }
-    expect(
-      await storage.ontology.sources.stage({
-        projectId: "project",
-        source,
-        generationId: "candidate",
-        stagedAt: "2026-01-01T00:00:00.000Z",
-        rows: [row],
-      })
-    ).toEqual({ inserted: 1, unchanged: 0 })
-    expect(
-      await storage.ontology.sources.stage({
-        projectId: "project",
-        source,
-        generationId: "candidate",
-        stagedAt: "2026-01-01T00:00:00.000Z",
-        rows: [row],
-      })
-    ).toEqual({ inserted: 0, unchanged: 1 })
-    expect(await storage.ontology.sources.getActive({ projectId: "project", source })).toBeNull()
-    expect(
-      await storage.objects.getByPrimaryId({
-        projectId: "project",
-        objectTypeId: "Device",
-        primaryId: "one",
-      })
-    ).toBeNull()
-    await expect(
-      storage.ontology.sources.stage({
-        projectId: "project",
-        source,
-        generationId: "candidate",
-        stagedAt: "2026-01-01T00:00:00.000Z",
-        rows: [{ ...row, stagingOrdinal: 1 }],
-      })
-    ).rejects.toThrow("repeats root")
-    await storage.ontology.sources.discard({
-      projectId: "project",
-      source,
-      generationId: "candidate",
-    })
-    expect(
-      await storage.ontology.sources.cleanupInactive({
-        projectId: "project",
-        olderThan: "2027-01-01T00:00:00Z",
-        limit: 10,
-      })
-    ).toBe(0)
-  })
-
-  test("validates source staging atomically and rejects active generation writes", async () => {
-    const storage = new InMemoryStorage()
-    const source = { projectionId: "devices" }
-    const assertion = {
-      kind: "object" as const,
-      ref: { objectTypeId: "Device", primaryId: "shared" },
-      properties: { name: "shared" },
-    }
-    const first = {
-      root: { kind: "object" as const, ref: { objectTypeId: "Device", primaryId: "root-1" } },
-      assertion,
-      stagingOrdinal: 0,
-    }
-    await expect(
-      storage.ontology.sources.stage({
-        projectId: "project",
-        source,
-        generationId: "atomic",
-        stagedAt: "2026-01-01T00:00:00.000Z",
-        rows: [
-          first,
-          {
-            ...first,
-            root: {
-              kind: "object" as const,
-              ref: { objectTypeId: "Device", primaryId: "root-2" },
-            },
-            stagingOrdinal: 1,
-          },
-        ],
-      })
-    ).rejects.toThrow("repeats asserted entity")
-    expect(
-      await storage.ontology.sources.stage({
-        projectId: "project",
-        source,
-        generationId: "atomic",
-        stagedAt: "2026-01-01T00:00:00.000Z",
-        rows: [first],
-      })
-    ).toEqual({ inserted: 1, unchanged: 0 })
-    await expect(
-      storage.ontology.sources.stage({
-        projectId: "project",
-        source,
-        generationId: "atomic",
-        stagedAt: "2026-01-02T00:00:00.000Z",
-        rows: [],
-      })
-    ).rejects.toThrow("different fixed time")
-    await expect(
-      storage.ontology.sources.stage({
-        projectId: "project",
-        source,
-        generationId: "bad-ordinal",
-        stagedAt: "2026-01-01T00:00:00.000Z",
-        rows: [{ ...first, stagingOrdinal: -1 }],
-      })
-    ).rejects.toThrow("nonnegative safe integer")
-    await expect(
-      storage.ontology.sources.stage({
-        projectId: "project",
-        source,
-        generationId: "bad-time",
-        stagedAt: "not-a-time",
-        rows: [],
-      })
-    ).rejects.toThrow("canonical UTC timestamp")
-
-    const fixture = createMaterializerFixture({ storage })
-    await fixture.materializer.projections.replace(
-      replacement("active", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
-    )
-    const active = await storage.ontology.sources.getActive({ projectId: "project", source })
-    await expect(
-      storage.ontology.sources.stage({
-        projectId: "project",
-        source,
-        generationId: active!.activeGenerationId,
-        stagedAt: "2026-01-02T00:00:00.000Z",
-        rows: [],
-      })
-    ).rejects.toThrow("cannot be staged")
-    await storage.ontology.sources.discard({
-      projectId: "project",
-      source,
-      generationId: "missing",
-    })
-    await storage.ontology.sources.stage({
-      projectId: "project",
-      source,
-      generationId: "cleanup-positive",
-      stagedAt: "2025-01-01T00:00:00.000Z",
-      rows: [],
-    })
-    expect(
-      await storage.ontology.sources.cleanupInactive({
-        projectId: "project",
-        olderThan: "2026-01-01T00:00:00Z",
-        limit: 1,
-      })
-    ).toBe(1)
-    expect(
-      await storage.ontology.sources.cleanupInactive({
-        projectId: "project",
-        olderThan: "2026-01-01T00:00:00Z",
-        limit: 1,
-      })
-    ).toBe(0)
-    await storage.ontology.sources.discard({
-      projectId: "project",
-      source,
-      generationId: "missing",
-    })
-  })
-
-  test("isolates cleanup, replacement heads, and incident override scans by project", async () => {
+  test("isolates replacement heads and incident override scans by project", async () => {
     const fixture = createMaterializerFixture()
     const { storage, ontology, projections, materializer } = fixture
-    let otherGeneration = 0
+    let otherMaterialization = 0
     const other = createOntologyMaterializer({
       projectId: "other-project",
       ontology,
@@ -207,15 +35,21 @@ describe("in-memory ontology storage", () => {
       storage: storage as typeof storage & { ontology: NonNullable<typeof storage.ontology> },
       dependencies: {
         clock: () => new Date("2026-01-03T00:00:00Z"),
-        generationId: () => `other-generation-${++otherGeneration}`,
+        materializationId: () => `other-materialization-${++otherMaterialization}`,
       },
     })
     await materializer.projections.replace(
       replacement("project-v1", "2026-01-01T00:00:00Z", [sourceEntry("hub", "hub")])
     )
-    await other.projections.replace(
-      replacement("other-v1", "2026-01-01T00:00:00Z", [sourceEntry("other", "other")])
-    )
+    const otherReplacement = replacement("other-v1", "2026-01-01T00:00:00Z", [
+      sourceEntry("other", "other"),
+    ])
+    const otherExecution = await claimReplacementExecution(storage, projections, {
+      projectId: "other-project",
+      runId: otherReplacement.execution.projectionRunId,
+      datasetVersion: otherReplacement.datasetVersion,
+    })
+    await other.projections.replace({ ...otherReplacement, execution: otherExecution })
     expect(
       (
         await storage.ontology.sources.getActive({
@@ -232,32 +66,6 @@ describe("in-memory ontology storage", () => {
         })
       )?.datasetVersion.versionId
     ).toBe("other-v1")
-
-    for (const projectId of ["project", "other-project"]) {
-      await storage.ontology.sources.stage({
-        projectId,
-        source: { projectionId: "devices" },
-        generationId: "inactive-shared-id",
-        stagedAt: "2025-01-01T00:00:00.000Z",
-        rows: [],
-      })
-    }
-    expect(
-      await storage.ontology.sources.cleanupInactive({
-        projectId: "project",
-        olderThan: "2026-01-01T00:00:00.000Z",
-        limit: 10,
-      })
-    ).toBe(1)
-    expect(
-      await storage.ontology.sources.stage({
-        projectId: "other-project",
-        source: { projectionId: "devices" },
-        generationId: "inactive-shared-id",
-        stagedAt: "2025-01-01T00:00:00.000Z",
-        rows: [],
-      })
-    ).toEqual({ inserted: 0, unchanged: 0 })
 
     await other.edits.commit(
       atomic("other-incident-authority", [
@@ -422,6 +230,15 @@ describe("in-memory ontology storage", () => {
             properties: { name: "two" },
           },
         ])
+      } else if (boundary === "timeseries.point.upsert") {
+        await commit("prepare-telemetry-object", [
+          {
+            id: "one",
+            kind: "object.create",
+            ref: object("one"),
+            properties: { name: "one" },
+          },
+        ])
       }
 
       const before = {
@@ -472,9 +289,24 @@ describe("in-memory ontology storage", () => {
       await expect(attempt).rejects.toThrow(`injected ${boundary}`)
       expect(storage.objects.snapshot()).toEqual(before.objects)
       expect(storage.timeseries.snapshot()).toEqual(before.timeseries)
-      expect(getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot()).toEqual(
-        before.ontology
-      )
+      const afterOntology = getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot()
+      if (boundary === "source.activate") {
+        expect({
+          ...afterOntology,
+          sourceMaterializations: before.ontology.sourceMaterializations,
+        }).toEqual(before.ontology)
+        expect(
+          [...afterOntology.sourceMaterializations.values()].map(({ status }) => status)
+        ).toEqual(["ready"])
+        expect(
+          await storage.ontology.sources.getActive({
+            projectId: "project",
+            source: { projectionId: "devices" },
+          })
+        ).toBeNull()
+      } else {
+        expect(afterOntology).toEqual(before.ontology)
+      }
     }
   })
 
@@ -492,7 +324,6 @@ describe("in-memory ontology storage", () => {
         committedAt: "2026-01-01T00:00:00.000Z",
       },
       expected: {
-        ontologyRevision: "revision",
         sources: [],
         objects: [],
         links: [],
@@ -607,7 +438,6 @@ describe("in-memory ontology storage", () => {
         committedAt: "2026-01-01T00:00:00.000Z",
       },
       expected: {
-        ontologyRevision: "revision",
         sources: [],
         objects: [],
         links: [],
@@ -635,6 +465,32 @@ describe("in-memory ontology storage", () => {
 
   test("serializes source staging with failed transaction snapshots", async () => {
     const storage = new InMemoryStorage()
+    const { projections } = createMaterializerFixture({ storage })
+    const source = { projectionId: "devices" }
+    const datasetVersion = {
+      datasetId: "devices",
+      versionId: "concurrent",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }
+    const execution = await claimReplacementExecution(storage, projections, {
+      projectId: "project",
+      runId: "concurrent-run",
+      datasetVersion,
+    })
+    const resolved = projections.resolveSource(source.projectionId)
+    await storage.ontology.sources.beginMaterialization({
+      projectId: "project",
+      source,
+      materializationId: "concurrent-candidate",
+      execution,
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetVersion,
+      projectionRevision: resolved.projectionRevision,
+      ownershipHash: resolved.ownershipHash,
+      ontologyRevision: projections.ontologyRevision,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    })
     let release!: () => void
     const blocked = new Promise<void>((resolve) => {
       release = resolve
@@ -661,11 +517,11 @@ describe("in-memory ontology storage", () => {
       stagingOrdinal: 0,
     }
     const staged = storage.ontology.sources
-      .stage({
+      .stageRows({
         projectId: "project",
-        source: { projectionId: "devices" },
-        generationId: "concurrent-candidate",
-        stagedAt: "2026-01-01T00:00:00.000Z",
+        source,
+        materializationId: "concurrent-candidate",
+        execution,
         rows: [row],
       })
       .then((result) => {
@@ -678,11 +534,11 @@ describe("in-memory ontology storage", () => {
     await expect(failed).rejects.toThrow("rollback after concurrent stage")
     expect(await staged).toEqual({ inserted: 1, unchanged: 0 })
     expect(
-      await storage.ontology.sources.stage({
+      await storage.ontology.sources.stageRows({
         projectId: "project",
-        source: { projectionId: "devices" },
-        generationId: "concurrent-candidate",
-        stagedAt: "2026-01-01T00:00:00.000Z",
+        source,
+        materializationId: "concurrent-candidate",
+        execution,
         rows: [row],
       })
     ).toEqual({ inserted: 0, unchanged: 1 })
@@ -702,7 +558,6 @@ describe("in-memory ontology storage", () => {
         committedAt: "2026-01-01T00:00:00.000Z",
       },
       expected: {
-        ontologyRevision: "revision",
         sources: [],
         objects: [],
         links: [],
@@ -856,6 +711,30 @@ describe("in-memory ontology storage", () => {
           .filter((record) => record.kind === "plan")
           .map((record) => record.sortKey)
       ).toEqual(["61", "62"])
+      const objectUpserts = applyPages
+        .flat()
+        .flatMap((record) =>
+          record.kind === "plan" && record.item.kind === "object-upsert" ? [record.item.value] : []
+        )
+      await materializations.applyChunk({
+        session,
+        chunk: {
+          overrides: {
+            objectUpserts: [],
+            objectDeletes: [],
+            linkUpserts: [],
+            linkDeletes: [],
+          },
+          effective: {
+            objectUpserts,
+            objectDeletes: [],
+            linkUpserts: [],
+            linkDeletes: [],
+          },
+          timeseries: { pointUpserts: [] },
+          outbox: [],
+        },
+      })
       const eventRecords = []
       for await (const page of materializations.streamWork({
         session,
@@ -865,6 +744,36 @@ describe("in-memory ontology storage", () => {
         eventRecords.push(...page.records)
       }
       expect(eventRecords.map((record) => record.recordKey)).toEqual(["event:0:61", "event:1:62"])
+      await materializations.applyChunk({
+        session,
+        chunk: {
+          overrides: {
+            objectUpserts: [],
+            objectDeletes: [],
+            linkUpserts: [],
+            linkDeletes: [],
+          },
+          effective: {
+            objectUpserts: [],
+            objectDeletes: [],
+            linkUpserts: [],
+            linkDeletes: [],
+          },
+          timeseries: { pointUpserts: [] },
+          outbox: eventRecords.map((record, commitOrdinal) => {
+            if (record.kind !== "event") throw new Error("Expected event work")
+            return {
+              envelope: {
+                ...record.draft,
+                id: createEventId("project", "work-commit", commitOrdinal),
+                commitOrdinal,
+              },
+              availableAt: "2026-01-01T00:00:00.000Z",
+              createdAt: "2026-01-01T00:00:00.000Z",
+            }
+          }),
+        },
+      })
       await expect(
         materializations.stageWork({
           session,
@@ -887,7 +796,7 @@ describe("in-memory ontology storage", () => {
             kind: "edit",
             commitId: "work-commit",
             created: true,
-            eventCount: 0,
+            eventCount: 2,
             outcomes: [],
             changes: { objects: [], links: [] },
           },
@@ -922,7 +831,6 @@ describe("in-memory ontology storage", () => {
             committedAt: "2026-01-01T00:00:00.000Z",
           },
           expected: {
-            ontologyRevision: "revision",
             sources: [],
             objects: [],
             links: [],
@@ -978,32 +886,25 @@ describe("in-memory ontology storage", () => {
         if (rejectBookkeeping) throw new Error("bookkeeping failure")
       },
     })
-    const { materializer } = createMaterializerFixture({ storage })
-    const startRun = (id: string) =>
-      storage.projectionRuns.start({
-        id,
-        projectId: "project",
-        projectionId: "devices",
-        projectionKind: "object",
-        datasetId: "devices",
-        datasetVersionId: id,
-        objectTypeId: "Device",
-      })
-
-    await startRun("failed-run")
+    const { materializer, projections } = createMaterializerFixture({ storage })
+    const failedInput = replacement(
+      "failed-version",
+      "2026-01-01T00:00:00Z",
+      [sourceEntry("one", "one")],
+      "failed-run"
+    )
+    const failedExecution = await claimProjectionExecution(storage, projections, {
+      runId: failedInput.execution.projectionRunId,
+      projectionId: failedInput.source.projectionId,
+      protocol: "replacement",
+      datasetVersion: failedInput.datasetVersion,
+    })
     await expect(
-      materializer.projections.replace(
-        replacement(
-          "failed-version",
-          "2026-01-01T00:00:00Z",
-          [sourceEntry("one", "one")],
-          "failed-run"
-        )
-      )
+      materializer.projections.replace({ ...failedInput, execution: failedExecution })
     ).rejects.toThrow("bookkeeping failure")
     expect(
       await storage.projectionRuns.getById({ projectId: "project", id: "failed-run" })
-    ).not.toHaveProperty("commitId")
+    ).not.toHaveProperty("replacementCommitId")
     expect(
       await storage.objects.getByPrimaryId({
         projectId: "project",
@@ -1013,49 +914,71 @@ describe("in-memory ontology storage", () => {
     ).toBeNull()
 
     rejectBookkeeping = false
-    await startRun("successful-run")
-    const result = await materializer.projections.replace(
-      replacement(
-        "successful-version",
-        "2026-01-02T00:00:00Z",
-        [sourceEntry("one", "one")],
-        "successful-run"
-      )
+    const successfulInput = replacement(
+      "successful-version",
+      "2026-01-02T00:00:00Z",
+      [sourceEntry("one", "one")],
+      "successful-run"
     )
+    const successfulExecution = await claimProjectionExecution(storage, projections, {
+      runId: successfulInput.execution.projectionRunId,
+      projectionId: successfulInput.source.projectionId,
+      protocol: "replacement",
+      datasetVersion: successfulInput.datasetVersion,
+    })
+    const result = await materializer.projections.replace({
+      ...successfulInput,
+      execution: successfulExecution,
+    })
     expect(
       await storage.projectionRuns.getById({ projectId: "project", id: "successful-run" })
-    ).toHaveProperty("commitId", result.commitId)
+    ).toHaveProperty("replacementCommitId", result.commitId)
 
-    await startRun("replay-run")
-    const replay = await materializer.projections.replace(
-      replacement(
-        "successful-version",
-        "2026-01-02T00:00:00Z",
-        [sourceEntry("ignored", "ignored")],
-        "replay-run"
-      )
-    )
+    const replayExecution = await claimProjectionExecution(storage, projections, {
+      runId: successfulInput.execution.projectionRunId,
+      projectionId: successfulInput.source.projectionId,
+      protocol: "replacement",
+      datasetVersion: successfulInput.datasetVersion,
+    })
+    const replay = await materializer.projections.replace({
+      ...successfulInput,
+      execution: replayExecution,
+      entries: replacement("ignored", "2026-01-02T00:00:00Z", [sourceEntry("ignored", "ignored")])
+        .entries,
+    })
     expect(replay.created).toBe(false)
     expect(
-      await storage.projectionRuns.getById({ projectId: "project", id: "replay-run" })
-    ).toHaveProperty("commitId", result.commitId)
+      await storage.projectionRuns.getById({ projectId: "project", id: "successful-run" })
+    ).toHaveProperty("replacementCommitId", result.commitId)
 
-    await startRun("conflicting-run")
-    await storage.projectionRuns.recordMaterializationReplay(
-      "project",
-      "conflicting-run",
-      "different-commit"
+    const conflictingInput = replacement(
+      "conflicting-version",
+      "2026-01-03T00:00:00Z",
+      [sourceEntry("two", "two")],
+      "conflicting-run"
     )
+    const conflictingExecution = await claimProjectionExecution(storage, projections, {
+      runId: conflictingInput.execution.projectionRunId,
+      projectionId: conflictingInput.source.projectionId,
+      protocol: "replacement",
+      datasetVersion: conflictingInput.datasetVersion,
+    })
+    const conflictingIdentity = replacementIdentity(projections, conflictingInput.datasetVersion)
+    await storage.projectionRuns.recordMaterializationCommit("project", {
+      kind: "projection",
+      ...conflictingIdentity,
+      execution: conflictingExecution,
+      commitId: "different-commit",
+      stagedRootCount: 0,
+      stagedAssertionCount: 0,
+      counts: zeroReplacementCounts(),
+    })
     await expect(
-      materializer.projections.replace(
-        replacement(
-          "conflicting-version",
-          "2026-01-03T00:00:00Z",
-          [sourceEntry("two", "two")],
-          "conflicting-run"
-        )
-      )
-    ).rejects.toThrow("different ontology commit")
+      materializer.projections.replace({
+        ...conflictingInput,
+        execution: conflictingExecution,
+      })
+    ).rejects.toThrow("different materialization commit")
     expect(
       await storage.objects.getByPrimaryId({
         projectId: "project",
@@ -1328,7 +1251,6 @@ describe("in-memory ontology storage", () => {
         committedAt: "2026-01-04T00:00:00.000Z",
       },
       expected: {
-        ontologyRevision: projections.ontologyRevision,
         sources: [],
         objects: [],
         links: [],
@@ -1344,20 +1266,13 @@ describe("in-memory ontology storage", () => {
     }
     await expectBeginConflict(
       {
-        ...baseHeader("bad-ontology-revision"),
-        expected: { ...baseHeader("bad-ontology-revision").expected, ontologyRevision: "stale" },
-      },
-      "contradictory ontology revisions"
-    )
-    await expectBeginConflict(
-      {
         ...baseHeader("bad-source"),
         expected: {
           ...baseHeader("bad-source").expected,
           sources: [
             {
               source: { projectionId: "devices" },
-              activeGenerationId: active.activeGenerationId,
+              activeMaterializationId: active.materializationId,
               lastCommitId: "stale",
             },
           ],
@@ -1470,7 +1385,7 @@ describe("in-memory ontology storage", () => {
           sources: [
             {
               source: { projectionId: "devices" },
-              activeGenerationId: active.activeGenerationId,
+              activeMaterializationId: active.materializationId,
               lastCommitId: active.lastCommitId,
             },
           ],
@@ -1598,7 +1513,6 @@ describe("in-memory ontology storage", () => {
           committedAt: "2026-01-02T00:00:00.000Z",
         },
         expected: {
-          ontologyRevision: projections.ontologyRevision,
           sources: [],
           objects: [],
           links: [],
@@ -1636,6 +1550,29 @@ describe("in-memory ontology storage", () => {
       timeseries: { pointUpserts: [] },
       outbox: [],
     })
+    const stagedPlanItem = (
+      value: ReturnType<typeof chunk>
+    ): MaterializationPlanWorkItem | null => {
+      if (value.overrides.objectUpserts[0])
+        return { kind: "object-override-upsert", value: value.overrides.objectUpserts[0] }
+      if (value.overrides.objectDeletes[0])
+        return { kind: "object-override-delete", value: value.overrides.objectDeletes[0] }
+      if (value.overrides.linkUpserts[0])
+        return { kind: "link-override-upsert", value: value.overrides.linkUpserts[0] }
+      if (value.overrides.linkDeletes[0])
+        return { kind: "link-override-delete", value: value.overrides.linkDeletes[0] }
+      if (value.effective.objectUpserts[0])
+        return { kind: "object-upsert", value: value.effective.objectUpserts[0] }
+      if (value.effective.objectDeletes[0])
+        return { kind: "object-delete", value: value.effective.objectDeletes[0] }
+      if (value.effective.linkUpserts[0])
+        return { kind: "link-upsert", value: value.effective.linkUpserts[0] }
+      if (value.effective.linkDeletes[0])
+        return { kind: "link-delete", value: value.effective.linkDeletes[0] }
+      if (value.timeseries.pointUpserts[0])
+        return { kind: "point-upsert", value: value.timeseries.pointUpserts[0] }
+      return null
+    }
     const cases = [
       {
         name: "object upsert ref",
@@ -1893,7 +1830,6 @@ describe("in-memory ontology storage", () => {
               committedAt,
             },
             expected: {
-              ontologyRevision: "revision",
               sources: [],
               objects: [],
               links: [],
@@ -1901,6 +1837,20 @@ describe("in-memory ontology storage", () => {
               points: [],
             },
           })
+          const stagedItem = stagedPlanItem(plan)
+          if (stagedItem) {
+            await tx.ontology.materializations.stageWork({
+              session,
+              records: [planWork(stagedItem, "61")],
+            })
+            for await (const _page of tx.ontology.materializations.streamWork({
+              session,
+              order: "apply",
+              pageRows: 1,
+            })) {
+              // Make the exact provider plan eligible for application.
+            }
+          }
           await tx.ontology.materializations.applyChunk({ session, chunk: plan })
         })
       ).rejects.toThrow(testCase.message)
@@ -1910,6 +1860,15 @@ describe("in-memory ontology storage", () => {
 
   test("rejects ordinal and bookkeeping finalization mismatches with rollback", async () => {
     const storage = new InMemoryStorage()
+    await storage.actionRuns.queue({
+      id: "run",
+      projectId: "project",
+      actionId: "action",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "one" },
+      params: {},
+      idempotencyKey: "action:project:run",
+    })
+    await storage.actionRuns.start({ id: "run", projectId: "project" })
     const committedAt = "2026-01-01T00:00:00.000Z"
     const header = (id: string, operationCount = 0): MaterializationPlanHeader => ({
       commit: {
@@ -1923,7 +1882,6 @@ describe("in-memory ontology storage", () => {
         committedAt,
       },
       expected: {
-        ontologyRevision: "revision",
         sources: [],
         objects: [],
         links: [],
@@ -1936,6 +1894,40 @@ describe("in-memory ontology storage", () => {
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
         const session = await tx.ontology.materializations.begin(header("ordinal-gap"))
+        await tx.ontology.materializations.stageWork({
+          session,
+          records: [
+            {
+              kind: "event",
+              recordKey: "event:0:61",
+              eventKindRank: 0,
+              sortKey: "61",
+              draft: {
+                schemaVersion: 1,
+                projectId: "project",
+                occurredAt: committedAt,
+                origin: { kind: "action", actionId: "action", runId: "run" },
+                commitId: "ordinal-gap",
+                partitionKey: "Device:one",
+                type: "object.created",
+                topic: "objects",
+                payload: {
+                  objectTypeId: "Device",
+                  primaryId: "one",
+                  properties: { name: "one" },
+                  propertyChanges: {},
+                },
+              },
+            },
+          ],
+        })
+        for await (const _page of tx.ontology.materializations.streamWork({
+          session,
+          order: "event",
+          pageRows: 1,
+        })) {
+          // The outbox write below deliberately skips canonical ordinal zero.
+        }
         await tx.ontology.materializations.applyChunk({
           session,
           chunk: {
@@ -1993,7 +1985,7 @@ describe("in-memory ontology storage", () => {
           },
         })
       })
-    ).rejects.toThrow("contiguous from zero")
+    ).rejects.toThrow("exact streamed order")
     expect(getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot()).toEqual(before)
 
     await expect(
@@ -2033,11 +2025,43 @@ describe("in-memory ontology storage", () => {
       versionId: "candidate-counts",
       createdAt: "2026-01-01T00:00:00.000Z",
     }
-    await storage.ontology.sources.stage({
+    const run = await storage.projectionRuns.startOrReclaimMaterialization({
+      id: "candidate-counts-run",
+      projectId: "project",
+      identity: {
+        projectionId: "devices",
+        projectionKind: "object",
+        protocol: "replacement",
+        datasetVersion,
+        ontologyRevision: "ontology-revision",
+        projectionRevision: "projection-revision",
+        ownershipHash: "ownership-hash",
+      },
+      objectTypeId: "Device",
+    })
+    if (!run.executionToken) throw new Error("Expected a projection execution token")
+    const execution = {
+      projectionRunId: run.id,
+      executionToken: run.executionToken,
+    }
+    await storage.ontology.sources.beginMaterialization({
       projectId: "project",
       source,
-      generationId: "candidate-counts",
-      stagedAt: "2026-01-01T00:00:00.000Z",
+      materializationId: "candidate-counts",
+      execution,
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetVersion,
+      projectionRevision: "projection-revision",
+      ownershipHash: "ownership-hash",
+      ontologyRevision: "ontology-revision",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    })
+    await storage.ontology.sources.stageRows({
+      projectId: "project",
+      source,
+      materializationId: "candidate-counts",
+      execution,
       rows: [
         {
           root: { kind: "object", ref: { objectTypeId: "Device", primaryId: "one" } },
@@ -2050,16 +2074,16 @@ describe("in-memory ontology storage", () => {
         },
       ],
     })
-    const emptyCounts = {
-      objectsCreated: 0,
-      objectsUpdated: 0,
-      objectsDeleted: 0,
-      objectsUnchanged: 0,
-      linksCreated: 0,
-      linksUpdated: 0,
-      linksDeleted: 0,
-      linksUnchanged: 0,
-    }
+    await storage.ontology.sources.markReady({
+      projectId: "project",
+      source,
+      materializationId: "candidate-counts",
+      execution,
+      rootCount: 1,
+      assertionCount: 1,
+      readyAt: "2026-01-01T00:01:00.000Z",
+    })
+    const emptyCounts = zeroReplacementCounts()
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
@@ -2083,8 +2107,7 @@ describe("in-memory ontology storage", () => {
             committedAt: "2026-01-02T00:00:00.000Z",
           },
           expected: {
-            ontologyRevision: "ontology-revision",
-            sources: [{ source, activeGenerationId: null, lastCommitId: null }],
+            sources: [{ source, activeMaterializationId: null, lastCommitId: null }],
             objects: [],
             links: [],
             linkScopes: [],
@@ -2094,7 +2117,7 @@ describe("in-memory ontology storage", () => {
         for await (const _page of tx.ontology.materializations.streamSourceReplacementState({
           session,
           source,
-          candidateGenerationId: "candidate-counts",
+          candidateMaterializationId: "candidate-counts",
           entityKind: "object",
           pageRows: 1,
         })) {
@@ -2106,12 +2129,15 @@ describe("in-memory ontology storage", () => {
             sourceActivations: [
               {
                 source,
-                generationId: "candidate-counts",
+                materializationId: "candidate-counts",
+                execution,
+                projectionKind: "object",
+                protocol: "replacement",
                 datasetVersion,
                 projectionRevision: "projection-revision",
                 ownershipHash: "ownership-hash",
                 ontologyRevision: "ontology-revision",
-                expected: { source, activeGenerationId: null, lastCommitId: null },
+                expected: { source, activeMaterializationId: null, lastCommitId: null },
                 lastCommitId: "candidate-counts-commit",
                 updatedAt: "2026-01-02T00:00:00.000Z",
               },
@@ -2127,9 +2153,12 @@ describe("in-memory ontology storage", () => {
               kind: "projection",
               protocol: "replacement",
               projectionId: "devices",
-              runId: "candidate-counts-run",
+              projectionKind: "object",
+              execution,
               datasetVersion,
+              ontologyRevision: "ontology-revision",
               projectionRevision: "projection-revision",
+              ownershipHash: "ownership-hash",
               commitId: "candidate-counts-commit",
               stagedRootCount: 2,
               stagedAssertionCount: 1,
@@ -2139,6 +2168,165 @@ describe("in-memory ontology storage", () => {
         })
       })
     ).rejects.toThrow("staged counts")
+    expect(await storage.ontology.sources.getActive({ projectId: "project", source })).toBeNull()
+  })
+
+  test("refuses activation until replacement state is fully streamed and classified", async () => {
+    const storage = new InMemoryStorage()
+    const source = { projectionId: "devices" }
+    const datasetVersion = {
+      datasetId: "devices",
+      versionId: "sealed-candidate",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }
+    const identity = {
+      projectionId: "devices",
+      projectionKind: "object" as const,
+      protocol: "replacement" as const,
+      datasetVersion,
+      ontologyRevision: "ontology-revision",
+      projectionRevision: "projection-revision",
+      ownershipHash: "ownership-hash",
+    }
+    const run = await storage.projectionRuns.startOrReclaimMaterialization({
+      id: "sealed-run",
+      projectId: "project",
+      identity,
+      objectTypeId: "Device",
+    })
+    if (!run.executionToken) throw new Error("Expected a projection execution token")
+    const execution = { projectionRunId: run.id, executionToken: run.executionToken }
+    await storage.ontology.sources.beginMaterialization({
+      projectId: "project",
+      source,
+      materializationId: "sealed-candidate",
+      execution,
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetVersion,
+      ontologyRevision: identity.ontologyRevision,
+      projectionRevision: identity.projectionRevision,
+      ownershipHash: identity.ownershipHash,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    })
+    await storage.ontology.sources.stageRows({
+      projectId: "project",
+      source,
+      materializationId: "sealed-candidate",
+      execution,
+      rows: [
+        {
+          root: { kind: "object", ref: { objectTypeId: "Device", primaryId: "one" } },
+          assertion: {
+            kind: "object",
+            ref: { objectTypeId: "Device", primaryId: "one" },
+            properties: { name: "one" },
+          },
+          stagingOrdinal: 0,
+        },
+      ],
+    })
+    await storage.ontology.sources.markReady({
+      projectId: "project",
+      source,
+      materializationId: "sealed-candidate",
+      execution,
+      rootCount: 1,
+      assertionCount: 1,
+      readyAt: "2026-01-01T00:01:00.000Z",
+    })
+    const counts = zeroReplacementCounts()
+    const header: MaterializationPlanHeader = {
+      commit: {
+        projectId: "project",
+        id: "sealed-commit",
+        idempotencyKey: "projection:sealed",
+        requestHash: "sealed",
+        origin: {
+          kind: "projection",
+          projectionId: "devices",
+          projectionRunId: run.id,
+          datasetId: datasetVersion.datasetId,
+          datasetVersionId: datasetVersion.versionId,
+        },
+        ontologyRevision: identity.ontologyRevision,
+        projectionRevision: identity.projectionRevision,
+        ownershipHash: identity.ownershipHash,
+        intent: { kind: "projection", source, datasetVersion },
+        committedAt: "2026-01-02T00:00:00.000Z",
+      },
+      expected: {
+        sources: [{ source, activeMaterializationId: null, lastCommitId: null }],
+        objects: [],
+        links: [],
+        linkScopes: [],
+        points: [],
+      },
+    }
+    const finalization: MaterializationPlanFinalization = {
+      sourceActivations: [
+        {
+          source,
+          materializationId: "sealed-candidate",
+          execution,
+          projectionKind: "object",
+          protocol: "replacement",
+          datasetVersion,
+          ontologyRevision: identity.ontologyRevision,
+          projectionRevision: identity.projectionRevision,
+          ownershipHash: identity.ownershipHash,
+          expected: { source, activeMaterializationId: null, lastCommitId: null },
+          lastCommitId: "sealed-commit",
+          updatedAt: "2026-01-02T00:00:00.000Z",
+        },
+      ],
+      result: {
+        kind: "projection",
+        commitId: "sealed-commit",
+        created: true,
+        eventCount: 0,
+        counts,
+      },
+      bookkeeping: {
+        kind: "projection",
+        protocol: "replacement",
+        projectionId: "devices",
+        projectionKind: "object",
+        execution,
+        datasetVersion,
+        ontologyRevision: identity.ontologyRevision,
+        projectionRevision: identity.projectionRevision,
+        ownershipHash: identity.ownershipHash,
+        commitId: "sealed-commit",
+        stagedRootCount: 1,
+        stagedAssertionCount: 1,
+        counts,
+      },
+    }
+    const finalizeWithoutSemanticWork = (streamReplacement: boolean) =>
+      storage.transaction(async (tx) => {
+        if (!tx.ontology) throw new Error("missing ontology")
+        const session = await tx.ontology.materializations.begin(header)
+        if (streamReplacement) {
+          for (const entityKind of ["object", "link"] as const) {
+            for await (const _page of tx.ontology.materializations.streamSourceReplacementState({
+              session,
+              source,
+              candidateMaterializationId: "sealed-candidate",
+              entityKind,
+              pageRows: 1,
+            })) {
+              // Deliberately omit classification work to exercise provider sealing.
+            }
+          }
+        }
+        return tx.ontology.materializations.finalize({ session, finalization })
+      })
+
+    await expect(finalizeWithoutSemanticWork(false)).rejects.toThrow(
+      "does not match the replacement candidate opened"
+    )
+    await expect(finalizeWithoutSemanticWork(true)).rejects.toThrow("classification coverage")
     expect(await storage.ontology.sources.getActive({ projectId: "project", source })).toBeNull()
   })
 
@@ -2214,7 +2402,7 @@ describe("in-memory ontology storage", () => {
           if (finalization.bookkeeping?.kind !== "projection") {
             throw new Error("bad fixture bookkeeping")
           }
-          finalization.bookkeeping.runId = "other"
+          finalization.bookkeeping.execution.projectionRunId = "other"
         },
         message: "bookkeeping does not correlate",
       },
@@ -2228,11 +2416,40 @@ describe("in-memory ontology storage", () => {
         versionId: "v1",
         createdAt: "2026-01-01T00:00:00.000Z",
       }
-      await storage.ontology.sources.stage({
+      const run = await storage.projectionRuns.startOrReclaimMaterialization({
+        id: "run",
+        projectId: "project",
+        identity: {
+          projectionId: "devices",
+          projectionKind: "object",
+          protocol: "replacement",
+          datasetVersion,
+          ontologyRevision: "ontology-revision",
+          projectionRevision: "projection-revision",
+          ownershipHash: "ownership-hash",
+        },
+        objectTypeId: "Device",
+      })
+      if (!run.executionToken) throw new Error("Expected a projection execution token")
+      const execution = { projectionRunId: run.id, executionToken: run.executionToken }
+      await storage.ontology.sources.beginMaterialization({
         projectId: "project",
         source,
-        generationId: "candidate",
-        stagedAt: "2026-01-01T00:00:00.000Z",
+        materializationId: "candidate",
+        execution,
+        projectionKind: "object",
+        protocol: "replacement",
+        datasetVersion,
+        projectionRevision: "projection-revision",
+        ownershipHash: "ownership-hash",
+        ontologyRevision: "ontology-revision",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      })
+      await storage.ontology.sources.stageRows({
+        projectId: "project",
+        source,
+        materializationId: "candidate",
+        execution,
         rows: [
           {
             root: { kind: "object", ref: { objectTypeId: "Device", primaryId: "one" } },
@@ -2244,6 +2461,15 @@ describe("in-memory ontology storage", () => {
             stagingOrdinal: 0,
           },
         ],
+      })
+      await storage.ontology.sources.markReady({
+        projectId: "project",
+        source,
+        materializationId: "candidate",
+        execution,
+        rootCount: 1,
+        assertionCount: 1,
+        readyAt: "2026-01-01T00:01:00.000Z",
       })
       const header: DeepMutable<MaterializationPlanHeader> = {
         commit: {
@@ -2265,8 +2491,7 @@ describe("in-memory ontology storage", () => {
           committedAt: "2026-01-02T00:00:00.000Z",
         },
         expected: {
-          ontologyRevision: "ontology-revision",
-          sources: [{ source, activeGenerationId: null, lastCommitId: null }],
+          sources: [{ source, activeMaterializationId: null, lastCommitId: null }],
           objects: [],
           links: [],
           linkScopes: [],
@@ -2287,12 +2512,15 @@ describe("in-memory ontology storage", () => {
         sourceActivations: [
           {
             source,
-            generationId: "candidate",
+            materializationId: "candidate",
+            execution: { ...execution },
+            projectionKind: "object",
+            protocol: "replacement",
             datasetVersion,
             projectionRevision: "projection-revision",
             ownershipHash: "ownership-hash",
             ontologyRevision: "ontology-revision",
-            expected: { source, activeGenerationId: null, lastCommitId: null },
+            expected: { source, activeMaterializationId: null, lastCommitId: null },
             lastCommitId: header.commit.id,
             updatedAt: header.commit.committedAt,
           },
@@ -2308,9 +2536,12 @@ describe("in-memory ontology storage", () => {
           kind: "projection",
           protocol: "replacement",
           projectionId: "devices",
-          runId: "run",
+          projectionKind: "object",
+          execution: { ...execution },
           datasetVersion,
+          ontologyRevision: "ontology-revision",
           projectionRevision: "projection-revision",
+          ownershipHash: "ownership-hash",
           commitId: header.commit.id,
           stagedRootCount: 1,
           stagedAssertionCount: 1,
@@ -2383,3 +2614,66 @@ type DeepMutable<T> = T extends readonly (infer TValue)[]
   : T extends object
     ? { -readonly [TKey in keyof T]: DeepMutable<T[TKey]> }
     : T
+
+async function claimReplacementExecution(
+  storage: InMemoryStorage,
+  projections: ProjectionRegistry,
+  input: {
+    readonly projectId: string
+    readonly runId: string
+    readonly datasetVersion: {
+      readonly datasetId: string
+      readonly versionId: string
+      readonly createdAt: string
+    }
+  }
+) {
+  const resolved = projections.resolveSource("devices")
+  if (resolved.definition._tag !== "ObjectProjectionDefinition") {
+    throw new Error("Expected the devices object projection")
+  }
+  const run = await storage.projectionRuns.startOrReclaimMaterialization({
+    id: input.runId,
+    projectId: input.projectId,
+    identity: replacementIdentity(projections, input.datasetVersion),
+    objectTypeId: resolved.definition.objectTypeId,
+  })
+  if (!run.executionToken) throw new Error("Projection run claim returned no execution token")
+  return { projectionRunId: run.id, executionToken: run.executionToken }
+}
+
+function replacementIdentity(
+  projections: ProjectionRegistry,
+  datasetVersion: {
+    readonly datasetId: string
+    readonly versionId: string
+    readonly createdAt: string
+  }
+) {
+  const resolved = projections.resolveSource("devices")
+  return {
+    projectionId: resolved.projectionId,
+    projectionKind: "object" as const,
+    protocol: "replacement" as const,
+    datasetVersion: {
+      ...datasetVersion,
+      createdAt: new Date(datasetVersion.createdAt).toISOString(),
+    },
+    ontologyRevision: projections.ontologyRevision,
+    projectionRevision: resolved.projectionRevision,
+    ownershipHash: resolved.ownershipHash,
+  }
+}
+
+function zeroReplacementCounts() {
+  return {
+    objectsCreated: 0,
+    objectsUpdated: 0,
+    objectsDeleted: 0,
+    objectsUnchanged: 0,
+    linksCreated: 0,
+    linksUpdated: 0,
+    linksDeleted: 0,
+    linksUnchanged: 0,
+  }
+}

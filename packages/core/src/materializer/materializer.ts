@@ -1,22 +1,22 @@
-import type { OntologyRegistry } from "../ontology"
-import type { ProjectionRegistry } from "../projections/registry"
-import { appendTelemetry } from "./append-telemetry"
-import { commitEdits } from "./commit-edits"
-import {
-  createMaterializerContext,
-  type MaterializerContext,
-  type MaterializerStorage,
-  type OntologyMaterializerDependencies,
-} from "./materializer-context"
-import { replaceProjection } from "./replace-projection"
 import type {
   OntologyEditCommit,
   OntologyMaterializer as OntologyMaterializerContract,
   ProjectionSourceReplacement,
   TelemetryAppend,
-} from "./types"
+} from "../materialization/model"
+import type { OntologyRegistry } from "../ontology"
+import type { ProjectionRegistry } from "../projections/registry"
+import {
+  createMaterializerContext,
+  type MaterializerContext,
+  type MaterializerStorage,
+  type OntologyMaterializerDependencies,
+} from "./context"
+import { commitEdits } from "./edits/commit"
+import { replaceProjection } from "./projections/replace"
+import { appendTelemetry } from "./telemetry/append"
 
-export type { MaterializerStorage, OntologyMaterializerDependencies } from "./materializer-context"
+export type { MaterializerStorage, OntologyMaterializerDependencies } from "./context"
 
 export class OntologyMaterializer implements OntologyMaterializerContract {
   readonly edits = { commit: (input: OntologyEditCommit) => commitEdits(this.context, input) }

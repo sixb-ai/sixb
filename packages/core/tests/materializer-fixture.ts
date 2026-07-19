@@ -13,9 +13,14 @@ import {
 import {
   createOntologyMaterializer,
   type OntologyMaterializerDependencies,
+  type PinnedDatasetVersion,
+  type ProjectionExecution,
   ProjectionRegistry,
   type ProjectionSourceEntry,
+  type ProjectionSourceReplacement,
+  type TelemetryAppend,
 } from "../src/materializer"
+import type { ProjectionRunMaterializationIdentity } from "../src/storage"
 
 export const Device = defineObjectType({
   id: "Device",
@@ -70,17 +75,51 @@ export function createMaterializerFixture(
     ]),
   })
   const storage = input.storage ?? new InMemoryStorage()
-  const materializer = createOntologyMaterializer({
+  const baseMaterializer = createOntologyMaterializer({
     projectId: "project",
     ontology,
     projections,
     storage,
     dependencies: {
       clock: () => new Date("2026-01-02T03:04:05.000Z"),
-      generationId: generationSequence(),
+      materializationId: materializationSequence(),
       ...input.dependencies,
     },
   })
+  const materializer = {
+    edits: baseMaterializer.edits,
+    projections: {
+      async replace(request: ProjectionSourceReplacement) {
+        const execution = await resolveFixtureExecution(storage, projections, request.execution, {
+          projectionId: request.source.projectionId,
+          protocol: "replacement",
+          datasetVersion: request.datasetVersion,
+        })
+        return baseMaterializer.projections.replace({ ...request, execution })
+      },
+    },
+    telemetry: {
+      async append(request: TelemetryAppend) {
+        if (
+          request.source.kind !== "projection" ||
+          request.source.execution.executionToken !== FIXTURE_EXECUTION_TOKEN
+        ) {
+          return baseMaterializer.telemetry.append(request)
+        }
+        const execution = await claimProjectionExecution(storage, projections, {
+          runId: request.source.execution.projectionRunId,
+          projectionId: request.source.projection.projectionId,
+          protocol: "telemetry",
+          datasetVersion: request.source.datasetVersion,
+          fixedBatchSize: request.points.length,
+        })
+        return baseMaterializer.telemetry.append({
+          ...request,
+          source: { ...request.source, execution },
+        })
+      },
+    },
+  }
   return { materializer, storage, ontology, projections }
 }
 
@@ -134,9 +173,84 @@ export function replacement(
   return {
     source: { projectionId: "devices" },
     datasetVersion: { datasetId: "devices", versionId, createdAt },
-    projectionRunId: runId,
+    execution: pendingProjectionExecution(runId),
     entries: entries(values),
   } as const
+}
+
+const FIXTURE_EXECUTION_TOKEN = "__fixture_claim__"
+
+export function pendingProjectionExecution(projectionRunId: string): ProjectionExecution {
+  return { projectionRunId, executionToken: FIXTURE_EXECUTION_TOKEN }
+}
+
+export async function claimProjectionExecution(
+  storage: InMemoryStorage,
+  projections: ProjectionRegistry,
+  input: {
+    readonly runId: string
+    readonly projectionId: string
+    readonly protocol: "replacement" | "telemetry"
+    readonly datasetVersion: PinnedDatasetVersion
+    readonly fixedBatchSize?: number
+  }
+): Promise<ProjectionExecution> {
+  const resolved =
+    input.protocol === "replacement"
+      ? projections.resolveSource(input.projectionId)
+      : projections.resolveTelemetry(input.projectionId)
+  const definition = resolved.definition
+  const projectionKind =
+    definition._tag === "ObjectProjectionDefinition"
+      ? "object"
+      : definition._tag === "LinkProjectionDefinition"
+        ? "link"
+        : "telemetry"
+  const identity: ProjectionRunMaterializationIdentity = {
+    projectionId: resolved.projectionId,
+    projectionKind,
+    protocol: input.protocol,
+    datasetVersion: {
+      ...input.datasetVersion,
+      createdAt: new Date(input.datasetVersion.createdAt).toISOString(),
+    },
+    ontologyRevision: projections.ontologyRevision,
+    projectionRevision: resolved.projectionRevision,
+    ownershipHash: resolved.ownershipHash,
+  }
+  const objectTypes =
+    definition._tag === "LinkProjectionDefinition"
+      ? {
+          sourceObjectTypeId: definition.sourceObjectTypeId,
+          targetObjectTypeId: definition.targetObjectTypeId,
+        }
+      : { objectTypeId: definition.objectTypeId }
+  const run = await storage.projectionRuns.startOrReclaimMaterialization({
+    id: input.runId,
+    projectId: "project",
+    identity,
+    ...objectTypes,
+    ...(input.fixedBatchSize !== undefined ? { fixedBatchSize: input.fixedBatchSize } : {}),
+  })
+  if (!run.executionToken) throw new Error("Fixture projection claim returned no execution token")
+  return { projectionRunId: run.id, executionToken: run.executionToken }
+}
+
+async function resolveFixtureExecution(
+  storage: InMemoryStorage,
+  projections: ProjectionRegistry,
+  execution: ProjectionExecution,
+  input: {
+    readonly projectionId: string
+    readonly protocol: "replacement"
+    readonly datasetVersion: PinnedDatasetVersion
+  }
+): Promise<ProjectionExecution> {
+  if (execution.executionToken !== FIXTURE_EXECUTION_TOKEN) return execution
+  return claimProjectionExecution(storage, projections, {
+    ...input,
+    runId: execution.projectionRunId,
+  })
 }
 
 export function atomic(
@@ -153,7 +267,7 @@ export function atomic(
   } as const
 }
 
-function generationSequence(): () => string {
+function materializationSequence(): () => string {
   let value = 0
-  return () => `generation-${++value}`
+  return () => `materialization-${++value}`
 }

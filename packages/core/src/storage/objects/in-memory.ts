@@ -5,7 +5,7 @@ import type {
   StoredObjectMutationEvent,
   StoredTelemetryAppendedEvent,
 } from "../../events"
-import type { EffectiveLinkSnapshot, EffectiveObjectSnapshot } from "../../materializer/types"
+import type { EffectiveLinkSnapshot, EffectiveObjectSnapshot } from "../../materialization/model"
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "../../objects/query"
 import {
   editCommitLinkCreateConflict,

@@ -8,13 +8,10 @@ import type {
 import type { OntologyOutboxRecord } from "../outbox"
 import type { OntologySourceRecord, StageSourceAssertion } from "../sources"
 
-export interface InMemorySourceGeneration {
-  readonly projectId: string
-  readonly sourceId: string
-  readonly generationId: string
-  readonly stagedAt: string
+export interface InMemorySourceMaterialization extends OntologySourceRecord {
   readonly rowsByEntity: Map<string, StageSourceAssertion>
   readonly rootOrdinals: Map<string, number>
+  readonly ordinalRoots: Map<number, string>
 }
 
 export interface InMemoryStoredObjectOverride extends StoredObjectOverride {
@@ -28,8 +25,7 @@ export interface InMemoryStoredLinkOverride extends StoredLinkOverride {
 export interface InMemoryOntologyState {
   readonly commitsById: Map<string, OntologyCommitRecord>
   readonly commitIdByIdempotency: Map<string, string>
-  readonly activeSources: Map<string, OntologySourceRecord>
-  readonly generations: Map<string, InMemorySourceGeneration>
+  readonly sourceMaterializations: Map<string, InMemorySourceMaterialization>
   readonly objectOverrides: Map<string, InMemoryStoredObjectOverride>
   readonly linkOverrides: Map<string, InMemoryStoredLinkOverride>
   readonly outbox: Map<string, OntologyOutboxRecord>
@@ -51,8 +47,7 @@ export function createInMemoryOntologyState(): InMemoryOntologyState {
   return {
     commitsById: new Map(),
     commitIdByIdempotency: new Map(),
-    activeSources: new Map(),
-    generations: new Map(),
+    sourceMaterializations: new Map(),
     objectOverrides: new Map(),
     linkOverrides: new Map(),
     outbox: new Map(),
@@ -63,12 +58,24 @@ export function projectEntityKey(projectId: string, entityKey: string): string {
   return JSON.stringify([projectId, entityKey])
 }
 
-export function sourceKey(projectId: string, sourceId: string): string {
-  return JSON.stringify([projectId, sourceId])
+export function sourceMaterializationKey(
+  projectId: string,
+  sourceId: string,
+  materializationId: string
+): string {
+  return JSON.stringify([projectId, sourceId, materializationId])
 }
 
-export function generationKey(projectId: string, sourceId: string, generationId: string): string {
-  return JSON.stringify([projectId, sourceId, generationId])
+export function sourceMaterializationRecord(
+  materialization: InMemorySourceMaterialization
+): OntologySourceRecord {
+  const {
+    rowsByEntity: _rows,
+    rootOrdinals: _roots,
+    ordinalRoots: _ordinals,
+    ...record
+  } = materialization
+  return structuredClone(record)
 }
 
 export function commitKey(projectId: string, commitId: string): string {

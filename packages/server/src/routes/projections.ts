@@ -25,9 +25,26 @@ import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../u
 
 function serializeProjectionRun(run: ProjectionRunRecord) {
   return {
-    ...run,
+    id: run.id,
+    projectId: run.projectId,
+    projectionId: run.projectionId,
+    projectionKind: run.projectionKind,
+    datasetId: run.datasetId,
+    datasetVersionId: run.datasetVersionId,
+    objectTypeId: run.objectTypeId,
+    sourceObjectTypeId: run.sourceObjectTypeId,
+    targetObjectTypeId: run.targetObjectTypeId,
+    status: run.status,
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
+    errorMessage: run.errorMessage,
+    rowsProcessed: run.rowsProcessed,
+    rowsSkipped: run.rowsSkipped,
+    objectsUpserted: run.objectsUpserted,
+    linksUpserted: run.linksUpserted,
+    telemetryPointsAppended: run.telemetryPointsAppended,
+    telemetryPointsSkipped: run.telemetryPointsSkipped,
+    telemetryRowsFailed: run.telemetryRowsFailed,
   }
 }
 

@@ -1,5 +1,5 @@
 import type { StoredTelemetryAppendedEvent } from "../../events"
-import type { TelemetrySeriesRef } from "../../materializer/types"
+import type { TelemetrySeriesRef } from "../../materialization/model"
 import type { StoredTelemetryPoint } from "../ontology/materializations"
 import type { TimeseriesHistoryBatchInput, TimeseriesPoint, TimeseriesStorage } from "./types"
 

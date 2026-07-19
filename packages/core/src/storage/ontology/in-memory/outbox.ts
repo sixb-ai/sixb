@@ -1,7 +1,7 @@
 import {
   MaterializationConflictError,
   MaterializationValidationError,
-} from "../../../materializer/errors"
+} from "../../../materialization/errors"
 import type {
   ClaimedOntologyOutboxRow,
   ClaimOntologyOutboxInput,
