@@ -11,8 +11,11 @@ import {
   type LoggerProvider,
   type OntologySource,
   Sixb,
+  type SixbErrorContext,
+  type SixbErrorHandler,
   type SixbOptions,
 } from "@sixb/core"
+import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -315,6 +318,8 @@ describe("webhook routes", () => {
   })
 
   test("maps unknown, unsupported, verification, and handler errors", async () => {
+    const handlerError = new Error("boom")
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
     const connector = defineConnector("github", {
       type: "test",
       webhooks: [
@@ -331,7 +336,7 @@ describe("webhook routes", () => {
           .post()
           .text()
           .handle(() => {
-            throw new Error("boom")
+            throw handlerError
           }),
       ],
       connect() {
@@ -340,7 +345,14 @@ describe("webhook routes", () => {
     })
 
     const storage = new InMemoryStorage()
-    const app = createWebhookApp([connector], storage)
+    const { app, sixb } = createWebhookRuntime(
+      [connector],
+      storage,
+      undefined,
+      (error, context) => {
+        reports.push({ error, context })
+      }
+    )
 
     const unknown = await app.fetch(
       new Request("http://localhost/api/webhooks/github/missing", { method: "POST" })
@@ -360,6 +372,7 @@ describe("webhook routes", () => {
         body: "hello",
       })
     )
+    await flushSixbErrors(sixb)
 
     expect(unknown.status).toBe(404)
     expect(unsupported.status).toBe(405)
@@ -395,6 +408,153 @@ describe("webhook routes", () => {
         }),
       ])
     )
+
+    const failedRun = runs.runs.find((run) => run.webhookId === "failing")
+    expect(reports).toHaveLength(1)
+    expect(reports[0]?.error).toBe(handlerError)
+    expect(reports[0]?.context).toMatchObject({
+      type: "run.failed",
+      notificationId: `project:test-project:run:webhook:${failedRun?.id}:failed:${reports[0]?.context.occurredAt}`,
+      projectId: "test-project",
+      run: {
+        kind: "webhook",
+        runId: failedRun?.id,
+        connectorId: "github",
+        webhookId: "failing",
+      },
+    })
+  })
+
+  test("reports delivery infrastructure and returned non-4xx failures exactly once", async () => {
+    const claimError = new Error("claim storage unavailable")
+    const completionError = new Error("completion storage unavailable")
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const connector = defineConnector("github", {
+      type: "test",
+      webhooks: [
+        defineWebhook("claim-failure")
+          .post()
+          .json()
+          .idempotencyKey(() => "claim-delivery")
+          .handle(() => undefined),
+        defineWebhook("completion-failure")
+          .post()
+          .json()
+          .idempotencyKey(() => "completion-delivery")
+          .handle(() => undefined),
+        defineWebhook("unavailable")
+          .post()
+          .json()
+          .handle(() => ({ status: 503, body: { error: "Retry later" } })),
+        defineWebhook("redirected")
+          .post()
+          .json()
+          .handle(() => ({ status: 302, body: { location: "elsewhere" } })),
+        defineWebhook("client-rejection")
+          .post()
+          .json()
+          .handle(() => ({ status: 422, body: { error: "Invalid event" } })),
+        defineWebhook("success")
+          .post()
+          .json()
+          .handle(() => undefined),
+      ],
+      connect() {
+        return {}
+      },
+    })
+
+    const storage = new InMemoryStorage()
+    const deliveries = storage.webhookDeliveries
+    const claim = deliveries.claim.bind(deliveries)
+    const complete = deliveries.complete.bind(deliveries)
+    deliveries.claim = async (input) => {
+      if (input.webhookId === "claim-failure") {
+        throw claimError
+      }
+      return claim(input)
+    }
+    deliveries.complete = async (input) => {
+      if (input.webhookId === "completion-failure") {
+        throw completionError
+      }
+      return complete(input)
+    }
+    storage.webhookRuns.finish = async () => {
+      throw new Error("run history unavailable")
+    }
+
+    const { app, sixb } = createWebhookRuntime(
+      [connector],
+      storage,
+      undefined,
+      (error, context) => {
+        reports.push({ error, context })
+      }
+    )
+    const dispatch = (webhookId: string) =>
+      app.fetch(
+        new Request(`http://localhost/api/webhooks/github/${webhookId}`, {
+          method: "POST",
+          body: JSON.stringify({ ok: true }),
+        })
+      )
+
+    const claimFailure = await dispatch("claim-failure")
+    const completionFailure = await dispatch("completion-failure")
+    const skippedRetry = await dispatch("completion-failure")
+    const unavailable = await dispatch("unavailable")
+    const redirected = await dispatch("redirected")
+    const clientRejection = await dispatch("client-rejection")
+    const success = await dispatch("success")
+    await flushSixbErrors(sixb)
+
+    expect(claimFailure.status).toBe(500)
+    expect(completionFailure.status).toBe(500)
+    expect(skippedRetry.status).toBe(202)
+    expect(unavailable.status).toBe(503)
+    expect(await unavailable.json()).toEqual({ error: "Retry later" })
+    expect(redirected.status).toBe(302)
+    expect(clientRejection.status).toBe(422)
+    expect(success.status).toBe(202)
+
+    expect(reports).toHaveLength(4)
+    expect(reports.map((report) => report.error)).toEqual([
+      claimError,
+      completionError,
+      expect.any(Error),
+      expect.any(Error),
+    ])
+    expect(reports[2]?.error.message).toBe("Webhook handler returned HTTP 503")
+    expect(reports[3]?.error.message).toBe("Webhook handler returned HTTP 302")
+    expect(reports.map((report) => report.context.run)).toEqual([
+      {
+        kind: "webhook",
+        runId: expect.stringMatching(/^webhookrun_/),
+        connectorId: "github",
+        webhookId: "claim-failure",
+      },
+      {
+        kind: "webhook",
+        runId: expect.stringMatching(/^webhookrun_/),
+        connectorId: "github",
+        webhookId: "completion-failure",
+      },
+      {
+        kind: "webhook",
+        runId: expect.stringMatching(/^webhookrun_/),
+        connectorId: "github",
+        webhookId: "unavailable",
+      },
+      {
+        kind: "webhook",
+        runId: expect.stringMatching(/^webhookrun_/),
+        connectorId: "github",
+        webhookId: "redirected",
+      },
+    ])
+    expect(reports.every((report) => report.context.projectId === "test-project")).toBe(true)
+    expect(new Set(reports.map((report) => report.context.run.runId)).size).toBe(4)
   })
 })
 
@@ -402,6 +562,15 @@ function createWebhookApp(
   connectors: SixbOptions<readonly OntologySource[]>["connectors"],
   storage = new InMemoryStorage(),
   logger?: LoggerProvider
+) {
+  return createWebhookRuntime(connectors, storage, logger).app
+}
+
+function createWebhookRuntime(
+  connectors: SixbOptions<readonly OntologySource[]>["connectors"],
+  storage = new InMemoryStorage(),
+  logger?: LoggerProvider,
+  onError?: SixbErrorHandler
 ) {
   const sixb = createSixbInstance<readonly OntologySource[]>({
     id: "test-project",
@@ -413,9 +582,10 @@ function createWebhookApp(
     queues: new InMemoryQueues(),
     connectors,
     logger,
+    onError,
   })
   const server = new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
-  return createSixbApi(server)
+  return { app: createSixbApi(server), sixb }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

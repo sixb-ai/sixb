@@ -11,6 +11,7 @@ import type {
   WebhookMetadata,
   WebhookResponse,
 } from "@sixb/core"
+import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type {
   FinishWebhookRunStatus,
   WebhookDeliveryClaimResult,
@@ -81,12 +82,43 @@ export function registerWebhookRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
 
 async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown> {
   const runId = `webhookrun_${randomUUID()}`
-  const logSession = options.sixb.logs.startExecution({ kind: "webhook", id: runId })
+  const { sixb, registered } = options
+  const logSession = sixb.logs.startExecution({ kind: "webhook", id: runId })
+  let failureReported = false
+  const reportFailure = (error: unknown) => {
+    if (failureReported) return
 
-  await startWebhookRun(options.sixb, options.registered, options.request, runId)
+    failureReported = true
+    reportRunFailure(sixb, error, {
+      projectId: sixb.id,
+      run: {
+        kind: "webhook",
+        runId,
+        connectorId: registered.connector.id,
+        webhookId: registered.webhook.id,
+      },
+    })
+  }
+
+  await startWebhookRun(sixb, registered, options.request, runId)
 
   try {
-    return await dispatchWebhookRun(options, runId, (phase) => logSession.withContext({ phase }))
+    return await dispatchWebhookRun(
+      options,
+      runId,
+      (phase) => logSession.withContext({ phase }),
+      reportFailure
+    )
+  } catch (error) {
+    await finishWebhookRun({
+      sixb,
+      runId,
+      status: "failed",
+      responseStatus: 500,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    reportFailure(error)
+    throw error
   } finally {
     await logSession.flush()
   }
@@ -95,7 +127,8 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
 async function dispatchWebhookRun(
   options: DispatchWebhookOptions,
   runId: string,
-  loggerForPhase: (phase: string) => Logger
+  loggerForPhase: (phase: string) => Logger,
+  reportFailure: (error: unknown) => void
 ): Promise<unknown> {
   const { sixb, registered, request, set } = options
   const { connector, webhook, route } = registered
@@ -210,7 +243,8 @@ async function dispatchWebhookRun(
       return result
     }
     deliveryKey = claim.key
-  } catch {
+  } catch (error) {
+    reportFailure(error)
     set.status = 500
     await finishWebhookRun({
       sixb,
@@ -227,6 +261,7 @@ async function dispatchWebhookRun(
   try {
     response = await webhook.handle(handlerContext as never)
   } catch (error) {
+    reportFailure(error)
     // Handler failures mark the key failed so the provider's next retry can
     // attempt the delivery again.
     if (deliveryKey) {
@@ -259,7 +294,8 @@ async function dispatchWebhookRun(
         completedAt: new Date().toISOString(),
       })
     }
-  } catch {
+  } catch (error) {
+    reportFailure(error)
     set.status = 500
     await finishWebhookRun({
       sixb,
@@ -276,6 +312,9 @@ async function dispatchWebhookRun(
 
   const responseStatus = getWebhookResponseStatus(response)
   const runStatus = responseStatus >= 200 && responseStatus <= 299 ? "succeeded" : "failed"
+  if (runStatus === "failed" && (responseStatus < 400 || responseStatus >= 500)) {
+    reportFailure(new Error(`Webhook handler returned HTTP ${responseStatus}`))
+  }
   await finishWebhookRun({
     sixb,
     runId,
