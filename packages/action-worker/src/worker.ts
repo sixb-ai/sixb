@@ -91,6 +91,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       runtime: context,
       job: actionJob,
       signal,
+      attempt: job.attempt,
     })
 
     if ("skipped" in result) {
