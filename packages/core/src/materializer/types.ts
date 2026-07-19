@@ -195,7 +195,7 @@ export interface TelemetryAppend {
 }
 
 export interface MaterializationItemError {
-  readonly code: string
+  readonly code: "validation"
   readonly message: string
 }
 

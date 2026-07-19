@@ -88,6 +88,8 @@ export interface ProjectionRunRecord extends ProjectionRunCounters, ProjectionRu
   readonly startedAt: Date
   readonly finishedAt?: Date
   readonly errorMessage?: string
+  /** Generic ontology commit linkage written atomically by the materializer. */
+  readonly commitId?: string
 }
 
 export interface StartProjectionRunInput extends ProjectionRunObjectTypes {
@@ -153,6 +155,16 @@ export interface ListLatestProjectionRunsResult {
 }
 
 export interface ProjectionRunStorage {
+  /** @internal Phase 1 materializer linkage; optional until every provider is switched. */
+  recordMaterializationCommit?(
+    projectId: string,
+    bookkeeping: Extract<
+      import("../ontology").MaterializationRunBookkeeping,
+      { readonly kind: "projection" }
+    >
+  ): Promise<void>
+  /** @internal Attach a replaying run to an already committed materialization. */
+  recordMaterializationReplay?(projectId: string, runId: string, commitId: string): Promise<void>
   start(input: StartProjectionRunInput): Promise<ProjectionRunRecord>
   update(input: UpdateProjectionRunInput): Promise<ProjectionRunRecord>
   finish(input: FinishProjectionRunInput): Promise<ProjectionRunRecord>

@@ -1751,7 +1751,7 @@ describe("runProjectionJob", () => {
     expect(run?.status).toBe("failed")
   })
 
-  test("fails before reading rows when an object FK target is incompatible", async () => {
+  test("rejects an incompatible object FK target at startup before reading rows", () => {
     const deps = createDeps()
     const invalidFkProjection = {
       _tag: "ObjectProjectionDefinition",
@@ -1771,77 +1771,33 @@ describe("runProjectionJob", () => {
         },
       },
     } satisfies ProjectionDefinition
-    const sixb = createSixb(
-      {
-        datasets: [roomsDataset],
-        projections: [invalidFkProjection],
-      },
-      deps
-    )
-    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
-      { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
-    ])
-
-    await expect(
-      runProjectionJob({
-        runtime: createRuntime(sixb),
-        job: {
-          id: "projrun-invalid-fk-target",
-          projectionId: "room-invalid-fk-proj",
-          projectionKind: "object",
-          datasetId: "canonical.rooms",
-          versionId: version.versionId,
+    expect(() =>
+      createSixb(
+        {
+          datasets: [roomsDataset],
+          projections: [invalidFkProjection],
         },
-      })
-    ).rejects.toThrow("not compatible")
-
-    const run = await deps.storage.projectionRuns.getById({
-      projectId: sixb.id,
-      id: "projrun-invalid-fk-target",
-    })
-    expect(run?.status).toBe("failed")
-    expect(run?.rowsProcessed).toBe(0)
-    expect(run?.errorMessage).toContain("not compatible")
+        deps
+      )
+    ).toThrow("not compatible")
   })
 
-  test("fails before reading rows when a link projection target is incompatible", async () => {
+  test("rejects an incompatible link projection target at startup before reading rows", () => {
     const deps = createDeps()
     const invalidLinkProjection = {
       ...roomSensorProjection,
       id: "room-sensor-invalid-target-proj",
       targetObjectTypeId: "Building",
     } satisfies ProjectionDefinition
-    const sixb = createSixb(
-      {
-        datasets: [roomSensorsDataset],
-        projections: [invalidLinkProjection],
-      },
-      deps
-    )
-    const version = await commitDatasetVersion(deps.lakeStorage, roomSensorsDataset, [
-      { room_id: "r1", sensor_id: "s1" },
-    ])
-
-    await expect(
-      runProjectionJob({
-        runtime: createRuntime(sixb),
-        job: {
-          id: "projrun-invalid-link-target",
-          projectionId: "room-sensor-invalid-target-proj",
-          projectionKind: "link",
-          datasetId: "canonical.room-sensors",
-          versionId: version.versionId,
+    expect(() =>
+      createSixb(
+        {
+          datasets: [roomSensorsDataset],
+          projections: [invalidLinkProjection],
         },
-      })
-    ).rejects.toThrow("not compatible")
-
-    const run = await deps.storage.projectionRuns.getById({
-      projectId: sixb.id,
-      id: "projrun-invalid-link-target",
-    })
-    expect(run?.status).toBe("failed")
-    expect(run?.rowsProcessed).toBe(0)
-    expect(run?.errorMessage).toContain("not compatible")
+        deps
+      )
+    ).toThrow("not compatible")
   })
 
   test("marks the run cancelled when the signal aborts during the final object flush", async () => {

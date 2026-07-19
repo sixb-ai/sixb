@@ -5,6 +5,7 @@ import type {
   StoredObjectMutationEvent,
   StoredTelemetryAppendedEvent,
 } from "../../events"
+import type { EffectiveLinkSnapshot, EffectiveObjectSnapshot } from "../../materializer/types"
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "../../objects/query"
 import {
   editCommitLinkCreateConflict,
@@ -117,10 +118,81 @@ export interface InMemoryObjectStorageSnapshot {
   readonly appliedEventIds: Set<string>
 }
 
+interface InMemoryObjectMaterializerAdapter {
+  getExactObjectRow(projectId: string, objectTypeId: string, primaryId: string): ObjectRow | null
+  getExactLinkRow(
+    projectId: string,
+    ref: {
+      readonly sourceTypeId: string
+      readonly sourceId: string
+      readonly linkId: string
+      readonly targetTypeId: string
+      readonly targetId: string
+    }
+  ): ObjectLinkRow | null
+  applyExactObject(row: EffectiveObjectSnapshot, projectId: string): void
+  deleteExactObject(projectId: string, objectTypeId: string, primaryId: string): void
+  applyExactLink(row: EffectiveLinkSnapshot, projectId: string): void
+  deleteExactLink(row: {
+    projectId: string
+    sourceTypeId: string
+    sourceId: string
+    linkId: string
+    targetTypeId: string
+    targetId: string
+  }): void
+  visitExactLinks(projectId: string, visit: (row: ObjectLinkRow) => void): void
+  visitExactScopeLinks(
+    projectId: string,
+    sourceTypeId: string,
+    sourceId: string,
+    linkId: string,
+    visit: (row: ObjectLinkRow) => void
+  ): void
+}
+
+const materializerAdapters = new WeakMap<InMemoryObjectStorage, InMemoryObjectMaterializerAdapter>()
+
+/** @internal Exact access for the in-memory ontology provider; not exported from package barrels. */
+export function getInMemoryObjectMaterializerAdapter(
+  storage: InMemoryObjectStorage
+): InMemoryObjectMaterializerAdapter {
+  const adapter = materializerAdapters.get(storage)
+  if (!adapter) throw new Error("[Sixb] In-memory object materializer adapter is unavailable.")
+  return adapter
+}
+
 export class InMemoryObjectStorage implements ObjectStorage {
   private readonly rows = new Map<string, Map<string, ObjectRow>>()
   private readonly links = new Map<string, Map<string, ObjectLinkRow>>()
   private readonly appliedEventIds = new Set<string>()
+
+  constructor() {
+    materializerAdapters.set(this, {
+      getExactObjectRow: (projectId, objectTypeId, primaryId) =>
+        this.getExactObjectRow(projectId, objectTypeId, primaryId),
+      getExactLinkRow: (projectId, ref) => this.getExactLinkRow(projectId, ref),
+      applyExactObject: (row, projectId) => this.applyExactObject(row, projectId),
+      deleteExactObject: (projectId, objectTypeId, primaryId) =>
+        this.deleteExactObject(projectId, objectTypeId, primaryId),
+      applyExactLink: (row, projectId) => this.applyExactLink(row, projectId),
+      deleteExactLink: (row) => this.deleteExactLink(row),
+      visitExactLinks: (projectId, visit) => {
+        for (const bucket of this.links.values()) {
+          for (const row of bucket.values()) {
+            if (row.projectId === projectId) visit(structuredClone(row))
+          }
+        }
+      },
+      visitExactScopeLinks: (projectId, sourceTypeId, sourceId, linkId, visit) => {
+        const bucket = this.links.get(sourceLinkBucketKey(projectId, sourceTypeId, sourceId))
+        if (!bucket) return
+        for (const row of bucket.values()) {
+          if (row.linkId === linkId) visit(structuredClone(row))
+        }
+      },
+    })
+  }
 
   snapshot(): InMemoryObjectStorageSnapshot {
     return {
@@ -145,6 +217,95 @@ export class InMemoryObjectStorage implements ObjectStorage {
     for (const eventId of snapshot.appliedEventIds) {
       this.appliedEventIds.add(eventId)
     }
+  }
+
+  private getExactObjectRow(
+    projectId: string,
+    objectTypeId: string,
+    primaryId: string
+  ): ObjectRow | null {
+    const row = this.rows.get(objectRowKey(projectId, objectTypeId))?.get(primaryId)
+    return row ? structuredClone(row) : null
+  }
+
+  private getExactLinkRow(
+    projectId: string,
+    ref: {
+      readonly sourceTypeId: string
+      readonly sourceId: string
+      readonly linkId: string
+      readonly targetTypeId: string
+      readonly targetId: string
+    }
+  ): ObjectLinkRow | null {
+    const row = this.links
+      .get(sourceLinkBucketKey(projectId, ref.sourceTypeId, ref.sourceId))
+      ?.get(linkRowKey(ref.linkId, ref.targetTypeId, ref.targetId))
+    return row ? structuredClone(row) : null
+  }
+
+  private applyExactObject(row: EffectiveObjectSnapshot, projectId: string): void {
+    const bucketId = objectRowKey(projectId, row.ref.objectTypeId)
+    const bucket = this.rows.get(bucketId) ?? new Map<string, ObjectRow>()
+    this.rows.set(bucketId, bucket)
+    bucket.set(row.ref.primaryId, {
+      projectId,
+      objectTypeId: row.ref.objectTypeId,
+      primaryId: row.ref.primaryId,
+      properties: structuredClone(row.properties) as Record<string, unknown>,
+      createdAt: new Date(row.createdAt),
+      updatedAt: new Date(row.updatedAt),
+      version: row.version,
+      lastCommitId: row.lastCommitId,
+      sourceEventId: undefined,
+    })
+  }
+
+  private deleteExactObject(projectId: string, objectTypeId: string, primaryId: string): void {
+    this.deleteObjectRow(projectId, objectTypeId, primaryId)
+  }
+
+  private applyExactLink(row: EffectiveLinkSnapshot, projectId: string): void {
+    const bucketKey = sourceLinkBucketKey(
+      projectId,
+      row.ref.source.objectTypeId,
+      row.ref.source.primaryId
+    )
+    const bucket = this.links.get(bucketKey) ?? new Map<string, ObjectLinkRow>()
+    this.links.set(bucketKey, bucket)
+    bucket.set(linkRowKey(row.ref.linkId, row.ref.target.objectTypeId, row.ref.target.primaryId), {
+      projectId,
+      sourceTypeId: row.ref.source.objectTypeId,
+      sourceId: row.ref.source.primaryId,
+      linkId: row.ref.linkId,
+      targetTypeId: row.ref.target.objectTypeId,
+      targetId: row.ref.target.primaryId,
+      properties: row.properties
+        ? (structuredClone(row.properties) as Record<string, unknown>)
+        : undefined,
+      createdAt: new Date(row.createdAt),
+      updatedAt: new Date(row.updatedAt),
+      lastCommitId: row.lastCommitId,
+      sourceEventId: undefined,
+    })
+  }
+
+  private deleteExactLink(row: {
+    projectId: string
+    sourceTypeId: string
+    sourceId: string
+    linkId: string
+    targetTypeId: string
+    targetId: string
+  }): void {
+    this.deleteLinkRow(
+      row.projectId,
+      row.sourceTypeId,
+      row.sourceId,
+      row.linkId,
+      row.targetTypeId,
+      row.targetId
+    )
   }
 
   async applyEditCommitPlan(input: {

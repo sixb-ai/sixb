@@ -7,6 +7,8 @@ import type {
   TelemetrySeriesRef,
 } from "./types"
 
+const textEncoder = new TextEncoder()
+
 function assertIdentifier(value: string, label: string): void {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new MaterializationValidationError(`${label} must be a nonblank string.`)
@@ -68,10 +70,53 @@ export function telemetryPointKey(series: TelemetrySeriesRef, at: string): strin
   ])
 }
 
+/**
+ * A provider-collation-independent byte key. Providers compare this lowercase hexadecimal value
+ * verbatim; all ontology identity structure is supplied by core in the canonical JSON tuple.
+ */
+export function canonicalIdentitySortKey(parts: readonly string[]): string {
+  let result = ""
+  for (const byte of textEncoder.encode(JSON.stringify(parts))) {
+    result += byte.toString(16).padStart(2, "0")
+  }
+  return result
+}
+
+export function utf8JsonByteLength(value: unknown): number {
+  return textEncoder.encode(JSON.stringify(value)).byteLength
+}
+
+export function objectRefSortKey(ref: OntologyObjectRef): string {
+  return canonicalIdentitySortKey([ref.objectTypeId, ref.primaryId])
+}
+
+export function linkRefSortKey(ref: OntologyLinkRef): string {
+  return canonicalIdentitySortKey([
+    ref.source.objectTypeId,
+    ref.source.primaryId,
+    ref.linkId,
+    ref.target.objectTypeId,
+    ref.target.primaryId,
+  ])
+}
+
+export function linkScopeSortKey(source: OntologyObjectRef, linkId: string): string {
+  return canonicalIdentitySortKey([source.objectTypeId, source.primaryId, linkId])
+}
+
+export function telemetryPointSortKey(series: TelemetrySeriesRef, at: string): string {
+  return canonicalIdentitySortKey([
+    series.object.objectTypeId,
+    series.object.primaryId,
+    series.propertyId,
+    at,
+  ])
+}
+
 export function compareObjectRefs(left: OntologyObjectRef, right: OntologyObjectRef): number {
-  return compareStrings(objectRefKey(left), objectRefKey(right))
+  return compareStrings(objectRefSortKey(left), objectRefSortKey(right))
 }
 
 export function compareLinkRefs(left: OntologyLinkRef, right: OntologyLinkRef): number {
-  return compareStrings(linkRefKey(left), linkRefKey(right))
+  return compareStrings(linkRefSortKey(left), linkRefSortKey(right))
 }

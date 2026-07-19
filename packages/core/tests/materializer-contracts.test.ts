@@ -7,15 +7,19 @@ import type {
   MaterializationRunBookkeeping,
   MaterializationSession,
   MaterializationStatePage,
+  MaterializationWorkPage,
   OntologyCommitRecord,
   OntologyCommitWrite,
   OntologyMaterializationEvent,
   OntologyMaterializationStorage,
   OntologyOutboxWrite,
   OntologySourceStorage,
+  ReadMaterializationObjectExistenceInput,
   SourceReplacementStatePage,
+  StageMaterializationWorkInput,
   StageSourceAssertion,
   StreamMaterializationStateInput,
+  StreamMaterializationWorkInput,
   StreamSourceReplacementStateInput,
 } from "@sixb/core/storage"
 import * as rootExports from "../src"
@@ -36,6 +40,7 @@ import {
   DEFAULT_MATERIALIZATION_BATCHING,
   resolveMaterializationBatching,
 } from "../src/materializer/batching"
+import { planStream } from "../src/materializer/plan-stream"
 
 const leftObject = { objectTypeId: "a:b", primaryId: "c" }
 const rightObject = { objectTypeId: "a", primaryId: "b:c" }
@@ -61,6 +66,20 @@ class FakeMaterializationStorage implements OntologyMaterializationStorage {
   ): AsyncIterable<SourceReplacementStatePage> {
     this.requireActive(input.session)
     yield* []
+  }
+
+  async stageWork(input: StageMaterializationWorkInput): Promise<void> {
+    this.requireActive(input.session)
+  }
+
+  async *streamWork(input: StreamMaterializationWorkInput): AsyncIterable<MaterializationWorkPage> {
+    this.requireActive(input.session)
+    yield* []
+  }
+
+  async readObjectExistence(input: ReadMaterializationObjectExistenceInput) {
+    this.requireActive(input.session)
+    return []
   }
 
   async applyChunk(input: ApplyMaterializationChunkInput): Promise<void> {
@@ -503,9 +522,31 @@ describe("materializer canonical contracts", () => {
     )
   })
 
+  test("uses UTF-8 bytes for plan chunk thresholds", async () => {
+    const item = {
+      kind: "object-override-delete" as const,
+      value: {
+        ref: { objectTypeId: "Device", primaryId: "😀" },
+        expectedLastCommitId: "previous",
+      },
+    }
+    const utf8Bytes = new TextEncoder().encode(JSON.stringify(item)).byteLength
+    const chunks = []
+    for await (const chunk of planStream([item, item], {
+      ...DEFAULT_MATERIALIZATION_BATCHING,
+      planChunkRows: 10,
+      planChunkBytes: utf8Bytes * 2 - 1,
+    })) {
+      chunks.push(chunk)
+    }
+    expect(chunks).toHaveLength(2)
+    expect(chunks.map((chunk) => chunk.overrides.objectDeletes.length)).toEqual([1, 1])
+  })
+
   test("does not expose materializer values or tuning from the package root", () => {
     expect("OntologyMaterializer" in rootExports).toBe(false)
     expect("ProjectionRegistry" in rootExports).toBe(false)
+    expect("InMemoryOntologyStorage" in rootExports).toBe(false)
     expect("MaterializationOptions" in rootExports).toBe(false)
     expect("MaterializationBatching" in rootExports).toBe(false)
     expect("sha256Canonical" in rootExports).toBe(false)

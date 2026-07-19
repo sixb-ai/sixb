@@ -18,7 +18,7 @@ import type {
   TelemetrySeriesRef,
 } from "../../materializer/types"
 import type { OntologyCommitRecord, OntologyCommitWrite } from "./commits"
-import type { OntologyOutboxWrite } from "./outbox"
+import type { OntologyMaterializationEventDraft, OntologyOutboxWrite } from "./outbox"
 import type { StoredSourceLinkAssertion, StoredSourceObjectAssertion } from "./sources"
 
 export interface StoredObjectOverride {
@@ -67,8 +67,8 @@ export interface MaterializationLinkState {
 export interface MaterializationLinkScopeState {
   readonly source: OntologyObjectRef
   readonly linkId: string
+  readonly effectiveCount: number
   readonly fingerprint: string
-  readonly links: readonly EffectiveLinkSnapshot[]
 }
 
 export interface MaterializationStatePage {
@@ -79,13 +79,13 @@ export interface MaterializationStatePage {
 }
 
 export interface SourceReplacementObjectState extends Omit<MaterializationObjectState, "source"> {
-  readonly previousSource: StoredSourceObjectAssertion | null
   readonly candidateSource: StoredSourceObjectAssertion | null
 }
 
 export interface SourceReplacementLinkState extends Omit<MaterializationLinkState, "source"> {
-  readonly previousSource: StoredSourceLinkAssertion | null
   readonly candidateSource: StoredSourceLinkAssertion | null
+  /** False only for an unchanged existing member included to validate a complete link scope. */
+  readonly diffRequired: boolean
 }
 
 export interface SourceReplacementStatePage {
@@ -110,7 +110,7 @@ export interface MaterializationStateRequestChunk {
 }
 
 /**
- * Provider-local opaque handle valid only for its enclosing transaction.
+ * Provider-local opaque handle valid only for its creating transaction until commit or rollback.
  * Providers own the token and validate its identity/liveness (for example, through a WeakMap).
  */
 export interface MaterializationSession {
@@ -290,7 +290,108 @@ export interface StreamSourceReplacementStateInput {
   readonly session: MaterializationSession
   readonly source: ProjectionSourceRef
   readonly candidateGenerationId: string
+  readonly entityKind: "object" | "link"
   readonly pageRows: number
+}
+
+export type MaterializationWorkEntityKind = "object" | "link" | "point"
+
+export interface MaterializationClassificationWorkRecord {
+  readonly kind: "classification"
+  readonly recordKey: string
+  readonly entityKind: MaterializationWorkEntityKind
+  readonly identityKey: string
+}
+
+export interface MaterializationObjectExistenceWorkRecord {
+  readonly kind: "object-existence"
+  readonly recordKey: string
+  readonly ref: OntologyObjectRef
+  readonly exists: boolean
+}
+
+export interface MaterializationIncidentObjectWorkRecord {
+  readonly kind: "incident-object"
+  readonly recordKey: string
+  readonly ref: OntologyObjectRef
+}
+
+export interface MaterializationCardinalityOccupantWorkRecord {
+  readonly kind: "cardinality"
+  readonly recordKey: string
+  readonly scopeSortKey: string
+  readonly linkSortKey: string
+  readonly ref: OntologyLinkRef
+  readonly occupied: boolean
+}
+
+export type MaterializationPlanWorkItem =
+  | { readonly kind: "object-override-upsert"; readonly value: ExactObjectOverrideWrite }
+  | { readonly kind: "object-override-delete"; readonly value: ExactObjectOverrideDelete }
+  | { readonly kind: "link-override-upsert"; readonly value: ExactLinkOverrideWrite }
+  | { readonly kind: "link-override-delete"; readonly value: ExactLinkOverrideDelete }
+  | { readonly kind: "object-upsert"; readonly value: ExactEffectiveObjectWrite }
+  | { readonly kind: "object-delete"; readonly value: ExactEffectiveObjectDelete }
+  | { readonly kind: "link-upsert"; readonly value: ExactEffectiveLinkWrite }
+  | { readonly kind: "link-delete"; readonly value: ExactEffectiveLinkDelete }
+  | { readonly kind: "point-upsert"; readonly value: ExactTimeseriesPointWrite }
+
+/** Safe physical phases; the provider compares the numeric value and never derives it. */
+export type MaterializationApplyPhase = 0 | 1 | 2 | 3 | 4 | 5
+
+export interface MaterializationPlanWorkRecord {
+  readonly kind: "plan"
+  readonly recordKey: string
+  readonly applyPhase: MaterializationApplyPhase
+  readonly sortKey: string
+  readonly item: MaterializationPlanWorkItem
+}
+
+export interface MaterializationEventWorkRecord {
+  readonly kind: "event"
+  readonly recordKey: string
+  readonly eventKindRank: number
+  readonly sortKey: string
+  readonly draft: OntologyMaterializationEventDraft
+}
+
+export type MaterializationWorkRecord =
+  | MaterializationClassificationWorkRecord
+  | MaterializationObjectExistenceWorkRecord
+  | MaterializationIncidentObjectWorkRecord
+  | MaterializationCardinalityOccupantWorkRecord
+  | MaterializationPlanWorkRecord
+  | MaterializationEventWorkRecord
+
+export interface StageMaterializationWorkInput {
+  readonly session: MaterializationSession
+  /** Insert-only and batch-atomic. Staging closes when any work lane starts streaming. */
+  readonly records: readonly MaterializationWorkRecord[]
+}
+
+export interface StreamMaterializationWorkInput {
+  readonly session: MaterializationSession
+  /** Canonical provider-owned lanes: physical writes, cardinality occupants, then event drafts. */
+  readonly order: "apply" | "cardinality" | "event"
+  readonly pageRows: number
+}
+
+export interface MaterializationWorkPage {
+  readonly records: readonly (
+    | MaterializationPlanWorkRecord
+    | MaterializationCardinalityOccupantWorkRecord
+    | MaterializationEventWorkRecord
+  )[]
+}
+
+export interface ReadMaterializationObjectExistenceInput {
+  readonly session: MaterializationSession
+  readonly refs: readonly OntologyObjectRef[]
+}
+
+export interface MaterializationObjectExistence {
+  readonly ref: OntologyObjectRef
+  readonly exists: boolean
 }
 
 export interface OntologyMaterializationStorage {
@@ -299,6 +400,11 @@ export interface OntologyMaterializationStorage {
   streamSourceReplacementState(
     input: StreamSourceReplacementStateInput
   ): AsyncIterable<SourceReplacementStatePage>
+  stageWork(input: StageMaterializationWorkInput): Promise<void>
+  streamWork(input: StreamMaterializationWorkInput): AsyncIterable<MaterializationWorkPage>
+  readObjectExistence(
+    input: ReadMaterializationObjectExistenceInput
+  ): Promise<readonly MaterializationObjectExistence[]>
   applyChunk(input: ApplyMaterializationChunkInput): Promise<void>
   finalize(input: FinalizeMaterializationInput): Promise<ApplyMaterializationResult>
 }

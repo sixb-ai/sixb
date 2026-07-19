@@ -59,6 +59,8 @@ export interface ActionRunRecord {
   readonly finishedAt?: Date
   readonly params: ActionRunParams
   readonly idempotencyKey: string
+  /** Generic ontology commit linkage written atomically by the materializer. */
+  readonly commitId?: string
   readonly writeback?: ActionRunWritebackRecord
   readonly commit?: ActionRunCommitRecord
   readonly effects?: ActionRunEffectsRecord
@@ -169,6 +171,10 @@ export interface ListActionRunsResult {
 }
 
 export interface ActionRunStorage {
+  /** @internal Phase 1 materializer linkage; optional until every provider is switched. */
+  recordMaterializationCommit?(projectId: string, runId: string, commitId: string): Promise<void>
+  /** @internal Attach a replaying run to an already committed materialization. */
+  recordMaterializationReplay?(projectId: string, runId: string, commitId: string): Promise<void>
   queue(input: QueueActionRunInput): Promise<ActionRunRecord>
   start(input: StartActionRunInput): Promise<ActionRunRecord>
   enterPhase(input: EnterActionRunPhaseInput): Promise<ActionRunRecord>

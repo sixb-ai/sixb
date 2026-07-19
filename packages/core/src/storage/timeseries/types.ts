@@ -11,6 +11,8 @@ export interface TimeseriesPoint {
   value: unknown
   unit?: string
   at: Date
+  /** Materializer commit provenance. Absent only on points written by the legacy compile bridge. */
+  lastCommitId?: string
   sourceEventId?: string
 }
 

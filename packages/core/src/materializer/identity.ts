@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import { assertJsonValue, stableJsonStringify } from "../json"
+import { MaterializationValidationError } from "./errors"
+import { linkRefSortKey } from "./refs"
 import type { EffectiveLinkSnapshot, PinnedDatasetVersion, ProjectionSourceRef } from "./types"
 
 export const ONTOLOGY_MATERIALIZATION_EVENT_KIND_ORDER = Object.freeze([
@@ -79,7 +81,7 @@ export function createFixedCommitIdentity(input: {
 }): FixedCommitIdentity {
   const committedAt = new Date(input.now ?? new Date())
   if (Number.isNaN(committedAt.getTime())) {
-    throw new Error("[Sixb] Materialization commit time must be a valid date.")
+    throw new MaterializationValidationError("Materialization commit time must be a valid date.")
   }
   return Object.freeze({
     idempotencyKey: input.idempotencyKey,
@@ -98,20 +100,8 @@ export function createLinkScopeFingerprint(links: readonly EffectiveLinkSnapshot
   return sha256Canonical(
     [...links]
       .sort((left, right) => {
-        const leftKey = stableJsonStringify([
-          left.ref.source.objectTypeId,
-          left.ref.source.primaryId,
-          left.ref.linkId,
-          left.ref.target.objectTypeId,
-          left.ref.target.primaryId,
-        ])
-        const rightKey = stableJsonStringify([
-          right.ref.source.objectTypeId,
-          right.ref.source.primaryId,
-          right.ref.linkId,
-          right.ref.target.objectTypeId,
-          right.ref.target.primaryId,
-        ])
+        const leftKey = linkRefSortKey(left.ref)
+        const rightKey = linkRefSortKey(right.ref)
         return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
       })
       .map((link) => ({

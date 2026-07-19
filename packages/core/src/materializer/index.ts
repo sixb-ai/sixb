@@ -31,6 +31,8 @@ export {
   ONTOLOGY_MATERIALIZATION_EVENT_KIND_ORDER,
   sha256Canonical,
 } from "./identity"
+export type { MaterializerStorage, OntologyMaterializerDependencies } from "./materializer"
+export { createOntologyMaterializer, OntologyMaterializer } from "./materializer"
 export {
   canonicalJson,
   normalizeJsonProperties,
@@ -69,7 +71,6 @@ export type {
   OntologyMaterializationOrigin,
   OntologyMaterializationPropertyChange,
   OntologyMaterializationPropertyChangeMap,
-  OntologyMaterializer,
   OntologyObjectRef,
   OntologyOperationOutcome,
   PinnedDatasetVersion,

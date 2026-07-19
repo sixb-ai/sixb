@@ -242,21 +242,34 @@ export type {
   GetActiveOntologySourceInput,
   GetOntologyCommitByIdempotencyKeyInput,
   GetOntologyCommitByIdInput,
+  MaterializationApplyPhase,
+  MaterializationCardinalityOccupantWorkRecord,
   MaterializationCasState,
+  MaterializationClassificationWorkRecord,
+  MaterializationEventWorkRecord,
+  MaterializationIncidentObjectWorkRecord,
   MaterializationLinkScopeState,
   MaterializationLinkState,
+  MaterializationObjectExistence,
+  MaterializationObjectExistenceWorkRecord,
   MaterializationObjectState,
   MaterializationPlanChunk,
   MaterializationPlanFinalization,
   MaterializationPlanHeader,
+  MaterializationPlanWorkItem,
+  MaterializationPlanWorkRecord,
   MaterializationRunBookkeeping,
   MaterializationSession,
   MaterializationStatePage,
   MaterializationStateRequestChunk,
+  MaterializationWorkEntityKind,
+  MaterializationWorkPage,
+  MaterializationWorkRecord,
   OntologyCommitRecord,
   OntologyCommitStorage,
   OntologyCommitWrite,
   OntologyMaterializationEvent,
+  OntologyMaterializationEventDraft,
   OntologyMaterializationStorage,
   OntologyOutboxRecord,
   OntologyOutboxStorage,
@@ -266,11 +279,13 @@ export type {
   OntologyStorage,
   ProjectionOntologyCommitIntent,
   PurgePublishedOntologyOutboxInput,
+  ReadMaterializationObjectExistenceInput,
   RescheduleOntologyOutboxLeaseInput,
   SourceActivationWrite,
   SourceReplacementLinkState,
   SourceReplacementObjectState,
   SourceReplacementStatePage,
+  StageMaterializationWorkInput,
   StageSourceAssertion,
   StageSourceRowsInput,
   StageSourceRowsResult,
@@ -281,6 +296,7 @@ export type {
   StoredSourceObjectAssertion,
   StoredTelemetryPoint,
   StreamMaterializationStateInput,
+  StreamMaterializationWorkInput,
   StreamSourceReplacementStateInput,
   TelemetryOntologyCommitIntent,
 } from "./ontology"
@@ -431,6 +447,8 @@ import { InMemoryAuthStorage } from "./auth"
 import { StorageTransactionError } from "./errors"
 import { InMemoryFileUploadSessions } from "./file-upload-sessions"
 import { InMemoryObjectStorage } from "./objects"
+import type { OntologyStorage } from "./ontology"
+import { InMemoryOntologyStorage } from "./ontology/in-memory"
 import { InMemoryPipelineRunStorage } from "./pipeline-runs"
 import { InMemoryProjectionRunStorage } from "./projection-runs"
 import { InMemoryRulesStorage } from "./rules"
@@ -446,6 +464,8 @@ import { InMemoryWorkflowRunStorage } from "./workflow-runs"
 export class InMemoryStorage implements Storage {
   readonly objects = new InMemoryObjectStorage()
   readonly timeseries = new InMemoryTimeseriesStorage()
+  readonly ontology: OntologyStorage
+  private readonly ontologyStorage: InMemoryOntologyStorage
   readonly auth = new InMemoryAuthStorage()
   readonly agents = new InMemoryAgentStorage()
   readonly actionRuns = new InMemoryActionRunStorage()
@@ -459,7 +479,26 @@ export class InMemoryStorage implements Storage {
   readonly rules = new InMemoryRulesStorage()
   readonly fileUploadSessions = new InMemoryFileUploadSessions()
 
-  private readonly transactionScope = new AsyncLocalStorage<boolean>()
+  constructor() {
+    this.ontologyStorage = new InMemoryOntologyStorage(this.objects, this.timeseries, {
+      runRootOperation: (run) => this.withOntologyOperation(run),
+      getTransactionToken: () => this.transactionScope.getStore() ?? null,
+      applyBookkeeping: async (projectId, bookkeeping) => {
+        if (bookkeeping.kind === "action") {
+          await this.actionRuns.recordMaterializationCommit(
+            projectId,
+            bookkeeping.runId,
+            bookkeeping.commitId
+          )
+        } else {
+          await this.projectionRuns.recordMaterializationCommit(projectId, bookkeeping)
+        }
+      },
+    })
+    this.ontology = this.ontologyStorage
+  }
+
+  private readonly transactionScope = new AsyncLocalStorage<object>()
   private transactionTail: Promise<void> = Promise.resolve()
 
   /**
@@ -486,9 +525,10 @@ export class InMemoryStorage implements Storage {
       const snapshot = this.snapshot()
       let active = true
       const tx = createTransactionStorageProxy(this, () => active)
+      const transactionToken = {}
 
       try {
-        return await this.transactionScope.run(true, async () => run(tx))
+        return await this.transactionScope.run(transactionToken, async () => run(tx))
       } catch (error) {
         // A failed rollback leaves the store in an unknown state. Surface that explicitly instead
         // of letting the restore error silently replace (mask) the original transaction error.
@@ -504,9 +544,15 @@ export class InMemoryStorage implements Storage {
         }
         throw error
       } finally {
+        this.ontologyStorage.completeTransaction(transactionToken)
         active = false
       }
     })
+  }
+
+  private async withOntologyOperation<T>(run: () => Promise<T> | T): Promise<T> {
+    if (this.transactionScope.getStore()) return await run()
+    return this.withTransactionLock(async () => run())
   }
 
   private async withTransactionLock<T>(run: () => Promise<T>): Promise<T> {
@@ -528,6 +574,7 @@ export class InMemoryStorage implements Storage {
     return {
       objects: this.objects.snapshot(),
       timeseries: this.timeseries.snapshot(),
+      ontology: this.ontologyStorage.snapshot(),
       auth: this.auth.snapshot(),
       agents: this.agents.snapshot(),
       actionRuns: this.actionRuns.snapshot(),
@@ -546,6 +593,7 @@ export class InMemoryStorage implements Storage {
   private restore(snapshot: InMemoryStorageSnapshot): void {
     this.objects.restore(snapshot.objects)
     this.timeseries.restore(snapshot.timeseries)
+    this.ontologyStorage.restore(snapshot.ontology)
     this.auth.restore(snapshot.auth)
     this.agents.restore(snapshot.agents)
     this.actionRuns.restore(snapshot.actionRuns)
@@ -564,6 +612,7 @@ export class InMemoryStorage implements Storage {
 interface InMemoryStorageSnapshot {
   readonly objects: ReturnType<InMemoryObjectStorage["snapshot"]>
   readonly timeseries: ReturnType<InMemoryTimeseriesStorage["snapshot"]>
+  readonly ontology: ReturnType<InMemoryOntologyStorage["snapshot"]>
   readonly auth: ReturnType<InMemoryAuthStorage["snapshot"]>
   readonly agents: ReturnType<InMemoryAgentStorage["snapshot"]>
   readonly actionRuns: ReturnType<InMemoryActionRunStorage["snapshot"]>
