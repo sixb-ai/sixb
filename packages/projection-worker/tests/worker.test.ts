@@ -15,6 +15,8 @@ import {
   type ProjectionDefinition,
   prop,
   Sixb,
+  type SixbErrorContext,
+  type SixbErrorHandler,
 } from "@sixb/core"
 import type { ProjectionRunStorage } from "@sixb/core/storage"
 import { ProjectionWorker } from "../src"
@@ -46,6 +48,7 @@ function createDeps() {
 function createSixb(options: {
   datasets?: readonly DatasetDefinition[]
   projections?: readonly ProjectionDefinition[]
+  onError?: SixbErrorHandler
 }) {
   const deps = createDeps()
   return new Sixb({
@@ -54,6 +57,7 @@ function createSixb(options: {
     ...deps,
     datasets: options.datasets ?? [],
     projections: options.projections ?? [],
+    onError: options.onError,
   })
 }
 
@@ -153,10 +157,14 @@ describe("ProjectionWorker", () => {
     }
   })
 
-  test("fails the queue job and run when execution fails", async () => {
+  test("reports once when execution transitions the run to failed", async () => {
+    const reports: { error: Error; context: SixbErrorContext }[] = []
     const sixb = createSixb({
       datasets: [roomsDataset],
       projections: [roomProjection],
+      onError(error, context) {
+        reports.push({ error, context })
+      },
     })
     await sixb.lakeStorage.createDataset(roomsDataset)
     const [queued] = await sixb.queues.projections.enqueue({
@@ -185,6 +193,26 @@ describe("ProjectionWorker", () => {
         (value) => value?.status === "failed"
       )
       expect(run?.errorMessage).toContain("was not found")
+
+      await waitFor(
+        async () => reports.length,
+        (count) => count === 1
+      )
+      expect(reports).toHaveLength(1)
+      expect(reports[0]?.error.message).toContain("was not found")
+      expect(reports[0]?.context).toEqual({
+        type: "run.failed",
+        notificationId: `project:${sixb.id}:run:projection:${runId}:failed:${run!.finishedAt!.toISOString()}`,
+        projectId: sixb.id,
+        occurredAt: run!.finishedAt!.toISOString(),
+        attempt: 1,
+        run: {
+          kind: "projection",
+          runId,
+          projectionId: roomProjection.id,
+          projectionKind: "object",
+        },
+      })
 
       const claimed = await sixb.queues.projections.claim({
         projectId: sixb.id,

@@ -13,6 +13,8 @@ import {
   prop,
   ref,
   Sixb,
+  type SixbErrorContext,
+  type SixbErrorHandler,
   type WorkflowDefinition,
 } from "@sixb/core"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
@@ -49,6 +51,7 @@ const slowStep = defineWorkflowStep("slow-step")
     return {}
   })
 
+const workflowExplosion = new Error("workflow exploded")
 const failingStep = defineWorkflowStep("explode")
   .input({
     transaction: ref(Transaction),
@@ -57,7 +60,7 @@ const failingStep = defineWorkflowStep("explode")
     invoice: ref(Invoice),
   })
   .run(() => {
-    throw new Error("workflow exploded")
+    throw workflowExplosion
   })
 
 const reviewInvoice = defineIntervention("review-invoice")
@@ -91,6 +94,7 @@ afterEach(async () => {
 function createSixb(options: {
   readonly workflows?: readonly WorkflowDefinition[]
   readonly actions?: readonly ActionDefinition[]
+  readonly onError?: SixbErrorHandler
 }) {
   return new Sixb({
     id: "workflow-worker-tests",
@@ -100,6 +104,7 @@ function createSixb(options: {
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
+    onError: options.onError,
     actions: options.actions ?? [],
     workflows: options.workflows ?? [],
   })
@@ -320,16 +325,32 @@ describe("WorkflowWorker", () => {
     expect(claimed).toHaveLength(0)
   })
 
-  test("fails the queue job and emits failed workflow lifecycle events", async () => {
+  test("reports a terminal failed workflow once with the original error", async () => {
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
     const workflow = defineWorkflow("failing-workflow")
       .input({
         transaction: ref(Transaction),
       })
       .then(failingStep)
-    const sixb = createSixb({ workflows: [workflow] })
+    const sixb = createSixb({
+      workflows: [workflow],
+      onError: (error, context) => {
+        reports.push({ error, context })
+      },
+    })
     await sixb.queues.workflows.enqueue({
       projectId: sixb.id,
       jobs: [
+        {
+          type: "workflow.run.requested",
+          payload: {
+            workflowId: workflow.id,
+            runId: "wfrun_worker_failed",
+            input: {
+              transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+            },
+          },
+        },
         {
           type: "workflow.run.requested",
           payload: {
@@ -356,6 +377,24 @@ describe("WorkflowWorker", () => {
       (value) => value?.status === "failed"
     )
     expect(run?.error).toBe("workflow exploded")
+
+    const reported = await waitFor(
+      async () => reports,
+      (value) => value.length === 1
+    )
+    expect(reported[0]?.error).toBe(workflowExplosion)
+    expect(reported[0]?.context).toMatchObject({
+      type: "run.failed",
+      notificationId: `project:${sixb.id}:run:workflow:wfrun_worker_failed:failed:${run?.finishedAt?.toISOString()}`,
+      projectId: sixb.id,
+      attempt: 1,
+      run: {
+        kind: "workflow",
+        runId: "wfrun_worker_failed",
+        workflowId: workflow.id,
+      },
+    })
+    expect(reported[0]?.context.occurredAt).toBe(run?.finishedAt?.toISOString() ?? "")
 
     const events = await waitFor(
       () =>
@@ -390,11 +429,79 @@ describe("WorkflowWorker", () => {
       error: "workflow exploded",
     })
 
+    await Bun.sleep(50)
+    expect(reports).toHaveLength(1)
+
     const claimed = await sixb.queues.workflows.claim({
       projectId: sixb.id,
       workerId: "observer",
     })
     expect(claimed).toHaveLength(0)
+  })
+
+  test("reports a queued run that fails before workflow start", async () => {
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const workflow = defineWorkflow("queued-invalid-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+    const sixb = createSixb({
+      workflows: [workflow],
+      onError: (error, context) => {
+        reports.push({ error, context })
+      },
+    })
+
+    await sixb.storage.workflowRuns!.queue({
+      projectId: sixb.id,
+      id: "wfrun_queued_invalid",
+      workflowId: workflow.id,
+      input: {},
+    })
+    await sixb.queues.workflows.enqueue({
+      projectId: sixb.id,
+      jobs: [
+        {
+          type: "workflow.run.requested",
+          payload: {
+            workflowId: workflow.id,
+            runId: "wfrun_queued_invalid",
+            input: {},
+          },
+        },
+      ],
+    })
+
+    const worker = new WorkflowWorker(sixb)
+    workers.push(worker)
+    await worker.start()
+
+    const run = await waitFor(
+      () =>
+        sixb.storage.workflowRuns!.getById({
+          projectId: sixb.id,
+          id: "wfrun_queued_invalid",
+        }),
+      (value) => value?.status === "failed"
+    )
+    const reported = await waitFor(
+      async () => reports,
+      (value) => value.length === 1
+    )
+
+    expect(reported[0]?.error.message).toContain("Missing required field")
+    expect(reported[0]?.context).toMatchObject({
+      type: "run.failed",
+      notificationId: `project:${sixb.id}:run:workflow:wfrun_queued_invalid:failed:${run?.finishedAt?.toISOString()}`,
+      attempt: 1,
+      run: {
+        kind: "workflow",
+        runId: "wfrun_queued_invalid",
+        workflowId: workflow.id,
+      },
+    })
+    expect(reported[0]?.context.occurredAt).toBe(run?.finishedAt?.toISOString() ?? "")
   })
 
   test("completes queue jobs when workflow runs suspend at intervention nodes", async () => {
@@ -591,9 +698,112 @@ describe("WorkflowWorker", () => {
     expect(claimed).toHaveLength(0)
   })
 
-  test("cancels the run and fails the queue job on worker shutdown", async () => {
+  test("reports a resumed workflow only when it transitions to failed", async () => {
+    const resumeError = new Error("resumed workflow exploded")
+    const failAfterResume = defineWorkflowStep("fail-after-resume")
+      .input({ approvedInvoice: ref(Invoice) })
+      .output({ invoice: ref(Invoice) })
+      .run(() => {
+        throw resumeError
+      })
+    const workflow = defineWorkflow("failing-resumed-workflow")
+      .input({ transaction: ref(Transaction) })
+      .then(findBestInvoice)
+      .then(reviewInvoice, ({ steps }) => ({
+        invoice: steps.findBestInvoice.invoice,
+      }))
+      .then(failAfterResume)
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const sixb = createSixb({
+      workflows: [workflow],
+      onError: (error, context) => {
+        reports.push({ error, context })
+      },
+    })
+
+    await sixb.queues.workflows.enqueue({
+      projectId: sixb.id,
+      jobs: [
+        {
+          type: "workflow.run.requested",
+          payload: {
+            workflowId: workflow.id,
+            runId: "wfrun_worker_resume_failed",
+            input: {
+              transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+            },
+          },
+        },
+      ],
+    })
+
+    const worker = new WorkflowWorker(sixb)
+    workers.push(worker)
+    await worker.start()
+
+    await waitFor(
+      () =>
+        sixb.storage.workflowRuns!.getById({
+          projectId: sixb.id,
+          id: "wfrun_worker_resume_failed",
+        }),
+      (value) => value?.status === "waiting"
+    )
+    await sixb.storage.workflowInterventions!.submit({
+      projectId: sixb.id,
+      id: "wfrun_worker_resume_failed:intervention:1",
+      response: {
+        approvedInvoice: { objectTypeId: "Invoice", primaryId: "inv_reviewed" },
+      },
+    })
+    await sixb.queues.workflows.enqueue({
+      projectId: sixb.id,
+      jobs: [
+        {
+          type: "workflow.run.resume.requested",
+          payload: {
+            workflowId: workflow.id,
+            runId: "wfrun_worker_resume_failed",
+            pendingInterventionId: "wfrun_worker_resume_failed:intervention:1",
+          },
+        },
+      ],
+    })
+
+    const run = await waitFor(
+      () =>
+        sixb.storage.workflowRuns!.getById({
+          projectId: sixb.id,
+          id: "wfrun_worker_resume_failed",
+        }),
+      (value) => value?.status === "failed"
+    )
+    const reported = await waitFor(
+      async () => reports,
+      (value) => value.length === 1
+    )
+
+    expect(run?.error).toBe(resumeError.message)
+    expect(reported[0]?.error).toBe(resumeError)
+    expect(reported[0]?.context).toMatchObject({
+      attempt: 1,
+      run: {
+        kind: "workflow",
+        runId: "wfrun_worker_resume_failed",
+        workflowId: workflow.id,
+      },
+    })
+  })
+
+  test("cancels the run without reporting a failure on worker shutdown", async () => {
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
     const workflow = defineWorkflow("cancel-workflow").input({}).then(slowStep)
-    const sixb = createSixb({ workflows: [workflow] })
+    const sixb = createSixb({
+      workflows: [workflow],
+      onError: (error, context) => {
+        reports.push({ error, context })
+      },
+    })
     await sixb.queues.workflows.enqueue({
       projectId: sixb.id,
       jobs: [
@@ -628,6 +838,8 @@ describe("WorkflowWorker", () => {
       id: "wfrun_worker_cancelled",
     })
     expect(run?.status).toBe("cancelled")
+    await Bun.sleep(0)
+    expect(reports).toHaveLength(0)
 
     const events = await sixb.events.read({
       types: [

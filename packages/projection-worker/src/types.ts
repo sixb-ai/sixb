@@ -42,7 +42,10 @@ export interface RunProjectionJobInput {
   readonly job: ProjectionJob
   readonly signal?: AbortSignal
   readonly batchSize?: number
+  readonly onRunFailed?: ProjectionRunFailedHandler
 }
+
+export type ProjectionRunFailedHandler = (error: unknown, run: ProjectionRunRecord) => void
 
 export interface ProjectionJobResult extends ProjectionRunCounters {
   readonly id: string

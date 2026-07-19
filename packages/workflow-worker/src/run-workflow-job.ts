@@ -109,6 +109,10 @@ async function failQueuedRun(input: RunWorkflowJobInput, error: unknown): Promis
     error: toWorkflowRunError(error),
   })
 
+  if (failed.status === "failed") {
+    input.onRunFailed?.(error, failed)
+  }
+
   try {
     await input.observer?.onRunFinished(failed)
   } catch (observerError) {

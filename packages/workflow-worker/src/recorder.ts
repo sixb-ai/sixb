@@ -193,6 +193,7 @@ export class WorkflowRunRecorder {
   async finishRunAfterError(params: {
     readonly status: "failed" | "cancelled"
     readonly error: string
+    readonly onTransition?: (run: WorkflowRunRecord) => void
   }): Promise<WorkflowRunRecord> {
     const run = await this.dependencies.workflowRuns.finish({
       projectId: this.dependencies.projectId,
@@ -201,6 +202,7 @@ export class WorkflowRunRecorder {
       error: params.error,
     })
     this.finished = true
+    params.onTransition?.(run)
     await this.notify(() => this.dependencies.observer.onRunFinished(run))
     return run
   }

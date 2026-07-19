@@ -491,6 +491,7 @@ describe("runWorkflowJob", () => {
       })
       .then(findBestInvoice)
     const sixb = createSixb({ workflows: [workflow] })
+    const reportedFailures: unknown[] = []
     const observer: WorkflowRunObserver = {
       async onRunStarted() {
         throw new Error("observer failed")
@@ -513,9 +514,11 @@ describe("runWorkflowJob", () => {
           },
         },
         observer,
+        onRunFailed: (error) => reportedFailures.push(error),
       })
 
       expect(result.run.status).toBe("succeeded")
+      expect(reportedFailures).toHaveLength(0)
     } finally {
       console.error = originalConsoleError
     }

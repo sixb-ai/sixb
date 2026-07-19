@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import type { DatasetDefinition, DatasetRow, PipelineDefinition } from "@sixb/core"
+import type {
+  DatasetDefinition,
+  DatasetRow,
+  PipelineDefinition,
+  SixbErrorContext,
+  SixbErrorHandler,
+} from "@sixb/core"
 import {
   col,
   defineDataset,
@@ -55,6 +61,7 @@ function createSixbForPipeline(options: {
   readonly pipeline: PipelineDefinition
   readonly datasets: readonly DatasetDefinition[]
   readonly lakeStorage?: InMemoryLakeStorage
+  readonly onError?: SixbErrorHandler
 }) {
   return new Sixb({
     id: "pipeline-worker-tests",
@@ -66,6 +73,7 @@ function createSixbForPipeline(options: {
     queues: new InMemoryQueues(),
     datasets: options.datasets,
     pipelines: [options.pipeline],
+    onError: options.onError,
   })
 }
 
@@ -374,7 +382,9 @@ describe("PipelineWorker", () => {
     })
   })
 
-  test("emits committed step events before failing a later step", async () => {
+  test("emits committed step events and reports once before failing a later step", async () => {
+    const reports: { error: Error; context: SixbErrorContext }[] = []
+    const originalError = new Error("nope")
     const cleanStep = definePipelineStep("clean-customers")
       .inputs({ rawCustomers: rawCustomersDataset })
       .output(customersDataset)
@@ -385,12 +395,15 @@ describe("PipelineWorker", () => {
       .inputs({ customers: customersDataset })
       .output(defineDataset("failed_output", { schema: [col("id", "string")] }))
       .run(() => {
-        throw new Error("nope")
+        throw originalError
       })
     const pipeline = definePipeline("customers").then(cleanStep).then(failingStep)
     const sixb = createSixbForPipeline({
       pipeline,
       datasets: [rawCustomersDataset, customersDataset, failingStep.output],
+      onError(error, context) {
+        reports.push({ error, context })
+      },
     })
     await seedDatasetVersion(sixb.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
       { id: "cust_1", name: "Ada" },
@@ -413,10 +426,28 @@ describe("PipelineWorker", () => {
     await worker.start()
 
     try {
-      await waitFor(
+      const run = await waitFor(
         () => sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "run-fails-late" }),
         (value) => value?.status === "failed"
       )
+      await waitFor(
+        async () => reports.length,
+        (count) => count === 1
+      )
+      expect(reports).toHaveLength(1)
+      expect(reports[0]?.error).toBe(originalError)
+      expect(reports[0]?.context).toEqual({
+        type: "run.failed",
+        notificationId: `project:${sixb.id}:run:pipeline:run-fails-late:failed:${run!.finishedAt!.toISOString()}`,
+        projectId: sixb.id,
+        occurredAt: run!.finishedAt!.toISOString(),
+        attempt: 1,
+        run: {
+          kind: "pipeline",
+          runId: "run-fails-late",
+          pipelineId: pipeline.id,
+        },
+      })
 
       const claimed = await sixb.queues.pipelines.claim({
         projectId: sixb.id,
@@ -486,7 +517,8 @@ describe("PipelineWorker", () => {
     expect(finishedPayload.versionId).toBeUndefined()
   })
 
-  test("fails an aborted queue job after a step has committed", async () => {
+  test("fails an aborted queue job after a step has committed without reporting it", async () => {
+    let reportCount = 0
     const firstStep = definePipelineStep("clean-customers")
       .inputs({ rawCustomers: rawCustomersDataset })
       .output(customersDataset)
@@ -505,6 +537,9 @@ describe("PipelineWorker", () => {
     const sixb = createSixbForPipeline({
       pipeline,
       datasets: [rawCustomersDataset, customersDataset, abortingStep.output],
+      onError() {
+        reportCount += 1
+      },
     })
     await seedDatasetVersion(sixb.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
       { id: "cust_1", name: "Ada" },
@@ -571,5 +606,6 @@ describe("PipelineWorker", () => {
       runId: "run-aborts-late",
       status: "cancelled",
     })
+    expect(reportCount).toBe(0)
   })
 })

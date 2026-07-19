@@ -12,6 +12,8 @@ import {
   InMemoryStorage,
   prop,
   Sixb,
+  type SixbErrorContext,
+  type SixbErrorHandler,
   type SyncDefinition,
 } from "@sixb/core"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
@@ -83,7 +85,8 @@ class ReusingVersionLakeStorage extends InMemoryLakeStorage {
 
 function createSixbForSync(
   sync: SyncDefinition,
-  lakeStorage: InMemoryLakeStorage = new InMemoryLakeStorage()
+  lakeStorage: InMemoryLakeStorage = new InMemoryLakeStorage(),
+  onError?: SixbErrorHandler
 ) {
   const storage = new InMemoryStorage()
 
@@ -98,6 +101,7 @@ function createSixbForSync(
     queues: new InMemoryQueues(),
     datasets: [sync.target.dataset],
     syncs: [sync],
+    onError,
   })
 }
 
@@ -142,6 +146,67 @@ describe("SyncWorker", () => {
     expect(claimed).toHaveLength(0)
 
     await worker.stop()
+  })
+
+  test("reports once when execution transitions the run to failed", async () => {
+    const reports: { error: Error; context: SixbErrorContext }[] = []
+    const originalError = new Error("sync source failed")
+    const dataset = makeDataset("raw.erp.failed-orders")
+    const sync = defineSync("sync-failed-orders")
+      .from(erpDb)
+      .read(() => {
+        throw originalError
+      })
+      .intoDataset(dataset)
+    const sixb = createSixbForSync(sync, undefined, (error, context) => {
+      reports.push({ error, context })
+    })
+    const worker = new SyncWorker(sixb)
+
+    await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
+      jobs: [
+        {
+          type: "sync.run.requested",
+          payload: { syncId: sync.id, runId: "run-failed" },
+        },
+      ],
+    })
+
+    await worker.start()
+    try {
+      const run = await waitFor(
+        () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-failed" }),
+        (value) => value?.status === "failed"
+      )
+      await waitFor(
+        async () => reports.length,
+        (count) => count === 1
+      )
+
+      expect(reports).toHaveLength(1)
+      expect(reports[0]?.error).toBe(originalError)
+      expect(reports[0]?.context).toEqual({
+        type: "run.failed",
+        notificationId: `project:${sixb.id}:run:sync:run-failed:failed:${run!.finishedAt!.toISOString()}`,
+        projectId: sixb.id,
+        occurredAt: run!.finishedAt!.toISOString(),
+        attempt: 1,
+        run: {
+          kind: "sync",
+          runId: "run-failed",
+          syncId: sync.id,
+        },
+      })
+
+      const claimed = await sixb.queues.syncRuns.claim({
+        projectId: sixb.id,
+        workerId: "observer",
+      })
+      expect(claimed).toHaveLength(0)
+    } finally {
+      await worker.stop()
+    }
   })
 
   test("streams a run-scoped log line to the broker", async () => {
@@ -221,7 +286,8 @@ describe("SyncWorker", () => {
     await worker.stop()
   })
 
-  test("retries the queue job when shutdown aborts an in-flight sync", async () => {
+  test("retries an aborted in-flight sync without reporting it", async () => {
+    let reportCount = 0
     const rawOrdersDataset = makeDataset("raw.erp.orders")
     const sync = defineSync("sync-orders")
       .from(erpDb)
@@ -240,7 +306,9 @@ describe("SyncWorker", () => {
         return []
       })
       .intoDataset(rawOrdersDataset)
-    const sixb = createSixbForSync(sync)
+    const sixb = createSixbForSync(sync, undefined, () => {
+      reportCount += 1
+    })
     const worker = new SyncWorker(sixb)
 
     const [queued] = await sixb.queues.syncRuns.enqueue({
@@ -279,6 +347,7 @@ describe("SyncWorker", () => {
 
     expect(retried?.job.id).toBe(queued?.id)
     expect(retried?.job.attempt).toBe(2)
+    expect(reportCount).toBe(0)
   })
 
   test("survives a transient claim error and keeps polling", async () => {

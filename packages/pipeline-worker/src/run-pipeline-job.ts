@@ -109,14 +109,18 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
     }
   } catch (error) {
     if (startedRun && !finished) {
-      await runtime.pipelineRunsStorage
-        .finish({
+      const status = statusForFailure(signal, error)
+      try {
+        const run = await runtime.pipelineRunsStorage.finish({
           projectId: runtime.id,
           id: job.id,
-          status: statusForFailure(signal, error),
+          status,
           error: toPipelineRunFailure(error),
         })
-        .catch(() => {})
+        if (status === "failed" && run.status === "failed") input.onRunFailed?.(error, run)
+      } catch {
+        // The run did not transition to the requested terminal status.
+      }
     }
 
     throw error
