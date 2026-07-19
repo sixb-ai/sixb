@@ -48,6 +48,8 @@ export interface RunActionJobInput {
   readonly runtime: ActionWorkerContext
   readonly job: ActionJob
   readonly signal?: AbortSignal
+  /** Queue delivery attempt, when invoked by ActionWorker. */
+  readonly attempt?: number
 }
 
 export type ActionRunResult =

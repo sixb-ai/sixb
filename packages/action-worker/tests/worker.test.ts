@@ -12,8 +12,10 @@ import {
   param,
   prop,
   Sixb,
+  type SixbErrorContext,
   type Storage,
 } from "@sixb/core"
+import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { EventsRuntime } from "@sixb/core/internal/events"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import type { ActionRunRecord, ObjectRow } from "@sixb/core/storage"
@@ -269,6 +271,47 @@ describe("ActionWorker", () => {
     })
 
     await worker.stop()
+  })
+
+  test("reports a terminal action failure exactly once with the original error", async () => {
+    const originalError = new Error("writeback failed")
+    const fail = defineAction("fail")
+      .on(Device)
+      .params({})
+      .writeback(() => {
+        throw originalError
+      })
+    const sixb = createSixb([fail])
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reporter = attachSixbErrorReporter(sixb, (error, context) => {
+      reports.push({ error, context })
+    })
+    const worker = new ActionWorker(sixb)
+    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
+
+    await worker.start()
+    const failed = await deviceObjects(sixb).requestActionAndWait({
+      id: "device-1",
+      actionId: "fail",
+    })
+    await worker.stop()
+    await reporter.flush()
+
+    expect(failed.status).toBe("failed")
+    expect(reports).toHaveLength(1)
+    expect(reports[0]?.error).toBe(originalError)
+    expect(reports[0]?.context).toMatchObject({
+      type: "run.failed",
+      notificationId: `project:${sixb.id}:run:action:${failed.id}:failed:${failed.finishedAt?.toISOString()}`,
+      projectId: sixb.id,
+      attempt: 1,
+      run: {
+        kind: "action",
+        runId: failed.id,
+        actionId: "fail",
+      },
+    })
+    expect(reports[0]?.context.occurredAt).toBe(failed.finishedAt?.toISOString() ?? "")
   })
 
   test("requestActionAndWait resolves with the terminal action run", async () => {

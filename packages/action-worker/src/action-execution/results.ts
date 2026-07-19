@@ -1,3 +1,4 @@
+import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { ActionRunFailure, ActionRunRecord } from "@sixb/core/storage"
 import { isTerminalActionRun } from "@sixb/core/storage"
 import { ActionWorkerError } from "../errors"
@@ -47,6 +48,7 @@ export async function failRedeliveredRunningRun(
     phase: existingRun.phase ?? "validation",
   }
 
+  let transitioned = false
   const finishedRun = await runtime.actionRunsStorage
     .finish({
       projectId: runtime.id,
@@ -55,7 +57,11 @@ export async function failRedeliveredRunningRun(
       phase: failure.phase,
       error: failure,
     })
-    .catch(async (error) => {
+    .then((run) => {
+      transitioned = true
+      return run
+    })
+    .catch(async (finishError) => {
       const latest = await runtime.actionRunsStorage.getById({
         projectId: runtime.id,
         id: job.id,
@@ -65,7 +71,7 @@ export async function failRedeliveredRunningRun(
         return latest
       }
 
-      throw error
+      throw finishError
     })
 
   if (finishedRun.status !== "failed") {
@@ -77,6 +83,19 @@ export async function failRedeliveredRunningRun(
       skipped: true,
       record: finishedRun,
     }
+  }
+
+  if (transitioned) {
+    reportRunFailure(runtime.sixb, error, {
+      projectId: runtime.id,
+      occurredAt: finishedRun.finishedAt,
+      attempt: input.attempt,
+      run: {
+        kind: "action",
+        runId: job.id,
+        actionId: job.actionId,
+      },
+    })
   }
 
   return {

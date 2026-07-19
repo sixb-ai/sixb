@@ -14,6 +14,7 @@ import {
   prop,
   Sixb,
 } from "@sixb/core"
+import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import type { EventsRuntime } from "@sixb/core/internal/events"
 import type { ActionRunParams, ObjectRow } from "@sixb/core/storage"
 import { ActionWorkerError } from "../src/errors"
@@ -681,7 +682,7 @@ describe("runActionJob", () => {
     expect(run?.phase).toBe("validation")
   })
 
-  test("marks redelivered running runs failed before a resumable boundary", async () => {
+  test("reports a lease-loss failure once and not on terminal redelivery", async () => {
     let invoked = 0
     const count = defineAction("count")
       .params({})
@@ -690,6 +691,10 @@ describe("runActionJob", () => {
       })
 
     const sixb = createSixb([count])
+    let reportCount = 0
+    const reporter = attachSixbErrorReporter(sixb, () => {
+      reportCount += 1
+    })
     await queueActionRun(sixb, {
       id: "act_1",
       actionId: "count",
@@ -720,6 +725,15 @@ describe("runActionJob", () => {
     expect(run?.status).toBe("failed")
     expect(run?.phase).toBe("validation")
     expect(run?.finishedAt).toBeInstanceOf(Date)
+
+    const redelivered = await runActionJob({
+      runtime: createContext(sixb),
+      job: { id: "act_1", actionId: "count" },
+      attempt: 2,
+    })
+    expect("skipped" in redelivered && redelivered.skipped).toBe(true)
+    await reporter.flush()
+    expect(reportCount).toBe(1)
   })
 
   test("resumes from a persisted successful writeback without replaying it", async () => {
@@ -780,6 +794,10 @@ describe("runActionJob", () => {
       })
 
     const sixb = createSixb([setStatus])
+    let reportCount = 0
+    const reporter = attachSixbErrorReporter(sixb, () => {
+      reportCount += 1
+    })
     await sixb.upsertObject("Device", {
       id: "device-1",
       name: "Device 1",
@@ -810,6 +828,54 @@ describe("runActionJob", () => {
         phase: "effects",
       },
     })
+    await reporter.flush()
+    expect(reportCount).toBe(0)
+  })
+
+  test("does not report cancelled runs", async () => {
+    let enteredWriteback: (() => void) | undefined
+    const entered = new Promise<void>((resolve) => {
+      enteredWriteback = resolve
+    })
+    const waitForCancel = defineAction("waitForCancel")
+      .params({})
+      .writeback(
+        ({ signal }) =>
+          new Promise((_resolve, reject) => {
+            enteredWriteback?.()
+            signal.addEventListener(
+              "abort",
+              () => reject(signal.reason ?? new DOMException("Aborted", "AbortError")),
+              { once: true }
+            )
+          })
+      )
+    const sixb = createSixb([waitForCancel])
+    let reportCount = 0
+    const reporter = attachSixbErrorReporter(sixb, () => {
+      reportCount += 1
+    })
+    await queueActionRun(sixb, {
+      id: "act_cancelled",
+      actionId: "waitForCancel",
+      subject: { kind: "none" },
+      params: {},
+    })
+    const controller = new AbortController()
+
+    const execution = runActionJob({
+      runtime: createContext(sixb),
+      job: { id: "act_cancelled", actionId: "waitForCancel" },
+      signal: controller.signal,
+      attempt: 1,
+    })
+    await entered
+    controller.abort(new Error("worker stopping"))
+    const result = await execution
+
+    expect(result.status).toBe("cancelled")
+    await reporter.flush()
+    expect(reportCount).toBe(0)
   })
 
   test("rejects forged object subjects outside the action target hierarchy", async () => {

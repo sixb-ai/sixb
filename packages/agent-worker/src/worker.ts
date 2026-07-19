@@ -5,6 +5,7 @@ import {
   dispatchQueuedAgentRuns,
   subscribeAgentRunCancel,
 } from "@sixb/core/internal/agents"
+import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentRunRequestedQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
@@ -150,6 +151,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     const { agentId, threadId, runId, triggerMessageId } = job.payload
     const agent = this.sixb.agents.getById(agentId)
     if (!agent) {
+      const error = new AgentWorkerError(`Unknown agent '${agentId}'.`)
       const run = await context.storage.agents.runs.getById({ projectId: context.id, id: runId })
       if (
         run?.status === "queued" &&
@@ -163,10 +165,11 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
           status: "failed",
           error: `Agent '${agentId}' is not registered.`,
         })
+        this.reportFailure(error, failed, job.attempt)
         await context.streamSink.publishRunFinished(failed)
         return
       }
-      throw new AgentWorkerError(`Unknown agent '${agentId}'.`)
+      throw error
     }
     const identity = await reconcileAgentExecutionIdentity(context.storage, context.id, agent)
 
@@ -256,6 +259,9 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
         error
       )
       if (finalized) {
+        if (finalized.status === "failed") {
+          this.reportFailure(error, finalized, job.attempt)
+        }
         await context.streamSink.publishRunFinished(finalized)
       }
       // Shutdown abort: rethrow so `onAbortError` releases the job for another process. A user cancel
@@ -308,6 +314,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
         status: "failed",
         error: toErrorMessage(error),
       })
+      this.reportFailure(error, failed, claimed.job.attempt)
       await this.requireContext().streamSink.publishRunFinished(failed)
     }
     return { kind: "fail" }
@@ -457,6 +464,19 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       id: runId,
       executionToken,
       queueLeaseExpiresAt: new Date(queueLeaseExpiresAt),
+    })
+  }
+
+  private reportFailure(error: unknown, run: AgentRunRecord, attempt: number): void {
+    reportRunFailure(this.sixb, error, {
+      projectId: this.sixb.id,
+      occurredAt: run.completedAt,
+      attempt,
+      run: {
+        kind: "agent",
+        runId: run.id,
+        agentId: run.agentId,
+      },
     })
   }
 
