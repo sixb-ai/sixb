@@ -1,4 +1,5 @@
 import { assertAuthorized } from "../authorization"
+import { reportRunFailure } from "../error-reporting/capability"
 import { ActionRunTimeoutError } from "../objects/action/errors"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
@@ -190,12 +191,21 @@ async function enqueueActionRunJob(
     })
     jobId = job?.id
   } catch (error) {
-    await params.actionRuns.finish({
+    const failed = await params.actionRuns.finish({
       projectId: runtime.projectId,
       id: params.runId,
       status: "failed",
       phase: "enqueue",
       error: toActionRunFailure(error, "enqueue"),
+    })
+    reportRunFailure(runtime, error, {
+      projectId: runtime.projectId,
+      occurredAt: failed.finishedAt,
+      run: {
+        kind: "action",
+        runId: params.runId,
+        actionId: params.actionId,
+      },
     })
     throw error
   }

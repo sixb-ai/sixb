@@ -733,6 +733,12 @@ export {
 // ── Runtime ─────────────────────────────────────────────────
 
 export type {
+  SixbErrorContext,
+  SixbErrorHandler,
+  SixbFailedRun,
+  SixbRunFailedContext,
+} from "./error-reporting/types"
+export type {
   BatchItemResult,
   CreateSixbOptions,
   ListResult,

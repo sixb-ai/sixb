@@ -23,6 +23,7 @@ import {
 import type { Broker } from "../broker"
 import type { ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets"
+import type { SixbErrorHandler } from "../error-reporting/types"
 import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
 import type { LoggerProvider, ObservabilityOptions } from "../logging"
@@ -52,6 +53,8 @@ export interface CreateSixbOptions {
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
   observability?: ObservabilityOptions
+  /** Observes terminal failed runs without changing their outcome. */
+  onError?: SixbErrorHandler
   ontologies?: readonly OntologySource[]
   actions?: readonly ActionDefinition[]
   /** Agent definitions to register in addition to auto-discovered `agents/` exports. */
@@ -140,6 +143,7 @@ export async function createSixb(
     sandboxes: options.sandboxes,
     logger: options.logger,
     observability: options.observability,
+    onError: options.onError,
     projectRoot,
     actions,
     datasets: [...(options.datasets ?? []), ...datasets],

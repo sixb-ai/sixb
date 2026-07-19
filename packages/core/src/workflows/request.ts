@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { assertAuthorized } from "../authorization"
+import { reportRunFailure } from "../error-reporting/capability"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { WorkflowValidationError } from "./errors"
 import { snapshotWorkflowInput } from "./snapshot"
@@ -85,15 +86,35 @@ export async function requestWorkflowRun(
     source: options.source,
   })
 
-  const [job] = await queue.enqueue({
-    projectId: runtime.projectId,
-    jobs: [
-      {
-        type: "workflow.run.requested",
-        payload: { workflowId: workflow.id, runId, input: value },
+  let job: Awaited<ReturnType<typeof queue.enqueue>>[number] | undefined
+  try {
+    ;[job] = await queue.enqueue({
+      projectId: runtime.projectId,
+      jobs: [
+        {
+          type: "workflow.run.requested",
+          payload: { workflowId: workflow.id, runId, input: value },
+        },
+      ],
+    })
+  } catch (error) {
+    const failed = await storage.finish({
+      projectId: runtime.projectId,
+      id: runId,
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error),
+    })
+    reportRunFailure(runtime, error, {
+      projectId: runtime.projectId,
+      occurredAt: failed.finishedAt,
+      run: {
+        kind: "workflow",
+        runId,
+        workflowId: workflow.id,
       },
-    ],
-  })
+    })
+    throw error
+  }
 
   await runtime.events.append({
     events: [

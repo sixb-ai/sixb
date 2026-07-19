@@ -25,6 +25,8 @@ import { ConnectorRuntime } from "../connectors/runtime"
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
+import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
+import type { SixbErrorHandler } from "../error-reporting/types"
 import { EventsRuntime } from "../events"
 import { FunctionRuntime } from "../functions/runtime"
 import type { FunctionDefinition } from "../functions/types"
@@ -93,6 +95,8 @@ export interface SixbOptions<TOntologySources extends readonly OntologySource[]>
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
   observability?: ObservabilityOptions
+  /** Observes terminal failed runs without changing their outcome. */
+  onError?: SixbErrorHandler
   projectRoot?: string
   actions?: readonly ActionDefinition[]
   datasets?: readonly DatasetDefinition[]
@@ -152,6 +156,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   private schedulerRuntime: SchedulerRuntime | null = null
 
   constructor(options: SixbOptions<TOntologySources>) {
+    attachSixbErrorReporter(this, options.onError)
     this.projectId = options.id ?? "default"
     this.ontologySources = options.ontology
     this.functions = options.functions ?? []
@@ -322,6 +327,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       sandboxes: this.sandboxes,
       rules: this.rules,
     }
+    shareSixbErrorReporter(this, this.runtimeContext)
     this.actions = new ActionsRuntime(this.runtimeContext)
     this.workflows = new WorkflowsRuntime(this.runtimeContext, workflows)
 

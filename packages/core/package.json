@@ -103,6 +103,12 @@
       "import": "./dist/events/index.js",
       "default": "./dist/events/index.js"
     },
+    "./internal/error-reporting": {
+      "types": "./dist/error-reporting/internal.d.ts",
+      "bun": "./src/error-reporting/internal.ts",
+      "import": "./dist/error-reporting/internal.js",
+      "default": "./dist/error-reporting/internal.js"
+    },
     "./internal/http": {
       "types": "./dist/http/index.d.ts",
       "bun": "./src/http/index.ts",

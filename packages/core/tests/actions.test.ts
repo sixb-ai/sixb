@@ -12,6 +12,7 @@ import {
   Sixb,
   stringEnum,
 } from "../src"
+import { flushSixbErrors } from "../src/error-reporting/internal"
 import { ActionRunError } from "../src/storage"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -795,6 +796,7 @@ describe("requestAction", () => {
 
   test("retries enqueue failures for the same run id and payload", async () => {
     const runtimeDeps = createTestRuntimeDeps()
+    const reports: string[] = []
     const enqueue = runtimeDeps.queues.actions.enqueue.bind(runtimeDeps.queues.actions)
     let shouldFailEnqueue = true
     runtimeDeps.queues.actions.enqueue = async (input) => {
@@ -810,6 +812,9 @@ describe("requestAction", () => {
       id: "action-enqueue-retry-test",
       ontology: [Room],
       actions: [actionDefinition(setTemperature)],
+      onError(error, context) {
+        reports.push(`${context.notificationId}:${error.message}`)
+      },
       ...runtimeDeps,
     })
 
@@ -839,6 +844,10 @@ describe("requestAction", () => {
         phase: "enqueue",
       },
     })
+    await flushSixbErrors(sixb)
+    expect(reports).toEqual([
+      `project:action-enqueue-retry-test:run:action:act_enqueue_retry:failed:${failed?.finishedAt?.toISOString()}:queue unavailable`,
+    ])
 
     const retry = await sixb.objects(Room).requestAction({
       id: "room:1",

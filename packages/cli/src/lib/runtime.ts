@@ -2,6 +2,7 @@ import { appendFileSync } from "node:fs"
 import { ActionWorker } from "@sixb/action-worker"
 import { AgentWorker } from "@sixb/agent-worker"
 import { migrateStorage } from "@sixb/core"
+import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import type { Worker } from "@sixb/core/internal/workers"
 import { assertLakeDatasetDefinitionsCompatible } from "@sixb/core/lake-storage"
 import {
@@ -83,6 +84,7 @@ export async function checkRuntimeLakeDefinitions(sixb: LoadedSixb): Promise<voi
 }
 
 export async function stopSixbProviders(sixb: LoadedSixb): Promise<void> {
+  await stopQuietly(() => flushSixbErrors(sixb))
   await stopQuietly(() => sixb.disconnectConnectors())
   await stopQuietly(() => closeProvider(sixb.queues))
   await stopQuietly(() => closeProvider(sixb.storage))
