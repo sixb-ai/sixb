@@ -50,9 +50,10 @@ local for dev, hosted backends for production).
 
 Optional: `id` (project id), `auth` (a `SixbAuthConfig`, see
 [Authentication](../auth/authentication.md)), `sandboxes` (a `SandboxFactory`), `logger` (a
-`LoggerProvider` for process-level log output) and `observability` (broker log-capture controls) —
-both covered in [Logging](../logging/overview.md) — and `projectRoot` (discovery root, defaults to
-`process.cwd()`).
+`LoggerProvider` for process-level log output), `observability` (broker log-capture controls),
+`onError` (terminal [failed run notifications](error-handling.md)), and `projectRoot` (discovery
+root, defaults to `process.cwd()`). Logging options are covered in
+[Logging](../logging/overview.md).
 
 ## The Sixb instance
 
@@ -188,6 +189,7 @@ export const sixb = await createSixb({
 
 ## Related
 
+- [Failed run notifications](error-handling.md) — route terminal run failures to project code
 - [Project structure](../fundamentals/project-structure.md) — folder layout and discovery
 - [Objects](../objects/overview.md) — the typed `sixb.objects(Type)` surface
 - [Events](../events/overview.md) — domain events and `sixb.events`

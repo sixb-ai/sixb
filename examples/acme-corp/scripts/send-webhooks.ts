@@ -1,4 +1,4 @@
-const DEFAULT_API_URL = "http://localhost:3000/api"
+const DEFAULT_API_URL = "http://localhost:3002/api"
 const WEBHOOK_PATH = "/webhooks/acme-erp/invoice-events"
 const LOCAL_WEBHOOK_SIGNATURE = "acme-local-secret"
 
