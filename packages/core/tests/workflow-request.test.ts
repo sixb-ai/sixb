@@ -13,6 +13,7 @@ import {
   type WorkflowDefinition,
   WorkflowValidationError,
 } from "../src"
+import { flushSixbErrors } from "../src/error-reporting/internal"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Transaction = defineObjectType({
@@ -93,6 +94,40 @@ describe("sixb.workflows.request", () => {
       queuedAt: result.queuedAt,
       jobId: result.jobId,
     })
+  })
+
+  test("marks and reports a run failed when queue dispatch fails", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    runtimeDeps.queues.workflows.enqueue = async () => {
+      throw new Error("workflow queue unavailable")
+    }
+    const reports: string[] = []
+    const sixb = new Sixb({
+      id: "workflow-enqueue-failure",
+      ontology: [Transaction, Invoice],
+      workflows: [draftInvoice],
+      onError(error, context) {
+        reports.push(`${context.notificationId}:${error.message}`)
+      },
+      ...runtimeDeps,
+    })
+
+    await expect(
+      sixb.workflows.request(draftInvoice, {
+        runId: "run_enqueue_failure",
+        input: validInput(),
+      })
+    ).rejects.toThrow("workflow queue unavailable")
+
+    const run = await sixb.storage.workflowRuns?.getById({
+      projectId: sixb.id,
+      id: "run_enqueue_failure",
+    })
+    expect(run).toMatchObject({ status: "failed", error: "workflow queue unavailable" })
+    await flushSixbErrors(sixb)
+    expect(reports).toEqual([
+      `project:workflow-enqueue-failure:run:workflow:run_enqueue_failure:failed:${run?.finishedAt?.toISOString()}:workflow queue unavailable`,
+    ])
   })
 
   test("requestById rejects unknown input fields at runtime", async () => {

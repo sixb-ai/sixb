@@ -7,6 +7,7 @@
 import type { ActionDefinition } from "../../actions"
 import type { AuthorizationContext } from "../../authorization"
 import { assertAuthorized } from "../../authorization"
+import { shareSixbErrorReporter } from "../../error-reporting/capability"
 import type { ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
@@ -72,6 +73,7 @@ export function createObjectSet<
     objectType,
     primaryPropertyId,
   }
+  shareSixbErrorReporter(params, resolvedCtx)
 
   const objectSet = {
     get: async (id: string) => {
