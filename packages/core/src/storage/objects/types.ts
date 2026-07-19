@@ -25,6 +25,8 @@ export interface ObjectRow {
   createdAt: Date
   updatedAt: Date
   version: number
+  /** Materializer commit provenance. Absent only on rows written by the legacy compile bridge. */
+  lastCommitId?: string
   sourceEventId?: string
   /**
    * Linked objects attached by an `expand` query node, keyed by link id.
@@ -63,6 +65,8 @@ export interface ObjectLinkRow {
   properties?: Record<string, unknown>
   createdAt: Date
   updatedAt: Date
+  /** Materializer commit provenance. Absent only on rows written by the legacy compile bridge. */
+  lastCommitId?: string
   sourceEventId?: string
 }
 

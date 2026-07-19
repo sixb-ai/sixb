@@ -68,6 +68,7 @@ export interface DiscardSourceGenerationInput {
 
 export interface CleanupInactiveSourceGenerationsInput {
   readonly projectId: string
+  /** Exclusive orphan cutoff. Core supplies an internal retention horizon, never its current time. */
   readonly olderThan: string
   readonly limit: number
 }

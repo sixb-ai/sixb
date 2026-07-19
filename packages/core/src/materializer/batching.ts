@@ -6,7 +6,6 @@ export interface MaterializationBatching {
   readonly statePageRows: number
   readonly planChunkRows: number
   readonly planChunkBytes: number
-  readonly outboxClaimRows: number
 }
 
 export const DEFAULT_MATERIALIZATION_BATCHING: MaterializationBatching = Object.freeze({
@@ -15,7 +14,6 @@ export const DEFAULT_MATERIALIZATION_BATCHING: MaterializationBatching = Object.
   statePageRows: 1_000,
   planChunkRows: 1_000,
   planChunkBytes: 4 * 1024 * 1024,
-  outboxClaimRows: 100,
 })
 
 /** Internal test/provider override. Application configuration never exposes these chunk targets. */

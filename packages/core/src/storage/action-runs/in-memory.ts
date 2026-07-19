@@ -119,6 +119,31 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
     }
   }
 
+  /** Internal Phase 1 bookkeeping hook. Missing unswitched runs are ignored. */
+  async recordMaterializationCommit(
+    projectId: string,
+    runId: string,
+    commitId: string
+  ): Promise<void> {
+    const key = actionRunKey(projectId, runId)
+    const existing = this.rows.get(key)
+    if (!existing) return
+    if (existing.commitId && existing.commitId !== commitId) {
+      throw new ActionRunError(
+        `[Sixb] Action run '${runId}' already links a different ontology commit.`
+      )
+    }
+    this.rows.set(key, { ...existing, commitId })
+  }
+
+  async recordMaterializationReplay(
+    projectId: string,
+    runId: string,
+    commitId: string
+  ): Promise<void> {
+    await this.recordMaterializationCommit(projectId, runId, commitId)
+  }
+
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
     const key = actionRunKey(input.projectId, input.id)
     const existing = this.rows.get(key)

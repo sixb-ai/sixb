@@ -1,4 +1,6 @@
 import type { StoredTelemetryAppendedEvent } from "../../events"
+import type { TelemetrySeriesRef } from "../../materializer/types"
+import type { StoredTelemetryPoint } from "../ontology/materializations"
 import type { TimeseriesHistoryBatchInput, TimeseriesPoint, TimeseriesStorage } from "./types"
 
 function pointKey(
@@ -7,7 +9,7 @@ function pointKey(
   objectId: string,
   propertyId: string
 ): string {
-  return `${projectId}:${objectTypeId}:${objectId}:${propertyId}`
+  return JSON.stringify([projectId, objectTypeId, objectId, propertyId])
 }
 
 export class InMemoryTimeseriesStorage implements TimeseriesStorage {
@@ -15,6 +17,15 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
   // instant per series. Re-applying the same instant is a last-write-wins
   // upsert, which makes telemetry writes idempotent under replay for free.
   private readonly pointsByKey = new Map<string, Map<number, TimeseriesPoint>>()
+
+  constructor() {
+    materializerAdapters.set(this, {
+      getExactPoint: (projectId, series, at) => this.getExactPoint(projectId, series, at),
+      listLatestForObject: (projectId, objectTypeId, objectId) =>
+        this.listLatestForObject(projectId, objectTypeId, objectId),
+      applyExactPoint: (projectId, point) => this.applyExactPoint(projectId, point),
+    })
+  }
 
   snapshot(): InMemoryTimeseriesStorageSnapshot {
     return {
@@ -27,6 +38,70 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
     for (const [key, points] of structuredClone(snapshot.pointsByKey)) {
       this.pointsByKey.set(key, points)
     }
+  }
+
+  private getExactPoint(
+    projectId: string,
+    series: TelemetrySeriesRef,
+    at: string
+  ): TimeseriesPoint | null {
+    const point =
+      this.pointsByKey
+        .get(
+          pointKey(
+            projectId,
+            series.object.objectTypeId,
+            series.object.primaryId,
+            series.propertyId
+          )
+        )
+        ?.get(new Date(at).getTime()) ?? null
+    return point ? clonePoint(point) : null
+  }
+
+  private listLatestForObject(
+    projectId: string,
+    objectTypeId: string,
+    objectId: string
+  ): TimeseriesPoint[] {
+    const latest: TimeseriesPoint[] = []
+    for (const series of this.pointsByKey.values()) {
+      let point: TimeseriesPoint | null = null
+      for (const candidate of series.values()) {
+        if (
+          candidate.projectId !== projectId ||
+          candidate.objectTypeId !== objectTypeId ||
+          candidate.objectId !== objectId
+        ) {
+          continue
+        }
+        if (!point || candidate.at > point.at) point = candidate
+      }
+      if (point) latest.push(clonePoint(point))
+    }
+    return latest
+  }
+
+  private applyExactPoint(projectId: string, point: StoredTelemetryPoint): void {
+    const key = pointKey(
+      projectId,
+      point.series.object.objectTypeId,
+      point.series.object.primaryId,
+      point.series.propertyId
+    )
+    const series = this.pointsByKey.get(key) ?? new Map<number, TimeseriesPoint>()
+    series.set(new Date(point.at).getTime(), {
+      projectId,
+      objectTypeId: point.series.object.objectTypeId,
+      objectId: point.series.object.primaryId,
+      propertyId: point.series.propertyId,
+      value: structuredClone(point.value),
+      ...(point.unit !== undefined ? { unit: point.unit } : {}),
+      at: new Date(point.at),
+      lastCommitId: point.lastCommitId,
+      sourceEventId: undefined,
+    })
+    this.pointsByKey.set(key, series)
   }
 
   async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
@@ -43,7 +118,7 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
       objectTypeId: event.payload.objectTypeId,
       objectId: event.payload.objectId,
       propertyId: event.payload.propertyId,
-      value: event.payload.value,
+      value: structuredClone(event.payload.value),
       unit: event.payload.unit,
       at,
       sourceEventId: event.id,
@@ -85,7 +160,7 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
       points = points.slice(0, Math.max(0, params.limit))
     }
 
-    return points
+    return points.map(clonePoint)
   }
 
   async getHistoryBatch(input: TimeseriesHistoryBatchInput): Promise<
@@ -134,7 +209,35 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
         latest = point
       }
     }
-    return latest
+    return latest ? clonePoint(latest) : null
+  }
+}
+
+interface InMemoryTimeseriesMaterializerAdapter {
+  getExactPoint(projectId: string, series: TelemetrySeriesRef, at: string): TimeseriesPoint | null
+  listLatestForObject(projectId: string, objectTypeId: string, objectId: string): TimeseriesPoint[]
+  applyExactPoint(projectId: string, point: StoredTelemetryPoint): void
+}
+
+const materializerAdapters = new WeakMap<
+  InMemoryTimeseriesStorage,
+  InMemoryTimeseriesMaterializerAdapter
+>()
+
+/** @internal Exact access for the in-memory ontology provider; not exported from package barrels. */
+export function getInMemoryTimeseriesMaterializerAdapter(
+  storage: InMemoryTimeseriesStorage
+): InMemoryTimeseriesMaterializerAdapter {
+  const adapter = materializerAdapters.get(storage)
+  if (!adapter) throw new Error("[Sixb] In-memory timeseries materializer adapter is unavailable.")
+  return adapter
+}
+
+function clonePoint(point: TimeseriesPoint): TimeseriesPoint {
+  return {
+    ...structuredClone(point),
+    value: structuredClone(point.value),
+    at: new Date(point.at),
   }
 }
 

@@ -1,3 +1,4 @@
+import type { MaterializationRunBookkeeping } from "../ontology"
 import { latestStartedAtByOwnerId } from "../run-listing"
 import { ProjectionRunError } from "./errors"
 import {
@@ -88,6 +89,38 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     for (const [key, record] of structuredClone(snapshot)) {
       this.rows.set(key, record)
     }
+  }
+
+  /** Internal Phase 1 bookkeeping hook. Missing unswitched runs are ignored. */
+  async recordMaterializationCommit(
+    projectId: string,
+    bookkeeping: Extract<MaterializationRunBookkeeping, { kind: "projection" }>
+  ): Promise<void> {
+    const rowKey = projectionRunKey(projectId, bookkeeping.runId)
+    const existing = this.rows.get(rowKey)
+    if (!existing) return
+    if (existing.commitId && existing.commitId !== bookkeeping.commitId) {
+      throw new ProjectionRunError(
+        `[Sixb] Projection run '${bookkeeping.runId}' already links a different ontology commit.`
+      )
+    }
+    this.rows.set(rowKey, { ...existing, commitId: bookkeeping.commitId })
+  }
+
+  async recordMaterializationReplay(
+    projectId: string,
+    runId: string,
+    commitId: string
+  ): Promise<void> {
+    const rowKey = projectionRunKey(projectId, runId)
+    const existing = this.rows.get(rowKey)
+    if (!existing) return
+    if (existing.commitId && existing.commitId !== commitId) {
+      throw new ProjectionRunError(
+        `[Sixb] Projection run '${runId}' already links a different ontology commit.`
+      )
+    }
+    this.rows.set(rowKey, { ...existing, commitId })
   }
 
   async start(input: StartProjectionRunInput): Promise<ProjectionRunRecord> {

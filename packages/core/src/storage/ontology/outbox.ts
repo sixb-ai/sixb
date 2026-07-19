@@ -88,6 +88,13 @@ export type OntologyMaterializationEvent =
   | OntologyLinkMaterializationEvent
   | OntologyTelemetryMaterializationEvent
 
+type WithoutEventSequence<T> = T extends OntologyMaterializationEvent
+  ? Omit<T, "id" | "commitOrdinal">
+  : never
+
+/** Complete core-authored event fact before contiguous commit sequencing is assigned. */
+export type OntologyMaterializationEventDraft = WithoutEventSequence<OntologyMaterializationEvent>
+
 export interface OntologyOutboxWrite {
   /** Providers may index envelope identity fields, but the envelope remains authoritative. */
   readonly envelope: OntologyMaterializationEvent
@@ -141,6 +148,7 @@ export interface PurgePublishedOntologyOutboxInput {
 }
 
 export interface OntologyOutboxStorage {
+  /** Claims in the parent-spec `(createdAt, eventId)` order. */
   claim(input: ClaimOntologyOutboxInput): Promise<readonly ClaimedOntologyOutboxRow[]>
   markPublished(input: CompleteOntologyOutboxLeaseInput): Promise<void>
   reschedule(input: RescheduleOntologyOutboxLeaseInput): Promise<void>
