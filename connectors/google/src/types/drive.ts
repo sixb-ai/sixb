@@ -93,3 +93,82 @@ export type DriveStartPageTokenOptions = QueryParams & {
   readonly driveId?: string
   readonly supportsAllDrives?: boolean
 }
+
+/* ------------------------------------------------------------------------ */
+/* Write path                                                               */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Bodies the Drive upload paths accept. Streams and Blobs upload with memory
+ * bounded to roughly one chunk — the whole payload is never read into memory.
+ */
+export type DriveUploadBody = Uint8Array | ArrayBuffer | Blob | ReadableStream<Uint8Array>
+
+/**
+ * Media bytes for `files.create` / `files.update`.
+ *
+ * `mimeType` is the content type of the bytes (defaults to
+ * `application/octet-stream`); the file's stored Drive type comes from the
+ * metadata `mimeType` when set. `sizeBytes` is a hint for **streams only**
+ * (buffered bodies always use their real length): it lets a stream take the
+ * chunked resumable path — pass `BlobStorage.stat(...).sizeBytes` when piping
+ * blobs. It must be exact; a wrong count fails the upload.
+ */
+export interface DriveFileContent {
+  readonly body: DriveUploadBody
+  readonly mimeType?: string
+  readonly sizeBytes?: number
+}
+
+/**
+ * File metadata sent as the JSON request body. Open-ended like `DriveFile`:
+ * unknown keys pass straight through to the API — which also means a mistyped
+ * key (or a query param the write input doesn't whitelist) is sent as metadata
+ * and ignored by Drive without an error.
+ */
+export interface DriveFileMetadataInput {
+  readonly name?: string
+  readonly mimeType?: string
+  readonly description?: string
+  /** Create-only: parent folder ids. Moves on update use `addParents`/`removeParents`. */
+  readonly parents?: readonly string[]
+  readonly starred?: boolean
+  /** Update-only: `true` trashes the file, `false` restores it. */
+  readonly trashed?: boolean
+  readonly [key: string]: unknown
+}
+
+/**
+ * `files.create` input. Top-level keys are metadata (the JSON body) except the
+ * known query params below and `content`, which selects the media bytes.
+ */
+export type DriveFileCreateInput = DriveFileMetadataInput & {
+  readonly name: string
+  readonly content?: DriveFileContent
+  readonly fields?: string
+  readonly supportsAllDrives?: boolean
+  readonly keepRevisionForever?: boolean
+  readonly enforceSingleParent?: boolean
+}
+
+/** `files.update` input — metadata patch, content replacement, or both. */
+export type DriveFileUpdateInput = DriveFileMetadataInput & {
+  readonly content?: DriveFileContent
+  /** Comma-separated parent ids to add (move between folders). */
+  readonly addParents?: string
+  /** Comma-separated parent ids to remove. */
+  readonly removeParents?: string
+  readonly fields?: string
+  readonly supportsAllDrives?: boolean
+  readonly keepRevisionForever?: boolean
+}
+
+export type DriveFileCopyInput = DriveFileMetadataInput & {
+  readonly fields?: string
+  readonly supportsAllDrives?: boolean
+}
+
+export type DriveFileDeleteOptions = QueryParams & {
+  readonly supportsAllDrives?: boolean
+  readonly enforceSingleParent?: boolean
+}

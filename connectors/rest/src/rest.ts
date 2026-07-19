@@ -71,6 +71,10 @@ function createRestClient(options: RestConnectorOptions, context: ConnectorConte
     }
 
     let unauthorizedRetried = false
+    // A stream body is consumed by the first attempt and can never be replayed,
+    // so neither the 401 refresh nor the retry policy may re-send this request —
+    // retrying would only mask the real failure behind a "stream already used" error.
+    const replayable = !(init.body instanceof ReadableStream)
 
     for (let attempt = 0; ; attempt++) {
       // Apply the same pacing to retries as the initial request.
@@ -99,7 +103,12 @@ function createRestClient(options: RestConnectorOptions, context: ConnectorConte
       }
 
       // Refresh auth at most once per request to avoid retry loops on bad credentials.
-      if (response?.status === 401 && !unauthorizedRetried && options.onUnauthorized) {
+      if (
+        response?.status === 401 &&
+        !unauthorizedRetried &&
+        options.onUnauthorized &&
+        replayable
+      ) {
         unauthorizedRetried = true
         await options.onUnauthorized(baseRequestContext)
         continue
@@ -107,7 +116,9 @@ function createRestClient(options: RestConnectorOptions, context: ConnectorConte
 
       const retryContext: RestRetryContext = { attempt, response, error }
       const canRetry =
-        attempt < retryPolicy.maxRetries && retryPolicy.shouldRetry?.(retryContext) === true
+        replayable &&
+        attempt < retryPolicy.maxRetries &&
+        retryPolicy.shouldRetry?.(retryContext) === true
 
       if (canRetry) {
         await sleep(retryPolicy.delayMs?.(retryContext) ?? 0)
