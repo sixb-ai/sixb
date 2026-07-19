@@ -25,7 +25,6 @@ export type {
   ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunLinkEditDiff,
-  ActionRunMaterializationBookkeeping,
   ActionRunObjectEditDiff,
   ActionRunObjectRef,
   ActionRunParams,

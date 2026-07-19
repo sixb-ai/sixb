@@ -12,7 +12,6 @@ import type {
   ActionRunCommitRecord,
   ActionRunEffectsRecord,
   ActionRunFailure,
-  ActionRunMaterializationBookkeeping,
   ActionRunParams,
   ActionRunRecord,
   ActionRunWritebackRecord,
@@ -140,20 +139,6 @@ export class InMemoryActionRunStorage implements ActionMaterializationRunStorage
     await this.runRootOperation(() => {
       this.requireMaterializationRun(input)
     })
-  }
-
-  async recordMaterializationCommit(
-    projectId: string,
-    bookkeeping: ActionRunMaterializationBookkeeping
-  ): Promise<void> {
-    await this.runRootOperation(() => this.recordMaterialization(projectId, bookkeeping))
-  }
-
-  async recordMaterializationReplay(
-    projectId: string,
-    bookkeeping: ActionRunMaterializationBookkeeping
-  ): Promise<void> {
-    await this.runRootOperation(() => this.recordMaterialization(projectId, bookkeeping))
   }
 
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
@@ -446,29 +431,6 @@ export class InMemoryActionRunStorage implements ActionMaterializationRunStorage
       const runs = filtered.slice(offset, offset + limit).map(cloneActionRunRecord)
       return { runs, hasMore: offset + runs.length < total, total }
     })
-  }
-
-  private recordMaterialization(
-    projectId: string,
-    bookkeeping: ActionRunMaterializationBookkeeping
-  ): void {
-    assertNonBlank(bookkeeping.commitId, "commitId")
-    const existing = this.requireMaterializationRun({
-      projectId,
-      actionId: bookkeeping.actionId,
-      runId: bookkeeping.runId,
-    })
-    if (existing.commitId && existing.commitId !== bookkeeping.commitId) {
-      throw new ActionRunError(
-        `[Sixb] Action run '${bookkeeping.runId}' already links a different ontology commit.`
-      )
-    }
-    if (!existing.commitId) {
-      this.rows.set(actionRunKey(projectId, bookkeeping.runId), {
-        ...existing,
-        commitId: bookkeeping.commitId,
-      })
-    }
   }
 
   private requireMaterializationRun(input: AssertActionMaterializationRunInput): ActionRunRecord {

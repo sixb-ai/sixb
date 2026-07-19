@@ -40,7 +40,10 @@ export interface CommitActionEditBatchResult {
 }
 
 /**
- * Atomically commits the local `.edits()` phase for an action run.
+ * Atomically commits the legacy local `.edits()` phase for an action run.
+ *
+ * TODO(ontology-materializer/phase-6): Remove after the Action worker routes edits through the
+ * ontology Materializer and reads the authoritative ontology commit result.
  *
  * This helper is the core orchestration boundary for local action writes: it validates that the
  * persisted run still matches the requested action identity, derives the EditBatch plan from the

@@ -6,6 +6,7 @@ import {
 } from "../../../materialization/errors"
 import { createEventId, materializationEventKindOrdinal } from "../../../materialization/identity"
 import type {
+  EffectiveChangeCounts,
   EffectiveLinkSnapshot,
   EffectiveObjectSnapshot,
   ExpectedLinkRevision,
@@ -13,6 +14,7 @@ import type {
   OntologyLinkRef,
   OntologyObjectRef,
   PinnedDatasetVersion,
+  TelemetryCommitResult,
 } from "../../../materialization/model"
 import {
   linkRefKey,
@@ -742,9 +744,6 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         updatedAt: activation.updatedAt,
       })
     }
-    if (input.finalization.bookkeeping)
-      await this.hooks.applyBookkeeping?.(commit.projectId, input.finalization.bookkeeping)
-
     const record = {
       ...structuredClone(commit),
       result: structuredClone(input.finalization.result),
@@ -1677,6 +1676,12 @@ function assertMaterializationHeader(header: MaterializationPlanHeader): void {
     if (!Number.isSafeInteger(commit.intent.operationCount) || commit.intent.operationCount < 0) {
       invalidCorrelation("Edit commit operation count is invalid.")
     }
+    if (commit.origin.kind === "action") {
+      assertNonblank(commit.origin.actionId, "Action origin action id")
+      assertNonblank(commit.origin.runId, "Action origin run id")
+    } else {
+      assertNonblank(commit.origin.requestId, "Runtime origin request id")
+    }
   } else if (commit.intent.kind === "projection") {
     if (
       commit.origin.kind !== "projection" ||
@@ -1688,6 +1693,7 @@ function assertMaterializationHeader(header: MaterializationPlanHeader): void {
     ) {
       invalidCorrelation("Projection commit metadata does not correlate with its intent.")
     }
+    assertNonblank(commit.origin.projectionRunId, "Projection run id")
     assertTimestamp(commit.intent.datasetVersion.createdAt, "Projection dataset version createdAt")
   } else {
     if (commit.origin.kind !== "telemetry") {
@@ -1708,11 +1714,18 @@ function assertMaterializationHeader(header: MaterializationPlanHeader): void {
         commit.intent.source.datasetVersion.datasetId !== commit.origin.source.datasetId ||
         commit.intent.source.datasetVersion.versionId !== commit.origin.source.datasetVersionId ||
         commit.intent.source.batchOrdinal !== commit.origin.source.batchOrdinal ||
+        !Number.isSafeInteger(commit.intent.source.batchOrdinal) ||
+        commit.intent.source.batchOrdinal < 0 ||
+        !Number.isSafeInteger(commit.intent.source.sourceRowCount) ||
+        commit.intent.source.sourceRowCount <= 0 ||
+        commit.intent.source.sourceRowCount < commit.intent.inputPointCount ||
+        typeof commit.intent.source.inputExhausted !== "boolean" ||
         !commit.projectionRevision ||
         !commit.ownershipHash
       ) {
         invalidCorrelation("Projection telemetry metadata does not correlate with its intent.")
       }
+      assertNonblank(commit.origin.source.projectionRunId, "Telemetry projection run id")
       assertTimestamp(
         commit.intent.source.datasetVersion.createdAt,
         "Telemetry dataset version createdAt"
@@ -1864,7 +1877,7 @@ function assertFinalizationCorrelations(
   objects: InMemoryObjectStorage
 ): void {
   const { commit } = session.header
-  const { result, bookkeeping, sourceActivations } = finalization
+  const { result, sourceActivations } = finalization
   if (
     result.commitId !== commit.id ||
     result.kind !== commit.intent.kind ||
@@ -1892,35 +1905,105 @@ function assertFinalizationCorrelations(
     if (result.kind !== "projection" || sourceActivations.length !== 1) {
       invalidCorrelation("Projection result requires exactly one correlated source activation.")
     }
-  } else {
-    if (
-      result.kind !== "telemetry" ||
-      result.pointsCreated + result.pointsUpdated + result.pointsUnchanged !==
-        commit.intent.pointCount ||
-      sourceActivations.length !== 0
-    ) {
-      invalidCorrelation("Telemetry result does not correlate with its point intent.")
-    }
+  } else if (result.kind !== "telemetry" || sourceActivations.length !== 0) {
+    invalidCorrelation("Telemetry result does not correlate with its point intent.")
   }
 
   for (const activation of sourceActivations) {
     assertSourceActivationCorrelation(activation, session, state)
   }
-  if (bookkeeping) {
-    assertBookkeepingCorrelation(bookkeeping, session, state, result, sourceActivations)
-  }
-  if (
-    !bookkeeping &&
-    (commit.intent.kind === "projection" ||
-      commit.origin.kind === "action" ||
-      (commit.origin.kind === "telemetry" && commit.origin.source.kind === "projection"))
-  ) {
-    invalidCorrelation("Action and projection commits require correlated run bookkeeping.")
-  }
   if (sourceActivations[0]) {
     assertReplacementFullyStreamed(session, sourceActivations[0])
   }
   assertFinalizedWork(session, state, objects)
+  if (commit.intent.kind === "projection") {
+    if (result.kind !== "projection" || !projectionCountsCorrelate(session, result.counts)) {
+      invalidCorrelation("Projection result counts do not correlate with finalized work.")
+    }
+  } else if (
+    commit.intent.kind === "telemetry" &&
+    (result.kind !== "telemetry" ||
+      !telemetryCountsCorrelate(session, commit.intent.pointCount, result))
+  ) {
+    invalidCorrelation("Telemetry result counts do not correlate with finalized work.")
+  }
+}
+
+function projectionCountsCorrelate(session: SessionState, actual: EffectiveChangeCounts): boolean {
+  const expected = {
+    objectsCreated: 0,
+    objectsUpdated: 0,
+    objectsDeleted: 0,
+    objectsUnchanged: 0,
+    linksCreated: 0,
+    linksUpdated: 0,
+    linksDeleted: 0,
+    linksUnchanged: 0,
+  }
+  let classifiedObjects = 0
+  let classifiedLinks = 0
+  for (const record of session.work.values()) {
+    if (record.kind !== "classification") continue
+    if (record.entityKind === "object") classifiedObjects += 1
+    if (record.entityKind === "link") classifiedLinks += 1
+  }
+  for (const work of session.applyWork) {
+    const { item } = work
+    if (item.kind === "object-upsert") {
+      if (item.value.expected.exists) expected.objectsUpdated += 1
+      else expected.objectsCreated += 1
+    } else if (item.kind === "object-delete") {
+      expected.objectsDeleted += 1
+    } else if (item.kind === "link-upsert") {
+      if (item.value.expected.exists) expected.linksUpdated += 1
+      else expected.linksCreated += 1
+    } else if (item.kind === "link-delete") {
+      expected.linksDeleted += 1
+    }
+  }
+  expected.objectsUnchanged =
+    classifiedObjects - expected.objectsCreated - expected.objectsUpdated - expected.objectsDeleted
+  expected.linksUnchanged =
+    classifiedLinks - expected.linksCreated - expected.linksUpdated - expected.linksDeleted
+  return (
+    expected.objectsUnchanged >= 0 &&
+    expected.linksUnchanged >= 0 &&
+    (Object.keys(expected) as (keyof EffectiveChangeCounts)[]).every(
+      (key) =>
+        Number.isSafeInteger(actual[key]) && actual[key] >= 0 && actual[key] === expected[key]
+    )
+  )
+}
+
+function telemetryCountsCorrelate(
+  session: SessionState,
+  pointCount: number,
+  actual: TelemetryCommitResult
+): boolean {
+  let pointsCreated = 0
+  let pointsUpdated = 0
+  let latestObjectsChanged = 0
+  for (const work of session.applyWork) {
+    if (work.item.kind === "point-upsert") {
+      if (work.item.value.expected.lastCommitId === null) pointsCreated += 1
+      else pointsUpdated += 1
+    } else if (work.item.kind === "object-upsert") {
+      latestObjectsChanged += 1
+    }
+  }
+  const expected = {
+    pointsCreated,
+    pointsUpdated,
+    pointsUnchanged: pointCount - pointsCreated - pointsUpdated,
+    latestObjectsChanged,
+  }
+  return (
+    expected.pointsUnchanged >= 0 &&
+    (Object.keys(expected) as (keyof typeof expected)[]).every(
+      (key) =>
+        Number.isSafeInteger(actual[key]) && actual[key] >= 0 && actual[key] === expected[key]
+    )
+  )
 }
 
 function assertSourceActivationCorrelation(
@@ -2198,99 +2281,6 @@ function classificationKeys(
 
 function assertTimestampNotBefore(value: string, minimum: string, message: string): void {
   if (Date.parse(value) < Date.parse(minimum)) invalidCorrelation(message)
-}
-
-function assertBookkeepingCorrelation(
-  bookkeeping: import("../materializations").MaterializationRunBookkeeping,
-  session: SessionState,
-  state: InMemoryOntologyState,
-  result:
-    | import("../../../materialization/model").EditCommitResult
-    | import("../../../materialization/model").ProjectionCommitResult
-    | import("../../../materialization/model").TelemetryCommitResult,
-  sourceActivations: readonly import("../materializations").SourceActivationWrite[]
-): void {
-  const { commit } = session.header
-  if (bookkeeping.commitId !== commit.id) {
-    invalidCorrelation("Run bookkeeping commit id does not match its materialization commit.")
-  }
-  if (bookkeeping.kind === "action") {
-    if (
-      commit.origin.kind !== "action" ||
-      bookkeeping.actionId !== commit.origin.actionId ||
-      bookkeeping.runId !== commit.origin.runId ||
-      commit.intent.kind !== "edit"
-    ) {
-      invalidCorrelation("Action bookkeeping does not correlate with its commit origin.")
-    }
-    return
-  }
-  if (commit.origin.kind === "projection" && bookkeeping.protocol === "replacement") {
-    if (commit.intent.kind !== "projection" || result.kind !== "projection") {
-      invalidCorrelation("Projection bookkeeping does not correlate with its commit intent.")
-    }
-    const activationWrite = sourceActivations[0]
-    const materialization = activationWrite
-      ? state.sourceMaterializations.get(
-          sourceMaterializationKey(
-            commit.projectId,
-            activationWrite.source.projectionId,
-            activationWrite.materializationId
-          )
-        )
-      : undefined
-    if (
-      bookkeeping.projectionId !== commit.origin.projectionId ||
-      bookkeeping.projectionKind !== activationWrite?.projectionKind ||
-      bookkeeping.execution.projectionRunId !== commit.origin.projectionRunId ||
-      stableJsonStringify(bookkeeping.execution) !==
-        stableJsonStringify(activationWrite?.execution) ||
-      stableJsonStringify(bookkeeping.datasetVersion) !==
-        stableJsonStringify(commit.intent.datasetVersion) ||
-      bookkeeping.ontologyRevision !== commit.ontologyRevision ||
-      bookkeeping.projectionRevision !== commit.projectionRevision ||
-      bookkeeping.ownershipHash !== commit.ownershipHash ||
-      stableJsonStringify(bookkeeping.counts) !== stableJsonStringify(result.counts)
-    ) {
-      invalidCorrelation("Projection bookkeeping does not correlate with its commit.")
-    }
-    if (
-      !materialization ||
-      bookkeeping.stagedRootCount !== materialization.rootOrdinals.size ||
-      bookkeeping.stagedAssertionCount !== materialization.rowsByEntity.size
-    ) {
-      invalidCorrelation("Projection bookkeeping staged counts do not match its candidate.")
-    }
-    return
-  }
-  if (commit.origin.kind === "telemetry" && commit.origin.source.kind === "projection") {
-    if (
-      bookkeeping.protocol !== "telemetry" ||
-      commit.intent.kind !== "telemetry" ||
-      result.kind !== "telemetry" ||
-      bookkeeping.projectionId !== commit.origin.source.projectionId ||
-      bookkeeping.projectionKind !== "telemetry" ||
-      bookkeeping.execution.projectionRunId !== commit.origin.source.projectionRunId ||
-      commit.intent.source.kind !== "projection" ||
-      stableJsonStringify(bookkeeping.datasetVersion) !==
-        stableJsonStringify(commit.intent.source.datasetVersion) ||
-      bookkeeping.ontologyRevision !== commit.ontologyRevision ||
-      bookkeeping.projectionRevision !== commit.projectionRevision ||
-      bookkeeping.ownershipHash !== commit.ownershipHash ||
-      bookkeeping.batchOrdinal !== commit.intent.source.batchOrdinal ||
-      bookkeeping.batchInputCount <= 0 ||
-      bookkeeping.batchInputCount !== commit.intent.inputPointCount ||
-      bookkeeping.batchPointCount !== commit.intent.pointCount ||
-      bookkeeping.pointsCreated !== result.pointsCreated ||
-      bookkeeping.pointsUpdated !== result.pointsUpdated ||
-      bookkeeping.pointsUnchanged !== result.pointsUnchanged ||
-      bookkeeping.latestObjectsChanged !== result.latestObjectsChanged
-    ) {
-      invalidCorrelation("Telemetry projection bookkeeping does not correlate with its commit.")
-    }
-    return
-  }
-  invalidCorrelation("Run bookkeeping does not correlate with its commit origin.")
 }
 
 function assertCommitWriteCorrelation(

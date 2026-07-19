@@ -1,6 +1,7 @@
 export { ProjectionRunError } from "./errors"
 export { InMemoryProjectionRunStorage } from "./in-memory"
 export type {
+  AdvanceProjectionTelemetryCheckpointInput,
   AssertProjectionMaterializationExecutionInput,
   FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
@@ -12,18 +13,14 @@ export type {
   ProjectionMaterializationProtocol,
   ProjectionMaterializationRunRecord,
   ProjectionMaterializationRunStorage,
-  ProjectionReplacementMaterializationCounts,
   ProjectionRunCounters,
   ProjectionRunDatasetVersion,
-  ProjectionRunMaterializationBookkeeping,
-  ProjectionRunMaterializationCounters,
   ProjectionRunMaterializationIdentity,
-  ProjectionRunMaterializationReplay,
   ProjectionRunObjectTypes,
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
-  ProjectionTelemetryMaterializationCounts,
+  ProjectionTelemetryCheckpoint,
   StartOrReclaimProjectionMaterializationInput,
   StartProjectionRunInput,
   UpdateProjectionMaterializationInput,
@@ -34,5 +31,4 @@ export {
   PROJECTION_COUNTER_KEYS,
   projectionRunObjectTypesVisible,
   zeroProjectionRunCounters,
-  zeroProjectionRunMaterializationCounters,
 } from "./types"

@@ -111,7 +111,7 @@ export function createMaterializerFixture(
           projectionId: request.source.projection.projectionId,
           protocol: "telemetry",
           datasetVersion: request.source.datasetVersion,
-          fixedBatchSize: request.points.length,
+          fixedBatchSize: request.source.sourceRowCount,
         })
         return baseMaterializer.telemetry.append({
           ...request,
@@ -206,10 +206,8 @@ export async function claimProjectionExecution(
       : definition._tag === "LinkProjectionDefinition"
         ? "link"
         : "telemetry"
-  const identity: ProjectionRunMaterializationIdentity = {
+  const identityBase = {
     projectionId: resolved.projectionId,
-    projectionKind,
-    protocol: input.protocol,
     datasetVersion: {
       ...input.datasetVersion,
       createdAt: new Date(input.datasetVersion.createdAt).toISOString(),
@@ -217,6 +215,15 @@ export async function claimProjectionExecution(
     ontologyRevision: projections.ontologyRevision,
     projectionRevision: resolved.projectionRevision,
     ownershipHash: resolved.ownershipHash,
+  }
+  let identity: ProjectionRunMaterializationIdentity
+  if (input.protocol === "telemetry") {
+    identity = { ...identityBase, projectionKind: "telemetry", protocol: "telemetry" }
+  } else {
+    if (projectionKind === "telemetry") {
+      throw new Error("Replacement execution requires an object or link projection")
+    }
+    identity = { ...identityBase, projectionKind, protocol: "replacement" }
   }
   const objectTypes =
     definition._tag === "LinkProjectionDefinition"

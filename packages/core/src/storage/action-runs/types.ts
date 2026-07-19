@@ -36,6 +36,10 @@ export type ActionRunObjectRef = EditObjectRef
 export type ActionRunLinkEditDiff = EditLinkDiff
 export type ActionRunCommitDiff = EditCommitDiff
 
+/**
+ * Legacy local edit result retained until the Action worker uses the ontology Materializer.
+ * TODO(ontology-materializer/phase-6): Remove after the worker reads authoritative ontology commits.
+ */
 export interface ActionRunCommitRecord {
   readonly committedAt: Date
   readonly diff: ActionRunCommitDiff
@@ -59,9 +63,8 @@ export interface ActionRunRecord {
   readonly finishedAt?: Date
   readonly params: ActionRunParams
   readonly idempotencyKey: string
-  /** Generic ontology commit linkage written atomically by the materializer. */
-  readonly commitId?: string
   readonly writeback?: ActionRunWritebackRecord
+  /** @deprecated Legacy local edit result; authoritative materializer commits live in ontology storage. */
   readonly commit?: ActionRunCommitRecord
   readonly effects?: ActionRunEffectsRecord
   readonly error?: ActionRunFailure
@@ -109,6 +112,10 @@ export type RecordActionWritebackInput =
       readonly error: ActionRunFailure
     }
 
+/**
+ * Legacy local edit result retained until the Action worker uses the ontology Materializer.
+ * TODO(ontology-materializer/phase-6): Remove with ActionRunCommitRecord.
+ */
 export interface RecordActionCommitInput {
   readonly id: string
   readonly projectId: string
@@ -170,13 +177,6 @@ export interface ListActionRunsResult {
   readonly total: number
 }
 
-export interface ActionRunMaterializationBookkeeping {
-  readonly kind: "action"
-  readonly actionId: string
-  readonly runId: string
-  readonly commitId: string
-}
-
 export interface AssertActionMaterializationRunInput {
   readonly projectId: string
   readonly actionId: string
@@ -186,20 +186,11 @@ export interface AssertActionMaterializationRunInput {
 export interface ActionRunStorage {
   /** Read-only preflight for Action materialization business identity and running state. */
   assertMaterializationRun?(input: AssertActionMaterializationRunInput): Promise<void>
-  /** @internal Atomically linked by ontology materialization finalization. */
-  recordMaterializationCommit?(
-    projectId: string,
-    bookkeeping: ActionRunMaterializationBookkeeping
-  ): Promise<void>
-  /** @internal Attach an exact committed replay to the same running Action. */
-  recordMaterializationReplay?(
-    projectId: string,
-    bookkeeping: ActionRunMaterializationBookkeeping
-  ): Promise<void>
   queue(input: QueueActionRunInput): Promise<ActionRunRecord>
   start(input: StartActionRunInput): Promise<ActionRunRecord>
   enterPhase(input: EnterActionRunPhaseInput): Promise<ActionRunRecord>
   recordWriteback(input: RecordActionWritebackInput): Promise<ActionRunRecord>
+  /** @deprecated Legacy Action worker commit path; see RecordActionCommitInput. */
   recordCommit(input: RecordActionCommitInput): Promise<ActionRunRecord>
   recordEffects(input: RecordActionEffectsInput): Promise<ActionRunRecord>
   finish(input: FinishActionRunInput): Promise<ActionRunRecord>
@@ -207,26 +198,18 @@ export interface ActionRunStorage {
   list(input: ListActionRunsInput): Promise<ListActionRunsResult>
 }
 
-/** Strict capability required by the ontology Materializer, not by legacy run providers. */
+/**
+ * Transitional required view used while ActionRunStorage supports legacy providers.
+ *
+ * TODO(ontology-materializer/phase-6): Make the assertion part of the required ActionRunStorage
+ * contract and delete this interface and its type guard.
+ */
 export interface ActionMaterializationRunStorage extends ActionRunStorage {
   assertMaterializationRun(input: AssertActionMaterializationRunInput): Promise<void>
-  recordMaterializationCommit(
-    projectId: string,
-    bookkeeping: ActionRunMaterializationBookkeeping
-  ): Promise<void>
-  recordMaterializationReplay(
-    projectId: string,
-    bookkeeping: ActionRunMaterializationBookkeeping
-  ): Promise<void>
 }
 
 export function isActionMaterializationRunStorage(
   storage: ActionRunStorage | null | undefined
 ): storage is ActionMaterializationRunStorage {
-  return (
-    storage != null &&
-    typeof storage.assertMaterializationRun === "function" &&
-    typeof storage.recordMaterializationCommit === "function" &&
-    typeof storage.recordMaterializationReplay === "function"
-  )
+  return storage != null && typeof storage.assertMaterializationRun === "function"
 }

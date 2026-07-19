@@ -186,21 +186,6 @@ function replacementFinalization(
       eventCount: 0,
       counts,
     },
-    bookkeeping: {
-      kind: "projection",
-      protocol: "replacement",
-      projectionId: candidate.source.projectionId,
-      projectionKind: candidate.projectionKind,
-      execution: candidate.execution,
-      datasetVersion: candidate.datasetVersion,
-      ontologyRevision,
-      projectionRevision,
-      ownershipHash,
-      commitId: header.commit.id,
-      stagedRootCount: 0,
-      stagedAssertionCount: 0,
-      counts,
-    },
   }
 }
 
@@ -749,95 +734,6 @@ describe("in-memory ontology materialization finalization", () => {
         })
       })
     ).rejects.toThrow("does not match the final effective link scope")
-  })
-
-  test("rejects empty projection telemetry bookkeeping", async () => {
-    const storage = new InMemoryStorage()
-    const datasetVersion = {
-      datasetId: "device-telemetry",
-      versionId: "v1",
-      createdAt: "2026-01-01T00:00:00.000Z",
-    }
-    const header: MaterializationPlanHeader = {
-      commit: {
-        projectId,
-        id: "empty-projection-telemetry",
-        idempotencyKey: "telemetry:empty-projection-telemetry",
-        requestHash: "empty-projection-telemetry",
-        origin: {
-          kind: "telemetry",
-          source: {
-            kind: "projection",
-            projectionId: "device-telemetry",
-            projectionRunId: "telemetry-run",
-            datasetId: datasetVersion.datasetId,
-            datasetVersionId: datasetVersion.versionId,
-            batchOrdinal: 0,
-          },
-        },
-        ontologyRevision,
-        projectionRevision,
-        ownershipHash,
-        intent: {
-          kind: "telemetry",
-          pointCount: 0,
-          inputPointCount: 0,
-          source: {
-            kind: "projection",
-            projection: { projectionId: "device-telemetry" },
-            datasetVersion,
-            batchOrdinal: 0,
-          },
-        },
-        committedAt: "2026-01-02T00:00:00.000Z",
-      },
-      expected: { sources: [], objects: [], links: [], linkScopes: [], points: [] },
-    }
-
-    await expect(
-      storage.transaction(async (tx) => {
-        if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(header)
-        await tx.ontology.materializations.finalize({
-          session,
-          finalization: {
-            sourceActivations: [],
-            result: {
-              kind: "telemetry",
-              commitId: header.commit.id,
-              created: true,
-              eventCount: 0,
-              pointsCreated: 0,
-              pointsUpdated: 0,
-              pointsUnchanged: 0,
-              latestObjectsChanged: 0,
-            },
-            bookkeeping: {
-              kind: "projection",
-              protocol: "telemetry",
-              projectionId: "device-telemetry",
-              projectionKind: "telemetry",
-              execution: {
-                projectionRunId: "telemetry-run",
-                executionToken: "execution-token",
-              },
-              datasetVersion,
-              ontologyRevision,
-              projectionRevision,
-              ownershipHash,
-              commitId: header.commit.id,
-              batchOrdinal: 0,
-              batchInputCount: 0,
-              batchPointCount: 0,
-              pointsCreated: 0,
-              pointsUpdated: 0,
-              pointsUnchanged: 0,
-              latestObjectsChanged: 0,
-            },
-          },
-        })
-      })
-    ).rejects.toThrow("Telemetry projection bookkeeping does not correlate")
   })
 
   test("rejects activation of a candidate other than the one opened by the session", async () => {

@@ -1,7 +1,6 @@
 import type { JsonValue } from "../../json"
 import type {
   EditCommitResult,
-  EffectiveChangeCounts,
   EffectiveLinkSnapshot,
   EffectiveObjectSnapshot,
   ExpectedLinkRevision,
@@ -228,54 +227,9 @@ export interface SourceActivationWrite {
   readonly updatedAt: string
 }
 
-export type MaterializationRunBookkeeping =
-  | {
-      readonly kind: "action"
-      readonly actionId: string
-      readonly runId: string
-      readonly commitId: string
-    }
-  | {
-      readonly kind: "projection"
-      readonly protocol: "replacement"
-      readonly projectionId: string
-      readonly projectionKind: "object" | "link"
-      readonly execution: ProjectionExecution
-      readonly datasetVersion: PinnedDatasetVersion
-      readonly ontologyRevision: string
-      readonly projectionRevision: string
-      readonly ownershipHash: string
-      readonly commitId: string
-      readonly stagedRootCount: number
-      readonly stagedAssertionCount: number
-      readonly counts: EffectiveChangeCounts
-    }
-  | {
-      readonly kind: "projection"
-      readonly protocol: "telemetry"
-      readonly projectionId: string
-      readonly projectionKind: "telemetry"
-      readonly execution: ProjectionExecution
-      readonly datasetVersion: PinnedDatasetVersion
-      readonly ontologyRevision: string
-      readonly projectionRevision: string
-      readonly ownershipHash: string
-      readonly commitId: string
-      readonly batchOrdinal: number
-      /** Caller-supplied points before equal-duplicate normalization. */
-      readonly batchInputCount: number
-      /** Canonical unique points classified by the semantic engine. */
-      readonly batchPointCount: number
-      readonly pointsCreated: number
-      readonly pointsUpdated: number
-      readonly pointsUnchanged: number
-      readonly latestObjectsChanged: number
-    }
-
 export interface MaterializationPlanFinalization {
   readonly sourceActivations: readonly SourceActivationWrite[]
   readonly result: EditCommitResult | ProjectionCommitResult | TelemetryCommitResult
-  readonly bookkeeping?: MaterializationRunBookkeeping
 }
 
 export interface ApplyMaterializationChunkInput {
@@ -418,5 +372,9 @@ export interface OntologyMaterializationStorage {
     input: ReadMaterializationObjectExistenceInput
   ): Promise<readonly MaterializationObjectExistence[]>
   applyChunk(input: ApplyMaterializationChunkInput): Promise<void>
+  /**
+   * Finalizes ontology-owned state only. Execution checkpoints remain owned by their run stores
+   * and are coordinated by the Materializer through the enclosing Storage transaction.
+   */
   finalize(input: FinalizeMaterializationInput): Promise<ApplyMaterializationResult>
 }
