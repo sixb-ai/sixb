@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test"
 import { InMemoryTimeseriesStorage } from "../src"
 import type { StoredTelemetryAppendedEvent } from "../src/events"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
-import { createMaterializerFixture, replacement, sourceEntry } from "./materializer-fixture"
+import {
+  claimProjectionExecution,
+  createMaterializerFixture,
+  pendingProjectionExecution,
+  replacement,
+  sourceEntry,
+} from "./materializer-fixture"
 
 const series = {
   object: { objectTypeId: "Device", primaryId: "one" },
@@ -147,6 +153,9 @@ describe("ontology materializer telemetry", () => {
 
   test("validates telemetry property JSON/type/unit and replays idempotently", async () => {
     const { materializer } = createMaterializerFixture()
+    await materializer.projections.replace(
+      replacement("telemetry-validation", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
+    )
     const input = {
       source: { kind: "runtime" as const, requestId: "replay" },
       points: [{ series, value: 20, at: "2026-01-01T01:00:00Z" }],
@@ -184,33 +193,25 @@ describe("ontology materializer telemetry", () => {
 
   test("keeps projection telemetry batches as independent commits", async () => {
     const { materializer, storage } = createMaterializerFixture()
+    await materializer.projections.replace(
+      replacement("telemetry-batches", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
+    )
     const datasetVersion = {
       datasetId: "readings",
       versionId: "readings-v1",
       createdAt: "2026-01-01T00:00:00Z",
     }
-    const startRun = (id: string) =>
-      storage.projectionRuns.start({
-        id,
-        projectId: "project",
-        projectionId: "temperatures",
-        projectionKind: "telemetry",
-        datasetId: "readings",
-        datasetVersionId: "readings-v1",
-        objectTypeId: "Device",
-      })
     const append = (batchOrdinal: number, value: number | string, runId = "telemetry-run") =>
       materializer.telemetry.append({
         source: {
           kind: "projection",
           projection: { projectionId: "temperatures" },
           datasetVersion,
-          projectionRunId: runId,
+          execution: pendingProjectionExecution(runId),
           batchOrdinal,
         },
         points: [{ series, value, at: `2026-01-01T0${batchOrdinal + 1}:00:00Z` }],
       })
-    await startRun("telemetry-failed-run")
     let rejectBookkeeping = true
     getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
       applyBookkeeping(_projectId, bookkeeping) {
@@ -224,7 +225,7 @@ describe("ontology materializer telemetry", () => {
     )
     expect(
       await storage.projectionRuns.getById({ projectId: "project", id: "telemetry-failed-run" })
-    ).not.toHaveProperty("commitId")
+    ).not.toHaveProperty("lastMaterializationCommitId")
     expect(
       await storage.timeseries.getHistory({
         projectId: "project",
@@ -235,17 +236,34 @@ describe("ontology materializer telemetry", () => {
     ).toEqual([])
 
     rejectBookkeeping = false
-    await startRun("telemetry-run")
     const committed = await append(0, 20)
     expect(
       await storage.projectionRuns.getById({ projectId: "project", id: "telemetry-run" })
-    ).toHaveProperty("commitId", committed.commitId)
-    await startRun("telemetry-replay-run")
-    expect((await append(0, 20, "telemetry-replay-run")).created).toBe(false)
+    ).toHaveProperty("lastMaterializationCommitId", committed.commitId)
+    expect((await append(0, 20)).created).toBe(false)
     expect(
-      await storage.projectionRuns.getById({ projectId: "project", id: "telemetry-replay-run" })
-    ).toHaveProperty("commitId", committed.commitId)
+      await storage.projectionRuns.getById({ projectId: "project", id: "telemetry-run" })
+    ).toMatchObject({
+      lastMaterializationCommitId: committed.commitId,
+      lastCommittedBatchOrdinal: 0,
+      materializationCommitCount: 1,
+    })
     await expect(append(1, "bad")).rejects.toThrow("must be numeric")
+    const second = await append(1, 21)
+    expect(second.created).toBe(true)
+    expect(
+      await storage.projectionRuns.getById({ projectId: "project", id: "telemetry-run" })
+    ).toMatchObject({
+      lastMaterializationCommitId: second.commitId,
+      lastCommittedBatchOrdinal: 1,
+      materializationCommitCount: 2,
+      materializationCounters: {
+        telemetryPointsCreated: 2,
+        telemetryPointsUpdated: 0,
+        telemetryPointsUnchanged: 0,
+        latestObjectsChanged: 2,
+      },
+    })
     expect(
       await storage.timeseries.getHistory({
         projectId: "project",
@@ -253,7 +271,125 @@ describe("ontology materializer telemetry", () => {
         objectId: "one",
         propertyId: "temperature",
       })
-    ).toHaveLength(1)
+    ).toHaveLength(2)
+  })
+
+  test("uses physical input size for telemetry batch continuation after equal deduplication", async () => {
+    const { materializer, storage } = createMaterializerFixture()
+    await materializer.projections.replace(
+      replacement("telemetry-deduplication", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
+    )
+    const source = (batchOrdinal: number) => ({
+      kind: "projection" as const,
+      projection: { projectionId: "temperatures" },
+      datasetVersion: {
+        datasetId: "readings",
+        versionId: "deduplicated-v1",
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+      execution: pendingProjectionExecution("telemetry-deduplicated-run"),
+      batchOrdinal,
+    })
+    const duplicate = { series, value: 20, at: "2026-01-01T01:00:00Z" }
+
+    await expect(
+      materializer.telemetry.append({
+        source: source(0),
+        points: [duplicate, { ...duplicate }],
+      })
+    ).resolves.toMatchObject({ pointsCreated: 1 })
+    await expect(
+      materializer.telemetry.append({
+        source: source(1),
+        points: [
+          { series, value: 21, at: "2026-01-01T02:00:00Z" },
+          { series, value: 22, at: "2026-01-01T03:00:00Z" },
+        ],
+      })
+    ).resolves.toMatchObject({ pointsCreated: 2 })
+
+    expect(
+      await storage.projectionRuns.getById({
+        projectId: "project",
+        id: "telemetry-deduplicated-run",
+      })
+    ).toMatchObject({
+      lastCommittedBatchOrdinal: 1,
+      materializationCommitCount: 2,
+      materializationCounters: { telemetryPointsCreated: 3 },
+    })
+  })
+
+  test("rejects an empty projection batch before creating a commit", async () => {
+    const { materializer, storage, projections } = createMaterializerFixture()
+    const datasetVersion = {
+      datasetId: "readings",
+      versionId: "empty-v1",
+      createdAt: "2026-01-01T00:00:00Z",
+    }
+    const execution = await claimProjectionExecution(storage, projections, {
+      runId: "telemetry-empty-run",
+      projectionId: "temperatures",
+      protocol: "telemetry",
+      datasetVersion,
+      fixedBatchSize: 10,
+    })
+    const ontologyActivity: string[] = []
+    getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
+      beforeRead(boundary) {
+        ontologyActivity.push(`read:${boundary}`)
+      },
+      beforeWrite(boundary) {
+        ontologyActivity.push(`write:${boundary}`)
+      },
+    })
+
+    await expect(
+      materializer.telemetry.append({
+        source: {
+          kind: "projection",
+          projection: { projectionId: "temperatures" },
+          datasetVersion,
+          execution,
+          batchOrdinal: 0,
+        },
+        points: [],
+      })
+    ).rejects.toThrow("empty dataset produces no batch commit")
+
+    expect(ontologyActivity).toEqual([])
+    expect(
+      await storage.projectionRuns.getById({
+        projectId: "project",
+        id: execution.projectionRunId,
+      })
+    ).toMatchObject({ materializationCommitCount: 0 })
+  })
+
+  test("rejects telemetry for an absent effective object without persisting anything", async () => {
+    const { materializer, storage } = createMaterializerFixture()
+
+    await expect(
+      materializer.telemetry.append({
+        source: { kind: "runtime", requestId: "missing-object" },
+        points: [{ series, value: 20, at: "2026-01-01T01:00:00Z" }],
+      })
+    ).rejects.toThrow("Cannot append telemetry to missing object 'Device:one'")
+
+    expect(
+      await storage.timeseries.getHistory({
+        projectId: "project",
+        objectTypeId: "Device",
+        objectId: "one",
+        propertyId: "temperature",
+      })
+    ).toEqual([])
+    expect(
+      await storage.ontology.commits.getByIdempotencyKey({
+        projectId: "project",
+        idempotencyKey: "runtime:missing-object",
+      })
+    ).toBeNull()
   })
 
   test("uses collision-free canonical series keys and clones returned point values", async () => {

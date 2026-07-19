@@ -1,10 +1,9 @@
 import type { DatasetDefinition } from "../datasets"
 import { compareStrings, type JsonValue } from "../json"
-import { sha256Canonical } from "../materializer/identity"
-import type { ProjectionOwnership } from "../materializer/types"
+import { sha256Canonical } from "../materialization/identity"
 import type { OntologyRegistry } from "../ontology"
 import type { ObjectFieldSchema, Property, Schema } from "../ontology/types"
-import type { ProjectionDefinition } from "./types"
+import type { ProjectionDefinition, ProjectionOwnership } from "./types"
 
 export function computeOntologyRevision(ontology: OntologyRegistry): string {
   const registeredValueTypes = ontology.getValueTypesById()

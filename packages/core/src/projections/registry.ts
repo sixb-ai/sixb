@@ -1,5 +1,4 @@
 import type { DatasetDefinition } from "../datasets"
-import type { ResolvedProjection } from "../materializer/types"
 import type { OntologyRegistry } from "../ontology"
 import { categorizeProjections } from "./builders"
 import { ProjectionValidationError } from "./errors"
@@ -13,6 +12,7 @@ import type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
+  ResolvedProjection,
   TelemetryProjectionDefinition,
 } from "./types"
 import { validateProjectionsAtStartup } from "./validation"

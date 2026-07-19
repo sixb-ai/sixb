@@ -1,8 +1,7 @@
 import { compareStrings } from "../json"
-import type { ProjectionOwnership } from "../materializer/types"
 import type { OntologyRegistry } from "../ontology"
 import { ProjectionValidationError } from "./errors"
-import type { ProjectionDefinition } from "./types"
+import type { ProjectionDefinition, ProjectionOwnership } from "./types"
 
 export function computeProjectionOwnership(
   projection: ProjectionDefinition,

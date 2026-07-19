@@ -170,11 +170,32 @@ export interface ListActionRunsResult {
   readonly total: number
 }
 
+export interface ActionRunMaterializationBookkeeping {
+  readonly kind: "action"
+  readonly actionId: string
+  readonly runId: string
+  readonly commitId: string
+}
+
+export interface AssertActionMaterializationRunInput {
+  readonly projectId: string
+  readonly actionId: string
+  readonly runId: string
+}
+
 export interface ActionRunStorage {
-  /** @internal Phase 1 materializer linkage; optional until every provider is switched. */
-  recordMaterializationCommit?(projectId: string, runId: string, commitId: string): Promise<void>
-  /** @internal Attach a replaying run to an already committed materialization. */
-  recordMaterializationReplay?(projectId: string, runId: string, commitId: string): Promise<void>
+  /** Read-only preflight for Action materialization business identity and running state. */
+  assertMaterializationRun?(input: AssertActionMaterializationRunInput): Promise<void>
+  /** @internal Atomically linked by ontology materialization finalization. */
+  recordMaterializationCommit?(
+    projectId: string,
+    bookkeeping: ActionRunMaterializationBookkeeping
+  ): Promise<void>
+  /** @internal Attach an exact committed replay to the same running Action. */
+  recordMaterializationReplay?(
+    projectId: string,
+    bookkeeping: ActionRunMaterializationBookkeeping
+  ): Promise<void>
   queue(input: QueueActionRunInput): Promise<ActionRunRecord>
   start(input: StartActionRunInput): Promise<ActionRunRecord>
   enterPhase(input: EnterActionRunPhaseInput): Promise<ActionRunRecord>
@@ -184,4 +205,28 @@ export interface ActionRunStorage {
   finish(input: FinishActionRunInput): Promise<ActionRunRecord>
   getById(params: { projectId: string; id: string }): Promise<ActionRunRecord | null>
   list(input: ListActionRunsInput): Promise<ListActionRunsResult>
+}
+
+/** Strict capability required by the ontology Materializer, not by legacy run providers. */
+export interface ActionMaterializationRunStorage extends ActionRunStorage {
+  assertMaterializationRun(input: AssertActionMaterializationRunInput): Promise<void>
+  recordMaterializationCommit(
+    projectId: string,
+    bookkeeping: ActionRunMaterializationBookkeeping
+  ): Promise<void>
+  recordMaterializationReplay(
+    projectId: string,
+    bookkeeping: ActionRunMaterializationBookkeeping
+  ): Promise<void>
+}
+
+export function isActionMaterializationRunStorage(
+  storage: ActionRunStorage | null | undefined
+): storage is ActionMaterializationRunStorage {
+  return (
+    storage != null &&
+    typeof storage.assertMaterializationRun === "function" &&
+    typeof storage.recordMaterializationCommit === "function" &&
+    typeof storage.recordMaterializationReplay === "function"
+  )
 }

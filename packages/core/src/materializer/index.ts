@@ -1,56 +1,10 @@
-export {
-  computeProjectionOwnership,
-  validateProjectionOwnership,
-} from "../projections/ownership"
-export { ProjectionRegistry } from "../projections/registry"
-export {
-  computeOntologyRevision,
-  computeProjectionOwnershipHash,
-  computeProjectionRevision,
-} from "../projections/revision"
-export type { MaterializationConflictKind } from "./errors"
+export type { MaterializationConflictKind } from "../materialization/errors"
 export {
   isMaterializationConflictError,
+  MaterializationCancellationError,
   MaterializationConflictError,
   MaterializationValidationError,
-} from "./errors"
-export type { FixedCommitIdentity, OntologyMaterializationEventKind } from "./identity"
-export {
-  createActionIdempotencyKey,
-  createCommitId,
-  createEventId,
-  createFixedCommitIdentity,
-  createLinkScopeFingerprint,
-  createProjectionGenerationId,
-  createProjectionIdempotencyKey,
-  createProjectionTelemetryIdempotencyKey,
-  createRequestHash,
-  createRuntimeIdempotencyKey,
-  createRuntimeTelemetryIdempotencyKey,
-  materializationEventKindOrdinal,
-  ONTOLOGY_MATERIALIZATION_EVENT_KIND_ORDER,
-  sha256Canonical,
-} from "./identity"
-export type { MaterializerStorage, OntologyMaterializerDependencies } from "./materializer"
-export { createOntologyMaterializer, OntologyMaterializer } from "./materializer"
-export {
-  canonicalJson,
-  normalizeJsonProperties,
-  normalizeOntologyEditCommit,
-  normalizeProjectionSourceEntry,
-  normalizeTelemetryAppend,
-} from "./normalize"
-export {
-  compareLinkRefs,
-  compareObjectRefs,
-  linkRefKey,
-  normalizeLinkRef,
-  normalizeObjectRef,
-  objectRefKey,
-  projectionEntityKey,
-  telemetryPointKey,
-  telemetrySeriesKey,
-} from "./refs"
+} from "../materialization/errors"
 export type {
   BaseCommitResult,
   EditCommitResult,
@@ -76,14 +30,70 @@ export type {
   PinnedDatasetVersion,
   ProjectionCommitResult,
   ProjectionEntityRef,
-  ProjectionOwnership,
+  ProjectionExecution,
   ProjectionSourceAssertion,
   ProjectionSourceEntry,
   ProjectionSourceRef,
   ProjectionSourceReplacement,
-  ResolvedProjection,
   TelemetryAppend,
   TelemetryCommitResult,
   TelemetryPointWrite,
   TelemetrySeriesRef,
-} from "./types"
+} from "../materialization/model"
+export {
+  compareLinkRefs,
+  compareObjectRefs,
+  linkRefKey,
+  normalizeLinkRef,
+  normalizeObjectRef,
+  objectRefKey,
+  projectionEntityKey,
+  telemetryPointKey,
+  telemetrySeriesKey,
+} from "../materialization/refs"
+export {
+  computeProjectionOwnership,
+  validateProjectionOwnership,
+} from "../projections/ownership"
+export { ProjectionRegistry } from "../projections/registry"
+export {
+  computeOntologyRevision,
+  computeProjectionOwnershipHash,
+  computeProjectionRevision,
+} from "../projections/revision"
+export type { ProjectionOwnership, ResolvedProjection } from "../projections/types"
+export type { MaterializerStorage, OntologyMaterializerDependencies } from "./materializer"
+export { createOntologyMaterializer, OntologyMaterializer } from "./materializer"
+export type {
+  CommitIdentity,
+  OntologyMaterializationEventKind,
+  ProjectionMaterializationFingerprint,
+  ProjectionTelemetryMaterializationFingerprint,
+  TimedCommitIdentity,
+} from "./shared/identity"
+export {
+  createActionIdempotencyKey,
+  createCommitId,
+  createCommitIdentity,
+  createEventId,
+  createLinkScopeFingerprint,
+  createProjectionIdempotencyKey,
+  createProjectionMaterializationId,
+  createProjectionTelemetryIdempotencyKey,
+  createRequestHash,
+  createRuntimeIdempotencyKey,
+  createRuntimeTelemetryIdempotencyKey,
+  createTimedCommitIdentity,
+  materializationEventKindOrdinal,
+  ONTOLOGY_MATERIALIZATION_EVENT_KIND_ORDER,
+  sha256Canonical,
+  timestampCommitIdentity,
+} from "./shared/identity"
+export {
+  canonicalJson,
+  normalizeJsonProperties,
+  normalizeOntologyEditCommit,
+  normalizeProjectionExecution,
+  normalizeProjectionSourceEntry,
+  normalizeTelemetryAppend,
+} from "./shared/normalize"

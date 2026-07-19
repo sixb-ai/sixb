@@ -19,11 +19,13 @@ export {
 } from "./idempotency"
 export { InMemoryActionRunStorage } from "./in-memory"
 export type {
+  ActionMaterializationRunStorage,
   ActionRunCommitDiff,
   ActionRunCommitRecord,
   ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunLinkEditDiff,
+  ActionRunMaterializationBookkeeping,
   ActionRunObjectEditDiff,
   ActionRunObjectRef,
   ActionRunParams,
@@ -33,6 +35,7 @@ export type {
   ActionRunStatus,
   ActionRunStorage,
   ActionRunWritebackRecord,
+  AssertActionMaterializationRunInput,
   EnterActionRunPhaseInput,
   FinishActionRunInput,
   ListActionRunsInput,
@@ -43,3 +46,4 @@ export type {
   RecordActionWritebackInput,
   StartActionRunInput,
 } from "./types"
+export { isActionMaterializationRunStorage } from "./types"

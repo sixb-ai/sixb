@@ -93,3 +93,28 @@ export type ProjectionDefinition =
   | ObjectProjectionDefinition
   | LinkProjectionDefinition
   | TelemetryProjectionDefinition
+
+export interface ProjectionOwnership {
+  readonly objects: readonly {
+    readonly objectTypeId: string
+    readonly existence: boolean
+    readonly propertyIds: readonly string[]
+  }[]
+  readonly links: readonly {
+    readonly sourceObjectTypeId: string
+    readonly linkId: string
+  }[]
+  readonly telemetry: readonly {
+    readonly objectTypeId: string
+    readonly propertyId: string
+  }[]
+}
+
+export interface ResolvedProjection<TDefinition extends ProjectionDefinition> {
+  readonly projectionId: string
+  readonly datasetId: string
+  readonly projectionRevision: string
+  readonly ownershipHash: string
+  readonly ownership: ProjectionOwnership
+  readonly definition: TDefinition
+}

@@ -15,19 +15,22 @@ import type { WorkflowInterventionStorage } from "./workflow-interventions"
 import type { WorkflowRunStorage } from "./workflow-runs"
 
 export type {
+  ActionMaterializationRunStorage,
   ActionRunFailure,
+  ActionRunMaterializationBookkeeping,
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
   ActionRunStatus,
   ActionRunStorage,
+  AssertActionMaterializationRunInput,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
   QueueActionRunInput,
   StartActionRunInput,
 } from "./action-runs"
-export { ActionRunError } from "./action-runs"
+export { ActionRunError, isActionMaterializationRunStorage } from "./action-runs"
 export type {
   AgentMessageRecord,
   AgentRunExecution,
@@ -132,18 +135,32 @@ export type {
 } from "./pipeline-runs"
 export { PipelineRunError } from "./pipeline-runs"
 export type {
+  AssertProjectionMaterializationExecutionInput,
+  FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
   ListProjectionRunsInput,
   ListProjectionRunsResult,
   ProjectionKind,
+  ProjectionMaterializationProtocol,
+  ProjectionMaterializationRunRecord,
+  ProjectionMaterializationRunStorage,
+  ProjectionReplacementMaterializationCounts,
   ProjectionRunCounters,
+  ProjectionRunDatasetVersion,
+  ProjectionRunMaterializationBookkeeping,
+  ProjectionRunMaterializationCounters,
+  ProjectionRunMaterializationIdentity,
+  ProjectionRunMaterializationReplay,
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
+  ProjectionTelemetryMaterializationCounts,
+  StartOrReclaimProjectionMaterializationInput,
   StartProjectionRunInput,
+  UpdateProjectionMaterializationInput,
   UpdateProjectionRunInput,
 } from "./projection-runs"
-export { ProjectionRunError } from "./projection-runs"
+export { isProjectionMaterializationRunStorage, ProjectionRunError } from "./projection-runs"
 export type {
   ListActiveRuleStatesInput,
   ListActiveRuleStatesResult,

@@ -3,7 +3,7 @@ import type { JsonValue } from "../../json"
 import type {
   OntologyMaterializationOrigin,
   OntologyMaterializationPropertyChangeMap,
-} from "../../materializer/types"
+} from "../../materialization/model"
 
 interface OntologyMaterializationEventBase {
   readonly id: string

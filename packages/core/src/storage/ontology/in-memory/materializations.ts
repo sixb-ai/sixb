@@ -3,8 +3,17 @@ import { stableJsonStringify } from "../../../json"
 import {
   MaterializationConflictError,
   MaterializationValidationError,
-} from "../../../materializer/errors"
-import { createEventId, materializationEventKindOrdinal } from "../../../materializer/identity"
+} from "../../../materialization/errors"
+import { createEventId, materializationEventKindOrdinal } from "../../../materialization/identity"
+import type {
+  EffectiveLinkSnapshot,
+  EffectiveObjectSnapshot,
+  ExpectedLinkRevision,
+  ExpectedObjectRevision,
+  OntologyLinkRef,
+  OntologyObjectRef,
+  PinnedDatasetVersion,
+} from "../../../materialization/model"
 import {
   linkRefKey,
   linkRefSortKey,
@@ -14,15 +23,7 @@ import {
   projectionEntityKey,
   telemetryPointKey,
   telemetryPointSortKey,
-} from "../../../materializer/refs"
-import type {
-  EffectiveLinkSnapshot,
-  EffectiveObjectSnapshot,
-  ExpectedLinkRevision,
-  ExpectedObjectRevision,
-  OntologyLinkRef,
-  OntologyObjectRef,
-} from "../../../materializer/types"
+} from "../../../materialization/refs"
 import {
   getInMemoryObjectMaterializerAdapter,
   type InMemoryObjectStorage,
@@ -48,6 +49,7 @@ import type {
   MaterializationObjectExistenceWorkRecord,
   MaterializationObjectState,
   MaterializationPlanHeader,
+  MaterializationPlanWorkItem,
   MaterializationPlanWorkRecord,
   MaterializationSession,
   MaterializationStatePage,
@@ -66,6 +68,7 @@ import type {
   StreamMaterializationWorkInput,
   StreamSourceReplacementStateInput,
 } from "../materializations"
+import type { OntologyMaterializationEvent } from "../outbox"
 import type {
   StageSourceAssertion,
   StoredSourceAssertion,
@@ -74,16 +77,15 @@ import type {
 } from "../sources"
 import {
   commitKey,
-  generationKey,
   type InMemoryOntologyState,
   type InMemoryOntologyStorageTestHooks,
-  type InMemorySourceGeneration,
+  type InMemorySourceMaterialization,
   type InMemoryStoredLinkOverride,
   type InMemoryStoredObjectOverride,
   idempotencyKey,
   outboxKey,
   projectEntityKey,
-  sourceKey,
+  sourceMaterializationKey,
 } from "./shared-state"
 
 interface SessionState {
@@ -98,11 +100,20 @@ interface SessionState {
   readonly applyWork: MaterializationPlanWorkRecord[]
   readonly cardinalityWork: MaterializationCardinalityOccupantWorkRecord[]
   readonly eventWork: MaterializationEventWorkRecord[]
+  readonly appliedPlanItems: string[]
+  readonly outboxEnvelopes: Map<number, OntologyMaterializationEvent>
+  readonly workStreams: Record<StreamMaterializationWorkInput["order"], WorkStreamState>
   workSealed: boolean
   incidentLinksByObject: Map<string, readonly OntologyLinkRef[]> | null
   linkScopeStates: Map<string, MaterializationLinkScopeState> | null
   readonly objectExistence: Map<string, MaterializationObjectExistenceWorkRecord>
   replacement: ReplacementSessionState | null
+}
+
+interface WorkStreamState {
+  started: boolean
+  completed: boolean
+  emittedCount: number
 }
 
 interface ReplacementObjectWork {
@@ -118,17 +129,19 @@ interface ReplacementLinkWork {
 
 interface ReplacementSessionState {
   readonly sourceId: string
-  readonly candidateGenerationId: string
-  readonly previous: InMemorySourceGeneration | undefined
-  readonly candidate: InMemorySourceGeneration
+  readonly candidateMaterializationId: string
+  readonly previous: InMemorySourceMaterialization | undefined
+  readonly candidate: InMemorySourceMaterialization
   readonly objects: Map<string, ReplacementObjectWork>
   readonly links: Map<string, ReplacementLinkWork>
   orderedObjects: ReplacementObjectWork[]
   orderedLinks: ReplacementLinkWork[] | null
   readonly affectedScopes: Set<string>
   readonly incidentObjects: Map<string, OntologyObjectRef>
-  objectStreamed: boolean
-  linkStreamed: boolean
+  objectStreamStarted: boolean
+  objectStreamCompleted: boolean
+  linkStreamStarted: boolean
+  linkStreamCompleted: boolean
   linksExpanded: boolean
 }
 
@@ -152,12 +165,6 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       )
     }
     assertMaterializationHeader(input)
-    if (input.commit.ontologyRevision !== input.expected.ontologyRevision) {
-      throw new MaterializationConflictError(
-        "ontology-revision",
-        "Materialization header uses contradictory ontology revisions."
-      )
-    }
     this.assertCommitAbsent(input)
     for (const expected of input.expected.sources)
       this.assertSource(expected, input.commit.projectId)
@@ -194,6 +201,13 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       applyWork: [],
       cardinalityWork: [],
       eventWork: [],
+      appliedPlanItems: [],
+      outboxEnvelopes: new Map<number, OntologyMaterializationEvent>(),
+      workStreams: {
+        apply: { started: false, completed: false, emittedCount: 0 },
+        cardinality: { started: false, completed: false, emittedCount: 0 },
+        event: { started: false, completed: false, emittedCount: 0 },
+      },
       workSealed: false,
       incidentLinksByObject: null,
       linkScopeStates: expectedScopeStates,
@@ -214,6 +228,8 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       session.applyWork.length = 0
       session.cardinalityWork.length = 0
       session.eventWork.length = 0
+      session.appliedPlanItems.length = 0
+      session.outboxEnvelopes.clear()
       session.incidentLinksByObject = null
       session.linkScopeStates = null
       session.objectExistence.clear()
@@ -228,9 +244,11 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     const session = this.requireSession(input.session)
     assertPageRows(input.pageRows)
     for await (const request of input.requests) {
+      this.requireSession(input.session)
       this.hooks.beforeRead?.("state.read")
       let objectCursor: string | null = null
       while (true) {
+        this.requireSession(input.session)
         const refs = selectBoundedUnique(
           request.objects,
           objectCursor,
@@ -241,6 +259,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         if (refs.length === 0) break
         const objects: MaterializationObjectState[] = []
         for (const ref of refs) objects.push(await this.objectState(session, ref))
+        this.requireSession(input.session)
         this.hooks.observeBuffer?.("state.object.page", objects.length)
         yield { objects, links: [], linkScopes: [], points: [] }
         objectCursor = objectRefSortKey(refs[refs.length - 1])
@@ -248,6 +267,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
 
       let linkCursor: string | null = null
       while (true) {
+        this.requireSession(input.session)
         const refs = selectBoundedUnique(
           request.links,
           linkCursor,
@@ -258,6 +278,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         if (refs.length === 0) break
         const links: MaterializationLinkState[] = []
         for (const ref of refs) links.push(await this.linkState(session, ref))
+        this.requireSession(input.session)
         this.hooks.observeBuffer?.("state.link.page", links.length)
         yield { objects: [], links, linkScopes: [], points: [] }
         linkCursor = linkRefSortKey(refs[refs.length - 1])
@@ -265,9 +286,11 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
 
       const incidentRefs = this.incidentLinkRefs(session, request.incidentObjects)
       for (let offset = 0; offset < incidentRefs.length; offset += input.pageRows) {
+        this.requireSession(input.session)
         const refs = incidentRefs.slice(offset, offset + input.pageRows)
         const links: MaterializationLinkState[] = []
         for (const ref of refs) links.push(await this.linkState(session, ref))
+        this.requireSession(input.session)
         this.hooks.observeBuffer?.("state.incident-link.page", links.length)
         yield { objects: [], links, linkScopes: [], points: [] }
       }
@@ -275,6 +298,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       for (const scope of uniqueBy(request.linkScopes, (value) =>
         linkScopeSortKey(value.source, value.linkId)
       )) {
+        this.requireSession(input.session)
         const value = this.linkScopeState(session, scope.source, scope.linkId)
         // Scope rows are currently only requested for cardinality-one links, so the complete member
         // set is bounded by the ontology invariant. Replacement scope enumeration is flattened in
@@ -284,6 +308,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
 
       let pointCursor: string | null = null
       while (true) {
+        this.requireSession(input.session)
         const selected = selectBoundedUnique(
           request.points,
           pointCursor,
@@ -301,6 +326,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           )
           if (stored) points.push(storedPoint(stored))
         }
+        this.requireSession(input.session)
         this.hooks.observeBuffer?.("state.point.page", points.length)
         if (points.length > 0) yield { objects: [], links: [], linkScopes: [], points }
         pointCursor = telemetryPointSortKey(
@@ -318,14 +344,21 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     assertPageRows(input.pageRows)
     const replacement = this.requireReplacement(session, input)
     if (input.entityKind === "object") {
-      if (replacement.objectStreamed)
+      if (replacement.candidate.projectionKind !== "object") {
+        throw new MaterializationConflictError(
+          "source-materialization",
+          "Link projection replacement cannot stream object state."
+        )
+      }
+      if (replacement.objectStreamStarted)
         throw new MaterializationConflictError(
           "effective-state",
           "Replacement object state may only be streamed once per session."
         )
-      replacement.objectStreamed = true
+      replacement.objectStreamStarted = true
       this.hooks.beforeRead?.("source-replacement.object")
       for (let offset = 0; offset < replacement.orderedObjects.length; offset += input.pageRows) {
+        this.requireSession(input.session)
         const selected = replacement.orderedObjects.slice(offset, offset + input.pageRows)
         const objects: SourceReplacementObjectState[] = []
         for (const entry of selected) {
@@ -335,7 +368,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
             ref: base.ref,
             candidateSource: storedSourceObject(
               input.source.projectionId,
-              replacement.candidate.generationId,
+              replacement.candidate.materializationId,
               replacement.candidate.rowsByEntity.get(key)
             ),
             override: base.override,
@@ -343,24 +376,34 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
             latestTelemetry: base.latestTelemetry,
           })
         }
+        this.requireSession(input.session)
         this.hooks.observeBuffer?.("replacement.object.page", objects.length)
         yield { objects, links: [], linkScopes: [] }
       }
+      this.requireSession(input.session)
+      replacement.objectStreamCompleted = true
       return
     }
 
-    if (replacement.linkStreamed)
+    if (replacement.candidate.projectionKind === "object" && !replacement.objectStreamCompleted) {
+      throw new MaterializationConflictError(
+        "effective-state",
+        "Object projection replacement must fully stream object state before link state."
+      )
+    }
+    if (replacement.linkStreamStarted)
       throw new MaterializationConflictError(
         "effective-state",
         "Replacement link state may only be streamed once per session."
       )
-    replacement.linkStreamed = true
+    replacement.linkStreamStarted = true
     this.hooks.beforeRead?.("source-replacement.link")
     this.expandReplacementLinks(session, replacement)
     replacement.orderedLinks ??= [...replacement.links.values()].sort((left, right) =>
       left.sortKey.localeCompare(right.sortKey)
     )
     for (let offset = 0; offset < replacement.orderedLinks.length; offset += input.pageRows) {
+      this.requireSession(input.session)
       const selected = replacement.orderedLinks.slice(offset, offset + input.pageRows)
       const links: SourceReplacementLinkState[] = []
       for (const entry of selected) {
@@ -373,7 +416,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           candidateSource: ownedByReplacement
             ? storedSourceLink(
                 input.source.projectionId,
-                replacement.candidate.generationId,
+                replacement.candidate.materializationId,
                 replacement.candidate.rowsByEntity.get(key)
               )
             : base.source,
@@ -382,9 +425,12 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           diffRequired: entry.diffRequired,
         })
       }
+      this.requireSession(input.session)
       this.hooks.observeBuffer?.("replacement.link.page", links.length)
       yield { objects: [], links, linkScopes: [] }
     }
+    this.requireSession(input.session)
+    replacement.linkStreamCompleted = true
   }
 
   async stageWork(input: StageMaterializationWorkInput): Promise<void> {
@@ -413,7 +459,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       }
       if (
         record.kind === "incident-object" &&
-        (!session.replacement || session.replacement.linkStreamed)
+        (!session.replacement || session.replacement.linkStreamStarted)
       ) {
         throw new MaterializationConflictError(
           "effective-state",
@@ -449,6 +495,14 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
   async *streamWork(input: StreamMaterializationWorkInput): AsyncIterable<MaterializationWorkPage> {
     const session = this.requireSession(input.session)
     assertPageRows(input.pageRows)
+    const stream = session.workStreams[input.order]
+    if (stream.started) {
+      throw new MaterializationConflictError(
+        "effective-state",
+        `Materialization ${input.order} work may only be streamed once per session.`
+      )
+    }
+    stream.started = true
     if (!session.workSealed) {
       session.applyWork.sort(comparePlanWork)
       session.cardinalityWork.sort(compareCardinalityWork)
@@ -462,10 +516,14 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           ? session.cardinalityWork
           : session.eventWork
     for (let offset = 0; offset < records.length; offset += input.pageRows) {
+      this.requireSession(input.session)
       const selected = records.slice(offset, offset + input.pageRows)
       this.hooks.observeBuffer?.(`work.${input.order}.page`, selected.length)
+      stream.emittedCount = offset + selected.length
       yield { records: structuredClone(selected) }
     }
+    this.requireSession(input.session)
+    stream.completed = true
   }
 
   async readObjectExistence(
@@ -486,6 +544,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     const session = this.requireSession(input.session)
     const projectId = session.header.commit.projectId
     assertPlanChunkCorrelations(input.chunk, session.header.commit)
+    assertChunkSequence(session, input.chunk)
     this.hooks.observeBuffer?.("apply.chunk", materializationChunkRows(input.chunk))
     const write = (boundary: string, apply: () => void): void => {
       this.hooks.beforeWrite?.(boundary, session.writeOrdinal++)
@@ -624,36 +683,61 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           createdAt: item.createdAt,
         })
         session.outboxOrdinals.add(envelope.commitOrdinal)
+        session.outboxEnvelopes.set(envelope.commitOrdinal, structuredClone(envelope))
         session.outboxCount += 1
       })
+    for (const item of materializationPlanItems(input.chunk)) {
+      session.appliedPlanItems.push(stableJsonStringify(item))
+    }
   }
 
   async finalize(input: FinalizeMaterializationInput): Promise<ApplyMaterializationResult> {
     const session = this.requireSession(input.session)
     const { commit } = session.header
-    assertFinalizationCorrelations(session, input.finalization, this.state)
+    assertFinalizationCorrelations(session, input.finalization, this.state, this.objects)
     this.hooks.beforeWrite?.("finalize", session.writeOrdinal++)
     for (const activation of input.finalization.sourceActivations) {
       this.hooks.beforeWrite?.("source.activate", session.writeOrdinal++)
       assertTimestamp(activation.datasetVersion.createdAt, "Source dataset version createdAt")
       assertTimestamp(activation.updatedAt, "Source activation updatedAt")
       this.assertSource(activation.expected, commit.projectId)
-      const generation = this.state.generations.get(
-        generationKey(commit.projectId, activation.source.projectionId, activation.generationId)
+      const candidateKey = sourceMaterializationKey(
+        commit.projectId,
+        activation.source.projectionId,
+        activation.materializationId
       )
-      if (!generation)
+      const candidate = this.state.sourceMaterializations.get(candidateKey)
+      if (!candidate || candidate.status !== "ready")
         throw new MaterializationConflictError(
-          "source-generation",
-          "Source activation candidate is missing."
+          "source-materialization",
+          "Source activation candidate is missing or is not ready."
         )
-      this.state.activeSources.set(sourceKey(commit.projectId, activation.source.projectionId), {
-        projectId: commit.projectId,
-        source: activation.source,
-        activeGenerationId: activation.generationId,
-        datasetVersion: activation.datasetVersion,
-        projectionRevision: activation.projectionRevision,
-        ownershipHash: activation.ownershipHash,
-        ontologyRevision: activation.ontologyRevision,
+      const previous = findActiveSourceMaterialization(
+        this.state,
+        commit.projectId,
+        activation.source.projectionId
+      )
+      if (previous) {
+        this.state.sourceMaterializations.set(
+          sourceMaterializationKey(
+            previous.projectId,
+            previous.source.projectionId,
+            previous.materializationId
+          ),
+          {
+            ...previous,
+            status: "superseded",
+            executionToken: null,
+            terminalAt: activation.updatedAt,
+            updatedAt: activation.updatedAt,
+          }
+        )
+      }
+      this.state.sourceMaterializations.set(candidateKey, {
+        ...candidate,
+        status: "active",
+        executionToken: null,
+        activatedAt: activation.updatedAt,
         lastCommitId: activation.lastCommitId,
         updatedAt: activation.updatedAt,
       })
@@ -676,6 +760,8 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     session.applyWork.length = 0
     session.cardinalityWork.length = 0
     session.eventWork.length = 0
+    session.appliedPlanItems.length = 0
+    session.outboxEnvelopes.clear()
     session.incidentLinksByObject = null
     session.linkScopeStates = null
     session.objectExistence.clear()
@@ -707,10 +793,10 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     if (session.replacement) {
       if (
         session.replacement.sourceId !== input.source.projectionId ||
-        session.replacement.candidateGenerationId !== input.candidateGenerationId
+        session.replacement.candidateMaterializationId !== input.candidateMaterializationId
       ) {
         throw new MaterializationConflictError(
-          "source-generation",
+          "source-materialization",
           "Materialization session already owns another replacement union."
         )
       }
@@ -718,22 +804,30 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     }
     const projectId = session.header.commit.projectId
     const sourceId = input.source.projectionId
-    const candidate = this.state.generations.get(
-      generationKey(projectId, sourceId, input.candidateGenerationId)
+    const candidate = this.state.sourceMaterializations.get(
+      sourceMaterializationKey(projectId, sourceId, input.candidateMaterializationId)
     )
-    if (!candidate) {
+    if (!candidate || candidate.status !== "ready") {
       throw new MaterializationConflictError(
-        "source-generation",
-        `Candidate source generation '${input.candidateGenerationId}' does not exist.`
+        "source-materialization",
+        `Candidate source materialization '${input.candidateMaterializationId}' is missing or is not ready.`
       )
     }
-    const active = this.state.activeSources.get(sourceKey(projectId, sourceId))
-    const previous = active
-      ? this.state.generations.get(generationKey(projectId, sourceId, active.activeGenerationId))
-      : undefined
+    const previous = findActiveSourceMaterialization(this.state, projectId, sourceId)
+    if (
+      candidate.protocol !== "replacement" ||
+      (previous &&
+        (previous.protocol !== candidate.protocol ||
+          previous.projectionKind !== candidate.projectionKind))
+    ) {
+      throw new MaterializationConflictError(
+        "source-materialization",
+        "Source replacement kind or protocol does not match its active materialization."
+      )
+    }
     const replacement: ReplacementSessionState = {
       sourceId,
-      candidateGenerationId: input.candidateGenerationId,
+      candidateMaterializationId: input.candidateMaterializationId,
       previous,
       candidate,
       objects: new Map(),
@@ -742,13 +836,15 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       orderedLinks: null,
       affectedScopes: new Set(),
       incidentObjects: new Map(),
-      objectStreamed: false,
-      linkStreamed: false,
+      objectStreamStarted: false,
+      objectStreamCompleted: false,
+      linkStreamStarted: false,
+      linkStreamCompleted: false,
       linksExpanded: false,
     }
-    for (const generation of [previous, candidate]) {
-      if (!generation) continue
-      for (const row of generation.rowsByEntity.values()) {
+    for (const materialization of [previous, candidate]) {
+      if (!materialization) continue
+      for (const row of materialization.rowsByEntity.values()) {
         if (row.assertion.kind === "object") {
           const ref = row.assertion.ref
           replacement.objects.set(objectRefKey(ref), { ref, sortKey: objectRefSortKey(ref) })
@@ -783,12 +879,9 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       if (override.projectId !== projectId) continue
       if (touchesIncident(override.ref)) addReplacementLink(replacement, override.ref, true)
     }
-    for (const active of this.state.activeSources.values()) {
-      if (active.projectId !== projectId) continue
-      const generation = this.state.generations.get(
-        generationKey(projectId, active.source.projectionId, active.activeGenerationId)
-      )
-      for (const row of generation?.rowsByEntity.values() ?? []) {
+    for (const active of this.state.sourceMaterializations.values()) {
+      if (active.projectId !== projectId || active.status !== "active") continue
+      for (const row of active.rowsByEntity.values()) {
         if (row.assertion.kind === "link" && touchesIncident(row.assertion.ref)) {
           addReplacementLink(replacement, row.assertion.ref, true)
         }
@@ -825,9 +918,13 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
   }
 
   private assertSource(expected: ExpectedSourceRevision, projectId: string): void {
-    const current = this.state.activeSources.get(sourceKey(projectId, expected.source.projectionId))
+    const current = findActiveSourceMaterialization(
+      this.state,
+      projectId,
+      expected.source.projectionId
+    )
     if (
-      (current?.activeGenerationId ?? null) !== expected.activeGenerationId ||
+      (current?.materializationId ?? null) !== expected.activeMaterializationId ||
       (current?.lastCommitId ?? null) !== expected.lastCommitId
     ) {
       throw new MaterializationConflictError(
@@ -1013,19 +1110,16 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
 
   private findActiveSource(projectId: string, entityKey: string): StoredSourceAssertion | null {
     let found: StoredSourceAssertion | null = null
-    for (const active of this.state.activeSources.values()) {
-      if (active.projectId !== projectId) continue
-      const generation = this.state.generations.get(
-        generationKey(projectId, active.source.projectionId, active.activeGenerationId)
-      )
-      const row = generation?.rowsByEntity.get(entityKey)
+    for (const active of this.state.sourceMaterializations.values()) {
+      if (active.projectId !== projectId || active.status !== "active") continue
+      const row = active.rowsByEntity.get(entityKey)
       if (!row) continue
       if (found)
         throw new MaterializationConflictError(
-          "source-generation",
+          "source-materialization",
           `Multiple active sources assert ${entityKey}.`
         )
-      found = storedSource(active.source.projectionId, active.activeGenerationId, row)
+      found = storedSource(active.source.projectionId, active.materializationId, row)
     }
     return structuredClone(found)
   }
@@ -1064,12 +1158,9 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     for (const override of this.state.linkOverrides.values()) {
       if (override.projectId === projectId) consider(override.ref)
     }
-    for (const active of this.state.activeSources.values()) {
-      if (active.projectId !== projectId) continue
-      const generation = this.state.generations.get(
-        generationKey(projectId, active.source.projectionId, active.activeGenerationId)
-      )
-      for (const row of generation?.rowsByEntity.values() ?? []) {
+    for (const active of this.state.sourceMaterializations.values()) {
+      if (active.projectId !== projectId || active.status !== "active") continue
+      for (const row of active.rowsByEntity.values()) {
         if (row.assertion.kind === "link") consider(row.assertion.ref)
       }
     }
@@ -1173,6 +1264,77 @@ function materializationChunkRows(
   )
 }
 
+function materializationPlanItems(
+  chunk: import("../materializations").MaterializationPlanChunk
+): import("../materializations").MaterializationPlanWorkItem[] {
+  return [
+    ...chunk.overrides.objectUpserts.map((value) => ({
+      kind: "object-override-upsert" as const,
+      value,
+    })),
+    ...chunk.overrides.objectDeletes.map((value) => ({
+      kind: "object-override-delete" as const,
+      value,
+    })),
+    ...chunk.overrides.linkUpserts.map((value) => ({
+      kind: "link-override-upsert" as const,
+      value,
+    })),
+    ...chunk.overrides.linkDeletes.map((value) => ({
+      kind: "link-override-delete" as const,
+      value,
+    })),
+    ...chunk.effective.linkDeletes.map((value) => ({ kind: "link-delete" as const, value })),
+    ...chunk.effective.objectDeletes.map((value) => ({ kind: "object-delete" as const, value })),
+    ...chunk.effective.objectUpserts.map((value) => ({ kind: "object-upsert" as const, value })),
+    ...chunk.effective.linkUpserts.map((value) => ({ kind: "link-upsert" as const, value })),
+    ...chunk.timeseries.pointUpserts.map((value) => ({ kind: "point-upsert" as const, value })),
+  ]
+}
+
+function assertChunkSequence(
+  session: SessionState,
+  chunk: import("../materializations").MaterializationPlanChunk
+): void {
+  const planItems = materializationPlanItems(chunk)
+  const applyStream = session.workStreams.apply
+  const appliedStart = session.appliedPlanItems.length
+  if (
+    planItems.length > 0 &&
+    (!applyStream.started || appliedStart + planItems.length > applyStream.emittedCount)
+  ) {
+    invalidCorrelation("Materialization plan items cannot be applied before they are streamed.")
+  }
+  for (let offset = 0; offset < planItems.length; offset += 1) {
+    const expected = session.applyWork[appliedStart + offset]?.item
+    if (!expected || stableJsonStringify(planItems[offset]) !== stableJsonStringify(expected)) {
+      invalidCorrelation("Materialization plan items must be applied in exact streamed order.")
+    }
+  }
+
+  const eventStream = session.workStreams.event
+  if (
+    chunk.outbox.length > 0 &&
+    (!eventStream.started || session.outboxCount + chunk.outbox.length > eventStream.emittedCount)
+  ) {
+    invalidCorrelation("Materialization events cannot be applied before they are streamed.")
+  }
+  for (let offset = 0; offset < chunk.outbox.length; offset += 1) {
+    const expected = session.eventWork[session.outboxCount + offset]
+    const actual = chunk.outbox[offset]?.envelope
+    if (!expected || !actual) {
+      invalidCorrelation("Materialization outbox events must follow exact streamed order.")
+    }
+    const { id: _id, commitOrdinal, ...actualDraft } = actual
+    if (
+      commitOrdinal !== session.outboxCount + offset ||
+      stableJsonStringify(actualDraft) !== stableJsonStringify(expected.draft)
+    ) {
+      invalidCorrelation("Materialization outbox events must follow exact streamed order.")
+    }
+  }
+}
+
 function assertTimestamp(value: string, label: string): void {
   if (!Number.isFinite(Date.parse(value))) {
     throw new MaterializationValidationError(`${label} must be a valid timestamp.`)
@@ -1251,14 +1413,39 @@ function storedPoint(point: TimeseriesPoint): StoredTelemetryPoint {
   }
 }
 
+function findActiveSourceMaterialization(
+  state: InMemoryOntologyState,
+  projectId: string,
+  sourceId: string
+): InMemorySourceMaterialization | undefined {
+  let active: InMemorySourceMaterialization | undefined
+  for (const materialization of state.sourceMaterializations.values()) {
+    if (
+      materialization.projectId !== projectId ||
+      materialization.source.projectionId !== sourceId ||
+      materialization.status !== "active"
+    ) {
+      continue
+    }
+    if (active) {
+      throw new MaterializationConflictError(
+        "source-materialization",
+        `Source '${sourceId}' has more than one active materialization.`
+      )
+    }
+    active = materialization
+  }
+  return active
+}
+
 function storedSource(
   sourceId: string,
-  generationId: string,
+  materializationId: string,
   row: StageSourceAssertion
 ): StoredSourceAssertion {
   return {
     source: { projectionId: sourceId },
-    generationId,
+    materializationId,
     root: structuredClone(row.root),
     assertion: structuredClone(row.assertion),
     stagingOrdinal: row.stagingOrdinal,
@@ -1267,20 +1454,20 @@ function storedSource(
 
 function storedSourceObject(
   sourceId: string,
-  generationId: string | undefined,
+  materializationId: string | undefined,
   row: StageSourceAssertion | undefined
 ): StoredSourceObjectAssertion | null {
-  if (!generationId || !row || row.assertion.kind !== "object") return null
-  return storedSource(sourceId, generationId, row) as StoredSourceObjectAssertion
+  if (!materializationId || !row || row.assertion.kind !== "object") return null
+  return storedSource(sourceId, materializationId, row) as StoredSourceObjectAssertion
 }
 
 function storedSourceLink(
   sourceId: string,
-  generationId: string | undefined,
+  materializationId: string | undefined,
   row: StageSourceAssertion | undefined
 ): StoredSourceLinkAssertion | null {
-  if (!generationId || !row || row.assertion.kind !== "link") return null
-  return storedSource(sourceId, generationId, row) as StoredSourceLinkAssertion
+  if (!materializationId || !row || row.assertion.kind !== "link") return null
+  return storedSource(sourceId, materializationId, row) as StoredSourceLinkAssertion
 }
 
 function addReplacementLink(
@@ -1404,9 +1591,33 @@ function comparePlanWork(
 ): number {
   return (
     left.applyPhase - right.applyPhase ||
+    planKindOrder(left.item.kind) - planKindOrder(right.item.kind) ||
     left.sortKey.localeCompare(right.sortKey) ||
     left.recordKey.localeCompare(right.recordKey)
   )
+}
+
+function planKindOrder(kind: MaterializationPlanWorkItem["kind"]): number {
+  switch (kind) {
+    case "object-override-upsert":
+      return 0
+    case "object-override-delete":
+      return 1
+    case "link-override-upsert":
+      return 2
+    case "link-override-delete":
+      return 3
+    case "point-upsert":
+      return 4
+    case "link-delete":
+      return 5
+    case "object-delete":
+      return 6
+    case "object-upsert":
+      return 7
+    case "link-upsert":
+      return 8
+  }
 }
 
 function compareCardinalityWork(
@@ -1482,19 +1693,32 @@ function assertMaterializationHeader(header: MaterializationPlanHeader): void {
     if (commit.origin.kind !== "telemetry") {
       invalidCorrelation("Telemetry commit origin does not correlate with its intent.")
     }
-    if (!Number.isSafeInteger(commit.intent.pointCount) || commit.intent.pointCount < 0) {
-      invalidCorrelation("Telemetry commit point count is invalid.")
+    if (
+      !Number.isSafeInteger(commit.intent.pointCount) ||
+      commit.intent.pointCount < 0 ||
+      !Number.isSafeInteger(commit.intent.inputPointCount) ||
+      commit.intent.inputPointCount < commit.intent.pointCount
+    ) {
+      invalidCorrelation("Telemetry commit point counts are invalid.")
     }
-    if (commit.origin.source.kind === "projection") {
+    if (commit.intent.source.kind === "projection") {
       if (
-        commit.intent.batchOrdinal !== commit.origin.source.batchOrdinal ||
+        commit.origin.source.kind !== "projection" ||
+        commit.intent.source.projection.projectionId !== commit.origin.source.projectionId ||
+        commit.intent.source.datasetVersion.datasetId !== commit.origin.source.datasetId ||
+        commit.intent.source.datasetVersion.versionId !== commit.origin.source.datasetVersionId ||
+        commit.intent.source.batchOrdinal !== commit.origin.source.batchOrdinal ||
         !commit.projectionRevision ||
         !commit.ownershipHash
       ) {
         invalidCorrelation("Projection telemetry metadata does not correlate with its intent.")
       }
+      assertTimestamp(
+        commit.intent.source.datasetVersion.createdAt,
+        "Telemetry dataset version createdAt"
+      )
     } else if (
-      commit.intent.batchOrdinal !== undefined ||
+      commit.origin.source.kind !== "runtime" ||
       commit.projectionRevision !== undefined ||
       commit.ownershipHash !== undefined
     ) {
@@ -1636,7 +1860,8 @@ function assertOutboxCorrelation(
 function assertFinalizationCorrelations(
   session: SessionState,
   finalization: import("../materializations").MaterializationPlanFinalization,
-  state: InMemoryOntologyState
+  state: InMemoryOntologyState,
+  objects: InMemoryObjectStorage
 ): void {
   const { commit } = session.header
   const { result, bookkeeping, sourceActivations } = finalization
@@ -1661,7 +1886,7 @@ function assertFinalizationCorrelations(
       invalidCorrelation("Edit result does not correlate with its operation count.")
     }
     if (sourceActivations.length !== 0) {
-      invalidCorrelation("Edit materialization cannot activate a source generation.")
+      invalidCorrelation("Edit materialization cannot activate a source materialization.")
     }
   } else if (commit.intent.kind === "projection") {
     if (result.kind !== "projection" || sourceActivations.length !== 1) {
@@ -1679,7 +1904,7 @@ function assertFinalizationCorrelations(
   }
 
   for (const activation of sourceActivations) {
-    assertSourceActivationCorrelation(activation, session.header, state)
+    assertSourceActivationCorrelation(activation, session, state)
   }
   if (bookkeeping) {
     assertBookkeepingCorrelation(bookkeeping, session, state, result, sourceActivations)
@@ -1692,17 +1917,26 @@ function assertFinalizationCorrelations(
   ) {
     invalidCorrelation("Action and projection commits require correlated run bookkeeping.")
   }
+  if (sourceActivations[0]) {
+    assertReplacementFullyStreamed(session, sourceActivations[0])
+  }
+  assertFinalizedWork(session, state, objects)
 }
 
 function assertSourceActivationCorrelation(
   activation: import("../materializations").SourceActivationWrite,
-  header: MaterializationPlanHeader,
+  session: SessionState,
   state: InMemoryOntologyState
 ): void {
+  const { header } = session
   const { commit } = header
   if (
     commit.intent.kind !== "projection" ||
+    commit.origin.kind !== "projection" ||
     activation.source.projectionId !== commit.intent.source.projectionId ||
+    activation.source.projectionId !== commit.origin.projectionId ||
+    activation.execution.projectionRunId !== commit.origin.projectionRunId ||
+    activation.protocol !== "replacement" ||
     stableJsonStringify(activation.datasetVersion) !==
       stableJsonStringify(commit.intent.datasetVersion) ||
     activation.projectionRevision !== commit.projectionRevision ||
@@ -1716,16 +1950,254 @@ function assertSourceActivationCorrelation(
   ) {
     invalidCorrelation("Source activation does not correlate with its projection commit.")
   }
-  if (
-    !state.generations.has(
-      generationKey(commit.projectId, activation.source.projectionId, activation.generationId)
+  const candidate = state.sourceMaterializations.get(
+    sourceMaterializationKey(
+      commit.projectId,
+      activation.source.projectionId,
+      activation.materializationId
     )
-  ) {
+  )
+  if (!candidate || candidate.status !== "ready") {
     throw new MaterializationConflictError(
-      "source-generation",
-      "Source activation candidate is missing."
+      "source-materialization",
+      "Source activation candidate is missing or is not ready."
     )
   }
+  if (
+    candidate.projectionRunId !== activation.execution.projectionRunId ||
+    candidate.executionToken !== activation.execution.executionToken ||
+    candidate.projectionKind !== activation.projectionKind ||
+    candidate.protocol !== activation.protocol ||
+    stableJsonStringify(candidate.datasetVersion) !==
+      stableJsonStringify(activation.datasetVersion) ||
+    candidate.projectionRevision !== activation.projectionRevision ||
+    candidate.ownershipHash !== activation.ownershipHash ||
+    candidate.ontologyRevision !== activation.ontologyRevision
+  ) {
+    invalidCorrelation("Source activation does not match its ready candidate identity.")
+  }
+  if (candidate.readyAt === null) {
+    invalidCorrelation("Source activation candidate has no ready timestamp.")
+  }
+  assertTimestampNotBefore(
+    activation.updatedAt,
+    candidate.readyAt,
+    "Source activation cannot precede candidate readiness."
+  )
+  const previous = findActiveSourceMaterialization(
+    state,
+    commit.projectId,
+    activation.source.projectionId
+  )
+  if (previous) {
+    assertSourceDatasetWatermark(previous.datasetVersion, activation.datasetVersion)
+    assertTimestampNotBefore(
+      activation.updatedAt,
+      previous.updatedAt,
+      "Source activation cannot precede the active materialization update."
+    )
+  }
+}
+
+function assertSourceDatasetWatermark(
+  active: PinnedDatasetVersion,
+  next: PinnedDatasetVersion
+): void {
+  if (active.datasetId !== next.datasetId) {
+    throw new MaterializationConflictError(
+      "projection-fence",
+      "Source activation dataset does not match the active source dataset."
+    )
+  }
+  if (active.versionId === next.versionId && active.createdAt !== next.createdAt) {
+    throw new MaterializationConflictError(
+      "projection-fence",
+      "Source activation reused an immutable dataset version id with different metadata."
+    )
+  }
+  if (next.createdAt < active.createdAt) {
+    throw new MaterializationConflictError(
+      "projection-fence",
+      "Source activation dataset version is older than the active watermark."
+    )
+  }
+  if (next.createdAt === active.createdAt && next.versionId !== active.versionId) {
+    throw new MaterializationConflictError(
+      "projection-fence",
+      "Source activation dataset watermark is ambiguous."
+    )
+  }
+}
+
+function assertFinalizedWork(
+  session: SessionState,
+  state: InMemoryOntologyState,
+  objects: InMemoryObjectStorage
+): void {
+  const expectedPlanItems = session.applyWork.map((record) => stableJsonStringify(record.item))
+  const appliedPlanItems = session.appliedPlanItems
+  if (expectedPlanItems.length > 0 && !session.workStreams.apply.completed) {
+    invalidCorrelation("Materialization plan work was not fully streamed.")
+  }
+  if (stableJsonStringify(appliedPlanItems) !== stableJsonStringify(expectedPlanItems)) {
+    invalidCorrelation("Materialization plan work was not applied exactly once.")
+  }
+  if (session.cardinalityWork.length > 0 && !session.workStreams.cardinality.completed) {
+    invalidCorrelation("Materialization cardinality work was not fully validated.")
+  }
+  assertFinalCardinality(session.cardinalityWork, session.header.commit.projectId, objects)
+  if (session.header.commit.intent.kind === "telemetry") {
+    const pointKeys = classificationKeys(session, "point")
+    if (pointKeys.length !== session.header.commit.intent.pointCount) {
+      invalidCorrelation(
+        "Telemetry point classification coverage does not match the commit intent."
+      )
+    }
+  }
+
+  const expectedEvents = [...session.eventWork].sort(compareEventWork)
+  if (expectedEvents.length > 0 && !session.workStreams.event.completed) {
+    invalidCorrelation("Materialization event work was not fully drained.")
+  }
+  if (session.outboxEnvelopes.size !== expectedEvents.length) {
+    invalidCorrelation("Materialization event work was not fully written to the outbox.")
+  }
+  for (let ordinal = 0; ordinal < expectedEvents.length; ordinal += 1) {
+    const expected = expectedEvents[ordinal]
+    const actual = session.outboxEnvelopes.get(ordinal)
+    if (!expected || !actual) {
+      invalidCorrelation("Materialization event work was not fully written to the outbox.")
+    }
+    const { id, commitOrdinal, ...actualDraft } = actual
+    if (
+      commitOrdinal !== ordinal ||
+      id !== createEventId(session.header.commit.projectId, session.header.commit.id, ordinal) ||
+      stableJsonStringify(actualDraft) !== stableJsonStringify(expected.draft)
+    ) {
+      invalidCorrelation("Materialization outbox event does not match its staged event work.")
+    }
+    const persisted = state.outbox.get(outboxKey(session.header.commit.projectId, actual.id))
+    if (!persisted || stableJsonStringify(persisted.envelope) !== stableJsonStringify(actual)) {
+      invalidCorrelation("Materialization outbox event was not persisted.")
+    }
+  }
+}
+
+function assertFinalCardinality(
+  records: readonly MaterializationCardinalityOccupantWorkRecord[],
+  projectId: string,
+  objects: InMemoryObjectStorage
+): void {
+  const scopes = new Map<
+    string,
+    {
+      readonly source: OntologyObjectRef
+      readonly linkId: string
+      readonly occupiedLinkKeys: Set<string>
+    }
+  >()
+  let currentScope: string | null = null
+  let occupiedCount = 0
+  for (const record of records) {
+    if (record.scopeSortKey !== currentScope) {
+      currentScope = record.scopeSortKey
+      occupiedCount = 0
+    }
+    const scope = scopes.get(record.scopeSortKey) ?? {
+      source: structuredClone(record.ref.source),
+      linkId: record.ref.linkId,
+      occupiedLinkKeys: new Set<string>(),
+    }
+    scopes.set(record.scopeSortKey, scope)
+    if (record.occupied) {
+      occupiedCount += 1
+      scope.occupiedLinkKeys.add(record.linkSortKey)
+      if (occupiedCount > 1) {
+        invalidCorrelation("Materialization cardinality work violates cardinality-one.")
+      }
+    }
+  }
+
+  const adapter = getInMemoryObjectMaterializerAdapter(objects)
+  for (const scope of scopes.values()) {
+    const effectiveLinkKeys: string[] = []
+    adapter.visitExactScopeLinks(
+      projectId,
+      scope.source.objectTypeId,
+      scope.source.primaryId,
+      scope.linkId,
+      (row) => effectiveLinkKeys.push(linkRefSortKey(linkRef(row)))
+    )
+    effectiveLinkKeys.sort()
+    const occupiedLinkKeys = [...scope.occupiedLinkKeys].sort()
+    if (stableJsonStringify(effectiveLinkKeys) !== stableJsonStringify(occupiedLinkKeys)) {
+      invalidCorrelation(
+        "Materialization cardinality work does not match the final effective link scope."
+      )
+    }
+  }
+}
+
+function assertReplacementFullyStreamed(
+  session: SessionState,
+  activation: import("../materializations").SourceActivationWrite
+): void {
+  const replacement = session.replacement
+  if (
+    !replacement ||
+    replacement.sourceId !== activation.source.projectionId ||
+    replacement.candidateMaterializationId !== activation.materializationId ||
+    replacement.candidate.materializationId !== activation.materializationId ||
+    replacement.candidate.projectionKind !== activation.projectionKind ||
+    replacement.candidate.protocol !== activation.protocol
+  ) {
+    invalidCorrelation(
+      "Source activation does not match the replacement candidate opened by the session."
+    )
+  }
+  if (
+    activation.projectionKind === "object" &&
+    (!replacement.objectStreamCompleted || !replacement.linkStreamCompleted)
+  ) {
+    invalidCorrelation("Object projection replacement state was not fully streamed.")
+  }
+  if (activation.projectionKind === "link" && !replacement.linkStreamCompleted) {
+    invalidCorrelation("Link projection replacement state was not fully streamed.")
+  }
+  const expectedObjectKeys =
+    activation.projectionKind === "object" ? [...replacement.objects.keys()].sort() : []
+  const expectedLinkKeys = [...replacement.links.entries()]
+    .filter(([, value]) => value.diffRequired)
+    .map(([key]) => key)
+    .sort()
+  if (
+    stableJsonStringify(classificationKeys(session, "object")) !==
+      stableJsonStringify(expectedObjectKeys) ||
+    stableJsonStringify(classificationKeys(session, "link")) !==
+      stableJsonStringify(expectedLinkKeys) ||
+    classificationKeys(session, "point").length > 0
+  ) {
+    invalidCorrelation(
+      "Projection replacement classification coverage does not match its streamed state."
+    )
+  }
+}
+
+function classificationKeys(
+  session: SessionState,
+  entityKind: import("../materializations").MaterializationWorkEntityKind
+): string[] {
+  return [...session.work.values()]
+    .filter(
+      (record): record is import("../materializations").MaterializationClassificationWorkRecord =>
+        record.kind === "classification" && record.entityKind === entityKind
+    )
+    .map((record) => record.identityKey)
+    .sort()
+}
+
+function assertTimestampNotBefore(value: string, minimum: string, message: string): void {
+  if (Date.parse(value) < Date.parse(minimum)) invalidCorrelation(message)
 }
 
 function assertBookkeepingCorrelation(
@@ -1733,9 +2205,9 @@ function assertBookkeepingCorrelation(
   session: SessionState,
   state: InMemoryOntologyState,
   result:
-    | import("../../../materializer/types").EditCommitResult
-    | import("../../../materializer/types").ProjectionCommitResult
-    | import("../../../materializer/types").TelemetryCommitResult,
+    | import("../../../materialization/model").EditCommitResult
+    | import("../../../materialization/model").ProjectionCommitResult
+    | import("../../../materialization/model").TelemetryCommitResult,
   sourceActivations: readonly import("../materializations").SourceActivationWrite[]
 ): void {
   const { commit } = session.header
@@ -1758,29 +2230,34 @@ function assertBookkeepingCorrelation(
       invalidCorrelation("Projection bookkeeping does not correlate with its commit intent.")
     }
     const activationWrite = sourceActivations[0]
-    const generation = activationWrite
-      ? state.generations.get(
-          generationKey(
+    const materialization = activationWrite
+      ? state.sourceMaterializations.get(
+          sourceMaterializationKey(
             commit.projectId,
             activationWrite.source.projectionId,
-            activationWrite.generationId
+            activationWrite.materializationId
           )
         )
       : undefined
     if (
       bookkeeping.projectionId !== commit.origin.projectionId ||
-      bookkeeping.runId !== commit.origin.projectionRunId ||
+      bookkeeping.projectionKind !== activationWrite?.projectionKind ||
+      bookkeeping.execution.projectionRunId !== commit.origin.projectionRunId ||
+      stableJsonStringify(bookkeeping.execution) !==
+        stableJsonStringify(activationWrite?.execution) ||
       stableJsonStringify(bookkeeping.datasetVersion) !==
         stableJsonStringify(commit.intent.datasetVersion) ||
+      bookkeeping.ontologyRevision !== commit.ontologyRevision ||
       bookkeeping.projectionRevision !== commit.projectionRevision ||
+      bookkeeping.ownershipHash !== commit.ownershipHash ||
       stableJsonStringify(bookkeeping.counts) !== stableJsonStringify(result.counts)
     ) {
       invalidCorrelation("Projection bookkeeping does not correlate with its commit.")
     }
     if (
-      !generation ||
-      bookkeeping.stagedRootCount !== generation.rootOrdinals.size ||
-      bookkeeping.stagedAssertionCount !== generation.rowsByEntity.size
+      !materialization ||
+      bookkeeping.stagedRootCount !== materialization.rootOrdinals.size ||
+      bookkeeping.stagedAssertionCount !== materialization.rowsByEntity.size
     ) {
       invalidCorrelation("Projection bookkeeping staged counts do not match its candidate.")
     }
@@ -1792,11 +2269,17 @@ function assertBookkeepingCorrelation(
       commit.intent.kind !== "telemetry" ||
       result.kind !== "telemetry" ||
       bookkeeping.projectionId !== commit.origin.source.projectionId ||
-      bookkeeping.runId !== commit.origin.source.projectionRunId ||
-      bookkeeping.datasetVersion.datasetId !== commit.origin.source.datasetId ||
-      bookkeeping.datasetVersion.versionId !== commit.origin.source.datasetVersionId ||
+      bookkeeping.projectionKind !== "telemetry" ||
+      bookkeeping.execution.projectionRunId !== commit.origin.source.projectionRunId ||
+      commit.intent.source.kind !== "projection" ||
+      stableJsonStringify(bookkeeping.datasetVersion) !==
+        stableJsonStringify(commit.intent.source.datasetVersion) ||
+      bookkeeping.ontologyRevision !== commit.ontologyRevision ||
       bookkeeping.projectionRevision !== commit.projectionRevision ||
-      bookkeeping.batchOrdinal !== commit.intent.batchOrdinal ||
+      bookkeeping.ownershipHash !== commit.ownershipHash ||
+      bookkeeping.batchOrdinal !== commit.intent.source.batchOrdinal ||
+      bookkeeping.batchInputCount <= 0 ||
+      bookkeeping.batchInputCount !== commit.intent.inputPointCount ||
       bookkeeping.batchPointCount !== commit.intent.pointCount ||
       bookkeeping.pointsCreated !== result.pointsCreated ||
       bookkeeping.pointsUpdated !== result.pointsUpdated ||

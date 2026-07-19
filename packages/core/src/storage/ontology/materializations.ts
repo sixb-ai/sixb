@@ -13,10 +13,11 @@ import type {
   OntologyObjectRef,
   PinnedDatasetVersion,
   ProjectionCommitResult,
+  ProjectionExecution,
   ProjectionSourceRef,
   TelemetryCommitResult,
   TelemetrySeriesRef,
-} from "../../materializer/types"
+} from "../../materialization/model"
 import type { OntologyCommitRecord, OntologyCommitWrite } from "./commits"
 import type { OntologyMaterializationEventDraft, OntologyOutboxWrite } from "./outbox"
 import type { StoredSourceLinkAssertion, StoredSourceObjectAssertion } from "./sources"
@@ -119,12 +120,11 @@ export interface MaterializationSession {
 
 export interface ExpectedSourceRevision {
   readonly source: ProjectionSourceRef
-  readonly activeGenerationId: string | null
+  readonly activeMaterializationId: string | null
   readonly lastCommitId: string | null
 }
 
 export interface MaterializationCasState {
-  readonly ontologyRevision: string
   readonly sources: readonly ExpectedSourceRevision[]
   readonly objects: readonly ExpectedObjectRevision[]
   readonly links: readonly ExpectedLinkRevision[]
@@ -215,7 +215,10 @@ export interface MaterializationPlanChunk {
 
 export interface SourceActivationWrite {
   readonly source: ProjectionSourceRef
-  readonly generationId: string
+  readonly materializationId: string
+  readonly execution: ProjectionExecution
+  readonly projectionKind: "object" | "link"
+  readonly protocol: "replacement"
   readonly datasetVersion: PinnedDatasetVersion
   readonly projectionRevision: string
   readonly ownershipHash: string
@@ -236,9 +239,12 @@ export type MaterializationRunBookkeeping =
       readonly kind: "projection"
       readonly protocol: "replacement"
       readonly projectionId: string
-      readonly runId: string
+      readonly projectionKind: "object" | "link"
+      readonly execution: ProjectionExecution
       readonly datasetVersion: PinnedDatasetVersion
+      readonly ontologyRevision: string
       readonly projectionRevision: string
+      readonly ownershipHash: string
       readonly commitId: string
       readonly stagedRootCount: number
       readonly stagedAssertionCount: number
@@ -248,11 +254,17 @@ export type MaterializationRunBookkeeping =
       readonly kind: "projection"
       readonly protocol: "telemetry"
       readonly projectionId: string
-      readonly runId: string
+      readonly projectionKind: "telemetry"
+      readonly execution: ProjectionExecution
       readonly datasetVersion: PinnedDatasetVersion
+      readonly ontologyRevision: string
       readonly projectionRevision: string
+      readonly ownershipHash: string
       readonly commitId: string
       readonly batchOrdinal: number
+      /** Caller-supplied points before equal-duplicate normalization. */
+      readonly batchInputCount: number
+      /** Canonical unique points classified by the semantic engine. */
       readonly batchPointCount: number
       readonly pointsCreated: number
       readonly pointsUpdated: number
@@ -289,7 +301,7 @@ export interface StreamMaterializationStateInput {
 export interface StreamSourceReplacementStateInput {
   readonly session: MaterializationSession
   readonly source: ProjectionSourceRef
-  readonly candidateGenerationId: string
+  readonly candidateMaterializationId: string
   readonly entityKind: "object" | "link"
   readonly pageRows: number
 }
