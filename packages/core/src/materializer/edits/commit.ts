@@ -14,8 +14,6 @@ import type {
 } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import {
-  attachRunReplay,
-  attachRunReplayTransaction,
   replayCommit,
   requireOntologyStorage,
   withSerializationRetry,
@@ -98,22 +96,17 @@ async function replayEditCommit(
   command: PreparedEditCommit
 ): Promise<EditCommitResult | null> {
   const replay = await replayCommit<EditCommitResult>(context, command.identity)
-  if (!replay) return null
-  await attachActionReplayTransaction(context, command)
-  return replay
-}
-
-async function attachActionReplayTransaction(
-  context: MaterializerContext,
-  command: PreparedEditCommit
-): Promise<void> {
-  if (command.input.source.kind !== "action") return
-  await attachRunReplayTransaction(context, {
-    kind: "action",
-    actionId: command.input.source.actionId,
-    runId: command.input.source.runId,
-    commitId: command.identity.commitId,
-  })
+  if (!replay || command.input.source.kind !== "action") return replay
+  return withSerializationRetry(context, () =>
+    context.storage.transaction(
+      async (txBase) => {
+        const storage = requireOntologyStorage(txBase)
+        await assertActionRunInTransaction(storage, context.projectId, command.input)
+        return replayCommit<EditCommitResult>(context, command.identity, storage)
+      },
+      { isolation: "serializable" }
+    )
+  )
 }
 
 async function executeEditCommit(
@@ -136,10 +129,7 @@ async function executeEditTransaction(
   await assertActionRunInTransaction(storage, context.projectId, command.input)
 
   const replay = await replayCommit<EditCommitResult>(context, command.identity, storage)
-  if (replay) {
-    await attachActionReplay(storage, context.projectId, command)
-    return replay
-  }
+  if (replay) return replay
 
   const session = await beginEditMaterialization(context, storage, command)
   const workingState = createEditWorkingState()
@@ -173,7 +163,7 @@ async function executeEditTransaction(
     outcomes,
     changes,
   }
-  return finalizeEditMaterialization(storage, session, command, result)
+  return finalizeEditMaterialization(storage, session, result)
 }
 
 async function assertActionRunInTransaction(
@@ -191,20 +181,6 @@ async function assertActionRunInTransaction(
     projectId,
     actionId: input.source.actionId,
     runId: input.source.runId,
-  })
-}
-
-async function attachActionReplay(
-  storage: Storage,
-  projectId: string,
-  command: PreparedEditCommit
-): Promise<void> {
-  if (command.input.source.kind !== "action") return
-  await attachRunReplay(storage, projectId, {
-    kind: "action",
-    actionId: command.input.source.actionId,
-    runId: command.input.source.runId,
-    commitId: command.identity.commitId,
   })
 }
 
@@ -307,29 +283,11 @@ function editPlanContext(command: PreparedEditCommit) {
 async function finalizeEditMaterialization(
   storage: MaterializerStorage,
   session: MaterializationSession,
-  command: PreparedEditCommit,
   result: EditCommitResult
 ): Promise<EditCommitResult> {
-  if (command.input.source.kind !== "action") {
-    const applied = await storage.ontology.materializations.finalize({
-      session,
-      finalization: { sourceActivations: [], result },
-    })
-    return applied.commit.result as EditCommitResult
-  }
-
   const applied = await storage.ontology.materializations.finalize({
     session,
-    finalization: {
-      sourceActivations: [],
-      result,
-      bookkeeping: {
-        kind: "action",
-        actionId: command.input.source.actionId,
-        runId: command.input.source.runId,
-        commitId: command.identity.commitId,
-      },
-    },
+    finalization: { sourceActivations: [], result },
   })
   return applied.commit.result as EditCommitResult
 }

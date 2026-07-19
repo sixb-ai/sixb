@@ -432,14 +432,25 @@ export function normalizeTelemetryAppend(input: TelemetryAppend): TelemetryAppen
           datasetVersion: normalizePinnedDatasetVersion(input.source.datasetVersion),
           execution: normalizeProjectionExecution(input.source.execution),
           batchOrdinal: input.source.batchOrdinal,
+          sourceRowCount: input.source.sourceRowCount,
+          inputExhausted: input.source.inputExhausted,
         })
-  if (
-    source.kind === "projection" &&
-    (!Number.isSafeInteger(source.batchOrdinal) || source.batchOrdinal < 0)
-  ) {
-    throw new MaterializationValidationError(
-      "Telemetry projection batch ordinal must be a nonnegative safe integer."
-    )
+  if (source.kind === "projection") {
+    if (!Number.isSafeInteger(source.batchOrdinal) || source.batchOrdinal < 0) {
+      throw new MaterializationValidationError(
+        "Telemetry projection batch ordinal must be a nonnegative safe integer."
+      )
+    }
+    if (!Number.isSafeInteger(source.sourceRowCount) || source.sourceRowCount < 0) {
+      throw new MaterializationValidationError(
+        "Telemetry projection sourceRowCount must be a nonnegative safe integer."
+      )
+    }
+    if (typeof source.inputExhausted !== "boolean") {
+      throw new MaterializationValidationError(
+        "Telemetry projection inputExhausted must be a boolean."
+      )
+    }
   }
   return Object.freeze({
     source,

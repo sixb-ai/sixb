@@ -17,7 +17,6 @@ import type { WorkflowRunStorage } from "./workflow-runs"
 export type {
   ActionMaterializationRunStorage,
   ActionRunFailure,
-  ActionRunMaterializationBookkeeping,
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
@@ -135,6 +134,7 @@ export type {
 } from "./pipeline-runs"
 export { PipelineRunError } from "./pipeline-runs"
 export type {
+  AdvanceProjectionTelemetryCheckpointInput,
   AssertProjectionMaterializationExecutionInput,
   FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
@@ -144,17 +144,13 @@ export type {
   ProjectionMaterializationProtocol,
   ProjectionMaterializationRunRecord,
   ProjectionMaterializationRunStorage,
-  ProjectionReplacementMaterializationCounts,
   ProjectionRunCounters,
   ProjectionRunDatasetVersion,
-  ProjectionRunMaterializationBookkeeping,
-  ProjectionRunMaterializationCounters,
   ProjectionRunMaterializationIdentity,
-  ProjectionRunMaterializationReplay,
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
-  ProjectionTelemetryMaterializationCounts,
+  ProjectionTelemetryCheckpoint,
   StartOrReclaimProjectionMaterializationInput,
   StartProjectionRunInput,
   UpdateProjectionMaterializationInput,

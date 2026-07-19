@@ -21,7 +21,6 @@ interface InMemoryOntologyStorageOptions {
   readonly runRootOperation: <T>(run: () => Promise<T> | T) => Promise<T>
   readonly getTransactionToken: () => object | null
   readonly assertSourceMaterializationExecution: AssertSourceMaterializationExecution
-  readonly applyBookkeeping?: InMemoryOntologyStorageTestHooks["applyBookkeeping"]
 }
 
 export class InMemoryOntologyStorage implements OntologyStorage {
@@ -54,10 +53,6 @@ export class InMemoryOntologyStorage implements OntologyStorage {
         beforeWrite: (boundary, ordinal) => this.testHooks.beforeWrite?.(boundary, ordinal),
         observeBuffer: (boundary, rows) => this.testHooks.observeBuffer?.(boundary, rows),
         observeWork: (records) => this.testHooks.observeWork?.(records),
-        applyBookkeeping: async (projectId, bookkeeping) => {
-          await options.applyBookkeeping?.(projectId, bookkeeping)
-          await this.testHooks.applyBookkeeping?.(projectId, bookkeeping)
-        },
       }
     )
     registerInMemoryOntologyStorageTestingAdapter(this, {

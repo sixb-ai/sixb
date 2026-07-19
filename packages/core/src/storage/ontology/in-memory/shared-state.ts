@@ -1,6 +1,5 @@
 import type { OntologyCommitRecord } from "../commits"
 import type {
-  MaterializationRunBookkeeping,
   MaterializationWorkRecord,
   StoredLinkOverride,
   StoredObjectOverride,
@@ -37,10 +36,6 @@ export interface InMemoryOntologyStorageTestHooks {
   readonly beforeWrite?: (boundary: string, ordinal: number) => void
   readonly observeBuffer?: (boundary: string, rows: number) => void
   readonly observeWork?: (records: readonly MaterializationWorkRecord[]) => void
-  readonly applyBookkeeping?: (
-    projectId: string,
-    bookkeeping: MaterializationRunBookkeeping
-  ) => Promise<void> | void
 }
 
 export function createInMemoryOntologyState(): InMemoryOntologyState {

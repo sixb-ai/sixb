@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto"
-import { stableJsonStringify } from "../../json"
 import type { AssertSourceMaterializationExecutionInput } from "../ontology/sources"
 import { latestStartedAtByOwnerId } from "../run-listing"
 import { ProjectionRunError } from "./errors"
 import {
+  type AdvanceProjectionTelemetryCheckpointInput,
   type AssertProjectionMaterializationExecutionInput,
   type FinishProjectionMaterializationInput,
   type FinishProjectionRunInput,
@@ -15,9 +15,7 @@ import {
   type ProjectionMaterializationRunRecord,
   type ProjectionMaterializationRunStorage,
   type ProjectionRunCounters,
-  type ProjectionRunMaterializationBookkeeping,
   type ProjectionRunMaterializationIdentity,
-  type ProjectionRunMaterializationReplay,
   type ProjectionRunObjectTypes,
   type ProjectionRunRecord,
   projectionRunObjectTypesVisible,
@@ -26,7 +24,6 @@ import {
   type UpdateProjectionMaterializationInput,
   type UpdateProjectionRunInput,
   zeroProjectionRunCounters,
-  zeroProjectionRunMaterializationCounters,
 } from "./types"
 
 type RunRootOperation = <T>(run: () => Promise<T> | T) => Promise<T>
@@ -37,16 +34,7 @@ function projectionRunKey(projectId: string, id: string): string {
   return JSON.stringify([projectId, id])
 }
 
-function telemetryCommitKey(projectId: string, runId: string, batchOrdinal: number): string {
-  return JSON.stringify([projectId, runId, batchOrdinal])
-}
-
 type StoredProjectionRunRecord = ProjectionRunRecord & { readonly executionToken?: string }
-
-type StoredTelemetryMaterializationCommit = Omit<
-  Extract<ProjectionRunMaterializationBookkeeping, { readonly protocol: "telemetry" }>,
-  "execution"
-> & { readonly execution: { readonly projectionRunId: string } }
 
 function cloneProjectionRunRecord<T extends StoredProjectionRunRecord>(record: T): T {
   return structuredClone(record)
@@ -234,44 +222,21 @@ function assertCompleteMaterializationRecord(
     !record.datasetVersionCreatedAt ||
     !record.ontologyRevision ||
     !record.projectionRevision ||
-    !record.ownershipHash ||
-    record.materializationCommitCount === undefined ||
-    record.materializationCounters === undefined
+    !record.ownershipHash
   ) {
     throw new ProjectionRunError(
       `[Sixb] Projection run '${record.id}' has incomplete materialization state.`
     )
   }
-}
-
-function identityFromBookkeeping(
-  bookkeeping: ProjectionRunMaterializationBookkeeping | ProjectionRunMaterializationReplay
-): ProjectionRunMaterializationIdentity {
-  return {
-    projectionId: bookkeeping.projectionId,
-    projectionKind: bookkeeping.projectionKind,
-    protocol: bookkeeping.protocol,
-    datasetVersion: bookkeeping.datasetVersion,
-    ontologyRevision: bookkeeping.ontologyRevision,
-    projectionRevision: bookkeeping.projectionRevision,
-    ownershipHash: bookkeeping.ownershipHash,
+  if (record.materializationProtocol === "telemetry" && !record.telemetryCheckpoint) {
+    throw new ProjectionRunError(
+      `[Sixb] Telemetry projection run '${record.id}' has incomplete checkpoint state.`
+    )
   }
-}
-
-function telemetryBookkeepingFingerprint(
-  bookkeeping:
-    | Extract<ProjectionRunMaterializationBookkeeping, { readonly protocol: "telemetry" }>
-    | StoredTelemetryMaterializationCommit
-): string {
-  return stableJsonStringify({
-    ...bookkeeping,
-    execution: { projectionRunId: bookkeeping.execution.projectionRunId },
-  })
 }
 
 export class InMemoryProjectionRunStorage implements ProjectionMaterializationRunStorage {
   private readonly rows = new Map<string, StoredProjectionRunRecord>()
-  private readonly telemetryCommits = new Map<string, StoredTelemetryMaterializationCommit>()
   /** Durable per-run history prevents a reclaimed execution token from becoming valid again. */
   private readonly executionTokensByRun = new Map<string, Set<string>>()
   private readonly runRootOperation: RunRootOperation
@@ -290,19 +255,14 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
   snapshot(): InMemoryProjectionRunStorageSnapshot {
     return structuredClone({
       rows: this.rows,
-      telemetryCommits: this.telemetryCommits,
       executionTokensByRun: this.executionTokensByRun,
     })
   }
 
   restore(snapshot: InMemoryProjectionRunStorageSnapshot): void {
     this.rows.clear()
-    this.telemetryCommits.clear()
     this.executionTokensByRun.clear()
     for (const [key, record] of structuredClone(snapshot.rows)) this.rows.set(key, record)
-    for (const [key, record] of structuredClone(snapshot.telemetryCommits)) {
-      this.telemetryCommits.set(key, record)
-    }
     for (const [key, tokens] of structuredClone(snapshot.executionTokensByRun)) {
       this.executionTokensByRun.set(key, tokens)
     }
@@ -330,7 +290,7 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
         this.assertRunning(existing)
         assertMaterializationIdentityMatches(existing, input.identity)
         assertObjectTypesMatch(existing, input)
-        if (existing.fixedBatchSize !== input.fixedBatchSize) {
+        if (existing.telemetryCheckpoint?.fixedBatchSize !== input.fixedBatchSize) {
           throw new ProjectionRunError(
             `[Sixb] Projection run '${input.id}' fixed batch size does not match.`
           )
@@ -380,9 +340,16 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
             ontologyRevision: input.identity.ontologyRevision,
             projectionRevision: input.identity.projectionRevision,
             ownershipHash: input.identity.ownershipHash,
-            ...(input.fixedBatchSize !== undefined ? { fixedBatchSize: input.fixedBatchSize } : {}),
-            materializationCommitCount: 0,
-            materializationCounters: zeroProjectionRunMaterializationCounters(),
+            ...(input.fixedBatchSize !== undefined
+              ? {
+                  telemetryCheckpoint: {
+                    fixedBatchSize: input.fixedBatchSize,
+                    nextBatchOrdinal: 0,
+                    nextRowOffset: 0,
+                    inputExhausted: false,
+                  },
+                }
+              : {}),
             ...zeroProjectionRunCounters(),
           }
 
@@ -444,18 +411,6 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
   ): Promise<ProjectionRunRecord> {
     return this.runRootOperation(() => {
       const existing = this.requireMaterializationExecution(input)
-      if (existing.materializationProtocol === "replacement") {
-        if (input.status === "succeeded" && !existing.replacementCommitId) {
-          throw new ProjectionRunError(
-            `[Sixb] Projection replacement run '${existing.id}' cannot succeed before its materialization commit is linked.`
-          )
-        }
-        if (input.status !== "succeeded" && existing.replacementCommitId) {
-          throw new ProjectionRunError(
-            `[Sixb] Projection replacement run '${existing.id}' cannot finish as '${input.status}' after its materialization commit is linked.`
-          )
-        }
-      }
       const withCounters = applyCounters(existing, input)
       const next: StoredProjectionRunRecord = {
         ...withCounters,
@@ -469,18 +424,56 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
     })
   }
 
-  async recordMaterializationCommit(
-    projectId: string,
-    bookkeeping: ProjectionRunMaterializationBookkeeping
-  ): Promise<void> {
-    await this.runRootOperation(() => this.recordMaterialization(bookkeeping, projectId))
-  }
-
-  async recordMaterializationReplay(
-    projectId: string,
-    replay: ProjectionRunMaterializationReplay
-  ): Promise<void> {
-    await this.runRootOperation(() => this.assertMaterializationReplay(replay, projectId))
+  async advanceTelemetryCheckpoint(
+    input: AdvanceProjectionTelemetryCheckpointInput
+  ): Promise<ProjectionMaterializationRunRecord> {
+    return this.runRootOperation(() => {
+      const existing = this.requireMaterializationExecution(input)
+      if (existing.materializationProtocol !== "telemetry") {
+        throw new ProjectionRunError(
+          `[Sixb] Projection run '${existing.id}' does not have a telemetry checkpoint.`
+        )
+      }
+      const checkpoint = existing.telemetryCheckpoint
+      if (!checkpoint) {
+        throw new ProjectionRunError(
+          `[Sixb] Telemetry projection run '${existing.id}' has incomplete checkpoint state.`
+        )
+      }
+      assertCounter(input.batchOrdinal, "batchOrdinal")
+      assertPositiveCounter(input.batchRowCount, "batchRowCount")
+      if (input.batchOrdinal !== checkpoint.nextBatchOrdinal) {
+        throw new ProjectionRunError(
+          `[Sixb] Telemetry projection run '${existing.id}' expected batch ordinal ${checkpoint.nextBatchOrdinal}, got ${input.batchOrdinal}.`
+        )
+      }
+      if (input.batchRowCount > checkpoint.fixedBatchSize) {
+        throw new ProjectionRunError(
+          `[Sixb] Telemetry projection run '${existing.id}' batch exceeds its fixed size.`
+        )
+      }
+      if (!input.inputExhausted && input.batchRowCount !== checkpoint.fixedBatchSize) {
+        throw new ProjectionRunError(
+          `[Sixb] Telemetry projection run '${existing.id}' cannot advance past a partial non-final batch.`
+        )
+      }
+      if (checkpoint.inputExhausted) {
+        throw new ProjectionRunError(
+          `[Sixb] Telemetry projection run '${existing.id}' has already exhausted its input.`
+        )
+      }
+      const next: ProjectionMaterializationRunRecord = {
+        ...existing,
+        telemetryCheckpoint: {
+          ...checkpoint,
+          nextBatchOrdinal: safeAdd(checkpoint.nextBatchOrdinal, 1, "nextBatchOrdinal"),
+          nextRowOffset: safeAdd(checkpoint.nextRowOffset, input.batchRowCount, "nextRowOffset"),
+          inputExhausted: input.inputExhausted,
+        },
+      }
+      this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
+      return cloneProjectionRunRecord(next)
+    })
   }
 
   async start(input: StartProjectionRunInput): Promise<ProjectionRunRecord> {
@@ -510,8 +503,6 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
         status: "running",
         startedAt: new Date(input.startedAt ?? new Date()),
         attempt: 0,
-        materializationCommitCount: 0,
-        materializationCounters: zeroProjectionRunMaterializationCounters(),
         ...zeroProjectionRunCounters(),
       }
       this.rows.set(key, structuredClone(record))
@@ -606,209 +597,6 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
     })
   }
 
-  private recordMaterialization(
-    bookkeeping: ProjectionRunMaterializationBookkeeping,
-    projectId: string
-  ): void {
-    assertNonEmpty(projectId, "projectId")
-    assertNonEmpty(bookkeeping.commitId, "materialization commitId")
-    const runId = bookkeeping.execution.projectionRunId
-    const identity = identityFromBookkeeping(bookkeeping)
-    assertIdentity(identity)
-    const existing = this.requireMaterializationExecution({
-      id: runId,
-      projectId,
-      executionToken: bookkeeping.execution.executionToken,
-      identity,
-    })
-
-    if (bookkeeping.protocol === "replacement") {
-      assertCounter(bookkeeping.stagedRootCount, "stagedRootCount")
-      assertCounter(bookkeeping.stagedAssertionCount, "stagedAssertionCount")
-      for (const [name, value] of Object.entries(bookkeeping.counts)) assertCounter(value, name)
-
-      if (existing.replacementCommitId) {
-        if (
-          existing.replacementCommitId === bookkeeping.commitId &&
-          existing.materializationCounters.stagedRootCount === bookkeeping.stagedRootCount &&
-          existing.materializationCounters.stagedAssertionCount ===
-            bookkeeping.stagedAssertionCount &&
-          stableJsonStringify({
-            objectsCreated: existing.materializationCounters.objectsCreated,
-            objectsUpdated: existing.materializationCounters.objectsUpdated,
-            objectsDeleted: existing.materializationCounters.objectsDeleted,
-            objectsUnchanged: existing.materializationCounters.objectsUnchanged,
-            linksCreated: existing.materializationCounters.linksCreated,
-            linksUpdated: existing.materializationCounters.linksUpdated,
-            linksDeleted: existing.materializationCounters.linksDeleted,
-            linksUnchanged: existing.materializationCounters.linksUnchanged,
-          }) === stableJsonStringify(bookkeeping.counts)
-        ) {
-          return
-        }
-        throw new ProjectionRunError(
-          `[Sixb] Replacement projection run '${runId}' already links a different materialization commit.`
-        )
-      }
-
-      const next: ProjectionMaterializationRunRecord = {
-        ...existing,
-        replacementCommitId: bookkeeping.commitId,
-        lastMaterializationCommitId: bookkeeping.commitId,
-        materializationCommitCount: 1,
-        materializationCounters: {
-          ...existing.materializationCounters,
-          stagedRootCount: bookkeeping.stagedRootCount,
-          stagedAssertionCount: bookkeeping.stagedAssertionCount,
-          ...bookkeeping.counts,
-        },
-      }
-      this.rows.set(projectionRunKey(projectId, runId), structuredClone(next))
-      return
-    }
-
-    const fixedBatchSize = existing.fixedBatchSize
-    if (fixedBatchSize === undefined) {
-      throw new ProjectionRunError(
-        `[Sixb] Telemetry projection run '${runId}' has no fixed batch size.`
-      )
-    }
-    assertCounter(bookkeeping.batchOrdinal, "batchOrdinal")
-    assertPositiveCounter(bookkeeping.batchInputCount, "batchInputCount")
-    assertCounter(bookkeeping.batchPointCount, "batchPointCount")
-    const telemetryCounts = {
-      pointsCreated: bookkeeping.pointsCreated,
-      pointsUpdated: bookkeeping.pointsUpdated,
-      pointsUnchanged: bookkeeping.pointsUnchanged,
-      latestObjectsChanged: bookkeeping.latestObjectsChanged,
-    }
-    for (const [name, value] of Object.entries(telemetryCounts)) assertCounter(value, name)
-    if (
-      bookkeeping.pointsCreated + bookkeeping.pointsUpdated + bookkeeping.pointsUnchanged !==
-      bookkeeping.batchPointCount
-    ) {
-      throw new ProjectionRunError(
-        `[Sixb] Telemetry projection run '${runId}' batch counters do not match its point count.`
-      )
-    }
-    if (bookkeeping.batchPointCount > bookkeeping.batchInputCount) {
-      throw new ProjectionRunError(
-        `[Sixb] Telemetry projection run '${runId}' normalized point count exceeds its input count.`
-      )
-    }
-    if (bookkeeping.batchInputCount > fixedBatchSize) {
-      throw new ProjectionRunError(
-        `[Sixb] Telemetry projection run '${runId}' batch exceeds its fixed size.`
-      )
-    }
-
-    const commitKey = telemetryCommitKey(projectId, runId, bookkeeping.batchOrdinal)
-    const committed = this.telemetryCommits.get(commitKey)
-    if (committed) {
-      if (
-        telemetryBookkeepingFingerprint(committed) === telemetryBookkeepingFingerprint(bookkeeping)
-      ) {
-        return
-      }
-      throw new ProjectionRunError(
-        `[Sixb] Telemetry projection run '${runId}' batch ordinal ${bookkeeping.batchOrdinal} already links a different commit.`
-      )
-    }
-
-    const expectedOrdinal = (existing.lastCommittedBatchOrdinal ?? -1) + 1
-    if (bookkeeping.batchOrdinal !== expectedOrdinal) {
-      throw new ProjectionRunError(
-        `[Sixb] Telemetry projection run '${runId}' expected batch ordinal ${expectedOrdinal}, got ${bookkeeping.batchOrdinal}.`
-      )
-    }
-    if (bookkeeping.batchOrdinal > 0) {
-      const previous = this.telemetryCommits.get(
-        telemetryCommitKey(projectId, runId, bookkeeping.batchOrdinal - 1)
-      )
-      if (!previous || previous.batchInputCount !== fixedBatchSize) {
-        throw new ProjectionRunError(
-          `[Sixb] Telemetry projection run '${runId}' cannot continue after a partial batch.`
-        )
-      }
-    }
-
-    const counters = existing.materializationCounters
-    const next: ProjectionMaterializationRunRecord = {
-      ...existing,
-      lastCommittedBatchOrdinal: bookkeeping.batchOrdinal,
-      lastMaterializationCommitId: bookkeeping.commitId,
-      materializationCommitCount: safeAdd(
-        existing.materializationCommitCount,
-        1,
-        "materializationCommitCount"
-      ),
-      materializationCounters: {
-        ...counters,
-        telemetryPointsCreated: safeAdd(
-          counters.telemetryPointsCreated,
-          bookkeeping.pointsCreated,
-          "telemetryPointsCreated"
-        ),
-        telemetryPointsUpdated: safeAdd(
-          counters.telemetryPointsUpdated,
-          bookkeeping.pointsUpdated,
-          "telemetryPointsUpdated"
-        ),
-        telemetryPointsUnchanged: safeAdd(
-          counters.telemetryPointsUnchanged,
-          bookkeeping.pointsUnchanged,
-          "telemetryPointsUnchanged"
-        ),
-        latestObjectsChanged: safeAdd(
-          counters.latestObjectsChanged,
-          bookkeeping.latestObjectsChanged,
-          "latestObjectsChanged"
-        ),
-      },
-    }
-    this.telemetryCommits.set(commitKey, {
-      ...structuredClone(bookkeeping),
-      execution: { projectionRunId: bookkeeping.execution.projectionRunId },
-    })
-    this.rows.set(projectionRunKey(projectId, runId), structuredClone(next))
-  }
-
-  private assertMaterializationReplay(
-    replay: ProjectionRunMaterializationReplay,
-    projectId: string
-  ): void {
-    assertNonEmpty(projectId, "projectId")
-    assertNonEmpty(replay.commitId, "materialization commitId")
-    if (replay.protocol === "telemetry") {
-      assertCounter(replay.batchOrdinal, "batchOrdinal")
-    }
-    const runId = replay.execution.projectionRunId
-    const existing = this.requireMaterializationExecution({
-      id: runId,
-      projectId,
-      executionToken: replay.execution.executionToken,
-      identity: identityFromBookkeeping(replay),
-    })
-
-    if (replay.protocol === "replacement") {
-      if (existing.replacementCommitId !== replay.commitId) {
-        throw new ProjectionRunError(
-          `[Sixb] Replacement projection run '${runId}' is not linked to materialization commit '${replay.commitId}'.`
-        )
-      }
-      return
-    }
-
-    const committed = this.telemetryCommits.get(
-      telemetryCommitKey(projectId, runId, replay.batchOrdinal)
-    )
-    if (!committed || committed.commitId !== replay.commitId) {
-      throw new ProjectionRunError(
-        `[Sixb] Telemetry projection run '${runId}' batch ordinal ${replay.batchOrdinal} is not linked to materialization commit '${replay.commitId}'.`
-      )
-    }
-  }
-
   private requireMaterializationExecution(
     input: AssertProjectionMaterializationExecutionInput
   ): ProjectionMaterializationRunRecord {
@@ -850,6 +638,5 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
 
 export interface InMemoryProjectionRunStorageSnapshot {
   readonly rows: Map<string, StoredProjectionRunRecord>
-  readonly telemetryCommits: Map<string, StoredTelemetryMaterializationCommit>
   readonly executionTokensByRun: Map<string, Set<string>>
 }

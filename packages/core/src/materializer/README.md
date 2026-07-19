@@ -9,18 +9,31 @@ state and atomic application.
 ```text
 normalize + validate intent
   -> derive deterministic identity
-  -> verify run and replay
+  -> verify execution when run-backed and check replay
   -> begin serializable materialization session
   -> resolve effective state
   -> diff against committed state
   -> stage deterministic work
   -> apply work in dependency order
   -> write ordered outbox events
-  -> finalize commit atomically
+  -> finalize ontology commit atomically
+  -> advance a run resume checkpoint when required
 ```
 
 `staged work` is a transaction-local execution plan. It is not a source materialization and is
 never queried as Ontology state.
+
+## Durable ownership
+
+```text
+run storage       -> execution ownership, lifecycle, progress, and resume checkpoints
+ontology storage  -> sources, effective state, telemetry, commits, and outbox
+Materializer      -> semantic planning and cross-store transaction orchestration
+```
+
+Ontology commit `origin` is the canonical correlation to an Action or projection run. Run records
+do not duplicate ontology commit ids or semantic commit history. Replacement projections need no
+resume checkpoint; projection telemetry stores only its next batch/row checkpoint on the run.
 
 ## Projection replacement
 
@@ -34,7 +47,8 @@ dataset entries
 ```
 
 Source ingress is sealed before commit time is assigned. A retry reuses the ready candidate and
-the same semantic commit identity.
+the same semantic commit identity. Activation and ontology commit finalization are atomic; the
+projection run stores no separate commit pointer.
 
 ## Managed edits and Actions
 
@@ -52,6 +66,10 @@ its mutable overrides let operation N+1 observe operation N. In `continue` mode,
 operation rolls back only its working override; provider and infrastructure failures abort the
 whole transaction.
 
+Action-backed edits verify the matching running Action before work and again inside the commit
+transaction. Their semantic result lives only in the ontology commit, correlated by Action origin;
+the Action run is not a second commit ledger.
+
 ## Telemetry append
 
 ```text
@@ -62,8 +80,10 @@ canonical telemetry points grouped by object
   -> plan and finalize one batch commit
 ```
 
-Projection telemetry additionally verifies the durable projection run and records batch progress.
-Physical input counts remain distinct from canonical point counts.
+Projection telemetry additionally verifies the durable projection execution and advances its
+resume checkpoint in the same transaction as ontology commit finalization. The ontology commits
+are the authoritative batch ledger. Physical source-row counts, including skipped rows, remain
+distinct from canonical point counts.
 
 ## Module boundaries
 
@@ -71,6 +91,7 @@ Physical input counts remain distinct from canonical point counts.
 - `effective/`: pure resolution, validation, diff, and event construction.
 - `execution/`: storage-neutral plan execution, replay, retry, and run correlation.
 - `shared/`: normalization, identity, batching, and chunking primitives.
+- `storage/ontology/`: durable ontology commit, source, materialization, and outbox contracts.
 
 Keep use-case entrypoints explicit. Share mechanics only after they have identical semantics; do
 not hide projection candidate lifecycle, edit continuation, or telemetry batching behind a generic

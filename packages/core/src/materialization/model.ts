@@ -193,6 +193,10 @@ export interface TelemetryAppend {
         readonly datasetVersion: PinnedDatasetVersion
         readonly execution: ProjectionExecution
         readonly batchOrdinal: number
+        /** Physical dataset rows consumed to produce this batch, including skipped rows. */
+        readonly sourceRowCount: number
+        /** True when this batch consumed the final row of the immutable dataset version. */
+        readonly inputExhausted: boolean
       }
   readonly actor?: EventActor
   readonly points: readonly TelemetryPointWrite[]

@@ -201,7 +201,12 @@ describe("ontology materializer telemetry", () => {
       versionId: "readings-v1",
       createdAt: "2026-01-01T00:00:00Z",
     }
-    const append = (batchOrdinal: number, value: number | string, runId = "telemetry-run") =>
+    const append = (
+      batchOrdinal: number,
+      value: number | string,
+      runId = "telemetry-run",
+      inputExhausted = false
+    ) =>
       materializer.telemetry.append({
         source: {
           kind: "projection",
@@ -209,23 +214,28 @@ describe("ontology materializer telemetry", () => {
           datasetVersion,
           execution: pendingProjectionExecution(runId),
           batchOrdinal,
+          sourceRowCount: 1,
+          inputExhausted,
         },
         points: [{ series, value, at: `2026-01-01T0${batchOrdinal + 1}:00:00Z` }],
       })
-    let rejectBookkeeping = true
-    getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
-      applyBookkeeping(_projectId, bookkeeping) {
-        if (bookkeeping.kind === "projection" && rejectBookkeeping) {
-          throw new Error("telemetry bookkeeping failure")
-        }
-      },
-    })
+    let rejectCheckpoint = true
+    const advanceCheckpoint = storage.projectionRuns.advanceTelemetryCheckpoint.bind(
+      storage.projectionRuns
+    )
+    storage.projectionRuns.advanceTelemetryCheckpoint = async (checkpoint) => {
+      const advanced = await advanceCheckpoint(checkpoint)
+      if (rejectCheckpoint) throw new Error("telemetry checkpoint failure")
+      return advanced
+    }
     await expect(append(0, 20, "telemetry-failed-run")).rejects.toThrow(
-      "telemetry bookkeeping failure"
+      "telemetry checkpoint failure"
     )
     expect(
       await storage.projectionRuns.getById({ projectId: "project", id: "telemetry-failed-run" })
-    ).not.toHaveProperty("lastMaterializationCommitId")
+    ).toMatchObject({
+      telemetryCheckpoint: { nextBatchOrdinal: 0, nextRowOffset: 0, inputExhausted: false },
+    })
     expect(
       await storage.timeseries.getHistory({
         projectId: "project",
@@ -235,35 +245,30 @@ describe("ontology materializer telemetry", () => {
       })
     ).toEqual([])
 
-    rejectBookkeeping = false
-    const committed = await append(0, 20)
-    expect(
-      await storage.projectionRuns.getById({ projectId: "project", id: "telemetry-run" })
-    ).toHaveProperty("lastMaterializationCommitId", committed.commitId)
+    rejectCheckpoint = false
+    await append(0, 20)
     expect((await append(0, 20)).created).toBe(false)
     expect(
       await storage.projectionRuns.getById({ projectId: "project", id: "telemetry-run" })
     ).toMatchObject({
-      lastMaterializationCommitId: committed.commitId,
-      lastCommittedBatchOrdinal: 0,
-      materializationCommitCount: 1,
+      telemetryCheckpoint: { nextBatchOrdinal: 1, nextRowOffset: 1, inputExhausted: false },
     })
     await expect(append(1, "bad")).rejects.toThrow("must be numeric")
-    const second = await append(1, 21)
+    const second = await append(1, 21, "telemetry-run", true)
     expect(second.created).toBe(true)
     expect(
       await storage.projectionRuns.getById({ projectId: "project", id: "telemetry-run" })
     ).toMatchObject({
-      lastMaterializationCommitId: second.commitId,
-      lastCommittedBatchOrdinal: 1,
-      materializationCommitCount: 2,
-      materializationCounters: {
-        telemetryPointsCreated: 2,
-        telemetryPointsUpdated: 0,
-        telemetryPointsUnchanged: 0,
-        latestObjectsChanged: 2,
-      },
+      telemetryCheckpoint: { nextBatchOrdinal: 2, nextRowOffset: 2, inputExhausted: true },
     })
+    const ledger = await storage.ontology.commits.list({
+      projectId: "project",
+      run: { kind: "projection", id: "telemetry-run" },
+    })
+    expect(ledger.commits.map((commit) => commit.origin)).toMatchObject([
+      { source: { batchOrdinal: 0 } },
+      { source: { batchOrdinal: 1 } },
+    ])
     expect(
       await storage.timeseries.getHistory({
         projectId: "project",
@@ -289,6 +294,8 @@ describe("ontology materializer telemetry", () => {
       },
       execution: pendingProjectionExecution("telemetry-deduplicated-run"),
       batchOrdinal,
+      sourceRowCount: 2,
+      inputExhausted: batchOrdinal === 1,
     })
     const duplicate = { series, value: 20, at: "2026-01-01T01:00:00Z" }
 
@@ -314,10 +321,88 @@ describe("ontology materializer telemetry", () => {
         id: "telemetry-deduplicated-run",
       })
     ).toMatchObject({
-      lastCommittedBatchOrdinal: 1,
-      materializationCommitCount: 2,
-      materializationCounters: { telemetryPointsCreated: 3 },
+      telemetryCheckpoint: { nextBatchOrdinal: 2, nextRowOffset: 4, inputExhausted: true },
     })
+  })
+
+  test("commits an all-skipped source batch so its row checkpoint can advance", async () => {
+    const { materializer, storage } = createMaterializerFixture()
+    await materializer.projections.replace(
+      replacement("telemetry-skipped", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
+    )
+    const result = await materializer.telemetry.append({
+      source: {
+        kind: "projection",
+        projection: { projectionId: "temperatures" },
+        datasetVersion: {
+          datasetId: "readings",
+          versionId: "skipped-v1",
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+        execution: pendingProjectionExecution("telemetry-skipped-run"),
+        batchOrdinal: 0,
+        sourceRowCount: 2,
+        inputExhausted: true,
+      },
+      points: [],
+    })
+
+    expect(result).toMatchObject({
+      created: true,
+      pointsCreated: 0,
+      pointsUpdated: 0,
+      pointsUnchanged: 0,
+    })
+    expect(
+      await storage.projectionRuns.getById({
+        projectId: "project",
+        id: "telemetry-skipped-run",
+      })
+    ).toMatchObject({
+      telemetryCheckpoint: { nextBatchOrdinal: 1, nextRowOffset: 2, inputExhausted: true },
+    })
+    await expect(
+      storage.ontology.commits.list({
+        projectId: "project",
+        run: { kind: "projection", id: "telemetry-skipped-run" },
+      })
+    ).resolves.toMatchObject({
+      commits: [
+        {
+          intent: {
+            source: { batchOrdinal: 0, sourceRowCount: 2, inputExhausted: true },
+          },
+        },
+      ],
+      total: 1,
+    })
+  })
+
+  test("rejects fabricated telemetry result counts before recording the commit", async () => {
+    const { materializer, storage } = createMaterializerFixture()
+    await materializer.projections.replace(
+      replacement("telemetry-counts", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
+    )
+    const finalize = storage.ontology.materializations.finalize.bind(
+      storage.ontology.materializations
+    )
+    storage.ontology.materializations.finalize = (input) => {
+      if (input.finalization.result.kind !== "telemetry") return finalize(input)
+      return finalize({
+        ...input,
+        finalization: {
+          ...input.finalization,
+          result: { ...input.finalization.result, pointsCreated: -1 },
+        },
+      })
+    }
+
+    await expect(
+      materializer.telemetry.append({
+        source: { kind: "runtime", requestId: "fabricated-telemetry-counts" },
+        points: [{ series, value: 20, at: "2026-01-01T00:00:00Z" }],
+      })
+    ).rejects.toThrow("result counts do not correlate")
   })
 
   test("rejects an empty projection batch before creating a commit", async () => {
@@ -352,6 +437,8 @@ describe("ontology materializer telemetry", () => {
           datasetVersion,
           execution,
           batchOrdinal: 0,
+          sourceRowCount: 0,
+          inputExhausted: true,
         },
         points: [],
       })
@@ -363,7 +450,9 @@ describe("ontology materializer telemetry", () => {
         projectId: "project",
         id: execution.projectionRunId,
       })
-    ).toMatchObject({ materializationCommitCount: 0 })
+    ).toMatchObject({
+      telemetryCheckpoint: { nextBatchOrdinal: 0, nextRowOffset: 0, inputExhausted: false },
+    })
   })
 
   test("rejects telemetry for an absent effective object without persisting anything", async () => {

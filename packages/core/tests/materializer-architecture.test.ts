@@ -41,4 +41,40 @@ describe("materializer architecture", () => {
       }
     }
   })
+
+  test("keeps ontology materialization storage independent from run bookkeeping", async () => {
+    for (const file of [
+      join(sourceRoot, "storage/ontology/materializations.ts"),
+      join(sourceRoot, "storage/ontology/in-memory/materializations.ts"),
+    ]) {
+      const contents = await readFile(file, "utf8")
+      expect(contents, relative(sourceRoot, file)).not.toMatch(
+        /MaterializationRunBookkeeping|recordMaterializationCommit|applyBookkeeping/
+      )
+    }
+  })
+
+  test("keeps Action runs free of materializer commit bookkeeping", async () => {
+    for (const file of [
+      join(sourceRoot, "storage/action-runs/types.ts"),
+      join(sourceRoot, "storage/action-runs/in-memory.ts"),
+    ]) {
+      const contents = await readFile(file, "utf8")
+      expect(contents, relative(sourceRoot, file)).not.toMatch(
+        /ActionRunMaterializationBookkeeping|recordMaterializationCommit|attachMaterializationCommit|readonly commitId/
+      )
+    }
+  })
+
+  test("keeps projection runs free of a duplicate ontology commit ledger", async () => {
+    for (const file of [
+      join(sourceRoot, "storage/projection-runs/types.ts"),
+      join(sourceRoot, "storage/projection-runs/in-memory.ts"),
+    ]) {
+      const contents = await readFile(file, "utf8")
+      expect(contents, relative(sourceRoot, file)).not.toMatch(
+        /replacementCommitId|lastMaterializationCommitId|materializationCounters|telemetryCommits|ProjectionRunMaterializationBookkeeping/
+      )
+    }
+  })
 })
