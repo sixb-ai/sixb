@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises"
-import { dirname, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { createCustomApp } from "@sixb/app"
 import { buildAtlasAssets } from "@sixb/atlas"
 import { generateProjectTypes } from "../lib/typegen"
@@ -39,6 +39,10 @@ export async function runBuild(options: BuildOptions = {}) {
 
   const customApp = await createCustomApp({
     rootDir: projectRoot,
+    // Keep production build inputs separate from the files watched by `sixb dev`.
+    // Sharing `.sixb/generated` lets this command replace the dev app's injected
+    // API origin and HTML bundle, causing Bun to hot-reload a same-origin client.
+    generatedDir: join(".sixb", "build", "app"),
   })
 
   if (await customApp.hasRoutes()) {
