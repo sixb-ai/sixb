@@ -63,11 +63,12 @@ export const sixb = createSixb({
 })
 ```
 
-Two demo scripts seed the system from the mock ERP and replay events:
+Two demo scripts seed the system from the mock ERP and replay events. With the default development
+topology they call the Sixb API on port `3002`:
 
 ```bash
 bun run sync:erp       # pull ERP rows into datasets, then project them into objects
-bun run webhooks:demo  # send sample webhook events at the running app
+bun run webhooks:demo  # send sample webhook events to the running API
 ```
 
 The ERP document sync stores a sample PDF and PNG through Sixb blob storage, writes them as
