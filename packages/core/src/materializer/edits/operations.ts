@@ -40,6 +40,12 @@ import {
 type ObjectOperation = Extract<OntologyEditOperation, { readonly kind: `object.${string}` }>
 type LinkOperation = Extract<OntologyEditOperation, { readonly kind: `link.${string}` }>
 
+/**
+ * Transaction-local edit working set.
+ *
+ * Loaded snapshots remain pinned to the commit start while each successful operation updates the
+ * mutable override. Operation N+1 can therefore observe operation N before anything is durable.
+ */
 export interface EditWorkingState {
   readonly objects: Map<string, WorkingObject>
   readonly links: Map<string, WorkingLink>
@@ -54,32 +60,57 @@ export async function applyEditOperation(
   operation: OntologyEditOperation,
   identity: TimedCommitIdentity
 ): Promise<OntologyOperationOutcome> {
-  if (isObjectOperation(operation)) validateObjectRef(context.ontology, operation.ref)
-  else validateLinkRef(context.ontology, operation.ref)
+  validateOperationRef(context, operation)
+  const cardinality = await loadOperationState(context, storage, session, state, operation)
+  if (isObjectOperation(operation)) {
+    return applyObjectOperation(context, storage, session, state, operation, identity)
+  }
+  return applyLinkOperation(context, state, operation, identity, cardinality)
+}
 
+function validateOperationRef(
+  context: Pick<MaterializerContext, "ontology">,
+  operation: OntologyEditOperation
+): void {
+  if (isObjectOperation(operation)) {
+    validateObjectRef(context.ontology, operation.ref)
+    return
+  }
+  validateLinkRef(context.ontology, operation.ref)
+}
+
+async function loadOperationState(
+  context: MaterializerContext,
+  storage: OntologyMaterializationStorage,
+  session: MaterializationSession,
+  state: EditWorkingState,
+  operation: OntologyEditOperation
+): Promise<"one" | "many" | undefined> {
   const requested = stateRequestForOperation(operation)
   const requestedLink = requested.links[0]
-  const linkDefinition = requestedLink
-    ? context.ontology
-        .resolveObjectType(requestedLink.source.objectTypeId)
-        .links.find((candidate) => candidate.id === requestedLink.linkId)
-    : null
+  const cardinality = requestedLinkCardinality(context, requestedLink)
   const request = {
     ...requested,
     objects: requested.objects.filter((ref) => !state.objects.has(objectRefKey(ref))),
     links: requested.links.filter((ref) => !state.links.has(linkRefKey(ref))),
     linkScopes: requested.linkScopes.filter(
       (scope) =>
-        linkDefinition?.cardinality === "one" &&
-        !state.scopeSnapshots.has(linkScopeKey(scope.source, scope.linkId))
+        cardinality === "one" && !state.scopeSnapshots.has(linkScopeKey(scope.source, scope.linkId))
     ),
   }
   const loaded = await loadState(context, storage, session, request)
   mergeWorkingState(state.objects, state.links, state.scopeSnapshots, loaded)
+  return cardinality
+}
 
-  return isObjectOperation(operation)
-    ? applyObjectOperation(context, storage, session, state, operation, identity)
-    : applyLinkOperation(context, state, operation, identity, linkDefinition?.cardinality)
+function requestedLinkCardinality(
+  context: Pick<MaterializerContext, "ontology">,
+  requestedLink: ReturnType<typeof stateRequestForOperation>["links"][number] | undefined
+): "one" | "many" | undefined {
+  if (!requestedLink) return undefined
+  return context.ontology
+    .resolveObjectType(requestedLink.source.objectTypeId)
+    .links.find((candidate) => candidate.id === requestedLink.linkId)?.cardinality
 }
 
 async function applyObjectOperation(
@@ -90,37 +121,95 @@ async function applyObjectOperation(
   operation: ObjectOperation,
   identity: TimedCommitIdentity
 ): Promise<OntologyOperationOutcome> {
-  const working = state.objects.get(objectRefKey(operation.ref))
-  if (!working) throw new MaterializationValidationError("Object state was not loaded.")
-  const normalizedProperties =
-    operation.kind === "object.create" || operation.kind === "object.upsert"
-      ? validateObjectAuthorityProperties(context.ontology, operation.ref, operation.properties)
-      : undefined
-  const normalizedSet =
-    operation.kind === "object.patch"
-      ? validateObjectAuthorityProperties(context.ontology, operation.ref, operation.set)
-      : undefined
-  if (operation.kind === "object.patch") {
-    validateObjectPatchPropertyIds(context.ontology, operation.ref, operation.unset, "unset")
-    validateObjectPatchPropertyIds(context.ontology, operation.ref, operation.reset, "reset")
-  }
-
+  const working = requireWorkingObject(state, operation)
+  const normalized = validateObjectOperation(context, operation)
   const currentEffective = resolveObject(context.ontology, working)
+  const effectiveSnapshot = provisionalObjectOrNull(working, currentEffective, identity)
   const transition = applyObjectEdit({
     operation,
     sourceProperties: working.source?.assertion.properties ?? null,
     authority: working.override,
-    effective: currentEffective
-      ? provisionalObjectSnapshot(working, currentEffective, identity)
-      : null,
-    ...(normalizedProperties !== undefined ? { normalizedProperties } : {}),
-    ...(normalizedSet !== undefined ? { normalizedSet } : {}),
+    effective: effectiveSnapshot,
+    ...normalized,
   })
+
+  await applyObjectTransition(
+    context,
+    storage,
+    session,
+    state,
+    working,
+    transition.next,
+    currentEffective !== null,
+    operation
+  )
+
+  return objectOperationOutcome(operation, working, transition.changed, context, identity)
+}
+
+function provisionalObjectOrNull(
+  working: WorkingObject,
+  resolved: ReturnType<typeof resolveObject>,
+  identity: TimedCommitIdentity
+) {
+  if (!resolved) return null
+  return provisionalObjectSnapshot(working, resolved, identity)
+}
+
+function requireWorkingObject(state: EditWorkingState, operation: ObjectOperation): WorkingObject {
+  const working = state.objects.get(objectRefKey(operation.ref))
+  if (!working) throw new MaterializationValidationError("Object state was not loaded.")
+  return working
+}
+
+function validateObjectOperation(
+  context: Pick<MaterializerContext, "ontology">,
+  operation: ObjectOperation
+): {
+  readonly normalizedProperties?: ReturnType<typeof validateObjectAuthorityProperties>
+  readonly normalizedSet?: ReturnType<typeof validateObjectAuthorityProperties>
+} {
+  switch (operation.kind) {
+    case "object.create":
+    case "object.upsert":
+      return {
+        normalizedProperties: validateObjectAuthorityProperties(
+          context.ontology,
+          operation.ref,
+          operation.properties
+        ),
+      }
+    case "object.patch":
+      validateObjectPatchPropertyIds(context.ontology, operation.ref, operation.unset, "unset")
+      validateObjectPatchPropertyIds(context.ontology, operation.ref, operation.reset, "reset")
+      return {
+        normalizedSet: validateObjectAuthorityProperties(
+          context.ontology,
+          operation.ref,
+          operation.set
+        ),
+      }
+    case "object.delete":
+    case "object.restore":
+      return {}
+  }
+}
+
+async function applyObjectTransition(
+  context: MaterializerContext,
+  storage: OntologyMaterializationStorage,
+  session: MaterializationSession,
+  state: EditWorkingState,
+  working: WorkingObject,
+  next: WorkingObject["override"],
+  existedBefore: boolean,
+  operation: ObjectOperation
+): Promise<void> {
   const previous = working.override
-  working.override = transition.next
+  working.override = next
   try {
     const resolved = resolveObject(context.ontology, working)
-    if (Boolean(currentEffective) !== Boolean(resolved)) {
+    if (existedBefore !== Boolean(resolved)) {
       await loadIncidentLinks(context, storage, session, state, operation.ref)
     }
     if (resolved) validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
@@ -129,13 +218,23 @@ async function applyObjectOperation(
     working.override = previous
     throw error
   }
-  const stepObject = resolveObject(context.ontology, working)
-  return {
+}
+
+function objectOperationOutcome(
+  operation: ObjectOperation,
+  working: WorkingObject,
+  changed: boolean,
+  context: Pick<MaterializerContext, "ontology">,
+  identity: TimedCommitIdentity
+): OntologyOperationOutcome {
+  const outcome: OntologyOperationOutcome = {
     id: operation.id,
     ok: true,
-    authority: transition.changed ? "changed" : "unchanged",
-    ...(stepObject ? { object: resultingObjectSnapshot(working, stepObject, identity) } : {}),
+    authority: authorityOutcome(changed),
   }
+  const resolved = resolveObject(context.ontology, working)
+  if (!resolved) return outcome
+  return { ...outcome, object: resultingObjectSnapshot(working, resolved, identity) }
 }
 
 function applyLinkOperation(
@@ -145,35 +244,76 @@ function applyLinkOperation(
   identity: TimedCommitIdentity,
   cardinality: "one" | "many" | undefined
 ): OntologyOperationOutcome {
-  const working = state.links.get(linkRefKey(operation.ref))
-  if (!working) throw new MaterializationValidationError("Link state was not loaded.")
-  const sourceEndpoint = state.objects.get(objectRefKey(operation.ref.source))
-  const targetEndpoint = state.objects.get(objectRefKey(operation.ref.target))
-  if (
-    operation.kind === "link.upsert" &&
-    (!sourceEndpoint ||
-      !targetEndpoint ||
-      !resolveObject(context.ontology, sourceEndpoint) ||
-      !resolveObject(context.ontology, targetEndpoint))
-  ) {
-    throw new MaterializationValidationError("Link upsert requires both endpoints to be effective.")
-  }
-  const normalizedProperties =
-    operation.kind === "link.upsert"
-      ? validateLinkAuthorityProperties(context.ontology, operation.ref, operation.properties)
-      : undefined
+  const working = requireWorkingLink(state, operation)
+  validateLinkEndpoints(context, state, operation)
+  const normalizedProperties = validateLinkOperation(context, operation)
   const currentEffective = resolveLink(context.ontology, working, state.objects)
-  const transition = applyLinkEdit({
+  const effectiveSnapshot = provisionalLinkOrNull(working, currentEffective, identity)
+  const transitionInput = {
     operation,
     hasSource: working.source !== null,
     authority: working.override,
-    effective: currentEffective
-      ? provisionalLinkSnapshot(working, currentEffective, identity)
-      : null,
-    ...(normalizedProperties !== undefined ? { normalizedProperties } : {}),
-  })
+    effective: effectiveSnapshot,
+  }
+  const transition = applyValidatedLinkEdit(transitionInput, normalizedProperties)
+  applyLinkTransition(context, state, working, transition.next, cardinality)
+  return { id: operation.id, ok: true, authority: authorityOutcome(transition.changed) }
+}
+
+function provisionalLinkOrNull(
+  working: WorkingLink,
+  resolved: ReturnType<typeof resolveLink>,
+  identity: TimedCommitIdentity
+) {
+  if (!resolved) return null
+  return provisionalLinkSnapshot(working, resolved, identity)
+}
+
+function applyValidatedLinkEdit(
+  input: Parameters<typeof applyLinkEdit>[0],
+  normalizedProperties: ReturnType<typeof validateLinkAuthorityProperties> | undefined
+) {
+  if (normalizedProperties === undefined) return applyLinkEdit(input)
+  return applyLinkEdit({ ...input, normalizedProperties })
+}
+
+function requireWorkingLink(state: EditWorkingState, operation: LinkOperation): WorkingLink {
+  const working = state.links.get(linkRefKey(operation.ref))
+  if (!working) throw new MaterializationValidationError("Link state was not loaded.")
+  return working
+}
+
+function validateLinkEndpoints(
+  context: Pick<MaterializerContext, "ontology">,
+  state: EditWorkingState,
+  operation: LinkOperation
+): void {
+  if (operation.kind !== "link.upsert") return
+  const source = state.objects.get(objectRefKey(operation.ref.source))
+  const target = state.objects.get(objectRefKey(operation.ref.target))
+  const sourceExists = source && resolveObject(context.ontology, source)
+  const targetExists = target && resolveObject(context.ontology, target)
+  if (sourceExists && targetExists) return
+  throw new MaterializationValidationError("Link upsert requires both endpoints to be effective.")
+}
+
+function validateLinkOperation(
+  context: Pick<MaterializerContext, "ontology">,
+  operation: LinkOperation
+): ReturnType<typeof validateLinkAuthorityProperties> | undefined {
+  if (operation.kind !== "link.upsert") return undefined
+  return validateLinkAuthorityProperties(context.ontology, operation.ref, operation.properties)
+}
+
+function applyLinkTransition(
+  context: Pick<MaterializerContext, "ontology">,
+  state: EditWorkingState,
+  working: WorkingLink,
+  next: WorkingLink["override"],
+  cardinality: "one" | "many" | undefined
+): void {
   const previous = working.override
-  working.override = transition.next
+  working.override = next
   try {
     if (cardinality === "one") {
       validateWorkingCardinality(context.ontology, state.objects, state.links, state.scopeSnapshots)
@@ -182,11 +322,11 @@ function applyLinkOperation(
     working.override = previous
     throw error
   }
-  return {
-    id: operation.id,
-    ok: true,
-    authority: transition.changed ? "changed" : "unchanged",
-  }
+}
+
+function authorityOutcome(changed: boolean): "changed" | "unchanged" {
+  if (changed) return "changed"
+  return "unchanged"
 }
 
 async function loadIncidentLinks(
