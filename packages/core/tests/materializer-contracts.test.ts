@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import type {
+  AdvanceProjectionTelemetryCheckpointInput,
   ApplyMaterializationChunkInput,
   ApplyMaterializationResult,
   FinalizeMaterializationInput,
   MaterializationPlanHeader,
-  MaterializationRunBookkeeping,
   MaterializationSession,
   MaterializationStatePage,
   MaterializationWorkPage,
@@ -318,6 +318,8 @@ describe("materializer canonical contracts", () => {
         },
         execution: { projectionRunId: "run-1", executionToken: "execution-1" },
         batchOrdinal: 2,
+        sourceRowCount: 1,
+        inputExhausted: true,
       },
       points: [point],
     })
@@ -326,7 +328,7 @@ describe("materializer canonical contracts", () => {
     ).toBe(2)
   })
 
-  test("freezes provider staging and bookkeeping shapes", () => {
+  test("freezes provider staging and telemetry checkpoint shapes", () => {
     const staged = {
       root: { kind: "object", ref: leftObject },
       assertion: { kind: "object", ref: leftObject, properties: {} },
@@ -334,57 +336,28 @@ describe("materializer canonical contracts", () => {
     } satisfies StageSourceAssertion
     expect(Object.keys(staged)).toEqual(["root", "assertion", "stagingOrdinal"])
 
-    const replacementBookkeeping = {
-      kind: "projection",
-      protocol: "replacement",
-      projectionId: "rooms",
-      projectionKind: "object",
-      execution: { projectionRunId: "run-1", executionToken: "execution-1" },
-      datasetVersion: {
-        datasetId: "rooms",
-        versionId: "version-1",
-        createdAt: "2026-01-02T03:04:05.000Z",
+    const checkpoint = {
+      id: "run-1",
+      projectId: "project",
+      executionToken: "execution-1",
+      identity: {
+        projectionId: "temperatures",
+        projectionKind: "telemetry",
+        protocol: "telemetry",
+        datasetVersion: {
+          datasetId: "readings",
+          versionId: "version-1",
+          createdAt: "2026-01-02T03:04:05.000Z",
+        },
+        ontologyRevision: "ontology-1",
+        projectionRevision: "revision-1",
+        ownershipHash: "ownership-1",
       },
-      ontologyRevision: "ontology-1",
-      projectionRevision: "revision-1",
-      ownershipHash: "ownership-1",
-      commitId: "commit-1",
-      stagedRootCount: 2,
-      stagedAssertionCount: 3,
-      counts: {
-        objectsCreated: 1,
-        objectsUpdated: 0,
-        objectsDeleted: 0,
-        objectsUnchanged: 1,
-        linksCreated: 1,
-        linksUpdated: 0,
-        linksDeleted: 0,
-        linksUnchanged: 1,
-      },
-    } satisfies MaterializationRunBookkeeping
-    expect(replacementBookkeeping.counts.objectsUnchanged).toBe(1)
-
-    const telemetryBookkeeping = {
-      kind: "projection",
-      protocol: "telemetry",
-      projectionId: "temperatures",
-      projectionKind: "telemetry",
-      execution: { projectionRunId: "run-2", executionToken: "execution-2" },
-      datasetVersion: replacementBookkeeping.datasetVersion,
-      ontologyRevision: "ontology-1",
-      projectionRevision: "revision-2",
-      ownershipHash: "ownership-2",
-      commitId: "commit-2",
       batchOrdinal: 4,
-      batchInputCount: 512,
-      batchPointCount: 412,
-      pointsCreated: 400,
-      pointsUpdated: 10,
-      pointsUnchanged: 2,
-      latestObjectsChanged: 20,
-    } satisfies MaterializationRunBookkeeping
-    expect(telemetryBookkeeping.batchInputCount).toBe(512)
-    expect(telemetryBookkeeping.batchPointCount).toBe(412)
+      batchRowCount: 512,
+      inputExhausted: false,
+    } satisfies AdvanceProjectionTelemetryCheckpointInput
+    expect(checkpoint.batchRowCount).toBe(512)
 
     type ActiveSource = Awaited<ReturnType<OntologySourceStorage["getActive"]>>
     const activeSource: ActiveSource = null

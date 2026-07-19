@@ -16,19 +16,17 @@ import type { ProjectionRegistry } from "../../projections/registry"
 import {
   isProjectionMaterializationRunStorage,
   type ProjectionRunMaterializationIdentity,
-  type ProjectionRunMaterializationReplay,
   type Storage,
 } from "../../storage"
 import type {
+  OntologyCommitRecord,
   OntologyCommitWrite,
   OntologyMaterializationStorage,
   OntologyStorage,
 } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import {
-  attachRunReplay,
-  attachRunReplayTransaction,
-  replayCommit,
+  replayCommitRecord,
   requireOntologyStorage,
   withSerializationRetry,
 } from "../execution/commit-lifecycle"
@@ -67,7 +65,6 @@ interface PreparedProjectionReplacement {
   readonly projectionKind: "object" | "link"
   readonly runIdentity: ProjectionRunMaterializationIdentity
   readonly identity: CommitIdentity
-  readonly replayProof: ProjectionRunMaterializationReplay
 }
 
 interface ProjectionCandidate {
@@ -134,18 +131,6 @@ function prepareProjectionReplacement(
     }),
     normalizedCallerIntent: { source, datasetVersion },
   })
-  const replayProof: ProjectionRunMaterializationReplay = {
-    kind: "projection",
-    protocol: "replacement",
-    projectionId: resolved.projectionId,
-    projectionKind,
-    execution,
-    datasetVersion,
-    ontologyRevision: runIdentity.ontologyRevision,
-    projectionRevision: runIdentity.projectionRevision,
-    ownershipHash: runIdentity.ownershipHash,
-    commitId: identity.commitId,
-  }
   const command = {
     source,
     datasetVersion,
@@ -155,7 +140,6 @@ function prepareProjectionReplacement(
     projectionKind,
     runIdentity,
     identity,
-    replayProof,
   }
   if (raw.signal === undefined) return command
   return { ...command, signal: raw.signal }
@@ -216,10 +200,36 @@ async function replayProjectionCommit(
   context: MaterializerContext,
   command: PreparedProjectionReplacement
 ): Promise<ProjectionCommitResult | null> {
-  const replay = await replayCommit<ProjectionCommitResult>(context, command.identity)
-  if (!replay) return null
-  await attachRunReplayTransaction(context, command.replayProof)
-  return replay
+  const existing = await replayCommitRecord(context, command.identity)
+  if (!existing) return null
+  return withSerializationRetry(context, () =>
+    context.storage.transaction(
+      async (txBase) => {
+        const storage = requireOntologyStorage(txBase)
+        await assertProjectionExecutionInTransaction(storage, context.projectId, command)
+        const commit = await replayCommitRecord(context, command.identity, storage)
+        return commit ? projectionReplayResult(commit, command) : null
+      },
+      { isolation: "serializable" }
+    )
+  )
+}
+
+function projectionReplayResult(
+  commit: OntologyCommitRecord,
+  command: PreparedProjectionReplacement
+): ProjectionCommitResult {
+  if (
+    commit.origin.kind !== "projection" ||
+    commit.origin.projectionRunId !== command.execution.projectionRunId ||
+    commit.result.kind !== "projection"
+  ) {
+    throw new MaterializationConflictError(
+      "run-correlation",
+      `Projection commit '${commit.id}' belongs to a different logical run.`
+    )
+  }
+  return { ...structuredClone(commit.result), created: false }
 }
 
 async function prepareProjectionCandidate(
@@ -305,11 +315,8 @@ async function executeProjectionTransaction(
   ready: ReadyProjectionReplacement
 ): Promise<ProjectionCommitResult> {
   await assertProjectionExecutionInTransaction(storage, context.projectId, command)
-  const replay = await replayCommit<ProjectionCommitResult>(context, command.identity, storage)
-  if (replay) {
-    await attachRunReplay(storage, context.projectId, command.replayProof)
-    return replay
-  }
+  const replay = await replayCommitRecord(context, command.identity, storage)
+  if (replay) return projectionReplayResult(replay, command)
 
   const origin = projectionOrigin(command)
   throwIfAborted(command.signal)
@@ -347,7 +354,7 @@ async function executeProjectionTransaction(
     counts,
   }
   throwIfAborted(command.signal)
-  return finalizeProjectionMaterialization(storage, session, command, ready, counts, result)
+  return finalizeProjectionMaterialization(storage, session, command, ready, result)
 }
 
 async function finalizeProjectionMaterialization(
@@ -355,7 +362,6 @@ async function finalizeProjectionMaterialization(
   session: Parameters<OntologyMaterializationStorage["finalize"]>[0]["session"],
   command: PreparedProjectionReplacement,
   ready: ReadyProjectionReplacement,
-  counts: Awaited<ReturnType<typeof planProjectionReplacement>>,
   result: ProjectionCommitResult
 ): Promise<ProjectionCommitResult> {
   const applied = await storage.ontology.materializations.finalize({
@@ -363,21 +369,6 @@ async function finalizeProjectionMaterialization(
     finalization: {
       sourceActivations: [projectionActivation(command, ready)],
       result,
-      bookkeeping: {
-        kind: "projection",
-        protocol: "replacement",
-        projectionId: command.resolved.projectionId,
-        projectionKind: command.projectionKind,
-        execution: command.execution,
-        datasetVersion: command.datasetVersion,
-        ontologyRevision: command.runIdentity.ontologyRevision,
-        projectionRevision: command.runIdentity.projectionRevision,
-        ownershipHash: command.runIdentity.ownershipHash,
-        commitId: ready.identity.commitId,
-        stagedRootCount: ready.staged.rootCount,
-        stagedAssertionCount: ready.staged.assertionCount,
-        counts,
-      },
     },
   })
   return applied.commit.result as ProjectionCommitResult

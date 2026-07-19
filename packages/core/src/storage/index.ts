@@ -7,7 +7,6 @@ export type {
   ActionRunFailure,
   ActionRunLinkDiffSourceRow,
   ActionRunLinkEditDiff,
-  ActionRunMaterializationBookkeeping,
   ActionRunObjectDiffPropertySourceRow,
   ActionRunObjectDiffSourceRow,
   ActionRunObjectEditDiff,
@@ -251,6 +250,8 @@ export type {
   GetActiveOntologySourceInput,
   GetOntologyCommitByIdempotencyKeyInput,
   GetOntologyCommitByIdInput,
+  ListOntologyCommitsInput,
+  ListOntologyCommitsResult,
   MarkSourceMaterializationReadyInput,
   MaterializationApplyPhase,
   MaterializationCardinalityOccupantWorkRecord,
@@ -268,7 +269,6 @@ export type {
   MaterializationPlanHeader,
   MaterializationPlanWorkItem,
   MaterializationPlanWorkRecord,
-  MaterializationRunBookkeeping,
   MaterializationSession,
   MaterializationStatePage,
   MaterializationStateRequestChunk,
@@ -276,6 +276,7 @@ export type {
   MaterializationWorkPage,
   MaterializationWorkRecord,
   OntologyCommitRecord,
+  OntologyCommitRunSelector,
   OntologyCommitStorage,
   OntologyCommitWrite,
   OntologyMaterializationEvent,
@@ -332,6 +333,7 @@ export type {
 } from "./pipeline-runs"
 export { InMemoryPipelineRunStorage, PipelineRunError } from "./pipeline-runs"
 export type {
+  AdvanceProjectionTelemetryCheckpointInput,
   AssertProjectionMaterializationExecutionInput,
   FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
@@ -343,18 +345,14 @@ export type {
   ProjectionMaterializationProtocol,
   ProjectionMaterializationRunRecord,
   ProjectionMaterializationRunStorage,
-  ProjectionReplacementMaterializationCounts,
   ProjectionRunCounters,
   ProjectionRunDatasetVersion,
-  ProjectionRunMaterializationBookkeeping,
-  ProjectionRunMaterializationCounters,
   ProjectionRunMaterializationIdentity,
-  ProjectionRunMaterializationReplay,
   ProjectionRunObjectTypes,
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
-  ProjectionTelemetryMaterializationCounts,
+  ProjectionTelemetryCheckpoint,
   StartOrReclaimProjectionMaterializationInput,
   StartProjectionRunInput,
   UpdateProjectionMaterializationInput,
@@ -367,7 +365,6 @@ export {
   ProjectionRunError,
   projectionRunObjectTypesVisible,
   zeroProjectionRunCounters,
-  zeroProjectionRunMaterializationCounters,
 } from "./projection-runs"
 export type {
   ListActiveRuleStatesInput,
@@ -984,13 +981,6 @@ export class InMemoryStorage implements Storage {
       getTransactionToken: () => this.getActiveTransactionToken(),
       assertSourceMaterializationExecution: (input) =>
         this.projectionRuns.assertSourceMaterializationExecutionUnlocked(input),
-      applyBookkeeping: async (projectId, bookkeeping) => {
-        if (bookkeeping.kind === "action") {
-          await this.actionRuns.recordMaterializationCommit(projectId, bookkeeping)
-        } else {
-          await this.projectionRuns.recordMaterializationCommit(projectId, bookkeeping)
-        }
-      },
     })
     this.ontology = this.ontologyStorage
   }

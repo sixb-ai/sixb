@@ -15,13 +15,7 @@ import {
   StorageTransactionError,
 } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
-import {
-  atomic,
-  claimProjectionExecution,
-  createMaterializerFixture,
-  replacement,
-  sourceEntry,
-} from "./materializer-fixture"
+import { atomic, createMaterializerFixture, replacement, sourceEntry } from "./materializer-fixture"
 
 describe("in-memory ontology storage", () => {
   test("isolates replacement heads and incident override scans by project", async () => {
@@ -878,142 +872,68 @@ describe("in-memory ontology storage", () => {
     ).rejects.toThrow("inactive")
   })
 
-  test("commits and rolls back recognized projection run linkage atomically", async () => {
-    let rejectBookkeeping = true
+  test("uses the ontology commit origin as replacement run attribution", async () => {
     const storage = new InMemoryStorage()
-    getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
-      applyBookkeeping() {
-        if (rejectBookkeeping) throw new Error("bookkeeping failure")
-      },
-    })
-    const { materializer, projections } = createMaterializerFixture({ storage })
-    const failedInput = replacement(
-      "failed-version",
-      "2026-01-01T00:00:00Z",
-      [sourceEntry("one", "one")],
-      "failed-run"
-    )
-    const failedExecution = await claimProjectionExecution(storage, projections, {
-      runId: failedInput.execution.projectionRunId,
-      projectionId: failedInput.source.projectionId,
-      protocol: "replacement",
-      datasetVersion: failedInput.datasetVersion,
-    })
-    await expect(
-      materializer.projections.replace({ ...failedInput, execution: failedExecution })
-    ).rejects.toThrow("bookkeeping failure")
-    expect(
-      await storage.projectionRuns.getById({ projectId: "project", id: "failed-run" })
-    ).not.toHaveProperty("replacementCommitId")
-    expect(
-      await storage.objects.getByPrimaryId({
-        projectId: "project",
-        objectTypeId: "Device",
-        primaryId: "one",
-      })
-    ).toBeNull()
-
-    rejectBookkeeping = false
-    const successfulInput = replacement(
+    const { materializer } = createMaterializerFixture({ storage })
+    const input = replacement(
       "successful-version",
       "2026-01-02T00:00:00Z",
       [sourceEntry("one", "one")],
       "successful-run"
     )
-    const successfulExecution = await claimProjectionExecution(storage, projections, {
-      runId: successfulInput.execution.projectionRunId,
-      projectionId: successfulInput.source.projectionId,
-      protocol: "replacement",
-      datasetVersion: successfulInput.datasetVersion,
+    const result = await materializer.projections.replace(input)
+    const run = await storage.projectionRuns.getById({
+      projectId: "project",
+      id: "successful-run",
     })
-    const result = await materializer.projections.replace({
-      ...successfulInput,
-      execution: successfulExecution,
-    })
-    expect(
-      await storage.projectionRuns.getById({ projectId: "project", id: "successful-run" })
-    ).toHaveProperty("replacementCommitId", result.commitId)
+    expect(run).not.toHaveProperty("replacementCommitId")
+    expect(run).not.toHaveProperty("materializationCounters")
 
-    const replayExecution = await claimProjectionExecution(storage, projections, {
-      runId: successfulInput.execution.projectionRunId,
-      projectionId: successfulInput.source.projectionId,
-      protocol: "replacement",
-      datasetVersion: successfulInput.datasetVersion,
+    const commit = await storage.ontology.commits.getById({
+      projectId: "project",
+      id: result.commitId,
     })
+    expect(commit?.origin).toEqual({
+      kind: "projection",
+      projectionId: "devices",
+      projectionRunId: "successful-run",
+      datasetId: "devices",
+      datasetVersionId: "successful-version",
+    })
+    expect(commit?.result).toEqual(result)
+    await expect(
+      storage.ontology.commits.list({
+        projectId: "project",
+        run: { kind: "projection", id: "successful-run" },
+      })
+    ).resolves.toMatchObject({ commits: [{ id: result.commitId }], total: 1, hasMore: false })
+
     const replay = await materializer.projections.replace({
-      ...successfulInput,
-      execution: replayExecution,
+      ...input,
       entries: replacement("ignored", "2026-01-02T00:00:00Z", [sourceEntry("ignored", "ignored")])
         .entries,
     })
     expect(replay.created).toBe(false)
-    expect(
-      await storage.projectionRuns.getById({ projectId: "project", id: "successful-run" })
-    ).toHaveProperty("replacementCommitId", result.commitId)
-
-    const conflictingInput = replacement(
-      "conflicting-version",
-      "2026-01-03T00:00:00Z",
-      [sourceEntry("two", "two")],
-      "conflicting-run"
-    )
-    const conflictingExecution = await claimProjectionExecution(storage, projections, {
-      runId: conflictingInput.execution.projectionRunId,
-      projectionId: conflictingInput.source.projectionId,
-      protocol: "replacement",
-      datasetVersion: conflictingInput.datasetVersion,
-    })
-    const conflictingIdentity = replacementIdentity(projections, conflictingInput.datasetVersion)
-    await storage.projectionRuns.recordMaterializationCommit("project", {
-      kind: "projection",
-      ...conflictingIdentity,
-      execution: conflictingExecution,
-      commitId: "different-commit",
-      stagedRootCount: 0,
-      stagedAssertionCount: 0,
-      counts: zeroReplacementCounts(),
-    })
-    await expect(
-      materializer.projections.replace({
-        ...conflictingInput,
-        execution: conflictingExecution,
-      })
-    ).rejects.toThrow("different materialization commit")
-    expect(
-      await storage.objects.getByPrimaryId({
-        projectId: "project",
-        objectTypeId: "Device",
-        primaryId: "two",
-      })
-    ).toBeNull()
   })
 
-  test("commits, replays, and rolls back Action materialization bookkeeping", async () => {
+  test("keeps Action materialization history exclusively in ontology commits", async () => {
     const storage = new InMemoryStorage()
     const { materializer } = createMaterializerFixture({ storage })
     await storage.actionRuns.queue({
-      id: "action-bookkeeping-run",
+      id: "action-materialization-run",
       projectId: "project",
       actionId: "createDevice",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "one" },
       params: {},
-      idempotencyKey: "action:project:action-bookkeeping-run",
+      idempotencyKey: "action:project:action-materialization-run",
     })
-    await storage.actionRuns.start({ id: "action-bookkeeping-run", projectId: "project" })
-    let failBookkeeping = true
-    getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
-      applyBookkeeping(_projectId, bookkeeping) {
-        if (bookkeeping.kind === "action" && failBookkeeping) {
-          throw new Error("action bookkeeping failure")
-        }
-      },
-    })
+    await storage.actionRuns.start({ id: "action-materialization-run", projectId: "project" })
     const input = {
       mode: "atomic" as const,
       source: {
         kind: "action" as const,
         actionId: "createDevice",
-        runId: "action-bookkeeping-run",
+        runId: "action-materialization-run",
       },
       operations: [
         {
@@ -1027,23 +947,21 @@ describe("in-memory ontology storage", () => {
       expectedLinks: [],
       expectedLinkScopes: [],
     }
-    await expect(materializer.edits.commit(input)).rejects.toThrow("action bookkeeping failure")
-    expect(
-      await storage.actionRuns.getById({ projectId: "project", id: "action-bookkeeping-run" })
-    ).not.toHaveProperty("commitId")
-    expect(
-      await storage.objects.getByPrimaryId({
-        projectId: "project",
-        objectTypeId: "Device",
-        primaryId: "one",
-      })
-    ).toBeNull()
 
-    failBookkeeping = false
     const committed = await materializer.edits.commit(input)
     expect(
-      await storage.actionRuns.getById({ projectId: "project", id: "action-bookkeeping-run" })
-    ).toHaveProperty("commitId", committed.commitId)
+      await storage.actionRuns.getById({ projectId: "project", id: "action-materialization-run" })
+    ).not.toHaveProperty("commitId")
+    await expect(
+      storage.ontology.commits.list({
+        projectId: "project",
+        run: { kind: "action", id: "action-materialization-run" },
+      })
+    ).resolves.toMatchObject({
+      commits: [{ id: committed.commitId, origin: { kind: "action" } }],
+      total: 1,
+      hasMore: false,
+    })
     expect((await materializer.edits.commit(input)).created).toBe(false)
   })
 
@@ -1858,7 +1776,7 @@ describe("in-memory ontology storage", () => {
     }
   })
 
-  test("rejects ordinal and bookkeeping finalization mismatches with rollback", async () => {
+  test("rejects ordinal finalization mismatches with rollback", async () => {
     const storage = new InMemoryStorage()
     await storage.actionRuns.queue({
       id: "run",
@@ -1987,188 +1905,6 @@ describe("in-memory ontology storage", () => {
       })
     ).rejects.toThrow("exact streamed order")
     expect(getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot()).toEqual(before)
-
-    await expect(
-      storage.transaction(async (tx) => {
-        if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(header("bad-bookkeeping"))
-        await tx.ontology.materializations.finalize({
-          session,
-          finalization: {
-            sourceActivations: [],
-            result: {
-              kind: "edit",
-              commitId: "bad-bookkeeping",
-              created: true,
-              eventCount: 0,
-              outcomes: [],
-              changes: { objects: [], links: [] },
-            },
-            bookkeeping: {
-              kind: "action",
-              actionId: "action",
-              runId: "run",
-              commitId: "wrong",
-            },
-          },
-        })
-      })
-    ).rejects.toThrow("bookkeeping commit id")
-    expect(getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot()).toEqual(before)
-  })
-
-  test("verifies replacement candidate root and assertion bookkeeping before activation", async () => {
-    const storage = new InMemoryStorage()
-    const source = { projectionId: "devices" }
-    const datasetVersion = {
-      datasetId: "devices",
-      versionId: "candidate-counts",
-      createdAt: "2026-01-01T00:00:00.000Z",
-    }
-    const run = await storage.projectionRuns.startOrReclaimMaterialization({
-      id: "candidate-counts-run",
-      projectId: "project",
-      identity: {
-        projectionId: "devices",
-        projectionKind: "object",
-        protocol: "replacement",
-        datasetVersion,
-        ontologyRevision: "ontology-revision",
-        projectionRevision: "projection-revision",
-        ownershipHash: "ownership-hash",
-      },
-      objectTypeId: "Device",
-    })
-    if (!run.executionToken) throw new Error("Expected a projection execution token")
-    const execution = {
-      projectionRunId: run.id,
-      executionToken: run.executionToken,
-    }
-    await storage.ontology.sources.beginMaterialization({
-      projectId: "project",
-      source,
-      materializationId: "candidate-counts",
-      execution,
-      projectionKind: "object",
-      protocol: "replacement",
-      datasetVersion,
-      projectionRevision: "projection-revision",
-      ownershipHash: "ownership-hash",
-      ontologyRevision: "ontology-revision",
-      createdAt: "2026-01-01T00:00:00.000Z",
-    })
-    await storage.ontology.sources.stageRows({
-      projectId: "project",
-      source,
-      materializationId: "candidate-counts",
-      execution,
-      rows: [
-        {
-          root: { kind: "object", ref: { objectTypeId: "Device", primaryId: "one" } },
-          assertion: {
-            kind: "object",
-            ref: { objectTypeId: "Device", primaryId: "one" },
-            properties: { name: "one" },
-          },
-          stagingOrdinal: 0,
-        },
-      ],
-    })
-    await storage.ontology.sources.markReady({
-      projectId: "project",
-      source,
-      materializationId: "candidate-counts",
-      execution,
-      rootCount: 1,
-      assertionCount: 1,
-      readyAt: "2026-01-01T00:01:00.000Z",
-    })
-    const emptyCounts = zeroReplacementCounts()
-    await expect(
-      storage.transaction(async (tx) => {
-        if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin({
-          commit: {
-            projectId: "project",
-            id: "candidate-counts-commit",
-            idempotencyKey: "projection:devices:candidate-counts",
-            requestHash: "candidate-counts",
-            origin: {
-              kind: "projection",
-              projectionId: "devices",
-              projectionRunId: "candidate-counts-run",
-              datasetId: "devices",
-              datasetVersionId: "candidate-counts",
-            },
-            ontologyRevision: "ontology-revision",
-            projectionRevision: "projection-revision",
-            ownershipHash: "ownership-hash",
-            intent: { kind: "projection", source, datasetVersion },
-            committedAt: "2026-01-02T00:00:00.000Z",
-          },
-          expected: {
-            sources: [{ source, activeMaterializationId: null, lastCommitId: null }],
-            objects: [],
-            links: [],
-            linkScopes: [],
-            points: [],
-          },
-        })
-        for await (const _page of tx.ontology.materializations.streamSourceReplacementState({
-          session,
-          source,
-          candidateMaterializationId: "candidate-counts",
-          entityKind: "object",
-          pageRows: 1,
-        })) {
-          // Establish the exact candidate union without applying semantic writes.
-        }
-        await tx.ontology.materializations.finalize({
-          session,
-          finalization: {
-            sourceActivations: [
-              {
-                source,
-                materializationId: "candidate-counts",
-                execution,
-                projectionKind: "object",
-                protocol: "replacement",
-                datasetVersion,
-                projectionRevision: "projection-revision",
-                ownershipHash: "ownership-hash",
-                ontologyRevision: "ontology-revision",
-                expected: { source, activeMaterializationId: null, lastCommitId: null },
-                lastCommitId: "candidate-counts-commit",
-                updatedAt: "2026-01-02T00:00:00.000Z",
-              },
-            ],
-            result: {
-              kind: "projection",
-              commitId: "candidate-counts-commit",
-              created: true,
-              eventCount: 0,
-              counts: emptyCounts,
-            },
-            bookkeeping: {
-              kind: "projection",
-              protocol: "replacement",
-              projectionId: "devices",
-              projectionKind: "object",
-              execution,
-              datasetVersion,
-              ontologyRevision: "ontology-revision",
-              projectionRevision: "projection-revision",
-              ownershipHash: "ownership-hash",
-              commitId: "candidate-counts-commit",
-              stagedRootCount: 2,
-              stagedAssertionCount: 1,
-              counts: emptyCounts,
-            },
-          },
-        })
-      })
-    ).rejects.toThrow("staged counts")
-    expect(await storage.ontology.sources.getActive({ projectId: "project", source })).toBeNull()
   })
 
   test("refuses activation until replacement state is fully streamed and classified", async () => {
@@ -2287,21 +2023,6 @@ describe("in-memory ontology storage", () => {
         eventCount: 0,
         counts,
       },
-      bookkeeping: {
-        kind: "projection",
-        protocol: "replacement",
-        projectionId: "devices",
-        projectionKind: "object",
-        execution,
-        datasetVersion,
-        ontologyRevision: identity.ontologyRevision,
-        projectionRevision: identity.projectionRevision,
-        ownershipHash: identity.ownershipHash,
-        commitId: "sealed-commit",
-        stagedRootCount: 1,
-        stagedAssertionCount: 1,
-        counts,
-      },
     }
     const finalizeWithoutSemanticWork = (streamReplacement: boolean) =>
       storage.transaction(async (tx) => {
@@ -2330,7 +2051,7 @@ describe("in-memory ontology storage", () => {
     expect(await storage.ontology.sources.getActive({ projectId: "project", source })).toBeNull()
   })
 
-  test("rejects projection header, activation, result, and bookkeeping correlation mismatches", async () => {
+  test("rejects projection header, activation, and result correlation mismatches", async () => {
     const cases: readonly {
       readonly name: string
       readonly mutate: (
@@ -2346,6 +2067,14 @@ describe("in-memory ontology storage", () => {
           header.commit.origin.projectionId = "other"
         },
         message: "metadata does not correlate with its intent",
+      },
+      {
+        name: "empty run origin",
+        mutate(header) {
+          if (header.commit.origin.kind !== "projection") throw new Error("bad fixture origin")
+          header.commit.origin.projectionRunId = ""
+        },
+        message: "Projection run id must be nonblank",
       },
       {
         name: "activation source",
@@ -2395,16 +2124,6 @@ describe("in-memory ontology storage", () => {
           finalization.result.commitId = "other"
         },
         message: "result does not correlate",
-      },
-      {
-        name: "bookkeeping run",
-        mutate(_header, finalization) {
-          if (finalization.bookkeeping?.kind !== "projection") {
-            throw new Error("bad fixture bookkeeping")
-          }
-          finalization.bookkeeping.execution.projectionRunId = "other"
-        },
-        message: "bookkeeping does not correlate",
       },
     ]
 
@@ -2530,21 +2249,6 @@ describe("in-memory ontology storage", () => {
           commitId: header.commit.id,
           created: true,
           eventCount: 0,
-          counts: emptyCounts,
-        },
-        bookkeeping: {
-          kind: "projection",
-          protocol: "replacement",
-          projectionId: "devices",
-          projectionKind: "object",
-          execution: { ...execution },
-          datasetVersion,
-          ontologyRevision: "ontology-revision",
-          projectionRevision: "projection-revision",
-          ownershipHash: "ownership-hash",
-          commitId: header.commit.id,
-          stagedRootCount: 1,
-          stagedAssertionCount: 1,
           counts: emptyCounts,
         },
       }) as DeepMutable<MaterializationPlanFinalization>

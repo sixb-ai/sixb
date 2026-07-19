@@ -1,24 +1,35 @@
+import type { PinnedDatasetVersion } from "../../materialization/model"
+
 export type ProjectionKind = "object" | "link" | "telemetry"
 export type ProjectionRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 export type ProjectionMaterializationProtocol = "replacement" | "telemetry"
 
-export interface ProjectionRunDatasetVersion {
-  readonly datasetId: string
-  readonly versionId: string
-  /** Canonical UTC timestamp copied from immutable dataset-version metadata. */
-  readonly createdAt: string
-}
+/**
+ * Transitional storage alias for the canonical materialization model.
+ * TODO(ontology-materializer/phase-6): Export PinnedDatasetVersion directly from the final contract.
+ */
+export type ProjectionRunDatasetVersion = PinnedDatasetVersion
 
-/** Immutable semantic identity pinned for the lifetime of one logical projection run. */
-export interface ProjectionRunMaterializationIdentity {
+interface ProjectionRunMaterializationIdentityBase {
   readonly projectionId: string
-  readonly projectionKind: ProjectionKind
-  readonly protocol: ProjectionMaterializationProtocol
-  readonly datasetVersion: ProjectionRunDatasetVersion
+  readonly datasetVersion: PinnedDatasetVersion
   readonly ontologyRevision: string
   readonly projectionRevision: string
   readonly ownershipHash: string
 }
+
+/** Immutable semantic identity pinned for the lifetime of one logical projection run. */
+export type ProjectionRunMaterializationIdentity = ProjectionRunMaterializationIdentityBase &
+  (
+    | {
+        readonly projectionKind: "object" | "link"
+        readonly protocol: "replacement"
+      }
+    | {
+        readonly projectionKind: "telemetry"
+        readonly protocol: "telemetry"
+      }
+  )
 
 export interface ProjectionRunCounters {
   readonly rowsProcessed: number
@@ -33,43 +44,6 @@ export interface ProjectionRunCounters {
   readonly telemetryPointsAppended: number
   readonly telemetryPointsSkipped: number
   readonly telemetryRowsFailed: number
-}
-
-/** Durable materializer outcomes, separate from worker ingress/progress counters. */
-export interface ProjectionRunMaterializationCounters {
-  readonly stagedRootCount: number
-  readonly stagedAssertionCount: number
-  readonly objectsCreated: number
-  readonly objectsUpdated: number
-  readonly objectsDeleted: number
-  readonly objectsUnchanged: number
-  readonly linksCreated: number
-  readonly linksUpdated: number
-  readonly linksDeleted: number
-  readonly linksUnchanged: number
-  readonly telemetryPointsCreated: number
-  readonly telemetryPointsUpdated: number
-  readonly telemetryPointsUnchanged: number
-  readonly latestObjectsChanged: number
-}
-
-export function zeroProjectionRunMaterializationCounters(): ProjectionRunMaterializationCounters {
-  return {
-    stagedRootCount: 0,
-    stagedAssertionCount: 0,
-    objectsCreated: 0,
-    objectsUpdated: 0,
-    objectsDeleted: 0,
-    objectsUnchanged: 0,
-    linksCreated: 0,
-    linksUpdated: 0,
-    linksDeleted: 0,
-    linksUnchanged: 0,
-    telemetryPointsCreated: 0,
-    telemetryPointsUpdated: 0,
-    telemetryPointsUnchanged: 0,
-    latestObjectsChanged: 0,
-  }
 }
 
 // Single source of truth for the counter field names. The Record type forces
@@ -133,6 +107,13 @@ export function projectionRunObjectTypesVisible(
   return false
 }
 
+export interface ProjectionTelemetryCheckpoint {
+  readonly fixedBatchSize: number
+  readonly nextBatchOrdinal: number
+  readonly nextRowOffset: number
+  readonly inputExhausted: boolean
+}
+
 export interface ProjectionRunRecord extends ProjectionRunCounters, ProjectionRunObjectTypes {
   readonly id: string
   readonly projectId: string
@@ -151,18 +132,16 @@ export interface ProjectionRunRecord extends ProjectionRunCounters, ProjectionRu
   readonly ontologyRevision?: string
   readonly projectionRevision?: string
   readonly ownershipHash?: string
-  /** Required and immutable for telemetry materialization runs. */
-  readonly fixedBatchSize?: number
-  /** Replacement runs link exactly one ontology commit. */
-  readonly replacementCommitId?: string
-  /** Telemetry runs link one commit per ordinal and retain only their latest commit here. */
-  readonly lastMaterializationCommitId?: string
-  readonly lastCommittedBatchOrdinal?: number
-  readonly materializationCommitCount?: number
-  readonly materializationCounters?: ProjectionRunMaterializationCounters
+  /** Present only for telemetry runs; replacement work has no partial committed checkpoint. */
+  readonly telemetryCheckpoint?: ProjectionTelemetryCheckpoint
 }
 
-/** Fully migrated record returned by the strict materialization capability. */
+/**
+ * Fully migrated record returned by the transitional fenced lifecycle.
+ *
+ * TODO(ontology-materializer/phase-6): Make this state required on ProjectionRunRecord, return the
+ * execution token separately from the public record, and delete this compatibility type.
+ */
 export interface ProjectionMaterializationRunRecord extends ProjectionRunRecord {
   readonly attempt: number
   readonly executionToken: string
@@ -171,8 +150,6 @@ export interface ProjectionMaterializationRunRecord extends ProjectionRunRecord 
   readonly ontologyRevision: string
   readonly projectionRevision: string
   readonly ownershipHash: string
-  readonly materializationCommitCount: number
-  readonly materializationCounters: ProjectionRunMaterializationCounters
 }
 
 export interface StartProjectionRunInput extends ProjectionRunObjectTypes {
@@ -212,85 +189,15 @@ export type FinishProjectionMaterializationInput = (
     readonly finishedAt?: Date
   } & Partial<ProjectionRunCounters>
 
-export interface ProjectionReplacementMaterializationCounts {
-  readonly objectsCreated: number
-  readonly objectsUpdated: number
-  readonly objectsDeleted: number
-  readonly objectsUnchanged: number
-  readonly linksCreated: number
-  readonly linksUpdated: number
-  readonly linksDeleted: number
-  readonly linksUnchanged: number
+export interface AdvanceProjectionTelemetryCheckpointInput
+  extends AssertProjectionMaterializationExecutionInput {
+  /** Must equal the run's current nextBatchOrdinal. */
+  readonly batchOrdinal: number
+  /** Physical dataset rows consumed by this batch, including skipped rows. */
+  readonly batchRowCount: number
+  /** True when this batch consumed the final row of the immutable dataset version. */
+  readonly inputExhausted: boolean
 }
-
-export interface ProjectionTelemetryMaterializationCounts {
-  readonly pointsCreated: number
-  readonly pointsUpdated: number
-  readonly pointsUnchanged: number
-  readonly latestObjectsChanged: number
-}
-
-interface ProjectionMaterializationBookkeepingBase {
-  readonly kind: "projection"
-  readonly projectionId: string
-  readonly projectionKind: ProjectionKind
-  readonly execution: {
-    readonly projectionRunId: string
-    readonly executionToken: string
-  }
-  readonly datasetVersion: ProjectionRunDatasetVersion
-  readonly ontologyRevision: string
-  readonly projectionRevision: string
-  readonly ownershipHash: string
-  readonly commitId: string
-}
-
-export type ProjectionRunMaterializationBookkeeping =
-  | (ProjectionMaterializationBookkeepingBase & {
-      readonly protocol: "replacement"
-      readonly stagedRootCount: number
-      readonly stagedAssertionCount: number
-      readonly counts: ProjectionReplacementMaterializationCounts
-    })
-  | (ProjectionMaterializationBookkeepingBase & {
-      readonly protocol: "telemetry"
-      readonly batchOrdinal: number
-      /** Caller-supplied points before equal-duplicate normalization. */
-      readonly batchInputCount: number
-      /** Canonical unique points classified by the semantic engine. */
-      readonly batchPointCount: number
-    } & ProjectionTelemetryMaterializationCounts)
-
-interface ProjectionMaterializationReplayBase {
-  readonly kind: "projection"
-  readonly projectionId: string
-  readonly projectionKind: ProjectionKind
-  readonly execution: {
-    readonly projectionRunId: string
-    readonly executionToken: string
-  }
-  readonly datasetVersion: ProjectionRunDatasetVersion
-  readonly ontologyRevision: string
-  readonly projectionRevision: string
-  readonly ownershipHash: string
-  readonly commitId: string
-}
-
-/**
- * Minimal proof used when the ontology commit already exists. Replay never
- * reconstructs or re-applies counters: it only proves that the exact commit
- * was already linked to the current logical run.
- */
-export type ProjectionRunMaterializationReplay =
-  | (ProjectionMaterializationReplayBase & {
-      readonly protocol: "replacement"
-      readonly projectionKind: "object" | "link"
-    })
-  | (ProjectionMaterializationReplayBase & {
-      readonly protocol: "telemetry"
-      readonly projectionKind: "telemetry"
-      readonly batchOrdinal: number
-    })
 
 export type UpdateProjectionRunInput = {
   readonly id: string
@@ -345,7 +252,13 @@ export interface ListLatestProjectionRunsResult {
 }
 
 export interface ProjectionRunStorage {
-  /** Claim a new logical run or fence its prior execution with a fresh opaque token. */
+  /**
+   * Transitional fenced lifecycle used by the ontology Materializer.
+   *
+   * TODO(ontology-materializer/phase-6): Replace the legacy start/update/finish lifecycle with
+   * these semantics, give the primary methods their final names, and make them required after the
+   * projection worker and every provider migrate.
+   */
   startOrReclaimMaterialization?(
     input: StartOrReclaimProjectionMaterializationInput
   ): Promise<ProjectionMaterializationRunRecord>
@@ -356,18 +269,20 @@ export interface ProjectionRunStorage {
     input: UpdateProjectionMaterializationInput
   ): Promise<ProjectionMaterializationRunRecord>
   finishMaterialization?(input: FinishProjectionMaterializationInput): Promise<ProjectionRunRecord>
-  /** @internal Atomically linked by ontology materialization finalization. */
-  recordMaterializationCommit?(
-    projectId: string,
-    bookkeeping: ProjectionRunMaterializationBookkeeping
-  ): Promise<void>
-  /** @internal Attach an exact committed replay without double-counting it. */
-  recordMaterializationReplay?(
-    projectId: string,
-    replay: ProjectionRunMaterializationReplay
-  ): Promise<void>
+  /**
+   * @internal Advances telemetry resume state on the same transaction as its ontology commit.
+   */
+  advanceTelemetryCheckpoint?(
+    input: AdvanceProjectionTelemetryCheckpointInput
+  ): Promise<ProjectionMaterializationRunRecord>
+  /**
+   * @deprecated Unfenced lifecycle retained while workers and providers migrate.
+   * TODO(ontology-materializer/phase-6): Remove with the transitional capability below.
+   */
   start(input: StartProjectionRunInput): Promise<ProjectionRunRecord>
+  /** @deprecated See start(). */
   update(input: UpdateProjectionRunInput): Promise<ProjectionRunRecord>
+  /** @deprecated See start(). */
   finish(input: FinishProjectionRunInput): Promise<ProjectionRunRecord>
   getById(params: { projectId: string; id: string }): Promise<ProjectionRunRecord | null>
   list(input: ListProjectionRunsInput): Promise<ListProjectionRunsResult>
@@ -376,7 +291,12 @@ export interface ProjectionRunStorage {
   ): Promise<ListLatestProjectionRunsResult>
 }
 
-/** Strict capability required by the ontology Materializer, not by legacy run providers. */
+/**
+ * Transitional required view used while ProjectionRunStorage supports legacy providers.
+ *
+ * TODO(ontology-materializer/phase-6): Delete this interface and its type guard after the fenced
+ * lifecycle becomes the required ProjectionRunStorage contract.
+ */
 export interface ProjectionMaterializationRunStorage extends ProjectionRunStorage {
   startOrReclaimMaterialization(
     input: StartOrReclaimProjectionMaterializationInput
@@ -388,14 +308,9 @@ export interface ProjectionMaterializationRunStorage extends ProjectionRunStorag
     input: UpdateProjectionMaterializationInput
   ): Promise<ProjectionMaterializationRunRecord>
   finishMaterialization(input: FinishProjectionMaterializationInput): Promise<ProjectionRunRecord>
-  recordMaterializationCommit(
-    projectId: string,
-    bookkeeping: ProjectionRunMaterializationBookkeeping
-  ): Promise<void>
-  recordMaterializationReplay(
-    projectId: string,
-    replay: ProjectionRunMaterializationReplay
-  ): Promise<void>
+  advanceTelemetryCheckpoint(
+    input: AdvanceProjectionTelemetryCheckpointInput
+  ): Promise<ProjectionMaterializationRunRecord>
 }
 
 export function isProjectionMaterializationRunStorage(
@@ -407,7 +322,6 @@ export function isProjectionMaterializationRunStorage(
     typeof storage.assertMaterializationExecution === "function" &&
     typeof storage.updateMaterialization === "function" &&
     typeof storage.finishMaterialization === "function" &&
-    typeof storage.recordMaterializationCommit === "function" &&
-    typeof storage.recordMaterializationReplay === "function"
+    typeof storage.advanceTelemetryCheckpoint === "function"
   )
 }

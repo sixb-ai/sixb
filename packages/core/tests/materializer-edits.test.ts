@@ -18,8 +18,6 @@ describe("ontology materializer edits", () => {
     const runs = storage.actionRuns
     Object.defineProperty(storage, "actionRuns", {
       value: {
-        recordMaterializationCommit: runs.recordMaterializationCommit.bind(runs),
-        recordMaterializationReplay: runs.recordMaterializationReplay.bind(runs),
         queue: runs.queue.bind(runs),
         start: runs.start.bind(runs),
         enterPhase: runs.enterPhase.bind(runs),
@@ -113,7 +111,7 @@ describe("ontology materializer edits", () => {
     }
   })
 
-  test("materializes a valid running Action and links its ontology commit", async () => {
+  test("materializes a valid running Action without duplicating its ontology commit", async () => {
     const storage = new InMemoryStorage()
     await storage.actionRuns.queue({
       id: "run-valid",
@@ -145,7 +143,17 @@ describe("ontology materializer edits", () => {
     expect(result.created).toBe(true)
     expect(
       await storage.actionRuns.getById({ projectId: "project", id: "run-valid" })
-    ).toHaveProperty("commitId", result.commitId)
+    ).not.toHaveProperty("commitId")
+    await expect(
+      storage.ontology.commits.list({
+        projectId: "project",
+        run: { kind: "action", id: "run-valid" },
+      })
+    ).resolves.toMatchObject({
+      commits: [{ id: result.commitId, origin: { kind: "action", runId: "run-valid" } }],
+      total: 1,
+      hasMore: false,
+    })
   })
 
   test("rechecks the Action run inside the transaction before ontology work", async () => {

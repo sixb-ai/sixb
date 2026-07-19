@@ -425,41 +425,73 @@ describe("ontology materializer projection replacement", () => {
     ).toBe("abandoned")
   })
 
-  test("retries serialization failure while attaching a fast replay to its run", async () => {
-    class ReplayRetryStorage extends InMemoryStorage {
-      failNextTransaction = false
+  test("rechecks a same-run fast replay in one fenced transaction", async () => {
+    class ReplayStorage extends InMemoryStorage {
+      transactions = 0
 
       override async transaction<T>(
         run: (tx: Storage) => Promise<T> | T,
         options?: StorageTransactionOptions
       ): Promise<T> {
-        if (this.failNextTransaction) {
-          this.failNextTransaction = false
-          throw new StorageTransactionError("retry replay attachment", {
-            code: "serialization_failure",
-          })
-        }
+        this.transactions += 1
         return super.transaction(run, options)
       }
     }
 
-    const storage = new ReplayRetryStorage()
-    let retries = 0
-    const { materializer } = createMaterializerFixture({
-      storage,
-      dependencies: { onSerializationRetry: () => retries++ },
-    })
+    const storage = new ReplayStorage()
+    const { materializer } = createMaterializerFixture({ storage })
     await materializer.projections.replace(
       replacement("replay-retry", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
     )
-    storage.failNextTransaction = true
+    storage.transactions = 0
 
     const replay = await materializer.projections.replace(
       replacement("replay-retry", "2026-01-01T00:00:00Z", [], "run-replay-retry")
     )
 
     expect(replay.created).toBe(false)
-    expect(retries).toBe(1)
+    expect(storage.transactions).toBe(1)
+  })
+
+  test("fences a replacement replay reclaimed after its fast preflight", async () => {
+    class ReplayFenceStorage extends InMemoryStorage {
+      beforeNextTransaction?: () => Promise<void>
+
+      override async transaction<T>(
+        run: (tx: Storage) => Promise<T> | T,
+        options?: StorageTransactionOptions
+      ): Promise<T> {
+        const before = this.beforeNextTransaction
+        this.beforeNextTransaction = undefined
+        await before?.()
+        return super.transaction(run, options)
+      }
+    }
+
+    const storage = new ReplayFenceStorage()
+    const { materializer, projections } = createMaterializerFixture({ storage })
+    const base = replacement("replay-fence", "2026-01-01T00:00:00Z", [], "replay-fence-run")
+    const execution = await claimProjectionExecution(storage, projections, {
+      runId: base.execution.projectionRunId,
+      projectionId: base.source.projectionId,
+      protocol: "replacement",
+      datasetVersion: base.datasetVersion,
+    })
+    const command = { ...base, execution }
+    await materializer.projections.replace(command)
+
+    storage.beforeNextTransaction = async () => {
+      await claimProjectionExecution(storage, projections, {
+        runId: execution.projectionRunId,
+        projectionId: base.source.projectionId,
+        protocol: "replacement",
+        datasetVersion: base.datasetVersion,
+      })
+    }
+
+    await expect(
+      materializer.projections.replace({ ...command, entries: entries([]) })
+    ).rejects.toThrow("execution token is stale")
   })
 
   test("abandons a staged candidate when another run wins the same semantic commit", async () => {
@@ -942,6 +974,38 @@ describe("ontology materializer projection replacement", () => {
     ).rejects.toThrow("cardinality one")
   })
 
+  test("rejects fabricated projection result counts before recording the commit", async () => {
+    const { materializer, storage } = createMaterializerFixture()
+    const finalize = storage.ontology.materializations.finalize.bind(
+      storage.ontology.materializations
+    )
+    storage.ontology.materializations.finalize = (input) => {
+      if (input.finalization.result.kind !== "projection") return finalize(input)
+      return finalize({
+        ...input,
+        finalization: {
+          ...input.finalization,
+          result: {
+            ...input.finalization.result,
+            counts: { ...input.finalization.result.counts, objectsCreated: -1 },
+          },
+        },
+      })
+    }
+
+    await expect(
+      materializer.projections.replace(
+        replacement("fabricated-counts", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
+      )
+    ).rejects.toThrow("result counts do not correlate")
+    expect(
+      await storage.ontology.commits.list({
+        projectId: "project",
+        run: { kind: "projection", id: "run-fabricated-counts" },
+      })
+    ).toMatchObject({ commits: [], total: 0 })
+  })
+
   test("aborts activation transactionally and retains the candidate for retry", async () => {
     const controller = new AbortController()
     const { materializer, storage } = createMaterializerFixture()
@@ -976,38 +1040,6 @@ describe("ontology materializer projection replacement", () => {
           .sourceMaterializations.values(),
       ].find((candidate) => candidate.projectionRunId === "run-aborted-activation")?.status
     ).toBe("ready")
-  })
-
-  test("finishes an atomic activation after crossing the finalization boundary", async () => {
-    const controller = new AbortController()
-    const { materializer, storage } = createMaterializerFixture()
-    await materializer.projections.replace(
-      replacement("abort-bookkeeping-v1", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
-    )
-    const activeBefore = await storage.ontology.sources.getActive({
-      projectId: "project",
-      source: { projectionId: "devices" },
-    })
-    getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
-      async applyBookkeeping() {
-        await Promise.resolve()
-        controller.abort(new DOMException("late bookkeeping abort", "AbortError"))
-      },
-    })
-    const committed = await materializer.projections.replace({
-      ...replacement("abort-bookkeeping-v2", "2026-01-02T00:00:00Z", [sourceEntry("one", "one")]),
-      signal: controller.signal,
-    })
-    const activeAfter = await storage.ontology.sources.getActive({
-      projectId: "project",
-      source: { projectionId: "devices" },
-    })
-    expect(controller.signal.aborted).toBe(true)
-    expect(activeAfter?.materializationId).not.toBe(activeBefore?.materializationId)
-    expect(activeAfter?.datasetVersion.versionId).toBe("abort-bookkeeping-v2")
-    expect(
-      await storage.ontology.commits.getById({ projectId: "project", id: committed.commitId })
-    ).not.toBeNull()
   })
 
   test("reuses one candidate materialization across projection serialization retry", async () => {
