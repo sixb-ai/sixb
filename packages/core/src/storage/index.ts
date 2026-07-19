@@ -761,32 +761,44 @@ function createRootOperationFacade<T extends object>(
   propertyOverrides: Partial<T> = {}
 ): T {
   const operations = new Set<PropertyKey>(operationMethods)
-  const wrappers = new Map<PropertyKey, (...args: unknown[]) => Promise<unknown>>()
+  const facadeTarget = Object.create(Object.getPrototypeOf(target)) as T
+  const methodKeys = new Set<PropertyKey>()
+  for (
+    let current: object | null = target;
+    current && current !== Object.prototype;
+    current = Object.getPrototypeOf(current)
+  ) {
+    for (const property of Reflect.ownKeys(current)) {
+      if (property !== "constructor") methodKeys.add(property)
+    }
+  }
 
-  return new Proxy(target, {
-    get(current, property) {
-      if (Object.hasOwn(propertyOverrides, property)) {
-        return Reflect.get(propertyOverrides, property, propertyOverrides)
-      }
+  // Use a real object with own method descriptors instead of a Proxy. This preserves normal
+  // assignment, decoration, and Bun spyOn semantics while built-in operations retain the root lock.
+  for (const property of methodKeys) {
+    const implementation = Reflect.get(target, property, target)
+    if (typeof implementation !== "function") continue
+    const value = operations.has(property)
+      ? (...args: unknown[]) => runRootOperation(() => Reflect.apply(implementation, target, args))
+      : implementation.bind(target)
+    Reflect.defineProperty(facadeTarget, property, {
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value,
+    })
+  }
 
-      const value = Reflect.get(current, property, current)
-      if (typeof value !== "function") return value
+  for (const property of Reflect.ownKeys(propertyOverrides)) {
+    Reflect.defineProperty(facadeTarget, property, {
+      configurable: true,
+      enumerable: true,
+      writable: false,
+      value: Reflect.get(propertyOverrides, property, propertyOverrides),
+    })
+  }
 
-      if (!operations.has(property)) {
-        return value.bind(current)
-      }
-
-      const existing = wrappers.get(property)
-      if (existing) return existing
-
-      // Lock only the public boundary. The method runs with the raw store as `this`, so batch
-      // methods can call their single-item methods without trying to acquire the root lock again.
-      const wrapper = (...args: unknown[]) =>
-        runRootOperation(() => Reflect.apply(value, current, args))
-      wrappers.set(property, wrapper)
-      return wrapper
-    },
-  })
+  return facadeTarget
 }
 
 type RootOperationRunner = <TResult>(run: () => Promise<TResult> | TResult) => Promise<TResult>

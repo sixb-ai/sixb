@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { InMemoryStorage, type Storage } from "../src"
 import type {
   StoredLinkMutationEvent,
@@ -51,6 +51,36 @@ describe("InMemoryStorage.transaction", () => {
         propertyId: "temperature",
       })
     ).toMatchObject({ value: 19 })
+  })
+
+  test("honors facade method replacements without recursively acquiring the root lock", async () => {
+    const storage = new InMemoryStorage()
+    await storage.objects.applyObjectUpsert(
+      objectEvent("event_decorated", "room_1", { name: "Blue" })
+    )
+
+    const originalGetByPrimaryId = storage.objects.getByPrimaryId.bind(storage.objects)
+    let objectCalls = 0
+    storage.objects.getByPrimaryId = async (input) => {
+      objectCalls += 1
+      return originalGetByPrimaryId(input)
+    }
+
+    await expect(
+      storage.objects.getByPrimaryId({
+        projectId: "my-app",
+        objectTypeId: "Room",
+        primaryId: "room_1",
+      })
+    ).resolves.toMatchObject({ primaryId: "room_1" })
+    expect(objectCalls).toBe(1)
+
+    const sessionSpy = spyOn(storage.auth.sessions, "getById")
+    await expect(
+      storage.auth.sessions.getById({ projectId: "my-app", id: "missing" })
+    ).resolves.toBeNull()
+    expect(sessionSpy).toHaveBeenCalledTimes(1)
+    sessionSpy.mockRestore()
   })
 
   test("rolls back writes across every mutated store when the transaction fails", async () => {
