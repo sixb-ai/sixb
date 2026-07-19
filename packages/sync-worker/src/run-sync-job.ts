@@ -287,15 +287,19 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
       // Before commit succeeds we can still best-effort clean up both the write session and run record.
       await write?.abort().catch(() => {})
 
-      await syncRunsStorage
-        .finish({
+      const status = signal.aborted ? "cancelled" : "failed"
+      try {
+        const run = await syncRunsStorage.finish({
           projectId: runtime.id,
           id: job.id,
-          status: signal.aborted ? "cancelled" : "failed",
+          status,
           rowsRead,
           error: toSyncRunFailure(error),
         })
-        .catch(() => {})
+        if (status === "failed" && run.status === "failed") input.onRunFailed?.(error, run)
+      } catch {
+        // The run did not transition to the requested terminal status.
+      }
     }
 
     throw error

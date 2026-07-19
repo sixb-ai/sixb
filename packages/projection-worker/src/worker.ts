@@ -1,3 +1,4 @@
+import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
 import type { ProjectionRunStorage } from "@sixb/core/storage"
@@ -6,6 +7,7 @@ import type { ProjectionWorkerContext, ProjectionWorkerSixb } from "./types"
 
 export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob> {
   private readonly context: ProjectionWorkerContext
+  private readonly sixb: ProjectionWorkerSixb
 
   constructor(sixb: ProjectionWorkerSixb) {
     const projectionCount =
@@ -28,6 +30,7 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
     })
 
     this.context = buildProjectionContext(sixb, projectionRunsStorage)
+    this.sixb = sixb
   }
 
   protected async execute(
@@ -46,6 +49,19 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
         queueJobId: job.id,
       },
       signal,
+      onRunFailed: (error, run) => {
+        reportRunFailure(this.sixb, error, {
+          projectId: this.sixb.projectId,
+          occurredAt: run.finishedAt,
+          attempt: job.attempt,
+          run: {
+            kind: "projection",
+            runId: run.id,
+            projectionId: run.projectionId,
+            projectionKind: run.projectionKind,
+          },
+        })
+      },
     })
   }
 }

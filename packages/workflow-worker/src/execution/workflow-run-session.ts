@@ -47,6 +47,7 @@ export class WorkflowRunSession {
       readonly state: WorkflowExecutionState
       readonly recorder: WorkflowRunRecorder
       readonly runner: WorkflowNodeRunner
+      readonly onRunFailed?: RunWorkflowJobInput["onRunFailed"]
     }
   ) {}
 
@@ -102,6 +103,7 @@ export class WorkflowRunSession {
         recorder,
         executors: options.executors,
       }),
+      onRunFailed: input.onRunFailed,
     })
   }
 
@@ -232,6 +234,7 @@ export class WorkflowRunSession {
         recorder,
         executors: options.executors,
       }),
+      onRunFailed: input.onRunFailed,
     })
 
     await runtime.workflowRuns.resume({
@@ -376,6 +379,10 @@ export class WorkflowRunSession {
       .finishRunAfterError({
         status: input.status,
         error: toWorkflowRunError(input.error),
+        onTransition:
+          input.status === "failed"
+            ? (run) => this.dependencies.onRunFailed?.(input.error, run)
+            : undefined,
       })
       .then(() => null)
       .catch((error: unknown) => error)

@@ -91,6 +91,9 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
     materialized = hasMaterialized(counters)
 
     if (execution.firstErrorMessage) {
+      const error = new ProjectionWorkerError(
+        `[SixbProjectionWorker] Projection run '${job.id}' failed. ${execution.firstErrorMessage}`
+      )
       runFinishAttempted = true
       const run = await finishRun({
         runtime,
@@ -101,9 +104,8 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
         materialized,
       })
       finished = true
-      throw new ProjectionWorkerError(
-        `[SixbProjectionWorker] Projection run '${run.id}' failed. ${execution.firstErrorMessage}`
-      )
+      if (run.status === "failed") input.onRunFailed?.(error, run)
+      throw error
     }
 
     runFinishAttempted = true
@@ -134,6 +136,7 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
         error,
         materialized,
         signal,
+        onRunFailed: input.onRunFailed,
       })
     }
 
@@ -292,18 +295,20 @@ async function finishAfterError(input: {
   readonly error: unknown
   readonly materialized: boolean
   readonly signal: AbortSignal
+  readonly onRunFailed: RunProjectionJobInput["onRunFailed"]
 }): Promise<void> {
   const status = input.signal.aborted || isAbortError(input.error) ? "cancelled" : "failed"
   const error = status === "cancelled" ? createAbortError() : input.error
 
   try {
-    await input.runtime.projectionRunsStorage.finish({
+    const run = await input.runtime.projectionRunsStorage.finish({
       projectId: input.runtime.projectId,
       id: input.job.id,
       status,
       errorMessage: errorMessage(error),
       ...input.counters,
     })
+    if (status === "failed" && run.status === "failed") input.onRunFailed?.(input.error, run)
   } catch (finishError) {
     if (input.materialized) {
       throw createBookkeepingError({

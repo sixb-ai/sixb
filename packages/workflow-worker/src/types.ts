@@ -43,11 +43,14 @@ export interface WorkflowResumeJob {
   readonly pendingInterventionId: string
 }
 
+export type WorkflowRunFailureReporter = (error: unknown, run: WorkflowRunRecord) => void
+
 export interface RunWorkflowJobInput {
   readonly runtime: WorkflowWorkerContext
   readonly job: WorkflowJob
   readonly signal?: AbortSignal
   readonly observer?: WorkflowRunObserver
+  readonly onRunFailed?: WorkflowRunFailureReporter
 }
 
 export interface RunWorkflowResumeJobInput {
@@ -55,6 +58,7 @@ export interface RunWorkflowResumeJobInput {
   readonly job: WorkflowResumeJob
   readonly signal?: AbortSignal
   readonly observer?: WorkflowRunObserver
+  readonly onRunFailed?: WorkflowRunFailureReporter
 }
 
 export interface WorkflowRunResult {

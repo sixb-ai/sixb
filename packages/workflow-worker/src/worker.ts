@@ -1,7 +1,8 @@
+import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, WorkflowQueueJob } from "@sixb/core/queues"
-import type { WorkflowRunStorage } from "@sixb/core/storage"
+import type { WorkflowRunRecord, WorkflowRunStorage } from "@sixb/core/storage"
 import { EventsRuntimeWorkflowRunObserver } from "./events"
 import { runWorkflowJob, runWorkflowResumeJob } from "./run-workflow-job"
 import type {
@@ -15,6 +16,7 @@ import type {
 export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
   private readonly context: WorkflowWorkerContext
   private readonly observer: WorkflowRunObserver
+  private readonly sixb: WorkflowWorkerSixb
 
   constructor(sixb: WorkflowWorkerSixb) {
     if (sixb.workflows.list().length === 0) {
@@ -40,6 +42,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
 
     this.context = buildWorkflowContext(sixb, workflowRuns)
     this.observer = new EventsRuntimeWorkflowRunObserver(sixb.events)
+    this.sixb = sixb
   }
 
   protected async execute(
@@ -52,6 +55,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
         job: workflowResumeJobFromClaimed(claimed),
         signal,
         observer: this.observer,
+        onRunFailed: (error, run) => this.reportFailedRun(claimed, error, run),
       })
       return
     }
@@ -63,6 +67,24 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
       job: workflowJob,
       signal,
       observer: this.observer,
+      onRunFailed: (error, run) => this.reportFailedRun(claimed, error, run),
+    })
+  }
+
+  private reportFailedRun(
+    claimed: ClaimedQueueJob<WorkflowQueueJob>,
+    error: unknown,
+    run: WorkflowRunRecord
+  ): void {
+    reportRunFailure(this.sixb, error, {
+      projectId: this.sixb.projectId,
+      occurredAt: run.finishedAt,
+      attempt: claimed.job.attempt,
+      run: {
+        kind: "workflow",
+        runId: run.id,
+        workflowId: run.workflowId,
+      },
     })
   }
 
