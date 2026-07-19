@@ -149,6 +149,67 @@ describe("rest connector", () => {
     expect(attempts).toBe(2)
   })
 
+  test("never retries a request with a stream body — it cannot be replayed", async () => {
+    let attempts = 0
+
+    mockFetch(() => {
+      attempts += 1
+      return Promise.resolve(new Response("busy", { status: 503 }))
+    })
+
+    const adapter = rest({
+      baseUrl: "https://api.example.com",
+      retry: { maxRetries: 3, delayMs: () => 0 },
+    })
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "hubspot",
+      signal: new AbortController().signal,
+    })
+
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]))
+        controller.close()
+      },
+    })
+    const response = await client.post("/upload", body)
+
+    // The real 503 surfaces instead of a masked "stream already used" error.
+    expect(response.status).toBe(503)
+    expect(attempts).toBe(1)
+  })
+
+  test("never replays a stream body after a 401 refresh", async () => {
+    let attempts = 0
+
+    mockFetch(() => {
+      attempts += 1
+      return Promise.resolve(new Response("unauthorized", { status: 401 }))
+    })
+
+    const adapter = rest({
+      baseUrl: "https://api.example.com",
+      onUnauthorized: () => Promise.resolve(),
+    })
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "hubspot",
+      signal: new AbortController().signal,
+    })
+
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1]))
+        controller.close()
+      },
+    })
+    const response = await client.post("/upload", body)
+
+    expect(response.status).toBe(401)
+    expect(attempts).toBe(1)
+  })
+
   test("serializes json bodies for post requests", async () => {
     let requestBody = ""
     let contentType = ""

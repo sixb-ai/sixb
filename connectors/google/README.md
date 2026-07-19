@@ -40,6 +40,57 @@ const { startPageToken } = await client.drive.changes.getStartPageToken()
 for await (const change of client.drive.changes.listAll({ pageToken: startPageToken })) { /* ... */ }
 ```
 
+### Writing files
+
+`create` / `update` / `delete` / `copy` cover the write path. Metadata-only writes go
+to the plain JSON endpoint (creating a folder is a metadata-only `create`); `content`
+selects the media bytes and the upload strategy follows automatically:
+
+- **≤ 5 MiB buffered bytes** → one `multipart/related` request (metadata + bytes).
+- **Larger bodies** → a resumable session: bytes stream up in 8 MiB chunks with
+  `Content-Range`, honoring `308 Resume Incomplete` (partially persisted chunks are
+  re-sent from the server's `Range` offset).
+- **`ReadableStream` bodies** stay unbuffered end to end: with `sizeBytes` they take
+  the chunked path above; without it they go as a single streaming PUT to the session
+  URI.
+
+```ts
+// Metadata only (this is also how folders are made).
+const folder = await client.drive.files.create({
+  name: "Reports",
+  mimeType: "application/vnd.google-apps.folder",
+})
+
+// Small file: metadata + bytes in one request.
+const file = await client.drive.files.create({
+  name: "report.csv",
+  parents: [folder.id],
+  content: { body: csvBytes, mimeType: "text/csv" },
+})
+
+// Large blob straight out of Sixb blob storage — streamed, never buffered whole.
+const info = await blobs.stat(blobId)
+await client.drive.files.create({
+  name: "export.parquet",
+  parents: [folder.id],
+  content: {
+    body: await blobs.open(blobId),
+    mimeType: "application/octet-stream",
+    sizeBytes: info?.sizeBytes,
+  },
+})
+
+await client.drive.files.update(file.id, { name: "renamed.csv" })           // metadata patch
+await client.drive.files.update(file.id, { content: { body: v2Bytes } })    // replace content
+await client.drive.files.update(file.id, { addParents: "b", removeParents: "a" }) // move
+await client.drive.files.update(file.id, { trashed: true })                 // trash
+await client.drive.files.copy(file.id, { name: "report (copy).csv" })
+await client.drive.files.delete(file.id)                                    // permanent
+```
+
+Writes need a write scope — `drive.file` (files the app created or opened) or full
+`drive` for arbitrary files — where the read paths above only need `drive.readonly`.
+
 ### Calendar (v3)
 
 The full Calendar API v3: `events`, `calendars`, `calendarList`, `acl`, `settings`, `colors`,

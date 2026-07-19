@@ -1,5 +1,5 @@
-import { type RestConnector, rest } from "@sixb/connector-rest"
-import type { ConnectorAdapter } from "@sixb/core"
+import { type RestClient, rest } from "@sixb/connector-rest"
+import type { ConnectorAdapter, ConnectorContext } from "@sixb/core"
 import { createTokenSource } from "./auth"
 import { createGoogleClient, type GoogleClient } from "./client"
 import { createGoogleHttp, type GoogleHttpClients, type GoogleSurface } from "./http"
@@ -14,6 +14,14 @@ const BASE_URLS = {
   drive: "https://www.googleapis.com/drive/v3/",
   calendar: "https://www.googleapis.com/calendar/v3/",
 } as const satisfies Record<GoogleSurface, string>
+
+/**
+ * Media upload lives on a separate host path (`/upload/<api>/<version>`),
+ * only for surfaces with upload endpoints. Same auth and HTTP core.
+ */
+const UPLOAD_BASE_URLS: Partial<Record<GoogleSurface, string>> = {
+  drive: "https://www.googleapis.com/upload/drive/v3/",
+}
 
 export type GoogleConnector = ConnectorAdapter<"google", GoogleClient>
 
@@ -30,19 +38,30 @@ export function google(options: GoogleConnectorOptions): GoogleConnector {
     minDelayMs: options.minDelayMs,
   }
 
-  const surfaces = Object.fromEntries(
-    Object.entries(BASE_URLS).map(([surface, baseUrl]) => [surface, rest({ ...common, baseUrl })])
-  ) as Record<GoogleSurface, RestConnector>
+  const connectAll = async (
+    urls: Record<string, string>,
+    context: ConnectorContext
+  ): Promise<Record<string, RestClient>> =>
+    Object.fromEntries(
+      await Promise.all(
+        Object.entries(urls).map(
+          async ([surface, baseUrl]) =>
+            [surface, await rest({ ...common, baseUrl }).connect(context)] as const
+        )
+      )
+    )
 
   return {
     type: "google",
     async connect(context) {
-      const entries = await Promise.all(
-        Object.entries(surfaces).map(
-          async ([surface, adapter]) => [surface, await adapter.connect(context)] as const
-        )
-      )
-      const clients = Object.fromEntries(entries) as GoogleHttpClients
+      const [api, upload] = await Promise.all([
+        connectAll(BASE_URLS, context),
+        connectAll(UPLOAD_BASE_URLS, context),
+      ])
+      const clients: GoogleHttpClients = {
+        api: api as GoogleHttpClients["api"],
+        upload,
+      }
       return createGoogleClient(createGoogleHttp(clients))
     },
   }
