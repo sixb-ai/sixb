@@ -14,50 +14,65 @@ export function diffEffectiveObject(input: {
   readonly commitId: string
   readonly committedAt: string
 }): EffectiveObjectChange | null {
-  if (!input.before && !input.resolved) return null
-  if (!input.before && input.resolved) {
-    const after: EffectiveObjectSnapshot = {
-      ...input.resolved,
-      version: 1,
-      createdAt: input.committedAt,
-      updatedAt: input.committedAt,
-      lastCommitId: input.commitId,
-    }
-    return {
-      kind: "created",
-      ref: after.ref,
-      before: null,
-      after,
-      propertyChanges: propertyChanges({}, after.properties),
-    }
+  if (!input.before) {
+    if (!input.resolved) return null
+    return createObjectChange(input.resolved, input.commitId, input.committedAt)
   }
-  if (input.before && !input.resolved) {
-    return {
-      kind: "deleted",
-      ref: input.before.ref,
-      before: input.before,
-      after: null,
-      propertyChanges: propertyChanges(input.before.properties, {}),
-    }
-  }
-  if (!input.before || !input.resolved) return null
-  if (
-    stableJsonStringify(input.before.properties) === stableJsonStringify(input.resolved.properties)
-  )
-    return null
+  if (!input.resolved) return deleteObjectChange(input.before)
+  if (sameProperties(input.before.properties, input.resolved.properties)) return null
+  return updateObjectChange(input.before, input.resolved, input.commitId, input.committedAt)
+}
+
+function createObjectChange(
+  resolved: ResolvedObjectValue,
+  commitId: string,
+  committedAt: string
+): EffectiveObjectChange {
   const after: EffectiveObjectSnapshot = {
-    ...input.resolved,
-    version: input.before.version + 1,
-    createdAt: input.before.createdAt,
-    updatedAt: input.committedAt,
-    lastCommitId: input.commitId,
+    ...resolved,
+    version: 1,
+    createdAt: committedAt,
+    updatedAt: committedAt,
+    lastCommitId: commitId,
+  }
+  return {
+    kind: "created",
+    ref: after.ref,
+    before: null,
+    after,
+    propertyChanges: propertyChanges({}, after.properties),
+  }
+}
+
+function deleteObjectChange(before: EffectiveObjectSnapshot): EffectiveObjectChange {
+  return {
+    kind: "deleted",
+    ref: before.ref,
+    before,
+    after: null,
+    propertyChanges: propertyChanges(before.properties, {}),
+  }
+}
+
+function updateObjectChange(
+  before: EffectiveObjectSnapshot,
+  resolved: ResolvedObjectValue,
+  commitId: string,
+  committedAt: string
+): EffectiveObjectChange {
+  const after: EffectiveObjectSnapshot = {
+    ...resolved,
+    version: before.version + 1,
+    createdAt: before.createdAt,
+    updatedAt: committedAt,
+    lastCommitId: commitId,
   }
   return {
     kind: "updated",
     ref: after.ref,
-    before: input.before,
+    before,
     after,
-    propertyChanges: propertyChanges(input.before.properties, after.properties),
+    propertyChanges: propertyChanges(before.properties, after.properties),
   }
 }
 
@@ -67,50 +82,71 @@ export function diffEffectiveLink(input: {
   readonly commitId: string
   readonly committedAt: string
 }): EffectiveLinkChange | null {
-  if (!input.before && !input.resolved) return null
-  if (!input.before && input.resolved) {
-    const after: EffectiveLinkSnapshot = {
-      ...input.resolved,
-      createdAt: input.committedAt,
-      updatedAt: input.committedAt,
-      lastCommitId: input.commitId,
-    }
-    return {
-      kind: "created",
-      ref: after.ref,
-      before: null,
-      after,
-      propertyChanges: propertyChanges({}, after.properties ?? {}),
-    }
+  if (!input.before) {
+    if (!input.resolved) return null
+    return createLinkChange(input.resolved, input.commitId, input.committedAt)
   }
-  if (input.before && !input.resolved) {
-    return {
-      kind: "deleted",
-      ref: input.before.ref,
-      before: input.before,
-      after: null,
-      propertyChanges: propertyChanges(input.before.properties ?? {}, {}),
-    }
-  }
-  if (!input.before || !input.resolved) return null
-  if (
-    stableJsonStringify(input.before.properties ?? {}) ===
-    stableJsonStringify(input.resolved.properties ?? {})
-  )
-    return null
+  if (!input.resolved) return deleteLinkChange(input.before)
+  if (sameProperties(input.before.properties ?? {}, input.resolved.properties ?? {})) return null
+  return updateLinkChange(input.before, input.resolved, input.commitId, input.committedAt)
+}
+
+function createLinkChange(
+  resolved: ResolvedLinkValue,
+  commitId: string,
+  committedAt: string
+): EffectiveLinkChange {
   const after: EffectiveLinkSnapshot = {
-    ...input.resolved,
-    createdAt: input.before.createdAt,
-    updatedAt: input.committedAt,
-    lastCommitId: input.commitId,
+    ...resolved,
+    createdAt: committedAt,
+    updatedAt: committedAt,
+    lastCommitId: commitId,
+  }
+  return {
+    kind: "created",
+    ref: after.ref,
+    before: null,
+    after,
+    propertyChanges: propertyChanges({}, after.properties ?? {}),
+  }
+}
+
+function deleteLinkChange(before: EffectiveLinkSnapshot): EffectiveLinkChange {
+  return {
+    kind: "deleted",
+    ref: before.ref,
+    before,
+    after: null,
+    propertyChanges: propertyChanges(before.properties ?? {}, {}),
+  }
+}
+
+function updateLinkChange(
+  before: EffectiveLinkSnapshot,
+  resolved: ResolvedLinkValue,
+  commitId: string,
+  committedAt: string
+): EffectiveLinkChange {
+  const after: EffectiveLinkSnapshot = {
+    ...resolved,
+    createdAt: before.createdAt,
+    updatedAt: committedAt,
+    lastCommitId: commitId,
   }
   return {
     kind: "updated",
     ref: after.ref,
-    before: input.before,
+    before,
     after,
-    propertyChanges: propertyChanges(input.before.properties ?? {}, after.properties ?? {}),
+    propertyChanges: propertyChanges(before.properties ?? {}, after.properties ?? {}),
   }
+}
+
+function sameProperties(
+  left: Readonly<Record<string, JsonValue>>,
+  right: Readonly<Record<string, JsonValue>>
+): boolean {
+  return stableJsonStringify(left) === stableJsonStringify(right)
 }
 
 function propertyChanges(

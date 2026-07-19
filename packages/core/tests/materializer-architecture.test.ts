@@ -22,7 +22,7 @@ describe("materializer architecture", () => {
       .map((entry) => entry.name)
       .sort()
 
-    expect(rootFiles).toEqual(["context.ts", "index.ts", "materializer.ts"])
+    expect(rootFiles).toEqual(["README.md", "context.ts", "index.ts", "materializer.ts"])
     expect(
       entries
         .filter((entry) => entry.isDirectory())

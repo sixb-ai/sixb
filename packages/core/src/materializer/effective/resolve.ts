@@ -28,21 +28,46 @@ export function resolveEffectiveObject(input: {
   readonly override: ObjectOverride | null
   readonly latestTelemetry: readonly StoredTelemetryPoint[]
 }): ResolvedObjectValue | null {
-  if (input.override?.kind === "delete") return null
-  let properties: Record<string, JsonValue>
-  if (input.override?.kind === "create") {
-    properties = { ...input.override.properties }
-  } else {
-    if (!input.source) return null
-    properties = { ...input.source.assertion.properties }
-    if (input.override?.kind === "patch") {
-      Object.assign(properties, input.override.set)
-      for (const propertyId of input.override.unset) delete properties[propertyId]
-    }
-  }
+  const properties = resolveObjectAuthority(input.source, input.override)
+  if (!properties) return null
+
   properties[input.primaryPropertyId] = input.ref.primaryId
-  for (const point of input.latestTelemetry) properties[point.series.propertyId] = point.value
+  applyLatestTelemetry(properties, input.latestTelemetry)
   return { ref: input.ref, properties }
+}
+
+function resolveObjectAuthority(
+  source: StoredSourceObjectAssertion | null,
+  override: ObjectOverride | null
+): Record<string, JsonValue> | null {
+  switch (override?.kind) {
+    case "delete":
+      return null
+    case "create":
+      return { ...override.properties }
+    case "patch":
+      if (!source) return null
+      return applyObjectPatch(source.assertion.properties, override)
+    default:
+      if (!source) return null
+      return { ...source.assertion.properties }
+  }
+}
+
+function applyObjectPatch(
+  sourceProperties: Readonly<Record<string, JsonValue>>,
+  override: Extract<ObjectOverride, { readonly kind: "patch" }>
+): Record<string, JsonValue> {
+  const properties = { ...sourceProperties, ...override.set }
+  for (const propertyId of override.unset) delete properties[propertyId]
+  return properties
+}
+
+function applyLatestTelemetry(
+  properties: Record<string, JsonValue>,
+  latestTelemetry: readonly StoredTelemetryPoint[]
+): void {
+  for (const point of latestTelemetry) properties[point.series.propertyId] = point.value
 }
 
 export function resolveEffectiveLink(input: {
@@ -52,24 +77,20 @@ export function resolveEffectiveLink(input: {
   readonly sourceEndpointExists: boolean
   readonly targetEndpointExists: boolean
 }): ResolvedLinkValue | null {
-  if (
-    !input.sourceEndpointExists ||
-    !input.targetEndpointExists ||
-    input.override?.kind === "delete"
-  ) {
-    return null
-  }
+  if (!input.sourceEndpointExists || !input.targetEndpointExists) return null
+  if (input.override?.kind === "delete") return null
+
   if (input.override?.kind === "upsert") {
-    return {
-      ref: input.ref,
-      ...(input.override.properties !== undefined ? { properties: input.override.properties } : {}),
-    }
+    return resolvedLink(input.ref, input.override.properties)
   }
   if (!input.source) return null
-  return {
-    ref: input.ref,
-    ...(input.source.assertion.properties !== undefined
-      ? { properties: input.source.assertion.properties }
-      : {}),
-  }
+  return resolvedLink(input.ref, input.source.assertion.properties)
+}
+
+function resolvedLink(
+  ref: OntologyLinkRef,
+  properties: Readonly<Record<string, JsonValue>> | undefined
+): ResolvedLinkValue {
+  if (properties === undefined) return { ref }
+  return { ref, properties }
 }

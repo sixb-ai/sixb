@@ -7,15 +7,24 @@ import type {
   OntologyMaterializationOrigin,
   PinnedDatasetVersion,
   ProjectionCommitResult,
+  ProjectionExecution,
+  ProjectionSourceEntry,
+  ProjectionSourceRef,
   ProjectionSourceReplacement,
 } from "../../materialization/model"
-import type {
-  ProjectionRunMaterializationIdentity,
-  ProjectionRunMaterializationReplay,
+import type { ProjectionRegistry } from "../../projections/registry"
+import {
+  isProjectionMaterializationRunStorage,
+  type ProjectionRunMaterializationIdentity,
+  type ProjectionRunMaterializationReplay,
+  type Storage,
 } from "../../storage"
-import { isProjectionMaterializationRunStorage } from "../../storage"
-import type { OntologyCommitWrite, OntologyStorage } from "../../storage/ontology"
-import type { MaterializerContext } from "../context"
+import type {
+  OntologyCommitWrite,
+  OntologyMaterializationStorage,
+  OntologyStorage,
+} from "../../storage/ontology"
+import type { MaterializerContext, MaterializerStorage } from "../context"
 import {
   attachRunReplay,
   attachRunReplayTransaction,
@@ -26,8 +35,10 @@ import {
 import { assertProjectionRunTargets } from "../execution/run-correlation"
 import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
 import {
+  type CommitIdentity,
   createCommitIdentity,
   createProjectionIdempotencyKey,
+  type TimedCommitIdentity,
   timestampCommitIdentity,
 } from "../shared/identity"
 import {
@@ -39,52 +50,88 @@ import { createProjectionEntryValidator } from "./entry-validator"
 import { planProjectionReplacement } from "./replacement-plan"
 import {
   bestEffort,
+  type StagedProjectionMaterialization,
   stageProjectionMaterialization,
   throwIfAborted,
 } from "./source-materialization"
+
+type ResolvedSourceProjection = ReturnType<ProjectionRegistry["resolveSource"]>
+
+interface PreparedProjectionReplacement {
+  readonly source: ProjectionSourceRef
+  readonly datasetVersion: PinnedDatasetVersion
+  readonly execution: ProjectionExecution
+  readonly entries: AsyncIterable<ProjectionSourceEntry>
+  readonly signal?: AbortSignal
+  readonly resolved: ResolvedSourceProjection
+  readonly projectionKind: "object" | "link"
+  readonly runIdentity: ProjectionRunMaterializationIdentity
+  readonly identity: CommitIdentity
+  readonly replayProof: ProjectionRunMaterializationReplay
+}
+
+interface ProjectionCandidate {
+  readonly materializationId: string
+  readonly createdAt: string
+  readonly expectedSource: {
+    readonly source: ProjectionSourceRef
+    readonly activeMaterializationId: string | null
+    readonly lastCommitId: string | null
+  }
+}
+
+interface ReadyProjectionReplacement extends ProjectionCandidate {
+  readonly staged: StagedProjectionMaterialization
+  readonly identity: TimedCommitIdentity
+}
 
 export async function replaceProjection(
   context: MaterializerContext,
   raw: ProjectionSourceReplacement
 ): Promise<ProjectionCommitResult> {
+  const command = prepareProjectionReplacement(context, raw)
+  await assertProjectionExecution(context.storage, context.projectId, command)
+
+  const replay = await replayProjectionCommit(context, command)
+  if (replay) return replay
+
+  const candidate = await prepareProjectionCandidate(context, command)
+  try {
+    const ready = await stageProjectionCandidate(context, command, candidate)
+    return await commitProjectionCandidate(context, command, ready)
+  } catch (error) {
+    await abandonFailedCandidate(context, command, candidate, error)
+    throw error
+  }
+}
+
+function prepareProjectionReplacement(
+  context: Pick<MaterializerContext, "projectId" | "projectionRegistry">,
+  raw: ProjectionSourceReplacement
+): PreparedProjectionReplacement {
   const source = normalizeProjectionSourceRef(raw.source)
   const datasetVersion = normalizePinnedDatasetVersion(raw.datasetVersion)
   const execution = normalizeProjectionExecution(raw.execution)
   const resolved = context.projectionRegistry.resolveSource(source.projectionId)
-  if (datasetVersion.datasetId !== resolved.datasetId) {
-    throw new MaterializationValidationError(
-      `Projection '${resolved.projectionId}' requires dataset '${resolved.datasetId}'.`
-    )
-  }
-  const projectionRuns = context.storage.projectionRuns
-  if (!isProjectionMaterializationRunStorage(projectionRuns)) {
-    throw new MaterializationValidationError(
-      "Storage does not provide projection run capabilities required by source replacement."
-    )
-  }
+  validateProjectionDataset(resolved, datasetVersion)
 
-  const projectionKind =
-    resolved.definition._tag === "ObjectProjectionDefinition" ? "object" : "link"
-  const runIdentity: ProjectionRunMaterializationIdentity = {
-    projectionId: resolved.projectionId,
+  const projectionKind = sourceProjectionKind(resolved)
+  const runIdentity = projectionRunIdentity(
+    context.projectionRegistry.ontologyRevision,
+    resolved,
     projectionKind,
-    protocol: "replacement",
-    datasetVersion,
-    ontologyRevision: context.projectionRegistry.ontologyRevision,
-    projectionRevision: resolved.projectionRevision,
-    ownershipHash: resolved.ownershipHash,
-  }
-  const idempotencyKey = createProjectionIdempotencyKey({
-    source,
-    projectionKind,
-    datasetVersion,
-    ontologyRevision: runIdentity.ontologyRevision,
-    projectionRevision: runIdentity.projectionRevision,
-    ownershipHash: runIdentity.ownershipHash,
-  })
+    datasetVersion
+  )
   const identity = createCommitIdentity({
     projectId: context.projectId,
-    idempotencyKey,
+    idempotencyKey: createProjectionIdempotencyKey({
+      source,
+      projectionKind,
+      datasetVersion,
+      ontologyRevision: runIdentity.ontologyRevision,
+      projectionRevision: runIdentity.projectionRevision,
+      ownershipHash: runIdentity.ownershipHash,
+    }),
     normalizedCallerIntent: { source, datasetVersion },
   })
   const replayProof: ProjectionRunMaterializationReplay = {
@@ -99,205 +146,359 @@ export async function replaceProjection(
     ownershipHash: runIdentity.ownershipHash,
     commitId: identity.commitId,
   }
-
-  const assertedRun = await projectionRuns.assertMaterializationExecution({
-    id: execution.projectionRunId,
-    projectId: context.projectId,
-    executionToken: execution.executionToken,
-    identity: runIdentity,
-  })
-  assertProjectionRunTargets(assertedRun, resolved)
-  const replay = await replayCommit<ProjectionCommitResult>(context, identity)
-  if (replay) {
-    await attachRunReplayTransaction(context, replayProof)
-    return replay
+  const command = {
+    source,
+    datasetVersion,
+    execution,
+    entries: raw.entries,
+    resolved,
+    projectionKind,
+    runIdentity,
+    identity,
+    replayProof,
   }
+  if (raw.signal === undefined) return command
+  return { ...command, signal: raw.signal }
+}
 
-  // Reconcile the previous attempt before any new precondition can fail. Otherwise a redelivery
-  // fenced by a newer active watermark could leave its old staging/ready candidate nonterminal.
+function validateProjectionDataset(
+  resolved: ResolvedSourceProjection,
+  datasetVersion: PinnedDatasetVersion
+): void {
+  if (datasetVersion.datasetId === resolved.datasetId) return
+  throw new MaterializationValidationError(
+    `Projection '${resolved.projectionId}' requires dataset '${resolved.datasetId}'.`
+  )
+}
+
+function sourceProjectionKind(resolved: ResolvedSourceProjection): "object" | "link" {
+  if (resolved.definition._tag === "ObjectProjectionDefinition") return "object"
+  return "link"
+}
+
+function projectionRunIdentity(
+  ontologyRevision: string,
+  resolved: ResolvedSourceProjection,
+  projectionKind: "object" | "link",
+  datasetVersion: PinnedDatasetVersion
+): ProjectionRunMaterializationIdentity {
+  return {
+    projectionId: resolved.projectionId,
+    projectionKind,
+    protocol: "replacement",
+    datasetVersion,
+    ontologyRevision,
+    projectionRevision: resolved.projectionRevision,
+    ownershipHash: resolved.ownershipHash,
+  }
+}
+
+async function assertProjectionExecution(
+  storage: Storage,
+  projectId: string,
+  command: PreparedProjectionReplacement
+): Promise<void> {
+  if (!isProjectionMaterializationRunStorage(storage.projectionRuns)) {
+    throw new MaterializationValidationError(
+      "Storage does not provide projection run capabilities required by source replacement."
+    )
+  }
+  const run = await storage.projectionRuns.assertMaterializationExecution({
+    id: command.execution.projectionRunId,
+    projectId,
+    executionToken: command.execution.executionToken,
+    identity: command.runIdentity,
+  })
+  assertProjectionRunTargets(run, command.resolved)
+}
+
+async function replayProjectionCommit(
+  context: MaterializerContext,
+  command: PreparedProjectionReplacement
+): Promise<ProjectionCommitResult | null> {
+  const replay = await replayCommit<ProjectionCommitResult>(context, command.identity)
+  if (!replay) return null
+  await attachRunReplayTransaction(context, command.replayProof)
+  return replay
+}
+
+async function prepareProjectionCandidate(
+  context: MaterializerContext,
+  command: PreparedProjectionReplacement
+): Promise<ProjectionCandidate> {
   await context.storage.ontology.sources.abandon({
     kind: "reclaim",
     projectId: context.projectId,
-    source,
-    execution,
+    source: command.source,
+    execution: command.execution,
     abandonedAt: context.clock().toISOString(),
   })
   const active = await context.storage.ontology.sources.getActive({
     projectId: context.projectId,
-    source,
+    source: command.source,
   })
-  validateProjectionWatermark(active, datasetVersion)
-  const expectedSource = {
-    source,
-    activeMaterializationId: active?.materializationId ?? null,
-    lastCommitId: active?.lastCommitId ?? null,
+  validateProjectionWatermark(active, command.datasetVersion)
+  return {
+    materializationId: context.materializationId(),
+    createdAt: context.clock().toISOString(),
+    expectedSource: {
+      source: command.source,
+      activeMaterializationId: active?.materializationId ?? null,
+      lastCommitId: active?.lastCommitId ?? null,
+    },
   }
-  const materializationId = context.materializationId()
-  const createdAt = context.clock().toISOString()
+}
 
-  try {
-    const staged = await stageProjectionMaterialization(context, {
-      source,
-      materializationId,
-      execution,
-      projectionKind,
-      datasetVersion,
-      projectionRevision: resolved.projectionRevision,
-      ownershipHash: resolved.ownershipHash,
-      createdAt,
-      entries: raw.entries,
-      validateEntry: createProjectionEntryValidator(context.ontology, resolved),
-      ...(raw.signal !== undefined ? { signal: raw.signal } : {}),
-    })
+async function stageProjectionCandidate(
+  context: MaterializerContext,
+  command: PreparedProjectionReplacement,
+  candidate: ProjectionCandidate
+): Promise<ReadyProjectionReplacement> {
+  const input = {
+    source: command.source,
+    materializationId: candidate.materializationId,
+    execution: command.execution,
+    projectionKind: command.projectionKind,
+    datasetVersion: command.datasetVersion,
+    projectionRevision: command.resolved.projectionRevision,
+    ownershipHash: command.resolved.ownershipHash,
+    createdAt: candidate.createdAt,
+    entries: command.entries,
+    validateEntry: createProjectionEntryValidator(context.ontology, command.resolved),
+  }
+  const staged = await stageCandidateEntries(context, input, command.signal)
+  return {
+    ...candidate,
+    staged,
+    // Commit time starts only after the source candidate is sealed ready.
+    identity: timestampCommitIdentity(command.identity, context.clock()),
+  }
+}
 
-    // Commit time is fixed only once ingress is ready, then retained across serialization retries.
-    const timedIdentity = timestampCommitIdentity(identity, context.clock())
-    return await withSerializationRetry(context, async () =>
-      context.storage.transaction(
-        async (txBase) => {
-          const tx = requireOntologyStorage(txBase)
-          if (!isProjectionMaterializationRunStorage(tx.projectionRuns)) {
-            throw new MaterializationValidationError(
-              "Storage transaction does not provide projection run capabilities."
-            )
-          }
-          const assertedRunInTransaction = await tx.projectionRuns.assertMaterializationExecution({
-            id: execution.projectionRunId,
-            projectId: context.projectId,
-            executionToken: execution.executionToken,
-            identity: runIdentity,
-          })
-          assertProjectionRunTargets(assertedRunInTransaction, resolved)
-          const replayInTransaction = await replayCommit<ProjectionCommitResult>(
-            context,
-            identity,
-            tx
-          )
-          if (replayInTransaction) {
-            await attachRunReplay(tx, context.projectId, replayProof)
-            return replayInTransaction
-          }
+async function stageCandidateEntries(
+  context: MaterializerContext,
+  input: Parameters<typeof stageProjectionMaterialization>[1],
+  signal: AbortSignal | undefined
+): Promise<StagedProjectionMaterialization> {
+  if (signal === undefined) return stageProjectionMaterialization(context, input)
+  return stageProjectionMaterialization(context, { ...input, signal })
+}
 
-          const origin: OntologyMaterializationOrigin = {
-            kind: "projection",
-            projectionId: resolved.projectionId,
-            projectionRunId: execution.projectionRunId,
-            datasetId: datasetVersion.datasetId,
-            datasetVersionId: datasetVersion.versionId,
-          }
-          const commit: OntologyCommitWrite = {
-            projectId: context.projectId,
-            id: timedIdentity.commitId,
-            idempotencyKey: timedIdentity.idempotencyKey,
-            requestHash: timedIdentity.requestHash,
-            origin,
-            ontologyRevision: runIdentity.ontologyRevision,
-            projectionRevision: runIdentity.projectionRevision,
-            ownershipHash: runIdentity.ownershipHash,
-            intent: { kind: "projection", source, datasetVersion },
-            committedAt: timedIdentity.committedAt,
-          }
-          throwIfAborted(raw.signal)
-          const session = await tx.ontology.materializations.begin({
-            commit,
-            expected: {
-              sources: [expectedSource],
-              objects: [],
-              links: [],
-              linkScopes: [],
-              points: [],
-            },
-          })
-          const counts = await planProjectionReplacement(
-            context,
-            tx.ontology.materializations,
-            session,
-            {
-              source,
-              materializationId,
-              projectionKind,
-              identity: timedIdentity,
-              origin,
-              ...(raw.signal !== undefined ? { signal: raw.signal } : {}),
-            }
-          )
-          await drainStagedWork(context, tx.ontology.materializations, session, raw.signal)
-          const eventCount = await drainStagedEvents(
-            context,
-            tx.ontology.materializations,
-            session,
-            timedIdentity,
-            raw.signal
-          )
-          const result: ProjectionCommitResult = {
-            kind: "projection",
-            commitId: timedIdentity.commitId,
-            created: true,
-            eventCount,
-            counts,
-          }
-          throwIfAborted(raw.signal)
-          const applied = await tx.ontology.materializations.finalize({
-            session,
-            finalization: {
-              sourceActivations: [
-                {
-                  source,
-                  materializationId,
-                  execution,
-                  projectionKind,
-                  protocol: "replacement",
-                  datasetVersion,
-                  projectionRevision: runIdentity.projectionRevision,
-                  ownershipHash: runIdentity.ownershipHash,
-                  ontologyRevision: runIdentity.ontologyRevision,
-                  expected: expectedSource,
-                  lastCommitId: timedIdentity.commitId,
-                  updatedAt: timedIdentity.committedAt,
-                },
-              ],
-              result,
-              bookkeeping: {
-                kind: "projection",
-                protocol: "replacement",
-                projectionId: resolved.projectionId,
-                projectionKind,
-                execution,
-                datasetVersion,
-                ontologyRevision: runIdentity.ontologyRevision,
-                projectionRevision: runIdentity.projectionRevision,
-                ownershipHash: runIdentity.ownershipHash,
-                commitId: timedIdentity.commitId,
-                stagedRootCount: staged.rootCount,
-                stagedAssertionCount: staged.assertionCount,
-                counts,
-              },
-            },
-          })
-          return applied.commit.result as ProjectionCommitResult
-        },
-        { isolation: "serializable" }
-      )
+async function commitProjectionCandidate(
+  context: MaterializerContext,
+  command: PreparedProjectionReplacement,
+  ready: ReadyProjectionReplacement
+): Promise<ProjectionCommitResult> {
+  return withSerializationRetry(context, () =>
+    context.storage.transaction(
+      (txBase) =>
+        executeProjectionTransaction(context, requireOntologyStorage(txBase), command, ready),
+      { isolation: "serializable" }
     )
-  } catch (error) {
-    if (
-      error instanceof MaterializationValidationError ||
-      error instanceof MaterializationCancellationError ||
-      (error instanceof MaterializationConflictError && error.kind === "run-correlation")
-    ) {
-      await bestEffort(() =>
-        context.storage.ontology.sources.abandon({
-          kind: "candidate",
-          projectId: context.projectId,
-          source,
-          materializationId,
-          execution,
-          abandonedAt: context.clock().toISOString(),
-        })
-      )
-    }
-    throw error
+  )
+}
+
+async function executeProjectionTransaction(
+  context: MaterializerContext,
+  storage: MaterializerStorage,
+  command: PreparedProjectionReplacement,
+  ready: ReadyProjectionReplacement
+): Promise<ProjectionCommitResult> {
+  await assertProjectionExecutionInTransaction(storage, context.projectId, command)
+  const replay = await replayCommit<ProjectionCommitResult>(context, command.identity, storage)
+  if (replay) {
+    await attachRunReplay(storage, context.projectId, command.replayProof)
+    return replay
   }
+
+  const origin = projectionOrigin(command)
+  throwIfAborted(command.signal)
+  const session = await storage.ontology.materializations.begin({
+    commit: projectionCommit(context.projectId, command, ready.identity, origin),
+    expected: {
+      sources: [ready.expectedSource],
+      objects: [],
+      links: [],
+      linkScopes: [],
+      points: [],
+    },
+  })
+  const counts = await planReadyProjection(
+    context,
+    storage.ontology.materializations,
+    session,
+    command,
+    ready,
+    origin
+  )
+  await drainStagedWork(context, storage.ontology.materializations, session, command.signal)
+  const eventCount = await drainStagedEvents(
+    context,
+    storage.ontology.materializations,
+    session,
+    ready.identity,
+    command.signal
+  )
+  const result: ProjectionCommitResult = {
+    kind: "projection",
+    commitId: ready.identity.commitId,
+    created: true,
+    eventCount,
+    counts,
+  }
+  throwIfAborted(command.signal)
+  return finalizeProjectionMaterialization(storage, session, command, ready, counts, result)
+}
+
+async function finalizeProjectionMaterialization(
+  storage: MaterializerStorage,
+  session: Parameters<OntologyMaterializationStorage["finalize"]>[0]["session"],
+  command: PreparedProjectionReplacement,
+  ready: ReadyProjectionReplacement,
+  counts: Awaited<ReturnType<typeof planProjectionReplacement>>,
+  result: ProjectionCommitResult
+): Promise<ProjectionCommitResult> {
+  const applied = await storage.ontology.materializations.finalize({
+    session,
+    finalization: {
+      sourceActivations: [projectionActivation(command, ready)],
+      result,
+      bookkeeping: {
+        kind: "projection",
+        protocol: "replacement",
+        projectionId: command.resolved.projectionId,
+        projectionKind: command.projectionKind,
+        execution: command.execution,
+        datasetVersion: command.datasetVersion,
+        ontologyRevision: command.runIdentity.ontologyRevision,
+        projectionRevision: command.runIdentity.projectionRevision,
+        ownershipHash: command.runIdentity.ownershipHash,
+        commitId: ready.identity.commitId,
+        stagedRootCount: ready.staged.rootCount,
+        stagedAssertionCount: ready.staged.assertionCount,
+        counts,
+      },
+    },
+  })
+  return applied.commit.result as ProjectionCommitResult
+}
+
+async function assertProjectionExecutionInTransaction(
+  storage: Storage,
+  projectId: string,
+  command: PreparedProjectionReplacement
+): Promise<void> {
+  if (!isProjectionMaterializationRunStorage(storage.projectionRuns)) {
+    throw new MaterializationValidationError(
+      "Storage transaction does not provide projection run capabilities."
+    )
+  }
+  const run = await storage.projectionRuns.assertMaterializationExecution({
+    id: command.execution.projectionRunId,
+    projectId,
+    executionToken: command.execution.executionToken,
+    identity: command.runIdentity,
+  })
+  assertProjectionRunTargets(run, command.resolved)
+}
+
+function projectionOrigin(command: PreparedProjectionReplacement): OntologyMaterializationOrigin {
+  return {
+    kind: "projection",
+    projectionId: command.resolved.projectionId,
+    projectionRunId: command.execution.projectionRunId,
+    datasetId: command.datasetVersion.datasetId,
+    datasetVersionId: command.datasetVersion.versionId,
+  }
+}
+
+function projectionCommit(
+  projectId: string,
+  command: PreparedProjectionReplacement,
+  identity: TimedCommitIdentity,
+  origin: OntologyMaterializationOrigin
+): OntologyCommitWrite {
+  return {
+    projectId,
+    id: identity.commitId,
+    idempotencyKey: identity.idempotencyKey,
+    requestHash: identity.requestHash,
+    origin,
+    ontologyRevision: command.runIdentity.ontologyRevision,
+    projectionRevision: command.runIdentity.projectionRevision,
+    ownershipHash: command.runIdentity.ownershipHash,
+    intent: { kind: "projection", source: command.source, datasetVersion: command.datasetVersion },
+    committedAt: identity.committedAt,
+  }
+}
+
+async function planReadyProjection(
+  context: MaterializerContext,
+  storage: OntologyMaterializationStorage,
+  session: Parameters<OntologyMaterializationStorage["finalize"]>[0]["session"],
+  command: PreparedProjectionReplacement,
+  ready: ReadyProjectionReplacement,
+  origin: OntologyMaterializationOrigin
+) {
+  const input = {
+    source: command.source,
+    materializationId: ready.materializationId,
+    projectionKind: command.projectionKind,
+    identity: ready.identity,
+    origin,
+  }
+  if (command.signal === undefined) {
+    return planProjectionReplacement(context, storage, session, input)
+  }
+  return planProjectionReplacement(context, storage, session, {
+    ...input,
+    signal: command.signal,
+  })
+}
+
+function projectionActivation(
+  command: PreparedProjectionReplacement,
+  ready: ReadyProjectionReplacement
+) {
+  return {
+    source: command.source,
+    materializationId: ready.materializationId,
+    execution: command.execution,
+    projectionKind: command.projectionKind,
+    protocol: "replacement" as const,
+    datasetVersion: command.datasetVersion,
+    projectionRevision: command.runIdentity.projectionRevision,
+    ownershipHash: command.runIdentity.ownershipHash,
+    ontologyRevision: command.runIdentity.ontologyRevision,
+    expected: ready.expectedSource,
+    lastCommitId: ready.identity.commitId,
+    updatedAt: ready.identity.committedAt,
+  }
+}
+
+async function abandonFailedCandidate(
+  context: MaterializerContext,
+  command: PreparedProjectionReplacement,
+  candidate: ProjectionCandidate,
+  error: unknown
+): Promise<void> {
+  if (!shouldAbandonCandidate(error)) return
+  await bestEffort(() =>
+    context.storage.ontology.sources.abandon({
+      kind: "candidate",
+      projectId: context.projectId,
+      source: command.source,
+      materializationId: candidate.materializationId,
+      execution: command.execution,
+      abandonedAt: context.clock().toISOString(),
+    })
+  )
+}
+
+function shouldAbandonCandidate(error: unknown): boolean {
+  if (error instanceof MaterializationValidationError) return true
+  if (error instanceof MaterializationCancellationError) return true
+  return error instanceof MaterializationConflictError && error.kind === "run-correlation"
 }
 
 function validateProjectionWatermark(

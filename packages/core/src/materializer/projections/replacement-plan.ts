@@ -18,7 +18,9 @@ import type {
   MaterializationSession,
   MaterializationWorkRecord,
   OntologyMaterializationStorage,
+  SourceReplacementLinkState,
   SourceReplacementObjectState,
+  SourceReplacementStatePage,
 } from "../../storage/ontology"
 import type { MaterializerContext } from "../context"
 import {
@@ -57,65 +59,115 @@ export async function planProjectionReplacement(
 ): Promise<EffectiveChangeCounts> {
   const counts = emptyCounts()
   if (input.projectionKind === "object") {
-    for await (const page of storage.streamSourceReplacementState({
-      session,
-      source: input.source,
-      candidateMaterializationId: input.materializationId,
-      entityKind: "object",
-      pageRows: context.batching.statePageRows,
-    })) {
-      throwIfAborted(input.signal)
-      const work: MaterializationWorkRecord[] = []
-      for (const state of page.objects) {
-        const resolvedValue = resolveReplacementObject(context, state)
-        if (resolvedValue) {
-          validateEffectiveObject(context.ontology, resolvedValue.ref, resolvedValue.properties)
-        }
-        const change = diffEffectiveObject({
-          before: state.effective,
-          resolved: resolvedValue,
-          commitId: input.identity.commitId,
-          committedAt: input.identity.committedAt,
-        })
-        const sortKey = objectRefSortKey(state.ref)
-        work.push(classificationWork("object", objectRefKey(state.ref), sortKey))
-        work.push({
-          kind: "object-existence",
-          recordKey: `existence:${sortKey}`,
-          ref: state.ref,
-          exists: resolvedValue !== null,
-        })
-        if (Boolean(state.effective) !== Boolean(resolvedValue)) {
-          work.push({
-            kind: "incident-object",
-            recordKey: `incident:${sortKey}`,
-            ref: state.ref,
-          })
-        }
-        if (change) {
-          incrementObjectCount(counts, change.kind)
-          const items: MaterializationPlanWorkItem[] = []
-          appendObjectEffectivePlan(items, change)
-          for (const item of items) work.push(planWork(item, sortKey))
-          work.push(
-            eventWork(
-              buildObjectMaterializationEventDraft({
-                projectId: context.projectId,
-                commitId: input.identity.commitId,
-                committedAt: input.identity.committedAt,
-                origin: input.origin,
-                change,
-              })
-            )
-          )
-        } else {
-          counts.objectsUnchanged += 1
-        }
-      }
-      await stageWorkBounded(context, storage, session, work)
-    }
+    await planObjectReplacement(context, storage, session, input, counts)
+  }
+  await planLinkReplacement(context, storage, session, input, counts)
+  await validateStagedCardinality(context, storage, session, input.signal)
+  return counts
+}
+
+async function planObjectReplacement(
+  context: MaterializerContext,
+  storage: OntologyMaterializationStorage,
+  session: MaterializationSession,
+  input: ProjectionReplacementPlanInput,
+  counts: MutableCounts
+): Promise<void> {
+  for await (const page of storage.streamSourceReplacementState({
+    session,
+    source: input.source,
+    candidateMaterializationId: input.materializationId,
+    entityKind: "object",
+    pageRows: context.batching.statePageRows,
+  })) {
+    throwIfAborted(input.signal)
+    const work = planObjectPage(context, input, page, counts)
+    await stageWorkBounded(context, storage, session, work)
+  }
+}
+
+function planObjectPage(
+  context: MaterializerContext,
+  input: ProjectionReplacementPlanInput,
+  page: SourceReplacementStatePage,
+  counts: MutableCounts
+): MaterializationWorkRecord[] {
+  const work: MaterializationWorkRecord[] = []
+  for (const state of page.objects) {
+    work.push(...planReplacementObject(context, input, state, counts))
+  }
+  return work
+}
+
+function planReplacementObject(
+  context: MaterializerContext,
+  input: ProjectionReplacementPlanInput,
+  state: SourceReplacementObjectState,
+  counts: MutableCounts
+): MaterializationWorkRecord[] {
+  const resolved = resolveReplacementObject(context, state)
+  if (resolved) validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
+
+  const change = diffEffectiveObject({
+    before: state.effective,
+    resolved,
+    commitId: input.identity.commitId,
+    committedAt: input.identity.committedAt,
+  })
+  const sortKey = objectRefSortKey(state.ref)
+  const work: MaterializationWorkRecord[] = [
+    classificationWork("object", objectRefKey(state.ref), sortKey),
+    {
+      kind: "object-existence",
+      recordKey: `existence:${sortKey}`,
+      ref: state.ref,
+      exists: resolved !== null,
+    },
+  ]
+  if (Boolean(state.effective) !== Boolean(resolved)) {
+    work.push({ kind: "incident-object", recordKey: `incident:${sortKey}`, ref: state.ref })
   }
 
+  if (!change) {
+    counts.objectsUnchanged += 1
+    return work
+  }
+
+  incrementObjectCount(counts, change.kind)
+  appendObjectChangeWork(work, sortKey, context, input, change)
+  return work
+}
+
+function appendObjectChangeWork(
+  work: MaterializationWorkRecord[],
+  sortKey: string,
+  context: Pick<MaterializerContext, "projectId">,
+  input: ProjectionReplacementPlanInput,
+  change: EffectiveObjectChange
+): void {
+  const items: MaterializationPlanWorkItem[] = []
+  appendObjectEffectivePlan(items, change)
+  for (const item of items) work.push(planWork(item, sortKey))
+  work.push(
+    eventWork(
+      buildObjectMaterializationEventDraft({
+        projectId: context.projectId,
+        commitId: input.identity.commitId,
+        committedAt: input.identity.committedAt,
+        origin: input.origin,
+        change,
+      })
+    )
+  )
+}
+
+async function planLinkReplacement(
+  context: MaterializerContext,
+  storage: OntologyMaterializationStorage,
+  session: MaterializationSession,
+  input: ProjectionReplacementPlanInput,
+  counts: MutableCounts
+): Promise<void> {
   for await (const page of storage.streamSourceReplacementState({
     session,
     source: input.source,
@@ -124,99 +176,163 @@ export async function planProjectionReplacement(
     pageRows: context.batching.statePageRows,
   })) {
     throwIfAborted(input.signal)
-    const endpointRefs = new Map<string, OntologyObjectRef>()
-    for (const state of page.links) {
-      endpointRefs.set(objectRefKey(state.ref.source), state.ref.source)
-      endpointRefs.set(objectRefKey(state.ref.target), state.ref.target)
-    }
-    const endpointExistence = new Map<string, boolean>()
-    for (const value of await storage.readObjectExistence({
-      session,
-      refs: [...endpointRefs.values()],
-    })) {
-      endpointExistence.set(objectRefKey(value.ref), value.exists)
-    }
-    const missingEndpoints = [...endpointRefs.values()].filter(
-      (ref) => !endpointExistence.has(objectRefKey(ref))
-    )
-    if (missingEndpoints.length > 0) {
-      for await (const endpointPage of storage.streamState({
-        session,
-        requests: oneStateRequest({
-          objects: missingEndpoints,
-          links: [],
-          linkScopes: [],
-          incidentObjects: [],
-          points: [],
-        }),
-        pageRows: context.batching.statePageRows,
-      })) {
-        for (const endpoint of endpointPage.objects) {
-          endpointExistence.set(objectRefKey(endpoint.ref), endpoint.effective !== null)
-        }
-      }
-    }
-    const work: MaterializationWorkRecord[] = []
-    for (const state of page.links) {
-      const resolvedValue = state.diffRequired
-        ? resolveEffectiveLink({
-            ref: state.ref,
-            source: state.candidateSource,
-            override: state.override?.value ?? null,
-            sourceEndpointExists: endpointExistence.get(objectRefKey(state.ref.source)) ?? false,
-            targetEndpointExists: endpointExistence.get(objectRefKey(state.ref.target)) ?? false,
-          })
-        : state.effective
-      const definition = context.ontology
-        .resolveObjectType(state.ref.source.objectTypeId)
-        .links.find((candidate) => candidate.id === state.ref.linkId)
-      if (definition?.cardinality === "one") {
-        const scopeSortKey = linkScopeSortKey(state.ref.source, state.ref.linkId)
-        const linkSortKey = linkRefSortKey(state.ref)
-        work.push({
-          kind: "cardinality",
-          recordKey: `cardinality:${scopeSortKey}:${linkSortKey}`,
-          scopeSortKey,
-          linkSortKey,
-          ref: state.ref,
-          occupied: resolvedValue !== null,
-        })
-      }
-      if (state.diffRequired) {
-        const change = diffEffectiveLink({
-          before: state.effective,
-          resolved: resolvedValue,
-          commitId: input.identity.commitId,
-          committedAt: input.identity.committedAt,
-        })
-        const sortKey = linkRefSortKey(state.ref)
-        work.push(classificationWork("link", linkRefKey(state.ref), sortKey))
-        if (change) {
-          incrementLinkCount(counts, change.kind)
-          const items: MaterializationPlanWorkItem[] = []
-          appendLinkEffectivePlan(items, change)
-          for (const item of items) work.push(planWork(item, sortKey))
-          work.push(
-            eventWork(
-              buildLinkMaterializationEventDraft({
-                projectId: context.projectId,
-                commitId: input.identity.commitId,
-                committedAt: input.identity.committedAt,
-                origin: input.origin,
-                change,
-              })
-            )
-          )
-        } else {
-          counts.linksUnchanged += 1
-        }
-      }
-    }
+    const endpointExistence = await loadEndpointExistence(context, storage, session, page)
+    const work = planLinkPage(context, input, page, endpointExistence, counts)
     await stageWorkBounded(context, storage, session, work)
   }
+}
 
-  await validateStagedCardinality(context, storage, session, input.signal)
-  return counts
+async function loadEndpointExistence(
+  context: MaterializerContext,
+  storage: OntologyMaterializationStorage,
+  session: MaterializationSession,
+  page: SourceReplacementStatePage
+): Promise<ReadonlyMap<string, boolean>> {
+  const endpointRefs = collectEndpointRefs(page.links)
+  const endpointExistence = new Map<string, boolean>()
+  for (const value of await storage.readObjectExistence({
+    session,
+    refs: [...endpointRefs.values()],
+  })) {
+    endpointExistence.set(objectRefKey(value.ref), value.exists)
+  }
+
+  const missingEndpoints = [...endpointRefs.values()].filter(
+    (ref) => !endpointExistence.has(objectRefKey(ref))
+  )
+  if (missingEndpoints.length === 0) return endpointExistence
+
+  for await (const endpointPage of storage.streamState({
+    session,
+    requests: oneStateRequest({
+      objects: missingEndpoints,
+      links: [],
+      linkScopes: [],
+      incidentObjects: [],
+      points: [],
+    }),
+    pageRows: context.batching.statePageRows,
+  })) {
+    for (const endpoint of endpointPage.objects) {
+      endpointExistence.set(objectRefKey(endpoint.ref), endpoint.effective !== null)
+    }
+  }
+  return endpointExistence
+}
+
+function collectEndpointRefs(
+  links: readonly SourceReplacementLinkState[]
+): ReadonlyMap<string, OntologyObjectRef> {
+  const refs = new Map<string, OntologyObjectRef>()
+  for (const state of links) {
+    refs.set(objectRefKey(state.ref.source), state.ref.source)
+    refs.set(objectRefKey(state.ref.target), state.ref.target)
+  }
+  return refs
+}
+
+function planLinkPage(
+  context: MaterializerContext,
+  input: ProjectionReplacementPlanInput,
+  page: SourceReplacementStatePage,
+  endpointExistence: ReadonlyMap<string, boolean>,
+  counts: MutableCounts
+): MaterializationWorkRecord[] {
+  const work: MaterializationWorkRecord[] = []
+  for (const state of page.links) {
+    work.push(...planReplacementLink(context, input, state, endpointExistence, counts))
+  }
+  return work
+}
+
+function planReplacementLink(
+  context: MaterializerContext,
+  input: ProjectionReplacementPlanInput,
+  state: SourceReplacementLinkState,
+  endpointExistence: ReadonlyMap<string, boolean>,
+  counts: MutableCounts
+): MaterializationWorkRecord[] {
+  const resolved = resolveReplacementLink(state, endpointExistence)
+  const work = cardinalityWork(context, state, resolved !== null)
+  if (!state.diffRequired) return work
+
+  const change = diffEffectiveLink({
+    before: state.effective,
+    resolved,
+    commitId: input.identity.commitId,
+    committedAt: input.identity.committedAt,
+  })
+  const sortKey = linkRefSortKey(state.ref)
+  work.push(classificationWork("link", linkRefKey(state.ref), sortKey))
+  if (!change) {
+    counts.linksUnchanged += 1
+    return work
+  }
+
+  incrementLinkCount(counts, change.kind)
+  appendLinkChangeWork(work, sortKey, context, input, change)
+  return work
+}
+
+function resolveReplacementLink(
+  state: SourceReplacementLinkState,
+  endpointExistence: ReadonlyMap<string, boolean>
+) {
+  if (!state.diffRequired) return state.effective
+  return resolveEffectiveLink({
+    ref: state.ref,
+    source: state.candidateSource,
+    override: state.override?.value ?? null,
+    sourceEndpointExists: endpointExistence.get(objectRefKey(state.ref.source)) ?? false,
+    targetEndpointExists: endpointExistence.get(objectRefKey(state.ref.target)) ?? false,
+  })
+}
+
+function cardinalityWork(
+  context: Pick<MaterializerContext, "ontology">,
+  state: SourceReplacementLinkState,
+  occupied: boolean
+): MaterializationWorkRecord[] {
+  const definition = context.ontology
+    .resolveObjectType(state.ref.source.objectTypeId)
+    .links.find((candidate) => candidate.id === state.ref.linkId)
+  if (definition?.cardinality !== "one") return []
+
+  const scopeSortKey = linkScopeSortKey(state.ref.source, state.ref.linkId)
+  const linkSortKey = linkRefSortKey(state.ref)
+  return [
+    {
+      kind: "cardinality",
+      recordKey: `cardinality:${scopeSortKey}:${linkSortKey}`,
+      scopeSortKey,
+      linkSortKey,
+      ref: state.ref,
+      occupied,
+    },
+  ]
+}
+
+function appendLinkChangeWork(
+  work: MaterializationWorkRecord[],
+  sortKey: string,
+  context: Pick<MaterializerContext, "projectId">,
+  input: ProjectionReplacementPlanInput,
+  change: EffectiveLinkChange
+): void {
+  const items: MaterializationPlanWorkItem[] = []
+  appendLinkEffectivePlan(items, change)
+  for (const item of items) work.push(planWork(item, sortKey))
+  work.push(
+    eventWork(
+      buildLinkMaterializationEventDraft({
+        projectId: context.projectId,
+        commitId: input.identity.commitId,
+        committedAt: input.identity.committedAt,
+        origin: input.origin,
+        change,
+      })
+    )
+  )
 }
 
 function resolveReplacementObject(

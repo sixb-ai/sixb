@@ -6,10 +6,16 @@ import type { ObjectFieldSchema, Property, Schema } from "../ontology/types"
 import type { ProjectionDefinition, ProjectionOwnership } from "./types"
 
 export function computeOntologyRevision(ontology: OntologyRegistry): string {
-  const registeredValueTypes = ontology.getValueTypesById()
-  const registeredObjectTypes = ontology.getObjectTypesById()
+  const referencedValueTypeIds = collectOntologyValueTypeDependencies(ontology)
+  return sha256Canonical({
+    objectTypes: normalizeOntologyObjectTypes(ontology),
+    valueTypes: normalizeOntologyValueTypes(ontology, referencedValueTypeIds),
+  })
+}
+
+function collectOntologyValueTypeDependencies(ontology: OntologyRegistry): ReadonlySet<string> {
   const referencedValueTypeIds = new Set<string>()
-  for (const objectType of registeredObjectTypes.values()) {
+  for (const objectType of ontology.getObjectTypesById().values()) {
     for (const property of objectType.properties) {
       collectReferencedValueTypeIds(property.schema, referencedValueTypeIds)
     }
@@ -22,7 +28,7 @@ export function computeOntologyRevision(ontology: OntologyRegistry): string {
   const pending = [...referencedValueTypeIds]
   const queued = new Set(pending)
   for (let index = 0; index < pending.length; index += 1) {
-    const valueType = registeredValueTypes.get(pending[index])
+    const valueType = ontology.getValueTypesById().get(pending[index])
     if (!valueType) continue
     collectReferencedValueTypeIds(valueType.schema, referencedValueTypeIds)
     for (const valueTypeId of referencedValueTypeIds) {
@@ -31,16 +37,26 @@ export function computeOntologyRevision(ontology: OntologyRegistry): string {
       pending.push(valueTypeId)
     }
   }
-  const valueTypes = [...referencedValueTypeIds]
+  return referencedValueTypeIds
+}
+
+function normalizeOntologyValueTypes(
+  ontology: OntologyRegistry,
+  referencedValueTypeIds: ReadonlySet<string>
+): JsonValue[] {
+  return [...referencedValueTypeIds]
     .sort(compareStrings)
-    .map((valueTypeId) => registeredValueTypes.get(valueTypeId))
+    .map((valueTypeId) => ontology.getValueTypesById().get(valueTypeId))
     .filter((valueType) => valueType !== undefined)
     .map((valueType) => ({
       id: valueType.id,
       schema: normalizeSchema(valueType.schema),
       semanticType: valueType.semanticType ?? null,
     }))
-  const objectTypes = [...registeredObjectTypes.values()]
+}
+
+function normalizeOntologyObjectTypes(ontology: OntologyRegistry): JsonValue[] {
+  return [...ontology.getObjectTypesById().values()]
     .sort((left, right) => compareStrings(left.id, right.id))
     .map((objectType) => ({
       id: objectType.id,
@@ -63,8 +79,6 @@ export function computeOntologyRevision(ontology: OntologyRegistry): string {
             .map(normalizeProperty),
         })),
     }))
-
-  return sha256Canonical({ objectTypes, valueTypes })
 }
 
 function collectReferencedValueTypeIds(schema: Schema, valueTypeIds: Set<string>): void {
