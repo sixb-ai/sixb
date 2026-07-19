@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 
 function runBuildEntry(
   entry: string,
@@ -70,6 +70,40 @@ describe("sixb build", () => {
     const html = await readFile(join(outdir, "app", "index.html"), "utf-8")
     expect(html).toContain('<div id="root"></div>')
   })
+
+  test("does not overwrite custom app files watched by the dev server", async () => {
+    const tempDir = await mkdtemp(join(dirname(exampleEntry), ".tmp-sixb-cli-build-isolation-"))
+    tempDirs.push(tempDir)
+    const appDir = join(tempDir, "app")
+    const devGeneratedDir = join(tempDir, ".sixb", "generated")
+    const entry = join(tempDir, "sixb.config.ts")
+    const outdir = join(tempDir, "dist")
+    await mkdir(appDir, { recursive: true })
+    await mkdir(devGeneratedDir, { recursive: true })
+    await writeFile(entry, "export default {}\n")
+    await writeFile(join(appDir, "page.tsx"), "export default function Page() { return null }\n")
+
+    const devFiles = new Map([
+      ["index.html", "dev index with http://localhost:3000\n"],
+      ["index.sixb-bundle.html", "dev HTML bundle entry\n"],
+      ["main.tsx", "dev main entry\n"],
+      ["routes.ts", "dev routes\n"],
+      ["app.webmanifest", "dev manifest\n"],
+    ])
+    for (const [name, content] of devFiles) {
+      await writeFile(join(devGeneratedDir, name), content)
+    }
+
+    const result = runBuildEntry(entry, outdir)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe("")
+    await stat(join(outdir, "app", "index.html"))
+    for (const [name, content] of devFiles) {
+      expect(await readFile(join(devGeneratedDir, name), "utf-8")).toBe(content)
+    }
+    await stat(join(tempDir, ".sixb", "build", "app", "index.html"))
+  }, 30_000)
 
   test("externalizes package dependencies when bundling runtime config", async () => {
     const repoRoot = resolve(import.meta.dir, "..", "..", "..")
