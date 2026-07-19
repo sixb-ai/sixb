@@ -13,6 +13,7 @@ import type {
   OntologyOutboxWrite,
 } from "../storage/ontology"
 import type { MaterializationBatching } from "./batching"
+import { chunkBySize } from "./chunking"
 import { utf8JsonByteLength } from "./refs"
 
 export type MaterializationPlanItem =
@@ -23,25 +24,15 @@ export async function* planStream(
   items: Iterable<MaterializationPlanItem> | AsyncIterable<MaterializationPlanItem>,
   batching: MaterializationBatching
 ): AsyncIterable<MaterializationPlanChunk> {
-  let chunk = mutableChunk()
-  let rows = 0
-  let bytes = 0
-  for await (const item of items) {
-    const itemBytes = utf8JsonByteLength(item)
-    if (
-      rows > 0 &&
-      (rows >= batching.planChunkRows || bytes + itemBytes > batching.planChunkBytes)
-    ) {
-      yield freezeChunk(chunk)
-      chunk = mutableChunk()
-      rows = 0
-      bytes = 0
-    }
-    appendItem(chunk, item)
-    rows += 1
-    bytes += itemBytes
+  for await (const itemsChunk of chunkBySize(items, {
+    maxRows: batching.planChunkRows,
+    maxBytes: batching.planChunkBytes,
+    byteLength: utf8JsonByteLength,
+  })) {
+    const chunk = mutableChunk()
+    for (const item of itemsChunk) appendItem(chunk, item)
+    yield freezeChunk(chunk)
   }
-  if (rows > 0) yield freezeChunk(chunk)
 }
 
 type MutableChunk = {

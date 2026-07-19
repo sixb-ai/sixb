@@ -22,7 +22,48 @@ export interface OrderedMaterializationEventDraft {
   readonly draft: OntologyMaterializationEventDraft
 }
 
-export function buildMaterializationEventDrafts(input: {
+export interface MaterializationEventDraftContext {
+  readonly projectId: string
+  readonly commitId: string
+  readonly committedAt: string
+  readonly origin: OntologyMaterializationOrigin
+  readonly actor?: EventActor
+}
+
+export function buildObjectMaterializationEventDraft(
+  input: MaterializationEventDraftContext & { readonly change: EffectiveObjectChange }
+): OrderedMaterializationEventDraft {
+  return buildMaterializationEventDrafts({
+    ...input,
+    objects: [input.change],
+    links: [],
+    points: [],
+  })[0]
+}
+
+export function buildLinkMaterializationEventDraft(
+  input: MaterializationEventDraftContext & { readonly change: EffectiveLinkChange }
+): OrderedMaterializationEventDraft {
+  return buildMaterializationEventDrafts({
+    ...input,
+    objects: [],
+    links: [input.change],
+    points: [],
+  })[0]
+}
+
+export function buildTelemetryMaterializationEventDraft(
+  input: MaterializationEventDraftContext & { readonly point: TelemetryPointWrite }
+): OrderedMaterializationEventDraft {
+  return buildMaterializationEventDrafts({
+    ...input,
+    objects: [],
+    links: [],
+    points: [{ point: input.point }],
+  })[0]
+}
+
+function buildMaterializationEventDrafts(input: {
   readonly projectId: string
   readonly commitId: string
   readonly committedAt: string

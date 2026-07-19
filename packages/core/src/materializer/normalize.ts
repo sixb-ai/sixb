@@ -3,6 +3,7 @@ import { assertJsonValue, cloneJsonValue, compareStrings, stableJsonStringify } 
 import { MaterializationValidationError } from "./errors"
 import {
   linkRefKey,
+  linkScopeKey,
   normalizeLinkRef,
   normalizeObjectRef,
   objectRefKey,
@@ -15,9 +16,11 @@ import type {
   ExpectedObjectRevision,
   OntologyEditCommit,
   OntologyEditOperation,
+  PinnedDatasetVersion,
   ProjectionEntityRef,
   ProjectionSourceAssertion,
   ProjectionSourceEntry,
+  ProjectionSourceRef,
   TelemetryAppend,
   TelemetryPointWrite,
   TelemetrySeriesRef,
@@ -266,10 +269,28 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
     ),
     expectedLinkScopes: deduplicateExpectations(
       expectedLinkScopes,
-      (value) => JSON.stringify([value.source.objectTypeId, value.source.primaryId, value.linkId]),
+      (value) => linkScopeKey(value.source, value.linkId),
       "Expected link scopes"
     ),
   })
+}
+
+export function normalizeProjectionSourceRef(source: ProjectionSourceRef): ProjectionSourceRef {
+  return Object.freeze({
+    projectionId: normalizeNonblank(source.projectionId, "Projection id"),
+  })
+}
+
+export function normalizePinnedDatasetVersion(version: PinnedDatasetVersion): PinnedDatasetVersion {
+  return Object.freeze({
+    datasetId: normalizeNonblank(version.datasetId, "Dataset id"),
+    versionId: normalizeNonblank(version.versionId, "Dataset version id"),
+    createdAt: normalizeTimestamp(version.createdAt, "Dataset version createdAt"),
+  })
+}
+
+export function normalizeProjectionRunId(runId: string): string {
+  return normalizeNonblank(runId, "Projection run id")
 }
 
 function normalizeProjectionEntity(entity: ProjectionEntityRef): ProjectionEntityRef {
@@ -399,21 +420,9 @@ export function normalizeTelemetryAppend(input: TelemetryAppend): TelemetryAppen
         })
       : Object.freeze({
           kind: "projection" as const,
-          projection: Object.freeze({
-            projectionId: normalizeNonblank(input.source.projection.projectionId, "Projection id"),
-          }),
-          datasetVersion: Object.freeze({
-            datasetId: normalizeNonblank(input.source.datasetVersion.datasetId, "Dataset id"),
-            versionId: normalizeNonblank(
-              input.source.datasetVersion.versionId,
-              "Dataset version id"
-            ),
-            createdAt: normalizeTimestamp(
-              input.source.datasetVersion.createdAt,
-              "Dataset version createdAt"
-            ),
-          }),
-          projectionRunId: normalizeNonblank(input.source.projectionRunId, "Projection run id"),
+          projection: normalizeProjectionSourceRef(input.source.projection),
+          datasetVersion: normalizePinnedDatasetVersion(input.source.datasetVersion),
+          projectionRunId: normalizeProjectionRunId(input.source.projectionRunId),
           batchOrdinal: input.source.batchOrdinal,
         })
   if (

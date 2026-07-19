@@ -57,6 +57,14 @@ export function projectionEntityKey(entity: ProjectionEntityRef): string {
       ])
 }
 
+export function linkOwnershipKey(sourceObjectTypeId: string, linkId: string): string {
+  return JSON.stringify([sourceObjectTypeId, linkId])
+}
+
+export function telemetryOwnershipKey(objectTypeId: string, propertyId: string): string {
+  return JSON.stringify([objectTypeId, propertyId])
+}
+
 export function telemetrySeriesKey(series: TelemetrySeriesRef): string {
   return JSON.stringify([series.object.objectTypeId, series.object.primaryId, series.propertyId])
 }
@@ -98,6 +106,10 @@ export function linkRefSortKey(ref: OntologyLinkRef): string {
     ref.target.objectTypeId,
     ref.target.primaryId,
   ])
+}
+
+export function linkScopeKey(source: OntologyObjectRef, linkId: string): string {
+  return JSON.stringify([source.objectTypeId, source.primaryId, linkId])
 }
 
 export function linkScopeSortKey(source: OntologyObjectRef, linkId: string): string {
