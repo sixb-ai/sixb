@@ -12,7 +12,16 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@sixb/ui/components/ui/popover"
 import { cn } from "@sixb/ui/lib/utils"
 import { Check, ChevronsUpDown } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { type UIEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
+
+const COMBOBOX_LOAD_MORE_THRESHOLD_PX = 80
+
+function isNearScrollEnd(element: HTMLDivElement): boolean {
+  return (
+    element.scrollHeight - element.scrollTop - element.clientHeight <=
+    COMBOBOX_LOAD_MORE_THRESHOLD_PX
+  )
+}
 
 export interface ComboboxOption {
   readonly value: string
@@ -35,7 +44,7 @@ export function Combobox({
   hasMore = false,
   loadingMore = false,
   loadingLabel = "Loading more...",
-  loadMoreLabel = "Scroll to load more...",
+  loadMoreLabel = "Load more",
   onLoadMore,
 }: {
   readonly id?: string
@@ -55,7 +64,8 @@ export function Combobox({
   readonly onLoadMore?: () => void
 }) {
   const [open, setOpen] = useState(false)
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const loadedOptionCountRef = useRef(options.length)
+  const loadMorePendingRef = useRef(false)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const selectedOption = useMemo(
     () => options.find((option) => option.value === value),
@@ -63,22 +73,29 @@ export function Combobox({
   )
 
   useEffect(() => {
-    if (!open || !hasMore || loadingMore || !onLoadMore) return
+    const optionCountChanged = loadedOptionCountRef.current !== options.length
+    if (!loadingMore || optionCountChanged) loadMorePendingRef.current = false
+    loadedOptionCountRef.current = options.length
+  }, [loadingMore, options.length])
 
-    const element = loadMoreRef.current
-    if (!element) return
+  const requestLoadMore = useCallback(() => {
+    if (!hasMore || loadingMore || loadMorePendingRef.current || !onLoadMore) return
 
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) {
-          onLoadMore()
-        }
-      },
-      { rootMargin: "80px" }
-    )
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [hasMore, loadingMore, onLoadMore, open])
+    loadMorePendingRef.current = true
+    try {
+      onLoadMore()
+    } catch (error) {
+      loadMorePendingRef.current = false
+      throw error
+    }
+  }, [hasMore, loadingMore, onLoadMore])
+
+  const handleListScroll = useCallback(
+    (event: UIEvent<HTMLDivElement>) => {
+      if (isNearScrollEnd(event.currentTarget)) requestLoadMore()
+    },
+    [requestLoadMore]
+  )
 
   const portalContainer = triggerRef.current?.closest<HTMLElement>("[data-slot='dialog-content']")
 
@@ -112,6 +129,7 @@ export function Combobox({
           <CommandList
             className="overscroll-contain"
             style={{ maxHeight: "18rem", overflowY: "auto" }}
+            onScroll={handleListScroll}
           >
             <CommandEmpty>{emptyLabel}</CommandEmpty>
             <CommandGroup>
@@ -142,12 +160,15 @@ export function Combobox({
               ))}
             </CommandGroup>
             {hasMore || loadingMore ? (
-              <div
-                ref={loadMoreRef}
-                className="px-3 py-2 text-center text-xs text-muted-foreground"
+              <CommandItem
+                forceMount
+                value="__sixb_load_more__"
+                disabled={loadingMore}
+                onSelect={requestLoadMore}
+                className="justify-center rounded-none px-3 py-2 text-xs text-muted-foreground"
               >
                 {loadingMore ? loadingLabel : loadMoreLabel}
-              </div>
+              </CommandItem>
             ) : null}
           </CommandList>
         </Command>
