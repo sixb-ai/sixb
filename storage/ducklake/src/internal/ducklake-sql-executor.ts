@@ -241,8 +241,9 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
       `CREATE TEMP TABLE ${tempTable} AS SELECT * FROM (${input.sql}) AS sixb_sql_transform_result`
     )
 
+    let result: ApplyDatasetRowsResult
     try {
-      return await applyDatasetRowsFromRelation({
+      result = await applyDatasetRowsFromRelation({
         options: this.options,
         runtime: input.runtime,
         dataset: input.target,
@@ -250,9 +251,18 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
         sourceRelationSql: tempTable,
         previousRowCount: input.previousRowCount,
       })
-    } finally {
-      await input.runtime.run(`DROP TABLE IF EXISTS ${tempTable}`)
+    } catch (error) {
+      try {
+        await input.runtime.run(`DROP TABLE IF EXISTS ${tempTable}`)
+      } catch {
+        // Preserve the write failure. DuckDB rejects cleanup statements while
+        // the transaction is aborted; the coordinator will roll it back next.
+      }
+      throw error
     }
+
+    await input.runtime.run(`DROP TABLE IF EXISTS ${tempTable}`)
+    return result
   }
 }
 

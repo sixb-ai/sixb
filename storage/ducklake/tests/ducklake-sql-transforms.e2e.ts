@@ -5,10 +5,16 @@ import { join } from "node:path"
 import { col, type DatasetDefinition, type DatasetRow, defineDataset } from "@sixb/core"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { DuckLakeStorage } from "../src"
+import type { DuckDbExclusiveRuntime, DuckDbRuntime } from "../src/internal/duckdb-runtime"
 import type { DuckLakeSnapshotReader } from "../src/internal/ducklake-snapshot-reader"
-import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
+import { encodeDatasetTableName } from "../src/internal/names"
+import { qualifiedTableName } from "../src/internal/sql"
+import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from "./test-utils"
 
 interface DuckLakeStorageInternals {
+  readonly connections: {
+    runtime(): Promise<DuckDbRuntime>
+  }
   readonly snapshotReader: DuckLakeSnapshotReader
 }
 
@@ -355,6 +361,43 @@ describe("DuckLake SQL transforms", () => {
     ).rejects.toThrow("SQL transform result schema does not match target dataset")
   })
 
+  test("preserves the write error when temp-table cleanup sees an aborted transaction", async () => {
+    const previous = await storage.sql.execute({
+      sources: {},
+      target: customerInsightsDataset,
+      mode: "snapshot",
+      sql: () => "SELECT 'cust_1' AS customerId, 1::BIGINT AS orders, 10::BIGINT AS revenue",
+    })
+    const runtime = await (storage as unknown as DuckLakeStorageInternals).connections.runtime()
+    const targetTable = qualifiedTableName(
+      localDuckLakeOptions(rootDir),
+      encodeDatasetTableName(customerInsightsDataset.id)
+    )
+    const writeError = new Error("Constraint Error: simulated persistent DuckLake insert failure")
+    const restoreRuntime = failNextPersistentInsert(runtime, targetTable, writeError)
+
+    try {
+      await expect(
+        storage.sql.execute({
+          sources: {},
+          target: customerInsightsDataset,
+          mode: "snapshot",
+          sql: () => "SELECT 'cust_2' AS customerId, 2::BIGINT AS orders, 20::BIGINT AS revenue",
+        })
+      ).rejects.toBe(writeError)
+    } finally {
+      restoreRuntime()
+    }
+
+    expect(await storage.getLatestVersion(customerInsightsDataset.id)).toMatchObject({
+      versionId: previous.versionId,
+    })
+    expect(await storage.listVersions(customerInsightsDataset.id)).toHaveLength(1)
+    await expect(
+      collectRows(storage.readRows({ datasetId: customerInsightsDataset.id }))
+    ).resolves.toEqual([{ customerId: "cust_1", orders: "1", revenue: "10" }])
+  })
+
   test("executes append SQL and keeps lineage on the appended version", async () => {
     const seedVersion = await storage.sql.execute({
       sources: {},
@@ -533,4 +576,55 @@ async function commitRows(
   const write = await storage.beginWrite({ dataset, mode })
   await write.writeRows(rows)
   return write.commit()
+}
+
+function failNextPersistentInsert(
+  runtime: DuckDbRuntime,
+  targetTable: string,
+  writeError: Error
+): () => void {
+  const originalWithExclusive = runtime.withExclusive.bind(runtime)
+  let transactionAborted = false
+  let insertFailed = false
+
+  runtime.withExclusive = (useRuntime) =>
+    originalWithExclusive((exclusiveRuntime) =>
+      useRuntime(
+        wrapExclusiveRuntime(exclusiveRuntime, async (sql, values) => {
+          if (!insertFailed && sql.startsWith(`INSERT INTO ${targetTable} `)) {
+            insertFailed = true
+            transactionAborted = true
+            throw writeError
+          }
+
+          if (transactionAborted && sql.startsWith('DROP TABLE IF EXISTS "sixb_sql_transform_')) {
+            throw new Error(
+              "TransactionContext Error: Current transaction is aborted (please ROLLBACK)"
+            )
+          }
+
+          if (sql === "ROLLBACK") {
+            transactionAborted = false
+          }
+
+          await exclusiveRuntime.run(sql, values)
+        })
+      )
+    )
+
+  return () => {
+    runtime.withExclusive = originalWithExclusive
+  }
+}
+
+function wrapExclusiveRuntime(
+  runtime: DuckDbExclusiveRuntime,
+  run: DuckDbExclusiveRuntime["run"]
+): DuckDbExclusiveRuntime {
+  return {
+    run,
+    runStatements: (statements) => runtime.runStatements(statements),
+    query: (sql, values) => runtime.query(sql, values),
+    withAppender: (tableName, useAppender) => runtime.withAppender(tableName, useAppender),
+  }
 }
