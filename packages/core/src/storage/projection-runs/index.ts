@@ -3,6 +3,7 @@ export { InMemoryProjectionRunStorage } from "./in-memory"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
   AssertProjectionMaterializationExecutionInput,
+  CompleteEmptyProjectionTelemetryInput,
   FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
   ListLatestProjectionRunsInput,

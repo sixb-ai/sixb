@@ -171,6 +171,36 @@ export interface ProjectionSourceReplacement {
   readonly signal?: AbortSignal
 }
 
+interface ProjectionRunFinishBase {
+  readonly source: ProjectionSourceRef
+  readonly datasetVersion: PinnedDatasetVersion
+  readonly execution: ProjectionExecution
+}
+
+type ProjectionRunTerminalStatus =
+  | { readonly status: "succeeded" }
+  | { readonly status: "failed" | "cancelled"; readonly errorMessage?: string }
+
+/**
+ * Queue-agnostic terminal decision for one fenced projection execution.
+ *
+ * A telemetry run with no physical rows has no ontology batch commit, so its successful
+ * completion must declare `emptyInput` explicitly. Non-empty telemetry completion is derived from
+ * the durable run checkpoint.
+ */
+export type ProjectionRunFinishInput =
+  | (ProjectionRunFinishBase &
+      ProjectionRunTerminalStatus & {
+        readonly protocol: "replacement"
+      })
+  | (ProjectionRunFinishBase &
+      (
+        | { readonly status: "succeeded"; readonly emptyInput?: true }
+        | { readonly status: "failed" | "cancelled"; readonly errorMessage?: string }
+      ) & {
+        readonly protocol: "telemetry"
+      })
+
 export interface TelemetrySeriesRef {
   readonly object: OntologyObjectRef
   readonly propertyId: string
@@ -340,6 +370,7 @@ export interface OntologyMaterializer {
   }
   readonly projections: {
     replace(input: ProjectionSourceReplacement): Promise<ProjectionCommitResult>
+    finishRun(input: ProjectionRunFinishInput): Promise<void>
   }
   readonly telemetry: {
     append(input: TelemetryAppend): Promise<TelemetryCommitResult>

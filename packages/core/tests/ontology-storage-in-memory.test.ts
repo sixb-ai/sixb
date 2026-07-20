@@ -12,12 +12,94 @@ import {
   type MaterializationPlanFinalization,
   type MaterializationPlanHeader,
   type MaterializationPlanWorkItem,
+  type OntologyCommitRecord,
+  type OntologyCommitWrite,
   StorageTransactionError,
 } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
-import { atomic, createMaterializerFixture, replacement, sourceEntry } from "./materializer-fixture"
+import {
+  atomic,
+  createMaterializerFixture,
+  pendingProjectionExecution,
+  replacement,
+  sourceEntry,
+} from "./materializer-fixture"
 
 describe("in-memory ontology storage", () => {
+  test("uniquely indexes authoritative commits by logical Action and projection origin", async () => {
+    const { materializer, storage } = createMaterializerFixture()
+
+    const replacementResult = await materializer.projections.replace(
+      replacement("origin-unique", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
+    )
+    const replacementCommit = await storage.ontology.commits.getByOrigin({
+      projectId: "project",
+      origin: { kind: "projection", projectionRunId: "run-origin-unique" },
+    })
+    expect(replacementCommit?.id).toBe(replacementResult.commitId)
+    await expectLogicalOriginDuplicateRejected(storage, replacementCommit)
+
+    await storage.actionRuns.queue({
+      id: "origin-action-run",
+      projectId: "project",
+      actionId: "noop",
+      subject: { kind: "none" },
+      params: {},
+      idempotencyKey: "action:origin-action-run",
+    })
+    await storage.actionRuns.start({ id: "origin-action-run", projectId: "project" })
+    const actionResult = await materializer.edits.commit({
+      mode: "atomic",
+      source: { kind: "action", actionId: "noop", runId: "origin-action-run" },
+      operations: [],
+      expectedObjects: [],
+      expectedLinks: [],
+      expectedLinkScopes: [],
+    })
+    const actionCommit = await storage.ontology.commits.getByOrigin({
+      projectId: "project",
+      origin: { kind: "action", actionRunId: "origin-action-run" },
+    })
+    expect(actionCommit?.id).toBe(actionResult.commitId)
+    await expectLogicalOriginDuplicateRejected(storage, actionCommit)
+
+    const telemetryResult = await materializer.telemetry.append({
+      source: {
+        kind: "projection",
+        projection: { projectionId: "temperatures" },
+        datasetVersion: {
+          datasetId: "readings",
+          versionId: "origin-telemetry",
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+        execution: pendingProjectionExecution("origin-telemetry-run"),
+        batchOrdinal: 0,
+        sourceRowCount: 1,
+        inputExhausted: true,
+      },
+      points: [
+        {
+          series: {
+            object: { objectTypeId: "Device", primaryId: "one" },
+            propertyId: "temperature",
+          },
+          value: 20,
+          at: "2026-01-01T01:00:00Z",
+        },
+      ],
+    })
+    const telemetryCommit = await storage.ontology.commits.getByOrigin({
+      projectId: "project",
+      origin: {
+        kind: "telemetry",
+        projectionRunId: "origin-telemetry-run",
+        batchOrdinal: 0,
+      },
+    })
+    expect(telemetryCommit?.id).toBe(telemetryResult.commitId)
+    await expectLogicalOriginDuplicateRejected(storage, telemetryCommit)
+  })
+
   test("isolates replacement heads and incident override scans by project", async () => {
     const fixture = createMaterializerFixture()
     const { storage, ontology, projections, materializer } = fixture
@@ -2312,6 +2394,30 @@ describe("in-memory ontology storage", () => {
     })
   })
 })
+
+async function expectLogicalOriginDuplicateRejected(
+  storage: InMemoryStorage,
+  commit: OntologyCommitRecord | null
+): Promise<void> {
+  if (!commit) throw new Error("Expected an authoritative ontology commit")
+  const { result: _result, ...write } = commit
+  const duplicate = {
+    ...write,
+    id: `${commit.id}-duplicate`,
+    idempotencyKey: `${commit.idempotencyKey}:duplicate`,
+    requestHash: `${commit.requestHash}:duplicate`,
+    committedAt: new Date(Date.parse(commit.committedAt) + 1).toISOString(),
+  } as OntologyCommitWrite
+  await expect(
+    storage.transaction(async (tx) => {
+      if (!tx.ontology) throw new Error("missing ontology")
+      await tx.ontology.materializations.begin({
+        commit: duplicate,
+        expected: { sources: [], objects: [], links: [], linkScopes: [], points: [] },
+      })
+    })
+  ).rejects.toMatchObject({ kind: "run-correlation" })
+}
 
 type DeepMutable<T> = T extends readonly (infer TValue)[]
   ? DeepMutable<TValue>[]

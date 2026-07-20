@@ -35,6 +35,10 @@ Ontology commit `origin` is the canonical correlation to an Action or projection
 do not duplicate ontology commit ids or semantic commit history. Replacement projections need no
 resume checkpoint; projection telemetry stores only its next batch/row checkpoint on the run.
 
+Logical origins are unique in the ontology ledger: one commit per Action run, one per replacement
+run, and one per telemetry run/batch ordinal. Exact origin lookup is used for correctness; commit
+listing is reserved for history and observability.
+
 ## Projection replacement
 
 ```text
@@ -49,6 +53,10 @@ dataset entries
 Source ingress is sealed before commit time is assigned. A retry reuses the ready candidate and
 the same semantic commit identity. Activation and ontology commit finalization are atomic; the
 projection run stores no separate commit pointer.
+
+Projection runs finish only through `projections.finishRun(...)`. Its serializable transaction reads
+the authoritative ontology commit before replacement success, rejects failure after commit, and
+then applies the fenced run transition.
 
 ## Managed edits and Actions
 
@@ -84,6 +92,10 @@ Projection telemetry additionally verifies the durable projection execution and 
 resume checkpoint in the same transaction as ontology commit finalization. The ontology commits
 are the authoritative batch ledger. Physical source-row counts, including skipped rows, remain
 distinct from canonical point counts.
+
+Telemetry success requires an exhausted checkpoint. A truly empty immutable input is completed
+explicitly without manufacturing an ontology batch commit; the empty checkpoint transition and run
+finish still commit atomically.
 
 ## Module boundaries
 

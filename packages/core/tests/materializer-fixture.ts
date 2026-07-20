@@ -97,6 +97,7 @@ export function createMaterializerFixture(
         })
         return baseMaterializer.projections.replace({ ...request, execution })
       },
+      finishRun: baseMaterializer.projections.finishRun,
     },
     telemetry: {
       async append(request: TelemetryAppend) {

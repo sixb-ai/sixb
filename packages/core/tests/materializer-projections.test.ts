@@ -37,6 +37,42 @@ import {
 const ref = (primaryId: string) => ({ objectTypeId: "Device", primaryId })
 
 describe("ontology materializer projection replacement", () => {
+  test("guards replacement terminal decisions with the authoritative ontology commit", async () => {
+    const { materializer, storage, projections } = createMaterializerFixture()
+    const datasetVersion = {
+      datasetId: "devices",
+      versionId: "guarded-finish",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }
+    const execution = await claimProjectionExecution(storage, projections, {
+      runId: "guarded-finish-run",
+      projectionId: "devices",
+      protocol: "replacement",
+      datasetVersion,
+    })
+    const finish = (status: "succeeded" | "failed") =>
+      materializer.projections.finishRun({
+        protocol: "replacement",
+        source: { projectionId: "devices" },
+        datasetVersion,
+        execution,
+        status,
+      })
+
+    await expect(finish("succeeded")).rejects.toThrow("before its ontology commit exists")
+    await materializer.projections.replace({
+      source: { projectionId: "devices" },
+      datasetVersion,
+      execution,
+      entries: entries([sourceEntry("one", "one")]),
+    })
+    await expect(finish("failed")).rejects.toThrow("after its ontology commit exists")
+    await expect(finish("succeeded")).resolves.toBeUndefined()
+    await expect(
+      storage.projectionRuns.getById({ projectId: "project", id: execution.projectionRunId })
+    ).resolves.toMatchObject({ status: "succeeded" })
+  })
+
   test("rejects a run whose durable target types do not match the projection", async () => {
     const { materializer, storage, projections } = createMaterializerFixture()
     const resolved = projections.resolveSource("devices")

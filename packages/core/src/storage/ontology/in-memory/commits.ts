@@ -1,13 +1,19 @@
 import type {
   GetOntologyCommitByIdempotencyKeyInput,
   GetOntologyCommitByIdInput,
+  GetOntologyCommitByOriginInput,
   ListOntologyCommitsInput,
   ListOntologyCommitsResult,
   OntologyCommitRecord,
   OntologyCommitRunSelector,
   OntologyCommitStorage,
 } from "../commits"
-import { commitKey, type InMemoryOntologyState, idempotencyKey } from "./shared-state"
+import {
+  commitKey,
+  commitOriginKey,
+  type InMemoryOntologyState,
+  idempotencyKey,
+} from "./shared-state"
 
 export class InMemoryOntologyCommitStorage implements OntologyCommitStorage {
   constructor(
@@ -31,6 +37,15 @@ export class InMemoryOntologyCommitStorage implements OntologyCommitStorage {
     return this.runRootOperation(() =>
       structuredClone(this.state.commitsById.get(commitKey(input.projectId, input.id)) ?? null)
     )
+  }
+
+  async getByOrigin(input: GetOntologyCommitByOriginInput): Promise<OntologyCommitRecord | null> {
+    return this.runRootOperation(() => {
+      assertOriginLookup(input)
+      const id = this.state.commitIdByOrigin.get(commitOriginKey(input.projectId, input.origin))
+      if (!id) return null
+      return structuredClone(this.state.commitsById.get(commitKey(input.projectId, id)) ?? null)
+    })
   }
 
   async list(input: ListOntologyCommitsInput): Promise<ListOntologyCommitsResult> {
@@ -67,6 +82,23 @@ export class InMemoryOntologyCommitStorage implements OntologyCommitStorage {
       const page = commits.slice(offset, offset + limit).map((commit) => structuredClone(commit))
       return { commits: page, total, hasMore: offset + page.length < total }
     })
+  }
+}
+
+function assertOriginLookup(input: GetOntologyCommitByOriginInput): void {
+  if (input.projectId.trim().length === 0) {
+    throw new Error("[Sixb] Ontology commit project id must be nonblank.")
+  }
+  const runId =
+    input.origin.kind === "action" ? input.origin.actionRunId : input.origin.projectionRunId
+  if (runId.trim().length === 0) {
+    throw new Error("[Sixb] Ontology commit origin run id must be nonblank.")
+  }
+  if (
+    input.origin.kind === "telemetry" &&
+    (!Number.isSafeInteger(input.origin.batchOrdinal) || input.origin.batchOrdinal < 0)
+  ) {
+    throw new Error("[Sixb] Ontology telemetry commit batch ordinal must be nonnegative.")
   }
 }
 
