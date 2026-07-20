@@ -1,6 +1,7 @@
 import type {
   OntologyEditCommit,
   OntologyMaterializer as OntologyMaterializerContract,
+  ProjectionRunFinishInput,
   ProjectionSourceReplacement,
   TelemetryAppend,
 } from "../materialization/model"
@@ -13,6 +14,7 @@ import {
   type OntologyMaterializerDependencies,
 } from "./context"
 import { commitEdits } from "./edits/commit"
+import { finishProjectionRun } from "./projections/finish-run"
 import { replaceProjection } from "./projections/replace"
 import { appendTelemetry } from "./telemetry/append"
 
@@ -22,6 +24,7 @@ export class OntologyMaterializer implements OntologyMaterializerContract {
   readonly edits = { commit: (input: OntologyEditCommit) => commitEdits(this.context, input) }
   readonly projections = {
     replace: (input: ProjectionSourceReplacement) => replaceProjection(this.context, input),
+    finishRun: (input: ProjectionRunFinishInput) => finishProjectionRun(this.context, input),
   }
   readonly telemetry = { append: (input: TelemetryAppend) => appendTelemetry(this.context, input) }
 

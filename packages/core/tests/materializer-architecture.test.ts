@@ -77,4 +77,12 @@ describe("materializer architecture", () => {
       )
     }
   })
+
+  test("keeps projection-run terminal policy inside its Materializer coordinator", async () => {
+    for (const file of await typescriptFiles(join(sourceRoot, "materializer"))) {
+      if (file.endsWith("/projections/finish-run.ts")) continue
+      const contents = await readFile(file, "utf8")
+      expect(contents, relative(sourceRoot, file)).not.toMatch(/\.finishMaterialization\s*\(/)
+    }
+  })
 })

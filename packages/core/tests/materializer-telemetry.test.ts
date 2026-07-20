@@ -16,6 +16,112 @@ const series = {
 }
 
 describe("ontology materializer telemetry", () => {
+  test("finishes telemetry only after exhaustion or an explicit empty input", async () => {
+    const { materializer, storage, projections } = createMaterializerFixture()
+    const datasetVersion = {
+      datasetId: "readings",
+      versionId: "telemetry-finish",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }
+    const emptyExecution = await claimProjectionExecution(storage, projections, {
+      runId: "telemetry-empty-finish-run",
+      projectionId: "temperatures",
+      protocol: "telemetry",
+      datasetVersion,
+      fixedBatchSize: 10,
+    })
+    const emptyFinish = {
+      protocol: "telemetry" as const,
+      source: { projectionId: "temperatures" },
+      datasetVersion,
+      execution: emptyExecution,
+      status: "succeeded" as const,
+    }
+
+    await expect(materializer.projections.finishRun(emptyFinish)).rejects.toThrow(
+      "before its input is exhausted"
+    )
+    const finishMaterialization = storage.projectionRuns.finishMaterialization.bind(
+      storage.projectionRuns
+    )
+    let rejectFinish = true
+    storage.projectionRuns.finishMaterialization = async (input) => {
+      if (rejectFinish) throw new Error("projection run finish failure")
+      return finishMaterialization(input)
+    }
+    await expect(
+      materializer.projections.finishRun({ ...emptyFinish, emptyInput: true })
+    ).rejects.toThrow("projection run finish failure")
+    await expect(
+      storage.projectionRuns.getById({ projectId: "project", id: emptyExecution.projectionRunId })
+    ).resolves.toMatchObject({
+      status: "running",
+      telemetryCheckpoint: { inputExhausted: false },
+    })
+    rejectFinish = false
+    await expect(
+      materializer.projections.finishRun({ ...emptyFinish, emptyInput: true })
+    ).resolves.toBeUndefined()
+    await expect(
+      storage.projectionRuns.getById({ projectId: "project", id: emptyExecution.projectionRunId })
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      telemetryCheckpoint: { nextRowOffset: 0, inputExhausted: true },
+    })
+    await expect(
+      storage.ontology.commits.getByOrigin({
+        projectId: "project",
+        origin: {
+          kind: "telemetry",
+          projectionRunId: emptyExecution.projectionRunId,
+          batchOrdinal: 0,
+        },
+      })
+    ).resolves.toBeNull()
+
+    await materializer.projections.replace(
+      replacement("telemetry-finish-object", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
+    )
+    const execution = await claimProjectionExecution(storage, projections, {
+      runId: "telemetry-finish-run",
+      projectionId: "temperatures",
+      protocol: "telemetry",
+      datasetVersion,
+      fixedBatchSize: 1,
+    })
+    const source = (batchOrdinal: number, inputExhausted: boolean) => ({
+      kind: "projection" as const,
+      projection: { projectionId: "temperatures" },
+      datasetVersion,
+      execution,
+      batchOrdinal,
+      sourceRowCount: 1,
+      inputExhausted,
+    })
+    await materializer.telemetry.append({
+      source: source(0, false),
+      points: [{ series, value: 20, at: "2026-01-01T01:00:00Z" }],
+    })
+    const finish = {
+      protocol: "telemetry" as const,
+      source: { projectionId: "temperatures" },
+      datasetVersion,
+      execution,
+      status: "succeeded" as const,
+    }
+    await expect(
+      materializer.projections.finishRun({ ...finish, emptyInput: true })
+    ).rejects.toThrow("cannot declare empty input after progress")
+    await expect(materializer.projections.finishRun(finish)).rejects.toThrow(
+      "before its input is exhausted"
+    )
+    await materializer.telemetry.append({
+      source: source(1, true),
+      points: [{ series, value: 21, at: "2026-01-01T02:00:00Z" }],
+    })
+    await expect(materializer.projections.finishRun(finish)).resolves.toBeUndefined()
+  })
+
   test("classifies a large point batch once while bounding provider pages and plan chunks", async () => {
     let maxCoreExistingPoints = 0
     const { materializer, storage } = createMaterializerFixture({

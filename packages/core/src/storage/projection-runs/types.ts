@@ -199,6 +199,9 @@ export interface AdvanceProjectionTelemetryCheckpointInput
   readonly inputExhausted: boolean
 }
 
+/** Marks a telemetry run's immutable input as empty without creating an ontology batch commit. */
+export type CompleteEmptyProjectionTelemetryInput = AssertProjectionMaterializationExecutionInput
+
 export type UpdateProjectionRunInput = {
   readonly id: string
   readonly projectId: string
@@ -275,6 +278,10 @@ export interface ProjectionRunStorage {
   advanceTelemetryCheckpoint?(
     input: AdvanceProjectionTelemetryCheckpointInput
   ): Promise<ProjectionMaterializationRunRecord>
+  /** @internal Used only by the Materializer's guarded projection-run finalizer. */
+  completeEmptyTelemetryInput?(
+    input: CompleteEmptyProjectionTelemetryInput
+  ): Promise<ProjectionMaterializationRunRecord>
   /**
    * @deprecated Unfenced lifecycle retained while workers and providers migrate.
    * TODO(ontology-materializer/phase-6): Remove with the transitional capability below.
@@ -311,6 +318,9 @@ export interface ProjectionMaterializationRunStorage extends ProjectionRunStorag
   advanceTelemetryCheckpoint(
     input: AdvanceProjectionTelemetryCheckpointInput
   ): Promise<ProjectionMaterializationRunRecord>
+  completeEmptyTelemetryInput(
+    input: CompleteEmptyProjectionTelemetryInput
+  ): Promise<ProjectionMaterializationRunRecord>
 }
 
 export function isProjectionMaterializationRunStorage(
@@ -322,6 +332,7 @@ export function isProjectionMaterializationRunStorage(
     typeof storage.assertMaterializationExecution === "function" &&
     typeof storage.updateMaterialization === "function" &&
     typeof storage.finishMaterialization === "function" &&
-    typeof storage.advanceTelemetryCheckpoint === "function"
+    typeof storage.advanceTelemetryCheckpoint === "function" &&
+    typeof storage.completeEmptyTelemetryInput === "function"
   )
 }

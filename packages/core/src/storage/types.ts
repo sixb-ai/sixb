@@ -136,6 +136,7 @@ export { PipelineRunError } from "./pipeline-runs"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
   AssertProjectionMaterializationExecutionInput,
+  CompleteEmptyProjectionTelemetryInput,
   FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
   ListProjectionRunsInput,
@@ -259,6 +260,10 @@ export interface Storage {
   rules?: RulesStorage
   fileUploadSessions?: FileUploadSessionStore
 
+  /**
+   * Runs every capability exposed on `tx` on one atomic transaction/connection. If the callback
+   * throws, writes performed through any of those capabilities must roll back together.
+   */
   transaction<T>(
     run: (tx: Storage) => Promise<T> | T,
     options?: StorageTransactionOptions
