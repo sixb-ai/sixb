@@ -250,6 +250,7 @@ export type {
   GetActiveOntologySourceInput,
   GetOntologyCommitByIdempotencyKeyInput,
   GetOntologyCommitByIdInput,
+  GetOntologyCommitByOriginInput,
   ListOntologyCommitsInput,
   ListOntologyCommitsResult,
   MarkSourceMaterializationReadyInput,
@@ -275,6 +276,7 @@ export type {
   MaterializationWorkEntityKind,
   MaterializationWorkPage,
   MaterializationWorkRecord,
+  OntologyCommitOriginSelector,
   OntologyCommitRecord,
   OntologyCommitRunSelector,
   OntologyCommitStorage,
@@ -335,6 +337,7 @@ export { InMemoryPipelineRunStorage, PipelineRunError } from "./pipeline-runs"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
   AssertProjectionMaterializationExecutionInput,
+  CompleteEmptyProjectionTelemetryInput,
   FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
   ListLatestProjectionRunsInput,

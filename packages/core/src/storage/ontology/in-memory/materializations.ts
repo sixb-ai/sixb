@@ -79,12 +79,14 @@ import type {
 } from "../sources"
 import {
   commitKey,
+  commitOriginKey,
   type InMemoryOntologyState,
   type InMemoryOntologyStorageTestHooks,
   type InMemorySourceMaterialization,
   type InMemoryStoredLinkOverride,
   type InMemoryStoredObjectOverride,
   idempotencyKey,
+  ontologyCommitOriginSelector,
   outboxKey,
   projectEntityKey,
   sourceMaterializationKey,
@@ -696,6 +698,9 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
   async finalize(input: FinalizeMaterializationInput): Promise<ApplyMaterializationResult> {
     const session = this.requireSession(input.session)
     const { commit } = session.header
+    // Recheck reservations at the durable boundary: callers may open more than one session in the
+    // same transaction before either one finalizes.
+    this.assertCommitAbsent(session.header)
     assertFinalizationCorrelations(session, input.finalization, this.state, this.objects)
     this.hooks.beforeWrite?.("finalize", session.writeOrdinal++)
     for (const activation of input.finalization.sourceActivations) {
@@ -753,6 +758,10 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       idempotencyKey(commit.projectId, commit.idempotencyKey),
       commit.id
     )
+    const origin = ontologyCommitOriginSelector(commit.origin)
+    if (origin) {
+      this.state.commitIdByOrigin.set(commitOriginKey(commit.projectId, origin), commit.id)
+    }
     session.active = false
     session.work.clear()
     session.workUniqueKeys.clear()
@@ -912,6 +921,16 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       throw new MaterializationConflictError(
         "idempotency",
         "Ontology idempotency key already exists."
+      )
+    }
+    const origin = ontologyCommitOriginSelector(header.commit.origin)
+    if (
+      origin &&
+      this.state.commitIdByOrigin.has(commitOriginKey(header.commit.projectId, origin))
+    ) {
+      throw new MaterializationConflictError(
+        "run-correlation",
+        "Ontology commit origin already has an authoritative commit."
       )
     }
   }

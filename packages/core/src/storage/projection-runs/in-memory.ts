@@ -5,6 +5,7 @@ import { ProjectionRunError } from "./errors"
 import {
   type AdvanceProjectionTelemetryCheckpointInput,
   type AssertProjectionMaterializationExecutionInput,
+  type CompleteEmptyProjectionTelemetryInput,
   type FinishProjectionMaterializationInput,
   type FinishProjectionRunInput,
   type ListLatestProjectionRunsInput,
@@ -411,6 +412,15 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
   ): Promise<ProjectionRunRecord> {
     return this.runRootOperation(() => {
       const existing = this.requireMaterializationExecution(input)
+      if (
+        input.status === "succeeded" &&
+        existing.materializationProtocol === "telemetry" &&
+        !existing.telemetryCheckpoint?.inputExhausted
+      ) {
+        throw new ProjectionRunError(
+          `[Sixb] Telemetry projection run '${existing.id}' cannot succeed before its input is exhausted.`
+        )
+      }
       const withCounters = applyCounters(existing, input)
       const next: StoredProjectionRunRecord = {
         ...withCounters,
@@ -470,6 +480,35 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
           nextRowOffset: safeAdd(checkpoint.nextRowOffset, input.batchRowCount, "nextRowOffset"),
           inputExhausted: input.inputExhausted,
         },
+      }
+      this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
+      return cloneProjectionRunRecord(next)
+    })
+  }
+
+  async completeEmptyTelemetryInput(
+    input: CompleteEmptyProjectionTelemetryInput
+  ): Promise<ProjectionMaterializationRunRecord> {
+    return this.runRootOperation(() => {
+      const existing = this.requireMaterializationExecution(input)
+      const checkpoint = existing.telemetryCheckpoint
+      if (existing.materializationProtocol !== "telemetry" || !checkpoint) {
+        throw new ProjectionRunError(
+          `[Sixb] Projection run '${existing.id}' does not have a telemetry checkpoint.`
+        )
+      }
+      if (
+        checkpoint.nextBatchOrdinal !== 0 ||
+        checkpoint.nextRowOffset !== 0 ||
+        checkpoint.inputExhausted
+      ) {
+        throw new ProjectionRunError(
+          `[Sixb] Telemetry projection run '${existing.id}' cannot declare empty input after progress.`
+        )
+      }
+      const next: ProjectionMaterializationRunRecord = {
+        ...existing,
+        telemetryCheckpoint: { ...checkpoint, inputExhausted: true },
       }
       this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
       return cloneProjectionRunRecord(next)

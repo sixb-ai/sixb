@@ -31,6 +31,7 @@ export type {
   ProjectionCommitResult,
   ProjectionEntityRef,
   ProjectionExecution,
+  ProjectionRunFinishInput,
   ProjectionSourceAssertion,
   ProjectionSourceEntry,
   ProjectionSourceRef,

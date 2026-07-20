@@ -182,27 +182,41 @@ describe("projection run materialization ownership", () => {
     ).rejects.toThrow("already exhausted")
   })
 
-  test("does not require replacement commit state on the run", async () => {
+  test("requires exhausted telemetry state before storage-level success", async () => {
     const storage = new InMemoryProjectionRunStorage({ executionToken: () => "execution" })
     await storage.startOrReclaimMaterialization({
-      id: "replacement-run",
+      id: "telemetry-run",
       projectId: "project",
-      identity: replacementIdentity,
+      identity: telemetryIdentity,
       objectTypeId: "Device",
+      fixedBatchSize: 10,
     })
 
     await expect(
       storage.finishMaterialization({
-        id: "replacement-run",
+        id: "telemetry-run",
         projectId: "project",
-        identity: replacementIdentity,
+        identity: telemetryIdentity,
+        executionToken: "execution",
+        status: "succeeded",
+      })
+    ).rejects.toThrow("before its input is exhausted")
+
+    await storage.completeEmptyTelemetryInput({
+      id: "telemetry-run",
+      projectId: "project",
+      identity: telemetryIdentity,
+      executionToken: "execution",
+    })
+    await expect(
+      storage.finishMaterialization({
+        id: "telemetry-run",
+        projectId: "project",
+        identity: telemetryIdentity,
         executionToken: "execution",
         status: "succeeded",
       })
     ).resolves.toMatchObject({ status: "succeeded" })
-    const run = await storage.getById({ projectId: "project", id: "replacement-run" })
-    expect(run).not.toHaveProperty("replacementCommitId")
-    expect(run).not.toHaveProperty("materializationCounters")
   })
 
   test("rejects legacy update and finish for fenced runs", async () => {

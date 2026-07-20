@@ -18,6 +18,20 @@ export interface GetOntologyCommitByIdInput {
   readonly id: string
 }
 
+export type OntologyCommitOriginSelector =
+  | { readonly kind: "action"; readonly actionRunId: string }
+  | { readonly kind: "projection"; readonly projectionRunId: string }
+  | {
+      readonly kind: "telemetry"
+      readonly projectionRunId: string
+      readonly batchOrdinal: number
+    }
+
+export interface GetOntologyCommitByOriginInput {
+  readonly projectId: string
+  readonly origin: OntologyCommitOriginSelector
+}
+
 export type OntologyCommitRunSelector =
   | { readonly kind: "action"; readonly id: string }
   | { readonly kind: "projection"; readonly id: string }
@@ -110,6 +124,8 @@ export interface OntologyCommitStorage {
     input: GetOntologyCommitByIdempotencyKeyInput
   ): Promise<OntologyCommitRecord | null>
   getById(input: GetOntologyCommitByIdInput): Promise<OntologyCommitRecord | null>
+  /** Exact authoritative lookup used by Action/projection lifecycle coordination. */
+  getByOrigin(input: GetOntologyCommitByOriginInput): Promise<OntologyCommitRecord | null>
   /** Reads authoritative commit history, optionally correlated to an Action or projection run. */
   list(input: ListOntologyCommitsInput): Promise<ListOntologyCommitsResult>
 }

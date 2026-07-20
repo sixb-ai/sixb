@@ -1,4 +1,5 @@
-import type { OntologyCommitRecord } from "../commits"
+import type { OntologyMaterializationOrigin } from "../../../materialization/model"
+import type { OntologyCommitOriginSelector, OntologyCommitRecord } from "../commits"
 import type {
   MaterializationWorkRecord,
   StoredLinkOverride,
@@ -24,6 +25,7 @@ export interface InMemoryStoredLinkOverride extends StoredLinkOverride {
 export interface InMemoryOntologyState {
   readonly commitsById: Map<string, OntologyCommitRecord>
   readonly commitIdByIdempotency: Map<string, string>
+  readonly commitIdByOrigin: Map<string, string>
   readonly sourceMaterializations: Map<string, InMemorySourceMaterialization>
   readonly objectOverrides: Map<string, InMemoryStoredObjectOverride>
   readonly linkOverrides: Map<string, InMemoryStoredLinkOverride>
@@ -42,6 +44,7 @@ export function createInMemoryOntologyState(): InMemoryOntologyState {
   return {
     commitsById: new Map(),
     commitIdByIdempotency: new Map(),
+    commitIdByOrigin: new Map(),
     sourceMaterializations: new Map(),
     objectOverrides: new Map(),
     linkOverrides: new Map(),
@@ -79,6 +82,34 @@ export function commitKey(projectId: string, commitId: string): string {
 
 export function idempotencyKey(projectId: string, key: string): string {
   return JSON.stringify([projectId, key])
+}
+
+export function ontologyCommitOriginSelector(
+  origin: OntologyMaterializationOrigin
+): OntologyCommitOriginSelector | null {
+  if (origin.kind === "action") return { kind: "action", actionRunId: origin.runId }
+  if (origin.kind === "projection") {
+    return { kind: "projection", projectionRunId: origin.projectionRunId }
+  }
+  if (origin.kind === "telemetry" && origin.source.kind === "projection") {
+    return {
+      kind: "telemetry",
+      projectionRunId: origin.source.projectionRunId,
+      batchOrdinal: origin.source.batchOrdinal,
+    }
+  }
+  return null
+}
+
+export function commitOriginKey(projectId: string, origin: OntologyCommitOriginSelector): string {
+  switch (origin.kind) {
+    case "action":
+      return JSON.stringify([projectId, origin.kind, origin.actionRunId])
+    case "projection":
+      return JSON.stringify([projectId, origin.kind, origin.projectionRunId])
+    case "telemetry":
+      return JSON.stringify([projectId, origin.kind, origin.projectionRunId, origin.batchOrdinal])
+  }
 }
 
 export function outboxKey(projectId: string, eventId: string): string {
