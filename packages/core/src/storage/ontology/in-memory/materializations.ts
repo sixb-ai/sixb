@@ -1949,49 +1949,122 @@ function assertFinalizationCorrelations(
 }
 
 function projectionCountsCorrelate(session: SessionState, actual: EffectiveChangeCounts): boolean {
-  const expected = {
+  const expected = deriveExpectedProjectionCounts(session)
+  if (expected === null) return false
+
+  return effectiveChangeCountsMatch(actual, expected)
+}
+
+interface ClassifiedProjectionCounts {
+  objects: number
+  links: number
+}
+
+interface AppliedProjectionChangeCounts {
+  objectsCreated: number
+  objectsUpdated: number
+  objectsDeleted: number
+  linksCreated: number
+  linksUpdated: number
+  linksDeleted: number
+}
+
+const effectiveChangeCountKeys = [
+  "objectsCreated",
+  "objectsUpdated",
+  "objectsDeleted",
+  "objectsUnchanged",
+  "linksCreated",
+  "linksUpdated",
+  "linksDeleted",
+  "linksUnchanged",
+] as const satisfies readonly (keyof EffectiveChangeCounts)[]
+
+function deriveExpectedProjectionCounts(session: SessionState): EffectiveChangeCounts | null {
+  const classified = countClassifiedProjectionEntities(session)
+  const applied = countAppliedProjectionChanges(session)
+  const objectsUnchanged = remainingClassifiedCount(
+    classified.objects,
+    applied.objectsCreated,
+    applied.objectsUpdated,
+    applied.objectsDeleted
+  )
+  const linksUnchanged = remainingClassifiedCount(
+    classified.links,
+    applied.linksCreated,
+    applied.linksUpdated,
+    applied.linksDeleted
+  )
+
+  if (objectsUnchanged < 0 || linksUnchanged < 0) return null
+
+  return { ...applied, objectsUnchanged, linksUnchanged }
+}
+
+function countClassifiedProjectionEntities(session: SessionState): ClassifiedProjectionCounts {
+  const counts = { objects: 0, links: 0 }
+
+  for (const record of session.work.values()) {
+    if (record.kind !== "classification") continue
+
+    if (record.entityKind === "object") counts.objects += 1
+    if (record.entityKind === "link") counts.links += 1
+  }
+
+  return counts
+}
+
+function countAppliedProjectionChanges(session: SessionState): AppliedProjectionChangeCounts {
+  const counts: AppliedProjectionChangeCounts = {
     objectsCreated: 0,
     objectsUpdated: 0,
     objectsDeleted: 0,
-    objectsUnchanged: 0,
     linksCreated: 0,
     linksUpdated: 0,
     linksDeleted: 0,
-    linksUnchanged: 0,
   }
-  let classifiedObjects = 0
-  let classifiedLinks = 0
-  for (const record of session.work.values()) {
-    if (record.kind !== "classification") continue
-    if (record.entityKind === "object") classifiedObjects += 1
-    if (record.entityKind === "link") classifiedLinks += 1
-  }
+
   for (const work of session.applyWork) {
     const { item } = work
-    if (item.kind === "object-upsert") {
-      if (item.value.expected.exists) expected.objectsUpdated += 1
-      else expected.objectsCreated += 1
-    } else if (item.kind === "object-delete") {
-      expected.objectsDeleted += 1
-    } else if (item.kind === "link-upsert") {
-      if (item.value.expected.exists) expected.linksUpdated += 1
-      else expected.linksCreated += 1
-    } else if (item.kind === "link-delete") {
-      expected.linksDeleted += 1
+
+    switch (item.kind) {
+      case "object-upsert":
+        if (item.value.expected.exists) counts.objectsUpdated += 1
+        else counts.objectsCreated += 1
+        break
+      case "object-delete":
+        counts.objectsDeleted += 1
+        break
+      case "link-upsert":
+        if (item.value.expected.exists) counts.linksUpdated += 1
+        else counts.linksCreated += 1
+        break
+      case "link-delete":
+        counts.linksDeleted += 1
+        break
     }
   }
-  expected.objectsUnchanged =
-    classifiedObjects - expected.objectsCreated - expected.objectsUpdated - expected.objectsDeleted
-  expected.linksUnchanged =
-    classifiedLinks - expected.linksCreated - expected.linksUpdated - expected.linksDeleted
-  return (
-    expected.objectsUnchanged >= 0 &&
-    expected.linksUnchanged >= 0 &&
-    (Object.keys(expected) as (keyof EffectiveChangeCounts)[]).every(
-      (key) =>
-        Number.isSafeInteger(actual[key]) && actual[key] >= 0 && actual[key] === expected[key]
-    )
-  )
+
+  return counts
+}
+
+function remainingClassifiedCount(
+  classified: number,
+  created: number,
+  updated: number,
+  deleted: number
+): number {
+  return classified - created - updated - deleted
+}
+
+function effectiveChangeCountsMatch(
+  actual: EffectiveChangeCounts,
+  expected: EffectiveChangeCounts
+): boolean {
+  return effectiveChangeCountKeys.every((key) => {
+    const count = actual[key]
+    return Number.isSafeInteger(count) && count >= 0 && count === expected[key]
+  })
 }
 
 function telemetryCountsCorrelate(
