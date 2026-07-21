@@ -48,7 +48,12 @@ export interface SixbRunFailedContext {
   readonly run: SixbFailedRun
 }
 
-/** Context supplied to the global Sixb error handler. */
+/**
+ * Context supplied to the global Sixb error handler.
+ *
+ * V1 emits terminal `run.failed` notifications only. Additional error context types may be added
+ * later.
+ */
 export type SixbErrorContext = SixbRunFailedContext
 
 /** Observes terminal failed runs without changing their outcome. */
