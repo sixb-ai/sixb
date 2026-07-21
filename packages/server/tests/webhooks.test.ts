@@ -556,6 +556,41 @@ describe("webhook routes", () => {
     expect(reports.every((report) => report.context.projectId === "test-project")).toBe(true)
     expect(new Set(reports.map((report) => report.context.run.runId)).size).toBe(4)
   })
+
+  test("retries idempotent deliveries after a returned server failure", async () => {
+    let invocations = 0
+    const connector = defineConnector("github", {
+      type: "test",
+      webhooks: [
+        defineWebhook("retryable")
+          .post()
+          .json()
+          .idempotencyKey(() => "delivery-1")
+          .handle(() => {
+            invocations += 1
+            return { status: 503, body: { error: "Retry later" } }
+          }),
+      ],
+      connect() {
+        return {}
+      },
+    })
+    const app = createWebhookApp([connector])
+    const dispatch = () =>
+      app.fetch(
+        new Request("http://localhost/api/webhooks/github/retryable", {
+          method: "POST",
+          body: JSON.stringify({ ok: true }),
+        })
+      )
+
+    const first = await dispatch()
+    const retry = await dispatch()
+
+    expect(first.status).toBe(503)
+    expect(retry.status).toBe(503)
+    expect(invocations).toBe(2)
+  })
 })
 
 function createWebhookApp(

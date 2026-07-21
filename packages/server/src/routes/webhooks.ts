@@ -286,13 +286,28 @@ async function dispatchWebhookRun(
     return { error: "Webhook handler failed" }
   }
 
+  const responseStatus = getWebhookResponseStatus(response)
+  const runStatus = responseStatus >= 200 && responseStatus <= 299 ? "succeeded" : "failed"
+  const failureMessage = `Webhook handler returned HTTP ${responseStatus}`
+  const responseError = runStatus === "failed" ? failureMessage : undefined
+  const shouldRetryDelivery =
+    runStatus === "failed" && (responseStatus < 400 || responseStatus >= 500)
+
   try {
     if (deliveryKey) {
-      // Mark completion only after the synchronous handler has succeeded.
-      await sixb.storage.webhookDeliveries?.complete({
-        ...deliveryKey,
-        completedAt: new Date().toISOString(),
-      })
+      const finalizedAt = new Date().toISOString()
+      if (shouldRetryDelivery) {
+        await sixb.storage.webhookDeliveries?.fail({
+          ...deliveryKey,
+          failedAt: finalizedAt,
+          error: failureMessage,
+        })
+      } else {
+        await sixb.storage.webhookDeliveries?.complete({
+          ...deliveryKey,
+          completedAt: finalizedAt,
+        })
+      }
     }
   } catch (error) {
     reportFailure(error)
@@ -310,10 +325,8 @@ async function dispatchWebhookRun(
     return { error: "Webhook delivery completion failed" }
   }
 
-  const responseStatus = getWebhookResponseStatus(response)
-  const runStatus = responseStatus >= 200 && responseStatus <= 299 ? "succeeded" : "failed"
-  if (runStatus === "failed" && (responseStatus < 400 || responseStatus >= 500)) {
-    reportFailure(new Error(`Webhook handler returned HTTP ${responseStatus}`))
+  if (shouldRetryDelivery) {
+    reportFailure(new Error(failureMessage))
   }
   await finishWebhookRun({
     sixb,
@@ -323,7 +336,7 @@ async function dispatchWebhookRun(
     responseStatus,
     idempotencyKey,
     deliveryClaimResult,
-    error: runStatus === "failed" ? `Webhook handler returned HTTP ${responseStatus}` : undefined,
+    error: responseError,
   })
 
   return applyWebhookResponse(set, response)
