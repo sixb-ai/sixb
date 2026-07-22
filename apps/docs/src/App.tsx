@@ -240,28 +240,32 @@ function TopBar({
         >
           <Menu />
         </Button>
-        <a
-          href="/"
-          onClick={intercept(navigate, "/")}
-          aria-label="Sixb Docs home"
-          className="mr-auto flex items-center gap-2.5 tracking-tight"
-        >
-          <svg
-            viewBox="0 0 1080 1080"
-            className="size-[22px] shrink-0 text-foreground"
-            fill="currentColor"
-            aria-hidden="true"
+        <div className="mr-auto flex items-center gap-2.5 tracking-tight">
+          <a
+            href="https://sixb.ai"
+            aria-label="Sixb website"
+            className="flex items-center gap-2 font-semibold text-foreground"
           >
-            <path d="M15.94,471.64l67.46,455.36,599.79-189.73,380.88-355.72L368.99,153C243.22,266.91,122.33,375.93,15.94,471.64Z" />
-          </svg>
+            <svg
+              viewBox="0 0 1080 1080"
+              className="size-[22px] shrink-0 text-foreground"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M15.94,471.64l67.46,455.36,599.79-189.73,380.88-355.72L368.99,153C243.22,266.91,122.33,375.93,15.94,471.64Z" />
+            </svg>
+            <span>Sixb</span>
+          </a>
           <span
             className="select-none text-lg font-light text-muted-foreground/40"
             aria-hidden="true"
           >
             /
           </span>
-          <span className="font-semibold text-foreground">Docs</span>
-        </a>
+          <a href="/" onClick={intercept(navigate, "/")} className="font-semibold text-foreground">
+            Docs
+          </a>
+        </div>
         <button
           type="button"
           onClick={onSearch}
@@ -762,8 +766,8 @@ function Landing({ navigate }: { navigate: Navigate }) {
             Build operational software, end to end
           </h1>
           <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
-            The TypeScript framework for operational software. One typed ontology powers your data,
-            APIs, and apps.
+            Sixb is the TypeScript framework for operational software. One typed ontology powers
+            your data, APIs, and apps.
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
             <Button asChild>

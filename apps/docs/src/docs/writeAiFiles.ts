@@ -44,8 +44,9 @@ for (const doc of docs) {
   full += `${markdown.trim()}\n\n---\n\n`
 }
 
-// sitemap.xml — one entry per rendered route.
-const urls = docs.map((doc) => `  <url><loc>${baseUrl}${doc.routePath}</loc></url>`).join("\n")
+// sitemap.xml — the docs homepage plus one entry per rendered documentation route.
+const sitemapRoutes = ["/", ...docs.map((doc) => doc.routePath)]
+const urls = sitemapRoutes.map((route) => `  <url><loc>${baseUrl}${route}</loc></url>`).join("\n")
 const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`
 
 // robots.txt — allow all (we want crawlers and LLMs to read the docs), point at the sitemap.
