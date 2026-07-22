@@ -1,4 +1,10 @@
 import type { EventActor } from "../../events/envelope"
+import type { LinkDeletedEventPayload, LinkMutationEventPayload } from "../../events/types/links"
+import type {
+  ObjectDeletedEventPayload,
+  ObjectMutationEventPayload,
+} from "../../events/types/objects"
+import type { TelemetryAppendedEventPayload } from "../../events/types/telemetry"
 import type { JsonValue } from "../../json"
 import type {
   OntologyMaterializationOrigin,
@@ -17,26 +23,41 @@ interface OntologyMaterializationEventBase {
   readonly partitionKey: string
 }
 
+interface ReadonlyMaterializationPropertyChanges {
+  readonly propertyChanges: OntologyMaterializationPropertyChangeMap
+}
+
+type ReadonlyDeletedMaterializationPayload<TPayload> = Readonly<
+  Omit<TPayload, "propertyChanges"> & ReadonlyMaterializationPropertyChanges
+>
+
+type ReadonlyObjectMutationMaterializationPayload = Readonly<
+  Omit<ObjectMutationEventPayload<JsonValue>, "properties" | "propertyChanges"> &
+    ReadonlyMaterializationPropertyChanges & {
+      readonly properties: Readonly<Record<string, JsonValue>>
+    }
+>
+
+type ReadonlyLinkMutationMaterializationPayload = Readonly<
+  Omit<LinkMutationEventPayload<JsonValue>, "properties" | "propertyChanges"> &
+    ReadonlyMaterializationPropertyChanges & {
+      readonly properties?: Readonly<Record<string, JsonValue>>
+    }
+>
+
 type OntologyObjectMaterializationEvent = OntologyMaterializationEventBase &
   (
     | {
         readonly type: "object.created" | "object.updated"
         readonly topic: "objects"
-        readonly payload: {
-          readonly objectTypeId: string
-          readonly primaryId: string
-          readonly properties: Readonly<Record<string, JsonValue>>
-          readonly propertyChanges: OntologyMaterializationPropertyChangeMap
-        }
+        readonly payload: ReadonlyObjectMutationMaterializationPayload
       }
     | {
         readonly type: "object.deleted"
         readonly topic: "objects"
-        readonly payload: {
-          readonly objectTypeId: string
-          readonly primaryId: string
-          readonly propertyChanges: OntologyMaterializationPropertyChangeMap
-        }
+        readonly payload: ReadonlyDeletedMaterializationPayload<
+          ObjectDeletedEventPayload<JsonValue>
+        >
       }
   )
 
@@ -45,41 +66,19 @@ type OntologyLinkMaterializationEvent = OntologyMaterializationEventBase &
     | {
         readonly type: "link.created" | "link.updated"
         readonly topic: "links"
-        readonly payload: {
-          readonly sourceTypeId: string
-          readonly sourceId: string
-          readonly linkId: string
-          readonly targetTypeId: string
-          readonly targetId: string
-          readonly properties?: Readonly<Record<string, JsonValue>>
-          readonly propertyChanges: OntologyMaterializationPropertyChangeMap
-        }
+        readonly payload: ReadonlyLinkMutationMaterializationPayload
       }
     | {
         readonly type: "link.deleted"
         readonly topic: "links"
-        readonly payload: {
-          readonly sourceTypeId: string
-          readonly sourceId: string
-          readonly linkId: string
-          readonly targetTypeId: string
-          readonly targetId: string
-          readonly propertyChanges: OntologyMaterializationPropertyChangeMap
-        }
+        readonly payload: ReadonlyDeletedMaterializationPayload<LinkDeletedEventPayload<JsonValue>>
       }
   )
 
 type OntologyTelemetryMaterializationEvent = OntologyMaterializationEventBase & {
   readonly type: "telemetry.appended"
   readonly topic: "telemetry"
-  readonly payload: {
-    readonly objectTypeId: string
-    readonly objectId: string
-    readonly propertyId: string
-    readonly value: JsonValue
-    readonly unit?: string
-    readonly at: string
-  }
+  readonly payload: Readonly<TelemetryAppendedEventPayload<JsonValue>>
 }
 
 /** JSON-safe post-commit facts persisted in the ontology outbox. */

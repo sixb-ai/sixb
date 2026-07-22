@@ -1,8 +1,5 @@
-import { stableJsonStringify } from "../../json"
 import { MaterializationValidationError } from "../../materialization/errors"
 import type {
-  EffectiveLinkSnapshot,
-  EffectiveObjectSnapshot,
   LinkOverride,
   ObjectOverride,
   OntologyLinkRef,
@@ -25,8 +22,6 @@ import {
   resolveEffectiveLink,
   resolveEffectiveObject,
 } from "../effective/resolve"
-import type { TimedCommitIdentity } from "../shared/identity"
-
 export interface WorkingObject {
   ref: OntologyObjectRef
   source: MaterializationObjectState["source"]
@@ -115,54 +110,6 @@ export function resolveLink(
     sourceEndpointExists: Boolean(source && resolveObject(ontology, source)),
     targetEndpointExists: Boolean(target && resolveObject(ontology, target)),
   })
-}
-
-export function provisionalObjectSnapshot(
-  working: WorkingObject,
-  resolved: ResolvedObjectValue,
-  identity: TimedCommitIdentity
-): EffectiveObjectSnapshot {
-  return {
-    ...resolved,
-    version: working.before?.version ?? 1,
-    createdAt: working.before?.createdAt ?? identity.committedAt,
-    updatedAt: identity.committedAt,
-    lastCommitId: identity.commitId,
-  }
-}
-
-export function resultingObjectSnapshot(
-  working: WorkingObject,
-  resolved: ResolvedObjectValue,
-  identity: TimedCommitIdentity
-): EffectiveObjectSnapshot {
-  if (
-    working.before &&
-    stableJsonStringify(working.before.properties) === stableJsonStringify(resolved.properties)
-  ) {
-    return working.before
-  }
-  if (!working.before) return provisionalObjectSnapshot(working, resolved, identity)
-  return {
-    ...resolved,
-    version: working.before.version + 1,
-    createdAt: working.before.createdAt,
-    updatedAt: identity.committedAt,
-    lastCommitId: identity.commitId,
-  }
-}
-
-export function provisionalLinkSnapshot(
-  working: WorkingLink,
-  resolved: ResolvedLinkValue,
-  identity: TimedCommitIdentity
-): EffectiveLinkSnapshot {
-  return {
-    ...resolved,
-    createdAt: working.before?.createdAt ?? identity.committedAt,
-    updatedAt: identity.committedAt,
-    lastCommitId: identity.commitId,
-  }
 }
 
 export function distinctCardinalityOneScopes(

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { ProjectionExecution } from "../src/materialization/model"
 import {
   createInMemoryOntologyState,
   sourceMaterializationKey,
@@ -6,7 +7,6 @@ import {
 import { InMemoryOntologySourceStorage } from "../src/storage/ontology/in-memory/sources"
 import type {
   BeginSourceMaterializationInput,
-  SourceMaterializationExecution,
   StageSourceAssertion,
 } from "../src/storage/ontology/sources"
 
@@ -33,10 +33,7 @@ function fixture() {
       }
     }
   )
-  const claim = (
-    projectionRunId: string,
-    executionToken: string
-  ): SourceMaterializationExecution => {
+  const claim = (projectionRunId: string, executionToken: string): ProjectionExecution => {
     currentTokens.set(projectionRunId, executionToken)
     return { projectionRunId, executionToken }
   }
@@ -45,7 +42,7 @@ function fixture() {
 
 function beginInput(
   materializationId: string,
-  execution: SourceMaterializationExecution,
+  execution: ProjectionExecution,
   createdAt = "2026-02-01T00:00:00.000Z"
 ): BeginSourceMaterializationInput {
   return {

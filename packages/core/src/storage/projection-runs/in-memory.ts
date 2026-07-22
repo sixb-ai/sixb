@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import type { ProjectionMaterializationIdentity } from "../../materialization/model"
 import type { AssertSourceMaterializationExecutionInput } from "../ontology/sources"
 import { latestStartedAtByOwnerId } from "../run-listing"
 import { ProjectionRunError } from "./errors"
@@ -16,7 +17,6 @@ import {
   type ProjectionMaterializationRunRecord,
   type ProjectionMaterializationRunStorage,
   type ProjectionRunCounters,
-  type ProjectionRunMaterializationIdentity,
   type ProjectionRunObjectTypes,
   type ProjectionRunRecord,
   projectionRunObjectTypesVisible,
@@ -126,7 +126,7 @@ function assertLegacyMutationAllowed(
   }
 }
 
-function assertIdentity(identity: ProjectionRunMaterializationIdentity): void {
+function assertIdentity(identity: ProjectionMaterializationIdentity): void {
   assertNonEmpty(identity.projectionId, "projectionId")
   if (
     identity.projectionKind !== "object" &&
@@ -179,7 +179,7 @@ function assertObjectTypes(
 
 function assertMaterializationIdentityMatches(
   record: ProjectionRunRecord,
-  identity: ProjectionRunMaterializationIdentity
+  identity: ProjectionMaterializationIdentity
 ): void {
   if (
     record.projectionId !== identity.projectionId ||

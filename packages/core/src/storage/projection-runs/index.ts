@@ -1,3 +1,4 @@
+export type { ProjectionMaterializationIdentity } from "../../materialization/model"
 export { ProjectionRunError } from "./errors"
 export { InMemoryProjectionRunStorage } from "./in-memory"
 export type {
@@ -16,7 +17,6 @@ export type {
   ProjectionMaterializationRunStorage,
   ProjectionRunCounters,
   ProjectionRunDatasetVersion,
-  ProjectionRunMaterializationIdentity,
   ProjectionRunObjectTypes,
   ProjectionRunRecord,
   ProjectionRunStatus,

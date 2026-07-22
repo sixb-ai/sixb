@@ -31,6 +31,7 @@ export type {
   ProjectionCommitResult,
   ProjectionEntityRef,
   ProjectionExecution,
+  ProjectionMaterializationIdentity,
   ProjectionRunFinishInput,
   ProjectionSourceAssertion,
   ProjectionSourceEntry,
@@ -68,8 +69,6 @@ export { createOntologyMaterializer, OntologyMaterializer } from "./materializer
 export type {
   CommitIdentity,
   OntologyMaterializationEventKind,
-  ProjectionMaterializationFingerprint,
-  ProjectionTelemetryMaterializationFingerprint,
   TimedCommitIdentity,
 } from "./shared/identity"
 export {
@@ -91,7 +90,6 @@ export {
   timestampCommitIdentity,
 } from "./shared/identity"
 export {
-  canonicalJson,
   normalizeJsonProperties,
   normalizeOntologyEditCommit,
   normalizeProjectionExecution,

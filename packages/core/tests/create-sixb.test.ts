@@ -24,7 +24,6 @@ import {
   link,
   ProjectionValidationError,
   prop,
-  RuntimeError,
   ref,
 } from "../src"
 import { EVENTS_STREAM } from "../src/events"
@@ -1161,8 +1160,11 @@ export const roomTemperatureProjection = defineTelemetryProjection(
 
     expect(sixb.getObjectProjections()).toHaveLength(0)
     expect(sixb.getLinkProjections()).toHaveLength(0)
-    expect(sixb.getTelemetryProjections()).toEqual([telemetryProjection])
-    expect(sixb.getProjectionById("room-temperatures")).toBe(telemetryProjection)
+    const registered = sixb.getTelemetryProjections()[0]
+    expect(registered).toEqual(telemetryProjection)
+    expect(registered).not.toBe(telemetryProjection)
+    expect(Object.isFrozen(registered)).toBe(true)
+    expect(sixb.getProjectionById("room-temperatures")).toBe(registered)
   })
 
   test("looks up object and link projections by id", async () => {
@@ -1199,8 +1201,14 @@ export const roomTemperatureProjection = defineTelemetryProjection(
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getProjectionById("room-proj")).toBe(roomProjection)
-    expect(sixb.getProjectionById("room-sensor-proj")).toBe(roomSensorProjection)
+    const registeredObjects = sixb.getObjectProjections()
+    const registeredLinks = sixb.getLinkProjections()
+    expect(sixb.getProjectionById("room-proj")).toBe(registeredObjects[0])
+    expect(sixb.getProjectionById("room-sensor-proj")).toBe(registeredLinks[0])
+    expect(registeredObjects[0]).not.toBe(roomProjection)
+    expect(registeredLinks[0]).not.toBe(roomSensorProjection)
+    expect(Object.isFrozen(registeredObjects)).toBe(true)
+    expect(Object.isFrozen(registeredLinks)).toBe(true)
     expect(sixb.getProjectionById("missing")).toBeNull()
   })
 
@@ -1228,7 +1236,7 @@ export const roomTemperatureProjection = defineTelemetryProjection(
         projections: [firstProjection, secondProjection],
         ...createTestRuntimeDeps(),
       })
-    ).rejects.toBeInstanceOf(RuntimeError)
+    ).rejects.toBeInstanceOf(ProjectionValidationError)
     await expect(
       createSixb({
         projectRoot,

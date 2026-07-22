@@ -7,6 +7,7 @@ import type {
 } from "../../storage/ontology"
 import type { MaterializerContext } from "../context"
 import { sequenceMaterializationEvent } from "../effective/build-events"
+import { throwIfAborted } from "../shared/abort"
 import { chunkBySize } from "../shared/chunking"
 import type { TimedCommitIdentity } from "../shared/identity"
 import { type MaterializationPlanItem, planStream } from "./plan-stream"
@@ -139,12 +140,4 @@ export async function drainStagedEvents(
     await applyItems(context, storage, session, items, signal)
   }
   return ordinal
-}
-
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) {
-    throw signal.reason instanceof Error
-      ? signal.reason
-      : new DOMException("Projection replacement aborted", "AbortError")
-  }
 }

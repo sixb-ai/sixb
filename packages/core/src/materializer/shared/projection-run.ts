@@ -1,14 +1,45 @@
 import { MaterializationValidationError } from "../../materialization/errors"
-import type { PinnedDatasetVersion } from "../../materialization/model"
-import type { ProjectionDefinition, ResolvedProjection } from "../../projections/types"
-import type { ProjectionRunMaterializationIdentity } from "../../storage"
+import type {
+  PinnedDatasetVersion,
+  ProjectionMaterializationIdentity,
+} from "../../materialization/model"
+import type {
+  LinkProjectionDefinition,
+  ObjectProjectionDefinition,
+  ResolvedProjection,
+  TelemetryProjectionDefinition,
+} from "../../projections/types"
 
-export function createProjectionRunMaterializationIdentity(input: {
-  readonly protocol: "replacement" | "telemetry"
-  readonly resolved: ResolvedProjection<ProjectionDefinition>
+type SourceProjectionDefinition = ObjectProjectionDefinition | LinkProjectionDefinition
+type SourceMaterializationIdentity = Extract<
+  ProjectionMaterializationIdentity,
+  { readonly protocol: "replacement" }
+>
+type TelemetryMaterializationIdentity = Extract<
+  ProjectionMaterializationIdentity,
+  { readonly protocol: "telemetry" }
+>
+
+interface ProjectionRunIdentityInput<
+  TDefinition extends SourceProjectionDefinition | TelemetryProjectionDefinition,
+> {
+  readonly resolved: ResolvedProjection<TDefinition>
   readonly datasetVersion: PinnedDatasetVersion
   readonly ontologyRevision: string
-}): ProjectionRunMaterializationIdentity {
+}
+
+export function createProjectionRunMaterializationIdentity(
+  input: ProjectionRunIdentityInput<SourceProjectionDefinition>
+): SourceMaterializationIdentity
+export function createProjectionRunMaterializationIdentity(
+  input: ProjectionRunIdentityInput<TelemetryProjectionDefinition>
+): TelemetryMaterializationIdentity
+export function createProjectionRunMaterializationIdentity(
+  input: ProjectionRunIdentityInput<SourceProjectionDefinition | TelemetryProjectionDefinition>
+): ProjectionMaterializationIdentity
+export function createProjectionRunMaterializationIdentity(
+  input: ProjectionRunIdentityInput<SourceProjectionDefinition | TelemetryProjectionDefinition>
+): ProjectionMaterializationIdentity {
   const base = {
     projectionId: input.resolved.projectionId,
     datasetVersion: input.datasetVersion,
@@ -17,23 +48,14 @@ export function createProjectionRunMaterializationIdentity(input: {
     ownershipHash: input.resolved.ownershipHash,
   }
 
-  if (input.protocol === "telemetry") {
-    if (input.resolved.definition._tag !== "TelemetryProjectionDefinition") {
-      throw new MaterializationValidationError(
-        "Telemetry materialization requires a telemetry projection."
-      )
-    }
-    return { ...base, projectionKind: "telemetry", protocol: "telemetry" }
-  }
-
   switch (input.resolved.definition._tag) {
     case "ObjectProjectionDefinition":
       return { ...base, projectionKind: "object", protocol: "replacement" }
     case "LinkProjectionDefinition":
       return { ...base, projectionKind: "link", protocol: "replacement" }
     case "TelemetryProjectionDefinition":
-      throw new MaterializationValidationError(
-        "Replacement completion requires a source projection."
-      )
+      return { ...base, projectionKind: "telemetry", protocol: "telemetry" }
+    default:
+      throw new MaterializationValidationError("Expected a supported projection definition.")
   }
 }

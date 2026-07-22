@@ -2,12 +2,12 @@ import { jsonValuesEqual } from "../json"
 
 export type PropertyChangeOperation = "created" | "updated" | "cleared"
 
-export type PropertyChange =
-  | { readonly operation: "created"; readonly after: unknown }
-  | { readonly operation: "updated"; readonly before: unknown; readonly after: unknown }
-  | { readonly operation: "cleared"; readonly before: unknown; readonly after: null }
+export type PropertyChange<TValue = unknown> =
+  | { readonly operation: "created"; readonly after: TValue }
+  | { readonly operation: "updated"; readonly before: TValue; readonly after: TValue }
+  | { readonly operation: "cleared"; readonly before: TValue; readonly after: null }
 
-export type PropertyChangeMap = Record<string, PropertyChange>
+export type PropertyChangeMap<TValue = unknown> = Record<string, PropertyChange<TValue>>
 
 export function hasPropertyChanges(changes: PropertyChangeMap): boolean {
   return Object.keys(changes).length > 0
@@ -21,7 +21,7 @@ export function diffPropertyChanges(
     return {}
   }
 
-  const changes: PropertyChangeMap = {}
+  const changes: Record<string, PropertyChange> = {}
 
   for (const [propertyId, after] of Object.entries(afterPatch)) {
     const hasBefore = before !== undefined && Object.hasOwn(before, propertyId)

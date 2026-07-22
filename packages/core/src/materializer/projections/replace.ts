@@ -9,12 +9,12 @@ import type {
   PinnedDatasetVersion,
   ProjectionCommitResult,
   ProjectionExecution,
+  ProjectionMaterializationIdentity,
   ProjectionSourceEntry,
   ProjectionSourceRef,
   ProjectionSourceReplacement,
 } from "../../materialization/model"
 import type { ProjectionRegistry } from "../../projections/registry"
-import type { ProjectionRunMaterializationIdentity } from "../../storage"
 import type {
   OntologyCommitRecord,
   OntologyCommitWrite,
@@ -29,6 +29,7 @@ import {
 } from "../execution/commit-lifecycle"
 import { assertProjectionMaterializationExecution } from "../execution/run-correlation"
 import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
+import { throwIfAborted } from "../shared/abort"
 import {
   type CommitIdentity,
   createCommitIdentity,
@@ -48,7 +49,6 @@ import {
   bestEffort,
   type StagedProjectionMaterialization,
   stageProjectionMaterialization,
-  throwIfAborted,
 } from "./source-materialization"
 
 type ResolvedSourceProjection = ReturnType<ProjectionRegistry["resolveSource"]>
@@ -61,7 +61,7 @@ interface PreparedProjectionReplacement {
   readonly signal?: AbortSignal
   readonly resolved: ResolvedSourceProjection
   readonly projectionKind: "object" | "link"
-  readonly runIdentity: ProjectionRunMaterializationIdentity
+  readonly runIdentity: ProjectionMaterializationIdentity
   readonly identity: CommitIdentity
 }
 
@@ -115,21 +115,13 @@ function prepareProjectionReplacement(
 
   const projectionKind = sourceProjectionKind(resolved)
   const runIdentity = createProjectionRunMaterializationIdentity({
-    protocol: "replacement",
     resolved,
     datasetVersion,
     ontologyRevision: context.projectionRegistry.ontologyRevision,
   })
   const identity = createCommitIdentity({
     projectId: context.projectId,
-    idempotencyKey: createProjectionIdempotencyKey({
-      source,
-      projectionKind,
-      datasetVersion,
-      ontologyRevision: runIdentity.ontologyRevision,
-      projectionRevision: runIdentity.projectionRevision,
-      ownershipHash: runIdentity.ownershipHash,
-    }),
+    idempotencyKey: createProjectionIdempotencyKey(runIdentity),
     normalizedCallerIntent: { source, datasetVersion },
   })
   const command = {

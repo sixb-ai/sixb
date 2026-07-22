@@ -31,7 +31,7 @@ export async function* planStream(
   })) {
     const chunk = mutableChunk()
     for (const item of itemsChunk) appendItem(chunk, item)
-    yield freezeChunk(chunk)
+    yield chunk
   }
 }
 
@@ -94,8 +94,4 @@ function appendItem(chunk: MutableChunk, item: MaterializationPlanItem): void {
       chunk.outbox.push(item.value)
       break
   }
-}
-
-function freezeChunk(chunk: MutableChunk): MaterializationPlanChunk {
-  return chunk
 }

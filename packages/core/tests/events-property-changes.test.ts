@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { clearedPropertyChanges, diffPropertyChanges } from "../src/events"
+import { clearedPropertyChanges, diffPropertyChanges, type PropertyChangeMap } from "../src/events"
+
+test("PropertyChangeMap remains incrementally writable", () => {
+  const changes: PropertyChangeMap = {}
+  changes.status = { operation: "created", after: "draft" }
+  expect(changes.status).toEqual({ operation: "created", after: "draft" })
+})
 
 describe("diffPropertyChanges", () => {
   test("marks provided properties as created when there is no previous row", () => {

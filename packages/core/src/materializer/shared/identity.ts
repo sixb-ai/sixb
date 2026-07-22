@@ -14,8 +14,7 @@ import { MaterializationValidationError } from "../../materialization/errors"
 import { createCommitId, createRequestHash, sha256Canonical } from "../../materialization/identity"
 import type {
   EffectiveLinkSnapshot,
-  PinnedDatasetVersion,
-  ProjectionSourceRef,
+  ProjectionMaterializationIdentity,
 } from "../../materialization/model"
 import { compareLinkRefs } from "../../materialization/refs"
 
@@ -27,29 +26,22 @@ export function createRuntimeIdempotencyKey(requestId: string): string {
   return `runtime:${requestId}`
 }
 
-export interface ProjectionMaterializationFingerprint {
-  readonly source: ProjectionSourceRef
-  readonly projectionKind: "object" | "link"
-  readonly datasetVersion: PinnedDatasetVersion
-  readonly ontologyRevision: string
-  readonly projectionRevision: string
-  readonly ownershipHash: string
-}
+type ReplacementMaterializationIdentity = Extract<
+  ProjectionMaterializationIdentity,
+  { readonly protocol: "replacement" }
+>
+type TelemetryMaterializationIdentity = Extract<
+  ProjectionMaterializationIdentity,
+  { readonly protocol: "telemetry" }
+>
 
-export interface ProjectionTelemetryMaterializationFingerprint
-  extends Omit<ProjectionMaterializationFingerprint, "projectionKind"> {
-  readonly projectionKind: "telemetry"
-  readonly batchOrdinal: number
-}
-
-function projectionFingerprintTuple(
-  input: ProjectionMaterializationFingerprint | ProjectionTelemetryMaterializationFingerprint,
-  protocol: "replacement" | "telemetry"
+function projectionIdentityTuple(
+  input: ProjectionMaterializationIdentity
 ): readonly [string, string, string, string, string, string, string, string, string] {
   return [
-    input.source.projectionId,
+    input.projectionId,
     input.projectionKind,
-    protocol,
+    input.protocol,
     input.datasetVersion.datasetId,
     input.datasetVersion.versionId,
     input.datasetVersion.createdAt,
@@ -60,9 +52,9 @@ function projectionFingerprintTuple(
 }
 
 export function createProjectionIdempotencyKey(
-  input: ProjectionMaterializationFingerprint
+  identity: ReplacementMaterializationIdentity
 ): string {
-  return `projection:replace:${sha256Canonical(projectionFingerprintTuple(input, "replacement"))}`
+  return `projection:replace:${sha256Canonical(projectionIdentityTuple(identity))}`
 }
 
 export function createRuntimeTelemetryIdempotencyKey(requestId: string): string {
@@ -70,11 +62,12 @@ export function createRuntimeTelemetryIdempotencyKey(requestId: string): string 
 }
 
 export function createProjectionTelemetryIdempotencyKey(
-  input: ProjectionTelemetryMaterializationFingerprint
+  identity: TelemetryMaterializationIdentity,
+  batchOrdinal: number
 ): string {
   return `telemetry:projection:${sha256Canonical([
-    ...projectionFingerprintTuple(input, "telemetry"),
-    input.batchOrdinal,
+    ...projectionIdentityTuple(identity),
+    batchOrdinal,
   ])}`
 }
 

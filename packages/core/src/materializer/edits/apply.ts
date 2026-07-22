@@ -2,8 +2,6 @@ import type { JsonValue } from "../../json"
 import { stableJsonStringify } from "../../json"
 import { MaterializationValidationError } from "../../materialization/errors"
 import type {
-  EffectiveLinkSnapshot,
-  EffectiveObjectSnapshot,
   LinkOverride,
   ObjectOverride,
   OntologyEditOperation,
@@ -27,7 +25,7 @@ interface ObjectEditInput {
   readonly operation: ObjectEditOperation
   readonly sourceProperties: Readonly<Record<string, JsonValue>> | null
   readonly authority: ObjectOverride | null
-  readonly effective: EffectiveObjectSnapshot | null
+  readonly effectiveExists: boolean
   readonly normalizedProperties?: Readonly<Record<string, JsonValue>>
   readonly normalizedSet?: Readonly<Record<string, JsonValue>>
 }
@@ -36,7 +34,7 @@ interface LinkEditInput {
   readonly operation: LinkEditOperation
   readonly hasSource: boolean
   readonly authority: LinkOverride | null
-  readonly effective: EffectiveLinkSnapshot | null
+  readonly effectiveExists: boolean
   readonly normalizedProperties?: Readonly<Record<string, JsonValue>>
 }
 
@@ -121,7 +119,7 @@ function applyObjectPatch(
   operation: Extract<ObjectEditOperation, { readonly kind: "object.patch" }>
 ): ObjectOverride | null {
   const current = input.authority
-  if (!input.effective && current?.kind !== "patch") {
+  if (!input.effectiveExists && current?.kind !== "patch") {
     throw new MaterializationValidationError(
       `Object patch requires an effective object for ${operation.ref.objectTypeId}:${operation.ref.primaryId}.`
     )
@@ -181,7 +179,7 @@ function patchOverride(
 }
 
 function applyObjectDelete(input: ObjectEditInput): ObjectOverride | null {
-  if (!input.effective) return input.authority
+  if (!input.effectiveExists) return input.authority
   if (input.authority?.kind === "create" && !input.sourceProperties) return null
   return { kind: "delete" }
 }
@@ -223,7 +221,7 @@ function linkUpsertOverride(input: LinkEditInput): LinkOverride {
 }
 
 function linkDeleteOverride(input: LinkEditInput): LinkOverride | null {
-  if (!input.effective) return input.authority
+  if (!input.effectiveExists) return input.authority
   if (input.authority?.kind === "upsert" && !input.hasSource) return null
   return { kind: "delete" }
 }

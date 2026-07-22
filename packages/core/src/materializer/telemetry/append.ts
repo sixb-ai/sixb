@@ -4,6 +4,7 @@ import {
 } from "../../materialization/errors"
 import type {
   OntologyMaterializationOrigin,
+  ProjectionMaterializationIdentity,
   TelemetryAppend,
   TelemetryCommitResult,
 } from "../../materialization/model"
@@ -12,7 +13,6 @@ import type { ProjectionRegistry } from "../../projections/registry"
 import type {
   ProjectionMaterializationRunRecord,
   ProjectionMaterializationRunStorage,
-  ProjectionRunMaterializationIdentity,
 } from "../../storage"
 import type {
   MaterializationSession,
@@ -65,7 +65,7 @@ interface PreparedProjectionTelemetry extends PreparedTelemetryBase {
   readonly kind: "projection"
   readonly source: ProjectionTelemetrySource
   readonly resolvedProjection: ResolvedTelemetryProjection
-  readonly runIdentity: ProjectionRunMaterializationIdentity
+  readonly runIdentity: ProjectionMaterializationIdentity
 }
 
 type PreparedTelemetryAppend = PreparedRuntimeTelemetry | PreparedProjectionTelemetry
@@ -157,22 +157,13 @@ function prepareProjectionTelemetry(
   validateTelemetryOwnership(resolvedProjection, input)
 
   const runIdentity = createProjectionRunMaterializationIdentity({
-    protocol: "telemetry",
     resolved: resolvedProjection,
     datasetVersion: source.datasetVersion,
     ontologyRevision,
   })
   const identity = createTimedCommitIdentity({
     projectId: context.projectId,
-    idempotencyKey: createProjectionTelemetryIdempotencyKey({
-      source: source.projection,
-      projectionKind: "telemetry",
-      datasetVersion: source.datasetVersion,
-      ontologyRevision,
-      projectionRevision: resolvedProjection.projectionRevision,
-      ownershipHash: resolvedProjection.ownershipHash,
-      batchOrdinal: source.batchOrdinal,
-    }),
+    idempotencyKey: createProjectionTelemetryIdempotencyKey(runIdentity, source.batchOrdinal),
     // Execution ownership is transient: a reclaimed delivery retains the same request hash.
     normalizedCallerIntent: projectionTelemetryCallerIntent(input, source, inputPointCount),
     now: context.clock(),
@@ -495,29 +486,23 @@ async function finalizeTelemetryMaterialization(
   result: TelemetryCommitResult,
   projectionRuns: ProjectionMaterializationRunStorage | undefined
 ): Promise<TelemetryCommitResult> {
-  if (command.kind === "runtime") {
-    const applied = await storage.ontology.materializations.finalize({
-      session,
-      finalization: { sourceActivations: [], result },
-    })
-    return applied.commit.result as TelemetryCommitResult
-  }
-
   const applied = await storage.ontology.materializations.finalize({
     session,
     finalization: { sourceActivations: [], result },
   })
-  if (!projectionRuns) {
-    throw new MaterializationValidationError("Expected an asserted telemetry projection run.")
+  if (command.kind === "projection") {
+    if (!projectionRuns) {
+      throw new MaterializationValidationError("Expected an asserted telemetry projection run.")
+    }
+    await projectionRuns.advanceTelemetryCheckpoint({
+      id: command.source.execution.projectionRunId,
+      projectId: applied.commit.projectId,
+      executionToken: command.source.execution.executionToken,
+      identity: command.runIdentity,
+      batchOrdinal: command.source.batchOrdinal,
+      batchRowCount: command.source.sourceRowCount,
+      inputExhausted: command.source.inputExhausted,
+    })
   }
-  await projectionRuns.advanceTelemetryCheckpoint({
-    id: command.source.execution.projectionRunId,
-    projectId: applied.commit.projectId,
-    executionToken: command.source.execution.executionToken,
-    identity: command.runIdentity,
-    batchOrdinal: command.source.batchOrdinal,
-    batchRowCount: command.source.sourceRowCount,
-    inputExhausted: command.source.inputExhausted,
-  })
   return applied.commit.result as TelemetryCommitResult
 }

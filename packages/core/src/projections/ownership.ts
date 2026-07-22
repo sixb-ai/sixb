@@ -51,25 +51,28 @@ export function computeProjectionOwnership(
   })
 }
 
+export interface ProjectionOwnershipRecord<
+  TDefinition extends ProjectionDefinition = ProjectionDefinition,
+> {
+  readonly definition: TDefinition
+  readonly ownership: ProjectionOwnership
+}
+
 export function validateProjectionOwnership(
-  projections: readonly ProjectionDefinition[],
-  ontology: OntologyRegistry
-): ReadonlyMap<string, ProjectionOwnership> {
-  const ownershipByProjectionId = new Map<string, ProjectionOwnership>()
+  projections: readonly ProjectionOwnershipRecord[]
+): void {
   const existenceOwners = new Map<string, string>()
   const propertyOwners = new Map<string, string>()
   const linkOwners = new Map<string, string>()
   const telemetryOwners = new Map<string, string>()
 
-  for (const projection of projections) {
-    const ownership = computeProjectionOwnership(projection, ontology)
-    ownershipByProjectionId.set(projection.id, ownership)
+  for (const { definition, ownership } of projections) {
     for (const object of ownership.objects) {
       if (object.existence) {
         registerOwner(
           existenceOwners,
           object.objectTypeId,
-          projection.id,
+          definition.id,
           `object type '${object.objectTypeId}' existence`
         )
       }
@@ -77,7 +80,7 @@ export function validateProjectionOwnership(
         registerOwner(
           propertyOwners,
           JSON.stringify([object.objectTypeId, propertyId]),
-          projection.id,
+          definition.id,
           `property '${object.objectTypeId}.${propertyId}'`
         )
       }
@@ -86,7 +89,7 @@ export function validateProjectionOwnership(
       registerOwner(
         linkOwners,
         JSON.stringify([link.sourceObjectTypeId, link.linkId]),
-        projection.id,
+        definition.id,
         `link scope '${link.sourceObjectTypeId}.${link.linkId}'`
       )
     }
@@ -94,12 +97,11 @@ export function validateProjectionOwnership(
       registerOwner(
         telemetryOwners,
         JSON.stringify([telemetry.objectTypeId, telemetry.propertyId]),
-        projection.id,
+        definition.id,
         `telemetry source '${telemetry.objectTypeId}.${telemetry.propertyId}'`
       )
     }
   }
-  return ownershipByProjectionId
 }
 
 function registerOwner(
