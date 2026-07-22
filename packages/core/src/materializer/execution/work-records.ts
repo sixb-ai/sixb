@@ -1,7 +1,6 @@
 import { stableJsonStringify } from "../../json"
 import type { EffectiveLinkChange, EffectiveObjectChange } from "../../materialization/model"
 import type {
-  MaterializationApplyPhase,
   MaterializationClassificationWorkRecord,
   MaterializationEventWorkRecord,
   MaterializationPlanWorkItem,
@@ -10,6 +9,7 @@ import type {
   OntologyMaterializationEvent,
   OntologyOutboxWrite,
 } from "../../storage/ontology"
+import { materializationApplyPhase } from "../../storage/ontology/materializations"
 import type { WorkingLink, WorkingObject } from "../edits/working-state"
 import type { OrderedMaterializationEventDraft } from "../effective/build-events"
 import type { TimedCommitIdentity } from "../shared/identity"
@@ -152,7 +152,7 @@ export function planWork(
   item: MaterializationPlanWorkItem,
   sortKey: string
 ): MaterializationPlanWorkRecord {
-  const applyPhase = planApplyPhase(item)
+  const applyPhase = materializationApplyPhase(item.kind)
   return {
     kind: "plan",
     recordKey: `plan:${item.kind}:${sortKey}`,
@@ -183,24 +183,4 @@ function expectedObject(snapshot: NonNullable<EffectiveObjectChange["before"]>) 
 
 function expectedLink(snapshot: NonNullable<EffectiveLinkChange["before"]>) {
   return { ref: snapshot.ref, exists: true as const, lastCommitId: snapshot.lastCommitId }
-}
-
-function planApplyPhase(item: MaterializationPlanWorkItem): MaterializationApplyPhase {
-  switch (item.kind) {
-    case "object-override-upsert":
-    case "object-override-delete":
-    case "link-override-upsert":
-    case "link-override-delete":
-      return 0
-    case "point-upsert":
-      return 1
-    case "link-delete":
-      return 2
-    case "object-delete":
-      return 3
-    case "object-upsert":
-      return 4
-    case "link-upsert":
-      return 5
-  }
 }

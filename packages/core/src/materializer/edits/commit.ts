@@ -101,7 +101,7 @@ async function replayEditCommit(
     context.storage.transaction(
       async (txBase) => {
         const storage = requireOntologyStorage(txBase)
-        await assertActionRunInTransaction(storage, context.projectId, command.input)
+        await assertActionRun(storage, context.projectId, command.input)
         return replayCommit<EditCommitResult>(context, command.identity, storage)
       },
       { isolation: "serializable" }
@@ -126,7 +126,7 @@ async function executeEditTransaction(
   storage: MaterializerStorage,
   command: PreparedEditCommit
 ): Promise<EditCommitResult> {
-  await assertActionRunInTransaction(storage, context.projectId, command.input)
+  await assertActionRun(storage, context.projectId, command.input)
 
   const replay = await replayCommit<EditCommitResult>(context, command.identity, storage)
   if (replay) return replay
@@ -164,24 +164,6 @@ async function executeEditTransaction(
     changes,
   }
   return finalizeEditMaterialization(storage, session, result)
-}
-
-async function assertActionRunInTransaction(
-  storage: Storage,
-  projectId: string,
-  input: NormalizedEditCommit
-): Promise<void> {
-  if (input.source.kind !== "action") return
-  if (!isActionMaterializationRunStorage(storage.actionRuns)) {
-    throw new MaterializationValidationError(
-      "Storage transaction does not provide Action run capabilities."
-    )
-  }
-  await storage.actionRuns.assertMaterializationRun({
-    projectId,
-    actionId: input.source.actionId,
-    runId: input.source.runId,
-  })
 }
 
 async function beginEditMaterialization(

@@ -255,7 +255,7 @@ function applyLinkOperation(
     authority: working.override,
     effective: effectiveSnapshot,
   }
-  const transition = applyValidatedLinkEdit(transitionInput, normalizedProperties)
+  const transition = applyLinkEdit({ ...transitionInput, normalizedProperties })
   applyLinkTransition(context, state, working, transition.next, cardinality)
   return { id: operation.id, ok: true, authority: authorityOutcome(transition.changed) }
 }
@@ -267,14 +267,6 @@ function provisionalLinkOrNull(
 ) {
   if (!resolved) return null
   return provisionalLinkSnapshot(working, resolved, identity)
-}
-
-function applyValidatedLinkEdit(
-  input: Parameters<typeof applyLinkEdit>[0],
-  normalizedProperties: ReturnType<typeof validateLinkAuthorityProperties> | undefined
-) {
-  if (normalizedProperties === undefined) return applyLinkEdit(input)
-  return applyLinkEdit({ ...input, normalizedProperties })
 }
 
 function requireWorkingLink(state: EditWorkingState, operation: LinkOperation): WorkingLink {

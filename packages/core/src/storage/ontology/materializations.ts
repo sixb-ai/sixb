@@ -302,7 +302,10 @@ export type MaterializationPlanWorkItem =
   | { readonly kind: "link-delete"; readonly value: ExactEffectiveLinkDelete }
   | { readonly kind: "point-upsert"; readonly value: ExactTimeseriesPointWrite }
 
-/** Safe physical phases; the provider compares the numeric value and never derives it. */
+/**
+ * Safe physical phases shared by the core planner and provider validation through
+ * {@link materializationApplyPhase}.
+ */
 export type MaterializationApplyPhase = 0 | 1 | 2 | 3 | 4 | 5
 
 export interface MaterializationPlanWorkRecord {
@@ -311,6 +314,33 @@ export interface MaterializationPlanWorkRecord {
   readonly applyPhase: MaterializationApplyPhase
   readonly sortKey: string
   readonly item: MaterializationPlanWorkItem
+}
+
+/**
+ * Canonical physical apply phase for a plan work item kind. The application-layer work planner and
+ * the provider's order validation both derive ordering from this single source so the two can never
+ * drift apart. Kept in the neutral storage contract because storage must not import the materializer.
+ */
+export function materializationApplyPhase(
+  kind: MaterializationPlanWorkItem["kind"]
+): MaterializationApplyPhase {
+  switch (kind) {
+    case "object-override-upsert":
+    case "object-override-delete":
+    case "link-override-upsert":
+    case "link-override-delete":
+      return 0
+    case "point-upsert":
+      return 1
+    case "link-delete":
+      return 2
+    case "object-delete":
+      return 3
+    case "object-upsert":
+      return 4
+    case "link-upsert":
+      return 5
+  }
 }
 
 export interface MaterializationEventWorkRecord {

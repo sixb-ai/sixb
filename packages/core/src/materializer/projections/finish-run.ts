@@ -4,21 +4,21 @@ import {
 } from "../../materialization/errors"
 import type { PinnedDatasetVersion, ProjectionRunFinishInput } from "../../materialization/model"
 import type { ProjectionDefinition, ResolvedProjection } from "../../projections/types"
-import {
-  isProjectionMaterializationRunStorage,
-  type ProjectionMaterializationRunRecord,
-  type ProjectionMaterializationRunStorage,
-  type ProjectionRunMaterializationIdentity,
+import type {
+  ProjectionMaterializationRunRecord,
+  ProjectionMaterializationRunStorage,
+  ProjectionRunMaterializationIdentity,
 } from "../../storage"
 import type { OntologyCommitRecord } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { requireOntologyStorage, withSerializationRetry } from "../execution/commit-lifecycle"
-import { assertProjectionRunTargets } from "../execution/run-correlation"
+import { assertProjectionMaterializationExecution } from "../execution/run-correlation"
 import {
   normalizePinnedDatasetVersion,
   normalizeProjectionExecution,
   normalizeProjectionSourceRef,
 } from "../shared/normalize"
+import { createProjectionRunMaterializationIdentity } from "../shared/projection-run"
 
 interface PreparedProjectionRunFinish {
   readonly projectId: string
@@ -57,27 +57,12 @@ function prepareProjectionRunFinish(
       `Projection '${resolved.projectionId}' requires dataset '${resolved.datasetId}'.`
     )
   }
-  const projectionKind = projectionKindOf(resolved.definition)
-  const identity: ProjectionRunMaterializationIdentity =
-    raw.protocol === "replacement"
-      ? {
-          projectionId: resolved.projectionId,
-          projectionKind: requireReplacementKind(projectionKind),
-          protocol: raw.protocol,
-          datasetVersion,
-          ontologyRevision: context.projectionRegistry.ontologyRevision,
-          projectionRevision: resolved.projectionRevision,
-          ownershipHash: resolved.ownershipHash,
-        }
-      : {
-          projectionId: resolved.projectionId,
-          projectionKind: "telemetry",
-          protocol: raw.protocol,
-          datasetVersion,
-          ontologyRevision: context.projectionRegistry.ontologyRevision,
-          projectionRevision: resolved.projectionRevision,
-          ownershipHash: resolved.ownershipHash,
-        }
+  const identity = createProjectionRunMaterializationIdentity({
+    protocol: raw.protocol,
+    resolved,
+    datasetVersion,
+    ontologyRevision: context.projectionRegistry.ontologyRevision,
+  })
   return {
     projectId: context.projectId,
     input: { ...raw, source, datasetVersion, execution },
@@ -87,39 +72,17 @@ function prepareProjectionRunFinish(
   }
 }
 
-function projectionKindOf(definition: ProjectionDefinition): "object" | "link" | "telemetry" {
-  switch (definition._tag) {
-    case "ObjectProjectionDefinition":
-      return "object"
-    case "LinkProjectionDefinition":
-      return "link"
-    case "TelemetryProjectionDefinition":
-      return "telemetry"
-  }
-}
-
-function requireReplacementKind(kind: "object" | "link" | "telemetry"): "object" | "link" {
-  if (kind !== "telemetry") return kind
-  throw new MaterializationValidationError("Replacement completion requires a source projection.")
-}
-
 async function finishProjectionRunTransaction(
   storage: MaterializerStorage,
   command: PreparedProjectionRunFinish
 ): Promise<void> {
-  if (!isProjectionMaterializationRunStorage(storage.projectionRuns)) {
-    throw new MaterializationValidationError(
-      "Storage transaction does not provide projection run capabilities."
-    )
-  }
-  const projectionRuns = storage.projectionRuns
-  const run = await projectionRuns.assertMaterializationExecution({
-    id: command.input.execution.projectionRunId,
+  const { projectionRuns, run } = await assertProjectionMaterializationExecution(storage, {
     projectId: command.projectId,
+    projectionRunId: command.input.execution.projectionRunId,
     executionToken: command.input.execution.executionToken,
     identity: command.identity,
+    resolved: command.resolved,
   })
-  assertProjectionRunTargets(run, command.resolved)
 
   if (command.input.protocol === "replacement") {
     await assertReplacementTerminalDecision(storage, command)

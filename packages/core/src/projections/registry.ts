@@ -2,7 +2,6 @@ import type { DatasetDefinition } from "../datasets"
 import type { OntologyRegistry } from "../ontology"
 import { categorizeProjections } from "./builders"
 import { ProjectionValidationError } from "./errors"
-import { computeProjectionOwnership } from "./ownership"
 import {
   computeOntologyRevision,
   computeProjectionOwnershipHash,
@@ -43,7 +42,7 @@ export class ProjectionRegistry {
     const { objectProjections, linkProjections, telemetryProjections } = categorizeProjections(
       input.projections
     )
-    validateProjectionsAtStartup(
+    const validatedById = validateProjectionsAtStartup(
       objectProjections,
       linkProjections,
       telemetryProjections,
@@ -53,13 +52,13 @@ export class ProjectionRegistry {
     this.ontologyRevision = computeOntologyRevision(input.ontology)
 
     for (const projection of input.projections) {
-      const dataset = input.datasetsById.get(projection.datasetId)
-      if (!dataset) {
+      const validated = validatedById.get(projection.id)
+      if (!validated) {
         throw new ProjectionValidationError(
-          `[Sixb] Projection '${projection.id}' references unknown dataset '${projection.datasetId}'.`
+          `[Sixb] Projection '${projection.id}' is missing validated registry inputs.`
         )
       }
-      const ownership = computeProjectionOwnership(projection, input.ontology)
+      const { dataset, ownership } = validated
       const resolved = deepFreeze({
         projectionId: projection.id,
         datasetId: projection.datasetId,
@@ -109,6 +108,8 @@ export class ProjectionRegistry {
   }
 }
 
+// Projection builders may attach fluent methods and callers may supply extra fields. Clone only the
+// frozen contract so resolved definitions stay serializable and cannot leak unsupported metadata.
 function cloneProjectionDefinition(projection: ProjectionDefinition): ProjectionDefinition {
   if (projection._tag === "ObjectProjectionDefinition") {
     return {
