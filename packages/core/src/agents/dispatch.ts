@@ -1,10 +1,10 @@
-import type { AgentRunRequestedQueueJob, Queue } from "../queues"
+import type { AgentQueueJob, Queue } from "../queues"
 import type { AgentStorage } from "../storage/agents"
 
 export interface DispatchQueuedAgentRunsInput {
   readonly projectId: string
   readonly storage: AgentStorage
-  readonly queue: Queue<AgentRunRequestedQueueJob>
+  readonly queue: Queue<AgentQueueJob>
   /** Dispatch only these runs. Omitted scans the oldest queued runs. */
   readonly runIds?: readonly string[]
   readonly limit?: number
@@ -29,6 +29,11 @@ export interface DispatchQueuedAgentRunsResult {
 /** Stable queue identity: repeated publication of one durable run is idempotent. */
 export function agentRunQueueJobId(runId: string): string {
   return `agt_job_${runId}`
+}
+
+/** Stable queue identity shared by workflow dispatch and agent reconciliation. */
+export function workflowAgentNodeQueueJobId(nodeRunId: string): string {
+  return `wfa_job_${nodeRunId}`
 }
 
 /**

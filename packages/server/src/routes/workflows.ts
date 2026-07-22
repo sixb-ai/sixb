@@ -1,13 +1,23 @@
-import type { OntologySource, Sixb, WorkflowDefinition } from "@sixb/core"
+import {
+  type OntologySource,
+  type Principal,
+  type ScopedSixb,
+  type Sixb,
+  SYSTEM_PRINCIPAL,
+  type WorkflowDefinition,
+} from "@sixb/core"
+import { publishAgentRunCancel } from "@sixb/core/internal/agents"
 import { canViewWorkflowIntervention, canViewWorkflowRun } from "@sixb/core/internal/authorization"
 import {
   snapshotWorkflowInterventionResponse,
   type WorkflowInterventionNodeDefinition,
 } from "@sixb/core/internal/workflows"
 import type {
+  WorkflowAgentNodeRunRecord,
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
+  WorkflowRunStorage,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
@@ -25,10 +35,13 @@ import { FileContentQuerySchema } from "../schemas/files"
 import {
   CancelWorkflowInterventionBodySchema,
   CancelWorkflowInterventionResponseSchema,
+  CancelWorkflowRunBodySchema,
+  CancelWorkflowRunResponseSchema,
   RequestWorkflowRunBodySchema,
   RequestWorkflowRunResponseSchema,
   SubmitWorkflowInterventionBodySchema,
   SubmitWorkflowInterventionResponseSchema,
+  WorkflowAgentNodeExecutionSchema,
   WorkflowInterventionListResponseSchema,
   WorkflowInterventionParamsSchema,
   WorkflowInterventionSchema,
@@ -74,12 +87,16 @@ function serializeWorkflowRun(run: WorkflowRunRecord) {
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
     error: run.error,
+    requestedBy: serializePrincipal(run.requestedByPrincipal),
   }
 }
 
 type SerializedWorkflowRun = ReturnType<typeof serializeWorkflowRun>
 
-function serializeWorkflowNodeRun(node: WorkflowNodeRunRecord) {
+function serializeWorkflowNodeRun(
+  node: WorkflowNodeRunRecord,
+  agentExecution?: WorkflowAgentNodeRunRecord | null
+) {
   return {
     id: node.id,
     projectId: node.projectId,
@@ -95,7 +112,66 @@ function serializeWorkflowNodeRun(node: WorkflowNodeRunRecord) {
     finishedAt: node.finishedAt ? toIsoString(node.finishedAt) : undefined,
     output: node.output,
     error: node.error,
+    ...(agentExecution
+      ? { agentExecution: serializeWorkflowAgentExecutionSummary(agentExecution) }
+      : {}),
   }
+}
+
+function serializePrincipal(principal: Principal) {
+  return { principalType: principal.type, principalId: principal.id }
+}
+
+function serializeWorkflowAgentExecutionSummary(execution: WorkflowAgentNodeRunRecord) {
+  return {
+    agentId: execution.agentId,
+    status: execution.status,
+    attempt: execution.attempt,
+    modelId: execution.modelId,
+    finishReason: execution.finishReason,
+    usage: execution.usage,
+    startedAt: execution.startedAt ? toIsoString(execution.startedAt) : undefined,
+    completedAt: execution.completedAt ? toIsoString(execution.completedAt) : undefined,
+  }
+}
+
+function serializeWorkflowAgentExecution(execution: WorkflowAgentNodeRunRecord) {
+  return {
+    ...serializeWorkflowAgentExecutionSummary(execution),
+    nodeRunId: execution.nodeRunId,
+    prompt: execution.prompt,
+    executionPrincipal: execution.executionPrincipal
+      ? serializePrincipal(execution.executionPrincipal)
+      : undefined,
+    trace: execution.trace,
+    diagnostics: execution.diagnostics,
+    error: execution.error,
+    createdAt: toIsoString(execution.createdAt),
+  }
+}
+
+async function serializeWorkflowNodeWithExecution(
+  storage: WorkflowRunStorage,
+  node: WorkflowNodeRunRecord
+) {
+  const execution =
+    node.nodeType === "agent"
+      ? await storage.agentNodes.getByNodeRunId({
+          projectId: node.projectId,
+          nodeRunId: node.id,
+        })
+      : null
+  return serializeWorkflowNodeRun(node, execution)
+}
+
+function canAccessWorkflowRun(
+  authz: ReturnType<typeof requestAuthState>["authz"],
+  scoped: ScopedSixb<readonly OntologySource[]> | null,
+  run: WorkflowRunRecord
+): boolean {
+  return (
+    canViewWorkflowRun(authz, run) && (!scoped || scoped.getWorkflowById(run.workflowId) !== null)
+  )
 }
 
 function serializeWorkflowIntervention(intervention: WorkflowInterventionRecord) {
@@ -133,7 +209,7 @@ async function workflowRunFileContentResponse(
   },
   options: { readonly head?: boolean } = {}
 ) {
-  const { authz } = requestAuthState(context)
+  const { authz, scoped } = requestAuthState(context)
 
   const storage = sixb.storage.workflowRuns
   if (!storage) {
@@ -150,7 +226,7 @@ async function workflowRunFileContentResponse(
     head: options.head,
     resolveRoot: async () => {
       const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
-      if (!run || !canViewWorkflowRun(authz, run)) {
+      if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
         return null
       }
 
@@ -169,7 +245,7 @@ async function workflowNodeFileContentResponse(
   },
   options: { readonly head?: boolean } = {}
 ) {
-  const { authz } = requestAuthState(context)
+  const { authz, scoped } = requestAuthState(context)
 
   const storage = sixb.storage.workflowRuns
   if (!storage) {
@@ -186,7 +262,7 @@ async function workflowNodeFileContentResponse(
     head: options.head,
     resolveRoot: async () => {
       const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
-      if (!run || !canViewWorkflowRun(authz, run)) {
+      if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
         return null
       }
 
@@ -270,6 +346,17 @@ function serializeWorkflow(
             ? { objectTypeId: node.action.binding.objectType.id }
             : {}),
           params: node.action.params,
+        }
+      }
+
+      if (node.type === "agent") {
+        return {
+          type: "agent" as const,
+          id: node.id,
+          key: node.key,
+          agentId: node.agentStep.agent.id,
+          input: node.agentStep.input,
+          output: node.agentStep.output,
         }
       }
 
@@ -397,6 +484,52 @@ async function emitWorkflowInterventionCancelled(input: {
   })
 }
 
+async function emitWorkflowRunCancelled(input: {
+  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly workflow: WorkflowDefinition
+  readonly run: WorkflowRunRecord
+  readonly node?: WorkflowNodeRunRecord
+}): Promise<void> {
+  const { sixb, workflow, run, node } = input
+  if (!run.finishedAt) {
+    throw new Error(`[SixbServer] Cancelled workflow run '${run.id}' has no finishedAt.`)
+  }
+  await sixb.events.append({
+    events: [
+      ...(node?.finishedAt
+        ? [
+            {
+              type: "workflow.run.node.finished" as const,
+              payload: {
+                workflowId: node.workflowId,
+                runId: node.workflowRunId,
+                nodeRunId: node.id,
+                nodeIndex: node.nodeIndex,
+                totalNodes: workflow.nodes.length,
+                nodeType: node.nodeType,
+                nodeId: node.nodeId,
+                nodeKey: node.nodeKey,
+                status: "cancelled" as const,
+                finishedAt: node.finishedAt.toISOString(),
+                ...(node.error ? { error: node.error } : {}),
+              },
+            },
+          ]
+        : []),
+      {
+        type: "workflow.run.finished",
+        payload: {
+          workflowId: run.workflowId,
+          runId: run.id,
+          status: "cancelled",
+          finishedAt: run.finishedAt.toISOString(),
+          ...(run.error ? { error: run.error } : {}),
+        },
+      },
+    ],
+  })
+}
+
 export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
@@ -455,7 +588,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-interventions",
       async (context) => {
         const { query, set } = context
-        const { authz } = requestAuthState(context)
+        const { authz, scoped } = requestAuthState(context)
         try {
           const parsed = WorkflowInterventionsQuerySchema.parse(query)
           const limit = parseOptionalInt(parsed.limit)
@@ -465,7 +598,11 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             return { interventions: [], hasMore: false, total: 0 }
           }
 
-          const workflowIds = authz ? [...authz.grants["run:workflow"]] : undefined
+          const workflowIds = scoped
+            ? scoped.listWorkflows().map((workflow) => workflow.id)
+            : authz
+              ? [...authz.grants["run:workflow"]]
+              : undefined
           const result = await storage.list({
             projectId: sixb.id,
             workflowId: parsed.workflowId,
@@ -506,7 +643,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-interventions/:interventionId",
       async (context) => {
         const { params, set } = context
-        const { authz } = requestAuthState(context)
+        const { authz, scoped } = requestAuthState(context)
         try {
           const storage = sixb.storage.workflowInterventions
           if (!storage) {
@@ -518,7 +655,11 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             projectId: sixb.id,
             id: params.interventionId,
           })
-          if (!intervention || !canViewWorkflowIntervention(authz, intervention)) {
+          if (
+            !intervention ||
+            !canViewWorkflowIntervention(authz, intervention) ||
+            (scoped && !scoped.getWorkflowById(intervention.workflowId))
+          ) {
             set.status = 404
             return { error: "Workflow intervention not found" }
           }
@@ -544,7 +685,9 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
     )
     .post(
       "/api/workflow-interventions/:interventionId/submit",
-      async ({ params, body, set }) => {
+      async (context) => {
+        const { params, body, set } = context
+        const { authz, scoped } = requestAuthState(context)
         try {
           const storage = sixb.storage.workflowInterventions
           if (!storage) {
@@ -556,7 +699,11 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             projectId: sixb.id,
             id: params.interventionId,
           })
-          if (!intervention) {
+          if (
+            !intervention ||
+            !canViewWorkflowIntervention(authz, intervention) ||
+            (scoped && !scoped.getWorkflowById(intervention.workflowId))
+          ) {
             set.status = 404
             return { error: "Workflow intervention not found" }
           }
@@ -581,7 +728,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             projectId: sixb.id,
             id: intervention.id,
             response,
-            submittedBy: parsedBody.submittedBy,
+            submittedBy: serializePrincipal(authz?.principal ?? SYSTEM_PRINCIPAL),
           })
 
           const [job] = await sixb.queues.workflows.enqueue({
@@ -592,7 +739,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
                 payload: {
                   workflowId: submitted.workflowId,
                   runId: submitted.workflowRunId,
-                  pendingInterventionId: submitted.id,
+                  resume: { kind: "intervention", interventionId: submitted.id },
                 },
               },
             ],
@@ -627,7 +774,9 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
     )
     .post(
       "/api/workflow-interventions/:interventionId/cancel",
-      async ({ params, body, set }) => {
+      async (context) => {
+        const { params, body, set } = context
+        const { authz, scoped } = requestAuthState(context)
         try {
           const interventionStorage = sixb.storage.workflowInterventions
           if (!interventionStorage) {
@@ -645,7 +794,11 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             projectId: sixb.id,
             id: params.interventionId,
           })
-          if (!intervention) {
+          if (
+            !intervention ||
+            !canViewWorkflowIntervention(authz, intervention) ||
+            (scoped && !scoped.getWorkflowById(intervention.workflowId))
+          ) {
             set.status = 404
             return { error: "Workflow intervention not found" }
           }
@@ -684,28 +837,36 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             return { error: "Workflow node run is not waiting" }
           }
 
-          const parsedBody = CancelWorkflowInterventionBodySchema.parse(body ?? {})
+          CancelWorkflowInterventionBodySchema.parse(body ?? {})
           const cancelledAt = new Date()
-          const cancelled = await interventionStorage.cancel({
-            projectId: sixb.id,
-            id: intervention.id,
-            cancelledAt,
-            cancelledBy: parsedBody.cancelledBy,
-          })
-          const cancelledNode = await runStorage.nodes.finish({
-            projectId: sixb.id,
-            id: intervention.nodeRunId,
-            status: "cancelled",
-            finishedAt: cancelledAt,
-            error: "Workflow intervention cancelled.",
-          })
-          const cancelledRun = await runStorage.finish({
-            projectId: sixb.id,
-            id: intervention.workflowRunId,
-            status: "cancelled",
-            finishedAt: cancelledAt,
-            error: "Workflow intervention cancelled.",
-          })
+          const { cancelled, cancelledNode, cancelledRun } = await sixb.storage.transaction(
+            async (tx) => {
+              if (!tx.workflowInterventions || !tx.workflowRuns) {
+                throw new Error("[SixbServer] Workflow storage disappeared during cancellation.")
+              }
+              const cancelled = await tx.workflowInterventions.cancel({
+                projectId: sixb.id,
+                id: intervention.id,
+                cancelledAt,
+                cancelledBy: serializePrincipal(authz?.principal ?? SYSTEM_PRINCIPAL),
+              })
+              const cancelledNode = await tx.workflowRuns.nodes.finish({
+                projectId: sixb.id,
+                id: intervention.nodeRunId,
+                status: "cancelled",
+                finishedAt: cancelledAt,
+                error: "Workflow intervention cancelled.",
+              })
+              const cancelledRun = await tx.workflowRuns.finish({
+                projectId: sixb.id,
+                id: intervention.workflowRunId,
+                status: "cancelled",
+                finishedAt: cancelledAt,
+                error: "Workflow intervention cancelled.",
+              })
+              return { cancelled, cancelledNode, cancelledRun }
+            }
+          )
 
           await emitWorkflowInterventionCancelled({
             sixb,
@@ -742,7 +903,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-runs",
       async (context) => {
         const { query, set } = context
-        const { authz } = requestAuthState(context)
+        const { authz, scoped } = requestAuthState(context)
         try {
           const parsed = WorkflowRunsQuerySchema.parse(query)
           const limit = parseOptionalInt(parsed.limit)
@@ -752,7 +913,11 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             return { runs: [], hasMore: false, total: 0 }
           }
 
-          const workflowIds = authz ? [...authz.grants["run:workflow"]] : undefined
+          const workflowIds = scoped
+            ? scoped.listWorkflows().map((workflow) => workflow.id)
+            : authz
+              ? [...authz.grants["run:workflow"]]
+              : undefined
           const result = await storage.list({
             projectId: sixb.id,
             workflowId: parsed.workflowId,
@@ -788,7 +953,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-runs/:runId",
       async (context) => {
         const { params, set } = context
-        const { authz } = requestAuthState(context)
+        const { authz, scoped } = requestAuthState(context)
         try {
           const storage = sixb.storage.workflowRuns
           if (!storage) {
@@ -797,7 +962,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           }
 
           const run = await storage.getById({ projectId: sixb.id, id: params.runId })
-          if (!run || !canViewWorkflowRun(authz, run)) {
+          if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
             set.status = 404
             return { error: "Workflow run not found" }
           }
@@ -810,7 +975,9 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
 
           return WorkflowRunDetailResponseSchema.parse({
             run: serializeWorkflowRun(run),
-            nodes: nodes.nodes.map(serializeWorkflowNodeRun),
+            nodes: await Promise.all(
+              nodes.nodes.map((node) => serializeWorkflowNodeWithExecution(storage, node))
+            ),
           })
         } catch (error) {
           return handleRouteError(error, set)
@@ -827,6 +994,213 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           summary: "Get workflow run detail",
           tags: [OPENAPI_TAGS.workflowRuns.name],
           operationId: "getWorkflowRun",
+        },
+      }
+    )
+    .get(
+      "/api/workflow-runs/:runId/nodes/:nodeKey/agent-execution",
+      async (context) => {
+        const { params, set } = context
+        const { authz, scoped } = requestAuthState(context)
+        try {
+          const storage = sixb.storage.workflowRuns
+          if (!storage) {
+            set.status = 400
+            return { error: "Workflow run storage is not configured" }
+          }
+          const run = await storage.getById({ projectId: sixb.id, id: params.runId })
+          if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
+            set.status = 404
+            return { error: "Workflow agent execution not found" }
+          }
+          const listed = await storage.nodes.list({
+            projectId: sixb.id,
+            workflowRunId: run.id,
+            nodeKey: params.nodeKey,
+            limit: 1,
+            order: "asc",
+          })
+          const node = listed.nodes[0]
+          if (!node || node.nodeType !== "agent") {
+            set.status = 404
+            return { error: "Workflow agent execution not found" }
+          }
+          const execution = await storage.agentNodes.getByNodeRunId({
+            projectId: sixb.id,
+            nodeRunId: node.id,
+          })
+          if (!execution) {
+            set.status = 404
+            return { error: "Workflow agent execution not found" }
+          }
+          return WorkflowAgentNodeExecutionSchema.parse(serializeWorkflowAgentExecution(execution))
+        } catch (error) {
+          return handleRouteError(error, set)
+        }
+      },
+      {
+        params: WorkflowNodeFileContentParamsSchema,
+        response: {
+          200: WorkflowAgentNodeExecutionSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Get workflow agent node execution detail",
+          tags: [OPENAPI_TAGS.workflowRuns.name],
+          operationId: "getWorkflowAgentNodeExecution",
+          security: bearerSecurityRequirement("getWorkflowAgentNodeExecution"),
+        },
+      }
+    )
+    .post(
+      "/api/workflow-runs/:runId/cancel",
+      async (context) => {
+        const { params, body, set } = context
+        const { authz, scoped } = requestAuthState(context)
+        try {
+          CancelWorkflowRunBodySchema.parse(body ?? {})
+          const storage = sixb.storage.workflowRuns
+          if (!storage) {
+            set.status = 400
+            return { error: "Workflow run storage is not configured" }
+          }
+          const existing = await storage.getById({ projectId: sixb.id, id: params.runId })
+          if (!existing || !canAccessWorkflowRun(authz, scoped, existing)) {
+            set.status = 404
+            return { error: "Workflow run not found" }
+          }
+          const workflow = sixb.workflows.getById(existing.workflowId)
+          if (!workflow) {
+            set.status = 404
+            return { error: "Workflow not found" }
+          }
+          const listed = await storage.nodes.list({
+            projectId: sixb.id,
+            workflowRunId: existing.id,
+            order: "asc",
+          })
+          if (existing.status === "cancelled") {
+            return CancelWorkflowRunResponseSchema.parse({
+              run: serializeWorkflowRun(existing),
+              nodes: await Promise.all(
+                listed.nodes.map((node) => serializeWorkflowNodeWithExecution(storage, node))
+              ),
+            })
+          }
+          if (existing.status === "succeeded" || existing.status === "failed") {
+            set.status = 400
+            return { error: `Workflow run is already ${existing.status}` }
+          }
+
+          const cancelledAt = new Date()
+          const cancellationError = "Workflow run cancelled."
+          const result = await sixb.storage.transaction(async (tx) => {
+            const runs = tx.workflowRuns
+            if (!runs) {
+              throw new Error("[SixbServer] Workflow storage disappeared during cancellation.")
+            }
+            const run = await runs.getById({ projectId: sixb.id, id: existing.id })
+            if (!run || !["queued", "running", "waiting"].includes(run.status)) {
+              throw new Error(`[SixbServer] Workflow run '${existing.id}' is no longer active.`)
+            }
+            const active = [...listed.nodes]
+              .reverse()
+              .find((node) => node.status === "running" || node.status === "waiting")
+            let cancelledNode: WorkflowNodeRunRecord | undefined
+            if (active?.nodeType === "agent") {
+              const execution = await runs.agentNodes.getByNodeRunId({
+                projectId: sixb.id,
+                nodeRunId: active.id,
+              })
+              if (execution?.status === "queued" || execution?.status === "running") {
+                await runs.agentNodes.cancel({
+                  projectId: sixb.id,
+                  nodeRunId: active.id,
+                  completedAt: cancelledAt,
+                  error: cancellationError,
+                })
+              }
+            }
+            if (active?.nodeType === "intervention" && tx.workflowInterventions) {
+              const pending = await tx.workflowInterventions.list({
+                projectId: sixb.id,
+                workflowRunId: run.id,
+                nodeRunId: active.id,
+                statuses: ["pending"],
+                limit: 1,
+              })
+              const intervention = pending.interventions[0]
+              if (intervention) {
+                await tx.workflowInterventions.cancel({
+                  projectId: sixb.id,
+                  id: intervention.id,
+                  cancelledAt,
+                  cancelledBy: serializePrincipal(authz?.principal ?? SYSTEM_PRINCIPAL),
+                })
+              }
+            }
+            if (active) {
+              cancelledNode = await runs.nodes.finish({
+                projectId: sixb.id,
+                id: active.id,
+                status: "cancelled",
+                finishedAt: cancelledAt,
+                error: cancellationError,
+                executionToken: run.execution?.token,
+              })
+            }
+            const cancelledRun = await runs.finish({
+              projectId: sixb.id,
+              id: run.id,
+              status: "cancelled",
+              finishedAt: cancelledAt,
+              error: cancellationError,
+              executionToken: run.execution?.token,
+            })
+            return { run: cancelledRun, node: cancelledNode }
+          })
+
+          await emitWorkflowRunCancelled({ sixb, workflow, ...result })
+          if (result.node?.nodeType === "agent") {
+            await publishAgentRunCancel(sixb.broker, {
+              projectId: sixb.id,
+              runId: result.node.id,
+            }).catch((error) => {
+              console.error(
+                `[SixbServer] Could not signal cancellation for workflow agent node '${result.node?.id}'.`,
+                error
+              )
+            })
+          }
+          const nodes = await storage.nodes.list({
+            projectId: sixb.id,
+            workflowRunId: existing.id,
+            order: "asc",
+          })
+          return CancelWorkflowRunResponseSchema.parse({
+            run: serializeWorkflowRun(result.run),
+            nodes: await Promise.all(
+              nodes.nodes.map((node) => serializeWorkflowNodeWithExecution(storage, node))
+            ),
+          })
+        } catch (error) {
+          return handleRouteError(error, set)
+        }
+      },
+      {
+        params: WorkflowRunParamsSchema,
+        body: CancelWorkflowRunBodySchema,
+        response: {
+          200: CancelWorkflowRunResponseSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Cancel a workflow run",
+          tags: [OPENAPI_TAGS.workflowRuns.name],
+          operationId: "cancelWorkflowRun",
+          security: bearerSecurityRequirement("cancelWorkflowRun"),
         },
       }
     )

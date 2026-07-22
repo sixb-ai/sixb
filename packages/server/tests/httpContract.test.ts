@@ -1721,7 +1721,6 @@ describe("SixbServer HTTP contract", () => {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             response: { approved: false, note: "Needs inspection." },
-            submittedBy: { principalType: "user", principalId: "reviewer-1" },
           }),
         }
       )
@@ -1740,7 +1739,7 @@ describe("SixbServer HTTP contract", () => {
         id: pending.id,
         status: "submitted",
         response: { approved: false, note: "Needs inspection." },
-        submittedBy: { principalType: "user", principalId: "reviewer-1" },
+        submittedBy: { principalType: "system", principalId: "system" },
       })
 
       const [resumeJob] = await sixb.queues.workflows.claim({
@@ -1759,7 +1758,7 @@ describe("SixbServer HTTP contract", () => {
         payload: {
           workflowId: "review-device-health-workflow",
           runId: pending.workflowRunId,
-          pendingInterventionId: pending.id,
+          resume: { kind: "intervention", interventionId: pending.id },
         },
       })
 
@@ -1808,9 +1807,7 @@ describe("SixbServer HTTP contract", () => {
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            cancelledBy: { principalType: "user", principalId: "reviewer-1" },
-          }),
+          body: JSON.stringify({}),
         }
       )
       expect(cancelResponse.status).toBe(200)
@@ -1818,7 +1815,7 @@ describe("SixbServer HTTP contract", () => {
         intervention: {
           id: pending.id,
           status: "cancelled",
-          cancelledBy: { principalType: "user", principalId: "reviewer-1" },
+          cancelledBy: { principalType: "system", principalId: "system" },
         },
       })
 
@@ -1863,6 +1860,79 @@ describe("SixbServer HTTP contract", () => {
           nodeRunId: pending.nodeRunId,
           pendingInterventionId: pending.id,
         }),
+      })
+    })
+  })
+
+  test("exposes agent node diagnostics without ownership tokens and cancels atomically", async () => {
+    await withHttpContractServer(async ({ baseUrl, sixb }) => {
+      const runs = sixb.storage.workflowRuns!
+      const runId = "workflow-agent-observability"
+      const nodeRunId = `${runId}:node:0`
+      await runs.start({
+        id: runId,
+        projectId: sixb.id,
+        workflowId: "review-device-health-workflow",
+        input: { deviceId: "fan-1" },
+      })
+      await runs.nodes.start({
+        id: nodeRunId,
+        projectId: sixb.id,
+        workflowRunId: runId,
+        workflowId: "review-device-health-workflow",
+        nodeIndex: 0,
+        nodeType: "agent",
+        nodeId: "resolve-device",
+        nodeKey: "resolveDevice",
+        input: { deviceId: "fan-1" },
+      })
+      await runs.agentNodes.create({
+        projectId: sixb.id,
+        nodeRunId,
+        agentId: "device-resolver",
+        prompt: "Resolve fan-1.",
+      })
+      await runs.nodes.wait({ projectId: sixb.id, id: nodeRunId })
+      await runs.wait({ projectId: sixb.id, id: runId })
+      await runs.agentNodes.start({
+        projectId: sixb.id,
+        nodeRunId,
+        modelId: "test-model",
+        execution: {
+          token: "secret-execution-token",
+          queueLeaseExpiresAt: new Date(Date.now() + 60_000),
+        },
+      })
+
+      const detailResponse = await fetch(
+        `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
+      )
+      expect(detailResponse.status).toBe(200)
+      const detail = (await detailResponse.json()) as Record<string, unknown>
+      expect(detail).toMatchObject({
+        nodeRunId,
+        agentId: "device-resolver",
+        status: "running",
+        prompt: "Resolve fan-1.",
+        modelId: "test-model",
+      })
+      expect(JSON.stringify(detail)).not.toContain("secret-execution-token")
+
+      const cancelResponse = await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      expect(cancelResponse.status).toBe(200)
+      expect(await cancelResponse.json()).toMatchObject({
+        run: { id: runId, status: "cancelled" },
+        nodes: [
+          {
+            id: nodeRunId,
+            status: "cancelled",
+            agentExecution: { status: "cancelled", agentId: "device-resolver" },
+          },
+        ],
       })
     })
   })

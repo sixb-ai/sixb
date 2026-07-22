@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
+  type AgentDefinition,
   defineAction,
+  defineAgent,
+  defineAgentStep,
   defineIntervention,
   defineObjectType,
   defineWorkflow,
@@ -38,6 +41,17 @@ const Invoice = defineObjectType({
   name: "Invoice",
   properties: [prop("id", "string", { required: true, primary: true })],
 })
+
+const invoiceResolverAgent = defineAgent("invoice-resolver", {
+  name: "Invoice resolver",
+  model: {} as Parameters<typeof defineAgent>[1]["model"],
+  instructions: "Resolve the best matching invoice.",
+})
+
+const resolveInvoiceWithAgent = defineAgentStep("resolve-invoice-with-agent", invoiceResolverAgent)
+  .input({ transaction: ref(Transaction) })
+  .output({ invoice: ref(Invoice), confidence: "double", reason: "string" })
+  .prompt(({ input }) => `Resolve transaction '${input.transaction.primaryId}'.`)
 
 const findBestInvoice = defineWorkflowStep("find-best-invoice")
   .input({
@@ -191,6 +205,7 @@ const createInvoiceFromTransaction = defineAction("create-invoice-from-transacti
 function createSixb(options: {
   readonly workflows?: readonly WorkflowDefinition[]
   readonly actions?: readonly ActionDefinition[]
+  readonly agents?: readonly AgentDefinition[]
 }) {
   return new Sixb({
     id: "workflow-worker-tests",
@@ -201,6 +216,7 @@ function createSixb(options: {
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     actions: options.actions ?? [],
+    agents: options.agents ?? [],
     workflows: options.workflows ?? [],
   })
 }
@@ -484,6 +500,82 @@ describe("runWorkflowJob", () => {
     expect(nodes.total).toBe(1)
   })
 
+  test("reclaims a running delivery and resumes from its deterministic node", async () => {
+    const workflow = defineWorkflow("recover-running-workflow")
+      .input({ transaction: ref(Transaction) })
+      .then(findBestInvoice)
+      .then(reviewInvoiceMatch)
+    const sixb = createSixb({ workflows: [workflow] })
+    const input = {
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+    } as const
+    const firstOutput = {
+      transaction: input.transaction,
+      invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
+      confidence: 0.98,
+    } as const
+    const runs = sixb.storage.workflowRuns!
+    await runs.start({
+      id: "wfrun_recovered",
+      projectId: sixb.id,
+      workflowId: workflow.id,
+      input,
+      execution: {
+        token: "workflow-exec-old",
+        queueLeaseExpiresAt: new Date("2026-05-08T10:05:00.000Z"),
+      },
+    })
+    await runs.nodes.start({
+      id: "wfrun_recovered:node:0",
+      projectId: sixb.id,
+      workflowRunId: "wfrun_recovered",
+      workflowId: workflow.id,
+      nodeIndex: 0,
+      nodeType: "step",
+      nodeId: findBestInvoice.id,
+      nodeKey: "findBestInvoice",
+      input,
+      executionToken: "workflow-exec-old",
+    })
+    await runs.nodes.finish({
+      id: "wfrun_recovered:node:0",
+      projectId: sixb.id,
+      status: "succeeded",
+      output: firstOutput,
+      executionToken: "workflow-exec-old",
+    })
+    await runs.nodes.start({
+      id: "wfrun_recovered:node:1",
+      projectId: sixb.id,
+      workflowRunId: "wfrun_recovered",
+      workflowId: workflow.id,
+      nodeIndex: 1,
+      nodeType: "step",
+      nodeId: reviewInvoiceMatch.id,
+      nodeKey: "reviewInvoiceMatch",
+      input: firstOutput,
+      executionToken: "workflow-exec-old",
+    })
+
+    const result = await runWorkflowJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "wfrun_recovered",
+        workflowId: workflow.id,
+        input,
+        execution: {
+          token: "workflow-exec-new",
+          queueLeaseExpiresAt: new Date("2026-05-08T10:10:00.000Z"),
+        },
+      },
+    })
+
+    expect(result.status).toBe("succeeded")
+    expect(result.nodes).toHaveLength(2)
+    expect(result.steps.reviewInvoiceMatch).toEqual({ invoice: firstOutput.invoice })
+    expect((await runs.getById({ projectId: sixb.id, id: result.id }))?.attempt).toBe(2)
+  })
+
   test("does not fail a workflow when lifecycle observer notification fails", async () => {
     const workflow = defineWorkflow("observer-fails")
       .input({
@@ -652,6 +744,86 @@ describe("runWorkflowJob", () => {
     })
   })
 
+  test("parks at an agent node and resumes from its validated structured output", async () => {
+    const workflow = defineWorkflow("agent-resolves-invoice")
+      .input({ transaction: ref(Transaction) })
+      .then(resolveInvoiceWithAgent)
+    const sixb = createSixb({ workflows: [workflow], agents: [invoiceResolverAgent] })
+    const runtime = createRuntime(sixb)
+
+    const waiting = await runWorkflowJob({
+      runtime,
+      job: {
+        id: "wfrun_agent_resolution",
+        workflowId: workflow.id,
+        input: {
+          transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+        },
+      },
+    })
+
+    expect(waiting.status).toBe("waiting")
+    const node = waiting.nodes[0]
+    expect(node).toMatchObject({ nodeType: "agent", status: "waiting" })
+    const execution = await sixb.storage.workflowRuns!.agentNodes.getByNodeRunId({
+      projectId: sixb.id,
+      nodeRunId: node!.id,
+    })
+    expect(execution).toMatchObject({
+      agentId: invoiceResolverAgent.id,
+      status: "queued",
+      prompt: "Resolve transaction 'txn_1'.",
+    })
+    const [queuedAgentJob] = await sixb.queues.agents.claim({
+      projectId: sixb.id,
+      workerId: "agent-test-worker",
+    })
+    expect(queuedAgentJob?.job).toMatchObject({
+      type: "agent.workflow-node.requested",
+      payload: { agentId: invoiceResolverAgent.id, nodeRunId: node!.id },
+    })
+
+    const token = "agent_execution_1"
+    await sixb.storage.workflowRuns!.agentNodes.start({
+      projectId: sixb.id,
+      nodeRunId: node!.id,
+      execution: {
+        token,
+        queueLeaseExpiresAt: new Date("2026-05-08T10:15:00.000Z"),
+      },
+    })
+    const output = {
+      invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
+      confidence: 0.97,
+      reason: "Matching amount and supplier.",
+    } as const
+    await sixb.storage.transaction(async (tx) => {
+      await tx.workflowRuns!.agentNodes.finish({
+        projectId: sixb.id,
+        nodeRunId: node!.id,
+        executionToken: token,
+        status: "succeeded",
+      })
+      await tx.workflowRuns!.nodes.finish({
+        projectId: sixb.id,
+        id: node!.id,
+        status: "succeeded",
+        output,
+      })
+    })
+
+    const resumed = await runWorkflowResumeJob({
+      runtime,
+      job: {
+        id: waiting.id,
+        workflowId: workflow.id,
+        resume: { kind: "agentNode", nodeRunId: node!.id },
+      },
+    })
+    expect(resumed.status).toBe("succeeded")
+    expect(resumed.steps.resolveInvoiceWithAgent).toEqual(output)
+  })
+
   test("resumes submitted interventions and continues workflow dataflow", async () => {
     const workflow = defineWorkflow("intervention-resumes")
       .input({
@@ -693,7 +865,10 @@ describe("runWorkflowJob", () => {
       job: {
         id: "wfrun_resume",
         workflowId: workflow.id,
-        pendingInterventionId: "wfrun_resume:intervention:1",
+        resume: {
+          kind: "intervention",
+          interventionId: "wfrun_resume:intervention:1",
+        },
       },
       observer,
     })
@@ -744,7 +919,10 @@ describe("runWorkflowJob", () => {
       job: {
         id: "wfrun_resume",
         workflowId: workflow.id,
-        pendingInterventionId: "wfrun_resume:intervention:1",
+        resume: {
+          kind: "intervention",
+          interventionId: "wfrun_resume:intervention:1",
+        },
       },
       observer,
     })
@@ -795,7 +973,10 @@ describe("runWorkflowJob", () => {
         job: {
           id: "wfrun_invalid_resume_response",
           workflowId: workflow.id,
-          pendingInterventionId: "wfrun_invalid_resume_response:intervention:1",
+          resume: {
+            kind: "intervention",
+            interventionId: "wfrun_invalid_resume_response:intervention:1",
+          },
         },
       })
     ).rejects.toBeInstanceOf(WorkflowValidationError)

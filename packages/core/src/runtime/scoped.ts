@@ -218,10 +218,23 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
     kind: "pipeline.run",
     pipelineId,
   }))
-  const workflows = scopedCatalog(deps.workflows, (workflowId) => ({
-    kind: "workflow.run",
-    workflowId,
-  }))
+  const canRunWorkflow = (workflow: WorkflowDefinition) =>
+    isAllowed(runtime.authorization, { kind: "workflow.run", workflowId: workflow.id }) &&
+    workflow.nodes.every(
+      (node) =>
+        node.type !== "agent" ||
+        isAllowed(runtime.authorization, {
+          kind: "agent.run",
+          agentId: node.agentStep.agent.id,
+        })
+    )
+  const workflows = {
+    list: () => deps.workflows.list().filter(canRunWorkflow),
+    getById: (workflowId: string) => {
+      const workflow = deps.workflows.getById(workflowId)
+      return workflow && canRunWorkflow(workflow) ? workflow : null
+    },
+  }
   const agents = scopedCatalog(deps.agents, (agentId) => ({ kind: "agent.run", agentId }))
 
   const scoped = {

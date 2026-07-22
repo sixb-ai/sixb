@@ -1,10 +1,14 @@
 import type { ActionDefinition } from "../actions"
 import { isActionDefinition } from "../actions"
+import type { AgentDefinition } from "../agents"
+import { isAgentDefinition } from "../agents"
 import type { SchemaOrRef } from "../ontology"
 import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
 import { WorkflowDefinitionError } from "./errors"
 import type {
+  AgentStepBuilder,
+  AgentStepDefinition,
   InterventionBuilder,
   InterventionDefaultsRuntimeHandler,
   InterventionDefinition,
@@ -18,7 +22,12 @@ import type {
   WorkflowScheduleMapper,
   WorkflowTriggerDefinition,
 } from "./types"
-import { assertNonEmpty, isInterventionDefinition, isStepDefinition } from "./validation"
+import {
+  assertNonEmpty,
+  isAgentStepDefinition,
+  isInterventionDefinition,
+  isStepDefinition,
+} from "./validation"
 
 type InterventionOptions = {
   description?: string
@@ -28,7 +37,11 @@ type RuntimeWorkflowInput = Record<string, SchemaOrRef>
 type RuntimeWorkflowValueInput = Record<string, unknown>
 type RuntimeWorkflowMapper = (...args: never[]) => unknown
 type RuntimeWorkflowScheduleMapper = WorkflowScheduleMapper<unknown, RuntimeWorkflowValueInput>
-type RuntimeWorkflowThenDefinition = StepDefinition | InterventionDefinition | ActionDefinition
+type RuntimeWorkflowThenDefinition =
+  | StepDefinition
+  | InterventionDefinition
+  | ActionDefinition
+  | AgentStepDefinition
 type RuntimeWorkflowThen = (
   nodeDefinition: RuntimeWorkflowThenDefinition,
   mapper?: RuntimeWorkflowMapper
@@ -102,6 +115,33 @@ export function defineWorkflowStep<const TId extends string>(id: TId): StepBuild
   } as unknown as StepBuilder<TId>
 }
 
+export function defineAgentStep<const TId extends string, const TAgent extends AgentDefinition>(
+  id: TId,
+  agent: TAgent
+): AgentStepBuilder<TId, TAgent> {
+  assertNonEmpty(id, "Agent step", "id")
+  if (!isAgentDefinition(agent)) {
+    throw new WorkflowDefinitionError(`Agent step "${id}" references an invalid agent.`)
+  }
+
+  return {
+    input(input: RuntimeWorkflowInput): unknown {
+      return {
+        output(output: RuntimeWorkflowInput): unknown {
+          return {
+            prompt(prompt: unknown): unknown {
+              if (typeof prompt !== "function") {
+                throw new WorkflowDefinitionError(`Agent step "${id}" prompt must be a function.`)
+              }
+              return { kind: "agentStep", id, agent, input, output, prompt }
+            },
+          }
+        },
+      }
+    },
+  } as unknown as AgentStepBuilder<TId, TAgent>
+}
+
 export function defineIntervention<const TId extends string>(
   id: TId,
   options?: InterventionOptions
@@ -157,6 +197,16 @@ function createWorkflowDraftBuilder(
       }
 
       nodes.push(createStepNode(id, nodes, nodeDefinition, mapper))
+      definition ??= createWorkflowDefinition(id, input, triggers, nodes, appendNode)
+      return definition
+    }
+
+    if (isAgentStepDefinition(nodeDefinition)) {
+      if (mapper !== undefined && !isRuntimeWorkflowMapper(mapper)) {
+        throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
+      }
+
+      nodes.push(createAgentNode(id, nodes, nodeDefinition, mapper))
       definition ??= createWorkflowDefinition(id, input, triggers, nodes, appendNode)
       return definition
     }
@@ -264,6 +314,25 @@ function createStepNode(
     id: step.id,
     key,
     step,
+    ...(mapper !== undefined ? { mapper } : {}),
+  }
+}
+
+function createAgentNode(
+  workflowId: string,
+  nodes: readonly WorkflowNodeDefinition[],
+  agentStep: AgentStepDefinition,
+  mapper: RuntimeWorkflowMapper | undefined
+): WorkflowNodeDefinition {
+  const key = deriveWorkflowNodeKey(agentStep.id)
+  assertNodeKey(workflowId, agentStep.id, key)
+  assertUniqueNode(workflowId, nodes, agentStep.id, key)
+
+  return {
+    type: "agent",
+    id: agentStep.id,
+    key,
+    agentStep,
     ...(mapper !== undefined ? { mapper } : {}),
   }
 }

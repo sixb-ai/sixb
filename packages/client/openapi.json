@@ -7735,6 +7735,34 @@
                               },
                               "required": ["type", "id", "key", "input", "response"],
                               "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["agent"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "key": {
+                                  "type": "string"
+                                },
+                                "agentId": {
+                                  "type": "string"
+                                },
+                                "input": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                "output": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                }
+                              },
+                              "required": ["type", "id", "key", "agentId", "input", "output"],
+                              "additionalProperties": false
                             }
                           ]
                         }
@@ -7777,6 +7805,21 @@
                           },
                           "error": {
                             "type": "string"
+                          },
+                          "requestedBy": {
+                            "type": "object",
+                            "properties": {
+                              "principalType": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "principalId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["principalType", "principalId"],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -7785,7 +7828,8 @@
                           "workflowId",
                           "status",
                           "input",
-                          "startedAt"
+                          "startedAt",
+                          "requestedBy"
                         ],
                         "additionalProperties": false,
                         "nullable": true
@@ -7934,6 +7978,34 @@
                             },
                             "required": ["type", "id", "key", "input", "response"],
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["agent"]
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "key": {
+                                "type": "string"
+                              },
+                              "agentId": {
+                                "type": "string"
+                              },
+                              "input": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "output": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              }
+                            },
+                            "required": ["type", "id", "key", "agentId", "input", "output"],
+                            "additionalProperties": false
                           }
                         ]
                       }
@@ -7976,9 +8048,32 @@
                         },
                         "error": {
                           "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "principalType": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "principalId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["principalType", "principalId"],
+                          "additionalProperties": false
                         }
                       },
-                      "required": ["id", "projectId", "workflowId", "status", "input", "startedAt"],
+                      "required": [
+                        "id",
+                        "projectId",
+                        "workflowId",
+                        "status",
+                        "input",
+                        "startedAt",
+                        "requestedBy"
+                      ],
                       "additionalProperties": false,
                       "nullable": true
                     }
@@ -8468,21 +8563,6 @@
                   "response": {
                     "type": "object",
                     "additionalProperties": {}
-                  },
-                  "submittedBy": {
-                    "type": "object",
-                    "properties": {
-                      "principalType": {
-                        "type": "string",
-                        "enum": ["user", "serviceAccount", "system"]
-                      },
-                      "principalId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": ["principalType", "principalId"],
-                    "additionalProperties": false
                   }
                 },
                 "required": ["response"],
@@ -8496,21 +8576,6 @@
                   "response": {
                     "type": "object",
                     "additionalProperties": {}
-                  },
-                  "submittedBy": {
-                    "type": "object",
-                    "properties": {
-                      "principalType": {
-                        "type": "string",
-                        "enum": ["user", "serviceAccount", "system"]
-                      },
-                      "principalId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": ["principalType", "principalId"],
-                    "additionalProperties": false
                   }
                 },
                 "required": ["response"],
@@ -8524,21 +8589,6 @@
                   "response": {
                     "type": "object",
                     "additionalProperties": {}
-                  },
-                  "submittedBy": {
-                    "type": "object",
-                    "properties": {
-                      "principalType": {
-                        "type": "string",
-                        "enum": ["user", "serviceAccount", "system"]
-                      },
-                      "principalId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": ["principalType", "principalId"],
-                    "additionalProperties": false
                   }
                 },
                 "required": ["response"],
@@ -8738,23 +8788,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "cancelledBy": {
-                    "type": "object",
-                    "properties": {
-                      "principalType": {
-                        "type": "string",
-                        "enum": ["user", "serviceAccount", "system"]
-                      },
-                      "principalId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": ["principalType", "principalId"],
-                    "additionalProperties": false
-                  }
-                },
+                "properties": {},
                 "additionalProperties": false,
                 "default": {}
               }
@@ -8762,23 +8796,7 @@
             "application/x-www-form-urlencoded": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "cancelledBy": {
-                    "type": "object",
-                    "properties": {
-                      "principalType": {
-                        "type": "string",
-                        "enum": ["user", "serviceAccount", "system"]
-                      },
-                      "principalId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": ["principalType", "principalId"],
-                    "additionalProperties": false
-                  }
-                },
+                "properties": {},
                 "additionalProperties": false,
                 "default": {}
               }
@@ -8786,23 +8804,7 @@
             "multipart/form-data": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "cancelledBy": {
-                    "type": "object",
-                    "properties": {
-                      "principalType": {
-                        "type": "string",
-                        "enum": ["user", "serviceAccount", "system"]
-                      },
-                      "principalId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": ["principalType", "principalId"],
-                    "additionalProperties": false
-                  }
-                },
+                "properties": {},
                 "additionalProperties": false,
                 "default": {}
               }
@@ -9083,6 +9085,21 @@
                           },
                           "error": {
                             "type": "string"
+                          },
+                          "requestedBy": {
+                            "type": "object",
+                            "properties": {
+                              "principalType": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "principalId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["principalType", "principalId"],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -9091,7 +9108,8 @@
                           "workflowId",
                           "status",
                           "input",
-                          "startedAt"
+                          "startedAt",
+                          "requestedBy"
                         ],
                         "additionalProperties": false
                       }
@@ -9191,9 +9209,32 @@
                         },
                         "error": {
                           "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "principalType": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "principalId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["principalType", "principalId"],
+                          "additionalProperties": false
                         }
                       },
-                      "required": ["id", "projectId", "workflowId", "status", "input", "startedAt"],
+                      "required": [
+                        "id",
+                        "projectId",
+                        "workflowId",
+                        "status",
+                        "input",
+                        "startedAt",
+                        "requestedBy"
+                      ],
                       "additionalProperties": false
                     },
                     "nodes": {
@@ -9218,7 +9259,7 @@
                           },
                           "nodeType": {
                             "type": "string",
-                            "enum": ["step", "action", "intervention"]
+                            "enum": ["step", "action", "intervention", "agent"]
                           },
                           "nodeId": {
                             "type": "string"
@@ -9246,6 +9287,457 @@
                           },
                           "error": {
                             "type": "string"
+                          },
+                          "agentExecution": {
+                            "type": "object",
+                            "properties": {
+                              "agentId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                              },
+                              "attempt": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "modelId": {
+                                "type": "string"
+                              },
+                              "finishReason": {
+                                "type": "string"
+                              },
+                              "usage": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "completedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["agentId", "status", "attempt"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "projectId",
+                          "workflowRunId",
+                          "workflowId",
+                          "nodeIndex",
+                          "nodeType",
+                          "nodeId",
+                          "nodeKey",
+                          "status",
+                          "input",
+                          "startedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["run", "nodes"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workflow-runs/{runId}/nodes/{nodeKey}/agent-execution": {
+      "get": {
+        "summary": "Get workflow agent node execution detail",
+        "tags": ["Workflow Runs"],
+        "operationId": "getWorkflowAgentNodeExecution",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "nodeKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                    },
+                    "attempt": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "modelId": {
+                      "type": "string"
+                    },
+                    "finishReason": {
+                      "type": "string"
+                    },
+                    "usage": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "startedAt": {
+                      "type": "string"
+                    },
+                    "completedAt": {
+                      "type": "string"
+                    },
+                    "nodeRunId": {
+                      "type": "string"
+                    },
+                    "prompt": {
+                      "type": "string"
+                    },
+                    "executionPrincipal": {
+                      "type": "object",
+                      "properties": {
+                        "principalType": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "principalId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["principalType", "principalId"],
+                      "additionalProperties": false
+                    },
+                    "trace": {
+                      "type": "array",
+                      "items": {}
+                    },
+                    "diagnostics": {
+                      "type": "array",
+                      "items": {}
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["agentId", "status", "attempt", "nodeRunId", "prompt", "createdAt"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workflow-runs/{runId}/cancel": {
+      "post": {
+        "summary": "Cancel a workflow run",
+        "tags": ["Workflow Runs"],
+        "operationId": "cancelWorkflowRun",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false,
+                "default": {}
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false,
+                "default": {}
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false,
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "workflowId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "queued",
+                            "running",
+                            "waiting",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ]
+                        },
+                        "input": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "queuedAt": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "finishedAt": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "principalType": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "principalId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["principalType", "principalId"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "workflowId",
+                        "status",
+                        "input",
+                        "startedAt",
+                        "requestedBy"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "projectId": {
+                            "type": "string"
+                          },
+                          "workflowRunId": {
+                            "type": "string"
+                          },
+                          "workflowId": {
+                            "type": "string"
+                          },
+                          "nodeIndex": {
+                            "type": "number"
+                          },
+                          "nodeType": {
+                            "type": "string",
+                            "enum": ["step", "action", "intervention", "agent"]
+                          },
+                          "nodeId": {
+                            "type": "string"
+                          },
+                          "nodeKey": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["running", "waiting", "succeeded", "failed", "cancelled"]
+                          },
+                          "input": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          },
+                          "finishedAt": {
+                            "type": "string"
+                          },
+                          "output": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "agentExecution": {
+                            "type": "object",
+                            "properties": {
+                              "agentId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                              },
+                              "attempt": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "modelId": {
+                                "type": "string"
+                              },
+                              "finishReason": {
+                                "type": "string"
+                              },
+                              "usage": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "completedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["agentId", "status", "attempt"],
+                            "additionalProperties": false
                           }
                         },
                         "required": [

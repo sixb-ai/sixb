@@ -1,8 +1,12 @@
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
+import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, WorkflowQueueJob } from "@sixb/core/queues"
-import type { WorkflowRunRecord, WorkflowRunStorage } from "@sixb/core/storage"
+import type {
+  WorkflowRunExecution,
+  WorkflowRunRecord,
+  WorkflowRunStorage,
+} from "@sixb/core/storage"
 import { EventsRuntimeWorkflowRunObserver } from "./events"
 import { runWorkflowJob, runWorkflowResumeJob } from "./run-workflow-job"
 import type {
@@ -12,6 +16,9 @@ import type {
   WorkflowWorkerContext,
   WorkflowWorkerSixb,
 } from "./types"
+
+const MAX_WORKFLOW_DELIVERY_ATTEMPTS = 5
+const WORKFLOW_RETRY_BACKOFF_MS = 1_000
 
 export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
   private readonly context: WorkflowWorkerContext
@@ -47,28 +54,64 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
 
   protected async execute(
     claimed: ClaimedQueueJob<WorkflowQueueJob>,
-    signal: AbortSignal
+    signal: AbortSignal,
+    delivery: QueueDelivery<WorkflowQueueJob>
   ): Promise<void> {
-    if (claimed.job.type === "workflow.run.resume.requested") {
-      await runWorkflowResumeJob({
+    const execution = freshWorkflowExecution(delivery.leaseExpiresAt)
+    const runId = workflowRunIdFromClaimed(claimed)
+    const stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
+      void this.projectExecutionOwnership(runId, execution.token, renewed.leaseExpiresAt)
+    })
+
+    try {
+      if (claimed.job.type === "workflow.run.resume.requested") {
+        await runWorkflowResumeJob({
+          runtime: this.context,
+          job: workflowResumeJobFromClaimed(claimed, execution),
+          signal,
+          observer: this.observer,
+          onRunFailed: (error, run) => this.reportFailedRun(claimed, error, run),
+        })
+        return
+      }
+
+      const workflowJob = workflowJobFromClaimed(claimed, execution)
+
+      await runWorkflowJob({
         runtime: this.context,
-        job: workflowResumeJobFromClaimed(claimed),
+        job: workflowJob,
         signal,
         observer: this.observer,
         onRunFailed: (error, run) => this.reportFailedRun(claimed, error, run),
       })
-      return
+    } finally {
+      stopOwnershipProjection()
     }
+  }
 
-    const workflowJob = workflowJobFromClaimed(claimed)
-
-    await runWorkflowJob({
-      runtime: this.context,
-      job: workflowJob,
-      signal,
-      observer: this.observer,
-      onRunFailed: (error, run) => this.reportFailedRun(claimed, error, run),
-    })
+  private async projectExecutionOwnership(
+    runId: string,
+    executionToken: string,
+    queueLeaseExpiresAt: string
+  ): Promise<void> {
+    try {
+      await this.context.workflowRuns.confirmExecutionOwnership({
+        projectId: this.context.projectId,
+        id: runId,
+        executionToken,
+        queueLeaseExpiresAt: new Date(queueLeaseExpiresAt),
+      })
+    } catch (error) {
+      const run = await this.context.workflowRuns
+        .getById({ projectId: this.context.projectId, id: runId })
+        .catch(() => null)
+      if (run?.status === "running" && run.execution?.token === executionToken) {
+        console.error(
+          `[SixbWorkflowWorker] Could not project queue ownership for workflow run '${runId}'.`,
+          error
+        )
+      }
+    }
   }
 
   private reportFailedRun(
@@ -89,9 +132,24 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
   }
 
   protected override async onExecutionError(
-    _claimed: ClaimedQueueJob<WorkflowQueueJob>,
+    claimed: ClaimedQueueJob<WorkflowQueueJob>,
     _error: unknown
   ): Promise<QueueWorkerFailureDecision> {
+    const run = await this.context.workflowRuns
+      .getById({
+        projectId: this.context.projectId,
+        id: workflowRunIdFromClaimed(claimed),
+      })
+      .catch(() => null)
+    if (
+      (!run || run.status === "queued" || run.status === "running") &&
+      claimed.job.attempt < MAX_WORKFLOW_DELIVERY_ATTEMPTS
+    ) {
+      return {
+        kind: "retry",
+        availableAt: new Date(Date.now() + WORKFLOW_RETRY_BACKOFF_MS).toISOString(),
+      }
+    }
     return { kind: "fail" }
   }
 
@@ -99,7 +157,10 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
     _claimed: ClaimedQueueJob<WorkflowQueueJob>,
     _error: unknown
   ): Promise<QueueWorkerFailureDecision> {
-    return { kind: "fail" }
+    return {
+      kind: "retry",
+      availableAt: new Date(Date.now() + WORKFLOW_RETRY_BACKOFF_MS).toISOString(),
+    }
   }
 }
 
@@ -109,7 +170,10 @@ function requiresWorkflowInterventionStorage(sixb: WorkflowWorkerSixb): boolean 
     .some((workflow) => workflow.nodes.some((node) => node.type === "intervention"))
 }
 
-function workflowJobFromClaimed(claimed: ClaimedQueueJob<WorkflowQueueJob>): WorkflowJob {
+function workflowJobFromClaimed(
+  claimed: ClaimedQueueJob<WorkflowQueueJob>,
+  execution: WorkflowRunExecution
+): WorkflowJob {
   const { job } = claimed
   if (job.type !== "workflow.run.requested") {
     throw new Error(`[SixbWorkflowWorker] Unsupported workflow job type '${job.type}'.`)
@@ -120,11 +184,13 @@ function workflowJobFromClaimed(claimed: ClaimedQueueJob<WorkflowQueueJob>): Wor
     workflowId: job.payload.workflowId,
     input: job.payload.input,
     source: job.payload.source,
+    execution,
   }
 }
 
 function workflowResumeJobFromClaimed(
-  claimed: ClaimedQueueJob<WorkflowQueueJob>
+  claimed: ClaimedQueueJob<WorkflowQueueJob>,
+  execution: WorkflowRunExecution
 ): WorkflowResumeJob {
   const { job } = claimed
   if (job.type !== "workflow.run.resume.requested") {
@@ -134,7 +200,21 @@ function workflowResumeJobFromClaimed(
   return {
     id: job.payload.runId,
     workflowId: job.payload.workflowId,
-    pendingInterventionId: job.payload.pendingInterventionId,
+    resume: job.payload.resume,
+    execution,
+  }
+}
+
+function workflowRunIdFromClaimed(claimed: ClaimedQueueJob<WorkflowQueueJob>): string {
+  return claimed.job.type === "workflow.run.resume.requested"
+    ? claimed.job.payload.runId
+    : (claimed.job.payload.runId ?? `${claimed.job.id}:attempt:${claimed.job.attempt}`)
+}
+
+function freshWorkflowExecution(queueLeaseExpiresAt: string): WorkflowRunExecution {
+  return {
+    token: `wfx_${crypto.randomUUID()}`,
+    queueLeaseExpiresAt: new Date(queueLeaseExpiresAt),
   }
 }
 

@@ -130,10 +130,6 @@ export function WorkflowInterventionPanel({ node }: { node: WorkflowRunNode }) {
       path: { interventionId: intervention.id },
       body: {
         response: result.input,
-        submittedBy: {
-          principalType: "user",
-          principalId: "atlas-ui",
-        },
       },
     })
   }

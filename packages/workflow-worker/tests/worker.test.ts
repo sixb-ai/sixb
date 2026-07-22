@@ -649,7 +649,10 @@ describe("WorkflowWorker", () => {
           payload: {
             workflowId: workflow.id,
             runId: "wfrun_worker_resume",
-            pendingInterventionId: "wfrun_worker_resume:intervention:1",
+            resume: {
+              kind: "intervention",
+              interventionId: "wfrun_worker_resume:intervention:1",
+            },
           },
         },
       ],
@@ -764,7 +767,10 @@ describe("WorkflowWorker", () => {
           payload: {
             workflowId: workflow.id,
             runId: "wfrun_worker_resume_failed",
-            pendingInterventionId: "wfrun_worker_resume_failed:intervention:1",
+            resume: {
+              kind: "intervention",
+              interventionId: "wfrun_worker_resume_failed:intervention:1",
+            },
           },
         },
       ],
@@ -795,7 +801,7 @@ describe("WorkflowWorker", () => {
     })
   })
 
-  test("cancels the run without reporting a failure on worker shutdown", async () => {
+  test("keeps the run recoverable without reporting a failure on worker shutdown", async () => {
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
     const workflow = defineWorkflow("cancel-workflow").input({}).then(slowStep)
     const sixb = createSixb({
@@ -837,8 +843,36 @@ describe("WorkflowWorker", () => {
       projectId: sixb.id,
       id: "wfrun_worker_cancelled",
     })
-    expect(run?.status).toBe("cancelled")
+    expect(run?.status).toBe("running")
     await Bun.sleep(0)
+    expect(reports).toHaveLength(0)
+
+    const interruptedEvents = await sixb.events.read({
+      types: [
+        "workflow.run.started",
+        "workflow.run.node.started",
+        "workflow.run.node.finished",
+        "workflow.run.finished",
+      ],
+    })
+    expect(interruptedEvents.map((event) => event.type)).toEqual([
+      "workflow.run.started",
+      "workflow.run.node.started",
+    ])
+
+    const replacement = new WorkflowWorker(sixb)
+    workers.push(replacement)
+    await replacement.start()
+    const recovered = await waitFor(
+      () =>
+        sixb.storage.workflowRuns!.getById({
+          projectId: sixb.id,
+          id: "wfrun_worker_cancelled",
+        }),
+      (value) => value?.status === "succeeded"
+    )
+
+    expect(recovered).toMatchObject({ status: "succeeded", attempt: 2 })
     expect(reports).toHaveLength(0)
 
     const events = await sixb.events.read({
@@ -859,14 +893,13 @@ describe("WorkflowWorker", () => {
       workflowId: workflow.id,
       runId: "wfrun_worker_cancelled",
       nodeRunId: "wfrun_worker_cancelled:node:0",
-      status: "cancelled",
+      status: "succeeded",
     })
     expect(events[3]?.payload).toMatchObject({
       workflowId: workflow.id,
       runId: "wfrun_worker_cancelled",
-      status: "cancelled",
+      status: "succeeded",
       finishedAt: expect.any(String),
-      error: "Workflow worker aborted.",
     })
 
     const claimed = await sixb.queues.workflows.claim({

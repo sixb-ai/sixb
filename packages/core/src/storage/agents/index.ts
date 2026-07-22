@@ -3,6 +3,7 @@ export { AgentStorageError } from "./errors"
 export type { InMemoryAgentStorageSnapshot } from "./in-memory"
 export { InMemoryAgentStorage } from "./in-memory"
 export type {
+  AgentExecutionStatus,
   AgentMessageRecord,
   AgentMessageRole,
   AgentMessageStore,

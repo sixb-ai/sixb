@@ -3,6 +3,7 @@ import type { JsonValue } from "../json"
 import { isObjectRefSchema, type Schema, type SchemaOrRef, type ValueType } from "../ontology"
 import { WorkflowValidationError } from "./errors"
 import type {
+  AgentStepDefinition,
   InterventionDefinition,
   InterventionResponseConfig,
   StepDefinition,
@@ -11,6 +12,8 @@ import type {
 } from "./types"
 import {
   interventionResponseFieldSchema,
+  validateWorkflowAgentStepInput,
+  validateWorkflowAgentStepOutput,
   validateWorkflowInput,
   validateWorkflowInterventionDefaultResponse,
   validateWorkflowInterventionInput,
@@ -18,6 +21,36 @@ import {
   validateWorkflowStepInput,
   validateWorkflowStepOutput,
 } from "./validation"
+
+export function snapshotWorkflowAgentStepInput(params: {
+  readonly workflowId: string
+  readonly agentStep: AgentStepDefinition
+  readonly value: unknown
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): WorkflowIOSnapshot {
+  const value = validateWorkflowAgentStepInput(params)
+  return snapshotWorkflowContractRecord({
+    shape: params.agentStep.input as Readonly<Record<string, SchemaOrRef>>,
+    value,
+    path: `Workflow "${params.workflowId}" agent step "${params.agentStep.id}" input`,
+    valueTypesById: params.valueTypesById,
+  })
+}
+
+export function snapshotWorkflowAgentStepOutput(params: {
+  readonly workflowId: string
+  readonly agentStep: AgentStepDefinition
+  readonly value: unknown
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): WorkflowIOSnapshot {
+  const value = validateWorkflowAgentStepOutput(params)
+  return snapshotWorkflowContractRecord({
+    shape: params.agentStep.output as Readonly<Record<string, SchemaOrRef>>,
+    value,
+    path: `Workflow "${params.workflowId}" agent step "${params.agentStep.id}" output`,
+    valueTypesById: params.valueTypesById,
+  })
+}
 
 export function snapshotWorkflowInput(params: {
   readonly workflow: WorkflowDefinition

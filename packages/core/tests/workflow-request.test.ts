@@ -74,6 +74,7 @@ describe("sixb.workflows.request", () => {
     const run = await sixb.storage.workflowRuns?.getById({ projectId: sixb.id, id: result.runId })
     expect(run?.status).toBe("queued")
     expect(run?.workflowId).toBe("draft-invoice")
+    expect(run?.requestedByPrincipal).toEqual({ type: "system", id: "system" })
     expect(run?.input).toEqual({
       transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
     })

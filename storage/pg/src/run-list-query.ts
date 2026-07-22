@@ -8,6 +8,7 @@ type PgRunListTable =
   | "webhook_runs"
   | "workflow_runs"
   | "workflow_node_runs"
+  | "workflow_agent_node_runs"
 
 /** Column projection — `sync_runs` needs the derived `checkpoint_present` flag. */
 type PgRunListSelectList = "*" | "*, checkpoint IS NOT NULL AS checkpoint_present"
@@ -75,11 +76,16 @@ export async function queryRunList<TRow>(input: {
 
   const queryParams = [...input.params] as SqlParameter[]
   const orderColumn =
-    input.tableName === "agent_runs" ? "COALESCE(started_at, created_at)" : "started_at"
+    input.tableName === "agent_runs"
+      ? "COALESCE(started_at, created_at)"
+      : input.tableName === "workflow_agent_node_runs"
+        ? "created_at"
+        : "started_at"
+  const idColumn = input.tableName === "workflow_agent_node_runs" ? "node_run_id" : "id"
   let query = `
     SELECT ${input.selectList ?? "*"} FROM ${input.tableName}
     ${where}
-    ORDER BY ${orderColumn} ${order}, id ${order}
+    ORDER BY ${orderColumn} ${order}, ${idColumn} ${order}
   `
   let nextIndex = input.nextIndex
 

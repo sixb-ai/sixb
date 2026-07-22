@@ -6,6 +6,7 @@ import {
   col,
   defineAction,
   defineAgent,
+  defineAgentStep,
   defineConnector,
   defineDataset,
   defineGroup,
@@ -101,6 +102,11 @@ const invoiceAgent = defineAgent("invoice-agent", {
   instructions: "Help with invoices.",
 })
 
+const reviewContractWithAgent = defineAgentStep("review-contract-with-agent", contractAgent)
+  .input({ contract: ref(Contract) })
+  .output({ approved: "boolean", reason: "string" })
+  .prompt(({ input }) => `Review contract '${input.contract.primaryId}'.`)
+
 // Widened to the base type, like renewContract below: keeps the registered
 // actions array out of the deep Sixb<tuple> instantiation (TS2589).
 const sendContract: ActionDefinition = defineAction("send-contract")
@@ -123,11 +129,15 @@ const reviewContract = defineWorkflowStep("review-contract")
 const renewContract: WorkflowDefinition = defineWorkflow("renew-contract")
   .input({ contract: ref(Contract) })
   .then(reviewContract)
+const agentReviewContract: WorkflowDefinition = defineWorkflow("agent-review-contract")
+  .input({ contract: ref(Contract) })
+  .then(reviewContractWithAgent)
 
 const commercial = defineGroup("commercial")
 const finance = defineGroup("finance")
 const ops = defineGroup("ops")
 const operations = defineGroup("operations")
+const workflowOnly = defineGroup("workflow-only")
 
 const contractOperator = defineRole("contract.operator", {
   grantedTo: [commercial],
@@ -149,10 +159,16 @@ const operationsRunner = defineRole("operations.runner", {
   grantedTo: [operations],
   grants: [
     can.run(renewContract),
+    can.run(agentReviewContract),
     can.run(syncContracts),
     can.run(contractPipeline),
     can.run(contractAgent),
   ],
+})
+
+const workflowOnlyRunner = defineRole("workflow-only.runner", {
+  grantedTo: [workflowOnly],
+  grants: [can.run(agentReviewContract)],
 })
 
 const principal = { type: "user", id: "adam" } as const
@@ -167,10 +183,10 @@ function createRuntime() {
     actions: [sendContract, archiveInvoice],
     syncs: [syncContracts, syncInvoices],
     pipelines: [contractPipeline, invoicePipeline],
-    workflows: [renewContract],
+    workflows: [renewContract, agentReviewContract],
     agents: [contractAgent, invoiceAgent],
-    groups: [commercial, finance, ops, operations],
-    roles: [contractOperator, invoiceViewer, contractSender, operationsRunner],
+    groups: [commercial, finance, ops, operations, workflowOnly],
+    roles: [contractOperator, invoiceViewer, contractSender, operationsRunner, workflowOnlyRunner],
     ...createTestRuntimeDeps(),
   })
 }
@@ -368,13 +384,26 @@ describe("sixb.as() operational access", () => {
     const sixb = createRuntime()
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    expect(runner.listWorkflows().map((workflow) => workflow.id)).toEqual(["renew-contract"])
+    expect(runner.listWorkflows().map((workflow) => workflow.id)).toEqual([
+      "renew-contract",
+      "agent-review-contract",
+    ])
     expect(runner.getWorkflowById("renew-contract")?.id).toBe("renew-contract")
 
     // No run grant: the workflow is hidden from both listing and lookup.
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
     expect(operator.listWorkflows()).toEqual([])
     expect(operator.getWorkflowById("renew-contract")).toBeNull()
+
+    const workflowOnlyPrincipal = sixb.as(contextFor(sixb, ["workflow-only"]))
+    expect(workflowOnlyPrincipal.listWorkflows()).toEqual([])
+    expect(workflowOnlyPrincipal.getWorkflowById("agent-review-contract")).toBeNull()
+    expect(
+      workflowOnlyPrincipal.runWorkflow({
+        workflowId: "agent-review-contract",
+        input: { contract: { objectTypeId: "contract", primaryId: "c1" } },
+      })
+    ).rejects.toThrow(AuthorizationError)
   })
 
   test("sync catalog narrows to runnable syncs", () => {

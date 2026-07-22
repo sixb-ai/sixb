@@ -14,6 +14,7 @@ import {
   appendTelemetry,
   cancelAgentRun,
   cancelWorkflowIntervention,
+  cancelWorkflowRun,
   completeFileUpload,
   countObjects,
   createAgentThread,
@@ -54,6 +55,7 @@ import {
   getSync,
   getTelemetryHistory,
   getWorkflow,
+  getWorkflowAgentNodeExecution,
   getWorkflowIntervention,
   getWorkflowNodeRunFileContent,
   getWorkflowRun,
@@ -129,6 +131,9 @@ import type {
   CancelWorkflowInterventionData,
   CancelWorkflowInterventionError,
   CancelWorkflowInterventionResponse,
+  CancelWorkflowRunData,
+  CancelWorkflowRunError,
+  CancelWorkflowRunResponse,
   CompleteFileUploadData,
   CompleteFileUploadError,
   CompleteFileUploadResponse,
@@ -243,6 +248,9 @@ import type {
   GetTelemetryHistoryData,
   GetTelemetryHistoryError,
   GetTelemetryHistoryResponse,
+  GetWorkflowAgentNodeExecutionData,
+  GetWorkflowAgentNodeExecutionError,
+  GetWorkflowAgentNodeExecutionResponse,
   GetWorkflowData,
   GetWorkflowError,
   GetWorkflowInterventionData,
@@ -2074,6 +2082,61 @@ export const getWorkflowRunOptions = (options: Options<GetWorkflowRunData>) =>
     },
     queryKey: getWorkflowRunQueryKey(options),
   })
+
+export const getWorkflowAgentNodeExecutionQueryKey = (
+  options: Options<GetWorkflowAgentNodeExecutionData>
+) => createQueryKey("getWorkflowAgentNodeExecution", options)
+
+/**
+ * Get workflow agent node execution detail
+ */
+export const getWorkflowAgentNodeExecutionOptions = (
+  options: Options<GetWorkflowAgentNodeExecutionData>
+) =>
+  queryOptions<
+    GetWorkflowAgentNodeExecutionResponse,
+    GetWorkflowAgentNodeExecutionError,
+    GetWorkflowAgentNodeExecutionResponse,
+    ReturnType<typeof getWorkflowAgentNodeExecutionQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getWorkflowAgentNodeExecution({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getWorkflowAgentNodeExecutionQueryKey(options),
+  })
+
+/**
+ * Cancel a workflow run
+ */
+export const cancelWorkflowRunMutation = (
+  options?: Partial<Options<CancelWorkflowRunData>>
+): UseMutationOptions<
+  CancelWorkflowRunResponse,
+  CancelWorkflowRunError,
+  Options<CancelWorkflowRunData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CancelWorkflowRunResponse,
+    CancelWorkflowRunError,
+    Options<CancelWorkflowRunData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await cancelWorkflowRun({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const getWorkflowRunFileContentQueryKey = (
   options: Options<GetWorkflowRunFileContentData>

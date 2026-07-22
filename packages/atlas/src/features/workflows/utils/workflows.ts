@@ -1,4 +1,5 @@
 import type {
+  GetWorkflowAgentNodeExecutionResponse,
   GetWorkflowResponse,
   GetWorkflowRunResponse,
   ListWorkflowRunsResponse,
@@ -11,6 +12,7 @@ export type WorkflowNode = WorkflowDetail["nodes"][number]
 export type WorkflowRunSummary = ListWorkflowRunsResponse["runs"][number]
 export type WorkflowRunDetail = GetWorkflowRunResponse["run"]
 export type WorkflowRunNode = GetWorkflowRunResponse["nodes"][number]
+export type WorkflowAgentNodeExecution = GetWorkflowAgentNodeExecutionResponse
 export type WorkflowRunStatus = WorkflowRunSummary["status"]
 export type WorkflowNodeStatus = WorkflowRunNode["status"]
 export type WorkflowRunStatusFilter = WorkflowRunStatus | "all"

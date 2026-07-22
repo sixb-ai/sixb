@@ -32,7 +32,11 @@ export type {
   DispatchQueuedAgentRunsInput,
   DispatchQueuedAgentRunsResult,
 } from "./dispatch"
-export { agentRunQueueJobId, dispatchQueuedAgentRuns } from "./dispatch"
+export {
+  agentRunQueueJobId,
+  dispatchQueuedAgentRuns,
+  workflowAgentNodeQueueJobId,
+} from "./dispatch"
 export {
   AgentDefinitionError,
   AgentMessageAdapterError,
@@ -62,6 +66,7 @@ export {
   type BuildAgentSystemPromptInput,
   buildAgentSystemPrompt,
   DEFAULT_AGENT_SYSTEM_CONTEXT,
+  DEFAULT_AGENT_TASK_SYSTEM_CONTEXT,
 } from "./prompt"
 export {
   type RequestAgentRunInput,

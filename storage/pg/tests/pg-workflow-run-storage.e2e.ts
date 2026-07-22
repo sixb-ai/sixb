@@ -556,6 +556,113 @@ describe("PgWorkflowRunStorage", () => {
     ).rejects.toBeInstanceOf(WorkflowRunError)
   })
 
+  test("fences stale workflow deliveries after reclaim", async () => {
+    await storage.workflowRuns.start({
+      id: "wf-run-fenced",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: {},
+      execution: {
+        token: "workflow-exec-old",
+        queueLeaseExpiresAt: new Date("2026-05-08T10:05:00.000Z"),
+      },
+    })
+    await storage.workflowRuns.nodes.start({
+      id: "wf-run-fenced:node:0",
+      projectId: "my-app",
+      workflowRunId: "wf-run-fenced",
+      workflowId: "reconcile-transaction",
+      nodeIndex: 0,
+      nodeType: "step",
+      nodeId: "resolve",
+      nodeKey: "resolve",
+      input: {},
+      executionToken: "workflow-exec-old",
+    })
+
+    const reclaimed = await storage.workflowRuns.reclaim({
+      id: "wf-run-fenced",
+      projectId: "my-app",
+      execution: {
+        token: "workflow-exec-new",
+        queueLeaseExpiresAt: new Date("2026-05-08T10:10:00.000Z"),
+      },
+    })
+    expect(reclaimed.attempt).toBe(2)
+    await expect(
+      storage.workflowRuns.nodes.finish({
+        id: "wf-run-fenced:node:0",
+        projectId: "my-app",
+        status: "succeeded",
+        output: {},
+        executionToken: "workflow-exec-old",
+      })
+    ).rejects.toThrow("Execution token is no longer current")
+    await storage.workflowRuns.nodes.finish({
+      id: "wf-run-fenced:node:0",
+      projectId: "my-app",
+      status: "succeeded",
+      output: {},
+      executionToken: "workflow-exec-new",
+    })
+  })
+
+  test("stores and cancels agent workflow node execution metadata", async () => {
+    await storage.workflowRuns.start({
+      id: "wf-run-agent",
+      projectId: "my-app",
+      workflowId: "agent-workflow",
+      input: {},
+    })
+    await storage.workflowRuns.nodes.start({
+      id: "wf-run-agent:node:0",
+      projectId: "my-app",
+      workflowRunId: "wf-run-agent",
+      workflowId: "agent-workflow",
+      nodeIndex: 0,
+      nodeType: "agent",
+      nodeId: "resolver",
+      nodeKey: "resolver",
+      input: { transcriptId: "tr_1" },
+    })
+    await storage.workflowRuns.agentNodes.create({
+      projectId: "my-app",
+      nodeRunId: "wf-run-agent:node:0",
+      agentId: "resolver-agent",
+      prompt: "Resolve tr_1.",
+    })
+    const running = await storage.workflowRuns.agentNodes.start({
+      projectId: "my-app",
+      nodeRunId: "wf-run-agent:node:0",
+      modelId: "test-model",
+      execution: {
+        token: "agent-exec-1",
+        queueLeaseExpiresAt: new Date("2026-05-08T10:15:00.000Z"),
+      },
+    })
+    expect(running).toMatchObject({ status: "running", attempt: 1, modelId: "test-model" })
+    await expect(
+      storage.workflowRuns.agentNodes.finish({
+        projectId: "my-app",
+        nodeRunId: running.nodeRunId,
+        executionToken: "stale-agent-exec",
+        status: "succeeded",
+      })
+    ).rejects.toThrow("Execution token is no longer current")
+
+    const cancelled = await storage.workflowRuns.agentNodes.cancel({
+      projectId: "my-app",
+      nodeRunId: running.nodeRunId,
+      error: "Workflow cancelled.",
+    })
+    expect(cancelled).toMatchObject({
+      status: "cancelled",
+      error: "Workflow cancelled.",
+      prompt: "Resolve tr_1.",
+    })
+    expect(cancelled.execution).toBeUndefined()
+  })
+
   test("PostgresStorage includes workflow run storage", () => {
     expect(storage.workflowRuns).toBeInstanceOf(PgWorkflowRunStorage)
   })

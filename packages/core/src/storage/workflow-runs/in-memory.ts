@@ -1,3 +1,4 @@
+import { SYSTEM_PRINCIPAL } from "../../auth"
 import {
   cloneRecord,
   compareStartedAt,
@@ -10,20 +11,32 @@ import {
 } from "../run-listing"
 import { WorkflowRunError } from "./errors"
 import type {
+  CancelWorkflowAgentNodeRunInput,
+  ConfirmWorkflowAgentNodeRunExecutionOwnershipInput,
+  ConfirmWorkflowRunExecutionOwnershipInput,
+  CreateWorkflowAgentNodeRunInput,
+  FinishWorkflowAgentNodeRunInput,
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
   ListLatestWorkflowRunsInput,
   ListLatestWorkflowRunsResult,
+  ListWorkflowAgentNodeRunsInput,
+  ListWorkflowAgentNodeRunsResult,
   ListWorkflowNodeRunsInput,
   ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,
   ListWorkflowRunsResult,
   QueueWorkflowRunInput,
+  ReclaimWorkflowAgentNodeRunInput,
+  ReclaimWorkflowRunInput,
   ResumeWorkflowRunInput,
+  StartWorkflowAgentNodeRunInput,
   StartWorkflowNodeRunInput,
   StartWorkflowRunInput,
   WaitWorkflowNodeRunInput,
   WaitWorkflowRunInput,
+  WorkflowAgentNodeRunRecord,
+  WorkflowAgentNodeRunStorage,
   WorkflowNodeRunRecord,
   WorkflowNodeRunStorage,
   WorkflowRunRecord,
@@ -38,6 +51,7 @@ function assertNonNegativeInteger(value: number, fieldName: string): void {
 
 export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
   readonly nodes: InMemoryWorkflowNodeRunStorage
+  readonly agentNodes: InMemoryWorkflowAgentNodeRunStorage
 
   private readonly runs = new Map<string, WorkflowRunRecord>()
 
@@ -45,6 +59,11 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     this.nodes = new InMemoryWorkflowNodeRunStorage({
       requireRunningWorkflowRun: (projectId, id) => this.requireRunningWorkflowRun(projectId, id),
       requireActiveWorkflowRun: (projectId, id) => this.requireActiveWorkflowRun(projectId, id),
+      assertExecutionOwnership: (projectId, id, token) =>
+        this.assertExecutionOwnership(projectId, id, token),
+    })
+    this.agentNodes = new InMemoryWorkflowAgentNodeRunStorage({
+      requireAgentNodeRun: (projectId, id) => this.nodes.requireAgentNodeRun(projectId, id),
     })
   }
 
@@ -52,6 +71,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     return {
       runs: structuredClone(this.runs),
       nodes: this.nodes.snapshot(),
+      agentNodes: this.agentNodes.snapshot(),
     }
   }
 
@@ -61,6 +81,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       this.runs.set(key, record)
     }
     this.nodes.restore(snapshot.nodes)
+    this.agentNodes.restore(snapshot.agentNodes)
   }
 
   async queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord> {
@@ -80,6 +101,8 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       input: cloneRecord(input.input),
       queuedAt,
       startedAt: queuedAt,
+      attempt: 0,
+      requestedByPrincipal: cloneRecord(input.requestedByPrincipal ?? SYSTEM_PRINCIPAL),
       ...(input.source ? { source: cloneRecord(input.source) } : {}),
     }
 
@@ -112,6 +135,8 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
         error: undefined,
         source:
           existing.source ?? (input.source === undefined ? undefined : cloneRecord(input.source)),
+        attempt: existing.attempt + 1,
+        execution: input.execution ? cloneRecord(input.execution) : undefined,
       }
 
       this.runs.set(key, cloneRecord(next))
@@ -125,6 +150,9 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       status: "running",
       input: cloneRecord(input.input),
       startedAt: new Date(input.startedAt ?? new Date()),
+      attempt: 1,
+      requestedByPrincipal: cloneRecord(input.requestedByPrincipal ?? SYSTEM_PRINCIPAL),
+      ...(input.execution ? { execution: cloneRecord(input.execution) } : {}),
       ...(input.source ? { source: cloneRecord(input.source) } : {}),
     }
 
@@ -134,10 +162,12 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
 
   async finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord> {
     const existing = this.requireFinishableWorkflowRun(input)
+    this.assertRecordExecutionOwnership(existing, input.executionToken)
     const base: WorkflowRunRecord = {
       ...existing,
       status: input.status,
       finishedAt: new Date(input.finishedAt ?? new Date()),
+      execution: undefined,
     }
 
     const next: WorkflowRunRecord =
@@ -157,11 +187,13 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
 
   async wait(input: WaitWorkflowRunInput): Promise<WorkflowRunRecord> {
     const existing = this.requireRunningWorkflowRun(input.projectId, input.id)
+    this.assertRecordExecutionOwnership(existing, input.executionToken)
     const next: WorkflowRunRecord = {
       ...existing,
       status: "waiting",
       finishedAt: undefined,
       error: undefined,
+      execution: undefined,
     }
 
     this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
@@ -175,8 +207,42 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       status: "running",
       finishedAt: undefined,
       error: undefined,
+      attempt: existing.attempt + 1,
+      execution: input.execution ? cloneRecord(input.execution) : undefined,
     }
 
+    this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
+    return cloneRecord(next)
+  }
+
+  async reclaim(input: ReclaimWorkflowRunInput): Promise<WorkflowRunRecord> {
+    const existing = this.requireRunningWorkflowRun(input.projectId, input.id)
+    const next: WorkflowRunRecord = {
+      ...existing,
+      attempt: existing.attempt + 1,
+      execution: cloneRecord(input.execution),
+    }
+    this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
+    return cloneRecord(next)
+  }
+
+  async confirmExecutionOwnership(
+    input: ConfirmWorkflowRunExecutionOwnershipInput
+  ): Promise<WorkflowRunRecord> {
+    const existing = this.requireRunningWorkflowRun(input.projectId, input.id)
+    this.assertRecordExecutionOwnership(existing, input.executionToken)
+    const next: WorkflowRunRecord = {
+      ...existing,
+      execution: {
+        token: input.executionToken,
+        queueLeaseExpiresAt: new Date(
+          Math.max(
+            existing.execution!.queueLeaseExpiresAt.getTime(),
+            input.queueLeaseExpiresAt.getTime()
+          )
+        ),
+      },
+    }
     this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
     return cloneRecord(next)
   }
@@ -284,7 +350,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       return record
     }
 
-    if (record.status === "waiting" && input.status === "cancelled") {
+    if (record.status === "waiting" && input.status !== "succeeded") {
       return record
     }
 
@@ -296,6 +362,18 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       `[Sixb] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${record.status}'.`
     )
   }
+
+  private assertExecutionOwnership(projectId: string, id: string, token?: string): void {
+    this.assertRecordExecutionOwnership(this.requireExistingWorkflowRun(projectId, id), token)
+  }
+
+  private assertRecordExecutionOwnership(record: WorkflowRunRecord, token?: string): void {
+    if (record.execution?.token !== token) {
+      throw new WorkflowRunError(
+        `[Sixb] Execution token is no longer current on workflow run '${record.id}'.`
+      )
+    }
+  }
 }
 
 export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
@@ -305,6 +383,7 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
     private readonly workflowRuns: {
       requireRunningWorkflowRun(projectId: string, id: string): WorkflowRunRecord
       requireActiveWorkflowRun(projectId: string, id: string): WorkflowRunRecord
+      assertExecutionOwnership(projectId: string, id: string, token?: string): void
     }
   ) {}
 
@@ -325,6 +404,11 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
     const workflowRun = this.workflowRuns.requireRunningWorkflowRun(
       input.projectId,
       input.workflowRunId
+    )
+    this.workflowRuns.assertExecutionOwnership(
+      input.projectId,
+      input.workflowRunId,
+      input.executionToken
     )
     if (workflowRun.workflowId !== input.workflowId) {
       throw new WorkflowRunError(
@@ -359,6 +443,11 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
   async finish(input: FinishWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
     const existing = this.requireActiveNodeRun(input.projectId, input.id)
+    this.workflowRuns.assertExecutionOwnership(
+      input.projectId,
+      existing.workflowRunId,
+      input.executionToken
+    )
     const base: WorkflowNodeRunRecord = {
       ...existing,
       status: input.status,
@@ -385,6 +474,11 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
   async wait(input: WaitWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
     const existing = this.requireRunningNodeRun(input.projectId, input.id)
     this.workflowRuns.requireActiveWorkflowRun(input.projectId, existing.workflowRunId)
+    this.workflowRuns.assertExecutionOwnership(
+      input.projectId,
+      existing.workflowRunId,
+      input.executionToken
+    )
 
     const next: WorkflowNodeRunRecord = {
       ...existing,
@@ -474,11 +568,210 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
     return record
   }
+
+  requireAgentNodeRun(projectId: string, id: string): WorkflowNodeRunRecord {
+    const node = this.nodes.get(storageKey(projectId, id))
+    if (!node) {
+      throw new WorkflowRunError(
+        `[Sixb] Workflow node run '${id}' not found for project '${projectId}'.`
+      )
+    }
+    if (node.nodeType !== "agent") {
+      throw new WorkflowRunError(`[Sixb] Workflow node run '${id}' is not an agent node.`)
+    }
+    return node
+  }
+}
+
+export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorage {
+  private readonly runs = new Map<string, WorkflowAgentNodeRunRecord>()
+
+  constructor(
+    private readonly nodes: {
+      requireAgentNodeRun(projectId: string, id: string): WorkflowNodeRunRecord
+    }
+  ) {}
+
+  snapshot(): InMemoryWorkflowAgentNodeRunStorageSnapshot {
+    return structuredClone(this.runs)
+  }
+
+  restore(snapshot: InMemoryWorkflowAgentNodeRunStorageSnapshot): void {
+    this.runs.clear()
+    for (const [key, record] of structuredClone(snapshot)) this.runs.set(key, record)
+  }
+
+  async create(input: CreateWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
+    const node = this.nodes.requireAgentNodeRun(input.projectId, input.nodeRunId)
+    if (node.status !== "running") {
+      throw new WorkflowRunError(
+        `[Sixb] Agent workflow node run '${input.nodeRunId}' must be running when queued.`
+      )
+    }
+    const key = storageKey(input.projectId, input.nodeRunId)
+    if (this.runs.has(key)) {
+      throw new WorkflowRunError(
+        `[Sixb] Agent execution already exists for workflow node run '${input.nodeRunId}'.`
+      )
+    }
+    const record: WorkflowAgentNodeRunRecord = {
+      projectId: input.projectId,
+      nodeRunId: input.nodeRunId,
+      agentId: input.agentId,
+      status: "queued",
+      prompt: input.prompt,
+      attempt: 0,
+      createdAt: new Date(input.createdAt ?? new Date()),
+    }
+    this.runs.set(key, cloneRecord(record))
+    return cloneRecord(record)
+  }
+
+  async start(input: StartWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
+    const run = this.requireStatus(input.projectId, input.nodeRunId, "queued")
+    const next: WorkflowAgentNodeRunRecord = {
+      ...run,
+      status: "running",
+      ...(input.executionPrincipal
+        ? { executionPrincipal: cloneRecord(input.executionPrincipal) }
+        : {}),
+      ...(input.modelId ? { modelId: input.modelId } : {}),
+      attempt: 1,
+      execution: cloneRecord(input.execution),
+      startedAt: new Date(input.startedAt ?? new Date()),
+    }
+    return this.save(next)
+  }
+
+  async reclaim(input: ReclaimWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
+    const run = this.requireStatus(input.projectId, input.nodeRunId, "running")
+    return this.save({ ...run, attempt: run.attempt + 1, execution: cloneRecord(input.execution) })
+  }
+
+  async confirmExecutionOwnership(
+    input: ConfirmWorkflowAgentNodeRunExecutionOwnershipInput
+  ): Promise<WorkflowAgentNodeRunRecord> {
+    const run = this.requireOwned(input.projectId, input.nodeRunId, input.executionToken)
+    return this.save({
+      ...run,
+      execution: {
+        token: input.executionToken,
+        queueLeaseExpiresAt: new Date(
+          Math.max(
+            run.execution!.queueLeaseExpiresAt.getTime(),
+            input.queueLeaseExpiresAt.getTime()
+          )
+        ),
+      },
+    })
+  }
+
+  async finish(input: FinishWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
+    const run = this.requireOwned(input.projectId, input.nodeRunId, input.executionToken)
+    return this.save({
+      ...run,
+      status: input.status,
+      ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
+      ...(input.finishReason === undefined ? {} : { finishReason: input.finishReason }),
+      ...(input.usage === undefined ? {} : { usage: cloneRecord(input.usage) }),
+      ...(input.trace === undefined ? {} : { trace: cloneRecord(input.trace) }),
+      ...(input.diagnostics === undefined ? {} : { diagnostics: cloneRecord(input.diagnostics) }),
+      ...(input.status === "succeeded" || input.error === undefined ? {} : { error: input.error }),
+      execution: undefined,
+      completedAt: new Date(input.completedAt ?? new Date()),
+    })
+  }
+
+  async cancel(input: CancelWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
+    const run = this.requireExisting(input.projectId, input.nodeRunId)
+    if (run.status !== "queued" && run.status !== "running") {
+      throw new WorkflowRunError(
+        `[Sixb] Agent workflow node run '${input.nodeRunId}' cannot be cancelled from status '${run.status}'.`
+      )
+    }
+    return this.save({
+      ...run,
+      status: "cancelled",
+      execution: undefined,
+      error: input.error,
+      completedAt: new Date(input.completedAt ?? new Date()),
+    })
+  }
+
+  async getByNodeRunId(params: {
+    projectId: string
+    nodeRunId: string
+  }): Promise<WorkflowAgentNodeRunRecord | null> {
+    const run = this.runs.get(storageKey(params.projectId, params.nodeRunId))
+    return run ? cloneRecord(run) : null
+  }
+
+  async list(input: ListWorkflowAgentNodeRunsInput): Promise<ListWorkflowAgentNodeRunsResult> {
+    const statuses = input.statuses ? new Set(input.statuses) : null
+    const order = input.order ?? "desc"
+    const filtered = [...this.runs.values()]
+      .filter((run) => run.projectId === input.projectId)
+      .filter((run) => (input.agentId ? run.agentId === input.agentId : true))
+      .filter((run) => (statuses ? statuses.has(run.status) : true))
+      .sort((a, b) =>
+        order === "asc"
+          ? a.createdAt.getTime() - b.createdAt.getTime()
+          : b.createdAt.getTime() - a.createdAt.getTime()
+      )
+    const { page, total, hasMore } = paginate(filtered, input)
+    return { runs: page.map(cloneRecord), total, hasMore }
+  }
+
+  private requireStatus(
+    projectId: string,
+    nodeRunId: string,
+    status: WorkflowAgentNodeRunRecord["status"]
+  ): WorkflowAgentNodeRunRecord {
+    const run = this.runs.get(storageKey(projectId, nodeRunId))
+    if (!run) throw new WorkflowRunError(`[Sixb] Agent workflow node run '${nodeRunId}' not found.`)
+    if (run.status !== status) {
+      throw new WorkflowRunError(
+        `[Sixb] Agent workflow node run '${nodeRunId}' must be ${status} (status '${run.status}').`
+      )
+    }
+    return run
+  }
+
+  private requireExisting(projectId: string, nodeRunId: string): WorkflowAgentNodeRunRecord {
+    const run = this.runs.get(storageKey(projectId, nodeRunId))
+    if (!run) {
+      throw new WorkflowRunError(
+        `[Sixb] Agent workflow node run '${nodeRunId}' not found for project '${projectId}'.`
+      )
+    }
+    return run
+  }
+
+  private requireOwned(
+    projectId: string,
+    nodeRunId: string,
+    token: string
+  ): WorkflowAgentNodeRunRecord {
+    const run = this.requireStatus(projectId, nodeRunId, "running")
+    if (run.execution?.token !== token) {
+      throw new WorkflowRunError(
+        `[Sixb] Execution token is no longer current on agent workflow node run '${nodeRunId}'.`
+      )
+    }
+    return run
+  }
+
+  private save(record: WorkflowAgentNodeRunRecord): WorkflowAgentNodeRunRecord {
+    this.runs.set(storageKey(record.projectId, record.nodeRunId), cloneRecord(record))
+    return cloneRecord(record)
+  }
 }
 
 export interface InMemoryWorkflowRunStorageSnapshot {
   readonly runs: Map<string, WorkflowRunRecord>
   readonly nodes: InMemoryWorkflowNodeRunStorageSnapshot
+  readonly agentNodes: InMemoryWorkflowAgentNodeRunStorageSnapshot
 }
 
 export type InMemoryWorkflowNodeRunStorageSnapshot = Map<string, WorkflowNodeRunRecord>
+export type InMemoryWorkflowAgentNodeRunStorageSnapshot = Map<string, WorkflowAgentNodeRunRecord>

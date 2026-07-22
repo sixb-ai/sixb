@@ -12,14 +12,9 @@ import {
   toModelMessages,
 } from "@sixb/core/internal/agents"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
-import type { AgentRunRecord, AgentRunUsage, AgentStorage } from "@sixb/core/storage"
-import {
-  type LanguageModelUsage,
-  type ModelMessage,
-  stepCountIs,
-  streamText,
-  toUIMessageStream,
-} from "ai"
+import type { AgentRunRecord, AgentStorage } from "@sixb/core/storage"
+import { type ModelMessage, stepCountIs, streamText, toUIMessageStream } from "ai"
+import { agentRunUsageFromAiSdk } from "./ai-sdk-adapters"
 import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
 import { AgentTurnTimeoutError, AgentWorkerError } from "./errors"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
@@ -96,7 +91,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     timeoutAbort.abort()
   }, turnTimeoutMs)
 
-  // The sandbox provisions concurrently with this turn (see `createAgentRunEnvironment`). If it
+  // The sandbox provisions concurrently with this turn (see `createConversationAgentEnvironment`). If it
   // fails, the run must be recorded `failed` rather than finalizing as a success with a dead
   // sandbox — even when the model never invokes bash. Capture the cause and abort the stream so the
   // turn ends now. We do NOT await provisioning before finalizing: a turn that out-runs a slow boot
@@ -234,7 +229,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     }
     const assistantParts = assistantPartsWithOutputAttachments(assistant.parts, outputAttachments)
 
-    const usage = mapUsage(await result.usage)
+    const usage = agentRunUsageFromAiSdk(await result.usage)
     const assistantMessageId = createAgentMessageId()
 
     // Keep the final signal check adjacent to the transaction. Collection, queue renewal, or usage
@@ -443,32 +438,3 @@ function coercePartialAssistantMessage(message: AgentInboundLike): AgentMessage 
 // `toUIMessageStream`'s `onFinish` hands back the SDK `UIMessage`; `fromAiSdk` accepts the wider
 // inbound shape. We keep the parameter loose here and let `fromAiSdk` narrow/validate at runtime.
 type AgentInboundLike = Parameters<typeof fromAiSdk>[0]
-
-/** Map AI SDK usage onto the stored {@link AgentRunUsage}, dropping unknown fields. */
-function mapUsage(usage: LanguageModelUsage): AgentRunUsage | undefined {
-  const mapped: {
-    inputTokens?: number
-    outputTokens?: number
-    totalTokens?: number
-    reasoningTokens?: number
-    cachedInputTokens?: number
-  } = {}
-  if (usage.inputTokens !== undefined) {
-    mapped.inputTokens = usage.inputTokens
-  }
-  if (usage.outputTokens !== undefined) {
-    mapped.outputTokens = usage.outputTokens
-  }
-  if (usage.totalTokens !== undefined) {
-    mapped.totalTokens = usage.totalTokens
-  }
-  const reasoning = usage.outputTokenDetails.reasoningTokens
-  if (reasoning !== undefined) {
-    mapped.reasoningTokens = reasoning
-  }
-  const cached = usage.inputTokenDetails.cacheReadTokens
-  if (cached !== undefined) {
-    mapped.cachedInputTokens = cached
-  }
-  return Object.keys(mapped).length > 0 ? mapped : undefined
-}

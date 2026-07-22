@@ -35,7 +35,7 @@ export interface WorkflowRunNodeStartedEvent extends EventEnvelope {
     nodeRunId: string
     nodeIndex: number
     totalNodes: number
-    nodeType: "step" | "action" | "intervention"
+    nodeType: "step" | "action" | "intervention" | "agent"
     nodeId: string
     nodeKey: string
     startedAt: string
@@ -80,7 +80,7 @@ export interface WorkflowRunNodeFinishedEvent extends EventEnvelope {
     nodeRunId: string
     nodeIndex: number
     totalNodes: number
-    nodeType: "step" | "action" | "intervention"
+    nodeType: "step" | "action" | "intervention" | "agent"
     nodeId: string
     nodeKey: string
     status: "succeeded" | "failed" | "cancelled"

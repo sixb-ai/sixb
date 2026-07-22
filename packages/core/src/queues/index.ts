@@ -2,7 +2,9 @@ export { QueueError } from "./errors"
 export { InMemoryQueues } from "./in-memory"
 export type {
   ActionRunRequestedQueueJob,
+  AgentQueueJob,
   AgentRunRequestedQueueJob,
+  AgentWorkflowNodeRequestedQueueJob,
   ClaimedQueueJob,
   NewQueueJob,
   PipelineRunRequestedQueueJob,
@@ -15,5 +17,6 @@ export type {
   SyncRunRequestedQueueJob,
   WorkflowQueueJob,
   WorkflowRunRequestedQueueJob,
+  WorkflowRunResumeCause,
   WorkflowRunResumeRequestedQueueJob,
 } from "./types"

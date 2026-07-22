@@ -1,6 +1,14 @@
-import type { BlobStorage, Broker, Queues, SandboxFactory, Storage } from "@sixb/core"
+import type {
+  BlobStorage,
+  Broker,
+  Queues,
+  SandboxFactory,
+  SixbRuntimeContext,
+  Storage,
+} from "@sixb/core"
 import type { AgentsRuntime } from "@sixb/core/internal/agents"
 import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
 import type { AgentStorage, AuthStorage } from "@sixb/core/storage"
 import type { ToolSet } from "ai"
 import type { AgentSkill } from "./agent-skills"
@@ -26,6 +34,8 @@ export interface AgentWorkerSixb {
   readonly storage: Storage
   readonly queues: Queues
   readonly agents: AgentsRuntime
+  readonly workflows?: WorkflowsRuntime
+  readonly ontology?: SixbRuntimeContext["ontology"]
   readonly blobStorage: BlobStorage
   readonly sandboxes?: SandboxFactory
   readonly projectRoot?: string

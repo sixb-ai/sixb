@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
 import { reportRunFailure } from "../error-reporting/capability"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -40,6 +41,11 @@ export async function requestWorkflowRun(
   options: WorkflowRunRequestOptions = {}
 ): Promise<WorkflowRunRequestResult> {
   assertAuthorized(runtime, { kind: "workflow.run", workflowId: workflow.id })
+  for (const node of workflow.nodes) {
+    if (node.type === "agent") {
+      assertAuthorized(runtime, { kind: "agent.run", agentId: node.agentStep.agent.id })
+    }
+  }
   const storage = runtime.storage.workflowRuns
   if (!storage) {
     throw new WorkflowValidationError("[Sixb] Workflow run storage is not configured.")
@@ -84,6 +90,9 @@ export async function requestWorkflowRun(
     input: snapshot,
     queuedAt,
     source: options.source,
+    requestedByPrincipal:
+      runtime.authorization?.principal ??
+      (options.source?.type === "schedule" ? options.source.principal : SYSTEM_PRINCIPAL),
   })
 
   let job: Awaited<ReturnType<typeof queue.enqueue>>[number] | undefined

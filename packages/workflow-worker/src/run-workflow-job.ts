@@ -11,9 +11,18 @@ export async function runWorkflowJob(input: RunWorkflowJobInput): Promise<Workfl
 
   let session: WorkflowRunSession
   try {
-    session = WorkflowRunSession.create(input, {
-      executors: workflowNodeExecutors,
+    const active = await input.runtime.workflowRuns.getById({
+      projectId: input.runtime.projectId,
+      id: input.job.id,
     })
+    session =
+      active?.status === "running"
+        ? await WorkflowRunSession.recoverRunning(input, {
+            executors: workflowNodeExecutors,
+          })
+        : WorkflowRunSession.create(input, {
+            executors: workflowNodeExecutors,
+          })
   } catch (error) {
     await failQueuedRun(input, error)
     throw error
@@ -27,6 +36,9 @@ export async function runWorkflowJob(input: RunWorkflowJobInput): Promise<Workfl
     }
     return await session.finishSucceeded()
   } catch (error) {
+    if (input.job.execution && input.signal?.aborted) {
+      throw error
+    }
     await session.finishAfterError(error)
     await failQueuedRun(input, error)
     throw error
@@ -53,6 +65,9 @@ export async function runWorkflowResumeJob(
     }
     return await session.finishSucceeded()
   } catch (error) {
+    if (input.job.execution && input.signal?.aborted) {
+      throw error
+    }
     await session.finishAfterError(error)
     throw error
   } finally {
@@ -67,7 +82,7 @@ async function completedWorkflowRunResult(
     projectId: input.runtime.projectId,
     id: input.job.id,
   })
-  if (!run || run.status === "queued") {
+  if (!run || run.status === "queued" || run.status === "running") {
     return null
   }
 

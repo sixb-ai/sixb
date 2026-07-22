@@ -1,21 +1,26 @@
 import type { AgentDefinition, Sandbox } from "@sixb/core"
-import type { AgentRunRecord } from "@sixb/core/storage"
+import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
+import type { AgentRunRecord, WorkflowAgentNodeRunRecord } from "@sixb/core/storage"
 import { renderAgentSkillCatalog } from "./agent-skills"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
-import { modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
+import {
+  modelSupportsInlineImages,
+  type PreparedAgentAttachmentContext,
+  prepareAgentAttachments,
+} from "./attachments"
 import { type BashSandboxHandle, createBashTool } from "./bash-tool"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import type { AgentTurnContext, AgentWorkerContext } from "./types"
+import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
-export interface AgentRunEnvironment {
+export interface AgentExecutionEnvironment {
   readonly turnContext: AgentTurnContext
   dispose(): Promise<void>
 }
 
-export interface CreateAgentRunEnvironmentInput {
+interface CreateAgentEnvironmentInput {
   readonly context: AgentWorkerContext
   readonly agent: AgentDefinition
-  readonly run: AgentRunRecord
   /**
    * Sink for a sandbox teardown that outlives dispose() (the model answered before the boot
    * finished, so dispose returns without stalling on it). The worker registers these so a graceful
@@ -24,48 +29,113 @@ export interface CreateAgentRunEnvironmentInput {
   readonly onDetachedTeardown?: (teardown: Promise<void>) => void
 }
 
-/**
- * Build the per-run turn context.
- *
- * Attachment preparation and the cached skill catalog resolve first. Sandbox creation (boot plus
- * writing the run context, attachments, and skills) is then kicked off without awaiting: the bash
- * tool awaits the sandbox on first use, while boot latency overlaps the model's first response when
- * bash is not immediately needed. dispose() awaits or tracks teardown.
- */
-export async function createAgentRunEnvironment(
-  input: CreateAgentRunEnvironmentInput
-): Promise<AgentRunEnvironment> {
+export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvironmentInput {
+  readonly run: AgentRunRecord
+}
+
+export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
+  readonly run: WorkflowAgentNodeRunRecord
+  readonly nodeInput: WorkflowIOSnapshot
+}
+
+/** Prepare conversation history and attachments, then start the shared agent environment. */
+export async function createConversationAgentEnvironment(
+  input: CreateConversationAgentEnvironmentInput
+): Promise<AgentExecutionEnvironment> {
   const { context, agent, run } = input
 
   const apiBaseUrl = createAgentApiGatewayBaseUrl({
     apiBaseUrl: context.apiBaseUrl,
     projectId: context.id,
-    run,
+    runId: run.id,
+    executionToken: run.execution?.token,
   })
-  const apiOrigin = new URL(apiBaseUrl).origin
-  const skills = await context.agentSkills
-
-  const history = await context.storage.agents.messages.list({
-    projectId: context.id,
-    threadId: run.threadId,
-    order: "asc",
-  })
+  const [skills, history, inlineImages] = await Promise.all([
+    context.agentSkills,
+    context.storage.agents.messages.list({
+      projectId: context.id,
+      threadId: run.threadId,
+      order: "asc",
+    }),
+    modelSupportsInlineImages(agent.model),
+  ])
   const attachmentContext = await prepareAgentAttachments({
     projectId: context.id,
     threadId: run.threadId,
     messages: history.messages,
     blobStorage: context.blobStorage,
     apiBaseUrl,
-    inlineImages: await modelSupportsInlineImages(agent.model),
+    inlineImages,
   })
 
-  // Provision concurrently; do NOT await. The bash tool, the turn, and dispose() await this.
+  return startAgentEnvironment({
+    context,
+    agent,
+    runId: run.id,
+    threadId: run.threadId,
+    apiBaseUrl,
+    attachmentContext,
+    skills,
+    onDetachedTeardown: input.onDetachedTeardown,
+  })
+}
+
+/** Build the same tool/sandbox environment for a fresh, headless workflow task. */
+export async function createWorkflowAgentNodeEnvironment(
+  input: CreateWorkflowAgentNodeEnvironmentInput
+): Promise<AgentExecutionEnvironment> {
+  const { context, agent, run } = input
+  const execution = run.execution
+  if (!execution) {
+    throw new Error(
+      `[SixbAgentWorker] Agent workflow node run '${run.nodeRunId}' must hold an execution token.`
+    )
+  }
+  const [skills, attachmentContext] = await Promise.all([
+    context.agentSkills,
+    prepareWorkflowInputAttachments({
+      input: input.nodeInput,
+      blobStorage: context.blobStorage,
+    }),
+  ])
+
+  return startAgentEnvironment({
+    context,
+    agent,
+    runId: run.nodeRunId,
+    apiBaseUrl: createAgentApiGatewayBaseUrl({
+      apiBaseUrl: context.apiBaseUrl,
+      projectId: context.id,
+      runId: run.nodeRunId,
+      executionToken: execution.token,
+    }),
+    attachmentContext,
+    skills,
+    onDetachedTeardown: input.onDetachedTeardown,
+  })
+}
+
+interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
+  readonly runId: string
+  readonly threadId?: string
+  readonly apiBaseUrl: string
+  readonly attachmentContext: PreparedAgentAttachmentContext
+  readonly skills: Awaited<AgentWorkerContext["agentSkills"]>
+}
+
+/**
+ * Start the shared tools, sandbox, and teardown lifecycle after source-specific preparation.
+ * Sandbox boot stays concurrent with the model call; the bash tool awaits it only when used.
+ */
+function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvironment {
+  const { context, agent, runId, threadId, apiBaseUrl, attachmentContext, skills } = input
+
   const ready = provisionSandbox({
     context,
     agent,
-    run,
+    run: { id: runId, ...(threadId ? { threadId } : {}) },
     apiBaseUrl,
-    apiOrigin,
+    apiOrigin: new URL(apiBaseUrl).origin,
     attachmentContext,
     skills,
   })
@@ -108,10 +178,10 @@ export async function createAgentRunEnvironment(
 interface ProvisionSandboxInput {
   readonly context: AgentWorkerContext
   readonly agent: AgentDefinition
-  readonly run: AgentRunRecord
+  readonly run: { readonly id: string; readonly threadId?: string }
   readonly apiBaseUrl: string
   readonly apiOrigin: string
-  readonly attachmentContext: Awaited<ReturnType<typeof prepareAgentAttachments>>
+  readonly attachmentContext: PreparedAgentAttachmentContext
   readonly skills: Awaited<AgentWorkerContext["agentSkills"]>
 }
 
@@ -127,7 +197,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<BashSandb
       apiBaseUrl,
       projectId: context.id,
       agentId: agent.id,
-      threadId: run.threadId,
+      ...(run.threadId ? { threadId: run.threadId } : {}),
       runId: run.id,
       attachments: input.attachmentContext,
       skills,

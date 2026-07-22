@@ -10,6 +10,7 @@ type SqliteRunListTable =
   | "webhook_runs"
   | "workflow_runs"
   | "workflow_node_runs"
+  | "workflow_agent_node_runs"
 
 export function hasEmptyStatuses(input: { readonly statuses?: readonly unknown[] }): boolean {
   return input.statuses !== undefined && input.statuses.length === 0
@@ -65,11 +66,16 @@ export function queryRunList<TRow>(input: {
     .get(...input.args) as { count: number }
 
   const orderColumn =
-    input.tableName === "agent_runs" ? "COALESCE(started_at, created_at)" : "started_at"
+    input.tableName === "agent_runs"
+      ? "COALESCE(started_at, created_at)"
+      : input.tableName === "workflow_agent_node_runs"
+        ? "created_at"
+        : "started_at"
+  const idColumn = input.tableName === "workflow_agent_node_runs" ? "node_run_id" : "id"
   let query = `
     SELECT * FROM ${input.tableName}
     ${where}
-    ORDER BY ${orderColumn} ${order}, id ${order}
+    ORDER BY ${orderColumn} ${order}, ${idColumn} ${order}
   `
   const queryArgs = [...input.args]
 

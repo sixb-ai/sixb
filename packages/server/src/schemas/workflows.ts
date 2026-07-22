@@ -64,16 +64,13 @@ export const WorkflowInterventionActorSchema = z.object({
   principalId: z.string().min(1),
 })
 
+export const CancelWorkflowRunBodySchema = z.object({}).default({})
+
 export const SubmitWorkflowInterventionBodySchema = z.object({
   response: z.record(z.unknown()),
-  submittedBy: WorkflowInterventionActorSchema.optional(),
 })
 
-export const CancelWorkflowInterventionBodySchema = z
-  .object({
-    cancelledBy: WorkflowInterventionActorSchema.optional(),
-  })
-  .default({})
+export const CancelWorkflowInterventionBodySchema = z.object({}).default({})
 
 const WorkflowTriggerSchema = z.object({
   type: z.literal("schedule"),
@@ -103,6 +100,14 @@ const WorkflowNodeSchema = z.union([
     response: z.record(z.unknown()),
     description: z.string().optional(),
   }),
+  z.object({
+    type: z.literal("agent"),
+    id: z.string(),
+    key: z.string(),
+    agentId: z.string(),
+    input: z.record(z.unknown()),
+    output: z.record(z.unknown()),
+  }),
 ])
 
 export const WorkflowRunSchema = z.object({
@@ -115,6 +120,28 @@ export const WorkflowRunSchema = z.object({
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   error: z.string().optional(),
+  requestedBy: WorkflowInterventionActorSchema,
+})
+
+export const WorkflowAgentNodeExecutionSummarySchema = z.object({
+  agentId: z.string(),
+  status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
+  attempt: z.number().int().nonnegative(),
+  modelId: z.string().optional(),
+  finishReason: z.string().optional(),
+  usage: z.record(z.unknown()).optional(),
+  startedAt: z.string().optional(),
+  completedAt: z.string().optional(),
+})
+
+export const WorkflowAgentNodeExecutionSchema = WorkflowAgentNodeExecutionSummarySchema.extend({
+  nodeRunId: z.string(),
+  prompt: z.string(),
+  executionPrincipal: WorkflowInterventionActorSchema.optional(),
+  trace: z.array(z.unknown()).optional(),
+  diagnostics: z.array(z.unknown()).optional(),
+  error: z.string().optional(),
+  createdAt: z.string(),
 })
 
 export const WorkflowNodeRunSchema = z.object({
@@ -123,7 +150,7 @@ export const WorkflowNodeRunSchema = z.object({
   workflowRunId: z.string(),
   workflowId: z.string(),
   nodeIndex: z.number(),
-  nodeType: z.enum(["step", "action", "intervention"]),
+  nodeType: z.enum(["step", "action", "intervention", "agent"]),
   nodeId: z.string(),
   nodeKey: z.string(),
   status: z.enum(["running", "waiting", "succeeded", "failed", "cancelled"]),
@@ -132,6 +159,7 @@ export const WorkflowNodeRunSchema = z.object({
   finishedAt: z.string().optional(),
   output: z.record(z.unknown()).optional(),
   error: z.string().optional(),
+  agentExecution: WorkflowAgentNodeExecutionSummarySchema.optional(),
 })
 
 export const WorkflowInterventionSchema = z.object({
@@ -175,6 +203,8 @@ export const WorkflowRunDetailResponseSchema = z.object({
   run: WorkflowRunSchema,
   nodes: z.array(WorkflowNodeRunSchema),
 })
+
+export const CancelWorkflowRunResponseSchema = WorkflowRunDetailResponseSchema
 
 export const WorkflowInterventionListResponseSchema = z.object({
   interventions: z.array(WorkflowInterventionSchema),

@@ -498,6 +498,13 @@ CREATE TABLE workflow_runs (
   finished_at TEXT,
   error TEXT,
   source TEXT,
+  attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+  execution_token TEXT,
+  execution_queue_lease_expires_at TEXT,
+  requested_by_principal_type TEXT NOT NULL DEFAULT 'system'
+    CHECK (requested_by_principal_type IN ('user', 'serviceAccount', 'system')),
+  requested_by_principal_id TEXT NOT NULL DEFAULT 'system',
+  CHECK ((execution_token IS NULL) = (execution_queue_lease_expires_at IS NULL)),
   PRIMARY KEY (project_id, id)
 );
 
@@ -514,7 +521,7 @@ CREATE TABLE workflow_node_runs (
   workflow_run_id TEXT NOT NULL,
   workflow_id TEXT NOT NULL,
   node_index INTEGER NOT NULL CHECK (node_index >= 0),
-  node_type TEXT NOT NULL CHECK (node_type IN ('step', 'action', 'intervention')),
+  node_type TEXT NOT NULL CHECK (node_type IN ('step', 'action', 'intervention', 'agent')),
   node_id TEXT NOT NULL,
   node_key TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('running', 'waiting', 'succeeded', 'failed', 'cancelled')),
@@ -538,6 +545,40 @@ CREATE INDEX idx_workflow_node_runs_project_key_started
   ON workflow_node_runs(project_id, node_key, started_at DESC);
 CREATE INDEX idx_workflow_node_runs_project_status_started
   ON workflow_node_runs(project_id, status, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS workflow_agent_node_runs (
+  project_id TEXT NOT NULL,
+  node_run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+  prompt TEXT NOT NULL,
+  execution_principal_type TEXT
+    CHECK (execution_principal_type IS NULL OR execution_principal_type = 'serviceAccount'),
+  execution_principal_id TEXT,
+  model_id TEXT,
+  finish_reason TEXT,
+  usage TEXT,
+  trace TEXT,
+  diagnostics TEXT,
+  error TEXT,
+  attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+  execution_token TEXT,
+  execution_queue_lease_expires_at TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT,
+  PRIMARY KEY (project_id, node_run_id),
+  FOREIGN KEY (project_id, node_run_id)
+    REFERENCES workflow_node_runs (project_id, id)
+    ON DELETE CASCADE,
+  CHECK ((execution_principal_type IS NULL) = (execution_principal_id IS NULL)),
+  CHECK ((execution_token IS NULL) = (execution_queue_lease_expires_at IS NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_agent_node_runs_project_agent_created
+  ON workflow_agent_node_runs(project_id, agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_agent_node_runs_project_status_created
+  ON workflow_agent_node_runs(project_id, status, created_at DESC);
 
 CREATE TABLE workflow_interventions (
   project_id TEXT NOT NULL,

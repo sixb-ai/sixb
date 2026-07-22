@@ -16,7 +16,9 @@ import {
   type CommandResult,
   type CreateSandboxOptions,
   defineAgent,
+  defineAgentStep,
   defineGroup,
+  defineWorkflow,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -55,7 +57,7 @@ import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } fro
 import { finishRunOrThrow } from "../src/finalize"
 import { reconcileAgentExecutionIdentity } from "../src/identity"
 import { runAgentTurn } from "../src/run-agent-turn"
-import { createAgentRunEnvironment } from "../src/run-environment"
+import { createConversationAgentEnvironment } from "../src/run-environment"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
 import type { AgentWorkerContext, AgentWorkerStorage } from "../src/types"
 import { waitFor, writeProjectSkill } from "./helpers"
@@ -148,6 +150,28 @@ function toolOnlyModel(): MockLanguageModelV4 {
         },
         finish("tool-calls"),
       ])
+    },
+  })
+}
+
+function structuredAnswerModel(
+  captureSystem?: (system: string | undefined) => void
+): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doGenerate: async (options) => {
+      captureSystem?.(options.prompt.find((message) => message.role === "system")?.content)
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ answer: "Project Alpha", confidence: 0.96 }),
+          },
+        ],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: USAGE,
+        warnings: [],
+      }
     },
   })
 }
@@ -910,6 +934,121 @@ describe("AgentWorker", () => {
     )
   })
 
+  test("executes a headless workflow agent node and publishes its resume", async () => {
+    let capturedSystem: string | undefined
+    const model = structuredAnswerModel((system) => {
+      capturedSystem = system
+    })
+    const agent = defineAgent("workflow-resolver", {
+      name: "Workflow resolver",
+      model,
+      instructions: "Resolve the best project.",
+      groups: [AGENT_RUNTIME_GROUP],
+    })
+    const agentStep = defineAgentStep("resolve-project", agent)
+      .input({ query: "string" })
+      .output({ answer: "string", confidence: "double" })
+      .prompt(({ input }) => `Resolve '${input.query}'.`)
+    const workflow = defineWorkflow("resolve-project-workflow")
+      .input({ query: "string" })
+      .then(agentStep)
+    const sixb = new SixbCtor({
+      id: PROJECT_ID,
+      ontology: [],
+      agents: [agent],
+      workflows: [workflow],
+      groups: [AGENT_RUNTIME_GROUP],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      sandboxes: new RecordingSandboxFactory(),
+    })
+    const runs = sixb.storage.workflowRuns!
+    const runId = "workflow-agent-run"
+    const nodeRunId = `${runId}:node:0`
+    await runs.start({
+      id: runId,
+      projectId: PROJECT_ID,
+      workflowId: workflow.id,
+      input: { query: "alpha" },
+    })
+    await runs.nodes.start({
+      id: nodeRunId,
+      projectId: PROJECT_ID,
+      workflowRunId: runId,
+      workflowId: workflow.id,
+      nodeIndex: 0,
+      nodeType: "agent",
+      nodeId: agentStep.id,
+      nodeKey: "resolveProject",
+      input: { query: "alpha" },
+    })
+    await runs.agentNodes.create({
+      projectId: PROJECT_ID,
+      nodeRunId,
+      agentId: agent.id,
+      prompt: "Resolve 'alpha'.",
+    })
+    await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
+    await runs.wait({ projectId: PROJECT_ID, id: runId })
+    await sixb.queues.agents.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [
+        {
+          id: `wfa_job_${nodeRunId}`,
+          type: "agent.workflow-node.requested",
+          payload: { agentId: agent.id, nodeRunId },
+        },
+      ],
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow agent node terminal" }
+      )
+      expect(execution).toMatchObject({
+        status: "succeeded",
+        agentId: agent.id,
+        modelId: "mock-model",
+        finishReason: "stop",
+        attempt: 1,
+      })
+      expect(execution.execution).toBeUndefined()
+      expect(execution.trace).toBeArray()
+      expect(capturedSystem).toContain("headless Sixb workflow agent")
+      expect(capturedSystem).toContain("Do not ask a user follow-up question")
+      expect(await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })).toMatchObject({
+        status: "succeeded",
+        output: { answer: "Project Alpha", confidence: 0.96 },
+      })
+      const [resume] = await sixb.queues.workflows.claim({
+        projectId: PROJECT_ID,
+        workerId: "workflow-test-worker",
+      })
+      expect(resume?.job).toMatchObject({
+        type: "workflow.run.resume.requested",
+        payload: {
+          runId,
+          workflowId: workflow.id,
+          resume: { kind: "agentNode", nodeRunId },
+        },
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("fails startup when a project Agent Skill is invalid", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "sixb-agent-skills-startup-"))
     try {
@@ -969,8 +1108,8 @@ describe("AgentWorker", () => {
     })
     await reconcileAgentExecutionIdentity(context.storage, PROJECT_ID, agent)
     const [firstEnvironment, secondEnvironment] = await Promise.all([
-      createAgentRunEnvironment({ context, agent, run: firstRun }),
-      createAgentRunEnvironment({ context, agent, run: secondRun }),
+      createConversationAgentEnvironment({ context, agent, run: firstRun }),
+      createConversationAgentEnvironment({ context, agent, run: secondRun }),
     ])
     let firstDisposed = false
     let secondDisposed = false
@@ -1047,7 +1186,7 @@ describe("AgentWorker", () => {
     const run = await reserveRequestedRun(sixb, request)
     const context = buildAgentWorkerContext(sixb, { apiBaseUrl: "http://sixb-api.local/api/" })
 
-    const environment = await createAgentRunEnvironment({ context, agent, run })
+    const environment = await createConversationAgentEnvironment({ context, agent, run })
     try {
       await environment.turnContext.sandboxReady
       const sandbox = sandboxes.sandboxes[0]
@@ -1106,7 +1245,7 @@ describe("AgentWorker", () => {
     })
     const run = await reserveRequestedRun(sixb, request)
     const context = buildAgentWorkerContext(sixb)
-    const environment = await createAgentRunEnvironment({
+    const environment = await createConversationAgentEnvironment({
       context,
       agent: sixb.agents.getById("assistant")!,
       run,
@@ -1164,7 +1303,7 @@ describe("AgentWorker", () => {
     })
     const run = await reserveRequestedRun(sixb, request)
     const context = buildAgentWorkerContext(sixb)
-    const environment = await createAgentRunEnvironment({
+    const environment = await createConversationAgentEnvironment({
       context,
       agent: sixb.agents.getById("assistant")!,
       run,
@@ -1226,7 +1365,7 @@ describe("AgentWorker", () => {
     })
     const run = await reserveRequestedRun(sixb, request)
     const context = buildAgentWorkerContext(sixb)
-    const environment = await createAgentRunEnvironment({
+    const environment = await createConversationAgentEnvironment({
       context,
       agent: sixb.agents.getById("assistant")!,
       run,
@@ -1292,7 +1431,7 @@ describe("AgentWorker", () => {
   test("provisions the sandbox concurrently without blocking turn start", async () => {
     // Gate sandbox creation so we can prove the turn context is ready before the
     // sandbox finishes booting. If creation were on the critical path, awaiting
-    // createAgentRunEnvironment below would hang until releaseCreate().
+    // createConversationAgentEnvironment below would hang until releaseCreate().
     let releaseCreate: () => void = () => {}
     const gate = new Promise<void>((resolve) => {
       releaseCreate = resolve
@@ -1316,7 +1455,7 @@ describe("AgentWorker", () => {
 
     // Resolves while create() is still gated: the system prompt is ready and the
     // sandbox has not been built yet.
-    const environment = await createAgentRunEnvironment({ context, agent, run })
+    const environment = await createConversationAgentEnvironment({ context, agent, run })
     expect(environment.turnContext.systemAddendum).toContain("Available Agent Skills")
     expect(recording.sandboxes).toHaveLength(0)
 
@@ -1358,7 +1497,7 @@ describe("AgentWorker", () => {
     await reconcileAgentExecutionIdentity(context.storage, PROJECT_ID, agent)
 
     let detached: Promise<void> | null = null
-    const environment = await createAgentRunEnvironment({
+    const environment = await createConversationAgentEnvironment({
       context,
       agent,
       run,
