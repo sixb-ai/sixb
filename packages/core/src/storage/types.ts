@@ -248,8 +248,7 @@ export interface StorageTransactionOptions {
 export interface Storage {
   objects: ObjectStorage
   timeseries: TimeseriesStorage
-  /** Temporary Phase 1 bridge while storage providers adopt ontology capabilities. */
-  ontology?: OntologyStorage
+  ontology: OntologyStorage
   auth?: AuthStorage
   agents?: AgentStorage
   actionRuns?: ActionRunStorage

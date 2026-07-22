@@ -1,5 +1,6 @@
 import type { ActionSubject, JsonValue } from "@sixb/core"
 import type {
+  ActionMaterializationRunStorage,
   ActionRunCommitDiff,
   ActionRunCommitRecord,
   ActionRunCommitSourceRow,
@@ -11,8 +12,8 @@ import type {
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
-  ActionRunStorage,
   ActionRunWritebackRecord,
+  AssertActionMaterializationRunInput,
   EnterActionRunPhaseInput,
   FinishActionRunInput,
   ListActionRunsInput,
@@ -38,8 +39,31 @@ import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
-export class PgActionRunStorage implements ActionRunStorage {
+export class PgActionRunStorage implements ActionMaterializationRunStorage {
   constructor(private readonly sql: PgStoreClient) {}
+
+  async assertMaterializationRun(input: AssertActionMaterializationRunInput): Promise<void> {
+    const [row] = await this.sql<{ readonly action_id: string; readonly status: string }[]>`
+      SELECT action_id, status
+      FROM action_runs
+      WHERE project_id = ${input.projectId} AND id = ${input.runId}
+    `
+    if (!row) {
+      throw new ActionRunError(
+        `[SixbPg] Action run '${input.runId}' not found for project '${input.projectId}'.`
+      )
+    }
+    if (row.action_id !== input.actionId) {
+      throw new ActionRunError(
+        `[SixbPg] Action run '${input.runId}' does not belong to action '${input.actionId}'.`
+      )
+    }
+    if (row.status !== "running") {
+      throw new ActionRunError(
+        `[SixbPg] Action run '${input.runId}' cannot materialize from status '${row.status}'.`
+      )
+    }
+  }
 
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
     try {

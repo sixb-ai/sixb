@@ -131,6 +131,11 @@ export interface MaterializationCasState {
 }
 
 export interface MaterializationPlanHeader {
+  /**
+   * Core must fence Action/projection execution through the matching run facade on this same
+   * transaction before opening the exact-plan session. Replacement activation and telemetry
+   * checkpoint writes recheck the token before commit.
+   */
   readonly commit: OntologyCommitWrite
   readonly expected: MaterializationCasState
 }

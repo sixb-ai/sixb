@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite"
 import type { ActionSubject, JsonValue } from "@sixb/core"
 import type {
+  ActionMaterializationRunStorage,
   ActionRunCommitDiff,
   ActionRunCommitRecord,
   ActionRunCommitSourceRow,
@@ -12,8 +13,8 @@ import type {
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
-  ActionRunStorage,
   ActionRunWritebackRecord,
+  AssertActionMaterializationRunInput,
   EnterActionRunPhaseInput,
   FinishActionRunInput,
   ListActionRunsInput,
@@ -49,7 +50,7 @@ export interface SqliteActionRunStorageOptions {
   connection?: SqliteStoreConnection
 }
 
-export class SqliteActionRunStorage implements ActionRunStorage {
+export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
   private readonly connection: SqliteStoreConnection
   private readonly db: Database
 
@@ -59,6 +60,30 @@ export class SqliteActionRunStorage implements ActionRunStorage {
 
     if (this.connection.installFreshSchema) {
       installFreshSqliteSchema(this.db)
+    }
+  }
+
+  async assertMaterializationRun(input: AssertActionMaterializationRunInput): Promise<void> {
+    const row = this.db
+      .query(`SELECT action_id, status FROM action_runs WHERE project_id = ? AND id = ?`)
+      .get(input.projectId, input.runId) as {
+      readonly action_id: string
+      readonly status: string
+    } | null
+    if (!row) {
+      throw new ActionRunError(
+        `[SixbSqlite] Action run '${input.runId}' not found for project '${input.projectId}'.`
+      )
+    }
+    if (row.action_id !== input.actionId) {
+      throw new ActionRunError(
+        `[SixbSqlite] Action run '${input.runId}' does not belong to action '${input.actionId}'.`
+      )
+    }
+    if (row.status !== "running") {
+      throw new ActionRunError(
+        `[SixbSqlite] Action run '${input.runId}' cannot materialize from status '${row.status}'.`
+      )
     }
   }
 

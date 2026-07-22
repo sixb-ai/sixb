@@ -127,6 +127,12 @@
       "import": "./dist/materializer/index.js",
       "default": "./dist/materializer/index.js"
     },
+    "./internal/ontology-storage-provider": {
+      "types": "./dist/storage/ontology/provider.d.ts",
+      "bun": "./src/storage/ontology/provider.ts",
+      "import": "./dist/storage/ontology/provider.js",
+      "default": "./dist/storage/ontology/provider.js"
+    },
     "./internal/objects": {
       "types": "./dist/objects/index.d.ts",
       "bun": "./src/objects/index.ts",

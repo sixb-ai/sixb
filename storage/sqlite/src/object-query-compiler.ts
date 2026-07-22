@@ -242,7 +242,8 @@ function compileSort(
         input.created_at,
         input.updated_at,
         input.version,
-        input.source_event_id
+        input.source_event_id,
+        input.last_commit_id
       FROM (${input.sql}) AS input
       ORDER BY ${order.sql}
     `,
@@ -535,6 +536,7 @@ function compileExpansionChildJson(
     `'updatedAt', ${target}.updated_at`,
     `'version', ${target}.version`,
     `'sourceEventId', ${target}.source_event_id`,
+    `'lastCommitId', ${target}.last_commit_id`,
     `'linkProperties', json(${edge}.properties)`,
   ]
   const args: SqliteValue[] = []
@@ -662,7 +664,8 @@ function compileProject(
         input.created_at,
         input.updated_at,
         input.version,
-        input.source_event_id
+        input.source_event_id,
+        input.last_commit_id
       FROM (${input.sql}) AS input
       ORDER BY ${inputOrder.sql}
     `,

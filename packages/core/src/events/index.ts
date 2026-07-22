@@ -33,6 +33,10 @@ export {
   buildObjectUpsertEvent,
 } from "./mutation-events"
 export {
+  OntologyOutboxDispatcher,
+  type OntologyOutboxDispatcherOptions,
+} from "./outbox-dispatcher"
+export {
   clearedPropertyChanges,
   diffPropertyChanges,
   hasPropertyChanges,
@@ -45,6 +49,7 @@ export {
   EventsRuntime,
   type EventsRuntimeOptions,
   type EventsSubscribeInput,
+  type StableEventEnvelope,
 } from "./runtime"
 export type { EventScopeKeys } from "./scope"
 export { scopeKeysForEvent } from "./scope"

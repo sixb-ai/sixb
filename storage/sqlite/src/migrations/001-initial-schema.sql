@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS objects (
+CREATE TABLE objects (
   project_id TEXT NOT NULL,
   object_type_id TEXT NOT NULL,
   primary_id TEXT NOT NULL,
@@ -7,17 +7,18 @@ CREATE TABLE IF NOT EXISTS objects (
   updated_at TEXT NOT NULL,
   version INTEGER NOT NULL,
   source_event_id TEXT,
+  last_commit_id TEXT,
   PRIMARY KEY (project_id, object_type_id, primary_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_objects_project_type
+CREATE INDEX idx_objects_project_type
   ON objects(project_id, object_type_id);
-CREATE INDEX IF NOT EXISTS idx_objects_updated_at
+CREATE INDEX idx_objects_updated_at
   ON objects(project_id, object_type_id, updated_at);
-CREATE INDEX IF NOT EXISTS idx_objects_created_at
+CREATE INDEX idx_objects_created_at
   ON objects(project_id, object_type_id, created_at);
 
-CREATE TABLE IF NOT EXISTS links (
+CREATE TABLE links (
   project_id TEXT NOT NULL,
   source_type_id TEXT NOT NULL,
   source_id TEXT NOT NULL,
@@ -28,15 +29,16 @@ CREATE TABLE IF NOT EXISTS links (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   source_event_id TEXT,
+  last_commit_id TEXT,
   PRIMARY KEY (project_id, source_type_id, source_id, link_id, target_type_id, target_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_links_source
+CREATE INDEX idx_links_source
   ON links(project_id, source_type_id, source_id);
-CREATE INDEX IF NOT EXISTS idx_links_target
+CREATE INDEX idx_links_target
   ON links(project_id, target_type_id, target_id);
 
-CREATE TABLE IF NOT EXISTS timeseries (
+CREATE TABLE timeseries (
   project_id TEXT NOT NULL,
   object_type_id TEXT NOT NULL,
   object_id TEXT NOT NULL,
@@ -44,7 +46,8 @@ CREATE TABLE IF NOT EXISTS timeseries (
   value TEXT NOT NULL,
   unit TEXT,
   at TEXT NOT NULL,
-  source_event_id TEXT NOT NULL,
+  source_event_id TEXT,
+  last_commit_id TEXT,
   -- A telemetry point's identity is (series, at): one value per instant per
   -- series. Appends upsert on this key (ON CONFLICT targets these columns), so
   -- no separate idempotency ledger is needed. This primary-key index also serves
@@ -53,7 +56,7 @@ CREATE TABLE IF NOT EXISTS timeseries (
   PRIMARY KEY (project_id, object_type_id, object_id, property_id, at)
 );
 
-CREATE TABLE IF NOT EXISTS sync_runs (
+CREATE TABLE sync_runs (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   sync_id TEXT NOT NULL,
@@ -72,28 +75,39 @@ CREATE TABLE IF NOT EXISTS sync_runs (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_sync_runs_project_started
+CREATE INDEX idx_sync_runs_project_started
   ON sync_runs(project_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sync_runs_project_dataset_started
+CREATE INDEX idx_sync_runs_project_dataset_started
   ON sync_runs(project_id, dataset_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sync_runs_project_sync_started
+CREATE INDEX idx_sync_runs_project_sync_started
   ON sync_runs(project_id, sync_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sync_runs_project_status_started
+CREATE INDEX idx_sync_runs_project_status_started
   ON sync_runs(project_id, status, started_at DESC);
 
-CREATE TABLE IF NOT EXISTS projection_runs (
+CREATE TABLE projection_runs (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   projection_id TEXT NOT NULL,
   projection_kind TEXT NOT NULL CHECK (projection_kind IN ('object', 'link', 'telemetry')),
+  materialization_protocol TEXT CHECK (materialization_protocol IN ('replacement', 'telemetry')),
   dataset_id TEXT NOT NULL,
   dataset_version_id TEXT NOT NULL,
+  dataset_version_created_at TEXT,
+  ontology_revision TEXT,
+  projection_revision TEXT,
+  ownership_hash TEXT,
   object_type_id TEXT,
   source_object_type_id TEXT,
   target_object_type_id TEXT,
   status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'cancelled')),
   started_at TEXT NOT NULL,
   finished_at TEXT,
+  attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+  execution_token TEXT,
+  fixed_batch_size INTEGER CHECK (fixed_batch_size > 0),
+  next_batch_ordinal INTEGER CHECK (next_batch_ordinal >= 0),
+  next_row_offset INTEGER CHECK (next_row_offset >= 0),
+  input_exhausted INTEGER CHECK (input_exhausted IN (0, 1)),
   rows_processed INTEGER NOT NULL DEFAULT 0 CHECK (rows_processed >= 0),
   rows_skipped INTEGER NOT NULL DEFAULT 0 CHECK (rows_skipped >= 0),
   objects_upserted INTEGER NOT NULL DEFAULT 0 CHECK (objects_upserted >= 0),
@@ -102,23 +116,310 @@ CREATE TABLE IF NOT EXISTS projection_runs (
   telemetry_points_skipped INTEGER NOT NULL DEFAULT 0 CHECK (telemetry_points_skipped >= 0),
   telemetry_rows_failed INTEGER NOT NULL DEFAULT 0 CHECK (telemetry_rows_failed >= 0),
   error_message TEXT,
-  PRIMARY KEY (project_id, id)
+  PRIMARY KEY (project_id, id),
+  CHECK ((status = 'running') = (finished_at IS NULL)),
+  CHECK (
+    (
+      materialization_protocol IS NULL
+      AND attempt = 0
+      AND execution_token IS NULL
+      AND dataset_version_created_at IS NULL
+      AND ontology_revision IS NULL
+      AND projection_revision IS NULL
+      AND ownership_hash IS NULL
+      AND fixed_batch_size IS NULL
+      AND next_batch_ordinal IS NULL
+      AND next_row_offset IS NULL
+      AND input_exhausted IS NULL
+    )
+    OR
+    (
+      materialization_protocol IS NOT NULL
+      AND attempt >= 1
+      AND dataset_version_created_at IS NOT NULL
+      AND ontology_revision IS NOT NULL
+      AND projection_revision IS NOT NULL
+      AND ownership_hash IS NOT NULL
+      AND ((status = 'running') = (execution_token IS NOT NULL))
+      AND (
+        (
+          materialization_protocol = 'replacement'
+          AND projection_kind IN ('object', 'link')
+          AND fixed_batch_size IS NULL
+          AND next_batch_ordinal IS NULL
+          AND next_row_offset IS NULL
+          AND input_exhausted IS NULL
+        )
+        OR
+        (
+          materialization_protocol = 'telemetry'
+          AND projection_kind = 'telemetry'
+          AND fixed_batch_size IS NOT NULL
+          AND next_batch_ordinal IS NOT NULL
+          AND next_row_offset IS NOT NULL
+          AND input_exhausted IS NOT NULL
+        )
+      )
+      AND (
+        (
+          projection_kind = 'link'
+          AND object_type_id IS NULL
+          AND source_object_type_id IS NOT NULL
+          AND target_object_type_id IS NOT NULL
+        )
+        OR
+        (
+          projection_kind IN ('object', 'telemetry')
+          AND object_type_id IS NOT NULL
+          AND source_object_type_id IS NULL
+          AND target_object_type_id IS NULL
+        )
+      )
+    )
+  )
 );
 
-CREATE INDEX IF NOT EXISTS idx_projection_runs_project_started
+CREATE INDEX idx_projection_runs_project_started
   ON projection_runs(project_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_projection_runs_project_projection_started
+CREATE INDEX idx_projection_runs_project_projection_started
   ON projection_runs(project_id, projection_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_projection_runs_project_dataset_started
+CREATE INDEX idx_projection_runs_project_dataset_started
   ON projection_runs(project_id, dataset_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_projection_runs_project_version_started
+CREATE INDEX idx_projection_runs_project_version_started
   ON projection_runs(project_id, dataset_version_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_projection_runs_project_status_started
+CREATE INDEX idx_projection_runs_project_status_started
   ON projection_runs(project_id, status, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_projection_runs_project_object_type_started
+CREATE INDEX idx_projection_runs_project_object_type_started
   ON projection_runs(project_id, object_type_id, started_at DESC);
 
-CREATE TABLE IF NOT EXISTS pipeline_runs (
+-- Ontology tables deliberately omit IF NOT EXISTS. A fresh installation is the only supported
+-- schema for this coordinated breaking release; an untracked legacy schema must fail atomically.
+CREATE TABLE ontology_commits (
+  project_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  origin_kind TEXT NOT NULL CHECK (origin_kind IN ('action', 'runtime', 'projection', 'telemetry')),
+  origin_run_id TEXT,
+  origin_batch_ordinal INTEGER CHECK (
+    origin_batch_ordinal IS NULL OR origin_batch_ordinal >= 0
+  ),
+  origin TEXT NOT NULL CHECK (json_valid(origin)),
+  actor TEXT CHECK (actor IS NULL OR json_valid(actor)),
+  ontology_revision TEXT NOT NULL,
+  projection_revision TEXT,
+  ownership_hash TEXT,
+  intent TEXT NOT NULL CHECK (json_valid(intent)),
+  result TEXT NOT NULL CHECK (json_valid(result)),
+  committed_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, id),
+  UNIQUE (project_id, idempotency_key),
+  CHECK (
+    (origin_kind IN ('action', 'projection') AND origin_run_id IS NOT NULL AND origin_batch_ordinal IS NULL)
+    OR (origin_kind = 'telemetry' AND (
+      (origin_run_id IS NULL AND origin_batch_ordinal IS NULL)
+      OR (origin_run_id IS NOT NULL AND origin_batch_ordinal IS NOT NULL)
+    ))
+    OR (origin_kind = 'runtime' AND origin_run_id IS NULL AND origin_batch_ordinal IS NULL)
+  )
+);
+
+CREATE UNIQUE INDEX idx_ontology_commits_action_origin
+  ON ontology_commits(project_id, origin_run_id)
+  WHERE origin_kind = 'action';
+CREATE UNIQUE INDEX idx_ontology_commits_projection_origin
+  ON ontology_commits(project_id, origin_run_id)
+  WHERE origin_kind = 'projection';
+CREATE UNIQUE INDEX idx_ontology_commits_telemetry_origin
+  ON ontology_commits(project_id, origin_run_id, origin_batch_ordinal)
+  WHERE origin_kind = 'telemetry' AND origin_run_id IS NOT NULL;
+CREATE INDEX idx_ontology_commits_history
+  ON ontology_commits(project_id, committed_at, id);
+CREATE INDEX idx_ontology_commits_origin
+  ON ontology_commits(project_id, origin_kind, origin_run_id, origin_batch_ordinal);
+
+CREATE TABLE ontology_sources (
+  project_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  materialization_id TEXT NOT NULL,
+  projection_run_id TEXT NOT NULL,
+  projection_kind TEXT NOT NULL CHECK (projection_kind IN ('object', 'link')),
+  protocol TEXT NOT NULL CHECK (protocol = 'replacement'),
+  status TEXT NOT NULL CHECK (
+    status IN ('staging', 'ready', 'active', 'superseded', 'abandoned')
+  ),
+  execution_token TEXT,
+  dataset_id TEXT NOT NULL,
+  dataset_version_id TEXT NOT NULL,
+  dataset_version_created_at TEXT NOT NULL,
+  projection_revision TEXT NOT NULL,
+  ownership_hash TEXT NOT NULL,
+  ontology_revision TEXT NOT NULL,
+  root_count INTEGER CHECK (root_count IS NULL OR root_count >= 0),
+  assertion_count INTEGER CHECK (assertion_count IS NULL OR assertion_count >= 0),
+  created_at TEXT NOT NULL,
+  ready_at TEXT,
+  activated_at TEXT,
+  terminal_at TEXT,
+  last_commit_id TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, source_id, materialization_id),
+  CHECK ((root_count IS NULL) = (assertion_count IS NULL)),
+  CHECK ((root_count IS NULL) = (ready_at IS NULL)),
+  CHECK ((status IN ('staging', 'ready')) = (execution_token IS NOT NULL)),
+  CHECK (
+    (status = 'staging' AND ready_at IS NULL)
+    OR (status IN ('ready', 'active', 'superseded') AND ready_at IS NOT NULL)
+    OR status = 'abandoned'
+  ),
+  CHECK ((status IN ('active', 'superseded')) = (activated_at IS NOT NULL)),
+  CHECK ((status IN ('active', 'superseded')) = (last_commit_id IS NOT NULL)),
+  CHECK ((status IN ('superseded', 'abandoned')) = (terminal_at IS NOT NULL)),
+  CHECK (ready_at IS NULL OR created_at <= ready_at),
+  CHECK (activated_at IS NULL OR (ready_at IS NOT NULL AND ready_at <= activated_at)),
+  CHECK (terminal_at IS NULL OR created_at <= terminal_at),
+  CHECK (terminal_at IS NULL OR ready_at IS NULL OR ready_at <= terminal_at),
+  CHECK (terminal_at IS NULL OR activated_at IS NULL OR activated_at <= terminal_at),
+  CHECK (created_at <= updated_at)
+);
+
+CREATE UNIQUE INDEX idx_ontology_sources_active
+  ON ontology_sources(project_id, source_id)
+  WHERE status = 'active';
+CREATE UNIQUE INDEX idx_ontology_sources_run_candidate
+  ON ontology_sources(project_id, projection_run_id)
+  WHERE status IN ('staging', 'ready');
+CREATE INDEX idx_ontology_sources_cleanup
+  ON ontology_sources(project_id, status, terminal_at, source_id, materialization_id);
+CREATE INDEX idx_ontology_sources_run
+  ON ontology_sources(project_id, projection_run_id);
+
+CREATE TABLE ontology_source_rows (
+  project_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  materialization_id TEXT NOT NULL,
+  entity_kind TEXT NOT NULL CHECK (entity_kind IN ('object', 'link')),
+  entity_key TEXT NOT NULL CHECK (json_valid(entity_key)),
+  entity_sort_key TEXT NOT NULL,
+  root_kind TEXT NOT NULL CHECK (root_kind IN ('object', 'link')),
+  root_key TEXT NOT NULL CHECK (json_valid(root_key)),
+  root_sort_key TEXT NOT NULL,
+  staging_ordinal INTEGER NOT NULL CHECK (staging_ordinal >= 0),
+  root TEXT NOT NULL CHECK (json_valid(root)),
+  assertion TEXT NOT NULL CHECK (json_valid(assertion)),
+  object_type_id TEXT,
+  primary_id TEXT,
+  source_type_id TEXT,
+  source_primary_id TEXT,
+  link_id TEXT,
+  target_type_id TEXT,
+  target_primary_id TEXT,
+  root_object_type_id TEXT,
+  root_primary_id TEXT,
+  root_source_type_id TEXT,
+  root_source_primary_id TEXT,
+  root_link_id TEXT,
+  root_target_type_id TEXT,
+  root_target_primary_id TEXT,
+  PRIMARY KEY (project_id, source_id, materialization_id, entity_kind, entity_key),
+  FOREIGN KEY (project_id, source_id, materialization_id)
+    REFERENCES ontology_sources(project_id, source_id, materialization_id)
+    ON DELETE RESTRICT,
+  CHECK (
+    (entity_kind = 'object' AND object_type_id IS NOT NULL AND primary_id IS NOT NULL
+      AND source_type_id IS NULL AND source_primary_id IS NULL AND link_id IS NULL
+      AND target_type_id IS NULL AND target_primary_id IS NULL)
+    OR
+    (entity_kind = 'link' AND object_type_id IS NULL AND primary_id IS NULL
+      AND source_type_id IS NOT NULL AND source_primary_id IS NOT NULL AND link_id IS NOT NULL
+      AND target_type_id IS NOT NULL AND target_primary_id IS NOT NULL)
+  ),
+  CHECK (
+    (root_kind = 'object' AND root_object_type_id IS NOT NULL AND root_primary_id IS NOT NULL
+      AND root_source_type_id IS NULL AND root_source_primary_id IS NULL AND root_link_id IS NULL
+      AND root_target_type_id IS NULL AND root_target_primary_id IS NULL)
+    OR
+    (root_kind = 'link' AND root_object_type_id IS NULL AND root_primary_id IS NULL
+      AND root_source_type_id IS NOT NULL AND root_source_primary_id IS NOT NULL
+      AND root_link_id IS NOT NULL AND root_target_type_id IS NOT NULL
+      AND root_target_primary_id IS NOT NULL)
+  )
+);
+
+CREATE INDEX idx_ontology_source_rows_root
+  ON ontology_source_rows(
+    project_id, source_id, materialization_id, root_sort_key, staging_ordinal, entity_sort_key
+  );
+CREATE INDEX idx_ontology_source_rows_object
+  ON ontology_source_rows(project_id, object_type_id, primary_id)
+  WHERE entity_kind = 'object';
+CREATE INDEX idx_ontology_source_rows_link_source
+  ON ontology_source_rows(project_id, source_type_id, source_primary_id, link_id)
+  WHERE entity_kind = 'link';
+CREATE INDEX idx_ontology_source_rows_link_target
+  ON ontology_source_rows(project_id, target_type_id, target_primary_id)
+  WHERE entity_kind = 'link';
+
+CREATE TABLE ontology_overrides (
+  project_id TEXT NOT NULL,
+  entity_kind TEXT NOT NULL CHECK (entity_kind IN ('object', 'link')),
+  entity_key TEXT NOT NULL CHECK (json_valid(entity_key)),
+  entity_sort_key TEXT NOT NULL,
+  object_type_id TEXT,
+  primary_id TEXT,
+  source_type_id TEXT,
+  source_primary_id TEXT,
+  link_id TEXT,
+  target_type_id TEXT,
+  target_primary_id TEXT,
+  value TEXT NOT NULL CHECK (json_valid(value)),
+  last_commit_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, entity_kind, entity_key),
+  CHECK (
+    (entity_kind = 'object' AND object_type_id IS NOT NULL AND primary_id IS NOT NULL
+      AND source_type_id IS NULL AND source_primary_id IS NULL AND link_id IS NULL
+      AND target_type_id IS NULL AND target_primary_id IS NULL)
+    OR
+    (entity_kind = 'link' AND object_type_id IS NULL AND primary_id IS NULL
+      AND source_type_id IS NOT NULL AND source_primary_id IS NOT NULL AND link_id IS NOT NULL
+      AND target_type_id IS NOT NULL AND target_primary_id IS NOT NULL)
+  )
+);
+
+CREATE INDEX idx_ontology_overrides_link_source
+  ON ontology_overrides(project_id, source_type_id, source_primary_id, link_id)
+  WHERE entity_kind = 'link';
+CREATE INDEX idx_ontology_overrides_link_target
+  ON ontology_overrides(project_id, target_type_id, target_primary_id)
+  WHERE entity_kind = 'link';
+
+CREATE TABLE ontology_outbox (
+  project_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  commit_id TEXT NOT NULL,
+  commit_ordinal INTEGER NOT NULL CHECK (commit_ordinal >= 0),
+  envelope TEXT NOT NULL CHECK (json_valid(envelope)),
+  available_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  lease_id TEXT,
+  lease_expires_at TEXT,
+  published_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, id),
+  UNIQUE (project_id, commit_id, commit_ordinal),
+  CHECK ((lease_id IS NULL) = (lease_expires_at IS NULL))
+);
+
+CREATE INDEX idx_ontology_outbox_claim
+  ON ontology_outbox(project_id, available_at, lease_expires_at, created_at, id)
+  WHERE published_at IS NULL;
+CREATE INDEX idx_ontology_outbox_published
+  ON ontology_outbox(project_id, published_at, id)
+  WHERE published_at IS NOT NULL;
+
+CREATE TABLE pipeline_runs (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   pipeline_id TEXT NOT NULL,
@@ -132,14 +433,14 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_pipeline_runs_project_started
+CREATE INDEX idx_pipeline_runs_project_started
   ON pipeline_runs(project_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_pipeline_runs_project_pipeline_started
+CREATE INDEX idx_pipeline_runs_project_pipeline_started
   ON pipeline_runs(project_id, pipeline_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_pipeline_runs_project_status_started
+CREATE INDEX idx_pipeline_runs_project_status_started
   ON pipeline_runs(project_id, status, started_at DESC);
 
-CREATE TABLE IF NOT EXISTS pipeline_step_runs (
+CREATE TABLE pipeline_step_runs (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   pipeline_run_id TEXT NOT NULL,
@@ -158,20 +459,20 @@ CREATE TABLE IF NOT EXISTS pipeline_step_runs (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_pipeline_step_runs_project_started
+CREATE INDEX idx_pipeline_step_runs_project_started
   ON pipeline_step_runs(project_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_pipeline_step_runs_project_run_started
+CREATE INDEX idx_pipeline_step_runs_project_run_started
   ON pipeline_step_runs(project_id, pipeline_run_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_pipeline_step_runs_project_pipeline_started
+CREATE INDEX idx_pipeline_step_runs_project_pipeline_started
   ON pipeline_step_runs(project_id, pipeline_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_pipeline_step_runs_project_step_started
+CREATE INDEX idx_pipeline_step_runs_project_step_started
   ON pipeline_step_runs(project_id, step_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_pipeline_step_runs_project_dataset_started
+CREATE INDEX idx_pipeline_step_runs_project_dataset_started
   ON pipeline_step_runs(project_id, dataset_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_pipeline_step_runs_project_status_started
+CREATE INDEX idx_pipeline_step_runs_project_status_started
   ON pipeline_step_runs(project_id, status, started_at DESC);
 
-CREATE TABLE IF NOT EXISTS workflow_runs (
+CREATE TABLE workflow_runs (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   workflow_id TEXT NOT NULL,
@@ -187,14 +488,14 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_workflow_runs_project_started
+CREATE INDEX idx_workflow_runs_project_started
   ON workflow_runs(project_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_runs_project_workflow_started
+CREATE INDEX idx_workflow_runs_project_workflow_started
   ON workflow_runs(project_id, workflow_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_runs_project_status_started
+CREATE INDEX idx_workflow_runs_project_status_started
   ON workflow_runs(project_id, status, started_at DESC);
 
-CREATE TABLE IF NOT EXISTS workflow_node_runs (
+CREATE TABLE workflow_node_runs (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   workflow_run_id TEXT NOT NULL,
@@ -212,20 +513,20 @@ CREATE TABLE IF NOT EXISTS workflow_node_runs (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_project_started
+CREATE INDEX idx_workflow_node_runs_project_started
   ON workflow_node_runs(project_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_project_run_started
+CREATE INDEX idx_workflow_node_runs_project_run_started
   ON workflow_node_runs(project_id, workflow_run_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_project_workflow_started
+CREATE INDEX idx_workflow_node_runs_project_workflow_started
   ON workflow_node_runs(project_id, workflow_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_project_node_started
+CREATE INDEX idx_workflow_node_runs_project_node_started
   ON workflow_node_runs(project_id, node_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_project_key_started
+CREATE INDEX idx_workflow_node_runs_project_key_started
   ON workflow_node_runs(project_id, node_key, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_project_status_started
+CREATE INDEX idx_workflow_node_runs_project_status_started
   ON workflow_node_runs(project_id, status, started_at DESC);
 
-CREATE TABLE IF NOT EXISTS workflow_interventions (
+CREATE TABLE workflow_interventions (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   workflow_id TEXT NOT NULL,
@@ -249,24 +550,24 @@ CREATE TABLE IF NOT EXISTS workflow_interventions (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_requested
+CREATE INDEX idx_workflow_interventions_project_requested
   ON workflow_interventions(project_id, requested_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_status_requested
+CREATE INDEX idx_workflow_interventions_project_status_requested
   ON workflow_interventions(project_id, status, requested_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_workflow_requested
+CREATE INDEX idx_workflow_interventions_project_workflow_requested
   ON workflow_interventions(project_id, workflow_id, requested_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_run_requested
+CREATE INDEX idx_workflow_interventions_project_run_requested
   ON workflow_interventions(project_id, workflow_run_id, requested_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_node_run_requested
+CREATE INDEX idx_workflow_interventions_project_node_run_requested
   ON workflow_interventions(project_id, node_run_id, requested_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_node_requested
+CREATE INDEX idx_workflow_interventions_project_node_requested
   ON workflow_interventions(project_id, node_id, requested_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_key_requested
+CREATE INDEX idx_workflow_interventions_project_key_requested
   ON workflow_interventions(project_id, node_key, requested_at DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_intervention_requested
+CREATE INDEX idx_workflow_interventions_project_intervention_requested
   ON workflow_interventions(project_id, intervention_id, requested_at DESC);
 
-CREATE TABLE IF NOT EXISTS webhook_deliveries (
+CREATE TABLE webhook_deliveries (
   project_id TEXT NOT NULL,
   connector_id TEXT NOT NULL,
   webhook_id TEXT NOT NULL,
@@ -279,10 +580,10 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
   PRIMARY KEY (project_id, connector_id, webhook_id, idempotency_key)
 );
 
-CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_project_received
+CREATE INDEX idx_webhook_deliveries_project_received
   ON webhook_deliveries(project_id, received_at DESC);
 
-CREATE TABLE IF NOT EXISTS webhook_runs (
+CREATE TABLE webhook_runs (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   connector_id TEXT NOT NULL,
@@ -304,18 +605,18 @@ CREATE TABLE IF NOT EXISTS webhook_runs (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_webhook_runs_project_started
+CREATE INDEX idx_webhook_runs_project_started
   ON webhook_runs(project_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_webhook_runs_project_connector_started
+CREATE INDEX idx_webhook_runs_project_connector_started
   ON webhook_runs(project_id, connector_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_webhook_runs_project_webhook_started
+CREATE INDEX idx_webhook_runs_project_webhook_started
   ON webhook_runs(project_id, connector_id, webhook_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_webhook_runs_project_status_started
+CREATE INDEX idx_webhook_runs_project_status_started
   ON webhook_runs(project_id, status, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_webhook_runs_project_idempotency
+CREATE INDEX idx_webhook_runs_project_idempotency
   ON webhook_runs(project_id, idempotency_key);
 
-CREATE TABLE IF NOT EXISTS rule_states (
+CREATE TABLE rule_states (
   project_id TEXT NOT NULL,
   rule_id TEXT NOT NULL,
   subject_kind TEXT NOT NULL CHECK (subject_kind IN ('object')),
@@ -325,17 +626,17 @@ CREATE TABLE IF NOT EXISTS rule_states (
   PRIMARY KEY (project_id, rule_id, subject_kind, object_type_id, primary_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_rule_states_project_rule
+CREATE INDEX idx_rule_states_project_rule
   ON rule_states(project_id, rule_id);
 
 -- Object materialization dedupes re-applied object/link mutation events and
 -- telemetry.appended by id. Timeseries needs no equivalent ledger: its
 -- (series, at) upsert is idempotent on its own.
-CREATE TABLE IF NOT EXISTS applied_events_objects (
+CREATE TABLE applied_events_objects (
   event_id TEXT PRIMARY KEY
 );
 
-CREATE TABLE IF NOT EXISTS action_runs (
+CREATE TABLE action_runs (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   action_id TEXT NOT NULL,
@@ -414,23 +715,23 @@ CREATE TABLE IF NOT EXISTS action_runs (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_action_runs_project_started
+CREATE INDEX idx_action_runs_project_started
   ON action_runs(project_id, COALESCE(started_at, queued_at) DESC);
-CREATE INDEX IF NOT EXISTS idx_action_runs_project_action_started
+CREATE INDEX idx_action_runs_project_action_started
   ON action_runs(project_id, action_id, COALESCE(started_at, queued_at) DESC);
-CREATE INDEX IF NOT EXISTS idx_action_runs_project_object_started
+CREATE INDEX idx_action_runs_project_object_started
   ON action_runs(project_id, object_type_id, primary_id, COALESCE(started_at, queued_at) DESC);
-CREATE INDEX IF NOT EXISTS idx_action_runs_project_status_started
+CREATE INDEX idx_action_runs_project_status_started
   ON action_runs(project_id, status, COALESCE(started_at, queued_at) DESC);
 
-CREATE TABLE IF NOT EXISTS action_run_commits (
+CREATE TABLE action_run_commits (
   project_id TEXT NOT NULL,
   run_id TEXT NOT NULL,
   committed_at TEXT NOT NULL,
   PRIMARY KEY (project_id, run_id)
 );
 
-CREATE TABLE IF NOT EXISTS action_run_object_diffs (
+CREATE TABLE action_run_object_diffs (
   project_id TEXT NOT NULL,
   run_id TEXT NOT NULL,
   object_type_id TEXT NOT NULL,
@@ -439,7 +740,7 @@ CREATE TABLE IF NOT EXISTS action_run_object_diffs (
   PRIMARY KEY (project_id, run_id, object_type_id, primary_id)
 );
 
-CREATE TABLE IF NOT EXISTS action_run_object_diff_properties (
+CREATE TABLE action_run_object_diff_properties (
   project_id TEXT NOT NULL,
   run_id TEXT NOT NULL,
   object_type_id TEXT NOT NULL,
@@ -448,7 +749,7 @@ CREATE TABLE IF NOT EXISTS action_run_object_diff_properties (
   PRIMARY KEY (project_id, run_id, object_type_id, primary_id, property_id)
 );
 
-CREATE TABLE IF NOT EXISTS action_run_link_diffs (
+CREATE TABLE action_run_link_diffs (
   project_id TEXT NOT NULL,
   run_id TEXT NOT NULL,
   operation TEXT NOT NULL CHECK (operation IN ('create', 'update', 'delete')),
@@ -469,14 +770,14 @@ CREATE TABLE IF NOT EXISTS action_run_link_diffs (
   )
 );
 
-CREATE INDEX IF NOT EXISTS idx_action_run_object_diffs_object
+CREATE INDEX idx_action_run_object_diffs_object
   ON action_run_object_diffs(project_id, object_type_id, primary_id);
-CREATE INDEX IF NOT EXISTS idx_action_run_link_diffs_source
+CREATE INDEX idx_action_run_link_diffs_source
   ON action_run_link_diffs(project_id, source_object_type_id, source_primary_id, link_id);
-CREATE INDEX IF NOT EXISTS idx_action_run_link_diffs_target
+CREATE INDEX idx_action_run_link_diffs_target
   ON action_run_link_diffs(project_id, target_object_type_id, target_primary_id);
 
-CREATE TABLE IF NOT EXISTS auth_users (
+CREATE TABLE auth_users (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   email TEXT NOT NULL,
@@ -488,14 +789,14 @@ CREATE TABLE IF NOT EXISTS auth_users (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_users_project_email
+CREATE UNIQUE INDEX idx_auth_users_project_email
   ON auth_users(project_id, email);
-CREATE INDEX IF NOT EXISTS idx_auth_users_project_status_created
+CREATE INDEX idx_auth_users_project_status_created
   ON auth_users(project_id, status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_auth_users_project_created
+CREATE INDEX idx_auth_users_project_created
   ON auth_users(project_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS auth_user_identities (
+CREATE TABLE auth_user_identities (
   project_id TEXT NOT NULL,
   strategy_id TEXT NOT NULL,
   subject TEXT NOT NULL,
@@ -506,10 +807,10 @@ CREATE TABLE IF NOT EXISTS auth_user_identities (
   PRIMARY KEY (project_id, strategy_id, subject)
 );
 
-CREATE INDEX IF NOT EXISTS idx_auth_user_identities_user
+CREATE INDEX idx_auth_user_identities_user
   ON auth_user_identities(project_id, user_id);
 
-CREATE TABLE IF NOT EXISTS auth_service_accounts (
+CREATE TABLE auth_service_accounts (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   name TEXT NOT NULL,
@@ -526,12 +827,12 @@ CREATE TABLE IF NOT EXISTS auth_service_accounts (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_auth_service_accounts_project_status_created
+CREATE INDEX idx_auth_service_accounts_project_status_created
   ON auth_service_accounts(project_id, status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_auth_service_accounts_project_created
+CREATE INDEX idx_auth_service_accounts_project_created
   ON auth_service_accounts(project_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS auth_service_account_group_memberships (
+CREATE TABLE auth_service_account_group_memberships (
   project_id TEXT NOT NULL,
   service_account_id TEXT NOT NULL,
   group_id TEXT NOT NULL,
@@ -540,10 +841,10 @@ CREATE TABLE IF NOT EXISTS auth_service_account_group_memberships (
   PRIMARY KEY (project_id, service_account_id, group_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_auth_service_account_group_memberships_group
+CREATE INDEX idx_auth_service_account_group_memberships_group
   ON auth_service_account_group_memberships(project_id, group_id);
 
-CREATE TABLE IF NOT EXISTS auth_sessions (
+CREATE TABLE auth_sessions (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   user_id TEXT NOT NULL,
@@ -560,12 +861,12 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_active
+CREATE INDEX idx_auth_sessions_user_active
   ON auth_sessions(project_id, user_id, audience, revoked_at, expires_at);
-CREATE INDEX IF NOT EXISTS idx_auth_sessions_token
+CREATE INDEX idx_auth_sessions_token
   ON auth_sessions(project_id, id, token_hash);
 
-CREATE TABLE IF NOT EXISTS auth_access_tokens (
+CREATE TABLE auth_access_tokens (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   name TEXT NOT NULL,
@@ -593,12 +894,12 @@ CREATE TABLE IF NOT EXISTS auth_access_tokens (
   )
 );
 
-CREATE INDEX IF NOT EXISTS idx_auth_access_tokens_lookup
+CREATE INDEX idx_auth_access_tokens_lookup
   ON auth_access_tokens(project_id, id, kind, token_hash, revoked_at, expires_at);
-CREATE INDEX IF NOT EXISTS idx_auth_access_tokens_subject_created
+CREATE INDEX idx_auth_access_tokens_subject_created
   ON auth_access_tokens(project_id, subject_type, subject_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS auth_invitations (
+CREATE TABLE auth_invitations (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   email TEXT NOT NULL,
@@ -617,12 +918,12 @@ CREATE TABLE IF NOT EXISTS auth_invitations (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_auth_invitations_project_email
+CREATE INDEX idx_auth_invitations_project_email
   ON auth_invitations(project_id, email, status, expires_at);
-CREATE INDEX IF NOT EXISTS idx_auth_invitations_project_status_created
+CREATE INDEX idx_auth_invitations_project_status_created
   ON auth_invitations(project_id, status, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS auth_invitation_groups (
+CREATE TABLE auth_invitation_groups (
   project_id TEXT NOT NULL,
   invitation_id TEXT NOT NULL,
   group_id TEXT NOT NULL,
@@ -630,12 +931,12 @@ CREATE TABLE IF NOT EXISTS auth_invitation_groups (
   PRIMARY KEY (project_id, invitation_id, group_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_auth_invitation_groups_group
+CREATE INDEX idx_auth_invitation_groups_group
   ON auth_invitation_groups(project_id, group_id);
-CREATE INDEX IF NOT EXISTS idx_auth_invitation_groups_invitation_position
+CREATE INDEX idx_auth_invitation_groups_invitation_position
   ON auth_invitation_groups(project_id, invitation_id, position);
 
-CREATE TABLE IF NOT EXISTS auth_group_memberships (
+CREATE TABLE auth_group_memberships (
   project_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   group_id TEXT NOT NULL,
@@ -644,10 +945,10 @@ CREATE TABLE IF NOT EXISTS auth_group_memberships (
   PRIMARY KEY (project_id, user_id, group_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_auth_group_memberships_group
+CREATE INDEX idx_auth_group_memberships_group
   ON auth_group_memberships(project_id, group_id);
 
-CREATE TABLE IF NOT EXISTS auth_magic_links (
+CREATE TABLE auth_magic_links (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   strategy_id TEXT NOT NULL,
@@ -662,10 +963,10 @@ CREATE TABLE IF NOT EXISTS auth_magic_links (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_auth_magic_links_email_active
+CREATE INDEX idx_auth_magic_links_email_active
   ON auth_magic_links(project_id, email, consumed_at, revoked_at, expires_at);
 
-CREATE TABLE IF NOT EXISTS auth_oidc_authorization_attempts (
+CREATE TABLE auth_oidc_authorization_attempts (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   strategy_id TEXT NOT NULL,
@@ -680,10 +981,10 @@ CREATE TABLE IF NOT EXISTS auth_oidc_authorization_attempts (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_auth_oidc_attempts_active
+CREATE INDEX idx_auth_oidc_attempts_active
   ON auth_oidc_authorization_attempts(project_id, strategy_id, consumed_at, expires_at);
 
-CREATE TABLE IF NOT EXISTS agent_threads (
+CREATE TABLE agent_threads (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   agent_id TEXT NOT NULL,
@@ -699,16 +1000,16 @@ CREATE TABLE IF NOT EXISTS agent_threads (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_agent_threads_project_activity
+CREATE INDEX idx_agent_threads_project_activity
   ON agent_threads(project_id, COALESCE(last_message_at, created_at) DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_threads_project_agent_activity
+CREATE INDEX idx_agent_threads_project_agent_activity
   ON agent_threads(project_id, agent_id, COALESCE(last_message_at, created_at) DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_threads_project_status_activity
+CREATE INDEX idx_agent_threads_project_status_activity
   ON agent_threads(project_id, status, COALESCE(last_message_at, created_at) DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_threads_project_owner_activity
+CREATE INDEX idx_agent_threads_project_owner_activity
   ON agent_threads(project_id, owner_principal_type, owner_principal_id, COALESCE(last_message_at, created_at) DESC);
 
-CREATE TABLE IF NOT EXISTS agent_runs (
+CREATE TABLE agent_runs (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   thread_id TEXT NOT NULL,
@@ -748,16 +1049,16 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   )
 );
 
-CREATE INDEX IF NOT EXISTS idx_agent_runs_project_started
+CREATE INDEX idx_agent_runs_project_started
   ON agent_runs(project_id, COALESCE(started_at, created_at) DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_runs_project_thread_started
+CREATE INDEX idx_agent_runs_project_thread_started
   ON agent_runs(project_id, thread_id, COALESCE(started_at, created_at) DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_runs_project_agent_started
+CREATE INDEX idx_agent_runs_project_agent_started
   ON agent_runs(project_id, agent_id, COALESCE(started_at, created_at) DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_runs_project_status_started
+CREATE INDEX idx_agent_runs_project_status_started
   ON agent_runs(project_id, status, COALESCE(started_at, created_at) DESC);
 
-CREATE TABLE IF NOT EXISTS agent_messages (
+CREATE TABLE agent_messages (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   thread_id TEXT NOT NULL,
@@ -776,7 +1077,7 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   PRIMARY KEY (project_id, id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_messages_thread_seq
+CREATE UNIQUE INDEX idx_agent_messages_thread_seq
   ON agent_messages(project_id, thread_id, seq);
-CREATE INDEX IF NOT EXISTS idx_agent_messages_project_thread_role
+CREATE INDEX idx_agent_messages_project_thread_role
   ON agent_messages(project_id, thread_id, role, seq);

@@ -296,10 +296,10 @@ describe("ontology materializer telemetry", () => {
     ).toHaveLength(2)
     const events = await storage.ontology.outbox.claim({
       projectId: "project",
-      now: "2027-01-01T00:00:00Z",
+      now: "2027-01-01T00:00:00.000Z",
       limit: 100,
       leaseId: "telemetry-events",
-      leaseExpiresAt: "2027-01-01T01:00:00Z",
+      leaseExpiresAt: "2027-01-01T01:00:00.000Z",
     })
     expect(
       events

@@ -1227,6 +1227,7 @@ function rowToObject(row: ObjectDatabaseRow): ObjectRow {
     updatedAt: new Date(row.updated_at),
     version: row.version,
     sourceEventId: row.source_event_id ?? undefined,
+    lastCommitId: row.last_commit_id ?? undefined,
   }
 }
 
@@ -1271,6 +1272,7 @@ function reviveExpandedRow(value: unknown): ExpandedObjectRow {
     version: Number(row.version),
   }
   if (row.sourceEventId != null) expanded.sourceEventId = String(row.sourceEventId)
+  if (row.lastCommitId != null) expanded.lastCommitId = String(row.lastCommitId)
   if (isPlainRecord(row.linkProperties) && Object.keys(row.linkProperties).length > 0) {
     expanded.linkProperties = row.linkProperties
   }
@@ -1295,6 +1297,7 @@ function rowToLink(row: LinkDatabaseRow): ObjectLinkRow {
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     sourceEventId: row.source_event_id ?? undefined,
+    lastCommitId: row.last_commit_id ?? undefined,
   }
 }
 
@@ -1307,6 +1310,7 @@ interface ObjectDatabaseRow {
   updated_at: Date | string
   version: number
   source_event_id: string | null
+  last_commit_id: string | null
 }
 
 interface ObjectQueryDatabaseRow extends ObjectDatabaseRow {
@@ -1332,4 +1336,5 @@ interface LinkDatabaseRow {
   created_at: Date | string
   updated_at: Date | string
   source_event_id: string | null
+  last_commit_id: string | null
 }

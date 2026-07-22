@@ -285,6 +285,21 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
         )
       }
 
+      for (const candidate of this.rows.values()) {
+        if (
+          candidate.projectId === input.projectId &&
+          candidate.id !== input.id &&
+          candidate.datasetId === input.identity.datasetVersion.datasetId &&
+          candidate.datasetVersionId === input.identity.datasetVersion.versionId &&
+          candidate.datasetVersionCreatedAt !== undefined &&
+          candidate.datasetVersionCreatedAt !== input.identity.datasetVersion.createdAt
+        ) {
+          throw new ProjectionRunError(
+            `[Sixb] Dataset version '${input.identity.datasetVersion.versionId}' reused an immutable dataset version id with different metadata.`
+          )
+        }
+      }
+
       const key = projectionRunKey(input.projectId, input.id)
       const existing = this.rows.get(key)
       if (existing) {
@@ -369,11 +384,7 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
     )
   }
 
-  /**
-   * @internal The caller must already hold InMemoryStorage's root operation lock.
-   * Source staging deliberately has only the run id, projection id and token;
-   * the source manifest carries the remaining immutable identity.
-   */
+  /** @internal The caller must already hold InMemoryStorage's root operation lock. */
   assertSourceMaterializationExecutionUnlocked(
     input: AssertSourceMaterializationExecutionInput
   ): void {
@@ -393,6 +404,12 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
         `[Sixb] Projection run '${record.id}' execution token is stale.`,
         "execution-lost"
       )
+    }
+    if (input.identity) {
+      assertMaterializationIdentityMatches(record, {
+        projectionId: input.source.projectionId,
+        ...input.identity,
+      })
     }
   }
 

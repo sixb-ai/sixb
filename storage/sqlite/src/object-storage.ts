@@ -898,6 +898,7 @@ export class SqliteObjectStorage implements ObjectStorage {
       updatedAt: new Date(row.updated_at),
       version: row.version,
       sourceEventId: row.source_event_id ?? undefined,
+      lastCommitId: row.last_commit_id ?? undefined,
     }
   }
 
@@ -923,6 +924,7 @@ export class SqliteObjectStorage implements ObjectStorage {
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
       sourceEventId: row.source_event_id ?? undefined,
+      lastCommitId: row.last_commit_id ?? undefined,
     }
   }
 
@@ -1017,6 +1019,7 @@ function reviveExpandedRow(value: unknown): ExpandedObjectRow {
     version: Number(row.version),
   }
   if (row.sourceEventId != null) expanded.sourceEventId = String(row.sourceEventId)
+  if (row.lastCommitId != null) expanded.lastCommitId = String(row.lastCommitId)
   if (isPlainObject(row.linkProperties) && Object.keys(row.linkProperties).length > 0) {
     expanded.linkProperties = row.linkProperties
   }
@@ -1054,6 +1057,7 @@ interface DatabaseRow {
   updated_at: string
   version: number
   source_event_id: string | null
+  last_commit_id: string | null
 }
 
 interface ObjectQueryDatabaseRow extends DatabaseRow {
@@ -1079,4 +1083,5 @@ interface LinkDatabaseRow {
   created_at: string
   updated_at: string
   source_event_id: string | null
+  last_commit_id: string | null
 }

@@ -17,8 +17,9 @@ import {
 import { PgAgentStorage } from "./agents"
 import { PgAuthStorage } from "./auth-storage"
 import { createPostgresStorageMigrators, dropSchema } from "./migrations"
+import { PgOntologyStorage, type PgOntologyTransactionContext } from "./ontology-storage"
 import { PgActionRunStorage } from "./pg-action-run-storage"
-import { createPgClient, type SQL } from "./pg-client"
+import { createPgClient, type SQL, type SQLClient } from "./pg-client"
 import { PgObjectStorage } from "./pg-object-storage"
 import { PgPipelineRunStorage } from "./pg-pipeline-run-storage"
 import { PgProjectionRunStorage } from "./pg-projection-run-storage"
@@ -115,6 +116,7 @@ export interface PostgresStorageOptions {
  */
 export class PostgresStorage implements MigrationCapableStorage {
   readonly objects: PgObjectStorage
+  readonly ontology: PgOntologyStorage
   readonly auth: PgAuthStorage
   readonly agents: PgAgentStorage
   readonly actionRuns: PgActionRunStorage
@@ -173,8 +175,12 @@ export class PostgresStorage implements MigrationCapableStorage {
     })
 
     this.migrators = createPostgresStorageMigrators(this.sql, this.schemaName)
-    const stores = createPostgresStores(this.sql)
+    const stores = createPostgresStores(this.sql, {
+      runOntologyOperation: (run) => runPgTransaction(this.sql, run),
+      transactionContext: null,
+    })
     this.objects = stores.objects
+    this.ontology = stores.ontology
     this.auth = stores.auth
     this.agents = stores.agents
     this.actionRuns = stores.actionRuns
@@ -202,12 +208,15 @@ export class PostgresStorage implements MigrationCapableStorage {
         this.sql,
         async (client) => {
           let active = true
-          const txStorage = this.createTransactionStorage(client)
+          const transactionContext: PgOntologyTransactionContext = { id: {}, active: true }
+          const txStorage = this.createTransactionStorage(client, transactionContext)
           const tx = createTransactionStorageProxy(txStorage, () => active)
 
           try {
             return await this.transactionScope.run(true, () => run(tx))
           } finally {
+            transactionContext.active = false
+            txStorage.ontology.deactivateSessions()
             active = false
           }
         },
@@ -242,9 +251,15 @@ export class PostgresStorage implements MigrationCapableStorage {
     await dropSchema(this.sql, this.schemaName)
   }
 
-  private createTransactionStorage(client: PgStoreClient): Storage {
+  private createTransactionStorage(
+    client: PgStoreClient,
+    transactionContext: PgOntologyTransactionContext
+  ): Storage & { readonly ontology: PgOntologyStorage } {
     return {
-      ...createPostgresStores(client),
+      ...createPostgresStores(client, {
+        runOntologyOperation: async (run) => run(client),
+        transactionContext,
+      }),
       transaction: async <T>(): Promise<T> => {
         throwNestedStorageTransaction()
       },
@@ -252,9 +267,20 @@ export class PostgresStorage implements MigrationCapableStorage {
   }
 }
 
-function createPostgresStores(sql: PgStoreClient): PostgresStoreSet {
+function createPostgresStores(
+  sql: PgStoreClient,
+  options: {
+    readonly runOntologyOperation: <T>(run: (sql: SQLClient) => Promise<T>) => Promise<T>
+    readonly transactionContext: PgOntologyTransactionContext | null
+  }
+): PostgresStoreSet {
   return {
     objects: new PgObjectStorage(sql),
+    ontology: new PgOntologyStorage({
+      sql,
+      runRootOperation: options.runOntologyOperation,
+      transactionContext: options.transactionContext,
+    }),
     auth: new PgAuthStorage({ sql }),
     agents: new PgAgentStorage({ sql }),
     actionRuns: new PgActionRunStorage(sql),
@@ -272,6 +298,7 @@ function createPostgresStores(sql: PgStoreClient): PostgresStoreSet {
 
 interface PostgresStoreSet {
   readonly objects: PgObjectStorage
+  readonly ontology: PgOntologyStorage
   readonly auth: PgAuthStorage
   readonly agents: PgAgentStorage
   readonly actionRuns: PgActionRunStorage

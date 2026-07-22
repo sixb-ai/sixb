@@ -154,6 +154,16 @@ export interface AssertSourceMaterializationExecutionInput {
   readonly projectId: string
   readonly source: ProjectionSourceRef
   readonly execution: ProjectionExecution
+  /** Full immutable source identity, required when a candidate manifest is first created. */
+  readonly identity?: Pick<
+    BeginSourceMaterializationInput,
+    | "projectionKind"
+    | "protocol"
+    | "datasetVersion"
+    | "projectionRevision"
+    | "ownershipHash"
+    | "ontologyRevision"
+  >
 }
 
 export type AssertSourceMaterializationExecution = (

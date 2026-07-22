@@ -1,7 +1,4 @@
-import {
-  MaterializationConflictError,
-  MaterializationValidationError,
-} from "../../materialization/errors"
+import { MaterializationConflictError } from "../../materialization/errors"
 import type {
   EditCommitResult,
   ProjectionCommitResult,
@@ -13,10 +10,7 @@ import type { MaterializerContext, MaterializerStorage } from "../context"
 import type { CommitIdentity } from "../shared/identity"
 
 export function requireOntologyStorage(storage: Storage): MaterializerStorage {
-  if (!storage.ontology) {
-    throw new MaterializationValidationError("Storage does not provide ontology capabilities.")
-  }
-  return storage as MaterializerStorage
+  return storage
 }
 
 export async function replayCommitRecord(

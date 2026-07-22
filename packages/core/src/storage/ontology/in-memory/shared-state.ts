@@ -154,8 +154,8 @@ export function assertNonblank(value: string, label: string): void {
 
 export function assertTimestamp(value: string, label: string): number {
   const milliseconds = Date.parse(value)
-  if (!Number.isFinite(milliseconds)) {
-    throw new MaterializationValidationError(`${label} must be a valid timestamp.`)
+  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) {
+    throw new MaterializationValidationError(`${label} must be a canonical UTC timestamp.`)
   }
   return milliseconds
 }
