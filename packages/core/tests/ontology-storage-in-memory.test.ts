@@ -204,10 +204,10 @@ describe("in-memory ontology storage", () => {
     expect(
       await storage.ontology.outbox.claim({
         projectId: "project",
-        now: "2027-01-01T00:00:00Z",
+        now: "2027-01-01T00:00:00.000Z",
         limit: 10,
         leaseId: "lease",
-        leaseExpiresAt: "2027-01-01T01:00:00Z",
+        leaseExpiresAt: "2027-01-01T01:00:00.000Z",
       })
     ).toEqual([])
 
@@ -465,36 +465,36 @@ describe("in-memory ontology storage", () => {
     })
     const claimed = await storage.ontology.outbox.claim({
       projectId: "project",
-      now: "2027-01-01T00:00:00Z",
+      now: "2027-01-01T00:00:00.000Z",
       limit: 10,
       leaseId: "lease",
-      leaseExpiresAt: "2027-01-01T01:00:00Z",
+      leaseExpiresAt: "2027-01-01T01:00:00.000Z",
     })
     expect(claimed).toHaveLength(1)
     await storage.ontology.outbox.reschedule({
       projectId: "project",
       ids: [claimed[0].envelope.id],
       leaseId: "lease",
-      availableAt: "2027-01-02T00:00:00Z",
+      availableAt: "2027-01-02T00:00:00.000Z",
       error: "broker down",
     })
     const reclaimed = await storage.ontology.outbox.claim({
       projectId: "project",
-      now: "2027-01-03T00:00:00Z",
+      now: "2027-01-03T00:00:00.000Z",
       limit: 10,
       leaseId: "lease-2",
-      leaseExpiresAt: "2027-01-03T01:00:00Z",
+      leaseExpiresAt: "2027-01-03T01:00:00.000Z",
     })
     await storage.ontology.outbox.markPublished({
       projectId: "project",
       ids: [reclaimed[0].envelope.id],
       leaseId: "lease-2",
-      publishedAt: "2027-01-03T00:30:00Z",
+      publishedAt: "2027-01-03T00:30:00.000Z",
     })
     expect(
       await storage.ontology.outbox.purgePublished({
         projectId: "project",
-        publishedBefore: "2027-01-04T00:00:00Z",
+        publishedBefore: "2027-01-04T00:00:00.000Z",
         limit: 10,
       })
     ).toBe(1)
@@ -1080,10 +1080,10 @@ describe("in-memory ontology storage", () => {
     )
     const claimed = await storage.ontology.outbox.claim({
       projectId: "project",
-      now: "2026-01-03T00:00:00Z",
+      now: "2026-01-03T00:00:00.000Z",
       limit: 10,
       leaseId: "lease-1",
-      leaseExpiresAt: "2026-01-03T01:00:00Z",
+      leaseExpiresAt: "2026-01-03T01:00:00.000Z",
     })
     expect(claimed.map((row) => row.createdAt)).toEqual([
       "2026-01-01T00:00:00.000Z",
@@ -1099,18 +1099,18 @@ describe("in-memory ontology storage", () => {
     expect(
       await storage.ontology.outbox.claim({
         projectId: "project",
-        now: "2026-01-03T00:30:00Z",
+        now: "2026-01-03T00:30:00.000Z",
         limit: 10,
         leaseId: "lease-early",
-        leaseExpiresAt: "2026-01-03T01:30:00Z",
+        leaseExpiresAt: "2026-01-03T01:30:00.000Z",
       })
     ).toEqual([])
     const reclaimed = await storage.ontology.outbox.claim({
       projectId: "project",
-      now: "2026-01-03T02:00:00Z",
+      now: "2026-01-03T02:00:00.000Z",
       limit: 10,
       leaseId: "lease-2",
-      leaseExpiresAt: "2026-01-03T03:00:00Z",
+      leaseExpiresAt: "2026-01-03T03:00:00.000Z",
     })
     const ids = reclaimed.map((row) => row.envelope.id)
     await expect(
@@ -1118,7 +1118,7 @@ describe("in-memory ontology storage", () => {
         projectId: "project",
         ids,
         leaseId: "lease-1",
-        publishedAt: "2026-01-03T02:30:00Z",
+        publishedAt: "2026-01-03T02:30:00.000Z",
       })
     ).rejects.toThrow("lease does not match")
     await expect(
@@ -1126,7 +1126,7 @@ describe("in-memory ontology storage", () => {
         projectId: "project",
         ids,
         leaseId: "lease-1",
-        availableAt: "2026-01-04T00:00:00Z",
+        availableAt: "2026-01-04T00:00:00.000Z",
         error: "stale",
       })
     ).rejects.toThrow("lease does not match")
@@ -1135,26 +1135,26 @@ describe("in-memory ontology storage", () => {
         projectId: "project",
         ids: [ids[0], "missing"],
         leaseId: "lease-2",
-        publishedAt: "2026-01-03T02:30:00Z",
+        publishedAt: "2026-01-03T02:30:00.000Z",
       })
     ).rejects.toThrow("lease does not match")
     await storage.ontology.outbox.markPublished({
       projectId: "project",
       ids,
       leaseId: "lease-2",
-      publishedAt: "2026-01-03T02:30:00Z",
+      publishedAt: "2026-01-03T02:30:00.000Z",
     })
     expect(
       await storage.ontology.outbox.purgePublished({
         projectId: "project",
-        publishedBefore: "2026-01-04T00:00:00Z",
+        publishedBefore: "2026-01-04T00:00:00.000Z",
         limit: 2,
       })
     ).toBe(2)
     expect(
       await storage.ontology.outbox.purgePublished({
         projectId: "project",
-        publishedBefore: "2026-01-04T00:00:00Z",
+        publishedBefore: "2026-01-04T00:00:00.000Z",
         limit: 2,
       })
     ).toBe(1)
@@ -2379,10 +2379,10 @@ describe("in-memory ontology storage", () => {
     )
     const [event] = await storage.ontology.outbox.claim({
       projectId: "project",
-      now: "2027-01-01T00:00:00Z",
+      now: "2027-01-01T00:00:00.000Z",
       limit: 10,
       leaseId: "stable-lease",
-      leaseExpiresAt: "2027-01-01T01:00:00Z",
+      leaseExpiresAt: "2027-01-01T01:00:00.000Z",
     })
     expect(clockCalls).toBe(1)
     expect(failures).toBe(2)

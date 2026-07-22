@@ -20,11 +20,29 @@ export {
   runLakeStorageContractSuite,
 } from "./lake-storage-contract"
 export {
+  type MaterializationFailureBoundary,
+  type MaterializationFailureContractSuiteOptions,
+  runMaterializationFailureContractSuite,
+} from "./materialization-failure-contract"
+export {
+  type MaterializerStorageContractProvider,
+  runMaterializerStorageContractSuite,
+} from "./materializer-storage-contract"
+export {
   type ObjectQueryProviderContractSuiteOptions,
   objectQueryContractOntology,
   runObjectQueryProviderContractSuite,
   seedObjectQueryContractData,
 } from "./object-query-contract"
+export {
+  type OntologyStorageContractStorage,
+  type OntologyStorageContractSuiteOptions,
+  runOntologyStorageContractSuite,
+} from "./ontology-storage-contract"
+export {
+  type ProjectionRunStorageContractSuiteOptions,
+  runProjectionRunStorageContractSuite,
+} from "./projection-run-storage-contract"
 export {
   type QueueContractSuiteOptions,
   runQueueContractSuite,

@@ -209,6 +209,7 @@ function rowToPoint(row: TimeseriesDatabaseRow): TimeseriesPoint {
     unit: row.unit ?? undefined,
     at: new Date(row.at),
     sourceEventId: row.source_event_id ?? undefined,
+    lastCommitId: row.last_commit_id ?? undefined,
   }
 }
 
@@ -221,4 +222,5 @@ interface TimeseriesDatabaseRow {
   unit: string | null
   at: Date | string
   source_event_id: string | null
+  last_commit_id: string | null
 }

@@ -3,6 +3,16 @@ import type { Storage } from "@sixb/core"
 import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "@sixb/core/internal/events"
 import { type ActionRunStorage, StorageTransactionError } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
+import { closeSqliteStoreConnection, openSqliteStoreConnection } from "../src/transactions"
+
+test("SQLite storage connections enforce foreign keys", () => {
+  const connection = openSqliteStoreConnection()
+  try {
+    expect(connection.db.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 })
+  } finally {
+    closeSqliteStoreConnection(connection)
+  }
+})
 
 describe("SqliteStorage.transaction", () => {
   let storage: SqliteStorage
@@ -76,6 +86,109 @@ describe("SqliteStorage.transaction", () => {
       })
     ).toHaveLength(0)
     expect(await storage.actionRuns.getById({ projectId: "my-app", id: "run_rollback" })).toBeNull()
+  })
+
+  test("serializes unrelated root operations behind an active transaction", async () => {
+    let releaseTransaction!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      releaseTransaction = resolve
+    })
+    let transactionEntered!: () => void
+    const entered = new Promise<void>((resolve) => {
+      transactionEntered = resolve
+    })
+
+    const failed = storage.transaction(async (tx) => {
+      await requireActionRuns(tx).queue({
+        id: "rolled-back",
+        projectId: "my-app",
+        actionId: "paint",
+        subject: { kind: "none" },
+        params: {},
+        idempotencyKey: "rolled-back",
+      })
+      transactionEntered()
+      await blocked
+      throw new Error("rollback active transaction")
+    })
+    await entered
+
+    let rootFinished = false
+    const rootWrite = storage.actionRuns
+      .queue({
+        id: "root-write",
+        projectId: "my-app",
+        actionId: "paint",
+        subject: { kind: "none" },
+        params: {},
+        idempotencyKey: "root-write",
+      })
+      .then((run) => {
+        rootFinished = true
+        return run
+      })
+    await Promise.resolve()
+    expect(rootFinished).toBe(false)
+
+    releaseTransaction()
+    await expect(failed).rejects.toThrow("rollback active transaction")
+    await expect(rootWrite).resolves.toMatchObject({ id: "root-write" })
+    expect(await storage.actionRuns.getById({ projectId: "my-app", id: "rolled-back" })).toBeNull()
+  })
+
+  test("does not let detached transaction context escape into a later transaction", async () => {
+    let releaseDetached!: () => void
+    const detachedGate = new Promise<void>((resolve) => {
+      releaseDetached = resolve
+    })
+    let detachedWrite!: Promise<unknown>
+    let detachedResolved = false
+
+    await storage.transaction(() => {
+      detachedWrite = Promise.resolve().then(async () => {
+        await detachedGate
+        return storage.actionRuns.queue({
+          id: "detached-write",
+          projectId: "my-app",
+          actionId: "paint",
+          subject: { kind: "none" },
+          params: {},
+          idempotencyKey: "detached-write",
+        })
+      })
+      detachedWrite.then(
+        () => {
+          detachedResolved = true
+        },
+        () => undefined
+      )
+    })
+
+    let releaseLaterTransaction!: () => void
+    const laterGate = new Promise<void>((resolve) => {
+      releaseLaterTransaction = resolve
+    })
+    let laterEntered!: () => void
+    const entered = new Promise<void>((resolve) => {
+      laterEntered = resolve
+    })
+    const later = storage.transaction(async () => {
+      laterEntered()
+      await laterGate
+      throw new Error("roll back later transaction")
+    })
+    await entered
+
+    releaseDetached()
+    await Promise.resolve()
+    expect(detachedResolved).toBe(false)
+
+    releaseLaterTransaction()
+    await expect(later).rejects.toThrow("roll back later transaction")
+    await expect(detachedWrite).resolves.toMatchObject({ id: "detached-write" })
+    expect(
+      await storage.actionRuns.getById({ projectId: "my-app", id: "detached-write" })
+    ).toMatchObject({ id: "detached-write" })
   })
 
   test("rejects nested transactions", async () => {

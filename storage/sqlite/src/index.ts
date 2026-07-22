@@ -19,6 +19,7 @@ import {
   sqliteStoragePath,
 } from "./migrations"
 import { SqliteObjectStorage } from "./object-storage"
+import { SqliteOntologyStorage, type SqliteOntologyTransactionContext } from "./ontology-storage"
 import { SqlitePipelineRunStorage } from "./pipeline-run-storage"
 import { SqliteProjectionRunStorage } from "./projection-run-storage"
 import { SqliteRulesStorage } from "./rules-storage"
@@ -58,6 +59,7 @@ export interface SqliteStorageOptions {
  */
 export class SqliteStorage implements MigrationCapableStorage {
   readonly objects: SqliteObjectStorage
+  readonly ontology: SqliteOntologyStorage
   readonly auth: SqliteAuthStorage
   readonly agents: SqliteAgentStorage
   readonly actionRuns: SqliteActionRunStorage
@@ -73,7 +75,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly migrators: readonly StorageMigrator[]
 
   private readonly connection: SqliteStoreConnection
-  private readonly transactionScope = new AsyncLocalStorage<boolean>()
+  private readonly transactionScope = new AsyncLocalStorage<{ active: boolean }>()
   private transactionTail: Promise<void> = Promise.resolve()
 
   constructor(options: SqliteStorageOptions = {}) {
@@ -84,20 +86,25 @@ export class SqliteStorage implements MigrationCapableStorage {
       installFreshSqliteSchema(this.connection.db)
     }
 
-    const stores = createSqliteStores(this.connection)
-    this.objects = stores.objects
-    this.auth = stores.auth
-    this.agents = stores.agents
-    this.actionRuns = stores.actionRuns
-    this.pipelineRuns = stores.pipelineRuns
-    this.timeseries = stores.timeseries
-    this.syncRuns = stores.syncRuns
-    this.projectionRuns = stores.projectionRuns
-    this.workflowRuns = stores.workflowRuns
-    this.workflowInterventions = stores.workflowInterventions
-    this.webhookDeliveries = stores.webhookDeliveries
-    this.webhookRuns = stores.webhookRuns
-    this.rules = stores.rules
+    const stores = createSqliteStores(this.connection, {
+      runOntologyOperation: (run) => this.runRootOntologyOperation(run),
+      transactionContext: null,
+    })
+    const lock = <T>(run: () => Promise<T> | T) => this.runRootStorageOperation(run)
+    this.objects = createSqliteRootFacade(stores.objects, lock)
+    this.ontology = stores.ontology
+    this.auth = createSqliteRootFacade(stores.auth, lock)
+    this.agents = createSqliteRootFacade(stores.agents, lock)
+    this.actionRuns = createSqliteRootFacade(stores.actionRuns, lock)
+    this.pipelineRuns = createSqliteRootFacade(stores.pipelineRuns, lock)
+    this.timeseries = createSqliteRootFacade(stores.timeseries, lock)
+    this.syncRuns = createSqliteRootFacade(stores.syncRuns, lock)
+    this.projectionRuns = createSqliteRootFacade(stores.projectionRuns, lock)
+    this.workflowRuns = createSqliteRootFacade(stores.workflowRuns, lock)
+    this.workflowInterventions = createSqliteRootFacade(stores.workflowInterventions, lock)
+    this.webhookDeliveries = createSqliteRootFacade(stores.webhookDeliveries, lock)
+    this.webhookRuns = createSqliteRootFacade(stores.webhookRuns, lock)
+    this.rules = createSqliteRootFacade(stores.rules, lock)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
   }
 
@@ -118,12 +125,22 @@ export class SqliteStorage implements MigrationCapableStorage {
 
     return this.withTransactionLock(async () => {
       let active = true
-      const txStorage = this.createTransactionStorage()
+      const scope = { active: true }
+      const transactionContext: SqliteOntologyTransactionContext = { id: {}, active: true }
+      const txStorage = this.createTransactionStorage(transactionContext)
       const tx = createTransactionStorageProxy(txStorage, () => active)
 
       try {
         return await runImmediateTransactionAsync(this.connection.db, () =>
-          this.transactionScope.run(true, () => run(tx))
+          this.transactionScope.run(scope, async () => {
+            try {
+              return await run(tx)
+            } finally {
+              scope.active = false
+              transactionContext.active = false
+              txStorage.ontology.deactivateSessions()
+            }
+          })
         )
       } finally {
         active = false
@@ -135,17 +152,35 @@ export class SqliteStorage implements MigrationCapableStorage {
     closeSqliteStoreConnection(this.connection)
   }
 
-  private createTransactionStorage(): Storage {
+  private createTransactionStorage(
+    transactionContext: SqliteOntologyTransactionContext
+  ): Storage & { readonly ontology: SqliteOntologyStorage } {
     return {
-      ...createSqliteStores({
-        db: this.connection.db,
-        ownsConnection: false,
-        installFreshSchema: false,
-      }),
+      ...createSqliteStores(
+        {
+          db: this.connection.db,
+          ownsConnection: false,
+          installFreshSchema: false,
+        },
+        {
+          runOntologyOperation: async (run) => run(),
+          transactionContext,
+        }
+      ),
       transaction: async <T>(): Promise<T> => {
         throwNestedStorageTransaction()
       },
     }
+  }
+
+  private runRootStorageOperation<T>(run: () => Promise<T> | T): Promise<T> {
+    if (this.transactionScope.getStore()?.active) return Promise.resolve(run())
+    return this.withTransactionLock(async () => run())
+  }
+
+  private runRootOntologyOperation<T>(run: () => Promise<T> | T): Promise<T> {
+    if (this.transactionScope.getStore()?.active) return Promise.resolve(run())
+    return this.withTransactionLock(() => runImmediateTransactionAsync(this.connection.db, run))
   }
 
   private async withTransactionLock<T>(run: () => Promise<T>): Promise<T> {
@@ -164,9 +199,20 @@ export class SqliteStorage implements MigrationCapableStorage {
   }
 }
 
-function createSqliteStores(connection: SqliteStoreConnection): SqliteStoreSet {
+function createSqliteStores(
+  connection: SqliteStoreConnection,
+  options: {
+    readonly runOntologyOperation: <T>(run: () => Promise<T> | T) => Promise<T>
+    readonly transactionContext: SqliteOntologyTransactionContext | null
+  }
+): SqliteStoreSet {
   return {
     objects: new SqliteObjectStorage({ connection }),
+    ontology: new SqliteOntologyStorage({
+      db: connection.db,
+      runRootOperation: options.runOntologyOperation,
+      transactionContext: options.transactionContext,
+    }),
     auth: new SqliteAuthStorage({ connection }),
     agents: new SqliteAgentStorage({ connection }),
     actionRuns: new SqliteActionRunStorage({ connection }),
@@ -182,8 +228,36 @@ function createSqliteStores(connection: SqliteStoreConnection): SqliteStoreSet {
   }
 }
 
+function createSqliteRootFacade<T extends object>(
+  target: T,
+  runRootOperation: <TResult>(run: () => Promise<TResult> | TResult) => Promise<TResult>
+): T {
+  const nested = new WeakMap<object, object>()
+  return new Proxy(target, {
+    get(current, property) {
+      const value = Reflect.get(current, property, current) as unknown
+      if (typeof value === "function") {
+        if (property === "close" || property === "queryCapabilities") {
+          return value.bind(current)
+        }
+        return (...args: readonly unknown[]) =>
+          runRootOperation(() => Reflect.apply(value, current, args) as unknown)
+      }
+      if (typeof value === "object" && value !== null) {
+        const existing = nested.get(value)
+        if (existing) return existing
+        const facade = createSqliteRootFacade(value, runRootOperation)
+        nested.set(value, facade)
+        return facade
+      }
+      return value
+    },
+  })
+}
+
 interface SqliteStoreSet {
   readonly objects: SqliteObjectStorage
+  readonly ontology: SqliteOntologyStorage
   readonly auth: SqliteAuthStorage
   readonly agents: SqliteAgentStorage
   readonly actionRuns: SqliteActionRunStorage

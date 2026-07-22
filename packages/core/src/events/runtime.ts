@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto"
 import type { Broker, BrokerCursor, BrokerRecord, BrokerStreamDefinition } from "../broker"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
+import type { OntologyMaterializationOrigin } from "../materialization/model"
 import {
   EVENT_DEFINITIONS,
   EVENT_TYPES,
   isDomainEventType,
   resolveEventStorage,
 } from "./definitions"
+import type { EventEnvelope } from "./envelope"
 import { EventsError } from "./errors"
 import type { DomainEvent, EventActor, EventDraft, StoredDomainEvent } from "./types"
 
@@ -43,6 +45,17 @@ export interface EventsSubscribeInput {
   readonly from?: "latest" | "earliest"
   readonly afterCursor?: BrokerCursor
   readonly types?: readonly DomainEvent["type"][]
+}
+
+/** Complete, already-identified event persisted before broker publication. @internal */
+export interface StableEventEnvelope extends Omit<EventEnvelope, "origin"> {
+  readonly origin: OntologyMaterializationOrigin
+  readonly commitId: string
+  readonly commitOrdinal: number
+  readonly type: DomainEvent["type"]
+  readonly topic: DomainEvent["topic"]
+  readonly partitionKey: string
+  readonly payload: unknown
 }
 
 /** Project-scoped domain event runtime backed by the shared broker provider. */
@@ -88,6 +101,51 @@ export class EventsRuntime {
     if (records.length !== payloads.length) {
       throw new EventsError(
         `Broker returned ${records.length} record(s) for ${payloads.length} appended event(s).`
+      )
+    }
+
+    return records.map(hydrateEventRecord)
+  }
+
+  /** Publishes persisted envelopes without changing their stable event identity. @internal */
+  async publishEnvelopes(
+    envelopes: readonly StableEventEnvelope[]
+  ): Promise<readonly StoredDomainEvent[]> {
+    if (envelopes.length === 0) {
+      return []
+    }
+
+    for (const envelope of envelopes) {
+      if (envelope.projectId !== this.projectId) {
+        throw new EventsError(
+          `Event '${envelope.id}' belongs to project '${envelope.projectId}', not '${this.projectId}'.`
+        )
+      }
+      if (!isDomainEventType(envelope.type)) {
+        throw new EventsError(`Event '${envelope.id}' has unknown event type.`)
+      }
+      if (EVENT_DEFINITIONS[envelope.type].topic !== envelope.topic) {
+        throw new EventsError(
+          `Event '${envelope.id}' topic '${envelope.topic}' does not match type '${envelope.type}'.`
+        )
+      }
+    }
+
+    await this.ensureStream()
+    const records = await this.broker.append({
+      projectId: this.projectId,
+      streamId: this.stream.id,
+      records: envelopes.map((envelope) => ({
+        name: envelope.type,
+        key: envelope.partitionKey,
+        payload: toBrokerRecordPayload(envelope),
+        idempotencyKey: envelope.id,
+      })),
+    })
+
+    if (records.length !== envelopes.length) {
+      throw new EventsError(
+        `Broker returned ${records.length} record(s) for ${envelopes.length} published event(s).`
       )
     }
 
@@ -204,7 +262,7 @@ function toStoredEventPayload(params: {
   return payload as StoredEventPayload
 }
 
-function toBrokerRecordPayload(payload: StoredEventPayload): JsonValue {
+function toBrokerRecordPayload(payload: StoredEventPayload | StableEventEnvelope): JsonValue {
   const reason = getInvalidJsonValueReason(payload, `event '${payload.type}' payload`)
   if (reason) {
     throw new EventsError(`Event '${payload.type}' cannot be stored in broker; ${reason}`)

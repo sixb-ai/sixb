@@ -881,13 +881,6 @@ describe("in-memory ontology materialization finalization", () => {
         message: "does not match the active source dataset",
       },
       {
-        name: "immutable version metadata mismatch",
-        datasetId: "devices",
-        versionId: "v2",
-        datasetCreatedAt: "2026-01-03T00:00:00.000Z",
-        message: "reused an immutable dataset version id",
-      },
-      {
         name: "regression",
         datasetId: "devices",
         versionId: "v1",

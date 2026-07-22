@@ -6,7 +6,6 @@ import { join } from "node:path"
 import { migrateStorage } from "@sixb/core"
 import { SqliteStorage } from "../src"
 import {
-  migrateSqliteStorage,
   SQLITE_STORAGE_ADAPTER_ID,
   sqliteStorageMigrations,
   sqliteStoragePath,
@@ -45,6 +44,61 @@ describe("SQLite storage migrations", () => {
 
     expect(result.status).toBe("migrated")
     expect(readMigrationRows(sqliteStoragePath(tempDir))).toEqual(expectedStorageMigrationRows)
+  })
+
+  test("recorded old checksums are rejected before schema mutation", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-checksum-"))
+    tempDirs.push(tempDir)
+    const path = sqliteStoragePath(tempDir)
+
+    const first = new SqliteStorage({ path: tempDir })
+    await migrateStorage(first)
+    closeStorage(first)
+
+    const db = new Database(path)
+    db.query(
+      "UPDATE sixb_migrations SET checksum = 'old-checksum' WHERE adapter_id = ? AND version = 1"
+    ).run(SQLITE_STORAGE_ADAPTER_ID)
+    db.close()
+
+    const reopened = new SqliteStorage({ path: tempDir })
+    await expect(migrateStorage(reopened)).rejects.toThrow("checksum")
+    closeStorage(reopened)
+
+    expect(readTableNames(path)).toContain("ontology_outbox")
+    expect(readMigrationRows(path)[0]?.checksum_length).toBe("old-checksum".length)
+  })
+
+  test("fresh schema installs the exact ontology table set and provenance columns", () => {
+    const db = new Database(":memory:")
+    try {
+      sqliteStorageMigrations.steps[0]?.up(db)
+      const ontologyTables = readMemoryTableNames(db).filter((name) => name.startsWith("ontology_"))
+      expect(ontologyTables).toEqual([
+        "ontology_commits",
+        "ontology_outbox",
+        "ontology_overrides",
+        "ontology_source_rows",
+        "ontology_sources",
+      ])
+      expect(readMemoryTableColumns(db, "objects")).toContain("last_commit_id")
+      expect(readMemoryTableColumns(db, "links")).toContain("last_commit_id")
+      expect(readMemoryTableColumns(db, "timeseries")).toContain("last_commit_id")
+      expect(readMemoryTableColumns(db, "projection_runs")).toEqual(
+        expect.arrayContaining([
+          "attempt",
+          "execution_token",
+          "materialization_protocol",
+          "dataset_version_created_at",
+          "fixed_batch_size",
+          "next_batch_ordinal",
+          "next_row_offset",
+          "input_exhausted",
+        ])
+      )
+    } finally {
+      db.close()
+    }
   })
 
   test("migrations install auth storage tables", async () => {
@@ -117,75 +171,27 @@ describe("SQLite storage migrations", () => {
     expect(tables).toContain("agent_messages")
   })
 
-  test("migrations preserve existing store rows", async () => {
+  test("untracked existing schema collides and rolls back without conversion", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-legacy-"))
     tempDirs.push(tempDir)
 
-    await seedExistingStoreRows(tempDir)
+    const path = sqliteStoragePath(tempDir)
+    const legacy = new Database(path)
+    legacy.run("CREATE TABLE objects (legacy_marker TEXT NOT NULL)")
+    legacy.run("INSERT INTO objects (legacy_marker) VALUES ('preserve-me')")
+    legacy.close()
 
     const storage = new SqliteStorage({ path: tempDir })
-    await migrateStorage(storage)
-
-    const row = await storage.objects.getByPrimaryId({
-      projectId: "project-a",
-      objectTypeId: "Room",
-      primaryId: "room:101",
-    })
-    const point = await storage.timeseries.getLatest({
-      projectId: "project-a",
-      objectTypeId: "Room",
-      objectId: "room:101",
-      propertyId: "temperature",
-    })
-    const syncRun = await storage.syncRuns.getById({
-      projectId: "project-a",
-      id: "run-1",
-    })
-    const projectionRun = await storage.projectionRuns.getById({
-      projectId: "project-a",
-      id: "proj-run-1",
-    })
-    const workflowRun = await storage.workflowRuns.getById({
-      projectId: "project-a",
-      id: "workflow-run-1",
-    })
-    const webhookRun = await storage.webhookRuns.getById({
-      projectId: "project-a",
-      id: "webhook-run-1",
-    })
-
+    await expect(migrateStorage(storage)).rejects.toThrow("table objects already exists")
     closeStorage(storage)
 
-    const webhookDelivery = readWebhookDeliveryRow(sqliteStoragePath(tempDir), {
-      projectId: "project-a",
-      connectorId: "github",
-      webhookId: "events",
-      idempotencyKey: "delivery-1",
+    const unchanged = new Database(path, { readonly: true })
+    expect(unchanged.query("SELECT legacy_marker FROM objects").get()).toEqual({
+      legacy_marker: "preserve-me",
     })
-
-    expect(row?.properties).toEqual({ name: "Legacy Room", temperature: 21.5 })
-    expect(point?.value).toBe(21.5)
-    expect(syncRun?.status).toBe("succeeded")
-    expect(syncRun?.checkpoint).toEqual({ cursor: "legacy" })
-    expect(projectionRun?.status).toBe("succeeded")
-    expect(projectionRun?.objectsUpserted).toBe(4)
-    expect(projectionRun?.telemetryPointsAppended).toBe(0)
-    expect(projectionRun?.telemetryPointsSkipped).toBe(0)
-    expect(projectionRun?.telemetryRowsFailed).toBe(0)
-    expect(workflowRun?.status).toBe("succeeded")
-    expect(workflowRun?.input).toEqual({ transactionId: "txn-1" })
-    expect(webhookRun).toMatchObject({
-      connectorId: "github",
-      webhookId: "events",
-      status: "succeeded",
-      responseStatus: 202,
-    })
-    expect(webhookDelivery).toMatchObject({
-      status: "completed",
-      completedAt: "2026-04-19T12:00:02.000Z",
-      receivedAt: "2026-04-19T12:00:00.000Z",
-    })
-    expect(readMigrationRows(sqliteStoragePath(tempDir))).toEqual(expectedStorageMigrationRows)
+    expect(readTableNames(path)).not.toContain("ontology_commits")
+    expect(readMigrationRows(path)).toEqual([])
+    unchanged.close()
   })
 
   test("dirty SQLite migration history blocks storage migrations", async () => {
@@ -286,48 +292,18 @@ function readTableColumns(path: string, tableName: string): readonly string[] {
   }
 }
 
-function readWebhookDeliveryRow(
-  path: string,
-  key: {
-    projectId: string
-    connectorId: string
-    webhookId: string
-    idempotencyKey: string
-  }
-): {
-  status: string
-  receivedAt: string
-  completedAt: string | null
-  failedAt: string | null
-  error: string | null
-} | null {
-  const db = new Database(path, { readonly: true })
+function readMemoryTableNames(db: Database): string[] {
+  return (
+    db.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as {
+      readonly name: string
+    }[]
+  ).map((row) => row.name)
+}
 
-  try {
-    return db
-      .query(`
-        SELECT
-          status,
-          received_at AS receivedAt,
-          completed_at AS completedAt,
-          failed_at AS failedAt,
-          error
-        FROM webhook_deliveries
-        WHERE project_id = ?
-          AND connector_id = ?
-          AND webhook_id = ?
-          AND idempotency_key = ?
-      `)
-      .get(key.projectId, key.connectorId, key.webhookId, key.idempotencyKey) as {
-      status: string
-      receivedAt: string
-      completedAt: string | null
-      failedAt: string | null
-      error: string | null
-    } | null
-  } finally {
-    db.close()
-  }
+function readMemoryTableColumns(db: Database, tableName: string): string[] {
+  return (db.query(`PRAGMA table_info(${tableName})`).all() as { readonly name: string }[]).map(
+    (row) => row.name
+  )
 }
 
 function writeStartedMigration(path: string): void {
@@ -357,149 +333,6 @@ function writeStartedMigration(path: string): void {
   }
 }
 
-async function seedExistingStoreRows(basePath: string): Promise<void> {
-  await migrateSqliteStorage(basePath)
-
-  const storage = new SqliteStorage({ path: basePath })
-  try {
-    await storage.objects.applyObjectUpsert({
-      id: "legacy-object-event",
-      cursor: "1",
-      schemaVersion: 1,
-      projectId: "project-a",
-      type: "object.created",
-      topic: "objects",
-      partitionKey: "Room:room:101",
-      payload: {
-        objectTypeId: "Room",
-        primaryId: "room:101",
-        properties: { name: "Legacy Room" },
-        propertyChanges: {},
-      },
-      occurredAt: "2026-04-06T12:00:00.000Z",
-    })
-
-    const telemetryEvent = {
-      id: "legacy-telemetry-event",
-      cursor: "2",
-      schemaVersion: 1 as const,
-      projectId: "project-a",
-      type: "telemetry.appended" as const,
-      topic: "telemetry" as const,
-      partitionKey: "Room:room:101:temperature",
-      payload: {
-        objectTypeId: "Room",
-        objectId: "room:101",
-        propertyId: "temperature",
-        value: 21.5,
-        at: "2026-04-19T12:00:00.500Z",
-      },
-      occurredAt: "2026-04-19T12:00:00.500Z",
-    }
-    await storage.objects.applyTelemetryAppended(telemetryEvent)
-    await storage.timeseries.applyTelemetryAppended(telemetryEvent)
-
-    await storage.syncRuns.start({
-      id: "run-1",
-      projectId: "project-a",
-      syncId: "sync-orders",
-      datasetId: "raw.orders",
-      mode: "snapshot",
-      startedAt: new Date("2026-04-19T12:00:00.000Z"),
-    })
-
-    await storage.syncRuns.finish({
-      id: "run-1",
-      projectId: "project-a",
-      status: "succeeded",
-      finishedAt: new Date("2026-04-19T12:00:01.000Z"),
-      rowsRead: 10,
-      output: {
-        datasetId: "raw.orders",
-        versionId: "ver_1",
-      },
-      checkpoint: { cursor: "legacy" },
-    })
-
-    await storage.projectionRuns.start({
-      id: "proj-run-1",
-      projectId: "project-a",
-      projectionId: "room-proj",
-      projectionKind: "object",
-      datasetId: "raw.orders",
-      datasetVersionId: "ver_1",
-      startedAt: new Date("2026-04-19T12:00:00.000Z"),
-    })
-
-    await storage.projectionRuns.finish({
-      id: "proj-run-1",
-      projectId: "project-a",
-      status: "succeeded",
-      finishedAt: new Date("2026-04-19T12:00:01.000Z"),
-      rowsProcessed: 4,
-      objectsUpserted: 4,
-    })
-
-    await storage.workflowRuns.start({
-      id: "workflow-run-1",
-      projectId: "project-a",
-      workflowId: "reconcile-transaction",
-      input: {
-        transactionId: "txn-1",
-      },
-      startedAt: new Date("2026-04-19T12:00:00.000Z"),
-    })
-
-    await storage.workflowRuns.finish({
-      id: "workflow-run-1",
-      projectId: "project-a",
-      status: "succeeded",
-      finishedAt: new Date("2026-04-19T12:00:01.000Z"),
-    })
-
-    await storage.webhookDeliveries.claim({
-      projectId: "project-a",
-      connectorId: "github",
-      webhookId: "events",
-      idempotencyKey: "delivery-1",
-      receivedAt: "2026-04-19T12:00:00.000Z",
-    })
-
-    await storage.webhookDeliveries.complete({
-      projectId: "project-a",
-      connectorId: "github",
-      webhookId: "events",
-      idempotencyKey: "delivery-1",
-      completedAt: "2026-04-19T12:00:02.000Z",
-    })
-
-    await storage.webhookRuns.start({
-      id: "webhook-run-1",
-      projectId: "project-a",
-      connectorId: "github",
-      webhookId: "events",
-      method: "POST",
-      route: "/api/webhooks/github/events",
-      startedAt: new Date("2026-04-19T12:00:00.000Z"),
-    })
-
-    await storage.webhookRuns.finish({
-      id: "webhook-run-1",
-      projectId: "project-a",
-      status: "succeeded",
-      finishedAt: new Date("2026-04-19T12:00:02.000Z"),
-      responseStatus: 202,
-      requestBodyBytes: 12,
-      idempotencyKey: "delivery-1",
-      deliveryClaimResult: "claimed",
-    })
-  } finally {
-    closeStorage(storage)
-  }
-
-  dropMigrationHistory(sqliteStoragePath(basePath))
-}
-
 function closeStorage(storage: SqliteStorage): void {
   storage.objects.close()
   storage.auth.close()
@@ -514,14 +347,4 @@ function closeStorage(storage: SqliteStorage): void {
   storage.webhookDeliveries.close()
   storage.webhookRuns.close()
   storage.rules.close()
-}
-
-function dropMigrationHistory(path: string): void {
-  const db = new Database(path)
-
-  try {
-    db.run("DROP TABLE IF EXISTS sixb_migrations")
-  } finally {
-    db.close()
-  }
 }

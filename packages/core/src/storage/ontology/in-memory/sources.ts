@@ -1,10 +1,19 @@
 import { stableJsonStringify } from "../../../json"
-import {
-  MaterializationConflictError,
-  MaterializationValidationError,
-} from "../../../materialization/errors"
+import { MaterializationValidationError } from "../../../materialization/errors"
 import type { ProjectionExecution } from "../../../materialization/model"
 import { projectionEntityKey } from "../../../materialization/refs"
+import {
+  assertSourceBeginInput as assertBeginInput,
+  assertTimestamp as assertCanonicalTimestamp,
+  assertSourceProject as assertProjectAndSource,
+  assertSourceCandidateOwner,
+  assertSourceExecutionIdentity,
+  assertSourceStagedRow,
+  assertSourceWriteIdentity as assertWriteIdentity,
+  isExactStagingManifest,
+  sourceConflict,
+  sourceMaterializationIdentity,
+} from "../provider"
 import type {
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
@@ -50,7 +59,9 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
       )
       const existing = this.state.sourceMaterializations.get(key)
       if (existing) {
-        if (isExactStagingManifest(existing, input)) return sourceMaterializationRecord(existing)
+        if (isExactStagingManifest(sourceMaterializationRecord(existing), input)) {
+          return sourceMaterializationRecord(existing)
+        }
         throw sourceConflict(
           `Source materialization '${input.materializationId}' already exists with different identity or state.`
         )
@@ -102,7 +113,7 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
       assertWriteIdentity(input)
       await this.assertCurrentExecution(input)
       const materialization = this.requireMaterialization(input)
-      assertCandidateOwner(materialization, input.execution)
+      assertSourceCandidateOwner(sourceMaterializationRecord(materialization), input.execution)
       if (materialization.status !== "staging") {
         throw sourceConflict(
           `Source materialization '${input.materializationId}' is '${materialization.status}' and cannot accept rows.`
@@ -120,7 +131,7 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
       assertCount(input.assertionCount, "Source assertion count")
       await this.assertCurrentExecution(input)
       const materialization = this.requireMaterialization(input)
-      assertCandidateOwner(materialization, input.execution)
+      assertSourceCandidateOwner(sourceMaterializationRecord(materialization), input.execution)
 
       if (materialization.status === "ready") {
         if (
@@ -185,7 +196,7 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
   async abandon(input: AbandonSourceMaterializationInput): Promise<OntologySourceRecord | null> {
     return this.runRootOperation(async () => {
       assertProjectAndSource(input)
-      assertExecution(input.execution)
+      assertSourceExecutionIdentity(input.execution.projectionRunId, input.execution.executionToken)
       assertCanonicalTimestamp(input.abandonedAt, "Source abandonedAt")
       await this.assertCurrentExecution(input)
       return input.kind === "candidate"
@@ -248,15 +259,20 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
     })
   }
 
-  private async assertCurrentExecution(input: {
-    readonly projectId: string
-    readonly source: BeginSourceMaterializationInput["source"]
-    readonly execution: ProjectionExecution
-  }): Promise<void> {
+  private async assertCurrentExecution(
+    input:
+      | BeginSourceMaterializationInput
+      | {
+          readonly projectId: string
+          readonly source: BeginSourceMaterializationInput["source"]
+          readonly execution: ProjectionExecution
+        }
+  ): Promise<void> {
     await this.assertExecution({
       projectId: input.projectId,
       source: input.source,
       execution: input.execution,
+      ...("projectionKind" in input ? { identity: sourceMaterializationIdentity(input) } : {}),
     })
   }
 
@@ -289,7 +305,7 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
         `Source materialization '${input.materializationId}' was abandoned by another execution or at another time.`
       )
     }
-    assertCandidateOwner(materialization, input.execution)
+    assertSourceCandidateOwner(sourceMaterializationRecord(materialization), input.execution)
     if (materialization.status !== "staging" && materialization.status !== "ready") {
       throw sourceConflict(
         `Source materialization '${input.materializationId}' cannot transition from '${materialization.status}' to 'abandoned'.`
@@ -373,14 +389,7 @@ function stageRowsAtomically(
   const newRootOrdinals = new Map<string, number>()
   const newOrdinalRoots = new Map<number, string>()
   for (const row of rows) {
-    assertRowMatchesProjectionKind(materialization, row)
-    assertEntityIds(row.root, "Source root")
-    assertEntityIds(row.assertion, "Source assertion")
-    if (!Number.isSafeInteger(row.stagingOrdinal) || row.stagingOrdinal < 0) {
-      throw new MaterializationValidationError(
-        "Source staging ordinal must be a nonnegative safe integer."
-      )
-    }
+    assertSourceStagedRow(materialization.projectionKind, row)
 
     const rootKey = projectionEntityKey(row.root)
     const existingOrdinal =
@@ -502,110 +511,9 @@ function assertReadyTopology(materialization: InMemorySourceMaterialization): vo
   }
 }
 
-function isExactStagingManifest(
-  existing: InMemorySourceMaterialization,
-  input: BeginSourceMaterializationInput
-): boolean {
-  return (
-    existing.status === "staging" &&
-    existing.executionToken === input.execution.executionToken &&
-    existing.projectionRunId === input.execution.projectionRunId &&
-    existing.projectionKind === input.projectionKind &&
-    existing.protocol === input.protocol &&
-    existing.createdAt === input.createdAt &&
-    existing.projectionRevision === input.projectionRevision &&
-    existing.ownershipHash === input.ownershipHash &&
-    existing.ontologyRevision === input.ontologyRevision &&
-    stableJsonStringify(existing.datasetVersion) === stableJsonStringify(input.datasetVersion)
-  )
-}
-
-function assertBeginInput(input: BeginSourceMaterializationInput): void {
-  assertWriteIdentity(input)
-  if (input.projectionKind !== "object" && input.projectionKind !== "link") {
-    throw new MaterializationValidationError("Source projection kind must be 'object' or 'link'.")
-  }
-  if (input.protocol !== "replacement") {
-    throw new MaterializationValidationError(
-      "Source materialization protocol must be 'replacement'."
-    )
-  }
-  assertNonblank(input.projectionRevision, "Source projection revision")
-  assertNonblank(input.ownershipHash, "Source ownership hash")
-  assertNonblank(input.ontologyRevision, "Source ontology revision")
-  assertNonblank(input.datasetVersion.datasetId, "Source dataset id")
-  assertNonblank(input.datasetVersion.versionId, "Source dataset version id")
-  assertCanonicalTimestamp(input.datasetVersion.createdAt, "Source dataset version createdAt")
-  assertCanonicalTimestamp(input.createdAt, "Source createdAt")
-}
-
-function assertRowMatchesProjectionKind(
-  materialization: InMemorySourceMaterialization,
-  row: StageSourceRowsInput["rows"][number]
-): void {
-  if (materialization.projectionKind === "object") {
-    if (row.root.kind !== "object") {
-      throw new MaterializationValidationError(
-        "Object projection source rows require an object root."
-      )
-    }
-    return
-  }
-  if (row.root.kind !== "link" || row.assertion.kind !== "link") {
-    throw new MaterializationValidationError(
-      "Link projection source rows require a link root and link assertion."
-    )
-  }
-}
-
-function assertWriteIdentity(input: {
-  readonly projectId: string
-  readonly source: BeginSourceMaterializationInput["source"]
-  readonly materializationId: string
-  readonly execution: ProjectionExecution
-}): void {
-  assertProjectAndSource(input)
-  assertNonblank(input.materializationId, "Source materialization id")
-  assertExecution(input.execution)
-}
-
-function assertProjectAndSource(input: {
-  readonly projectId: string
-  readonly source: BeginSourceMaterializationInput["source"]
-}): void {
-  assertNonblank(input.projectId, "Source project id")
-  assertNonblank(input.source.projectionId, "Source projection id")
-}
-
-function assertExecution(execution: ProjectionExecution): void {
-  assertNonblank(execution.projectionRunId, "Source projection run id")
-  assertNonblank(execution.executionToken, "Source execution token")
-}
-
-function assertCandidateOwner(
-  materialization: InMemorySourceMaterialization,
-  execution: ProjectionExecution
-): void {
-  if (
-    materialization.projectionRunId !== execution.projectionRunId ||
-    materialization.executionToken !== execution.executionToken
-  ) {
-    throw sourceConflict(
-      `Source materialization '${materialization.materializationId}' is owned by another execution.`
-    )
-  }
-}
-
 function assertCount(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new MaterializationValidationError(`${label} must be a nonnegative safe integer.`)
-  }
-}
-
-function assertCanonicalTimestamp(value: string, label: string): void {
-  const milliseconds = Date.parse(value)
-  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) {
-    throw new MaterializationValidationError(`${label} must be a canonical UTC timestamp.`)
   }
 }
 
@@ -620,24 +528,6 @@ function assertNotBefore(
   }
 }
 
-function assertEntityIds(
-  entity:
-    | StageSourceRowsInput["rows"][number]["root"]
-    | StageSourceRowsInput["rows"][number]["assertion"],
-  label: string
-): void {
-  if (entity.kind === "object") {
-    assertNonblank(entity.ref.objectTypeId, `${label} object type id`)
-    assertNonblank(entity.ref.primaryId, `${label} primary id`)
-    return
-  }
-  assertNonblank(entity.ref.source.objectTypeId, `${label} source object type id`)
-  assertNonblank(entity.ref.source.primaryId, `${label} source primary id`)
-  assertNonblank(entity.ref.linkId, `${label} link id`)
-  assertNonblank(entity.ref.target.objectTypeId, `${label} target object type id`)
-  assertNonblank(entity.ref.target.primaryId, `${label} target primary id`)
-}
-
 function compareTerminalMaterializations(
   [, left]: readonly [string, InMemorySourceMaterialization],
   [, right]: readonly [string, InMemorySourceMaterialization]
@@ -647,8 +537,4 @@ function compareTerminalMaterializations(
     left.source.projectionId.localeCompare(right.source.projectionId) ||
     left.materializationId.localeCompare(right.materializationId)
   )
-}
-
-function sourceConflict(message: string): MaterializationConflictError {
-  return new MaterializationConflictError("source-materialization", message)
 }

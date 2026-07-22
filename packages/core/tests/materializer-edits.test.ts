@@ -952,10 +952,10 @@ describe("ontology materializer edits", () => {
     )
     const rows = await storage.ontology.outbox.claim({
       projectId: "project",
-      now: "2027-01-01T00:00:00Z",
+      now: "2027-01-01T00:00:00.000Z",
       limit: 10,
       leaseId: "event-lease",
-      leaseExpiresAt: "2027-01-01T01:00:00Z",
+      leaseExpiresAt: "2027-01-01T01:00:00.000Z",
     })
     const envelopes = rows
       .map((row) => row.envelope)
@@ -979,7 +979,7 @@ describe("ontology materializer edits", () => {
       projectId: "project",
       ids: rows.map((row) => row.envelope.id),
       leaseId: "event-lease",
-      publishedAt: "2027-01-01T00:30:00Z",
+      publishedAt: "2027-01-01T00:30:00.000Z",
     })
 
     const updated = await materializer.edits.commit(
@@ -996,10 +996,10 @@ describe("ontology materializer edits", () => {
     )
     const [removal] = await storage.ontology.outbox.claim({
       projectId: "project",
-      now: "2027-01-02T00:00:00Z",
+      now: "2027-01-02T00:00:00.000Z",
       limit: 10,
       leaseId: "removal-lease",
-      leaseExpiresAt: "2027-01-02T01:00:00Z",
+      leaseExpiresAt: "2027-01-02T01:00:00.000Z",
     })
     expect(removal.envelope).toMatchObject({
       id: createEventId("project", updated.commitId, 0),

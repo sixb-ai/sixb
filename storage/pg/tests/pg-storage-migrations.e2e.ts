@@ -30,57 +30,69 @@ describe("Postgres storage migrations", () => {
     })
   })
 
-  test("migrations preserve existing store rows", async () => {
+  test("recorded old checksums are rejected before schema mutation", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      await migrateStorage(storage)
+      await withSql((sql) =>
+        sql.unsafe(
+          `UPDATE ${quoteIdent(schemaName)}.sixb_migrations
+           SET checksum = 'old-checksum'
+           WHERE adapter_id = $1 AND version = 1`,
+          [POSTGRES_STORAGE_ADAPTER_ID]
+        )
+      )
+
+      await expect(migrateStorage(storage)).rejects.toThrow("checksum")
+      expect((await readMigrationRows(schemaName))[0]?.checksum_length).toBe("old-checksum".length)
+      expect(await readTableNames(schemaName)).toContain("ontology_outbox")
+    })
+  })
+
+  test("fresh schema installs the exact ontology table set and provenance columns", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      await migrateStorage(storage)
+      expect(
+        (await readTableNames(schemaName)).filter((name) => name.startsWith("ontology_"))
+      ).toEqual([
+        "ontology_commits",
+        "ontology_outbox",
+        "ontology_overrides",
+        "ontology_source_rows",
+        "ontology_sources",
+      ])
+      expect(await readTableColumns(schemaName, "objects")).toContain("last_commit_id")
+      expect(await readTableColumns(schemaName, "links")).toContain("last_commit_id")
+      expect(await readTableColumns(schemaName, "timeseries")).toContain("last_commit_id")
+      expect(await readTableColumns(schemaName, "projection_runs")).toEqual(
+        expect.arrayContaining([
+          "attempt",
+          "execution_token",
+          "materialization_protocol",
+          "dataset_version_created_at",
+          "fixed_batch_size",
+          "next_batch_ordinal",
+          "next_row_offset",
+          "input_exhausted",
+        ])
+      )
+    })
+  })
+
+  test("untracked existing schema collides and rolls back without conversion", async () => {
     await withStorage(false, async (storage, schemaName) => {
       await migrateStorage(storage)
       await seedExistingStoreRows(storage)
       await dropMigrationHistory(schemaName)
 
-      const result = await migrateStorage(storage)
-      const object = await storage.objects.getByPrimaryId({
-        projectId: "project-a",
-        objectTypeId: "Room",
-        primaryId: "room:101",
-      })
-      const point = await storage.timeseries.getLatest({
-        projectId: "project-a",
-        objectTypeId: "Room",
-        objectId: "room:101",
-        propertyId: "temperature",
-      })
-      const syncRun = await storage.syncRuns.getById({ projectId: "project-a", id: "run-1" })
-      const projectionRun = await storage.projectionRuns.getById({
-        projectId: "project-a",
-        id: "proj-run-1",
-      })
-
-      const workflowRun = await storage.workflowRuns.getById({
-        projectId: "project-a",
-        id: "workflow-run-1",
-      })
-      const webhookRun = await storage.webhookRuns.getById({
-        projectId: "project-a",
-        id: "webhook-run-1",
-      })
-
-      expect(result.status).toBe("migrated")
-      expect(object?.properties).toEqual({ name: "Legacy Room" })
-      expect(point?.value).toBe(21.5)
-      expect(syncRun?.checkpoint).toEqual({ cursor: "legacy" })
-      expect(projectionRun?.status).toBe("succeeded")
-      expect(projectionRun?.objectsUpserted).toBe(4)
-      expect(projectionRun?.telemetryPointsAppended).toBe(0)
-      expect(projectionRun?.telemetryPointsSkipped).toBe(0)
-      expect(projectionRun?.telemetryRowsFailed).toBe(0)
-      expect(workflowRun?.status).toBe("succeeded")
-      expect(workflowRun?.input).toEqual({ transactionId: "txn-1" })
-      expect(webhookRun).toMatchObject({
-        connectorId: "github",
-        webhookId: "events",
-        status: "succeeded",
-        responseStatus: 202,
-      })
-      expect(await readWebhookDeliveryStatus(schemaName)).toBe("completed")
+      await expect(migrateStorage(storage)).rejects.toThrow("already exists")
+      expect(
+        await storage.objects.getByPrimaryId({
+          projectId: "project-a",
+          objectTypeId: "Room",
+          primaryId: "room:101",
+        })
+      ).toMatchObject({ properties: { name: "Legacy Room" } })
+      expect(await readMigrationRows(schemaName)).toEqual([])
     })
   })
 
@@ -352,21 +364,6 @@ async function readMigrationRows(schemaName: string): Promise<
       ...row,
       checksum_length: Number(row.checksum_length),
     }))
-  })
-}
-
-async function readWebhookDeliveryStatus(schemaName: string): Promise<string | undefined> {
-  return withSql(async (sql) => {
-    const [row] = (await sql.unsafe(`
-      SELECT status
-      FROM ${quoteIdent(schemaName)}.webhook_deliveries
-      WHERE project_id = 'project-a'
-        AND connector_id = 'github'
-        AND webhook_id = 'events'
-        AND idempotency_key = 'delivery-1'
-    `)) as Array<{ status: string }>
-
-    return row?.status
   })
 }
 

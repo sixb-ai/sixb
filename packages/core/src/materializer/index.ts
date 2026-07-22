@@ -1,3 +1,7 @@
+export {
+  assertPinnedDatasetWatermark,
+  comparePinnedDatasetWatermarks,
+} from "../materialization/dataset-watermark"
 export type { MaterializationConflictKind } from "../materialization/errors"
 export {
   isMaterializationConflictError,
@@ -43,14 +47,19 @@ export type {
   TelemetrySeriesRef,
 } from "../materialization/model"
 export {
+  canonicalIdentitySortKey,
   compareLinkRefs,
   compareObjectRefs,
   linkRefKey,
+  linkRefSortKey,
+  linkScopeSortKey,
   normalizeLinkRef,
   normalizeObjectRef,
   objectRefKey,
+  objectRefSortKey,
   projectionEntityKey,
   telemetryPointKey,
+  telemetryPointSortKey,
   telemetrySeriesKey,
 } from "../materialization/refs"
 export {

@@ -398,6 +398,7 @@ describe("setLinkBatch", () => {
     const racingStorage: Storage = {
       objects: backingStorage.objects,
       timeseries: backingStorage.timeseries,
+      ontology: backingStorage.ontology,
       async transaction(run, options) {
         transactionAttempts += 1
         if (transactionAttempts === 1) {

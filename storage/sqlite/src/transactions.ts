@@ -27,8 +27,10 @@ export function openSqliteStoreConnection(
 
   const path = options.path ?? ":memory:"
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true })
+  const db = new SqliteDatabase(path)
+  db.run("PRAGMA foreign_keys = ON")
   return {
-    db: new SqliteDatabase(path),
+    db,
     ownsConnection: true,
     installFreshSchema: path === ":memory:",
   }

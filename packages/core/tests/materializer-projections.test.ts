@@ -166,10 +166,10 @@ describe("ontology materializer projection replacement", () => {
       )
       const claimed = await storage.ontology.outbox.claim({
         projectId: "project",
-        now: "2027-01-01T00:00:00Z",
+        now: "2027-01-01T00:00:00.000Z",
         limit: 1_000,
         leaseId: `lease-${statePageRows}-${reversed}`,
-        leaseExpiresAt: "2027-01-01T01:00:00Z",
+        leaseExpiresAt: "2027-01-01T01:00:00.000Z",
       })
       return {
         result,
@@ -956,10 +956,10 @@ describe("ontology materializer projection replacement", () => {
     expect(result.counts).toMatchObject({ linksCreated: 2 })
     const events = await storage.ontology.outbox.claim({
       projectId: "project",
-      now: "2027-01-01T00:00:00Z",
+      now: "2027-01-01T00:00:00.000Z",
       limit: 20,
       leaseId: "shuffled-events",
-      leaseExpiresAt: "2027-01-01T01:00:00Z",
+      leaseExpiresAt: "2027-01-01T01:00:00.000Z",
     })
     expect(
       events
