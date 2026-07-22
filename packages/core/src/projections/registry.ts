@@ -1,6 +1,6 @@
 import type { DatasetDefinition } from "../datasets"
 import type { OntologyRegistry } from "../ontology"
-import { categorizeProjections } from "./builders"
+import { isProjectionDefinition } from "./builders"
 import { ProjectionValidationError } from "./errors"
 import {
   computeOntologyRevision,
@@ -14,12 +14,16 @@ import type {
   ResolvedProjection,
   TelemetryProjectionDefinition,
 } from "./types"
-import { validateProjectionsAtStartup } from "./validation"
+import { type ValidatedProjectionRecord, validateProjectionsAtStartup } from "./validation"
 
 type SourceProjectionDefinition = ObjectProjectionDefinition | LinkProjectionDefinition
 
 export class ProjectionRegistry {
   readonly ontologyRevision: string
+  private readonly objectProjections: readonly ObjectProjectionDefinition[]
+  private readonly linkProjections: readonly LinkProjectionDefinition[]
+  private readonly telemetryProjections: readonly TelemetryProjectionDefinition[]
+  private readonly projectionsById = new Map<string, ProjectionDefinition>()
   private readonly sourceById = new Map<string, ResolvedProjection<SourceProjectionDefinition>>()
   private readonly telemetryById = new Map<
     string,
@@ -31,54 +35,77 @@ export class ProjectionRegistry {
     readonly ontology: OntologyRegistry
     readonly datasetsById: ReadonlyMap<string, DatasetDefinition>
   }) {
-    const ids = new Set<string>()
+    const objectProjections: ObjectProjectionDefinition[] = []
+    const linkProjections: LinkProjectionDefinition[] = []
+    const telemetryProjections: TelemetryProjectionDefinition[] = []
     for (const projection of input.projections) {
-      if (ids.has(projection.id)) {
-        throw new ProjectionValidationError(`[Sixb] Duplicate projection id: ${projection.id}`)
+      if (!isProjectionDefinition(projection)) {
+        throw new ProjectionValidationError("[Sixb] Invalid projection definition.")
       }
-      ids.add(projection.id)
+      switch (projection._tag) {
+        case "ObjectProjectionDefinition":
+          objectProjections.push(deepFreeze(cloneObjectProjectionDefinition(projection)))
+          break
+        case "LinkProjectionDefinition":
+          linkProjections.push(deepFreeze(cloneLinkProjectionDefinition(projection)))
+          break
+        case "TelemetryProjectionDefinition":
+          telemetryProjections.push(deepFreeze(cloneTelemetryProjectionDefinition(projection)))
+          break
+      }
     }
+    this.objectProjections = Object.freeze(objectProjections)
+    this.linkProjections = Object.freeze(linkProjections)
+    this.telemetryProjections = Object.freeze(telemetryProjections)
 
-    const { objectProjections, linkProjections, telemetryProjections } = categorizeProjections(
-      input.projections
-    )
-    const validatedById = validateProjectionsAtStartup(
-      objectProjections,
-      linkProjections,
-      telemetryProjections,
+    const projections = [
+      ...this.objectProjections,
+      ...this.linkProjections,
+      ...this.telemetryProjections,
+    ]
+    assertUniqueProjectionIds(projections)
+    const validated = validateProjectionsAtStartup(
+      {
+        objectProjections: this.objectProjections,
+        linkProjections: this.linkProjections,
+        telemetryProjections: this.telemetryProjections,
+      },
       input.ontology,
       input.datasetsById
     )
     this.ontologyRevision = computeOntologyRevision(input.ontology)
 
-    for (const projection of input.projections) {
-      const validated = validatedById.get(projection.id)
-      if (!validated) {
-        throw new ProjectionValidationError(
-          `[Sixb] Projection '${projection.id}' is missing validated registry inputs.`
-        )
-      }
-      const { dataset, ownership } = validated
-      const resolved = deepFreeze({
-        projectionId: projection.id,
-        datasetId: projection.datasetId,
-        projectionRevision: computeProjectionRevision(projection, dataset),
-        ownershipHash: computeProjectionOwnershipHash(ownership),
-        ownership,
-        definition: cloneProjectionDefinition(projection),
-      })
-      if (projection._tag === "TelemetryProjectionDefinition") {
-        this.telemetryById.set(
-          projection.id,
-          resolved as ResolvedProjection<TelemetryProjectionDefinition>
-        )
-      } else {
-        this.sourceById.set(
-          projection.id,
-          resolved as ResolvedProjection<SourceProjectionDefinition>
-        )
-      }
+    for (const record of validated.objectProjections) {
+      const resolved = createResolvedProjection(record)
+      this.sourceById.set(resolved.projectionId, resolved)
+      this.projectionsById.set(resolved.projectionId, resolved.definition)
     }
+    for (const record of validated.linkProjections) {
+      const resolved = createResolvedProjection(record)
+      this.sourceById.set(resolved.projectionId, resolved)
+      this.projectionsById.set(resolved.projectionId, resolved.definition)
+    }
+    for (const record of validated.telemetryProjections) {
+      const resolved = createResolvedProjection(record)
+      this.telemetryById.set(resolved.projectionId, resolved)
+      this.projectionsById.set(resolved.projectionId, resolved.definition)
+    }
+  }
+
+  getObjectProjections(): readonly ObjectProjectionDefinition[] {
+    return this.objectProjections
+  }
+
+  getLinkProjections(): readonly LinkProjectionDefinition[] {
+    return this.linkProjections
+  }
+
+  getTelemetryProjections(): readonly TelemetryProjectionDefinition[] {
+    return this.telemetryProjections
+  }
+
+  getProjectionById(projectionId: string): ProjectionDefinition | null {
+    return this.projectionsById.get(projectionId) ?? null
   }
 
   resolveSource(projectionId: string): ResolvedProjection<SourceProjectionDefinition> {
@@ -108,45 +135,75 @@ export class ProjectionRegistry {
   }
 }
 
+function assertUniqueProjectionIds(projections: readonly ProjectionDefinition[]): void {
+  const ids = new Set<string>()
+  for (const projection of projections) {
+    if (ids.has(projection.id)) {
+      throw new ProjectionValidationError(`[Sixb] Duplicate projection id: ${projection.id}`)
+    }
+    ids.add(projection.id)
+  }
+}
+
+function createResolvedProjection<TDefinition extends ProjectionDefinition>(
+  validated: ValidatedProjectionRecord<TDefinition>
+): ResolvedProjection<TDefinition> {
+  const { definition, dataset, ownership } = validated
+  return deepFreeze({
+    projectionId: definition.id,
+    datasetId: definition.datasetId,
+    projectionRevision: computeProjectionRevision(definition, dataset),
+    ownershipHash: computeProjectionOwnershipHash(ownership),
+    ownership,
+    definition,
+  })
+}
+
 // Projection builders may attach fluent methods and callers may supply extra fields. Clone only the
 // frozen contract so resolved definitions stay serializable and cannot leak unsupported metadata.
-function cloneProjectionDefinition(projection: ProjectionDefinition): ProjectionDefinition {
-  if (projection._tag === "ObjectProjectionDefinition") {
-    return {
-      _tag: projection._tag,
-      id: projection.id,
-      objectTypeId: projection.objectTypeId,
-      datasetId: projection.datasetId,
-      properties: { ...projection.properties },
-      links: Object.fromEntries(
-        Object.entries(projection.links).map(([linkId, descriptor]) => [
-          linkId,
-          {
-            linkId: descriptor.linkId,
-            ...(descriptor.sourcePropertyId !== undefined
-              ? { sourcePropertyId: descriptor.sourcePropertyId }
-              : {}),
-            ...(descriptor.sourceField !== undefined
-              ? { sourceField: descriptor.sourceField }
-              : {}),
-            targetObjectTypeId: descriptor.targetObjectTypeId,
-          },
-        ])
-      ),
-    }
+function cloneObjectProjectionDefinition(
+  projection: ObjectProjectionDefinition
+): ObjectProjectionDefinition {
+  return {
+    _tag: projection._tag,
+    id: projection.id,
+    objectTypeId: projection.objectTypeId,
+    datasetId: projection.datasetId,
+    properties: { ...projection.properties },
+    links: Object.fromEntries(
+      Object.entries(projection.links).map(([linkId, descriptor]) => [
+        linkId,
+        {
+          linkId: descriptor.linkId,
+          ...(descriptor.sourcePropertyId !== undefined
+            ? { sourcePropertyId: descriptor.sourcePropertyId }
+            : {}),
+          ...(descriptor.sourceField !== undefined ? { sourceField: descriptor.sourceField } : {}),
+          targetObjectTypeId: descriptor.targetObjectTypeId,
+        },
+      ])
+    ),
   }
-  if (projection._tag === "LinkProjectionDefinition") {
-    return {
-      _tag: "LinkProjectionDefinition",
-      id: projection.id,
-      linkId: projection.linkId,
-      sourceObjectTypeId: projection.sourceObjectTypeId,
-      targetObjectTypeId: projection.targetObjectTypeId,
-      datasetId: projection.datasetId,
-      sourceField: projection.sourceField,
-      targetField: projection.targetField,
-    }
+}
+
+function cloneLinkProjectionDefinition(
+  projection: LinkProjectionDefinition
+): LinkProjectionDefinition {
+  return {
+    _tag: "LinkProjectionDefinition",
+    id: projection.id,
+    linkId: projection.linkId,
+    sourceObjectTypeId: projection.sourceObjectTypeId,
+    targetObjectTypeId: projection.targetObjectTypeId,
+    datasetId: projection.datasetId,
+    sourceField: projection.sourceField,
+    targetField: projection.targetField,
   }
+}
+
+function cloneTelemetryProjectionDefinition(
+  projection: TelemetryProjectionDefinition
+): TelemetryProjectionDefinition {
   return {
     _tag: "TelemetryProjectionDefinition",
     id: projection.id,

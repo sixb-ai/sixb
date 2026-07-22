@@ -3,6 +3,7 @@ import {
   MaterializationConflictError,
   MaterializationValidationError,
 } from "../../../materialization/errors"
+import type { ProjectionExecution } from "../../../materialization/model"
 import { projectionEntityKey } from "../../../materialization/refs"
 import type {
   AbandonSourceMaterializationCandidateInput,
@@ -16,7 +17,6 @@ import type {
   OntologySourceRecord,
   OntologySourceStorage,
   ReclaimSourceMaterializationInput,
-  SourceMaterializationExecution,
   StageSourceAssertion,
   StageSourceRowsInput,
   StageSourceRowsResult,
@@ -251,7 +251,7 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
   private async assertCurrentExecution(input: {
     readonly projectId: string
     readonly source: BeginSourceMaterializationInput["source"]
-    readonly execution: SourceMaterializationExecution
+    readonly execution: ProjectionExecution
   }): Promise<void> {
     await this.assertExecution({
       projectId: input.projectId,
@@ -562,7 +562,7 @@ function assertWriteIdentity(input: {
   readonly projectId: string
   readonly source: BeginSourceMaterializationInput["source"]
   readonly materializationId: string
-  readonly execution: SourceMaterializationExecution
+  readonly execution: ProjectionExecution
 }): void {
   assertProjectAndSource(input)
   assertNonblank(input.materializationId, "Source materialization id")
@@ -577,14 +577,14 @@ function assertProjectAndSource(input: {
   assertNonblank(input.source.projectionId, "Source projection id")
 }
 
-function assertExecution(execution: SourceMaterializationExecution): void {
+function assertExecution(execution: ProjectionExecution): void {
   assertNonblank(execution.projectionRunId, "Source projection run id")
   assertNonblank(execution.executionToken, "Source execution token")
 }
 
 function assertCandidateOwner(
   materialization: InMemorySourceMaterialization,
-  execution: SourceMaterializationExecution
+  execution: ProjectionExecution
 ): void {
   if (
     materialization.projectionRunId !== execution.projectionRunId ||

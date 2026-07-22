@@ -12,6 +12,7 @@ import type {
   OntologyMaterializationStorage,
 } from "../../storage/ontology"
 import type { MaterializerContext } from "../context"
+import { diffEffectiveObject } from "../effective/diff"
 import { loadState, oneStateRequest, stateRequestForOperation } from "../effective/load-state"
 import {
   validateEffectiveObject,
@@ -26,11 +27,8 @@ import { applyLinkEdit, applyObjectEdit } from "./apply"
 import {
   distinctCardinalityOneScopes,
   mergeWorkingState,
-  provisionalLinkSnapshot,
-  provisionalObjectSnapshot,
   resolveLink,
   resolveObject,
-  resultingObjectSnapshot,
   validateWorkingCardinality,
   type WorkingLink,
   type WorkingObject,
@@ -65,7 +63,7 @@ export async function applyEditOperation(
   if (isObjectOperation(operation)) {
     return applyObjectOperation(context, storage, session, state, operation, identity)
   }
-  return applyLinkOperation(context, state, operation, identity, cardinality)
+  return applyLinkOperation(context, state, operation, cardinality)
 }
 
 function validateOperationRef(
@@ -124,12 +122,11 @@ async function applyObjectOperation(
   const working = requireWorkingObject(state, operation)
   const normalized = validateObjectOperation(context, operation)
   const currentEffective = resolveObject(context.ontology, working)
-  const effectiveSnapshot = provisionalObjectOrNull(working, currentEffective, identity)
   const transition = applyObjectEdit({
     operation,
     sourceProperties: working.source?.assertion.properties ?? null,
     authority: working.override,
-    effective: effectiveSnapshot,
+    effectiveExists: currentEffective !== null,
     ...normalized,
   })
 
@@ -145,15 +142,6 @@ async function applyObjectOperation(
   )
 
   return objectOperationOutcome(operation, working, transition.changed, context, identity)
-}
-
-function provisionalObjectOrNull(
-  working: WorkingObject,
-  resolved: ReturnType<typeof resolveObject>,
-  identity: TimedCommitIdentity
-) {
-  if (!resolved) return null
-  return provisionalObjectSnapshot(working, resolved, identity)
 }
 
 function requireWorkingObject(state: EditWorkingState, operation: ObjectOperation): WorkingObject {
@@ -234,39 +222,38 @@ function objectOperationOutcome(
   }
   const resolved = resolveObject(context.ontology, working)
   if (!resolved) return outcome
-  return { ...outcome, object: resultingObjectSnapshot(working, resolved, identity) }
+  const change = diffEffectiveObject({
+    before: working.before,
+    resolved,
+    commitId: identity.commitId,
+    committedAt: identity.committedAt,
+  })
+  const object = change?.after ?? working.before
+  if (!object) {
+    throw new MaterializationValidationError("Effective object outcome could not be resolved.")
+  }
+  return { ...outcome, object }
 }
 
 function applyLinkOperation(
   context: MaterializerContext,
   state: EditWorkingState,
   operation: LinkOperation,
-  identity: TimedCommitIdentity,
   cardinality: "one" | "many" | undefined
 ): OntologyOperationOutcome {
   const working = requireWorkingLink(state, operation)
   validateLinkEndpoints(context, state, operation)
   const normalizedProperties = validateLinkOperation(context, operation)
   const currentEffective = resolveLink(context.ontology, working, state.objects)
-  const effectiveSnapshot = provisionalLinkOrNull(working, currentEffective, identity)
   const transitionInput = {
     operation,
     hasSource: working.source !== null,
     authority: working.override,
-    effective: effectiveSnapshot,
+    effectiveExists: currentEffective !== null,
   }
   const transition = applyLinkEdit({ ...transitionInput, normalizedProperties })
   applyLinkTransition(context, state, working, transition.next, cardinality)
   return { id: operation.id, ok: true, authority: authorityOutcome(transition.changed) }
-}
-
-function provisionalLinkOrNull(
-  working: WorkingLink,
-  resolved: ReturnType<typeof resolveLink>,
-  identity: TimedCommitIdentity
-) {
-  if (!resolved) return null
-  return provisionalLinkSnapshot(working, resolved, identity)
 }
 
 function requireWorkingLink(state: EditWorkingState, operation: LinkOperation): WorkingLink {

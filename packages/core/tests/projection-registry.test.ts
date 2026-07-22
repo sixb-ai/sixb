@@ -69,6 +69,18 @@ describe("projection registry", () => {
     })
 
     const resolved = projectionRegistry.resolveSource("rooms")
+    const objectProjections = projectionRegistry.getObjectProjections()
+    const telemetryProjections = projectionRegistry.getTelemetryProjections()
+    expect(Object.isFrozen(objectProjections)).toBe(true)
+    expect(Object.isFrozen(telemetryProjections)).toBe(true)
+    expect(projectionRegistry.getLinkProjections()).toEqual([])
+    expect(projectionRegistry.getProjectionById("rooms")).toBe(objectProjections[0])
+    expect(projectionRegistry.getProjectionById("temperatures")).toBe(telemetryProjections[0])
+    expect(resolved.definition).toBe(objectProjections[0])
+    expect(projectionRegistry.resolveTelemetry("temperatures").definition).toBe(
+      telemetryProjections[0]
+    )
+    expect(projectionRegistry.getProjectionById("missing")).toBeNull()
     expect(resolved.ownership.objects).toEqual([
       { objectTypeId: "Room", existence: true, propertyIds: ["name"] },
     ])
@@ -224,6 +236,10 @@ describe("projection registry", () => {
 
     const resolvedObject = projectionRegistry.resolveSource("rooms").definition
     if (resolvedObject._tag !== "ObjectProjectionDefinition") throw new Error("unexpected kind")
+    expect(projectionRegistry.getObjectProjections()[0]).toBe(resolvedObject)
+    expect(projectionRegistry.getTelemetryProjections()[0]).toBe(
+      projectionRegistry.resolveTelemetry("temperatures").definition
+    )
     expect(Object.keys(resolvedObject)).toEqual([
       "_tag",
       "id",
@@ -237,6 +253,8 @@ describe("projection registry", () => {
       "sourceField",
       "targetObjectTypeId",
     ])
+    ;(objectProjection.properties as Record<string, string>).name = "sensor_id"
+    expect(resolvedObject.properties.name).toBe("room_name")
 
     const linkRegistry = new ProjectionRegistry({
       projections: [linkProjection],
@@ -297,6 +315,17 @@ describe("projection registry", () => {
       schema: { type: "array", items: valueTypeRef("Leaf") },
     })
     expect(computeOntologyRevision(ontology([Leaf, changedContainer, Unused]))).not.toBe(baseline)
+  })
+
+  test("rejects malformed definitions instead of silently dropping them", () => {
+    expect(
+      () =>
+        new ProjectionRegistry({
+          projections: [{ _tag: "UnknownProjectionDefinition", id: "invalid" } as never],
+          ontology: registry(),
+          datasetsById: datasets(rooms),
+        })
+    ).toThrow("Invalid projection definition")
   })
 
   test("rejects object existence and link scope ownership overlaps", () => {

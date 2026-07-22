@@ -7,6 +7,7 @@ import type {
 import { utf8JsonByteLength } from "../../materialization/refs"
 import type { StageSourceAssertion } from "../../storage/ontology"
 import type { MaterializerContext } from "../context"
+import { throwIfAborted } from "../shared/abort"
 import { chunkBySize } from "../shared/chunking"
 import { normalizeProjectionSourceEntry } from "../shared/normalize"
 import type { ProjectionEntryValidator } from "./entry-validator"
@@ -95,14 +96,6 @@ export async function stageProjectionMaterialization(
     readyAt: context.clock().toISOString(),
   })
   return { rootCount, assertionCount }
-}
-
-export function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) {
-    throw signal.reason instanceof Error
-      ? signal.reason
-      : new DOMException("Projection replacement aborted", "AbortError")
-  }
 }
 
 export async function bestEffort(run: () => Promise<unknown>): Promise<void> {

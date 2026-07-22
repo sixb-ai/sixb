@@ -1,6 +1,7 @@
 import type {
   PinnedDatasetVersion,
   ProjectionEntityRef,
+  ProjectionExecution,
   ProjectionSourceAssertion,
   ProjectionSourceRef,
 } from "../../materialization/model"
@@ -11,11 +12,6 @@ export type OntologySourceMaterializationStatus =
   | "active"
   | "superseded"
   | "abandoned"
-
-export interface SourceMaterializationExecution {
-  readonly projectionRunId: string
-  readonly executionToken: string
-}
 
 /**
  * One explicit, durable materialization of a projection source.
@@ -75,7 +71,7 @@ export interface BeginSourceMaterializationInput {
   readonly projectId: string
   readonly source: ProjectionSourceRef
   readonly materializationId: string
-  readonly execution: SourceMaterializationExecution
+  readonly execution: ProjectionExecution
   readonly projectionKind: "object" | "link"
   readonly protocol: "replacement"
   readonly datasetVersion: PinnedDatasetVersion
@@ -96,7 +92,7 @@ export interface StageSourceRowsInput {
   readonly projectId: string
   readonly source: ProjectionSourceRef
   readonly materializationId: string
-  readonly execution: SourceMaterializationExecution
+  readonly execution: ProjectionExecution
   readonly rows: readonly StageSourceAssertion[]
 }
 
@@ -109,7 +105,7 @@ export interface MarkSourceMaterializationReadyInput {
   readonly projectId: string
   readonly source: ProjectionSourceRef
   readonly materializationId: string
-  readonly execution: SourceMaterializationExecution
+  readonly execution: ProjectionExecution
   readonly rootCount: number
   readonly assertionCount: number
   readonly readyAt: string
@@ -118,7 +114,7 @@ export interface MarkSourceMaterializationReadyInput {
 interface BaseAbandonSourceMaterializationInput {
   readonly projectId: string
   readonly source: ProjectionSourceRef
-  readonly execution: SourceMaterializationExecution
+  readonly execution: ProjectionExecution
   readonly abandonedAt: string
 }
 
@@ -157,7 +153,7 @@ export interface CleanupTerminalSourceMaterializationsResult {
 export interface AssertSourceMaterializationExecutionInput {
   readonly projectId: string
   readonly source: ProjectionSourceRef
-  readonly execution: SourceMaterializationExecution
+  readonly execution: ProjectionExecution
 }
 
 export type AssertSourceMaterializationExecution = (

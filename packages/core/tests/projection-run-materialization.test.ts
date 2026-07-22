@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test"
+import type { ProjectionMaterializationIdentity } from "../src/materialization/model"
 import { isActionMaterializationRunStorage } from "../src/storage/action-runs"
 import { InMemoryActionRunStorage } from "../src/storage/action-runs/in-memory"
 import { InMemoryStorage } from "../src/storage/index"
 import { isProjectionMaterializationRunStorage } from "../src/storage/projection-runs"
 import { InMemoryProjectionRunStorage } from "../src/storage/projection-runs/in-memory"
-import type { ProjectionRunMaterializationIdentity } from "../src/storage/projection-runs/types"
 
-const replacementIdentity: ProjectionRunMaterializationIdentity = {
+const replacementIdentity: ProjectionMaterializationIdentity = {
   projectionId: "devices",
   projectionKind: "object",
   protocol: "replacement",
@@ -20,7 +20,7 @@ const replacementIdentity: ProjectionRunMaterializationIdentity = {
   ownershipHash: "ownership-1",
 }
 
-const telemetryIdentity: ProjectionRunMaterializationIdentity = {
+const telemetryIdentity: ProjectionMaterializationIdentity = {
   projectionId: "temperatures",
   projectionKind: "telemetry",
   protocol: "telemetry",

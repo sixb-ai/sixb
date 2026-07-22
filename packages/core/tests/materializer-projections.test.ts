@@ -941,7 +941,7 @@ describe("ontology materializer projection replacement", () => {
           for await (const page of streamed) links.push(...page.links)
           links.reverse()
           shuffled = links.length > 1
-          for (const link of links) yield { objects: [], links: [link], linkScopes: [] }
+          for (const link of links) yield { objects: [], links: [link] }
         },
       }
     }
@@ -981,7 +981,7 @@ describe("ontology materializer projection replacement", () => {
           const links: SourceReplacementLinkState[] = []
           for await (const page of streamed) links.push(...page.links)
           for (const link of links.reverse()) {
-            yield { objects: [], links: [link], linkScopes: [] }
+            yield { objects: [], links: [link] }
           }
         },
       }

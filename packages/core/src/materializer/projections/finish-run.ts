@@ -2,12 +2,15 @@ import {
   MaterializationConflictError,
   MaterializationValidationError,
 } from "../../materialization/errors"
-import type { PinnedDatasetVersion, ProjectionRunFinishInput } from "../../materialization/model"
+import type {
+  PinnedDatasetVersion,
+  ProjectionMaterializationIdentity,
+  ProjectionRunFinishInput,
+} from "../../materialization/model"
 import type { ProjectionDefinition, ResolvedProjection } from "../../projections/types"
 import type {
   ProjectionMaterializationRunRecord,
   ProjectionMaterializationRunStorage,
-  ProjectionRunMaterializationIdentity,
 } from "../../storage"
 import type { OntologyCommitRecord } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
@@ -23,7 +26,7 @@ import { createProjectionRunMaterializationIdentity } from "../shared/projection
 interface PreparedProjectionRunFinish {
   readonly projectId: string
   readonly input: ProjectionRunFinishInput
-  readonly identity: ProjectionRunMaterializationIdentity
+  readonly identity: ProjectionMaterializationIdentity
   readonly resolved: ResolvedProjection<ProjectionDefinition>
   readonly finishedAt: Date
 }
@@ -58,7 +61,6 @@ function prepareProjectionRunFinish(
     )
   }
   const identity = createProjectionRunMaterializationIdentity({
-    protocol: raw.protocol,
     resolved,
     datasetVersion,
     ontologyRevision: context.projectionRegistry.ontologyRevision,
@@ -172,7 +174,7 @@ async function prepareTelemetryTerminalDecision(
   projectionRuns: ProjectionMaterializationRunStorage,
   run: ProjectionMaterializationRunRecord,
   projectId: string,
-  identity: ProjectionRunMaterializationIdentity,
+  identity: ProjectionMaterializationIdentity,
   input: Extract<ProjectionRunFinishInput, { readonly protocol: "telemetry" }>
 ): Promise<void> {
   if (input.status !== "succeeded") return

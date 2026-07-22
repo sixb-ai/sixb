@@ -1,4 +1,8 @@
 export type {
+  ProjectionExecution,
+  ProjectionMaterializationIdentity,
+} from "../materialization/model"
+export type {
   ActionMaterializationRunStorage,
   ActionRunCommitDiff,
   ActionRunCommitRecord,
@@ -298,7 +302,6 @@ export type {
   ReclaimSourceMaterializationInput,
   RescheduleOntologyOutboxLeaseInput,
   SourceActivationWrite,
-  SourceMaterializationExecution,
   SourceReplacementLinkState,
   SourceReplacementObjectState,
   SourceReplacementStatePage,
@@ -351,7 +354,6 @@ export type {
   ProjectionMaterializationRunStorage,
   ProjectionRunCounters,
   ProjectionRunDatasetVersion,
-  ProjectionRunMaterializationIdentity,
   ProjectionRunObjectTypes,
   ProjectionRunRecord,
   ProjectionRunStatus,

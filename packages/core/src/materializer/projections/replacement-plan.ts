@@ -39,8 +39,8 @@ import {
   eventWork,
   planWork,
 } from "../execution/work-records"
+import { throwIfAborted } from "../shared/abort"
 import type { TimedCommitIdentity } from "../shared/identity"
-import { throwIfAborted } from "./source-materialization"
 
 export interface ProjectionReplacementPlanInput {
   readonly source: ProjectionSourceRef

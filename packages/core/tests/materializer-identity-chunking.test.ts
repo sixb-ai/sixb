@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { ProjectionMaterializationIdentity } from "../src/materialization/model"
 import { chunkBySize } from "../src/materializer/shared/chunking"
 import {
   createCommitId,
@@ -7,14 +8,14 @@ import {
   createProjectionMaterializationId,
   createProjectionTelemetryIdempotencyKey,
   createTimedCommitIdentity,
-  type ProjectionMaterializationFingerprint,
   sha256Canonical,
   timestampCommitIdentity,
 } from "../src/materializer/shared/identity"
 
-const projectionFingerprint = {
-  source: { projectionId: "projection:a" },
+const projectionIdentity = {
+  projectionId: "projection:a",
   projectionKind: "object",
+  protocol: "replacement",
   datasetVersion: {
     datasetId: "dataset:b",
     versionId: "version:c",
@@ -23,7 +24,7 @@ const projectionFingerprint = {
   ontologyRevision: "ontology:d",
   projectionRevision: "projection:e",
   ownershipHash: "ownership:f",
-} satisfies ProjectionMaterializationFingerprint
+} satisfies ProjectionMaterializationIdentity
 
 describe("materializer identity", () => {
   test("adds commit time only when explicitly requested", () => {
@@ -59,59 +60,63 @@ describe("materializer identity", () => {
     )
   })
 
-  test("hashes the complete projection replacement fingerprint without delimiter collisions", () => {
-    const key = createProjectionIdempotencyKey(projectionFingerprint)
+  test("hashes the complete projection replacement identity without delimiter collisions", () => {
+    const key = createProjectionIdempotencyKey(projectionIdentity)
 
     expect(key).toMatch(/^projection:replace:[0-9a-f]{64}$/)
-    expect(key).toBe(createProjectionIdempotencyKey(projectionFingerprint))
+    expect(key).toBe(createProjectionIdempotencyKey(projectionIdentity))
     expect(key).not.toBe(
       createProjectionIdempotencyKey({
-        ...projectionFingerprint,
-        source: { projectionId: "projection" },
+        ...projectionIdentity,
+        projectionId: "projection",
         datasetVersion: {
-          ...projectionFingerprint.datasetVersion,
+          ...projectionIdentity.datasetVersion,
           datasetId: "a:dataset:b",
         },
       })
     )
     expect(key).not.toBe(
       createProjectionIdempotencyKey({
-        ...projectionFingerprint,
+        ...projectionIdentity,
         ontologyRevision: "ontology:other",
       })
     )
     expect(key).not.toBe(
       createProjectionIdempotencyKey({
-        ...projectionFingerprint,
+        ...projectionIdentity,
         projectionKind: "link",
       })
     )
     expect(key).not.toBe(
       createProjectionIdempotencyKey({
-        ...projectionFingerprint,
+        ...projectionIdentity,
         datasetVersion: {
-          ...projectionFingerprint.datasetVersion,
+          ...projectionIdentity.datasetVersion,
           createdAt: "2026-01-02T03:04:06.000Z",
         },
       })
     )
     expect(key).not.toBe(
       createProjectionIdempotencyKey({
-        ...projectionFingerprint,
+        ...projectionIdentity,
         ownershipHash: "ownership:other",
       })
     )
   })
 
-  test("hashes projection telemetry by full fingerprint and batch ordinal only", () => {
+  test("hashes projection telemetry by full identity and batch ordinal only", () => {
     const withTransportFields = {
-      ...projectionFingerprint,
+      ...projectionIdentity,
       projectionKind: "telemetry" as const,
+      protocol: "telemetry" as const,
       batchOrdinal: 7,
       executionToken: "token-one",
       deliveryAttempt: 1,
     }
-    const key = createProjectionTelemetryIdempotencyKey(withTransportFields)
+    const key = createProjectionTelemetryIdempotencyKey(
+      withTransportFields,
+      withTransportFields.batchOrdinal
+    )
     const withOtherTransportFields = {
       ...withTransportFields,
       executionToken: "token-two",
@@ -119,15 +124,18 @@ describe("materializer identity", () => {
     }
 
     expect(key).toMatch(/^telemetry:projection:[0-9a-f]{64}$/)
-    expect(key).toBe(createProjectionTelemetryIdempotencyKey(withOtherTransportFields))
-    expect(key).not.toBe(
-      createProjectionTelemetryIdempotencyKey({ ...withTransportFields, batchOrdinal: 8 })
+    expect(key).toBe(
+      createProjectionTelemetryIdempotencyKey(
+        withOtherTransportFields,
+        withOtherTransportFields.batchOrdinal
+      )
     )
+    expect(key).not.toBe(createProjectionTelemetryIdempotencyKey(withTransportFields, 8))
     expect(key).not.toBe(
-      createProjectionTelemetryIdempotencyKey({
-        ...withTransportFields,
-        projectionRevision: "projection:other",
-      })
+      createProjectionTelemetryIdempotencyKey(
+        { ...withTransportFields, projectionRevision: "projection:other" },
+        withTransportFields.batchOrdinal
+      )
     )
   })
 

@@ -15,12 +15,12 @@ import {
   type OntologyMaterializerDependencies,
   type PinnedDatasetVersion,
   type ProjectionExecution,
+  type ProjectionMaterializationIdentity,
   ProjectionRegistry,
   type ProjectionSourceEntry,
   type ProjectionSourceReplacement,
   type TelemetryAppend,
 } from "../src/materializer"
-import type { ProjectionRunMaterializationIdentity } from "../src/storage"
 
 export const Device = defineObjectType({
   id: "Device",
@@ -217,7 +217,7 @@ export async function claimProjectionExecution(
     projectionRevision: resolved.projectionRevision,
     ownershipHash: resolved.ownershipHash,
   }
-  let identity: ProjectionRunMaterializationIdentity
+  let identity: ProjectionMaterializationIdentity
   if (input.protocol === "telemetry") {
     identity = { ...identityBase, projectionKind: "telemetry", protocol: "telemetry" }
   } else {

@@ -41,14 +41,13 @@ import {
 } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { PipelineDefinition } from "../pipelines/types"
-import { categorizeProjections } from "../projections/builders"
+import { ProjectionRegistry } from "../projections/registry"
 import type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
   TelemetryProjectionDefinition,
 } from "../projections/types"
-import { validateProjectionsAtStartup } from "../projections/validation"
 import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
 import { validateRulesAtStartup } from "../rules"
@@ -131,10 +130,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   private readonly webhooksByRoute = new Map<string, RegisteredWebhook>()
   private readonly webhooks: readonly RegisteredWebhook[]
   private readonly runtimeContext: SixbRuntimeContext
-  private readonly objectProjections: readonly ObjectProjectionDefinition[]
-  private readonly linkProjections: readonly LinkProjectionDefinition[]
-  private readonly telemetryProjections: readonly TelemetryProjectionDefinition[]
-  private readonly projectionsById = new Map<string, ProjectionDefinition>()
+  private readonly projectionRegistry: ProjectionRegistry
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
   readonly actions: ActionsRuntime
@@ -316,25 +312,11 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       workflowIds.add(workflow.id)
     }
 
-    const { objectProjections, linkProjections, telemetryProjections } = categorizeProjections(
-      options.projections ?? []
-    )
-    this.objectProjections = objectProjections
-    this.linkProjections = linkProjections
-    this.telemetryProjections = telemetryProjections
-    for (const projection of [...objectProjections, ...linkProjections, ...telemetryProjections]) {
-      if (this.projectionsById.has(projection.id)) {
-        throw new RuntimeError(`Duplicate projection id: ${projection.id}`)
-      }
-      this.projectionsById.set(projection.id, projection)
-    }
-    validateProjectionsAtStartup(
-      objectProjections,
-      linkProjections,
-      telemetryProjections,
-      this.ontology,
-      this.datasetsById
-    )
+    this.projectionRegistry = new ProjectionRegistry({
+      projections: options.projections ?? [],
+      ontology: this.ontology,
+      datasetsById: this.datasetsById,
+    })
 
     this.runtimeContext = {
       projectId: this.projectId,
@@ -637,19 +619,19 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   }
 
   getObjectProjections(): readonly ObjectProjectionDefinition[] {
-    return this.objectProjections
+    return this.projectionRegistry.getObjectProjections()
   }
 
   getLinkProjections(): readonly LinkProjectionDefinition[] {
-    return this.linkProjections
+    return this.projectionRegistry.getLinkProjections()
   }
 
   getTelemetryProjections(): readonly TelemetryProjectionDefinition[] {
-    return this.telemetryProjections
+    return this.projectionRegistry.getTelemetryProjections()
   }
 
   getProjectionById(projectionId: string): ProjectionDefinition | null {
-    return this.projectionsById.get(projectionId) ?? null
+    return this.projectionRegistry.getProjectionById(projectionId)
   }
 
   /**

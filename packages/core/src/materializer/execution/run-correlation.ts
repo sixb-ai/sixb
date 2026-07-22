@@ -2,12 +2,12 @@ import {
   MaterializationConflictError,
   MaterializationValidationError,
 } from "../../materialization/errors"
+import type { ProjectionMaterializationIdentity } from "../../materialization/model"
 import type { ProjectionDefinition, ResolvedProjection } from "../../projections/types"
 import {
   isProjectionMaterializationRunStorage,
   type ProjectionMaterializationRunRecord,
   type ProjectionMaterializationRunStorage,
-  type ProjectionRunMaterializationIdentity,
   type Storage,
 } from "../../storage"
 
@@ -15,7 +15,7 @@ export interface AssertProjectionExecutionInput {
   readonly projectId: string
   readonly projectionRunId: string
   readonly executionToken: string
-  readonly identity: ProjectionRunMaterializationIdentity
+  readonly identity: ProjectionMaterializationIdentity
   readonly resolved: ResolvedProjection<ProjectionDefinition>
   readonly capabilityErrorMessage?: string
 }

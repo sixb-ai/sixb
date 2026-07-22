@@ -1,4 +1,7 @@
-import type { PinnedDatasetVersion } from "../../materialization/model"
+import type {
+  PinnedDatasetVersion,
+  ProjectionMaterializationIdentity,
+} from "../../materialization/model"
 
 export type ProjectionKind = "object" | "link" | "telemetry"
 export type ProjectionRunStatus = "running" | "succeeded" | "failed" | "cancelled"
@@ -9,27 +12,6 @@ export type ProjectionMaterializationProtocol = "replacement" | "telemetry"
  * TODO(ontology-materializer/phase-6): Export PinnedDatasetVersion directly from the final contract.
  */
 export type ProjectionRunDatasetVersion = PinnedDatasetVersion
-
-interface ProjectionRunMaterializationIdentityBase {
-  readonly projectionId: string
-  readonly datasetVersion: PinnedDatasetVersion
-  readonly ontologyRevision: string
-  readonly projectionRevision: string
-  readonly ownershipHash: string
-}
-
-/** Immutable semantic identity pinned for the lifetime of one logical projection run. */
-export type ProjectionRunMaterializationIdentity = ProjectionRunMaterializationIdentityBase &
-  (
-    | {
-        readonly projectionKind: "object" | "link"
-        readonly protocol: "replacement"
-      }
-    | {
-        readonly projectionKind: "telemetry"
-        readonly protocol: "telemetry"
-      }
-  )
 
 export interface ProjectionRunCounters {
   readonly rowsProcessed: number
@@ -165,7 +147,7 @@ export interface StartProjectionRunInput extends ProjectionRunObjectTypes {
 export interface StartOrReclaimProjectionMaterializationInput extends ProjectionRunObjectTypes {
   readonly id: string
   readonly projectId: string
-  readonly identity: ProjectionRunMaterializationIdentity
+  readonly identity: ProjectionMaterializationIdentity
   /** Required for telemetry and forbidden for replacement. */
   readonly fixedBatchSize?: number
   readonly startedAt?: Date
@@ -175,7 +157,7 @@ export interface AssertProjectionMaterializationExecutionInput {
   readonly id: string
   readonly projectId: string
   readonly executionToken: string
-  readonly identity: ProjectionRunMaterializationIdentity
+  readonly identity: ProjectionMaterializationIdentity
 }
 
 export type UpdateProjectionMaterializationInput = AssertProjectionMaterializationExecutionInput &

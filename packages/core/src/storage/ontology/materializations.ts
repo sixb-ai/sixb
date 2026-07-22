@@ -91,7 +91,6 @@ export interface SourceReplacementLinkState extends Omit<MaterializationLinkStat
 export interface SourceReplacementStatePage {
   readonly objects: readonly SourceReplacementObjectState[]
   readonly links: readonly SourceReplacementLinkState[]
-  readonly linkScopes: readonly MaterializationLinkScopeState[]
 }
 
 export interface MaterializationStateRequestChunk {

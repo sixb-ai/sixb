@@ -3,6 +3,7 @@ import type { OntologyMaterializationStorage } from "./materializations"
 import type { OntologyOutboxStorage } from "./outbox"
 import type { OntologySourceStorage } from "./sources"
 
+export type { ProjectionExecution } from "../../materialization/model"
 export type {
   EditOntologyCommitIntent,
   GetOntologyCommitByIdempotencyKeyInput,
@@ -98,7 +99,6 @@ export type {
   OntologySourceRecord,
   OntologySourceStorage,
   ReclaimSourceMaterializationInput,
-  SourceMaterializationExecution,
   StageSourceAssertion,
   StageSourceRowsInput,
   StageSourceRowsResult,

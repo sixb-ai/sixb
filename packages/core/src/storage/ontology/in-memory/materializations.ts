@@ -403,7 +403,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         }
         this.requireSession(input.session)
         this.hooks.observeBuffer?.("replacement.object.page", objects.length)
-        yield { objects, links: [], linkScopes: [] }
+        yield { objects, links: [] }
       }
       this.requireSession(input.session)
       replacement.objectStreamCompleted = true
@@ -452,7 +452,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       }
       this.requireSession(input.session)
       this.hooks.observeBuffer?.("replacement.link.page", links.length)
-      yield { objects: [], links, linkScopes: [] }
+      yield { objects: [], links }
     }
     this.requireSession(input.session)
     replacement.linkStreamCompleted = true

@@ -458,14 +458,3 @@ export function normalizeTelemetryAppend(input: TelemetryAppend): TelemetryAppen
     points: Object.freeze(points),
   })
 }
-
-export function canonicalJson(value: unknown): string {
-  try {
-    assertJsonValue(value)
-  } catch (error) {
-    throw new MaterializationValidationError(
-      error instanceof Error ? error.message : "Canonical input must be JSON."
-    )
-  }
-  return stableJsonStringify(value)
-}

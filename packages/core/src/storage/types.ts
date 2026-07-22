@@ -15,6 +15,10 @@ import type { WorkflowInterventionStorage } from "./workflow-interventions"
 import type { WorkflowRunStorage } from "./workflow-runs"
 
 export type {
+  ProjectionExecution,
+  ProjectionMaterializationIdentity,
+} from "../materialization/model"
+export type {
   ActionMaterializationRunStorage,
   ActionRunFailure,
   ActionRunParams,
@@ -147,7 +151,6 @@ export type {
   ProjectionMaterializationRunStorage,
   ProjectionRunCounters,
   ProjectionRunDatasetVersion,
-  ProjectionRunMaterializationIdentity,
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,

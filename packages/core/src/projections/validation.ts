@@ -9,12 +9,16 @@ import type { DatasetDefinition } from "../datasets"
 import type { OntologyRegistry } from "../ontology"
 import type { ObjectType, Property } from "../ontology/types"
 import { ProjectionValidationError } from "./errors"
-import { validateProjectionOwnership } from "./ownership"
+import {
+  computeProjectionOwnership,
+  type ProjectionOwnershipRecord,
+  validateProjectionOwnership,
+} from "./ownership"
 import type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
-  ProjectionOwnership,
+  ProjectionDefinition,
   TelemetryProjectionDefinition,
 } from "./types"
 
@@ -261,21 +265,35 @@ export function validateTelemetryProjectionFieldMapping(
  * 3. `propertyId` exists on the object type and is telemetry-enabled.
  * 4. Point mapping fields exist in the referenced dataset.
  */
-export interface ValidatedProjectionInputs {
+export interface ValidatedProjectionRecord<TDefinition extends ProjectionDefinition>
+  extends ProjectionOwnershipRecord<TDefinition> {
   readonly dataset: DatasetDefinition
-  readonly ownership: ProjectionOwnership
+}
+
+export interface ProjectionValidationInput {
+  readonly objectProjections: readonly ObjectProjectionDefinition[]
+  readonly linkProjections: readonly LinkProjectionDefinition[]
+  readonly telemetryProjections: readonly TelemetryProjectionDefinition[]
+}
+
+export interface ValidatedProjectionCatalog {
+  readonly objectProjections: readonly ValidatedProjectionRecord<ObjectProjectionDefinition>[]
+  readonly linkProjections: readonly ValidatedProjectionRecord<LinkProjectionDefinition>[]
+  readonly telemetryProjections: readonly ValidatedProjectionRecord<TelemetryProjectionDefinition>[]
 }
 
 export function validateProjectionsAtStartup(
-  objectProjections: readonly ObjectProjectionDefinition[],
-  linkProjections: readonly LinkProjectionDefinition[],
-  telemetryProjections: readonly TelemetryProjectionDefinition[],
+  projections: ProjectionValidationInput,
   ontology: OntologyRegistry,
   datasetsById: ReadonlyMap<string, DatasetDefinition>
-): ReadonlyMap<string, ValidatedProjectionInputs> {
+): ValidatedProjectionCatalog {
+  const { objectProjections, linkProjections, telemetryProjections } = projections
   const objectTypesById = ontology.getObjectTypesById()
   const primaryByTypeId = ontology.getPrimaryByTypeId()
-  const datasetByProjectionId = new Map<string, DatasetDefinition>()
+  const validatedObjectProjections: ValidatedProjectionRecord<ObjectProjectionDefinition>[] = []
+  const validatedLinkProjections: ValidatedProjectionRecord<LinkProjectionDefinition>[] = []
+  const validatedTelemetryProjections: ValidatedProjectionRecord<TelemetryProjectionDefinition>[] =
+    []
 
   validateMaterializationOntologyConstraints(ontology)
 
@@ -289,7 +307,6 @@ export function validateProjectionsAtStartup(
       )
     }
 
-    datasetByProjectionId.set(projection.id, dataset)
     const objectType = objectTypesById.get(projection.objectTypeId)
     if (!objectType) {
       throw new ProjectionValidationError(
@@ -382,6 +399,12 @@ export function validateProjectionsAtStartup(
         )
       }
     }
+
+    validatedObjectProjections.push({
+      definition: projection,
+      dataset,
+      ownership: computeProjectionOwnership(projection, ontology),
+    })
   }
 
   for (const projection of linkProjections) {
@@ -394,7 +417,6 @@ export function validateProjectionsAtStartup(
       )
     }
 
-    datasetByProjectionId.set(projection.id, dataset)
     if (!objectTypesById.has(projection.sourceObjectTypeId)) {
       throw new ProjectionValidationError(
         `${prefix}: unknown source type "${projection.sourceObjectTypeId}"`
@@ -440,6 +462,12 @@ export function validateProjectionsAtStartup(
         `${prefix}: target type "${projection.targetObjectTypeId}" has no primary property`
       )
     }
+
+    validatedLinkProjections.push({
+      definition: projection,
+      dataset,
+      ownership: computeProjectionOwnership(projection, ontology),
+    })
   }
 
   for (const projection of telemetryProjections) {
@@ -452,7 +480,6 @@ export function validateProjectionsAtStartup(
       )
     }
 
-    datasetByProjectionId.set(projection.id, dataset)
     const objectType = objectTypesById.get(projection.objectTypeId)
     if (!objectType) {
       throw new ProjectionValidationError(
@@ -462,22 +489,24 @@ export function validateProjectionsAtStartup(
 
     const datasetColumnNames = new Set(dataset.schema.columns.map((column) => column.name))
     validateTelemetryProjectionFieldMapping(projection, objectType, datasetColumnNames, prefix)
+    validatedTelemetryProjections.push({
+      definition: projection,
+      dataset,
+      ownership: computeProjectionOwnership(projection, ontology),
+    })
   }
 
-  const projections = [...objectProjections, ...linkProjections, ...telemetryProjections]
-  const ownershipByProjectionId = validateProjectionOwnership(projections, ontology)
-  return new Map(
-    projections.map((definition) => {
-      const dataset = datasetByProjectionId.get(definition.id)
-      const ownership = ownershipByProjectionId.get(definition.id)
-      if (!dataset || !ownership) {
-        throw new ProjectionValidationError(
-          `[Sixb] Projection '${definition.id}' did not produce validated registry inputs.`
-        )
-      }
-      return [definition.id, { dataset, ownership }]
-    })
-  )
+  const validatedProjections = [
+    ...validatedObjectProjections,
+    ...validatedLinkProjections,
+    ...validatedTelemetryProjections,
+  ]
+  validateProjectionOwnership(validatedProjections)
+  return {
+    objectProjections: validatedObjectProjections,
+    linkProjections: validatedLinkProjections,
+    telemetryProjections: validatedTelemetryProjections,
+  }
 }
 
 function validateMaterializationOntologyConstraints(ontology: OntologyRegistry): void {

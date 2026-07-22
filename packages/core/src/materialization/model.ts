@@ -1,4 +1,5 @@
 import type { EventActor } from "../events/envelope"
+import type { PropertyChange, PropertyChangeMap } from "../events/property-changes"
 import type { JsonValue } from "../json"
 
 export interface OntologyObjectRef {
@@ -27,6 +28,27 @@ export interface PinnedDatasetVersion {
   /** Canonical UTC ISO timestamp from immutable version metadata. */
   readonly createdAt: string
 }
+
+interface ProjectionMaterializationIdentityBase {
+  readonly projectionId: string
+  readonly datasetVersion: PinnedDatasetVersion
+  readonly ontologyRevision: string
+  readonly projectionRevision: string
+  readonly ownershipHash: string
+}
+
+/** Immutable semantic identity pinned for the lifetime of one logical projection run. */
+export type ProjectionMaterializationIdentity = ProjectionMaterializationIdentityBase &
+  (
+    | {
+        readonly projectionKind: "object" | "link"
+        readonly protocol: "replacement"
+      }
+    | {
+        readonly projectionKind: "telemetry"
+        readonly protocol: "telemetry"
+      }
+  )
 
 export type OntologyMaterializationOrigin =
   | {
@@ -254,14 +276,8 @@ export interface EffectiveLinkSnapshot {
   readonly lastCommitId: string
 }
 
-export type OntologyMaterializationPropertyChange =
-  | { readonly operation: "created"; readonly after: JsonValue }
-  | { readonly operation: "updated"; readonly before: JsonValue; readonly after: JsonValue }
-  | { readonly operation: "cleared"; readonly before: JsonValue; readonly after: null }
-
-export type OntologyMaterializationPropertyChangeMap = Readonly<
-  Record<string, OntologyMaterializationPropertyChange>
->
+export type OntologyMaterializationPropertyChange = PropertyChange<JsonValue>
+export type OntologyMaterializationPropertyChangeMap = Readonly<PropertyChangeMap<JsonValue>>
 
 export type EffectiveObjectChange =
   | {
