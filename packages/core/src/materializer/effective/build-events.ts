@@ -193,18 +193,5 @@ export function sequenceMaterializationEvent(
     id: createEventId(projectId, commitId, commitOrdinal),
     commitOrdinal,
   }
-  switch (draft.type) {
-    case "object.created":
-    case "object.updated":
-      return { ...draft, ...sequence }
-    case "object.deleted":
-      return { ...draft, ...sequence }
-    case "link.created":
-    case "link.updated":
-      return { ...draft, ...sequence }
-    case "link.deleted":
-      return { ...draft, ...sequence }
-    case "telemetry.appended":
-      return { ...draft, ...sequence }
-  }
+  return { ...draft, ...sequence }
 }

@@ -54,7 +54,8 @@ export function computeProjectionOwnership(
 export function validateProjectionOwnership(
   projections: readonly ProjectionDefinition[],
   ontology: OntologyRegistry
-): void {
+): ReadonlyMap<string, ProjectionOwnership> {
+  const ownershipByProjectionId = new Map<string, ProjectionOwnership>()
   const existenceOwners = new Map<string, string>()
   const propertyOwners = new Map<string, string>()
   const linkOwners = new Map<string, string>()
@@ -62,6 +63,7 @@ export function validateProjectionOwnership(
 
   for (const projection of projections) {
     const ownership = computeProjectionOwnership(projection, ontology)
+    ownershipByProjectionId.set(projection.id, ownership)
     for (const object of ownership.objects) {
       if (object.existence) {
         registerOwner(
@@ -97,6 +99,7 @@ export function validateProjectionOwnership(
       )
     }
   }
+  return ownershipByProjectionId
 }
 
 function registerOwner(

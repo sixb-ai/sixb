@@ -1,20 +1,13 @@
-import { createHash } from "node:crypto"
 import { stableJsonStringify } from "../../../json"
 import {
   MaterializationConflictError,
   MaterializationValidationError,
 } from "../../../materialization/errors"
-import { createEventId, materializationEventKindOrdinal } from "../../../materialization/identity"
 import type {
-  EffectiveChangeCounts,
-  EffectiveLinkSnapshot,
-  EffectiveObjectSnapshot,
   ExpectedLinkRevision,
   ExpectedObjectRevision,
   OntologyLinkRef,
   OntologyObjectRef,
-  PinnedDatasetVersion,
-  TelemetryCommitResult,
 } from "../../../materialization/model"
 import {
   linkRefKey,
@@ -30,12 +23,11 @@ import {
   getInMemoryObjectMaterializerAdapter,
   type InMemoryObjectStorage,
 } from "../../objects/in-memory"
-import type { ObjectLinkRow, ObjectRow } from "../../objects/types"
+import type { ObjectLinkRow } from "../../objects/types"
 import {
   getInMemoryTimeseriesMaterializerAdapter,
   type InMemoryTimeseriesStorage,
 } from "../../timeseries/store"
-import type { TimeseriesPoint } from "../../timeseries/types"
 import type { OntologyCommitRecord } from "../commits"
 import type {
   ApplyMaterializationChunkInput,
@@ -51,7 +43,6 @@ import type {
   MaterializationObjectExistenceWorkRecord,
   MaterializationObjectState,
   MaterializationPlanHeader,
-  MaterializationPlanWorkItem,
   MaterializationPlanWorkRecord,
   MaterializationSession,
   MaterializationStatePage,
@@ -63,8 +54,6 @@ import type {
   SourceReplacementObjectState,
   SourceReplacementStatePage,
   StageMaterializationWorkInput,
-  StoredLinkOverride,
-  StoredObjectOverride,
   StoredTelemetryPoint,
   StreamMaterializationStateInput,
   StreamMaterializationWorkInput,
@@ -72,19 +61,50 @@ import type {
 } from "../materializations"
 import type { OntologyMaterializationEvent } from "../outbox"
 import type {
-  StageSourceAssertion,
   StoredSourceAssertion,
   StoredSourceLinkAssertion,
   StoredSourceObjectAssertion,
 } from "../sources"
+import { assertFinalizationCorrelations } from "./materializations-finalization"
 import {
+  addReplacementLink,
+  appendScopeSnapshot,
+  findActiveSourceMaterialization,
+  finishScopeAccumulator,
+  linkRef,
+  linkSnapshot,
+  objectSnapshot,
+  publicLinkOverride,
+  publicObjectOverride,
+  selectBoundedUnique,
+  startScopeAccumulator,
+  storedPoint,
+  storedSource,
+  storedSourceLink,
+  storedSourceObject,
+  uniqueBy,
+} from "./materializations-state"
+import {
+  assertChunkSequence,
+  assertLastCommit,
+  assertMaterializationHeader,
+  assertPageRows,
+  assertPlanChunkCorrelations,
+  assertWorkRecord,
+  compareCardinalityWork,
+  compareEventWork,
+  comparePlanWork,
+  materializationChunkRows,
+  materializationPlanItems,
+  workUniquenessKey,
+} from "./materializations-work"
+import {
+  assertTimestamp,
   commitKey,
   commitOriginKey,
   type InMemoryOntologyState,
   type InMemoryOntologyStorageTestHooks,
   type InMemorySourceMaterialization,
-  type InMemoryStoredLinkOverride,
-  type InMemoryStoredObjectOverride,
   idempotencyKey,
   ontologyCommitOriginSelector,
   outboxKey,
@@ -92,13 +112,11 @@ import {
   sourceMaterializationKey,
 } from "./shared-state"
 
-interface SessionState {
+export interface SessionState {
   readonly header: MaterializationPlanHeader
   readonly transactionToken: object
   active: boolean
   writeOrdinal: number
-  outboxCount: number
-  readonly outboxOrdinals: Set<number>
   readonly work: Map<string, MaterializationWorkRecord>
   readonly workUniqueKeys: Set<string>
   readonly applyWork: MaterializationPlanWorkRecord[]
@@ -114,24 +132,24 @@ interface SessionState {
   replacement: ReplacementSessionState | null
 }
 
-interface WorkStreamState {
+export interface WorkStreamState {
   started: boolean
   completed: boolean
   emittedCount: number
 }
 
-interface ReplacementObjectWork {
+export interface ReplacementObjectWork {
   readonly ref: OntologyObjectRef
   readonly sortKey: string
 }
 
-interface ReplacementLinkWork {
+export interface ReplacementLinkWork {
   readonly ref: OntologyLinkRef
   readonly sortKey: string
   diffRequired: boolean
 }
 
-interface ReplacementSessionState {
+export interface ReplacementSessionState {
   readonly sourceId: string
   readonly candidateMaterializationId: string
   readonly previous: InMemorySourceMaterialization | undefined
@@ -198,8 +216,6 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       transactionToken,
       active: true,
       writeOrdinal: 0,
-      outboxCount: 0,
-      outboxOrdinals: new Set<number>(),
       work: new Map<string, MaterializationWorkRecord>(),
       workUniqueKeys: new Set<string>(),
       applyWork: [],
@@ -226,20 +242,25 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
   deactivateTransaction(transactionToken: object): void {
     for (const session of this.liveSessions) {
       if (session.transactionToken !== transactionToken) continue
-      session.active = false
-      session.work.clear()
-      session.workUniqueKeys.clear()
-      session.applyWork.length = 0
-      session.cardinalityWork.length = 0
-      session.eventWork.length = 0
-      session.appliedPlanItems.length = 0
-      session.outboxEnvelopes.clear()
-      session.incidentLinksByObject = null
-      session.linkScopeStates = null
-      session.objectExistence.clear()
-      session.replacement = null
-      this.liveSessions.delete(session)
+      this.releaseSession(session)
     }
+  }
+
+  /** Deactivate a session, drop its transaction-local work, and stop tracking it as live. */
+  private releaseSession(session: SessionState): void {
+    session.active = false
+    session.work.clear()
+    session.workUniqueKeys.clear()
+    session.applyWork.length = 0
+    session.cardinalityWork.length = 0
+    session.eventWork.length = 0
+    session.appliedPlanItems.length = 0
+    session.outboxEnvelopes.clear()
+    session.incidentLinksByObject = null
+    session.linkScopeStates = null
+    session.objectExistence.clear()
+    session.replacement = null
+    this.liveSessions.delete(session)
   }
 
   async *streamState(
@@ -671,7 +692,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
             `Duplicate outbox event '${envelope.id}'.`
           )
         }
-        if (session.outboxOrdinals.has(envelope.commitOrdinal))
+        if (session.outboxEnvelopes.has(envelope.commitOrdinal))
           throw new MaterializationConflictError(
             "effective-state",
             "Duplicate outbox commit ordinal."
@@ -686,9 +707,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           lastError: null,
           createdAt: item.createdAt,
         })
-        session.outboxOrdinals.add(envelope.commitOrdinal)
         session.outboxEnvelopes.set(envelope.commitOrdinal, structuredClone(envelope))
-        session.outboxCount += 1
       })
     for (const item of materializationPlanItems(input.chunk)) {
       session.appliedPlanItems.push(stableJsonStringify(item))
@@ -762,19 +781,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     if (origin) {
       this.state.commitIdByOrigin.set(commitOriginKey(commit.projectId, origin), commit.id)
     }
-    session.active = false
-    session.work.clear()
-    session.workUniqueKeys.clear()
-    session.applyWork.length = 0
-    session.cardinalityWork.length = 0
-    session.eventWork.length = 0
-    session.appliedPlanItems.length = 0
-    session.outboxEnvelopes.clear()
-    session.incidentLinksByObject = null
-    session.linkScopeStates = null
-    session.objectExistence.clear()
-    session.replacement = null
-    this.liveSessions.delete(session)
+    this.releaseSession(session)
     return { commit: structuredClone(record) }
   }
 
@@ -1193,1219 +1200,4 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     }
     return index
   }
-}
-
-function publicObjectOverride(
-  value: InMemoryStoredObjectOverride | undefined
-): StoredObjectOverride | null {
-  if (!value) return null
-  const { projectId: _, ...stored } = value
-  return stored
-}
-
-function publicLinkOverride(
-  value: InMemoryStoredLinkOverride | undefined
-): StoredLinkOverride | null {
-  if (!value) return null
-  const { projectId: _, ...stored } = value
-  return stored
-}
-
-interface LinkScopeAccumulator {
-  readonly scopeSortKey: string
-  readonly source: OntologyObjectRef
-  readonly linkId: string
-  readonly hash: ReturnType<typeof createHash>
-  effectiveCount: number
-}
-
-function startScopeAccumulator(
-  source: OntologyObjectRef,
-  linkId: string,
-  scopeSortKey: string
-): LinkScopeAccumulator {
-  const hash = createHash("sha256")
-  hash.update("[")
-  return {
-    scopeSortKey,
-    source: structuredClone(source),
-    linkId,
-    hash,
-    effectiveCount: 0,
-  }
-}
-
-function appendScopeSnapshot(
-  accumulator: LinkScopeAccumulator,
-  snapshot: EffectiveLinkSnapshot
-): void {
-  if (accumulator.effectiveCount > 0) accumulator.hash.update(",")
-  accumulator.hash.update(
-    stableJsonStringify({
-      ref: snapshot.ref,
-      properties: snapshot.properties ?? {},
-      lastCommitId: snapshot.lastCommitId,
-    })
-  )
-  accumulator.effectiveCount += 1
-}
-
-function finishScopeAccumulator(accumulator: LinkScopeAccumulator): MaterializationLinkScopeState {
-  accumulator.hash.update("]")
-  return {
-    source: accumulator.source,
-    linkId: accumulator.linkId,
-    effectiveCount: accumulator.effectiveCount,
-    fingerprint: accumulator.hash.digest("hex"),
-  }
-}
-
-function assertPageRows(value: number): void {
-  if (!Number.isSafeInteger(value) || value <= 0)
-    throw new MaterializationValidationError("Materialization page size must be positive.")
-}
-
-function materializationChunkRows(
-  chunk: import("../materializations").MaterializationPlanChunk
-): number {
-  return (
-    chunk.overrides.objectUpserts.length +
-    chunk.overrides.objectDeletes.length +
-    chunk.overrides.linkUpserts.length +
-    chunk.overrides.linkDeletes.length +
-    chunk.effective.objectUpserts.length +
-    chunk.effective.objectDeletes.length +
-    chunk.effective.linkUpserts.length +
-    chunk.effective.linkDeletes.length +
-    chunk.timeseries.pointUpserts.length +
-    chunk.outbox.length
-  )
-}
-
-function materializationPlanItems(
-  chunk: import("../materializations").MaterializationPlanChunk
-): import("../materializations").MaterializationPlanWorkItem[] {
-  return [
-    ...chunk.overrides.objectUpserts.map((value) => ({
-      kind: "object-override-upsert" as const,
-      value,
-    })),
-    ...chunk.overrides.objectDeletes.map((value) => ({
-      kind: "object-override-delete" as const,
-      value,
-    })),
-    ...chunk.overrides.linkUpserts.map((value) => ({
-      kind: "link-override-upsert" as const,
-      value,
-    })),
-    ...chunk.overrides.linkDeletes.map((value) => ({
-      kind: "link-override-delete" as const,
-      value,
-    })),
-    ...chunk.effective.linkDeletes.map((value) => ({ kind: "link-delete" as const, value })),
-    ...chunk.effective.objectDeletes.map((value) => ({ kind: "object-delete" as const, value })),
-    ...chunk.effective.objectUpserts.map((value) => ({ kind: "object-upsert" as const, value })),
-    ...chunk.effective.linkUpserts.map((value) => ({ kind: "link-upsert" as const, value })),
-    ...chunk.timeseries.pointUpserts.map((value) => ({ kind: "point-upsert" as const, value })),
-  ]
-}
-
-function assertChunkSequence(
-  session: SessionState,
-  chunk: import("../materializations").MaterializationPlanChunk
-): void {
-  const planItems = materializationPlanItems(chunk)
-  const applyStream = session.workStreams.apply
-  const appliedStart = session.appliedPlanItems.length
-  if (
-    planItems.length > 0 &&
-    (!applyStream.started || appliedStart + planItems.length > applyStream.emittedCount)
-  ) {
-    invalidCorrelation("Materialization plan items cannot be applied before they are streamed.")
-  }
-  for (let offset = 0; offset < planItems.length; offset += 1) {
-    const expected = session.applyWork[appliedStart + offset]?.item
-    if (!expected || stableJsonStringify(planItems[offset]) !== stableJsonStringify(expected)) {
-      invalidCorrelation("Materialization plan items must be applied in exact streamed order.")
-    }
-  }
-
-  const eventStream = session.workStreams.event
-  if (
-    chunk.outbox.length > 0 &&
-    (!eventStream.started || session.outboxCount + chunk.outbox.length > eventStream.emittedCount)
-  ) {
-    invalidCorrelation("Materialization events cannot be applied before they are streamed.")
-  }
-  for (let offset = 0; offset < chunk.outbox.length; offset += 1) {
-    const expected = session.eventWork[session.outboxCount + offset]
-    const actual = chunk.outbox[offset]?.envelope
-    if (!expected || !actual) {
-      invalidCorrelation("Materialization outbox events must follow exact streamed order.")
-    }
-    const { id: _id, commitOrdinal, ...actualDraft } = actual
-    if (
-      commitOrdinal !== session.outboxCount + offset ||
-      stableJsonStringify(actualDraft) !== stableJsonStringify(expected.draft)
-    ) {
-      invalidCorrelation("Materialization outbox events must follow exact streamed order.")
-    }
-  }
-}
-
-function assertTimestamp(value: string, label: string): void {
-  if (!Number.isFinite(Date.parse(value))) {
-    throw new MaterializationValidationError(`${label} must be a valid timestamp.`)
-  }
-}
-
-function assertLastCommit(
-  value: StoredObjectOverride | StoredLinkOverride | undefined,
-  expected: string | null,
-  label: string
-): void {
-  if ((value?.lastCommitId ?? null) !== expected)
-    throw new MaterializationConflictError("effective-state", `Expected ${label} changed.`)
-}
-
-function uniqueBy<T>(values: readonly T[], keyOf: (value: T) => string): T[] {
-  return [...new Map(values.map((value) => [keyOf(value), structuredClone(value)])).values()]
-}
-
-function objectSnapshot(row: ObjectRow): EffectiveObjectSnapshot {
-  if (!row.lastCommitId)
-    throw new MaterializationConflictError(
-      "effective-state",
-      `Effective object ${row.objectTypeId}:${row.primaryId} lacks materializer provenance.`
-    )
-  return {
-    ref: { objectTypeId: row.objectTypeId, primaryId: row.primaryId },
-    properties: structuredClone(row.properties) as EffectiveObjectSnapshot["properties"],
-    version: row.version,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-    lastCommitId: row.lastCommitId,
-  }
-}
-
-function linkSnapshot(row: ObjectLinkRow): EffectiveLinkSnapshot {
-  if (!row.lastCommitId)
-    throw new MaterializationConflictError(
-      "effective-state",
-      `Effective link lacks materializer provenance.`
-    )
-  return {
-    ref: linkRef(row),
-    ...(row.properties
-      ? { properties: structuredClone(row.properties) as EffectiveLinkSnapshot["properties"] }
-      : {}),
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-    lastCommitId: row.lastCommitId,
-  }
-}
-
-function linkRef(row: ObjectLinkRow): OntologyLinkRef {
-  return {
-    source: { objectTypeId: row.sourceTypeId, primaryId: row.sourceId },
-    linkId: row.linkId,
-    target: { objectTypeId: row.targetTypeId, primaryId: row.targetId },
-  }
-}
-
-function storedPoint(point: TimeseriesPoint): StoredTelemetryPoint {
-  if (!point.lastCommitId)
-    throw new MaterializationConflictError(
-      "timeseries-point",
-      "Telemetry point lacks materializer provenance."
-    )
-  return {
-    series: {
-      object: { objectTypeId: point.objectTypeId, primaryId: point.objectId },
-      propertyId: point.propertyId,
-    },
-    value: structuredClone(point.value) as StoredTelemetryPoint["value"],
-    ...(point.unit !== undefined ? { unit: point.unit } : {}),
-    at: point.at.toISOString(),
-    lastCommitId: point.lastCommitId,
-  }
-}
-
-function findActiveSourceMaterialization(
-  state: InMemoryOntologyState,
-  projectId: string,
-  sourceId: string
-): InMemorySourceMaterialization | undefined {
-  let active: InMemorySourceMaterialization | undefined
-  for (const materialization of state.sourceMaterializations.values()) {
-    if (
-      materialization.projectId !== projectId ||
-      materialization.source.projectionId !== sourceId ||
-      materialization.status !== "active"
-    ) {
-      continue
-    }
-    if (active) {
-      throw new MaterializationConflictError(
-        "source-materialization",
-        `Source '${sourceId}' has more than one active materialization.`
-      )
-    }
-    active = materialization
-  }
-  return active
-}
-
-function storedSource(
-  sourceId: string,
-  materializationId: string,
-  row: StageSourceAssertion
-): StoredSourceAssertion {
-  return {
-    source: { projectionId: sourceId },
-    materializationId,
-    root: structuredClone(row.root),
-    assertion: structuredClone(row.assertion),
-    stagingOrdinal: row.stagingOrdinal,
-  } as StoredSourceAssertion
-}
-
-function storedSourceObject(
-  sourceId: string,
-  materializationId: string | undefined,
-  row: StageSourceAssertion | undefined
-): StoredSourceObjectAssertion | null {
-  if (!materializationId || !row || row.assertion.kind !== "object") return null
-  return storedSource(sourceId, materializationId, row) as StoredSourceObjectAssertion
-}
-
-function storedSourceLink(
-  sourceId: string,
-  materializationId: string | undefined,
-  row: StageSourceAssertion | undefined
-): StoredSourceLinkAssertion | null {
-  if (!materializationId || !row || row.assertion.kind !== "link") return null
-  return storedSource(sourceId, materializationId, row) as StoredSourceLinkAssertion
-}
-
-function addReplacementLink(
-  replacement: ReplacementSessionState,
-  ref: OntologyLinkRef,
-  diffRequired: boolean
-): void {
-  const key = linkRefKey(ref)
-  const existing = replacement.links.get(key)
-  if (existing) {
-    existing.diffRequired ||= diffRequired
-    if (diffRequired) replacement.affectedScopes.add(linkScopeSortKey(ref.source, ref.linkId))
-    return
-  }
-  replacement.links.set(key, {
-    ref: structuredClone(ref),
-    sortKey: linkRefSortKey(ref),
-    diffRequired,
-  })
-  if (diffRequired) replacement.affectedScopes.add(linkScopeSortKey(ref.source, ref.linkId))
-}
-
-function selectBoundedUnique<T>(
-  values: readonly T[],
-  cursor: string | null,
-  limit: number,
-  sortKeyOf: (value: T) => string,
-  identityOf: (value: T) => string
-): T[] {
-  const selected = new Map<string, T>()
-  for (const value of values) {
-    const sortKey = sortKeyOf(value)
-    if (cursor !== null && sortKey <= cursor) continue
-    const identity = identityOf(value)
-    let duplicate = false
-    for (const candidate of selected.values()) {
-      if (identityOf(candidate) === identity) {
-        duplicate = true
-        break
-      }
-    }
-    if (duplicate) continue
-    selected.set(sortKey, value)
-    if (selected.size <= limit) continue
-    let largest: string | null = null
-    for (const key of selected.keys()) if (largest === null || key > largest) largest = key
-    if (largest !== null) selected.delete(largest)
-  }
-  return [...selected.entries()]
-    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-    .map(([, value]) => value)
-}
-
-function assertWorkRecord(
-  record: MaterializationWorkRecord,
-  header: MaterializationPlanHeader
-): void {
-  if (record.recordKey.trim().length === 0) {
-    throw new MaterializationValidationError("Materialization work key must be nonblank.")
-  }
-  if (record.kind === "plan") {
-    if (!/^[0-9a-f]+$/.test(record.sortKey) || !planPhaseMatches(record)) {
-      throw new MaterializationValidationError("Materialization plan work has an invalid order.")
-    }
-    assertPlanItemCorrelation(record.item, header.commit)
-    return
-  }
-  if (record.kind === "event") {
-    if (
-      !/^[0-9a-f]+$/.test(record.sortKey) ||
-      !Number.isSafeInteger(record.eventKindRank) ||
-      record.eventKindRank < 0 ||
-      record.eventKindRank !== materializationEventKindOrdinal(record.draft.type) ||
-      record.draft.projectId !== header.commit.projectId ||
-      record.draft.commitId !== header.commit.id ||
-      record.draft.occurredAt !== header.commit.committedAt ||
-      stableJsonStringify(record.draft.origin) !== stableJsonStringify(header.commit.origin) ||
-      stableJsonStringify(record.draft.actor ?? null) !==
-        stableJsonStringify(header.commit.actor ?? null)
-    ) {
-      throw new MaterializationValidationError("Materialization event work is invalid.")
-    }
-    return
-  }
-  if (record.kind === "cardinality") {
-    if (
-      record.scopeSortKey !== linkScopeSortKey(record.ref.source, record.ref.linkId) ||
-      record.linkSortKey !== linkRefSortKey(record.ref)
-    ) {
-      throw new MaterializationValidationError(
-        "Materialization cardinality work has an invalid identity or order."
-      )
-    }
-    return
-  }
-  if (record.kind === "classification" && record.identityKey.trim().length === 0) {
-    throw new MaterializationValidationError("Materialization classification identity is invalid.")
-  }
-}
-
-function workUniquenessKey(record: MaterializationWorkRecord): string {
-  switch (record.kind) {
-    case "classification":
-      return `classification:${record.entityKind}:${record.identityKey}`
-    case "object-existence":
-      return `object-existence:${objectRefKey(record.ref)}`
-    case "incident-object":
-      return `incident-object:${objectRefKey(record.ref)}`
-    case "cardinality":
-      return `cardinality:${record.scopeSortKey}:${record.linkSortKey}`
-    case "plan":
-      return `plan:${record.item.kind}:${record.sortKey}`
-    case "event":
-      return `event:${record.eventKindRank}:${record.sortKey}`
-  }
-}
-
-function comparePlanWork(
-  left: MaterializationPlanWorkRecord,
-  right: MaterializationPlanWorkRecord
-): number {
-  return (
-    left.applyPhase - right.applyPhase ||
-    planKindOrder(left.item.kind) - planKindOrder(right.item.kind) ||
-    left.sortKey.localeCompare(right.sortKey) ||
-    left.recordKey.localeCompare(right.recordKey)
-  )
-}
-
-function planKindOrder(kind: MaterializationPlanWorkItem["kind"]): number {
-  switch (kind) {
-    case "object-override-upsert":
-      return 0
-    case "object-override-delete":
-      return 1
-    case "link-override-upsert":
-      return 2
-    case "link-override-delete":
-      return 3
-    case "point-upsert":
-      return 4
-    case "link-delete":
-      return 5
-    case "object-delete":
-      return 6
-    case "object-upsert":
-      return 7
-    case "link-upsert":
-      return 8
-  }
-}
-
-function compareCardinalityWork(
-  left: MaterializationCardinalityOccupantWorkRecord,
-  right: MaterializationCardinalityOccupantWorkRecord
-): number {
-  return (
-    left.scopeSortKey.localeCompare(right.scopeSortKey) ||
-    left.linkSortKey.localeCompare(right.linkSortKey) ||
-    left.recordKey.localeCompare(right.recordKey)
-  )
-}
-
-function compareEventWork(
-  left: MaterializationEventWorkRecord,
-  right: MaterializationEventWorkRecord
-): number {
-  return (
-    left.eventKindRank - right.eventKindRank ||
-    left.sortKey.localeCompare(right.sortKey) ||
-    left.recordKey.localeCompare(right.recordKey)
-  )
-}
-
-function planPhaseMatches(record: MaterializationPlanWorkRecord): boolean {
-  switch (record.item.kind) {
-    case "object-override-upsert":
-    case "object-override-delete":
-    case "link-override-upsert":
-    case "link-override-delete":
-      return record.applyPhase === 0
-    case "point-upsert":
-      return record.applyPhase === 1
-    case "link-delete":
-      return record.applyPhase === 2
-    case "object-delete":
-      return record.applyPhase === 3
-    case "object-upsert":
-      return record.applyPhase === 4
-    case "link-upsert":
-      return record.applyPhase === 5
-  }
-}
-
-function assertMaterializationHeader(header: MaterializationPlanHeader): void {
-  const { commit } = header
-  assertNonblank(commit.projectId, "Materialization project id")
-  assertNonblank(commit.id, "Materialization commit id")
-  assertNonblank(commit.idempotencyKey, "Materialization idempotency key")
-  assertNonblank(commit.requestHash, "Materialization request hash")
-  assertNonblank(commit.ontologyRevision, "Materialization ontology revision")
-  assertTimestamp(commit.committedAt, "Materialization commit time")
-  if (commit.intent.kind === "edit") {
-    if (commit.origin.kind !== "action" && commit.origin.kind !== "runtime") {
-      invalidCorrelation("Edit commit origin does not correlate with its intent.")
-    }
-    if (!Number.isSafeInteger(commit.intent.operationCount) || commit.intent.operationCount < 0) {
-      invalidCorrelation("Edit commit operation count is invalid.")
-    }
-    if (commit.origin.kind === "action") {
-      assertNonblank(commit.origin.actionId, "Action origin action id")
-      assertNonblank(commit.origin.runId, "Action origin run id")
-    } else {
-      assertNonblank(commit.origin.requestId, "Runtime origin request id")
-    }
-  } else if (commit.intent.kind === "projection") {
-    if (
-      commit.origin.kind !== "projection" ||
-      commit.origin.projectionId !== commit.intent.source.projectionId ||
-      commit.origin.datasetId !== commit.intent.datasetVersion.datasetId ||
-      commit.origin.datasetVersionId !== commit.intent.datasetVersion.versionId ||
-      !commit.projectionRevision ||
-      !commit.ownershipHash
-    ) {
-      invalidCorrelation("Projection commit metadata does not correlate with its intent.")
-    }
-    assertNonblank(commit.origin.projectionRunId, "Projection run id")
-    assertTimestamp(commit.intent.datasetVersion.createdAt, "Projection dataset version createdAt")
-  } else {
-    if (commit.origin.kind !== "telemetry") {
-      invalidCorrelation("Telemetry commit origin does not correlate with its intent.")
-    }
-    if (
-      !Number.isSafeInteger(commit.intent.pointCount) ||
-      commit.intent.pointCount < 0 ||
-      !Number.isSafeInteger(commit.intent.inputPointCount) ||
-      commit.intent.inputPointCount < commit.intent.pointCount
-    ) {
-      invalidCorrelation("Telemetry commit point counts are invalid.")
-    }
-    if (commit.intent.source.kind === "projection") {
-      if (
-        commit.origin.source.kind !== "projection" ||
-        commit.intent.source.projection.projectionId !== commit.origin.source.projectionId ||
-        commit.intent.source.datasetVersion.datasetId !== commit.origin.source.datasetId ||
-        commit.intent.source.datasetVersion.versionId !== commit.origin.source.datasetVersionId ||
-        commit.intent.source.batchOrdinal !== commit.origin.source.batchOrdinal ||
-        !Number.isSafeInteger(commit.intent.source.batchOrdinal) ||
-        commit.intent.source.batchOrdinal < 0 ||
-        !Number.isSafeInteger(commit.intent.source.sourceRowCount) ||
-        commit.intent.source.sourceRowCount <= 0 ||
-        commit.intent.source.sourceRowCount < commit.intent.inputPointCount ||
-        typeof commit.intent.source.inputExhausted !== "boolean" ||
-        !commit.projectionRevision ||
-        !commit.ownershipHash
-      ) {
-        invalidCorrelation("Projection telemetry metadata does not correlate with its intent.")
-      }
-      assertNonblank(commit.origin.source.projectionRunId, "Telemetry projection run id")
-      assertTimestamp(
-        commit.intent.source.datasetVersion.createdAt,
-        "Telemetry dataset version createdAt"
-      )
-    } else if (
-      commit.origin.source.kind !== "runtime" ||
-      commit.projectionRevision !== undefined ||
-      commit.ownershipHash !== undefined
-    ) {
-      invalidCorrelation("Runtime telemetry commit contains projection-only metadata.")
-    }
-  }
-}
-
-function assertPlanChunkCorrelations(
-  chunk: import("../materializations").MaterializationPlanChunk,
-  commit: MaterializationPlanHeader["commit"]
-): void {
-  for (const value of chunk.overrides.objectUpserts) {
-    assertCommitWriteCorrelation(value.lastCommitId, value.updatedAt, commit, "Object override")
-  }
-  for (const value of chunk.overrides.linkUpserts) {
-    assertCommitWriteCorrelation(value.lastCommitId, value.updatedAt, commit, "Link override")
-  }
-  for (const value of chunk.effective.objectUpserts) {
-    assertObjectRefEqual(value.row.ref, value.expected.ref, "Effective object upsert")
-    assertCommitWriteCorrelation(
-      value.row.lastCommitId,
-      value.row.updatedAt,
-      commit,
-      "Effective object"
-    )
-  }
-  for (const value of chunk.effective.objectDeletes) {
-    assertObjectRefEqual(value.ref, value.expected.ref, "Effective object delete")
-  }
-  for (const value of chunk.effective.linkUpserts) {
-    assertLinkRefEqual(value.row.ref, value.expected.ref, "Effective link upsert")
-    assertCommitWriteCorrelation(
-      value.row.lastCommitId,
-      value.row.updatedAt,
-      commit,
-      "Effective link"
-    )
-  }
-  for (const value of chunk.effective.linkDeletes) {
-    assertLinkRefEqual(value.ref, value.expected.ref, "Effective link delete")
-  }
-  for (const value of chunk.timeseries.pointUpserts) assertPointWriteCorrelation(value, commit)
-  for (const value of chunk.outbox) assertOutboxCorrelation(value, commit)
-}
-
-function assertPlanItemCorrelation(
-  item: import("../materializations").MaterializationPlanWorkItem,
-  commit: MaterializationPlanHeader["commit"]
-): void {
-  switch (item.kind) {
-    case "object-override-upsert":
-      assertCommitWriteCorrelation(
-        item.value.lastCommitId,
-        item.value.updatedAt,
-        commit,
-        "Object override"
-      )
-      return
-    case "object-override-delete":
-      return
-    case "link-override-upsert":
-      assertCommitWriteCorrelation(
-        item.value.lastCommitId,
-        item.value.updatedAt,
-        commit,
-        "Link override"
-      )
-      return
-    case "link-override-delete":
-      return
-    case "object-upsert":
-      assertObjectRefEqual(item.value.row.ref, item.value.expected.ref, "Effective object upsert")
-      assertCommitWriteCorrelation(
-        item.value.row.lastCommitId,
-        item.value.row.updatedAt,
-        commit,
-        "Effective object"
-      )
-      return
-    case "object-delete":
-      assertObjectRefEqual(item.value.ref, item.value.expected.ref, "Effective object delete")
-      return
-    case "link-upsert":
-      assertLinkRefEqual(item.value.row.ref, item.value.expected.ref, "Effective link upsert")
-      assertCommitWriteCorrelation(
-        item.value.row.lastCommitId,
-        item.value.row.updatedAt,
-        commit,
-        "Effective link"
-      )
-      return
-    case "link-delete":
-      assertLinkRefEqual(item.value.ref, item.value.expected.ref, "Effective link delete")
-      return
-    case "point-upsert":
-      assertPointWriteCorrelation(item.value, commit)
-      return
-  }
-}
-
-function assertPointWriteCorrelation(
-  value: import("../materializations").ExactTimeseriesPointWrite,
-  commit: MaterializationPlanHeader["commit"]
-): void {
-  if (
-    telemetryPointKey(value.point.series, value.point.at) !==
-    telemetryPointKey(value.expected.series, value.expected.at)
-  ) {
-    invalidCorrelation("Timeseries point write does not match its expected identity.")
-  }
-  assertTimestamp(value.point.at, "Timeseries point timestamp")
-  if (value.point.lastCommitId !== commit.id) {
-    invalidCorrelation("Timeseries point last commit id does not match its session commit.")
-  }
-}
-
-function assertOutboxCorrelation(
-  value: import("../outbox").OntologyOutboxWrite,
-  commit: MaterializationPlanHeader["commit"]
-): void {
-  const { envelope } = value
-  if (
-    envelope.projectId !== commit.projectId ||
-    envelope.commitId !== commit.id ||
-    envelope.occurredAt !== commit.committedAt ||
-    value.availableAt !== commit.committedAt ||
-    value.createdAt !== commit.committedAt ||
-    stableJsonStringify(envelope.origin) !== stableJsonStringify(commit.origin) ||
-    stableJsonStringify(envelope.actor ?? null) !== stableJsonStringify(commit.actor ?? null) ||
-    !Number.isSafeInteger(envelope.commitOrdinal) ||
-    envelope.commitOrdinal < 0 ||
-    envelope.id !== createEventId(commit.projectId, commit.id, envelope.commitOrdinal)
-  ) {
-    invalidCorrelation("Outbox event does not correlate with its materialization commit.")
-  }
-}
-
-function assertFinalizationCorrelations(
-  session: SessionState,
-  finalization: import("../materializations").MaterializationPlanFinalization,
-  state: InMemoryOntologyState,
-  objects: InMemoryObjectStorage
-): void {
-  const { commit } = session.header
-  const { result, sourceActivations } = finalization
-  if (
-    result.commitId !== commit.id ||
-    result.kind !== commit.intent.kind ||
-    result.created !== true ||
-    !Number.isSafeInteger(result.eventCount) ||
-    result.eventCount < 0 ||
-    result.eventCount !== session.outboxCount
-  ) {
-    invalidCorrelation("Materialization result does not correlate with its commit intent.")
-  }
-  for (let ordinal = 0; ordinal < result.eventCount; ordinal += 1) {
-    if (!session.outboxOrdinals.has(ordinal)) {
-      invalidCorrelation("Outbox event ordinals must be contiguous from zero.")
-    }
-  }
-
-  if (commit.intent.kind === "edit") {
-    if (result.kind !== "edit" || result.outcomes.length !== commit.intent.operationCount) {
-      invalidCorrelation("Edit result does not correlate with its operation count.")
-    }
-    if (sourceActivations.length !== 0) {
-      invalidCorrelation("Edit materialization cannot activate a source materialization.")
-    }
-  } else if (commit.intent.kind === "projection") {
-    if (result.kind !== "projection" || sourceActivations.length !== 1) {
-      invalidCorrelation("Projection result requires exactly one correlated source activation.")
-    }
-  } else if (result.kind !== "telemetry" || sourceActivations.length !== 0) {
-    invalidCorrelation("Telemetry result does not correlate with its point intent.")
-  }
-
-  for (const activation of sourceActivations) {
-    assertSourceActivationCorrelation(activation, session, state)
-  }
-  if (sourceActivations[0]) {
-    assertReplacementFullyStreamed(session, sourceActivations[0])
-  }
-  assertFinalizedWork(session, state, objects)
-  if (commit.intent.kind === "projection") {
-    if (result.kind !== "projection" || !projectionCountsCorrelate(session, result.counts)) {
-      invalidCorrelation("Projection result counts do not correlate with finalized work.")
-    }
-  } else if (
-    commit.intent.kind === "telemetry" &&
-    (result.kind !== "telemetry" ||
-      !telemetryCountsCorrelate(session, commit.intent.pointCount, result))
-  ) {
-    invalidCorrelation("Telemetry result counts do not correlate with finalized work.")
-  }
-}
-
-function projectionCountsCorrelate(session: SessionState, actual: EffectiveChangeCounts): boolean {
-  const expected = deriveExpectedProjectionCounts(session)
-  if (expected === null) return false
-
-  return effectiveChangeCountsMatch(actual, expected)
-}
-
-interface ClassifiedProjectionCounts {
-  objects: number
-  links: number
-}
-
-interface AppliedProjectionChangeCounts {
-  objectsCreated: number
-  objectsUpdated: number
-  objectsDeleted: number
-  linksCreated: number
-  linksUpdated: number
-  linksDeleted: number
-}
-
-const effectiveChangeCountKeys = [
-  "objectsCreated",
-  "objectsUpdated",
-  "objectsDeleted",
-  "objectsUnchanged",
-  "linksCreated",
-  "linksUpdated",
-  "linksDeleted",
-  "linksUnchanged",
-] as const satisfies readonly (keyof EffectiveChangeCounts)[]
-
-function deriveExpectedProjectionCounts(session: SessionState): EffectiveChangeCounts | null {
-  const classified = countClassifiedProjectionEntities(session)
-  const applied = countAppliedProjectionChanges(session)
-  const objectsUnchanged = remainingClassifiedCount(
-    classified.objects,
-    applied.objectsCreated,
-    applied.objectsUpdated,
-    applied.objectsDeleted
-  )
-  const linksUnchanged = remainingClassifiedCount(
-    classified.links,
-    applied.linksCreated,
-    applied.linksUpdated,
-    applied.linksDeleted
-  )
-
-  if (objectsUnchanged < 0 || linksUnchanged < 0) return null
-
-  return { ...applied, objectsUnchanged, linksUnchanged }
-}
-
-function countClassifiedProjectionEntities(session: SessionState): ClassifiedProjectionCounts {
-  const counts = { objects: 0, links: 0 }
-
-  for (const record of session.work.values()) {
-    if (record.kind !== "classification") continue
-
-    if (record.entityKind === "object") counts.objects += 1
-    if (record.entityKind === "link") counts.links += 1
-  }
-
-  return counts
-}
-
-function countAppliedProjectionChanges(session: SessionState): AppliedProjectionChangeCounts {
-  const counts: AppliedProjectionChangeCounts = {
-    objectsCreated: 0,
-    objectsUpdated: 0,
-    objectsDeleted: 0,
-    linksCreated: 0,
-    linksUpdated: 0,
-    linksDeleted: 0,
-  }
-
-  for (const work of session.applyWork) {
-    const { item } = work
-
-    switch (item.kind) {
-      case "object-upsert":
-        if (item.value.expected.exists) counts.objectsUpdated += 1
-        else counts.objectsCreated += 1
-        break
-      case "object-delete":
-        counts.objectsDeleted += 1
-        break
-      case "link-upsert":
-        if (item.value.expected.exists) counts.linksUpdated += 1
-        else counts.linksCreated += 1
-        break
-      case "link-delete":
-        counts.linksDeleted += 1
-        break
-    }
-  }
-
-  return counts
-}
-
-function remainingClassifiedCount(
-  classified: number,
-  created: number,
-  updated: number,
-  deleted: number
-): number {
-  return classified - created - updated - deleted
-}
-
-function effectiveChangeCountsMatch(
-  actual: EffectiveChangeCounts,
-  expected: EffectiveChangeCounts
-): boolean {
-  return effectiveChangeCountKeys.every((key) => {
-    const count = actual[key]
-    return Number.isSafeInteger(count) && count >= 0 && count === expected[key]
-  })
-}
-
-function telemetryCountsCorrelate(
-  session: SessionState,
-  pointCount: number,
-  actual: TelemetryCommitResult
-): boolean {
-  let pointsCreated = 0
-  let pointsUpdated = 0
-  let latestObjectsChanged = 0
-  for (const work of session.applyWork) {
-    if (work.item.kind === "point-upsert") {
-      if (work.item.value.expected.lastCommitId === null) pointsCreated += 1
-      else pointsUpdated += 1
-    } else if (work.item.kind === "object-upsert") {
-      latestObjectsChanged += 1
-    }
-  }
-  const expected = {
-    pointsCreated,
-    pointsUpdated,
-    pointsUnchanged: pointCount - pointsCreated - pointsUpdated,
-    latestObjectsChanged,
-  }
-  return (
-    expected.pointsUnchanged >= 0 &&
-    (Object.keys(expected) as (keyof typeof expected)[]).every(
-      (key) =>
-        Number.isSafeInteger(actual[key]) && actual[key] >= 0 && actual[key] === expected[key]
-    )
-  )
-}
-
-function assertSourceActivationCorrelation(
-  activation: import("../materializations").SourceActivationWrite,
-  session: SessionState,
-  state: InMemoryOntologyState
-): void {
-  const { header } = session
-  const { commit } = header
-  if (
-    commit.intent.kind !== "projection" ||
-    commit.origin.kind !== "projection" ||
-    activation.source.projectionId !== commit.intent.source.projectionId ||
-    activation.source.projectionId !== commit.origin.projectionId ||
-    activation.execution.projectionRunId !== commit.origin.projectionRunId ||
-    activation.protocol !== "replacement" ||
-    stableJsonStringify(activation.datasetVersion) !==
-      stableJsonStringify(commit.intent.datasetVersion) ||
-    activation.projectionRevision !== commit.projectionRevision ||
-    activation.ownershipHash !== commit.ownershipHash ||
-    activation.ontologyRevision !== commit.ontologyRevision ||
-    activation.lastCommitId !== commit.id ||
-    activation.updatedAt !== commit.committedAt ||
-    !header.expected.sources.some(
-      (expected) => stableJsonStringify(expected) === stableJsonStringify(activation.expected)
-    )
-  ) {
-    invalidCorrelation("Source activation does not correlate with its projection commit.")
-  }
-  const candidate = state.sourceMaterializations.get(
-    sourceMaterializationKey(
-      commit.projectId,
-      activation.source.projectionId,
-      activation.materializationId
-    )
-  )
-  if (!candidate || candidate.status !== "ready") {
-    throw new MaterializationConflictError(
-      "source-materialization",
-      "Source activation candidate is missing or is not ready."
-    )
-  }
-  if (
-    candidate.projectionRunId !== activation.execution.projectionRunId ||
-    candidate.executionToken !== activation.execution.executionToken ||
-    candidate.projectionKind !== activation.projectionKind ||
-    candidate.protocol !== activation.protocol ||
-    stableJsonStringify(candidate.datasetVersion) !==
-      stableJsonStringify(activation.datasetVersion) ||
-    candidate.projectionRevision !== activation.projectionRevision ||
-    candidate.ownershipHash !== activation.ownershipHash ||
-    candidate.ontologyRevision !== activation.ontologyRevision
-  ) {
-    invalidCorrelation("Source activation does not match its ready candidate identity.")
-  }
-  if (candidate.readyAt === null) {
-    invalidCorrelation("Source activation candidate has no ready timestamp.")
-  }
-  assertTimestampNotBefore(
-    activation.updatedAt,
-    candidate.readyAt,
-    "Source activation cannot precede candidate readiness."
-  )
-  const previous = findActiveSourceMaterialization(
-    state,
-    commit.projectId,
-    activation.source.projectionId
-  )
-  if (previous) {
-    assertSourceDatasetWatermark(previous.datasetVersion, activation.datasetVersion)
-    assertTimestampNotBefore(
-      activation.updatedAt,
-      previous.updatedAt,
-      "Source activation cannot precede the active materialization update."
-    )
-  }
-}
-
-function assertSourceDatasetWatermark(
-  active: PinnedDatasetVersion,
-  next: PinnedDatasetVersion
-): void {
-  if (active.datasetId !== next.datasetId) {
-    throw new MaterializationConflictError(
-      "projection-fence",
-      "Source activation dataset does not match the active source dataset."
-    )
-  }
-  if (active.versionId === next.versionId && active.createdAt !== next.createdAt) {
-    throw new MaterializationConflictError(
-      "projection-fence",
-      "Source activation reused an immutable dataset version id with different metadata."
-    )
-  }
-  if (next.createdAt < active.createdAt) {
-    throw new MaterializationConflictError(
-      "projection-fence",
-      "Source activation dataset version is older than the active watermark."
-    )
-  }
-  if (next.createdAt === active.createdAt && next.versionId !== active.versionId) {
-    throw new MaterializationConflictError(
-      "projection-fence",
-      "Source activation dataset watermark is ambiguous."
-    )
-  }
-}
-
-function assertFinalizedWork(
-  session: SessionState,
-  state: InMemoryOntologyState,
-  objects: InMemoryObjectStorage
-): void {
-  const expectedPlanItems = session.applyWork.map((record) => stableJsonStringify(record.item))
-  const appliedPlanItems = session.appliedPlanItems
-  if (expectedPlanItems.length > 0 && !session.workStreams.apply.completed) {
-    invalidCorrelation("Materialization plan work was not fully streamed.")
-  }
-  if (stableJsonStringify(appliedPlanItems) !== stableJsonStringify(expectedPlanItems)) {
-    invalidCorrelation("Materialization plan work was not applied exactly once.")
-  }
-  if (session.cardinalityWork.length > 0 && !session.workStreams.cardinality.completed) {
-    invalidCorrelation("Materialization cardinality work was not fully validated.")
-  }
-  assertFinalCardinality(session.cardinalityWork, session.header.commit.projectId, objects)
-  if (session.header.commit.intent.kind === "telemetry") {
-    const pointKeys = classificationKeys(session, "point")
-    if (pointKeys.length !== session.header.commit.intent.pointCount) {
-      invalidCorrelation(
-        "Telemetry point classification coverage does not match the commit intent."
-      )
-    }
-  }
-
-  const expectedEvents = [...session.eventWork].sort(compareEventWork)
-  if (expectedEvents.length > 0 && !session.workStreams.event.completed) {
-    invalidCorrelation("Materialization event work was not fully drained.")
-  }
-  if (session.outboxEnvelopes.size !== expectedEvents.length) {
-    invalidCorrelation("Materialization event work was not fully written to the outbox.")
-  }
-  for (let ordinal = 0; ordinal < expectedEvents.length; ordinal += 1) {
-    const expected = expectedEvents[ordinal]
-    const actual = session.outboxEnvelopes.get(ordinal)
-    if (!expected || !actual) {
-      invalidCorrelation("Materialization event work was not fully written to the outbox.")
-    }
-    const { id, commitOrdinal, ...actualDraft } = actual
-    if (
-      commitOrdinal !== ordinal ||
-      id !== createEventId(session.header.commit.projectId, session.header.commit.id, ordinal) ||
-      stableJsonStringify(actualDraft) !== stableJsonStringify(expected.draft)
-    ) {
-      invalidCorrelation("Materialization outbox event does not match its staged event work.")
-    }
-    const persisted = state.outbox.get(outboxKey(session.header.commit.projectId, actual.id))
-    if (!persisted || stableJsonStringify(persisted.envelope) !== stableJsonStringify(actual)) {
-      invalidCorrelation("Materialization outbox event was not persisted.")
-    }
-  }
-}
-
-function assertFinalCardinality(
-  records: readonly MaterializationCardinalityOccupantWorkRecord[],
-  projectId: string,
-  objects: InMemoryObjectStorage
-): void {
-  const scopes = new Map<
-    string,
-    {
-      readonly source: OntologyObjectRef
-      readonly linkId: string
-      readonly occupiedLinkKeys: Set<string>
-    }
-  >()
-  let currentScope: string | null = null
-  let occupiedCount = 0
-  for (const record of records) {
-    if (record.scopeSortKey !== currentScope) {
-      currentScope = record.scopeSortKey
-      occupiedCount = 0
-    }
-    const scope = scopes.get(record.scopeSortKey) ?? {
-      source: structuredClone(record.ref.source),
-      linkId: record.ref.linkId,
-      occupiedLinkKeys: new Set<string>(),
-    }
-    scopes.set(record.scopeSortKey, scope)
-    if (record.occupied) {
-      occupiedCount += 1
-      scope.occupiedLinkKeys.add(record.linkSortKey)
-      if (occupiedCount > 1) {
-        invalidCorrelation("Materialization cardinality work violates cardinality-one.")
-      }
-    }
-  }
-
-  const adapter = getInMemoryObjectMaterializerAdapter(objects)
-  for (const scope of scopes.values()) {
-    const effectiveLinkKeys: string[] = []
-    adapter.visitExactScopeLinks(
-      projectId,
-      scope.source.objectTypeId,
-      scope.source.primaryId,
-      scope.linkId,
-      (row) => effectiveLinkKeys.push(linkRefSortKey(linkRef(row)))
-    )
-    effectiveLinkKeys.sort()
-    const occupiedLinkKeys = [...scope.occupiedLinkKeys].sort()
-    if (stableJsonStringify(effectiveLinkKeys) !== stableJsonStringify(occupiedLinkKeys)) {
-      invalidCorrelation(
-        "Materialization cardinality work does not match the final effective link scope."
-      )
-    }
-  }
-}
-
-function assertReplacementFullyStreamed(
-  session: SessionState,
-  activation: import("../materializations").SourceActivationWrite
-): void {
-  const replacement = session.replacement
-  if (
-    !replacement ||
-    replacement.sourceId !== activation.source.projectionId ||
-    replacement.candidateMaterializationId !== activation.materializationId ||
-    replacement.candidate.materializationId !== activation.materializationId ||
-    replacement.candidate.projectionKind !== activation.projectionKind ||
-    replacement.candidate.protocol !== activation.protocol
-  ) {
-    invalidCorrelation(
-      "Source activation does not match the replacement candidate opened by the session."
-    )
-  }
-  if (
-    activation.projectionKind === "object" &&
-    (!replacement.objectStreamCompleted || !replacement.linkStreamCompleted)
-  ) {
-    invalidCorrelation("Object projection replacement state was not fully streamed.")
-  }
-  if (activation.projectionKind === "link" && !replacement.linkStreamCompleted) {
-    invalidCorrelation("Link projection replacement state was not fully streamed.")
-  }
-  const expectedObjectKeys =
-    activation.projectionKind === "object" ? [...replacement.objects.keys()].sort() : []
-  const expectedLinkKeys = [...replacement.links.entries()]
-    .filter(([, value]) => value.diffRequired)
-    .map(([key]) => key)
-    .sort()
-  if (
-    stableJsonStringify(classificationKeys(session, "object")) !==
-      stableJsonStringify(expectedObjectKeys) ||
-    stableJsonStringify(classificationKeys(session, "link")) !==
-      stableJsonStringify(expectedLinkKeys) ||
-    classificationKeys(session, "point").length > 0
-  ) {
-    invalidCorrelation(
-      "Projection replacement classification coverage does not match its streamed state."
-    )
-  }
-}
-
-function classificationKeys(
-  session: SessionState,
-  entityKind: import("../materializations").MaterializationWorkEntityKind
-): string[] {
-  return [...session.work.values()]
-    .filter(
-      (record): record is import("../materializations").MaterializationClassificationWorkRecord =>
-        record.kind === "classification" && record.entityKind === entityKind
-    )
-    .map((record) => record.identityKey)
-    .sort()
-}
-
-function assertTimestampNotBefore(value: string, minimum: string, message: string): void {
-  if (Date.parse(value) < Date.parse(minimum)) invalidCorrelation(message)
-}
-
-function assertCommitWriteCorrelation(
-  lastCommitId: string,
-  updatedAt: string,
-  commit: MaterializationPlanHeader["commit"],
-  label: string
-): void {
-  if (lastCommitId !== commit.id || updatedAt !== commit.committedAt) {
-    invalidCorrelation(`${label} provenance does not match its session commit.`)
-  }
-}
-
-function assertObjectRefEqual(
-  left: OntologyObjectRef,
-  right: OntologyObjectRef,
-  label: string
-): void {
-  if (objectRefKey(left) !== objectRefKey(right)) {
-    invalidCorrelation(`${label} row and expected references differ.`)
-  }
-}
-
-function assertLinkRefEqual(left: OntologyLinkRef, right: OntologyLinkRef, label: string): void {
-  if (linkRefKey(left) !== linkRefKey(right)) {
-    invalidCorrelation(`${label} row and expected references differ.`)
-  }
-}
-
-function assertNonblank(value: string, label: string): void {
-  if (value.trim().length === 0) invalidCorrelation(`${label} must be nonblank.`)
-}
-
-function invalidCorrelation(message: string): never {
-  throw new MaterializationValidationError(message)
 }

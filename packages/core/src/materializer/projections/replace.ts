@@ -1,3 +1,4 @@
+import { assertPinnedDatasetWatermark } from "../../materialization/dataset-watermark"
 import {
   MaterializationCancellationError,
   MaterializationConflictError,
@@ -13,11 +14,7 @@ import type {
   ProjectionSourceReplacement,
 } from "../../materialization/model"
 import type { ProjectionRegistry } from "../../projections/registry"
-import {
-  isProjectionMaterializationRunStorage,
-  type ProjectionRunMaterializationIdentity,
-  type Storage,
-} from "../../storage"
+import type { ProjectionRunMaterializationIdentity } from "../../storage"
 import type {
   OntologyCommitRecord,
   OntologyCommitWrite,
@@ -30,7 +27,7 @@ import {
   requireOntologyStorage,
   withSerializationRetry,
 } from "../execution/commit-lifecycle"
-import { assertProjectionRunTargets } from "../execution/run-correlation"
+import { assertProjectionMaterializationExecution } from "../execution/run-correlation"
 import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
 import {
   type CommitIdentity,
@@ -44,6 +41,7 @@ import {
   normalizeProjectionExecution,
   normalizeProjectionSourceRef,
 } from "../shared/normalize"
+import { createProjectionRunMaterializationIdentity } from "../shared/projection-run"
 import { createProjectionEntryValidator } from "./entry-validator"
 import { planProjectionReplacement } from "./replacement-plan"
 import {
@@ -87,7 +85,10 @@ export async function replaceProjection(
   raw: ProjectionSourceReplacement
 ): Promise<ProjectionCommitResult> {
   const command = prepareProjectionReplacement(context, raw)
-  await assertProjectionExecution(context.storage, context.projectId, command)
+  await assertProjectionExecution(context.storage, context.projectId, command, {
+    capabilityErrorMessage:
+      "Storage does not provide projection run capabilities required by source replacement.",
+  })
 
   const replay = await replayProjectionCommit(context, command)
   if (replay) return replay
@@ -113,12 +114,12 @@ function prepareProjectionReplacement(
   validateProjectionDataset(resolved, datasetVersion)
 
   const projectionKind = sourceProjectionKind(resolved)
-  const runIdentity = projectionRunIdentity(
-    context.projectionRegistry.ontologyRevision,
+  const runIdentity = createProjectionRunMaterializationIdentity({
+    protocol: "replacement",
     resolved,
-    projectionKind,
-    datasetVersion
-  )
+    datasetVersion,
+    ontologyRevision: context.projectionRegistry.ontologyRevision,
+  })
   const identity = createCommitIdentity({
     projectId: context.projectId,
     idempotencyKey: createProjectionIdempotencyKey({
@@ -160,40 +161,20 @@ function sourceProjectionKind(resolved: ResolvedSourceProjection): "object" | "l
   return "link"
 }
 
-function projectionRunIdentity(
-  ontologyRevision: string,
-  resolved: ResolvedSourceProjection,
-  projectionKind: "object" | "link",
-  datasetVersion: PinnedDatasetVersion
-): ProjectionRunMaterializationIdentity {
-  return {
-    projectionId: resolved.projectionId,
-    projectionKind,
-    protocol: "replacement",
-    datasetVersion,
-    ontologyRevision,
-    projectionRevision: resolved.projectionRevision,
-    ownershipHash: resolved.ownershipHash,
-  }
-}
-
 async function assertProjectionExecution(
-  storage: Storage,
+  storage: MaterializerStorage,
   projectId: string,
-  command: PreparedProjectionReplacement
+  command: PreparedProjectionReplacement,
+  options: { readonly capabilityErrorMessage?: string } = {}
 ): Promise<void> {
-  if (!isProjectionMaterializationRunStorage(storage.projectionRuns)) {
-    throw new MaterializationValidationError(
-      "Storage does not provide projection run capabilities required by source replacement."
-    )
-  }
-  const run = await storage.projectionRuns.assertMaterializationExecution({
-    id: command.execution.projectionRunId,
+  await assertProjectionMaterializationExecution(storage, {
     projectId,
+    projectionRunId: command.execution.projectionRunId,
     executionToken: command.execution.executionToken,
     identity: command.runIdentity,
+    resolved: command.resolved,
+    ...options,
   })
-  assertProjectionRunTargets(run, command.resolved)
 }
 
 async function replayProjectionCommit(
@@ -206,7 +187,7 @@ async function replayProjectionCommit(
     context.storage.transaction(
       async (txBase) => {
         const storage = requireOntologyStorage(txBase)
-        await assertProjectionExecutionInTransaction(storage, context.projectId, command)
+        await assertProjectionExecution(storage, context.projectId, command)
         const commit = await replayCommitRecord(context, command.identity, storage)
         return commit ? projectionReplayResult(commit, command) : null
       },
@@ -314,7 +295,7 @@ async function executeProjectionTransaction(
   command: PreparedProjectionReplacement,
   ready: ReadyProjectionReplacement
 ): Promise<ProjectionCommitResult> {
-  await assertProjectionExecutionInTransaction(storage, context.projectId, command)
+  await assertProjectionExecution(storage, context.projectId, command)
   const replay = await replayCommitRecord(context, command.identity, storage)
   if (replay) return projectionReplayResult(replay, command)
 
@@ -372,25 +353,6 @@ async function finalizeProjectionMaterialization(
     },
   })
   return applied.commit.result as ProjectionCommitResult
-}
-
-async function assertProjectionExecutionInTransaction(
-  storage: Storage,
-  projectId: string,
-  command: PreparedProjectionReplacement
-): Promise<void> {
-  if (!isProjectionMaterializationRunStorage(storage.projectionRuns)) {
-    throw new MaterializationValidationError(
-      "Storage transaction does not provide projection run capabilities."
-    )
-  }
-  const run = await storage.projectionRuns.assertMaterializationExecution({
-    id: command.execution.projectionRunId,
-    projectId,
-    executionToken: command.execution.executionToken,
-    identity: command.runIdentity,
-  })
-  assertProjectionRunTargets(run, command.resolved)
 }
 
 function projectionOrigin(command: PreparedProjectionReplacement): OntologyMaterializationOrigin {
@@ -497,33 +459,5 @@ function validateProjectionWatermark(
   next: PinnedDatasetVersion
 ): void {
   if (!active) return
-  if (active.datasetVersion.datasetId !== next.datasetId) {
-    throw new MaterializationConflictError(
-      "projection-fence",
-      "Projection replacement dataset does not match the active source dataset."
-    )
-  }
-  if (
-    active.datasetVersion.versionId === next.versionId &&
-    active.datasetVersion.createdAt !== next.createdAt
-  ) {
-    throw new MaterializationConflictError(
-      "projection-fence",
-      "Projection replacement reused an immutable dataset version id with different metadata."
-    )
-  }
-  const currentAt = Date.parse(active.datasetVersion.createdAt)
-  const nextAt = Date.parse(next.createdAt)
-  if (nextAt < currentAt) {
-    throw new MaterializationConflictError(
-      "projection-fence",
-      "Projection replacement dataset version is older than the active watermark."
-    )
-  }
-  if (nextAt === currentAt && active.datasetVersion.versionId !== next.versionId) {
-    throw new MaterializationConflictError(
-      "projection-fence",
-      "Projection replacement dataset watermark is ambiguous."
-    )
-  }
+  assertPinnedDatasetWatermark(active.datasetVersion, next, "Projection replacement")
 }

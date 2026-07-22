@@ -9,11 +9,10 @@ import type {
 } from "../../materialization/model"
 import { telemetryOwnershipKey } from "../../materialization/refs"
 import type { ProjectionRegistry } from "../../projections/registry"
-import {
-  isProjectionMaterializationRunStorage,
-  type ProjectionMaterializationRunRecord,
-  type ProjectionRunMaterializationIdentity,
-  type Storage,
+import type {
+  ProjectionMaterializationRunRecord,
+  ProjectionMaterializationRunStorage,
+  ProjectionRunMaterializationIdentity,
 } from "../../storage"
 import type {
   MaterializationSession,
@@ -29,7 +28,10 @@ import {
   requireOntologyStorage,
   withSerializationRetry,
 } from "../execution/commit-lifecycle"
-import { assertProjectionRunTargets } from "../execution/run-correlation"
+import {
+  type AssertedProjectionExecution,
+  assertProjectionMaterializationExecution,
+} from "../execution/run-correlation"
 import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
 import {
   createProjectionTelemetryIdempotencyKey,
@@ -38,6 +40,7 @@ import {
   type TimedCommitIdentity,
 } from "../shared/identity"
 import { normalizeTelemetryAppend } from "../shared/normalize"
+import { createProjectionRunMaterializationIdentity } from "../shared/projection-run"
 import { planTelemetryAppend } from "./plan"
 
 type NormalizedTelemetryAppend = ReturnType<typeof normalizeTelemetryAppend>
@@ -72,10 +75,10 @@ export async function appendTelemetry(
   raw: TelemetryAppend
 ): Promise<TelemetryCommitResult> {
   const command = prepareTelemetryAppend(context, raw)
-  await assertTelemetryExecution(context.storage, context.projectId, command)
-
-  const replay = await replayTelemetryCommit(context, command)
-  if (replay) return replay
+  if (command.kind === "runtime") {
+    const replay = await replayCommit<TelemetryCommitResult>(context, command.identity)
+    if (replay) return replay
+  }
 
   return executeTelemetryCommit(context, command)
 }
@@ -153,7 +156,12 @@ function prepareProjectionTelemetry(
   validateTelemetryProjectionDataset(resolvedProjection, source)
   validateTelemetryOwnership(resolvedProjection, input)
 
-  const runIdentity = telemetryRunIdentity(ontologyRevision, resolvedProjection, source)
+  const runIdentity = createProjectionRunMaterializationIdentity({
+    protocol: "telemetry",
+    resolved: resolvedProjection,
+    datasetVersion: source.datasetVersion,
+    ontologyRevision,
+  })
   const identity = createTimedCommitIdentity({
     projectId: context.projectId,
     idempotencyKey: createProjectionTelemetryIdempotencyKey({
@@ -178,22 +186,6 @@ function prepareProjectionTelemetry(
     identity,
     resolvedProjection,
     runIdentity,
-  }
-}
-
-function telemetryRunIdentity(
-  ontologyRevision: string,
-  resolved: ResolvedTelemetryProjection,
-  source: ProjectionTelemetrySource
-): ProjectionRunMaterializationIdentity {
-  return {
-    projectionId: resolved.projectionId,
-    projectionKind: "telemetry",
-    protocol: "telemetry",
-    datasetVersion: source.datasetVersion,
-    ontologyRevision,
-    projectionRevision: resolved.projectionRevision,
-    ownershipHash: resolved.ownershipHash,
   }
 }
 
@@ -247,30 +239,27 @@ function projectionTelemetryCallerIntent(
 }
 
 async function assertTelemetryExecution(
-  storage: Storage,
+  storage: MaterializerStorage,
   projectId: string,
   command: PreparedTelemetryAppend
-): Promise<ProjectionMaterializationRunRecord | null> {
+): Promise<AssertedProjectionExecution | null> {
   if (command.kind === "runtime") return null
-  if (!isProjectionMaterializationRunStorage(storage.projectionRuns)) {
-    throw new MaterializationValidationError(
-      "Storage does not provide projection run capabilities required by telemetry projection."
-    )
-  }
-  const run = await storage.projectionRuns.assertMaterializationExecution({
-    id: command.source.execution.projectionRunId,
+  const execution = await assertProjectionMaterializationExecution(storage, {
     projectId,
+    projectionRunId: command.source.execution.projectionRunId,
     executionToken: command.source.execution.executionToken,
     identity: command.runIdentity,
+    resolved: command.resolvedProjection,
+    capabilityErrorMessage:
+      "Storage does not provide projection run capabilities required by telemetry projection.",
   })
-  assertProjectionRunTargets(run, command.resolvedProjection)
   assertTelemetryBatchPosition(
-    run,
+    execution.run,
     command.source.batchOrdinal,
     command.source.sourceRowCount,
     command.source.inputExhausted
   )
-  return run
+  return execution
 }
 
 function assertTelemetryBatchPosition(
@@ -338,29 +327,6 @@ function telemetryProjectionReplayResult(
   return { ...structuredClone(commit.result), created: false }
 }
 
-async function replayTelemetryCommit(
-  context: MaterializerContext,
-  command: PreparedTelemetryAppend
-): Promise<TelemetryCommitResult | null> {
-  if (command.kind === "runtime") {
-    return replayCommit<TelemetryCommitResult>(context, command.identity)
-  }
-  return withSerializationRetry(context, () =>
-    context.storage.transaction(
-      async (txBase) => {
-        const storage = requireOntologyStorage(txBase)
-        const run = await assertTelemetryExecution(storage, context.projectId, command)
-        if (!run) throw new MaterializationValidationError("Expected a telemetry projection run.")
-        const replay = await replayCommitRecord(context, command.identity, storage)
-        if (!replay) return null
-        assertTelemetryReplayCheckpoint(run, command.source.batchOrdinal)
-        return telemetryProjectionReplayResult(replay, command)
-      },
-      { isolation: "serializable" }
-    )
-  )
-}
-
 async function executeTelemetryCommit(
   context: MaterializerContext,
   command: PreparedTelemetryAppend
@@ -378,19 +344,19 @@ async function executeTelemetryTransaction(
   storage: MaterializerStorage,
   command: PreparedTelemetryAppend
 ): Promise<TelemetryCommitResult> {
-  const run = await assertTelemetryExecutionInTransaction(storage, context.projectId, command)
+  const execution = await assertTelemetryExecution(storage, context.projectId, command)
   const replay = await replayCommitRecord(context, command.identity, storage)
   if (replay) {
-    if (command.kind === "projection" && run) {
-      assertTelemetryReplayCheckpoint(run, command.source.batchOrdinal)
+    if (command.kind === "projection" && execution) {
+      assertTelemetryReplayCheckpoint(execution.run, command.source.batchOrdinal)
       return telemetryProjectionReplayResult(replay, command)
     }
     return { ...structuredClone(replay.result), created: false } as TelemetryCommitResult
   }
   if (command.kind === "projection") {
     if (
-      !run?.telemetryCheckpoint ||
-      run.telemetryCheckpoint.nextBatchOrdinal !== command.source.batchOrdinal
+      !execution?.run.telemetryCheckpoint ||
+      execution.run.telemetryCheckpoint.nextBatchOrdinal !== command.source.batchOrdinal
     ) {
       throw new MaterializationValidationError(
         `Telemetry projection batch ${command.source.batchOrdinal} is behind its run checkpoint.`
@@ -422,34 +388,13 @@ async function executeTelemetryTransaction(
     eventCount,
     ...counts,
   }
-  return finalizeTelemetryMaterialization(storage, session, command, result)
-}
-
-async function assertTelemetryExecutionInTransaction(
-  storage: Storage,
-  projectId: string,
-  command: PreparedTelemetryAppend
-): Promise<ProjectionMaterializationRunRecord | null> {
-  if (command.kind === "runtime") return null
-  if (!isProjectionMaterializationRunStorage(storage.projectionRuns)) {
-    throw new MaterializationValidationError(
-      "Storage transaction does not provide projection run capabilities."
-    )
-  }
-  const run = await storage.projectionRuns.assertMaterializationExecution({
-    id: command.source.execution.projectionRunId,
-    projectId,
-    executionToken: command.source.execution.executionToken,
-    identity: command.runIdentity,
-  })
-  assertProjectionRunTargets(run, command.resolvedProjection)
-  assertTelemetryBatchPosition(
-    run,
-    command.source.batchOrdinal,
-    command.source.sourceRowCount,
-    command.source.inputExhausted
+  return finalizeTelemetryMaterialization(
+    storage,
+    session,
+    command,
+    result,
+    execution?.projectionRuns
   )
-  return run
 }
 
 function telemetryOrigin(command: PreparedTelemetryAppend): OntologyMaterializationOrigin {
@@ -547,7 +492,8 @@ async function finalizeTelemetryMaterialization(
   storage: MaterializerStorage,
   session: MaterializationSession,
   command: PreparedTelemetryAppend,
-  result: TelemetryCommitResult
+  result: TelemetryCommitResult,
+  projectionRuns: ProjectionMaterializationRunStorage | undefined
 ): Promise<TelemetryCommitResult> {
   if (command.kind === "runtime") {
     const applied = await storage.ontology.materializations.finalize({
@@ -561,12 +507,10 @@ async function finalizeTelemetryMaterialization(
     session,
     finalization: { sourceActivations: [], result },
   })
-  if (!isProjectionMaterializationRunStorage(storage.projectionRuns)) {
-    throw new MaterializationValidationError(
-      "Storage transaction does not provide projection run capabilities."
-    )
+  if (!projectionRuns) {
+    throw new MaterializationValidationError("Expected an asserted telemetry projection run.")
   }
-  await storage.projectionRuns.advanceTelemetryCheckpoint({
+  await projectionRuns.advanceTelemetryCheckpoint({
     id: command.source.execution.projectionRunId,
     projectId: applied.commit.projectId,
     executionToken: command.source.execution.executionToken,

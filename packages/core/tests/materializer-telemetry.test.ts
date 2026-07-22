@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryTimeseriesStorage } from "../src"
+import { InMemoryStorage, InMemoryTimeseriesStorage } from "../src"
 import type { StoredTelemetryAppendedEvent } from "../src/events"
+import type { Storage, StorageTransactionOptions } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import {
   claimProjectionExecution,
@@ -16,6 +17,57 @@ const series = {
 }
 
 describe("ontology materializer telemetry", () => {
+  test("correlates durable targets for telemetry batches and terminal decisions", async () => {
+    const { materializer, storage, projections } = createMaterializerFixture()
+    const resolved = projections.resolveTelemetry("temperatures")
+    const datasetVersion = {
+      datasetId: "readings",
+      versionId: "wrong-telemetry-target",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }
+    const run = await storage.projectionRuns.startOrReclaimMaterialization({
+      id: "wrong-telemetry-target-run",
+      projectId: "project",
+      identity: {
+        projectionId: resolved.projectionId,
+        projectionKind: "telemetry",
+        protocol: "telemetry",
+        datasetVersion,
+        ontologyRevision: projections.ontologyRevision,
+        projectionRevision: resolved.projectionRevision,
+        ownershipHash: resolved.ownershipHash,
+      },
+      objectTypeId: "Secret",
+      fixedBatchSize: 1,
+    })
+    if (!run.executionToken) throw new Error("Projection run was not claimed")
+    const execution = { projectionRunId: run.id, executionToken: run.executionToken }
+
+    await expect(
+      materializer.telemetry.append({
+        source: {
+          kind: "projection",
+          projection: { projectionId: "temperatures" },
+          datasetVersion,
+          execution,
+          batchOrdinal: 0,
+          sourceRowCount: 1,
+          inputExhausted: true,
+        },
+        points: [{ series, value: 20, at: "2026-01-01T01:00:00Z" }],
+      })
+    ).rejects.toMatchObject({ kind: "run-correlation" })
+    await expect(
+      materializer.projections.finishRun({
+        protocol: "telemetry",
+        source: { projectionId: "temperatures" },
+        datasetVersion,
+        execution,
+        status: "failed",
+      })
+    ).rejects.toMatchObject({ kind: "run-correlation" })
+  })
+
   test("finishes telemetry only after exhaustion or an explicit empty input", async () => {
     const { materializer, storage, projections } = createMaterializerFixture()
     const datasetVersion = {
@@ -383,6 +435,78 @@ describe("ontology materializer telemetry", () => {
         propertyId: "temperature",
       })
     ).toHaveLength(2)
+  })
+
+  test("uses one fenced transaction per projection batch and keeps runtime replay cheap", async () => {
+    class TransactionCountingStorage extends InMemoryStorage {
+      transactions: (StorageTransactionOptions | undefined)[] = []
+
+      override async transaction<T>(
+        run: (tx: Storage) => Promise<T> | T,
+        options?: StorageTransactionOptions
+      ): Promise<T> {
+        this.transactions.push(options)
+        return super.transaction(run, options)
+      }
+    }
+
+    const storage = new TransactionCountingStorage()
+    const { materializer, projections } = createMaterializerFixture({ storage })
+    await materializer.projections.replace(
+      replacement("telemetry-one-transaction", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
+    )
+    const datasetVersion = {
+      datasetId: "readings",
+      versionId: "one-transaction-v1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }
+    const execution = await claimProjectionExecution(storage, projections, {
+      runId: "telemetry-one-transaction-run",
+      projectionId: "temperatures",
+      protocol: "telemetry",
+      datasetVersion,
+      fixedBatchSize: 1,
+    })
+    const projectionAppend = {
+      source: {
+        kind: "projection" as const,
+        projection: { projectionId: "temperatures" },
+        datasetVersion,
+        execution,
+        batchOrdinal: 0,
+        sourceRowCount: 1,
+        inputExhausted: true,
+      },
+      points: [{ series, value: 20, at: "2026-01-01T01:00:00Z" }],
+    }
+
+    storage.transactions = []
+    await expect(materializer.telemetry.append(projectionAppend)).resolves.toMatchObject({
+      created: true,
+    })
+    expect(storage.transactions).toEqual([{ isolation: "serializable" }])
+
+    storage.transactions = []
+    await expect(materializer.telemetry.append(projectionAppend)).resolves.toMatchObject({
+      created: false,
+    })
+    expect(storage.transactions).toEqual([{ isolation: "serializable" }])
+
+    const runtimeAppend = {
+      source: { kind: "runtime" as const, requestId: "runtime-cheap-replay" },
+      points: [{ series, value: 21, at: "2026-01-01T02:00:00Z" }],
+    }
+    storage.transactions = []
+    await expect(materializer.telemetry.append(runtimeAppend)).resolves.toMatchObject({
+      created: true,
+    })
+    expect(storage.transactions).toEqual([{ isolation: "serializable" }])
+
+    storage.transactions = []
+    await expect(materializer.telemetry.append(runtimeAppend)).resolves.toMatchObject({
+      created: false,
+    })
+    expect(storage.transactions).toEqual([])
   })
 
   test("uses physical input size for telemetry batch continuation after equal deduplication", async () => {

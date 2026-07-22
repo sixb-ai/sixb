@@ -17,7 +17,7 @@ import type {
   PinnedDatasetVersion,
   ProjectionSourceRef,
 } from "../../materialization/model"
-import { linkRefSortKey } from "../../materialization/refs"
+import { compareLinkRefs } from "../../materialization/refs"
 
 export function createActionIdempotencyKey(runId: string): string {
   return `action:${runId}:edits`
@@ -138,11 +138,7 @@ export function createProjectionMaterializationId(): string {
 export function createLinkScopeFingerprint(links: readonly EffectiveLinkSnapshot[]): string {
   return sha256Canonical(
     [...links]
-      .sort((left, right) => {
-        const leftKey = linkRefSortKey(left.ref)
-        const rightKey = linkRefSortKey(right.ref)
-        return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
-      })
+      .sort((left, right) => compareLinkRefs(left.ref, right.ref))
       .map((link) => ({
         ref: link.ref,
         properties: link.properties ?? {},

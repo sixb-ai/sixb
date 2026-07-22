@@ -5,6 +5,8 @@ import type {
   OntologyMaterializationOrigin,
 } from "../../materialization/model"
 import {
+  compareLinkRefs,
+  compareObjectRefs,
   linkRefKey,
   linkRefSortKey,
   objectRefKey,
@@ -182,19 +184,9 @@ function materializationEventContext(
 }
 
 function sortedObjects(objects: EditWorkingState["objects"]): WorkingObject[] {
-  return [...objects.values()].sort((left, right) =>
-    compareSortKeys(objectRefSortKey(left.ref), objectRefSortKey(right.ref))
-  )
+  return [...objects.values()].sort((left, right) => compareObjectRefs(left.ref, right.ref))
 }
 
 function sortedLinks(links: EditWorkingState["links"]): WorkingLink[] {
-  return [...links.values()].sort((left, right) =>
-    compareSortKeys(linkRefSortKey(left.ref), linkRefSortKey(right.ref))
-  )
-}
-
-function compareSortKeys(left: string, right: string): number {
-  if (left < right) return -1
-  if (left > right) return 1
-  return 0
+  return [...links.values()].sort((left, right) => compareLinkRefs(left.ref, right.ref))
 }

@@ -14,6 +14,7 @@ import type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
+  ProjectionOwnership,
   TelemetryProjectionDefinition,
 } from "./types"
 
@@ -260,15 +261,21 @@ export function validateTelemetryProjectionFieldMapping(
  * 3. `propertyId` exists on the object type and is telemetry-enabled.
  * 4. Point mapping fields exist in the referenced dataset.
  */
+export interface ValidatedProjectionInputs {
+  readonly dataset: DatasetDefinition
+  readonly ownership: ProjectionOwnership
+}
+
 export function validateProjectionsAtStartup(
   objectProjections: readonly ObjectProjectionDefinition[],
   linkProjections: readonly LinkProjectionDefinition[],
   telemetryProjections: readonly TelemetryProjectionDefinition[],
   ontology: OntologyRegistry,
   datasetsById: ReadonlyMap<string, DatasetDefinition>
-): void {
+): ReadonlyMap<string, ValidatedProjectionInputs> {
   const objectTypesById = ontology.getObjectTypesById()
   const primaryByTypeId = ontology.getPrimaryByTypeId()
+  const datasetByProjectionId = new Map<string, DatasetDefinition>()
 
   validateMaterializationOntologyConstraints(ontology)
 
@@ -282,6 +289,7 @@ export function validateProjectionsAtStartup(
       )
     }
 
+    datasetByProjectionId.set(projection.id, dataset)
     const objectType = objectTypesById.get(projection.objectTypeId)
     if (!objectType) {
       throw new ProjectionValidationError(
@@ -386,6 +394,7 @@ export function validateProjectionsAtStartup(
       )
     }
 
+    datasetByProjectionId.set(projection.id, dataset)
     if (!objectTypesById.has(projection.sourceObjectTypeId)) {
       throw new ProjectionValidationError(
         `${prefix}: unknown source type "${projection.sourceObjectTypeId}"`
@@ -443,6 +452,7 @@ export function validateProjectionsAtStartup(
       )
     }
 
+    datasetByProjectionId.set(projection.id, dataset)
     const objectType = objectTypesById.get(projection.objectTypeId)
     if (!objectType) {
       throw new ProjectionValidationError(
@@ -454,9 +464,19 @@ export function validateProjectionsAtStartup(
     validateTelemetryProjectionFieldMapping(projection, objectType, datasetColumnNames, prefix)
   }
 
-  validateProjectionOwnership(
-    [...objectProjections, ...linkProjections, ...telemetryProjections],
-    ontology
+  const projections = [...objectProjections, ...linkProjections, ...telemetryProjections]
+  const ownershipByProjectionId = validateProjectionOwnership(projections, ontology)
+  return new Map(
+    projections.map((definition) => {
+      const dataset = datasetByProjectionId.get(definition.id)
+      const ownership = ownershipByProjectionId.get(definition.id)
+      if (!dataset || !ownership) {
+        throw new ProjectionValidationError(
+          `[Sixb] Projection '${definition.id}' did not produce validated registry inputs.`
+        )
+      }
+      return [definition.id, { dataset, ownership }]
+    })
   )
 }
 

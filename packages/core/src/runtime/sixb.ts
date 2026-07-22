@@ -40,13 +40,13 @@ import {
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { PipelineDefinition } from "../pipelines/types"
 import { categorizeProjections } from "../projections/builders"
-import { ProjectionRegistry } from "../projections/registry"
 import type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
   TelemetryProjectionDefinition,
 } from "../projections/types"
+import { validateProjectionsAtStartup } from "../projections/validation"
 import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
 import { validateRulesAtStartup } from "../rules"
@@ -323,11 +323,13 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       }
       this.projectionsById.set(projection.id, projection)
     }
-    new ProjectionRegistry({
-      projections: [...objectProjections, ...linkProjections, ...telemetryProjections],
-      ontology: this.ontology,
-      datasetsById: this.datasetsById,
-    })
+    validateProjectionsAtStartup(
+      objectProjections,
+      linkProjections,
+      telemetryProjections,
+      this.ontology,
+      this.datasetsById
+    )
 
     this.runtimeContext = {
       projectId: this.projectId,

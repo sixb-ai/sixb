@@ -11,7 +11,13 @@ import type {
   PurgePublishedOntologyOutboxInput,
   RescheduleOntologyOutboxLeaseInput,
 } from "../outbox"
-import { type InMemoryOntologyState, outboxKey } from "./shared-state"
+import {
+  assertNonblank,
+  assertTimestamp,
+  type InMemoryOntologyState,
+  insertBounded,
+  outboxKey,
+} from "./shared-state"
 
 export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
   constructor(
@@ -170,35 +176,9 @@ function comparePublishedRows(
   )
 }
 
-function insertBounded<T>(
-  values: T[],
-  value: T,
-  limit: number,
-  compare: (left: T, right: T) => number
-): void {
-  let index = values.findIndex((candidate) => compare(value, candidate) < 0)
-  if (index < 0) index = values.length
-  values.splice(index, 0, value)
-  if (values.length > limit) values.pop()
-}
-
 function assertPositiveLimit(limit: number): void {
   if (!Number.isSafeInteger(limit) || limit <= 0) {
     throw new MaterializationValidationError("Ontology outbox limit must be positive.")
-  }
-}
-
-function assertTimestamp(value: string, label: string): number {
-  const milliseconds = Date.parse(value)
-  if (!Number.isFinite(milliseconds)) {
-    throw new MaterializationValidationError(`${label} must be a valid timestamp.`)
-  }
-  return milliseconds
-}
-
-function assertNonblank(value: string, label: string): void {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new MaterializationValidationError(`${label} must be nonblank.`)
   }
 }
 

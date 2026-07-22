@@ -22,8 +22,10 @@ import type {
   StageSourceRowsResult,
 } from "../sources"
 import {
+  assertNonblank,
   type InMemoryOntologyState,
   type InMemorySourceMaterialization,
+  insertBounded,
   sourceMaterializationKey,
   sourceMaterializationRecord,
 } from "./shared-state"
@@ -600,12 +602,6 @@ function assertCount(value: number, label: string): void {
   }
 }
 
-function assertNonblank(value: string, label: string): void {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new MaterializationValidationError(`${label} must be nonblank.`)
-  }
-}
-
 function assertCanonicalTimestamp(value: string, label: string): void {
   const milliseconds = Date.parse(value)
   if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) {
@@ -651,18 +647,6 @@ function compareTerminalMaterializations(
     left.source.projectionId.localeCompare(right.source.projectionId) ||
     left.materializationId.localeCompare(right.materializationId)
   )
-}
-
-function insertBounded<T>(
-  values: T[],
-  value: T,
-  limit: number,
-  compare: (left: T, right: T) => number
-): void {
-  let index = values.findIndex((candidate) => compare(value, candidate) < 0)
-  if (index < 0) index = values.length
-  values.splice(index, 0, value)
-  if (values.length > limit) values.pop()
 }
 
 function sourceConflict(message: string): MaterializationConflictError {
