@@ -429,6 +429,31 @@ describe("sftp connector", () => {
     }
   })
 
+  test("requests directory modes and changes them explicitly", async () => {
+    const adapter = sftp({
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      password: server.password,
+    })
+
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+
+    try {
+      await client.mkdir("/files/private", { mode: 0o700 })
+      expect((await client.stat("/files/private")).mode & 0o7777).toBe(0o700)
+
+      await client.chmod("/files/private", 0o770)
+      expect((await client.stat("/files/private")).mode & 0o7777).toBe(0o770)
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
   test("ensures deep directories", async () => {
     const adapter = sftp({
       host: server.host,
@@ -473,6 +498,64 @@ describe("sftp connector", () => {
 
       const stats = await client.stat("/files/archive/2026")
       expect(stats.isDirectory()).toBe(true)
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("ensureDir applies a mode only to missing segments", async () => {
+    const adapter = sftp({
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      password: server.password,
+    })
+
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+
+    try {
+      await client.mkdir("/files/archive", { mode: 0o700 })
+      await client.ensureDir("/files/archive/2026/reports", { mode: 0o755 })
+
+      expect((await client.stat("/files/archive")).mode & 0o7777).toBe(0o700)
+      expect((await client.stat("/files/archive/2026")).mode & 0o7777).toBe(0o755)
+      expect((await client.stat("/files/archive/2026/reports")).mode & 0o7777).toBe(0o755)
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("rejects invalid directory modes before sending SFTP requests", async () => {
+    const adapter = sftp({
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      password: server.password,
+    })
+
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+
+    try {
+      expect(() => client.mkdir("/files/negative", { mode: -1 })).toThrow(
+        "mkdir mode must be an integer between 0o0000 and 0o7777"
+      )
+      expect(() => client.ensureDir("/files/fractional", { mode: 0.5 })).toThrow(
+        "ensureDir mode must be an integer between 0o0000 and 0o7777"
+      )
+      expect(() => client.chmod("/files", 0o10000)).toThrow(
+        "chmod mode must be an integer between 0o0000 and 0o7777"
+      )
+
+      expect(await client.exists("/files/negative")).toBe(false)
+      expect(await client.exists("/files/fractional")).toBe(false)
     } finally {
       await adapter.disconnect?.(client)
     }

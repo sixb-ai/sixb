@@ -21,17 +21,29 @@ export interface SftpOpenOptions {
   readonly signal?: AbortSignal
 }
 
+export interface SftpMkdirOptions {
+  /**
+   * POSIX permission bits requested when creating a directory.
+   *
+   * The SFTP server may further restrict this mode through its umask or ACL policy. Use `stat`
+   * when the resulting permissions are a required postcondition.
+   */
+  readonly mode?: number
+}
+
 export interface SftpClient {
   list(path: string): Promise<readonly SftpListEntry[]>
   stat(path: string): Promise<SftpStats>
   exists(path: string): Promise<boolean>
-  ensureDir(path: string): Promise<void>
+  /** Creates missing path segments without changing existing directory permissions. */
+  ensureDir(path: string, options?: SftpMkdirOptions): Promise<void>
   open(path: string, options?: SftpOpenOptions): Promise<ReadableStream<Uint8Array>>
   read(path: string): Promise<Buffer>
   write(path: string, data: SftpWriteData): Promise<void>
   rename(sourcePath: string, destinationPath: string): Promise<void>
   delete(path: string): Promise<void>
-  mkdir(path: string): Promise<void>
+  mkdir(path: string, options?: SftpMkdirOptions): Promise<void>
+  chmod(path: string, mode: number): Promise<void>
   rmdir(path: string): Promise<void>
 }
 

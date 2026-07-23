@@ -5,6 +5,7 @@ export type {
   SftpConnection,
   SftpConnector,
   SftpListEntry,
+  SftpMkdirOptions,
   SftpOpenOptions,
   SftpOptions,
   SftpStats,
