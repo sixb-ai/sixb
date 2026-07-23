@@ -58,7 +58,6 @@ export function contractEditResult(commitId: string, eventCount = 0) {
 
 export async function commitEmptyEdit(storage: OntologyContractStorage, id: string): Promise<void> {
   await storage.transaction(async (tx) => {
-    if (!tx.ontology) throw new Error("[Sixb] Contract transaction omitted ontology storage.")
     const session = await tx.ontology.materializations.begin(contractEditHeader(id))
     await tx.ontology.materializations.finalize({
       session,
@@ -128,7 +127,6 @@ export async function commitExactObject(
   ]
 
   await storage.transaction(async (tx) => {
-    if (!tx.ontology) throw new Error("[Sixb] Contract transaction omitted ontology storage.")
     const materializations = tx.ontology.materializations
     const session = await materializations.begin(header)
     await materializations.stageWork({ session, records: work })

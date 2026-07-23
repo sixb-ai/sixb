@@ -1,18 +1,16 @@
 import type { Database } from "bun:sqlite"
-import { randomUUID } from "node:crypto"
-import { stableJsonStringify } from "@sixb/core"
 import {
   linkRefKey,
   MaterializationConflictError,
   objectRefKey,
 } from "@sixb/core/internal/materializer"
 import {
-  assertWorkRecord,
+  correlateMaterializationChunk,
   duplicateMaterializationWork as duplicateWork,
   invalidCorrelation,
   materializationPlanItems,
-  materializationWorkColumns as workColumns,
-  workUniquenessKey,
+  ProviderMaterializationSessionState,
+  prepareMaterializationWork,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
   MaterializationEventWorkRecord,
@@ -37,46 +35,7 @@ export interface SqliteOntologyTransactionContext {
   active: boolean
 }
 
-interface LaneState {
-  started: boolean
-  completed: boolean
-  emittedCount: number
-}
-
-export interface ReplacementSessionState {
-  readonly sourceId: string
-  readonly candidateMaterializationId: string
-  readonly previousMaterializationId: string | null
-  readonly projectionKind: "object" | "link"
-  objectStreamStarted: boolean
-  objectStreamCompleted: boolean
-  linkStreamStarted: boolean
-  linkStreamCompleted: boolean
-}
-
-export class SqliteMaterializationSessionState {
-  readonly id = randomUUID()
-  readonly providerToken = {}
-  readonly workStreams: Record<StreamMaterializationWorkInput["order"], LaneState> = {
-    apply: { started: false, completed: false, emittedCount: 0 },
-    cardinality: { started: false, completed: false, emittedCount: 0 },
-    event: { started: false, completed: false, emittedCount: 0 },
-  }
-  active = true
-  workSealed = false
-  appliedPlanCount = 0
-  appliedOutboxCount = 0
-  replacement: ReplacementSessionState | null = null
-
-  constructor(
-    readonly header: MaterializationPlanHeader,
-    readonly transactionId: object
-  ) {}
-
-  publicSession(): MaterializationSession {
-    return { providerToken: this.providerToken }
-  }
-}
+export class SqliteMaterializationSessionState extends ProviderMaterializationSessionState {}
 
 export class SqliteMaterializationSessions {
   private readonly sessions = new WeakMap<object, SqliteMaterializationSessionState>()
@@ -131,32 +90,7 @@ export class SqliteMaterializationSessions {
 
   stage(input: StageMaterializationWorkInput): void {
     const session = this.require(input.session)
-    if (session.workSealed) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Materialization work cannot be staged after draining begins."
-      )
-    }
-    const keys = new Set<string>()
-    const uniqueKeys = new Set<string>()
-    for (const record of input.records) {
-      assertWorkRecord(record, session.header)
-      const uniqueKey = workUniquenessKey(record)
-      if (keys.has(record.recordKey) || uniqueKeys.has(uniqueKey)) {
-        throw duplicateWork(record.recordKey)
-      }
-      if (
-        record.kind === "incident-object" &&
-        (!session.replacement || session.replacement.linkStreamStarted)
-      ) {
-        throw new MaterializationConflictError(
-          "effective-state",
-          "Incident replacement work must be staged before link state is streamed."
-        )
-      }
-      keys.add(record.recordKey)
-      uniqueKeys.add(uniqueKey)
-    }
+    const records = prepareMaterializationWork(session, input)
     const insert = this.db.query(
       `
         INSERT INTO ${SQLITE_MATERIALIZATION_WORK_TABLE} (
@@ -166,12 +100,11 @@ export class SqliteMaterializationSessions {
       `
     )
     try {
-      for (const record of input.records) {
-        const columns = workColumns(record)
+      for (const { record, uniqueKey, columns } of records) {
         insert.run(
           session.id,
           record.recordKey,
-          workUniquenessKey(record),
+          uniqueKey,
           record.kind,
           columns.lane,
           columns.rankOne,
@@ -255,44 +188,15 @@ export class SqliteMaterializationSessions {
     chunk: MaterializationPlanChunk
   ): void {
     const items = materializationPlanItems(chunk)
-    if (
-      items.length > 0 &&
-      (!session.workStreams.apply.started ||
-        session.appliedPlanCount + items.length > session.workStreams.apply.emittedCount)
-    ) {
-      invalidCorrelation("Materialization plan items cannot be applied before they are streamed.")
-    }
-    const expectedItems = this.planItems(session, session.appliedPlanCount, items.length)
-    for (let index = 0; index < items.length; index += 1) {
-      if (stableJsonStringify(items[index]) !== stableJsonStringify(expectedItems[index])) {
-        invalidCorrelation("Materialization plan items must be applied in exact streamed order.")
-      }
-    }
-
-    if (
-      chunk.outbox.length > 0 &&
-      (!session.workStreams.event.started ||
-        session.appliedOutboxCount + chunk.outbox.length > session.workStreams.event.emittedCount)
-    ) {
-      invalidCorrelation("Materialization events cannot be applied before they are streamed.")
-    }
-    const events = this.eventRecords(session, session.appliedOutboxCount, chunk.outbox.length)
-    for (let index = 0; index < chunk.outbox.length; index += 1) {
-      const expected = events[index]
-      const actual = chunk.outbox[index]?.envelope
-      if (!expected || !actual) {
-        invalidCorrelation("Materialization outbox events must follow exact streamed order.")
-      }
-      const { id: _id, commitOrdinal, ...draft } = actual
-      if (
-        commitOrdinal !== session.appliedOutboxCount + index ||
-        stableJsonStringify(draft) !== stableJsonStringify(expected.draft)
-      ) {
-        invalidCorrelation("Materialization outbox events must follow exact streamed order.")
-      }
-    }
-    session.appliedPlanCount += items.length
-    session.appliedOutboxCount += chunk.outbox.length
+    const progress = correlateMaterializationChunk(
+      session,
+      chunk,
+      items,
+      this.planItems(session, session.appliedPlanCount, items.length),
+      this.eventRecords(session, session.appliedOutboxCount, chunk.outbox.length)
+    )
+    session.appliedPlanCount = progress.appliedPlanCount
+    session.appliedOutboxCount = progress.appliedOutboxCount
   }
 
   recordReplacementIdentities(
@@ -328,14 +232,24 @@ export class SqliteMaterializationSessions {
     return row.count
   }
 
-  laneCount(session: SqliteMaterializationSessionState, lane: string): number {
-    const row = this.db
+  laneCounts(session: SqliteMaterializationSessionState): {
+    readonly apply: number
+    readonly cardinality: number
+    readonly event: number
+  } {
+    const rows = this.db
       .query(
-        `SELECT COUNT(*) AS count FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
-         WHERE session_id = ? AND lane = ?`
+        `SELECT lane, COUNT(*) AS count FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
+         WHERE session_id = ? AND lane <> 'none'
+         GROUP BY lane`
       )
-      .get(session.id, lane) as { readonly count: number }
-    return row.count
+      .all(session.id) as {
+      readonly lane: "apply" | "cardinality" | "event"
+      readonly count: number
+    }[]
+    const counts = { apply: 0, cardinality: 0, event: 0 }
+    for (const row of rows) counts[row.lane] = row.count
+    return counts
   }
 
   records(session: SqliteMaterializationSessionState, kind?: string): MaterializationWorkRecord[] {

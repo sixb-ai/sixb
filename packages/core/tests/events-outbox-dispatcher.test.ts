@@ -72,6 +72,33 @@ describe("OntologyOutboxDispatcher", () => {
     })
   })
 
+  test("publishes and acknowledges each claimed lease as one batch", async () => {
+    const storage = new TransactionTrackingStorage()
+    const broker = new RecordingBroker()
+    const events = new EventsRuntime({ projectId: "project", broker })
+    const { materializer } = createMaterializerFixture({ storage })
+    await seedObjectCreated(materializer, "request-batch-1", "batch-one")
+    await seedObjectCreated(materializer, "request-batch-2", "batch-two")
+    const expectedIds = outboxRows(storage).map((row) => row.envelope.id)
+
+    const dispatcher = new OntologyOutboxDispatcher({
+      projectId: "project",
+      storage,
+      events,
+      batchSize: 100,
+      pollIntervalMs: 10,
+      now: () => NOW,
+      createLeaseId: () => "lease-batch",
+    })
+    await dispatcher.start()
+    await waitFor(() => outboxRows(storage).every((row) => row.publishedAt !== null))
+    await dispatcher.stop()
+
+    expect(broker.appended).toHaveLength(1)
+    expect(broker.appended[0]?.records.map((record) => record.idempotencyKey)).toEqual(expectedIds)
+    expect(outboxRows(storage).every((row) => row.leaseId === null)).toBe(true)
+  })
+
   test("reschedules publication failures with deterministic bounded exponential jitter", async () => {
     const storage = new InMemoryStorage()
     const broker = new FailingBroker()
@@ -143,6 +170,59 @@ describe("OntologyOutboxDispatcher", () => {
         leaseExpiresAt: "2026-01-02T03:05:05.575Z",
       })
     ).toHaveLength(1)
+  })
+
+  test("keeps retry backoff per attempt group while publishing one claimed batch", async () => {
+    const storage = new InMemoryStorage()
+    const broker = new FailingBroker()
+    const events = new EventsRuntime({ projectId: "project", broker })
+    const { materializer } = createMaterializerFixture({ storage })
+    await seedObjectCreated(materializer, "request-older", "older")
+    const olderId = outboxRows(storage)[0]!.envelope.id
+    const [olderClaim] = await storage.ontology.outbox.claim({
+      projectId: "project",
+      now: NOW.toISOString(),
+      limit: 1,
+      leaseId: "older-lease",
+      leaseExpiresAt: new Date(NOW.getTime() + 1_000).toISOString(),
+    })
+    await storage.ontology.outbox.reschedule({
+      projectId: "project",
+      ids: [olderId],
+      leaseId: olderClaim!.leaseId,
+      availableAt: NOW.toISOString(),
+      error: "seed retry",
+    })
+    await seedObjectCreated(materializer, "request-newer", "newer")
+    const newerId = outboxRows(storage).find((row) => row.envelope.id !== olderId)!.envelope.id
+
+    const dispatcher = new OntologyOutboxDispatcher({
+      projectId: "project",
+      storage,
+      events,
+      now: () => NOW,
+      random: () => 0.5,
+      initialRetryDelayMs: 100,
+      maxRetryDelayMs: 1_000,
+      retryJitterRatio: 0,
+      pollIntervalMs: 10,
+      createLeaseId: () => "mixed-attempt-lease",
+    })
+    await dispatcher.start()
+    await broker.attempted.promise
+    await waitFor(() => outboxRows(storage).every((row) => row.leaseId === null))
+    await dispatcher.stop()
+
+    const rows = outboxRows(storage)
+    expect(broker.attempts).toBe(1)
+    expect(rows.find((row) => row.envelope.id === olderId)).toMatchObject({
+      attempts: 2,
+      availableAt: "2026-01-02T03:04:05.200Z",
+    })
+    expect(rows.find((row) => row.envelope.id === newerId)).toMatchObject({
+      attempts: 1,
+      availableAt: "2026-01-02T03:04:05.100Z",
+    })
   })
 
   test("wakes promptly and still discovers rows by polling without a wake notification", async () => {

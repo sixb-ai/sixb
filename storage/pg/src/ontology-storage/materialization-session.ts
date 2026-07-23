@@ -1,13 +1,15 @@
-import { randomUUID } from "node:crypto"
-import { stableJsonStringify } from "@sixb/core"
-import { MaterializationConflictError } from "@sixb/core/internal/materializer"
 import {
-  assertWorkRecord,
+  linkRefKey,
+  MaterializationConflictError,
+  objectRefKey,
+} from "@sixb/core/internal/materializer"
+import {
+  correlateMaterializationChunk,
   duplicateMaterializationWork as duplicateWork,
   invalidCorrelation,
   materializationPlanItems,
-  materializationWorkColumns as workColumns,
-  workUniquenessKey,
+  ProviderMaterializationSessionState,
+  prepareMaterializationWork,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
   MaterializationEventWorkRecord,
@@ -40,23 +42,6 @@ interface WorkCursor {
   readonly recordKey: string
 }
 
-interface LaneState {
-  started: boolean
-  completed: boolean
-  emittedCount: number
-}
-
-export interface ReplacementSessionState {
-  readonly sourceId: string
-  readonly candidateMaterializationId: string
-  readonly previousMaterializationId: string | null
-  readonly projectionKind: "object" | "link"
-  objectStreamStarted: boolean
-  objectStreamCompleted: boolean
-  linkStreamStarted: boolean
-  linkStreamCompleted: boolean
-}
-
 export interface PgChunkSequenceProgress {
   readonly appliedPlanCount: number
   readonly appliedOutboxCount: number
@@ -64,30 +49,9 @@ export interface PgChunkSequenceProgress {
   readonly appliedEventCursor: WorkCursor | null
 }
 
-export class PgMaterializationSessionState {
-  readonly id = randomUUID()
-  readonly providerToken = {}
-  readonly workStreams: Record<StreamMaterializationWorkInput["order"], LaneState> = {
-    apply: { started: false, completed: false, emittedCount: 0 },
-    cardinality: { started: false, completed: false, emittedCount: 0 },
-    event: { started: false, completed: false, emittedCount: 0 },
-  }
-  active = true
-  workSealed = false
-  appliedPlanCount = 0
-  appliedOutboxCount = 0
+export class PgMaterializationSessionState extends ProviderMaterializationSessionState {
   appliedPlanCursor: WorkCursor | null = null
   appliedEventCursor: WorkCursor | null = null
-  replacement: ReplacementSessionState | null = null
-
-  constructor(
-    readonly header: MaterializationPlanHeader,
-    readonly transactionId: object
-  ) {}
-
-  publicSession(): MaterializationSession {
-    return { providerToken: this.providerToken }
-  }
 }
 
 interface WorkDatabaseRow {
@@ -157,59 +121,49 @@ export class PgMaterializationSessions {
 
   async stage(input: StageMaterializationWorkInput): Promise<void> {
     const session = this.require(input.session)
-    if (session.workSealed) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Materialization work cannot be staged after draining begins."
-      )
-    }
-    const keys = new Set<string>()
-    const uniqueKeys = new Set<string>()
-    for (const record of input.records) {
-      assertWorkRecord(record, session.header)
-      const uniqueKey = workUniquenessKey(record)
-      if (keys.has(record.recordKey) || uniqueKeys.has(uniqueKey)) {
-        throw duplicateWork(record.recordKey)
-      }
-      if (
-        record.kind === "incident-object" &&
-        (!session.replacement || session.replacement.linkStreamStarted)
-      ) {
-        throw new MaterializationConflictError(
-          "effective-state",
-          "Incident replacement work must be staged before link state is streamed."
-        )
-      }
-      keys.add(record.recordKey)
-      uniqueKeys.add(uniqueKey)
-    }
-    if (input.records.length === 0) return
+    const records = prepareMaterializationWork(session, input)
+    if (records.length === 0) return
+    const keys = records.map(({ record }) => record.recordKey)
+    const uniqueKeys = records.map(({ uniqueKey }) => uniqueKey)
 
     const [duplicate] = await this.sql<{ readonly record_key: string }[]>`
       SELECT record_key
       FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
       WHERE session_id = ${session.id}
         AND (
-          record_key = ANY(${this.sql.array([...keys])}::text[])
-          OR unique_key = ANY(${this.sql.array([...uniqueKeys])}::text[])
+          record_key = ANY(${this.sql.array(keys)}::text[])
+          OR unique_key = ANY(${this.sql.array(uniqueKeys)}::text[])
         )
       LIMIT 1
     `
     if (duplicate) throw duplicateWork(duplicate.record_key)
 
-    for (const record of input.records) {
-      const columns = workColumns(record)
-      await this.sql`
-        INSERT INTO ${this.sql(PG_MATERIALIZATION_WORK_TABLE)} (
-          session_id, record_key, unique_key, kind, lane,
-          rank_one, rank_two, sort_one, sort_two, payload
-        ) VALUES (
-          ${session.id}, ${record.recordKey}, ${workUniquenessKey(record)}, ${record.kind},
-          ${columns.lane}, ${columns.rankOne}, ${columns.rankTwo}, ${columns.sortOne},
-          ${columns.sortTwo}, ${jsonParameter(this.sql, record)}
-        )
-      `
-    }
+    const payload = records.map(({ record, uniqueKey, columns }) => {
+      return {
+        recordKey: record.recordKey,
+        uniqueKey,
+        kind: record.kind,
+        lane: columns.lane,
+        rankOne: columns.rankOne,
+        rankTwo: columns.rankTwo,
+        sortOne: columns.sortOne,
+        sortTwo: columns.sortTwo,
+        record,
+      }
+    })
+    await this.sql`
+      WITH staged AS (
+        SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, payload)}::jsonb)
+      )
+      INSERT INTO ${this.sql(PG_MATERIALIZATION_WORK_TABLE)} (
+        session_id, record_key, unique_key, kind, lane,
+        rank_one, rank_two, sort_one, sort_two, payload
+      )
+      SELECT ${session.id}, value->>'recordKey', value->>'uniqueKey', value->>'kind',
+        value->>'lane', (value->>'rankOne')::integer, (value->>'rankTwo')::integer,
+        value->>'sortOne', value->>'sortTwo', value->'record'
+      FROM staged
+    `
   }
 
   async *stream(input: StreamMaterializationWorkInput): AsyncIterable<MaterializationWorkPage> {
@@ -248,23 +202,26 @@ export class PgMaterializationSessions {
       readonly exists: boolean
     }[]
   > {
-    const result = []
-    for (const ref of refs) {
-      const key = `object-existence:${JSON.stringify([ref.objectTypeId, ref.primaryId])}`
-      const [row] = await this.sql<{ readonly payload: unknown }[]>`
-        SELECT payload FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
-        WHERE session_id = ${session.id}
-          AND unique_key = ${key}
-          AND kind = 'object-existence'
-      `
-      if (!row) continue
-      const record = structuredClone(row.payload) as Extract<
+    if (refs.length === 0) return []
+    const keys = refs.map(
+      (ref) => `object-existence:${JSON.stringify([ref.objectTypeId, ref.primaryId])}`
+    )
+    const rows = await this.sql<{ readonly unique_key: string; readonly payload: unknown }[]>`
+      SELECT unique_key, payload FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
+      WHERE session_id = ${session.id}
+        AND unique_key = ANY(${this.sql.array(keys)}::text[])
+        AND kind = 'object-existence'
+    `
+    const found = new Map(rows.map((row) => [row.unique_key, row.payload] as const))
+    return keys.flatMap((key) => {
+      const payload = found.get(key)
+      if (!payload) return []
+      const record = structuredClone(payload) as Extract<
         MaterializationWorkRecord,
         { readonly kind: "object-existence" }
       >
-      result.push({ ref: record.ref, exists: record.exists })
-    }
-    return result
+      return [{ ref: record.ref, exists: record.exists }]
+    })
   }
 
   async prepareChunkSequence(
@@ -272,61 +229,40 @@ export class PgMaterializationSessions {
     chunk: MaterializationPlanChunk
   ): Promise<PgChunkSequenceProgress> {
     const items = materializationPlanItems(chunk)
-    if (
-      items.length > 0 &&
-      (!session.workStreams.apply.started ||
-        session.appliedPlanCount + items.length > session.workStreams.apply.emittedCount)
-    ) {
-      invalidCorrelation("Materialization plan items cannot be applied before they are streamed.")
-    }
     const planRows = await this.readLane(
       "apply",
       session.id,
       session.appliedPlanCursor,
       items.length
     )
-    for (let index = 0; index < items.length; index += 1) {
-      const expected = structuredClone(planRows[index]?.payload) as
-        | Extract<MaterializationWorkRecord, { readonly kind: "plan" }>
-        | undefined
-      if (!expected || stableJsonStringify(items[index]) !== stableJsonStringify(expected.item)) {
-        invalidCorrelation("Materialization plan items must be applied in exact streamed order.")
-      }
-    }
-
-    if (
-      chunk.outbox.length > 0 &&
-      (!session.workStreams.event.started ||
-        session.appliedOutboxCount + chunk.outbox.length > session.workStreams.event.emittedCount)
-    ) {
-      invalidCorrelation("Materialization events cannot be applied before they are streamed.")
-    }
+    const expectedItems = planRows.map(
+      (row) =>
+        (
+          structuredClone(row.payload) as Extract<
+            MaterializationWorkRecord,
+            { readonly kind: "plan" }
+          >
+        ).item
+    )
     const eventRows = await this.readLane(
       "event",
       session.id,
       session.appliedEventCursor,
       chunk.outbox.length
     )
-    for (let index = 0; index < chunk.outbox.length; index += 1) {
-      const expected = structuredClone(eventRows[index]?.payload) as
-        | MaterializationEventWorkRecord
-        | undefined
-      const actual = chunk.outbox[index]?.envelope
-      if (!expected || !actual) {
-        invalidCorrelation("Materialization outbox events must follow exact streamed order.")
-      }
-      const { id: _id, commitOrdinal, ...draft } = actual
-      if (
-        commitOrdinal !== session.appliedOutboxCount + index ||
-        stableJsonStringify(draft) !== stableJsonStringify(expected.draft)
-      ) {
-        invalidCorrelation("Materialization outbox events must follow exact streamed order.")
-      }
-    }
+    const expectedEvents = eventRows.map(
+      (row) => structuredClone(row.payload) as MaterializationEventWorkRecord
+    )
+    const progress = correlateMaterializationChunk(
+      session,
+      chunk,
+      items,
+      expectedItems,
+      expectedEvents
+    )
 
     return {
-      appliedPlanCount: session.appliedPlanCount + items.length,
-      appliedOutboxCount: session.appliedOutboxCount + chunk.outbox.length,
+      ...progress,
       appliedPlanCursor:
         planRows.length === 0
           ? session.appliedPlanCursor
@@ -352,33 +288,26 @@ export class PgMaterializationSessions {
     session: PgMaterializationSessionState,
     identities: readonly ReplacementIdentity[]
   ): Promise<void> {
-    for (const identity of identities) {
-      const identityKey =
-        identity.kind === "object"
-          ? JSON.stringify([
-              (identity.ref as { readonly objectTypeId: string }).objectTypeId,
-              (identity.ref as { readonly primaryId: string }).primaryId,
-            ])
-          : JSON.stringify([
-              (identity.ref as { readonly source: { readonly objectTypeId: string } }).source
-                .objectTypeId,
-              (identity.ref as { readonly source: { readonly primaryId: string } }).source
-                .primaryId,
-              (identity.ref as { readonly linkId: string }).linkId,
-              (identity.ref as { readonly target: { readonly objectTypeId: string } }).target
-                .objectTypeId,
-              (identity.ref as { readonly target: { readonly primaryId: string } }).target
-                .primaryId,
-            ])
-      await this.sql`
-        INSERT INTO ${this.sql(PG_REPLACEMENT_WORK_TABLE)} (
-          session_id, entity_kind, identity_key, diff_required
-        ) VALUES (${session.id}, ${identity.kind}, ${identityKey}, ${identity.diffRequired})
-        ON CONFLICT (session_id, entity_kind, identity_key) DO UPDATE SET
-          diff_required = ${this.sql(PG_REPLACEMENT_WORK_TABLE)}.diff_required
-            OR EXCLUDED.diff_required
-      `
-    }
+    if (identities.length === 0) return
+    const payload = identities.map((identity) => ({
+      kind: identity.kind,
+      identityKey: replacementIdentityKey(identity),
+      diffRequired: identity.diffRequired,
+    }))
+    await this.sql`
+      WITH staged AS (
+        SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, payload)}::jsonb)
+      )
+      INSERT INTO ${this.sql(PG_REPLACEMENT_WORK_TABLE)} (
+        session_id, entity_kind, identity_key, diff_required
+      )
+      SELECT ${session.id}, value->>'kind', value->>'identityKey',
+        (value->>'diffRequired')::boolean
+      FROM staged
+      ON CONFLICT (session_id, entity_kind, identity_key) DO UPDATE SET
+        diff_required = ${this.sql(PG_REPLACEMENT_WORK_TABLE)}.diff_required
+          OR EXCLUDED.diff_required
+    `
   }
 
   async count(session: PgMaterializationSessionState, kind: string): Promise<number> {
@@ -389,12 +318,21 @@ export class PgMaterializationSessions {
     return Number(row?.count ?? 0)
   }
 
-  async laneCount(session: PgMaterializationSessionState, lane: string): Promise<number> {
-    const [row] = await this.sql<{ readonly count: number | string }[]>`
-      SELECT COUNT(*) AS count FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
-      WHERE session_id = ${session.id} AND lane = ${lane}
+  async laneCounts(session: PgMaterializationSessionState): Promise<{
+    readonly apply: number
+    readonly cardinality: number
+    readonly event: number
+  }> {
+    const rows = await this.sql<
+      { readonly lane: "apply" | "cardinality" | "event"; readonly count: number | string }[]
+    >`
+      SELECT lane, COUNT(*) AS count FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
+      WHERE session_id = ${session.id} AND lane <> 'none'
+      GROUP BY lane
     `
-    return Number(row?.count ?? 0)
+    const counts = { apply: 0, cardinality: 0, event: 0 }
+    for (const row of rows) counts[row.lane] = Number(row.count)
+    return counts
   }
 
   async records(
@@ -510,6 +448,10 @@ export class PgMaterializationSessions {
       DELETE FROM ${this.sql(PG_REPLACEMENT_WORK_TABLE)} WHERE session_id = ${sessionId}
     `
   }
+}
+
+function replacementIdentityKey(identity: ReplacementIdentity): string {
+  return identity.kind === "object" ? objectRefKey(identity.ref) : linkRefKey(identity.ref)
 }
 
 function workCursor(row: WorkDatabaseRow): WorkCursor {

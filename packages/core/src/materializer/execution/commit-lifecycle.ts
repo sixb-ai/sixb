@@ -4,14 +4,10 @@ import type {
   ProjectionCommitResult,
   TelemetryCommitResult,
 } from "../../materialization/model"
-import { isStorageSerializationFailure, type Storage } from "../../storage"
+import { isStorageSerializationFailure } from "../../storage"
 import type { OntologyCommitRecord } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import type { CommitIdentity } from "../shared/identity"
-
-export function requireOntologyStorage(storage: Storage): MaterializerStorage {
-  return storage
-}
 
 export async function replayCommitRecord(
   context: Pick<MaterializerContext, "projectId" | "storage">,

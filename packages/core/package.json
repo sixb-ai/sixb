@@ -133,6 +133,12 @@
       "import": "./dist/storage/ontology/provider.js",
       "default": "./dist/storage/ontology/provider.js"
     },
+    "./internal/storage-root-operations": {
+      "types": "./dist/storage/root-operations.d.ts",
+      "bun": "./src/storage/root-operations.ts",
+      "import": "./dist/storage/root-operations.js",
+      "default": "./dist/storage/root-operations.js"
+    },
     "./internal/objects": {
       "types": "./dist/objects/index.d.ts",
       "bun": "./src/objects/index.ts",

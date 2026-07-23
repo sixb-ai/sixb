@@ -22,11 +22,7 @@ import type {
   OntologyStorage,
 } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
-import {
-  replayCommitRecord,
-  requireOntologyStorage,
-  withSerializationRetry,
-} from "../execution/commit-lifecycle"
+import { replayCommitRecord, withSerializationRetry } from "../execution/commit-lifecycle"
 import { assertProjectionMaterializationExecution } from "../execution/run-correlation"
 import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
 import { throwIfAborted } from "../shared/abort"
@@ -177,8 +173,7 @@ async function replayProjectionCommit(
   if (!existing) return null
   return withSerializationRetry(context, () =>
     context.storage.transaction(
-      async (txBase) => {
-        const storage = requireOntologyStorage(txBase)
+      async (storage) => {
         await assertProjectionExecution(storage, context.projectId, command)
         const commit = await replayCommitRecord(context, command.identity, storage)
         return commit ? projectionReplayResult(commit, command) : null
@@ -274,8 +269,7 @@ async function commitProjectionCandidate(
 ): Promise<ProjectionCommitResult> {
   return withSerializationRetry(context, () =>
     context.storage.transaction(
-      (txBase) =>
-        executeProjectionTransaction(context, requireOntologyStorage(txBase), command, ready),
+      (storage) => executeProjectionTransaction(context, storage, command, ready),
       { isolation: "serializable" }
     )
   )

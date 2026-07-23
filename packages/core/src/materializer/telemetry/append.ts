@@ -25,7 +25,6 @@ import { validateTelemetryPoint } from "../effective/validate"
 import {
   replayCommit,
   replayCommitRecord,
-  requireOntologyStorage,
   withSerializationRetry,
 } from "../execution/commit-lifecycle"
 import {
@@ -324,7 +323,7 @@ async function executeTelemetryCommit(
 ): Promise<TelemetryCommitResult> {
   return withSerializationRetry(context, () =>
     context.storage.transaction(
-      (txBase) => executeTelemetryTransaction(context, requireOntologyStorage(txBase), command),
+      (storage) => executeTelemetryTransaction(context, storage, command),
       { isolation: "serializable" }
     )
   )

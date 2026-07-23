@@ -60,6 +60,7 @@ import type {
   StreamSourceReplacementStateInput,
 } from "../materializations"
 import type { OntologyMaterializationEvent } from "../outbox"
+import { appendScopeSnapshot, finishScopeAccumulator, startScopeAccumulator } from "../provider"
 import type {
   StoredSourceAssertion,
   StoredSourceLinkAssertion,
@@ -68,16 +69,13 @@ import type {
 import { assertFinalizationCorrelations } from "./materializations-finalization"
 import {
   addReplacementLink,
-  appendScopeSnapshot,
   findActiveSourceMaterialization,
-  finishScopeAccumulator,
   linkRef,
   linkSnapshot,
   objectSnapshot,
   publicLinkOverride,
   publicObjectOverride,
   selectBoundedUnique,
-  startScopeAccumulator,
   storedPoint,
   storedSource,
   storedSourceLink,

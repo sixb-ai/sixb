@@ -118,7 +118,6 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         ;(divergent.commit as { requestHash: string }).requestHash = "different-hash"
         await expect(
           storage.transaction(async (tx) => {
-            if (!tx.ontology) throw new Error("missing ontology")
             await tx.ontology.materializations.begin(divergent)
           })
         ).rejects.toMatchObject({ kind: "idempotency" })
@@ -143,12 +142,11 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         let unfinished: Awaited<ReturnType<typeof storage.ontology.materializations.begin>> | null =
           null
         await storage.transaction(async (tx) => {
-          if (!tx.ontology) throw new Error("missing ontology")
           unfinished = await tx.ontology.materializations.begin(header)
         })
         await expect(
           storage.transaction(async (tx) => {
-            if (!tx.ontology || !unfinished) throw new Error("missing contract session")
+            if (!unfinished) throw new Error("missing contract session")
             await tx.ontology.materializations.stageWork({ session: unfinished, records: [] })
           })
         ).rejects.toThrow("inactive")
@@ -576,6 +574,51 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
       })
     })
 
+    test("keeps batch outbox settlement atomic when callers catch a stale lease", async () => {
+      await withStorage(async (storage) => {
+        await commitExactObject(storage, "lease-atomic-a")
+        await commitExactObject(storage, "lease-atomic-b")
+        const claimed = await storage.ontology.outbox.claim({
+          projectId: "contract-project",
+          now: "2026-01-03T00:00:00.000Z",
+          limit: 10,
+          leaseId: "lease-atomic-old",
+          leaseExpiresAt: "2026-01-03T01:00:00.000Z",
+        })
+        expect(claimed).toHaveLength(2)
+        const [reclaimed] = await storage.ontology.outbox.claim({
+          projectId: "contract-project",
+          now: "2026-01-03T02:00:00.000Z",
+          limit: 1,
+          leaseId: "lease-atomic-new",
+          leaseExpiresAt: "2026-01-03T03:00:00.000Z",
+        })
+        const untouched = claimed.find((row) => row.envelope.id !== reclaimed!.envelope.id)!
+
+        let conflict: unknown
+        await storage.transaction(async (tx) => {
+          try {
+            await tx.ontology.outbox.markPublished({
+              projectId: "contract-project",
+              ids: claimed.map((row) => row.envelope.id),
+              leaseId: "lease-atomic-old",
+              publishedAt: "2026-01-03T02:10:00.000Z",
+            })
+          } catch (error) {
+            conflict = error
+          }
+        })
+        expect(conflict).toMatchObject({ kind: "outbox-lease" })
+
+        await storage.ontology.outbox.markPublished({
+          projectId: "contract-project",
+          ids: [untouched.envelope.id],
+          leaseId: "lease-atomic-old",
+          publishedAt: "2026-01-03T02:20:00.000Z",
+        })
+      })
+    })
+
     test("rolls back a telemetry checkpoint with its authoritative ontology commit", async () => {
       await withStorage(async (storage) => {
         const identity: ProjectionMaterializationIdentity = {
@@ -600,7 +643,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         })
         const execute = async (throwAfter: boolean) => {
           await storage.transaction(async (tx) => {
-            if (!tx.ontology || !isProjectionMaterializationRunStorage(tx.projectionRuns)) {
+            if (!isProjectionMaterializationRunStorage(tx.projectionRuns)) {
               throw new Error("Contract transaction omitted required storage facades.")
             }
             const header = telemetryHeader(identity, run.id)
@@ -767,7 +810,7 @@ async function activateEmptyCandidate(
     },
   }
   await storage.transaction(async (tx) => {
-    if (!tx.ontology || !isProjectionMaterializationRunStorage(tx.projectionRuns)) {
+    if (!isProjectionMaterializationRunStorage(tx.projectionRuns)) {
       throw new Error("Contract transaction omitted required storage facades.")
     }
     await tx.projectionRuns.assertMaterializationExecution({

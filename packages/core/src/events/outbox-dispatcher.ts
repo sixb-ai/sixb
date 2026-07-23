@@ -30,7 +30,7 @@ export interface OntologyOutboxDispatcherOptions {
 }
 
 interface InFlightPublication {
-  readonly row: ClaimedOntologyOutboxRow
+  readonly rows: readonly ClaimedOntologyOutboxRow[]
   settling: boolean
 }
 
@@ -50,7 +50,7 @@ export class OntologyOutboxDispatcher {
   private readonly random: () => number
   private readonly createLeaseId: () => string
   private readonly onError: (error: unknown) => void
-  private readonly inFlight = new Map<string, InFlightPublication>()
+  private inFlight: InFlightPublication | null = null
   private controller: AbortController | null = null
   private running: Promise<void> | null = null
   private wakeVersion = 0
@@ -140,7 +140,7 @@ export class OntologyOutboxDispatcher {
     }
 
     await settlesWithin(this.rescheduleUnsettledForShutdown(), settlementBudget)
-    this.inFlight.clear()
+    this.inFlight = null
     this.detachRun(controller, running)
   }
 
@@ -165,7 +165,7 @@ export class OntologyOutboxDispatcher {
         return
       }
 
-      await Promise.all(rows.map((row) => this.publishRow(row)))
+      await this.publishBatch(rows)
     }
   }
 
@@ -183,21 +183,22 @@ export class OntologyOutboxDispatcher {
     )
   }
 
-  private async publishRow(row: ClaimedOntologyOutboxRow): Promise<void> {
-    const id = row.envelope.id
-    const publication: InFlightPublication = { row, settling: false }
-    this.inFlight.set(id, publication)
+  private async publishBatch(rows: readonly ClaimedOntologyOutboxRow[]): Promise<void> {
+    if (rows.length === 0) return
+    const publication: InFlightPublication = { rows, settling: false }
+    this.inFlight = publication
+    const ids = rows.map((row) => row.envelope.id)
+    const leaseId = sharedLeaseId(rows)
 
     try {
-      await this.events.publishEnvelopes([row.envelope])
-      const claimed = this.beginSettlement(id, publication)
-      if (!claimed) return
+      await this.events.publishEnvelopes(rows.map((row) => row.envelope))
+      if (!this.beginSettlement(publication)) return
       try {
         await this.withOutbox((outbox) =>
           outbox.markPublished({
             projectId: this.projectId,
-            ids: [id],
-            leaseId: row.leaseId,
+            ids,
+            leaseId,
             publishedAt: this.now().toISOString(),
           })
         )
@@ -205,37 +206,34 @@ export class OntologyOutboxDispatcher {
         this.reportError(error)
       }
     } catch (error) {
-      const claimed = this.beginSettlement(id, publication)
-      if (!claimed) return
+      if (!this.beginSettlement(publication)) return
       try {
-        await this.withOutbox((outbox) =>
-          outbox.reschedule({
-            projectId: this.projectId,
-            ids: [id],
-            leaseId: row.leaseId,
-            availableAt: new Date(
-              this.now().getTime() + this.retryDelayMs(row.attempts)
-            ).toISOString(),
-            error: errorMessage(error),
-          })
-        )
+        const failedAt = this.now().getTime()
+        for (const [attempts, attemptRows] of rowsByAttempts(rows)) {
+          await this.withOutbox((outbox) =>
+            outbox.reschedule({
+              projectId: this.projectId,
+              ids: attemptRows.map((row) => row.envelope.id),
+              leaseId,
+              availableAt: new Date(failedAt + this.retryDelayMs(attempts)).toISOString(),
+              error: errorMessage(error),
+            })
+          )
+        }
       } catch (rescheduleError) {
         this.reportError(rescheduleError)
       }
     } finally {
-      if (this.inFlight.get(id) === publication && publication.settling) {
-        this.inFlight.delete(id)
+      if (this.inFlight === publication && publication.settling) {
+        this.inFlight = null
       }
     }
   }
 
-  private beginSettlement(
-    id: string,
-    publication: InFlightPublication
-  ): ClaimedOntologyOutboxRow | undefined {
-    if (this.inFlight.get(id) !== publication || publication.settling) return undefined
+  private beginSettlement(publication: InFlightPublication): boolean {
+    if (this.inFlight !== publication || publication.settling) return false
     publication.settling = true
-    return publication.row
+    return true
   }
 
   private retryDelayMs(attempts: number): number {
@@ -256,7 +254,7 @@ export class OntologyOutboxDispatcher {
         outbox.reschedule({
           projectId: this.projectId,
           ids: rows.map((row) => row.envelope.id),
-          leaseId: rows[0].leaseId,
+          leaseId: sharedLeaseId(rows),
           availableAt: this.now().toISOString(),
           error: SHUTDOWN_RESCHEDULE_ERROR,
         })
@@ -267,30 +265,15 @@ export class OntologyOutboxDispatcher {
   }
 
   private async rescheduleUnsettledForShutdown(): Promise<void> {
-    const publications = [...this.inFlight.entries()]
-    await Promise.all(
-      publications.map(async ([id, publication]) => {
-        const row = this.beginSettlement(id, publication)
-        if (!row) return
-        try {
-          await this.withOutbox((outbox) =>
-            outbox.reschedule({
-              projectId: this.projectId,
-              ids: [id],
-              leaseId: row.leaseId,
-              availableAt: this.now().toISOString(),
-              error: SHUTDOWN_RESCHEDULE_ERROR,
-            })
-          )
-        } catch (error) {
-          this.reportError(error)
-        } finally {
-          if (this.inFlight.get(id) === publication) {
-            this.inFlight.delete(id)
-          }
-        }
-      })
-    )
+    const publication = this.inFlight
+    if (!publication || !this.beginSettlement(publication)) return
+    try {
+      await this.rescheduleClaimedForShutdown(publication.rows)
+    } finally {
+      if (this.inFlight === publication) {
+        this.inFlight = null
+      }
+    }
   }
 
   private withOutbox<T>(run: (outbox: OntologyOutboxStorage) => Promise<T> | T): Promise<T> {
@@ -352,6 +335,26 @@ function assertNonblank(value: string, name: string): void {
   if (value.trim().length === 0) {
     throw new Error(`[Sixb] Ontology outbox dispatcher ${name} must not be blank.`)
   }
+}
+
+function rowsByAttempts(
+  rows: readonly ClaimedOntologyOutboxRow[]
+): ReadonlyMap<number, readonly ClaimedOntologyOutboxRow[]> {
+  const groups = new Map<number, ClaimedOntologyOutboxRow[]>()
+  for (const row of rows) {
+    const group = groups.get(row.attempts) ?? []
+    group.push(row)
+    groups.set(row.attempts, group)
+  }
+  return groups
+}
+
+function sharedLeaseId(rows: readonly ClaimedOntologyOutboxRow[]): string {
+  const leaseId = rows[0]?.leaseId
+  if (!leaseId || rows.some((row) => row.leaseId !== leaseId)) {
+    throw new Error("[Sixb] Claimed ontology outbox batch does not share one lease.")
+  }
+  return leaseId
 }
 
 function errorMessage(error: unknown): string {
