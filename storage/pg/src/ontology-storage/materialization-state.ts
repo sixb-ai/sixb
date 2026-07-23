@@ -135,6 +135,13 @@ interface ReplacementIdentityInput {
   readonly pageRows: number
 }
 
+interface ReplacementWorkRow {
+  readonly entity_kind: "object" | "link"
+  readonly identity_key: string
+  readonly sort_key: string
+  readonly diff_required: boolean
+}
+
 export class PgMaterializationStateReader {
   constructor(
     private readonly sql: SQLClient,
@@ -195,20 +202,13 @@ export class PgMaterializationStateReader {
         WITH requested AS (
           SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter})
             AS requested_values(object_type_id TEXT, primary_id TEXT)
-        ), ranked AS (
-          SELECT timeseries.*,
-            ROW_NUMBER() OVER (
-              PARTITION BY timeseries.object_type_id, timeseries.object_id,
-                timeseries.property_id
-              ORDER BY timeseries.at DESC
-            ) AS rank
-          FROM timeseries
-          JOIN requested
-            ON requested.object_type_id = timeseries.object_type_id
-           AND requested.primary_id = timeseries.object_id
-          WHERE timeseries.project_id = ${this.projectId}
         )
-        SELECT * FROM ranked WHERE rank = 1
+        SELECT latest.*
+          FROM timeseries_latest AS latest
+          JOIN requested
+            ON requested.object_type_id = latest.object_type_id
+           AND requested.primary_id = latest.object_id
+          WHERE latest.project_id = ${this.projectId}
       `,
     ])
 
@@ -462,25 +462,68 @@ export class PgMaterializationStateReader {
     while (true) {
       const rows: LinkIdentityRow[] = await this.sql`
         WITH requested AS (
-          SELECT *
+          SELECT DISTINCT *
           FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)})
             AS requested_values(object_type_id TEXT, primary_id TEXT)
         ), authority_links AS (
-          SELECT source_type_id, source_id, link_id, target_type_id, target_id
-          FROM links WHERE project_id = ${this.projectId}
+          SELECT links.source_type_id, links.source_id, links.link_id,
+            links.target_type_id, links.target_id
+          FROM links
+          JOIN requested
+            ON requested.object_type_id = links.source_type_id
+           AND requested.primary_id = links.source_id
+          WHERE links.project_id = ${this.projectId}
           UNION
-          SELECT source_type_id, source_primary_id AS source_id, link_id,
-            target_type_id, target_primary_id AS target_id
-          FROM ontology_overrides
-          WHERE project_id = ${this.projectId} AND entity_kind = 'link'
+          SELECT links.source_type_id, links.source_id, links.link_id,
+            links.target_type_id, links.target_id
+          FROM links
+          JOIN requested
+            ON requested.object_type_id = links.target_type_id
+           AND requested.primary_id = links.target_id
+          WHERE links.project_id = ${this.projectId}
           UNION
-          SELECT rows.source_type_id, rows.source_primary_id AS source_id, rows.link_id,
-            rows.target_type_id, rows.target_primary_id AS target_id
+          SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
+            overrides.link_id, overrides.target_type_id,
+            overrides.target_primary_id AS target_id
+          FROM ontology_overrides AS overrides
+          JOIN requested
+            ON requested.object_type_id = overrides.source_type_id
+           AND requested.primary_id = overrides.source_primary_id
+          WHERE overrides.project_id = ${this.projectId} AND overrides.entity_kind = 'link'
+          UNION
+          SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
+            overrides.link_id, overrides.target_type_id,
+            overrides.target_primary_id AS target_id
+          FROM ontology_overrides AS overrides
+          JOIN requested
+            ON requested.object_type_id = overrides.target_type_id
+           AND requested.primary_id = overrides.target_primary_id
+          WHERE overrides.project_id = ${this.projectId} AND overrides.entity_kind = 'link'
+          UNION
+          SELECT rows.source_type_id, rows.source_primary_id AS source_id,
+            rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
           FROM ontology_source_rows AS rows
           JOIN ontology_sources AS sources
             ON sources.project_id = rows.project_id
            AND sources.source_id = rows.source_id
            AND sources.materialization_id = rows.materialization_id
+          JOIN requested
+            ON requested.object_type_id = rows.source_type_id
+           AND requested.primary_id = rows.source_primary_id
+          WHERE rows.project_id = ${this.projectId}
+            AND rows.entity_kind = 'link'
+            AND sources.status = 'active'
+          UNION
+          SELECT rows.source_type_id, rows.source_primary_id AS source_id,
+            rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
+          FROM ontology_source_rows AS rows
+          JOIN ontology_sources AS sources
+            ON sources.project_id = rows.project_id
+           AND sources.source_id = rows.source_id
+           AND sources.materialization_id = rows.materialization_id
+          JOIN requested
+            ON requested.object_type_id = rows.target_type_id
+           AND requested.primary_id = rows.target_primary_id
           WHERE rows.project_id = ${this.projectId}
             AND rows.entity_kind = 'link'
             AND sources.status = 'active'
@@ -488,13 +531,6 @@ export class PgMaterializationStateReader {
           SELECT DISTINCT links.*,
             ${this.sql.unsafe(linkSortExpression("links"))} AS sort_key
           FROM authority_links AS links
-          WHERE EXISTS (
-            SELECT 1 FROM requested
-            WHERE (requested.object_type_id = links.source_type_id
-                AND requested.primary_id = links.source_id)
-               OR (requested.object_type_id = links.target_type_id
-                AND requested.primary_id = links.target_id)
-          )
         )
         SELECT * FROM selected
         WHERE (${cursor}::text IS NULL OR sort_key > ${cursor})
@@ -510,28 +546,19 @@ export class PgMaterializationStateReader {
   async *replacementIdentities(
     input: ReplacementIdentityInput
   ): AsyncIterable<ReplacementIdentity[]> {
+    await this.prepareReplacementIdentities(input)
     let cursor: string | null = null
     while (true) {
-      if (input.kind === "object") {
-        const rows = await this.replacementObjectRows(input, cursor)
-        if (rows.length === 0) break
-        yield rows.map((row) => ({
-          kind: "object",
-          ref: { objectTypeId: row.object_type_id, primaryId: row.primary_id },
-          sortKey: row.sort_key,
-          diffRequired: true,
-        }))
-        cursor = rows[rows.length - 1]?.sort_key ?? null
-        continue
-      }
-      const rows = await this.replacementLinkRows(input, cursor)
+      const rows: ReplacementWorkRow[] = await this.sql<ReplacementWorkRow[]>`
+        SELECT entity_kind, identity_key, sort_key, diff_required
+        FROM ${this.sql(PG_REPLACEMENT_WORK_TABLE)}
+        WHERE session_id = ${input.sessionId} AND entity_kind = ${input.kind}
+          AND (${cursor}::text IS NULL OR sort_key > ${cursor})
+        ORDER BY sort_key
+        LIMIT ${input.pageRows}
+      `
       if (rows.length === 0) break
-      yield rows.map((row) => ({
-        kind: "link",
-        ref: linkRefFromColumns(row),
-        sortKey: row.sort_key,
-        diffRequired: row.diff_required,
-      }))
+      yield rows.map(replacementIdentity)
       cursor = rows[rows.length - 1]?.sort_key ?? null
     }
   }
@@ -692,14 +719,18 @@ export class PgMaterializationStateReader {
     if (materializationIds.length === 0 || refs.length === 0) {
       return { owned: new Set(), byMaterialization: new Map() }
     }
-    const keys = refs.map((ref) => JSON.parse(projectionEntityKey(ref)) as unknown)
+    const keys = refs.map((ref) => ({
+      entity_kind: ref.kind,
+      entity_key: JSON.parse(projectionEntityKey(ref)) as unknown,
+    }))
     const rows = await this.sql<PgOntologySourceAssertionRow[]>`
       WITH requested AS (
-        SELECT value AS entity_key
-        FROM jsonb_array_elements(${jsonParameter(this.sql, keys)}::jsonb)
+        SELECT *
+        FROM jsonb_to_recordset(${jsonParameter(this.sql, keys)})
+          AS requested_values(entity_kind TEXT, entity_key JSONB)
       )
       SELECT rows.* FROM ontology_source_rows AS rows
-      JOIN requested USING (entity_key)
+      JOIN requested USING (entity_kind, entity_key)
       WHERE rows.project_id = ${this.projectId}
         AND rows.source_id = ${sourceId}
         AND rows.materialization_id = ANY(
@@ -719,66 +750,52 @@ export class PgMaterializationStateReader {
     return { owned, byMaterialization }
   }
 
-  private async replacementObjectRows(
-    input: ReplacementIdentityInput,
-    cursor: string | null
-  ): Promise<
-    { readonly object_type_id: string; readonly primary_id: string; readonly sort_key: string }[]
-  > {
-    const after = cursor === null ? this.sql`` : this.sql`AND entity_sort_key > ${cursor}`
-    return this.sql`
-      SELECT DISTINCT object_type_id, primary_id, entity_sort_key AS sort_key
-      FROM ontology_source_rows
-      WHERE project_id = ${this.projectId}
-        AND source_id = ${input.sourceId}
-        AND entity_kind = 'object'
-        AND materialization_id = ANY(
-          ${this.sql.array(
-            [input.candidateMaterializationId, input.previousMaterializationId].filter(
-              (value): value is string => value !== null
-            )
-          )}::text[]
-        )
-        ${after}
-      ORDER BY sort_key
-      LIMIT ${input.pageRows}
-    `
+  private async prepareReplacementIdentities(input: ReplacementIdentityInput): Promise<void> {
+    if (input.kind === "object") {
+      await this.prepareReplacementObjects(input)
+      return
+    }
+    await this.prepareReplacementLinks(input)
   }
 
-  private async replacementLinkRows(
-    input: ReplacementIdentityInput,
-    cursor: string | null
-  ): Promise<(LinkIdentityRow & { readonly diff_required: boolean })[]> {
+  private async prepareReplacementObjects(input: ReplacementIdentityInput): Promise<void> {
     const materializationIds = [
       input.candidateMaterializationId,
       ...(input.previousMaterializationId ? [input.previousMaterializationId] : []),
     ]
-    const after = cursor === null ? this.sql`` : this.sql`WHERE sort_key > ${cursor}`
-    return this.sql`
+    await this.sql`
+      WITH selected AS (
+        SELECT DISTINCT object_type_id, primary_id,
+          ${this.sql.unsafe(objectKeyExpression("rows"))} AS identity_key,
+          ${this.sql.unsafe(objectSortExpression("rows"))} AS sort_key
+        FROM ontology_source_rows AS rows
+        WHERE project_id = ${this.projectId}
+          AND source_id = ${input.sourceId}
+          AND entity_kind = 'object'
+          AND materialization_id = ANY(${this.sql.array(materializationIds)}::text[])
+      )
+      INSERT INTO ${this.sql(PG_REPLACEMENT_WORK_TABLE)} (
+        session_id, entity_kind, identity_key, sort_key, diff_required
+      )
+      SELECT ${input.sessionId}, 'object', identity_key, sort_key, TRUE
+      FROM selected
+      ON CONFLICT (session_id, entity_kind, identity_key) DO UPDATE SET
+        diff_required = ${this.sql(PG_REPLACEMENT_WORK_TABLE)}.diff_required
+          OR EXCLUDED.diff_required
+    `
+  }
+
+  private async prepareReplacementLinks(input: ReplacementIdentityInput): Promise<void> {
+    const materializationIds = [
+      input.candidateMaterializationId,
+      ...(input.previousMaterializationId ? [input.previousMaterializationId] : []),
+    ]
+    await this.sql`
       WITH incident_objects AS (
-        SELECT payload->'ref'->>'objectTypeId' AS object_type_id,
+        SELECT DISTINCT payload->'ref'->>'objectTypeId' AS object_type_id,
           payload->'ref'->>'primaryId' AS primary_id
         FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
         WHERE session_id = ${input.sessionId} AND kind = 'incident-object'
-      ), authority_links AS (
-        SELECT source_type_id, source_id, link_id, target_type_id, target_id
-        FROM links WHERE project_id = ${this.projectId}
-        UNION
-        SELECT source_type_id, source_primary_id AS source_id, link_id,
-          target_type_id, target_primary_id AS target_id
-        FROM ontology_overrides
-        WHERE project_id = ${this.projectId} AND entity_kind = 'link'
-        UNION
-        SELECT rows.source_type_id, rows.source_primary_id AS source_id, rows.link_id,
-          rows.target_type_id, rows.target_primary_id AS target_id
-        FROM ontology_source_rows AS rows
-        JOIN ontology_sources AS sources
-          ON sources.project_id = rows.project_id
-         AND sources.source_id = rows.source_id
-         AND sources.materialization_id = rows.materialization_id
-        WHERE rows.project_id = ${this.projectId}
-          AND rows.entity_kind = 'link'
-          AND sources.status = 'active'
       ), replacement_links AS (
         SELECT source_type_id, source_primary_id AS source_id, link_id,
           target_type_id, target_primary_id AS target_id
@@ -788,14 +805,67 @@ export class PgMaterializationStateReader {
           AND entity_kind = 'link'
           AND materialization_id = ANY(${this.sql.array(materializationIds)}::text[])
       ), incident_links AS (
-        SELECT links.* FROM authority_links AS links
-        WHERE EXISTS (
-          SELECT 1 FROM incident_objects
-          WHERE (incident_objects.object_type_id = links.source_type_id
-              AND incident_objects.primary_id = links.source_id)
-             OR (incident_objects.object_type_id = links.target_type_id
-              AND incident_objects.primary_id = links.target_id)
-        )
+        SELECT links.source_type_id, links.source_id, links.link_id,
+          links.target_type_id, links.target_id
+        FROM links
+        JOIN incident_objects
+          ON incident_objects.object_type_id = links.source_type_id
+         AND incident_objects.primary_id = links.source_id
+        WHERE links.project_id = ${this.projectId}
+        UNION
+        SELECT links.source_type_id, links.source_id, links.link_id,
+          links.target_type_id, links.target_id
+        FROM links
+        JOIN incident_objects
+          ON incident_objects.object_type_id = links.target_type_id
+         AND incident_objects.primary_id = links.target_id
+        WHERE links.project_id = ${this.projectId}
+        UNION
+        SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
+          overrides.link_id, overrides.target_type_id,
+          overrides.target_primary_id AS target_id
+        FROM ontology_overrides AS overrides
+        JOIN incident_objects
+          ON incident_objects.object_type_id = overrides.source_type_id
+         AND incident_objects.primary_id = overrides.source_primary_id
+        WHERE overrides.project_id = ${this.projectId} AND overrides.entity_kind = 'link'
+        UNION
+        SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
+          overrides.link_id, overrides.target_type_id,
+          overrides.target_primary_id AS target_id
+        FROM ontology_overrides AS overrides
+        JOIN incident_objects
+          ON incident_objects.object_type_id = overrides.target_type_id
+         AND incident_objects.primary_id = overrides.target_primary_id
+        WHERE overrides.project_id = ${this.projectId} AND overrides.entity_kind = 'link'
+        UNION
+        SELECT rows.source_type_id, rows.source_primary_id AS source_id,
+          rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
+        FROM ontology_source_rows AS rows
+        JOIN ontology_sources AS sources
+          ON sources.project_id = rows.project_id
+         AND sources.source_id = rows.source_id
+         AND sources.materialization_id = rows.materialization_id
+        JOIN incident_objects
+          ON incident_objects.object_type_id = rows.source_type_id
+         AND incident_objects.primary_id = rows.source_primary_id
+        WHERE rows.project_id = ${this.projectId}
+          AND rows.entity_kind = 'link'
+          AND sources.status = 'active'
+        UNION
+        SELECT rows.source_type_id, rows.source_primary_id AS source_id,
+          rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
+        FROM ontology_source_rows AS rows
+        JOIN ontology_sources AS sources
+          ON sources.project_id = rows.project_id
+         AND sources.source_id = rows.source_id
+         AND sources.materialization_id = rows.materialization_id
+        JOIN incident_objects
+          ON incident_objects.object_type_id = rows.target_type_id
+         AND incident_objects.primary_id = rows.target_primary_id
+        WHERE rows.project_id = ${this.projectId}
+          AND rows.entity_kind = 'link'
+          AND sources.status = 'active'
       ), diff_links AS (
         SELECT * FROM replacement_links
         UNION SELECT * FROM incident_links
@@ -811,16 +881,43 @@ export class PgMaterializationStateReader {
         WHERE links.project_id = ${this.projectId}
       ), selected AS (
         SELECT source_type_id, source_id, link_id, target_type_id, target_id,
+          ${this.sql.unsafe(linkKeyExpression("all_links"))} AS identity_key,
           ${this.sql.unsafe(linkSortExpression("all_links"))} AS sort_key,
           BOOL_OR(diff_required) AS diff_required
         FROM all_links
         GROUP BY source_type_id, source_id, link_id, target_type_id, target_id
       )
-      SELECT * FROM selected
-      ${after}
-      ORDER BY sort_key
-      LIMIT ${input.pageRows}
+      INSERT INTO ${this.sql(PG_REPLACEMENT_WORK_TABLE)} (
+        session_id, entity_kind, identity_key, sort_key, diff_required
+      )
+      SELECT ${input.sessionId}, 'link', identity_key, sort_key, diff_required
+      FROM selected
+      ON CONFLICT (session_id, entity_kind, identity_key) DO UPDATE SET
+        diff_required = ${this.sql(PG_REPLACEMENT_WORK_TABLE)}.diff_required
+          OR EXCLUDED.diff_required
     `
+  }
+}
+
+function replacementIdentity(row: ReplacementWorkRow): ReplacementIdentity {
+  const parts = JSON.parse(row.identity_key) as string[]
+  if (row.entity_kind === "object") {
+    return {
+      kind: "object",
+      ref: { objectTypeId: parts[0]!, primaryId: parts[1]! },
+      sortKey: row.sort_key,
+      diffRequired: true,
+    }
+  }
+  return {
+    kind: "link",
+    ref: {
+      source: { objectTypeId: parts[0]!, primaryId: parts[1]! },
+      linkId: parts[2]!,
+      target: { objectTypeId: parts[3]!, primaryId: parts[4]! },
+    },
+    sortKey: row.sort_key,
+    diffRequired: row.diff_required,
   }
 }
 
@@ -957,7 +1054,15 @@ function storedPoint(row: TelemetryRow): StoredTelemetryPoint {
 
 export function objectSortExpression(alias?: string): string {
   const prefix = alias ? `${alias}.` : ""
-  return jsonTupleSortExpression([
+  return utf8SortExpression([
+    `to_jsonb(${prefix}object_type_id)::text`,
+    `to_jsonb(${prefix}primary_id)::text`,
+  ])
+}
+
+function objectKeyExpression(alias?: string): string {
+  const prefix = alias ? `${alias}.` : ""
+  return jsonTupleExpression([
     `to_jsonb(${prefix}object_type_id)::text`,
     `to_jsonb(${prefix}primary_id)::text`,
   ])
@@ -965,7 +1070,18 @@ export function objectSortExpression(alias?: string): string {
 
 export function linkSortExpression(alias?: string): string {
   const prefix = alias ? `${alias}.` : ""
-  return jsonTupleSortExpression([
+  return utf8SortExpression([
+    `to_jsonb(${prefix}source_type_id)::text`,
+    `to_jsonb(${prefix}source_id)::text`,
+    `to_jsonb(${prefix}link_id)::text`,
+    `to_jsonb(${prefix}target_type_id)::text`,
+    `to_jsonb(${prefix}target_id)::text`,
+  ])
+}
+
+function linkKeyExpression(alias?: string): string {
+  const prefix = alias ? `${alias}.` : ""
+  return jsonTupleExpression([
     `to_jsonb(${prefix}source_type_id)::text`,
     `to_jsonb(${prefix}source_id)::text`,
     `to_jsonb(${prefix}link_id)::text`,
@@ -976,7 +1092,7 @@ export function linkSortExpression(alias?: string): string {
 
 export function pointSortExpression(alias?: string): string {
   const prefix = alias ? `${alias}.` : ""
-  return jsonTupleSortExpression([
+  return utf8SortExpression([
     `to_jsonb(${prefix}object_type_id)::text`,
     `to_jsonb(${prefix}object_id)::text`,
     `to_jsonb(${prefix}property_id)::text`,
@@ -984,6 +1100,10 @@ export function pointSortExpression(alias?: string): string {
   ])
 }
 
-function jsonTupleSortExpression(parts: readonly string[]): string {
-  return `encode(convert_to(concat('[', ${parts.join(", ',', ")}, ']'), 'UTF8'), 'hex')`
+function utf8SortExpression(parts: readonly string[]): string {
+  return `encode(convert_to(${jsonTupleExpression(parts)}, 'UTF8'), 'hex')`
+}
+
+function jsonTupleExpression(parts: readonly string[]): string {
+  return `concat('[', ${parts.join(", ',', ")}, ']')`
 }

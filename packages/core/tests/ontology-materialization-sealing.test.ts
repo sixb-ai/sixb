@@ -319,26 +319,28 @@ describe("in-memory ontology materialization finalization", () => {
     const storage = new InMemoryStorage()
     let leaked: AsyncIterator<MaterializationStatePage> | undefined
 
-    await storage.transaction(async (tx) => {
-      if (!tx.ontology) throw new Error("missing ontology")
-      const session = await tx.ontology.materializations.begin(emptyEditHeader("leaked-stream"))
-      const requests = (async function* () {
-        yield {
-          objects: [
-            { objectTypeId: "Device", primaryId: "one" },
-            { objectTypeId: "Device", primaryId: "two" },
-          ],
-          links: [],
-          linkScopes: [],
-          incidentObjects: [],
-          points: [],
-        }
-      })()
-      leaked = tx.ontology.materializations
-        .streamState({ session, requests, pageRows: 1 })
-        [Symbol.asyncIterator]()
-      expect((await leaked.next()).done).toBe(false)
-    })
+    await expect(
+      storage.transaction(async (tx) => {
+        if (!tx.ontology) throw new Error("missing ontology")
+        const session = await tx.ontology.materializations.begin(emptyEditHeader("leaked-stream"))
+        const requests = (async function* () {
+          yield {
+            objects: [
+              { objectTypeId: "Device", primaryId: "one" },
+              { objectTypeId: "Device", primaryId: "two" },
+            ],
+            links: [],
+            linkScopes: [],
+            incidentObjects: [],
+            points: [],
+          }
+        })()
+        leaked = tx.ontology.materializations
+          .streamState({ session, requests, pageRows: 1 })
+          [Symbol.asyncIterator]()
+        expect((await leaked.next()).done).toBe(false)
+      })
+    ).rejects.toThrow("unfinished materialization session")
 
     if (!leaked) throw new Error("Expected leaked iterator")
     await expect(leaked.next()).rejects.toThrow("session is inactive")
@@ -592,32 +594,34 @@ describe("in-memory ontology materialization finalization", () => {
     const first = objectUpsertWork(header, "one", "61")
     const second = objectUpsertWork(header, "two", "62")
 
-    await storage.transaction(async (tx) => {
-      if (!tx.ontology) throw new Error("missing ontology")
-      const session = await tx.ontology.materializations.begin(header)
-      await tx.ontology.materializations.stageWork({ session, records: [first, second] })
+    await expect(
+      storage.transaction(async (tx) => {
+        if (!tx.ontology) throw new Error("missing ontology")
+        const session = await tx.ontology.materializations.begin(header)
+        await tx.ontology.materializations.stageWork({ session, records: [first, second] })
 
-      await expect(
-        tx.ontology.materializations.applyChunk({
-          session,
-          chunk: objectUpsertChunk([first]),
-        })
-      ).rejects.toThrow("before they are streamed")
+        await expect(
+          tx.ontology.materializations.applyChunk({
+            session,
+            chunk: objectUpsertChunk([first]),
+          })
+        ).rejects.toThrow("before they are streamed")
 
-      for await (const _page of tx.ontology.materializations.streamWork({
-        session,
-        order: "apply",
-        pageRows: 2,
-      })) {
-        // Drain the canonical provider order before trying an inverted chunk.
-      }
-      await expect(
-        tx.ontology.materializations.applyChunk({
+        for await (const _page of tx.ontology.materializations.streamWork({
           session,
-          chunk: objectUpsertChunk([second, first]),
-        })
-      ).rejects.toThrow("exact streamed order")
-    })
+          order: "apply",
+          pageRows: 2,
+        })) {
+          // Drain the canonical provider order before trying an inverted chunk.
+        }
+        await expect(
+          tx.ontology.materializations.applyChunk({
+            session,
+            chunk: objectUpsertChunk([second, first]),
+          })
+        ).rejects.toThrow("exact streamed order")
+      })
+    ).rejects.toThrow("unfinished materialization session")
 
     expect(
       await storage.objects.getByPrimaryId({

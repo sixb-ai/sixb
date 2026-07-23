@@ -42,21 +42,39 @@ export class PgTimeseriesStorage implements TimeseriesStorage {
     event: StoredTelemetryAppendedEvent
   ): Promise<void> {
     await sql`
-      INSERT INTO timeseries (
-        project_id, object_type_id, object_id, property_id,
-        value, unit, at, source_event_id
-      ) VALUES (
-        ${event.projectId}, ${event.payload.objectTypeId}, ${event.payload.objectId},
-        ${event.payload.propertyId},
-        ${JSON.stringify(event.payload.value)}::text::jsonb,
-        ${event.payload.unit ?? null}, ${event.payload.at}::timestamptz,
-        ${event.id}
+      WITH written AS (
+        INSERT INTO timeseries (
+          project_id, object_type_id, object_id, property_id,
+          value, unit, at, source_event_id
+        ) VALUES (
+          ${event.projectId}, ${event.payload.objectTypeId}, ${event.payload.objectId},
+          ${event.payload.propertyId},
+          ${JSON.stringify(event.payload.value)}::text::jsonb,
+          ${event.payload.unit ?? null}, ${event.payload.at}::timestamptz,
+          ${event.id}
+        )
+        ON CONFLICT (project_id, object_type_id, object_id, property_id, at)
+        DO UPDATE SET
+          value = EXCLUDED.value,
+          unit = EXCLUDED.unit,
+          source_event_id = EXCLUDED.source_event_id
+        RETURNING *
       )
-      ON CONFLICT (project_id, object_type_id, object_id, property_id, at)
+      INSERT INTO timeseries_latest (
+        project_id, object_type_id, object_id, property_id,
+        value, unit, at, source_event_id, last_commit_id
+      )
+      SELECT project_id, object_type_id, object_id, property_id,
+        value, unit, at, source_event_id, last_commit_id
+      FROM written
+      ON CONFLICT (project_id, object_type_id, object_id, property_id)
       DO UPDATE SET
         value = EXCLUDED.value,
         unit = EXCLUDED.unit,
-        source_event_id = EXCLUDED.source_event_id
+        at = EXCLUDED.at,
+        source_event_id = EXCLUDED.source_event_id,
+        last_commit_id = EXCLUDED.last_commit_id
+      WHERE EXCLUDED.at >= timeseries_latest.at
     `
   }
 
@@ -186,13 +204,11 @@ export class PgTimeseriesStorage implements TimeseriesStorage {
     propertyId: string
   }): Promise<TimeseriesPoint | null> {
     const [row] = await this.sql<TimeseriesDatabaseRow[]>`
-      SELECT * FROM timeseries
+      SELECT * FROM timeseries_latest
       WHERE project_id = ${params.projectId}
         AND object_type_id = ${params.objectTypeId}
         AND object_id = ${params.objectId}
         AND property_id = ${params.propertyId}
-      ORDER BY at DESC
-      LIMIT 1
     `
 
     return row ? rowToPoint(row) : null

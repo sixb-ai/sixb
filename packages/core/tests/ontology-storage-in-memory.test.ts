@@ -500,7 +500,7 @@ describe("in-memory ontology storage", () => {
     ).toBe(1)
   })
 
-  test("requires transaction-scoped sessions and invalidates unfinished sessions after commit", async () => {
+  test("requires transaction-scoped sessions and rejects unfinished sessions", async () => {
     const storage = new InMemoryStorage()
     const header = {
       commit: {
@@ -527,10 +527,12 @@ describe("in-memory ontology storage", () => {
 
     let unfinished: Awaited<ReturnType<typeof storage.ontology.materializations.begin>> | null =
       null
-    await storage.transaction(async (tx) => {
-      if (!tx.ontology) throw new Error("missing ontology")
-      unfinished = await tx.ontology.materializations.begin(header)
-    })
+    await expect(
+      storage.transaction(async (tx) => {
+        if (!tx.ontology) throw new Error("missing ontology")
+        unfinished = await tx.ontology.materializations.begin(header)
+      })
+    ).rejects.toThrow("unfinished materialization session")
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")

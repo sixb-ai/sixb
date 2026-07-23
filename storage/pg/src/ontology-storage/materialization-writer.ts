@@ -305,17 +305,33 @@ export class PgMaterializationWriter {
       const rows = await this.sql<{ readonly object_type_id: string }[]>`
         WITH staged AS (
           SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, inserts)}::jsonb)
+        ), written AS (
+          INSERT INTO timeseries (
+            project_id, object_type_id, object_id, property_id,
+            value, unit, at, source_event_id, last_commit_id
+          )
+          SELECT ${projectId}, value->>'objectTypeId', value->>'objectId',
+            value->>'propertyId', value->'value', value->>'unit',
+            (value->>'at')::timestamptz, NULL, value->>'lastCommitId'
+          FROM staged
+          ON CONFLICT DO NOTHING
+          RETURNING *
+        ), latest AS (
+          INSERT INTO timeseries_latest (
+            project_id, object_type_id, object_id, property_id,
+            value, unit, at, source_event_id, last_commit_id
+          )
+          SELECT project_id, object_type_id, object_id, property_id,
+            value, unit, at, source_event_id, last_commit_id
+          FROM written
+          ON CONFLICT (project_id, object_type_id, object_id, property_id)
+          DO UPDATE SET value = EXCLUDED.value, unit = EXCLUDED.unit, at = EXCLUDED.at,
+            source_event_id = EXCLUDED.source_event_id,
+            last_commit_id = EXCLUDED.last_commit_id
+          WHERE EXCLUDED.at >= timeseries_latest.at
+          RETURNING object_type_id
         )
-        INSERT INTO timeseries (
-          project_id, object_type_id, object_id, property_id,
-          value, unit, at, source_event_id, last_commit_id
-        )
-        SELECT ${projectId}, value->>'objectTypeId', value->>'objectId',
-          value->>'propertyId', value->'value', value->>'unit',
-          (value->>'at')::timestamptz, NULL, value->>'lastCommitId'
-        FROM staged
-        ON CONFLICT DO NOTHING
-        RETURNING object_type_id
+        SELECT object_type_id, (SELECT COUNT(*) FROM latest) AS latest_count FROM written
       `
       if (rows.length !== inserts.length) throw pointConflict(inserts[0]!)
     }
@@ -325,18 +341,34 @@ export class PgMaterializationWriter {
       const rows = await this.sql<{ readonly object_type_id: string }[]>`
         WITH staged AS (
           SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, updates)}::jsonb)
+        ), written AS (
+          UPDATE timeseries AS points
+          SET value = staged.value->'value', unit = staged.value->>'unit',
+            source_event_id = NULL, last_commit_id = staged.value->>'lastCommitId'
+          FROM staged
+          WHERE points.project_id = ${projectId}
+            AND points.object_type_id = staged.value->>'objectTypeId'
+            AND points.object_id = staged.value->>'objectId'
+            AND points.property_id = staged.value->>'propertyId'
+            AND points.at = (staged.value->>'at')::timestamptz
+            AND points.last_commit_id = staged.value->>'expectedLastCommitId'
+          RETURNING points.*
+        ), latest AS (
+          INSERT INTO timeseries_latest (
+            project_id, object_type_id, object_id, property_id,
+            value, unit, at, source_event_id, last_commit_id
+          )
+          SELECT project_id, object_type_id, object_id, property_id,
+            value, unit, at, source_event_id, last_commit_id
+          FROM written
+          ON CONFLICT (project_id, object_type_id, object_id, property_id)
+          DO UPDATE SET value = EXCLUDED.value, unit = EXCLUDED.unit, at = EXCLUDED.at,
+            source_event_id = EXCLUDED.source_event_id,
+            last_commit_id = EXCLUDED.last_commit_id
+          WHERE EXCLUDED.at >= timeseries_latest.at
+          RETURNING object_type_id
         )
-        UPDATE timeseries AS points
-        SET value = staged.value->'value', unit = staged.value->>'unit',
-          source_event_id = NULL, last_commit_id = staged.value->>'lastCommitId'
-        FROM staged
-        WHERE points.project_id = ${projectId}
-          AND points.object_type_id = staged.value->>'objectTypeId'
-          AND points.object_id = staged.value->>'objectId'
-          AND points.property_id = staged.value->>'propertyId'
-          AND points.at = (staged.value->>'at')::timestamptz
-          AND points.last_commit_id = staged.value->>'expectedLastCommitId'
-        RETURNING points.object_type_id
+        SELECT object_type_id, (SELECT COUNT(*) FROM latest) AS latest_count FROM written
       `
       if (rows.length !== updates.length) throw pointConflict(updates[0]!)
     }

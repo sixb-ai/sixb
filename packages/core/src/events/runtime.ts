@@ -1,14 +1,13 @@
 import { randomUUID } from "node:crypto"
 import type { Broker, BrokerCursor, BrokerRecord, BrokerStreamDefinition } from "../broker"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
-import type { OntologyMaterializationOrigin } from "../materialization/model"
+import type { OntologyMaterializationEvent } from "../materialization/events"
 import {
   EVENT_DEFINITIONS,
   EVENT_TYPES,
   isDomainEventType,
   resolveEventStorage,
 } from "./definitions"
-import type { EventEnvelope } from "./envelope"
 import { EventsError } from "./errors"
 import type { DomainEvent, EventActor, EventDraft, StoredDomainEvent } from "./types"
 
@@ -47,16 +46,8 @@ export interface EventsSubscribeInput {
   readonly types?: readonly DomainEvent["type"][]
 }
 
-/** Complete, already-identified event persisted before broker publication. @internal */
-export interface StableEventEnvelope extends Omit<EventEnvelope, "origin"> {
-  readonly origin: OntologyMaterializationOrigin
-  readonly commitId: string
-  readonly commitOrdinal: number
-  readonly type: DomainEvent["type"]
-  readonly topic: DomainEvent["topic"]
-  readonly partitionKey: string
-  readonly payload: unknown
-}
+/** Exact, already-identified materialization event persisted before broker publication. @internal */
+export type StableEventEnvelope = OntologyMaterializationEvent
 
 /** Project-scoped domain event runtime backed by the shared broker provider. */
 export class EventsRuntime {

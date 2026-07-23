@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { InMemoryStorage, type Storage } from "../src"
 import type {
   StoredLinkMutationEvent,
@@ -88,12 +88,16 @@ describe("InMemoryStorage.transaction", () => {
     ).resolves.toMatchObject({ primaryId: "room_1" })
     expect(objectCalls).toBe(1)
 
-    const sessionSpy = spyOn(storage.auth.sessions, "getById")
+    const getSessionById = storage.auth.sessions.getById.bind(storage.auth.sessions)
+    let sessionCalls = 0
+    storage.auth.sessions.getById = async (input) => {
+      sessionCalls += 1
+      return getSessionById(input)
+    }
     await expect(
       storage.auth.sessions.getById({ projectId: "my-app", id: "missing" })
     ).resolves.toBeNull()
-    expect(sessionSpy).toHaveBeenCalledTimes(1)
-    sessionSpy.mockRestore()
+    expect(sessionCalls).toBe(1)
   })
 
   test("rolls back writes across every mutated store when the transaction fails", async () => {

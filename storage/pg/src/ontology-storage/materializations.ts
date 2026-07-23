@@ -1,4 +1,3 @@
-import { stableJsonStringify } from "@sixb/core"
 import type {
   EffectiveChangeCounts,
   ExpectedLinkRevision,
@@ -30,11 +29,8 @@ import type {
   ApplyMaterializationChunkInput,
   ApplyMaterializationResult,
   FinalizeMaterializationInput,
-  MaterializationCardinalityOccupantWorkRecord,
-  MaterializationClassificationWorkRecord,
   MaterializationObjectExistence,
   MaterializationPlanHeader,
-  MaterializationPlanWorkRecord,
   MaterializationSession,
   MaterializationStatePage,
   MaterializationWorkPage,
@@ -73,6 +69,24 @@ import {
   toIsoString,
 } from "./shared"
 
+interface ProjectionCountsRow {
+  readonly object_classifications: number | string
+  readonly link_classifications: number | string
+  readonly objects_created: number | string
+  readonly objects_updated: number | string
+  readonly objects_deleted: number | string
+  readonly links_created: number | string
+  readonly links_updated: number | string
+  readonly links_deleted: number | string
+}
+
+interface TelemetrySummaryRow {
+  readonly classified_points: number | string
+  readonly points_created: number | string
+  readonly points_updated: number | string
+  readonly latest_objects_changed: number | string
+}
+
 export class PgOntologyMaterializationStorage implements OntologyMaterializationStorage {
   private readonly sessions: PgMaterializationSessions
   private readonly writer: PgMaterializationWriter
@@ -107,11 +121,9 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       for (const expected of input.expected.links) {
         this.assertLink(linkRevisions.get(linkRefKey(expected.ref)), expected)
       }
-      for (const expected of input.expected.linkScopes) {
-        if (
-          (await reader.linkScope(expected.source, expected.linkId)).fingerprint !==
-          expected.fingerprint
-        ) {
+      const linkScopes = await reader.linkScopes(input.expected.linkScopes)
+      for (const [index, expected] of input.expected.linkScopes.entries()) {
+        if (linkScopes[index]?.fingerprint !== expected.fingerprint) {
           throw new MaterializationConflictError(
             "effective-state",
             `Expected link scope changed for ${expected.source.objectTypeId}:${expected.source.primaryId}.${expected.linkId}.`
@@ -227,7 +239,6 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         pageRows: input.pageRows,
       })) {
         this.sessions.require(input.session)
-        await this.sessions.recordReplacementIdentities(session, identities)
         const refs = identities.map((identity) => {
           if (identity.kind !== "object") {
             invalidCorrelation("Object replacement returned a link identity.")
@@ -272,7 +283,6 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       pageRows: input.pageRows,
     })) {
       this.sessions.require(input.session)
-      await this.sessions.recordReplacementIdentities(session, identities)
       const linkIdentities = identities.map((identity) => {
         if (identity.kind !== "link") {
           invalidCorrelation("Link replacement returned an object identity.")
@@ -463,14 +473,6 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     }
   }
 
-  private async assertSource(
-    expected: MaterializationPlanHeader["expected"]["sources"][number],
-    projectId: string
-  ): Promise<void> {
-    const active = await this.getActiveSource(projectId, expected.source.projectionId, true)
-    this.assertSourceRow(expected, active)
-  }
-
   private assertSourceRow(
     expected: MaterializationPlanHeader["expected"]["sources"][number],
     active: PgOntologySourceRow | null
@@ -562,21 +564,13 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     }
 
     if (commit.intent.kind === "telemetry") {
-      const [classified] = await this.sql<{ readonly count: number | string }[]>`
-        SELECT COUNT(*) AS count FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
-        WHERE session_id = ${session.id}
-          AND kind = 'classification'
-          AND payload->>'entityKind' = 'point'
-      `
-      if (Number(classified?.count ?? 0) !== commit.intent.pointCount) {
+      const summary = await this.telemetrySummary(session, commit.intent.pointCount)
+      if (summary.classifiedPoints !== commit.intent.pointCount) {
         invalidCorrelation(
           "Telemetry point classification coverage does not match the commit intent."
         )
       }
-      if (
-        result.kind !== "telemetry" ||
-        !sameCounts(result, await this.telemetryCounts(session, commit.intent.pointCount))
-      ) {
+      if (result.kind !== "telemetry" || !sameCounts(result, summary.counts)) {
         invalidCorrelation("Telemetry result counts do not correlate with finalized work.")
       }
     }
@@ -590,133 +584,138 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
   }
 
   private async assertFinalCardinality(session: PgMaterializationSessionState): Promise<void> {
-    const [duplicate] = await this.sql<{ readonly scope_key: string }[]>`
-      SELECT payload->>'scopeSortKey' AS scope_key
-      FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
-      WHERE session_id = ${session.id}
-        AND kind = 'cardinality'
-        AND (payload->>'occupied')::boolean
-      GROUP BY scope_key
-      HAVING COUNT(*) > 1
+    const [violation] = await this.sql<{ readonly reason: "duplicate" | "mismatch" }[]>`
+      WITH work AS (
+        SELECT payload->>'scopeSortKey' AS scope_sort_key,
+          payload->>'linkSortKey' AS link_sort_key,
+          (payload->>'occupied')::boolean AS occupied,
+          payload->'ref'->'source'->>'objectTypeId' AS source_type_id,
+          payload->'ref'->'source'->>'primaryId' AS source_id,
+          payload->'ref'->>'linkId' AS link_id
+        FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
+        WHERE session_id = ${session.id} AND kind = 'cardinality'
+      ), duplicate AS (
+        SELECT scope_sort_key FROM work WHERE occupied
+        GROUP BY scope_sort_key HAVING COUNT(*) > 1
+      ), scopes AS (
+        SELECT DISTINCT scope_sort_key, source_type_id, source_id, link_id FROM work
+      ), expected AS (
+        SELECT scope_sort_key, link_sort_key FROM work WHERE occupied
+      ), actual AS (
+        SELECT scopes.scope_sort_key,
+          ${this.sql.unsafe(linkSortExpression("links"))} AS link_sort_key
+        FROM scopes
+        JOIN links USING (source_type_id, source_id, link_id)
+        WHERE links.project_id = ${session.header.commit.projectId}
+      ), differences AS (
+        (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+        UNION ALL
+        (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+      )
+      SELECT 'duplicate'::text AS reason FROM duplicate
+      UNION ALL
+      SELECT 'mismatch'::text AS reason FROM differences
       LIMIT 1
     `
-    if (duplicate) {
+    if (violation?.reason === "duplicate") {
       invalidCorrelation("Materialization cardinality work violates cardinality-one.")
     }
-    const records = (await this.sessions.records(
-      session,
-      "cardinality"
-    )) as MaterializationCardinalityOccupantWorkRecord[]
-    const scopes = new Map<string, MaterializationCardinalityOccupantWorkRecord>()
-    for (const record of records) scopes.set(record.scopeSortKey, record)
-    if (scopes.size === 0) return
-    const requested = [...scopes.values()].map((record) => ({
-      scope_sort_key: record.scopeSortKey,
-      source_type_id: record.ref.source.objectTypeId,
-      source_id: record.ref.source.primaryId,
-      link_id: record.ref.linkId,
-    }))
-    const effective = await this.sql<
-      { readonly scope_sort_key: string; readonly sort_key: string }[]
-    >`
-      WITH requested AS (
-        SELECT * FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)})
-          AS requested_values(
-            scope_sort_key TEXT, source_type_id TEXT, source_id TEXT, link_id TEXT
-          )
+    if (violation) {
+      invalidCorrelation(
+        "Materialization cardinality work does not match the final effective link scope."
       )
-      SELECT requested.scope_sort_key,
-        ${this.sql.unsafe(linkSortExpression("links"))} AS sort_key
-      FROM links
-      JOIN requested USING (source_type_id, source_id, link_id)
-      WHERE links.project_id = ${session.header.commit.projectId}
-      ORDER BY requested.scope_sort_key, sort_key
-    `
-    const effectiveByScope = new Map<string, string[]>()
-    for (const row of effective) {
-      const links = effectiveByScope.get(row.scope_sort_key) ?? []
-      links.push(row.sort_key)
-      effectiveByScope.set(row.scope_sort_key, links)
-    }
-    for (const record of scopes.values()) {
-      const occupied = records
-        .filter((candidate) => candidate.scopeSortKey === record.scopeSortKey && candidate.occupied)
-        .map((candidate) => candidate.linkSortKey)
-        .sort()
-      if (
-        stableJsonStringify(effectiveByScope.get(record.scopeSortKey) ?? []) !==
-        stableJsonStringify(occupied)
-      ) {
-        invalidCorrelation(
-          "Materialization cardinality work does not match the final effective link scope."
-        )
-      }
     }
   }
 
   private async projectionCounts(
     session: PgMaterializationSessionState
   ): Promise<EffectiveChangeCounts> {
-    const classifications = (await this.sessions.records(
-      session,
-      "classification"
-    )) as MaterializationClassificationWorkRecord[]
-    const plans = (await this.sessions.records(session, "plan")) as MaterializationPlanWorkRecord[]
-    const counts: MutableEffectiveChangeCounts = {
-      objectsCreated: 0,
-      objectsUpdated: 0,
-      objectsDeleted: 0,
-      objectsUnchanged: classifications.filter((record) => record.entityKind === "object").length,
-      linksCreated: 0,
-      linksUpdated: 0,
-      linksDeleted: 0,
-      linksUnchanged: classifications.filter((record) => record.entityKind === "link").length,
+    const [row] = await this.sql<ProjectionCountsRow[]>`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE kind = 'classification' AND payload->>'entityKind' = 'object'
+        ) AS object_classifications,
+        COUNT(*) FILTER (
+          WHERE kind = 'classification' AND payload->>'entityKind' = 'link'
+        ) AS link_classifications,
+        COUNT(*) FILTER (
+          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'object-upsert'
+            AND NOT (payload->'item'->'value'->'expected'->>'exists')::boolean
+        ) AS objects_created,
+        COUNT(*) FILTER (
+          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'object-upsert'
+            AND (payload->'item'->'value'->'expected'->>'exists')::boolean
+        ) AS objects_updated,
+        COUNT(*) FILTER (
+          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'object-delete'
+        ) AS objects_deleted,
+        COUNT(*) FILTER (
+          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'link-upsert'
+            AND NOT (payload->'item'->'value'->'expected'->>'exists')::boolean
+        ) AS links_created,
+        COUNT(*) FILTER (
+          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'link-upsert'
+            AND (payload->'item'->'value'->'expected'->>'exists')::boolean
+        ) AS links_updated,
+        COUNT(*) FILTER (
+          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'link-delete'
+        ) AS links_deleted
+      FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
+      WHERE session_id = ${session.id}
+    `
+    const objectsCreated = databaseCount(row?.objects_created)
+    const objectsUpdated = databaseCount(row?.objects_updated)
+    const objectsDeleted = databaseCount(row?.objects_deleted)
+    const linksCreated = databaseCount(row?.links_created)
+    const linksUpdated = databaseCount(row?.links_updated)
+    const linksDeleted = databaseCount(row?.links_deleted)
+    return {
+      objectsCreated,
+      objectsUpdated,
+      objectsDeleted,
+      objectsUnchanged:
+        databaseCount(row?.object_classifications) -
+        objectsCreated -
+        objectsUpdated -
+        objectsDeleted,
+      linksCreated,
+      linksUpdated,
+      linksDeleted,
+      linksUnchanged:
+        databaseCount(row?.link_classifications) - linksCreated - linksUpdated - linksDeleted,
     }
-    for (const record of plans) {
-      switch (record.item.kind) {
-        case "object-upsert":
-          if (record.item.value.expected.exists) counts.objectsUpdated += 1
-          else counts.objectsCreated += 1
-          counts.objectsUnchanged -= 1
-          break
-        case "object-delete":
-          counts.objectsDeleted += 1
-          counts.objectsUnchanged -= 1
-          break
-        case "link-upsert":
-          if (record.item.value.expected.exists) counts.linksUpdated += 1
-          else counts.linksCreated += 1
-          counts.linksUnchanged -= 1
-          break
-        case "link-delete":
-          counts.linksDeleted += 1
-          counts.linksUnchanged -= 1
-          break
-      }
-    }
-    return counts
   }
 
-  private async telemetryCounts(session: PgMaterializationSessionState, pointCount: number) {
-    let pointsCreated = 0
-    let pointsUpdated = 0
-    let latestObjectsChanged = 0
-    for (const record of (await this.sessions.records(
-      session,
-      "plan"
-    )) as MaterializationPlanWorkRecord[]) {
-      if (record.item.kind === "point-upsert") {
-        if (record.item.value.expected.lastCommitId === null) pointsCreated += 1
-        else pointsUpdated += 1
-      } else if (record.item.kind === "object-upsert") {
-        latestObjectsChanged += 1
-      }
-    }
+  private async telemetrySummary(session: PgMaterializationSessionState, pointCount: number) {
+    const [row] = await this.sql<TelemetrySummaryRow[]>`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE kind = 'classification' AND payload->>'entityKind' = 'point'
+        ) AS classified_points,
+        COUNT(*) FILTER (
+          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'point-upsert'
+            AND payload->'item'->'value'->'expected'->>'lastCommitId' IS NULL
+        ) AS points_created,
+        COUNT(*) FILTER (
+          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'point-upsert'
+            AND payload->'item'->'value'->'expected'->>'lastCommitId' IS NOT NULL
+        ) AS points_updated,
+        COUNT(*) FILTER (
+          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'object-upsert'
+        ) AS latest_objects_changed
+      FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
+      WHERE session_id = ${session.id}
+    `
+    const pointsCreated = databaseCount(row?.points_created)
+    const pointsUpdated = databaseCount(row?.points_updated)
     return {
-      pointsCreated,
-      pointsUpdated,
-      pointsUnchanged: pointCount - pointsCreated - pointsUpdated,
-      latestObjectsChanged,
+      classifiedPoints: databaseCount(row?.classified_points),
+      counts: {
+        pointsCreated,
+        pointsUpdated,
+        pointsUnchanged: pointCount - pointsCreated - pointsUpdated,
+        latestObjectsChanged: databaseCount(row?.latest_objects_changed),
+      },
     }
   }
 
@@ -760,12 +759,12 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     ) {
       invalidCorrelation("Source activation does not match its ready candidate identity.")
     }
-    await this.assertSource(activation.expected, commit.projectId)
     const previous = await this.getActiveSource(
       commit.projectId,
       activation.source.projectionId,
       true
     )
+    this.assertSourceRow(activation.expected, previous)
     if (previous) {
       assertPinnedDatasetWatermark(
         {
@@ -935,6 +934,6 @@ function materializationLockKeys(header: MaterializationPlanHeader): string[] {
   ]
 }
 
-type MutableEffectiveChangeCounts = {
-  -readonly [TKey in keyof EffectiveChangeCounts]: EffectiveChangeCounts[TKey]
+function databaseCount(value: number | string | undefined): number {
+  return Number(value ?? 0)
 }

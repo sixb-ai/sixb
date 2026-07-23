@@ -388,6 +388,39 @@ describe("PgTimeseriesStorage", () => {
     expect(latest?.value).toBe(23)
   })
 
+  test("getLatest keeps the newest point when history arrives out of order", async () => {
+    const newer = createTelemetryEvent(
+      "project-a",
+      "Room",
+      "room:101",
+      "temperature",
+      24,
+      "2026-01-02T00:00:00.000Z",
+      "newer"
+    )
+    const older = createTelemetryEvent(
+      "project-a",
+      "Room",
+      "room:101",
+      "temperature",
+      20,
+      "2026-01-01T00:00:00.000Z",
+      "older"
+    )
+
+    await storage.timeseries.applyTelemetryAppended(newer)
+    await storage.timeseries.applyTelemetryAppended(older)
+
+    await expect(
+      storage.timeseries.getLatest({
+        projectId: "project-a",
+        objectTypeId: "Room",
+        objectId: "room:101",
+        propertyId: "temperature",
+      })
+    ).resolves.toMatchObject({ value: 24, at: new Date("2026-01-02T00:00:00.000Z") })
+  })
+
   test("getLatest returns null for no data", async () => {
     const latest = await storage.timeseries.getLatest({
       projectId: "project-a",

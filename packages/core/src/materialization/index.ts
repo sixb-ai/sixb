@@ -16,6 +16,7 @@ export {
   MaterializationConflictError,
   MaterializationValidationError,
 } from "./errors"
+export type { OntologyMaterializationEvent, OntologyMaterializationEventDraft } from "./events"
 export type {
   BaseCommitResult,
   EditCommitResult,
