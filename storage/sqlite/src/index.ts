@@ -9,23 +9,20 @@ import type {
   StorageMigrator,
   StorageTransactionOptions,
 } from "@sixb/core"
+import { ProviderMaterializationTransactionLifecycle } from "@sixb/core/internal/ontology-storage-provider"
 import {
-  ACTION_RUN_ROOT_OPERATION_METHODS,
-  createAgentStorageFacade,
-  createAuthStorageFacade,
-  createRootOperationFacade,
-  createWorkflowRunStorageFacade,
-  OBJECT_ROOT_OPERATION_METHODS,
-  PIPELINE_RUN_ROOT_OPERATION_METHODS,
-  PROJECTION_RUN_ROOT_OPERATION_METHODS,
-  RULES_ROOT_OPERATION_METHODS,
-  SYNC_RUN_ROOT_OPERATION_METHODS,
-  TIMESERIES_ROOT_OPERATION_METHODS,
-  WEBHOOK_DELIVERY_ROOT_OPERATION_METHODS,
-  WEBHOOK_RUN_ROOT_OPERATION_METHODS,
-  WORKFLOW_INTERVENTION_ROOT_OPERATION_METHODS,
-} from "@sixb/core/internal/storage-root-operations"
-import { createTransactionStorageProxy, throwNestedStorageTransaction } from "@sixb/core/storage"
+  createAgentOperationScope,
+  createAuthOperationScope,
+  createOntologyOperationScope,
+  createOperationScopedFacade,
+  createStorageOperationScope,
+  createWorkflowRunOperationScope,
+} from "@sixb/core/internal/storage-operation-scope"
+import {
+  createTransactionStorageProxy,
+  StorageTransactionError,
+  throwNestedStorageTransaction,
+} from "@sixb/core/storage"
 import { SqliteActionRunStorage } from "./action-run-storage"
 import { SqliteAgentStorage } from "./agents"
 import { SqliteAuthStorage } from "./auth-storage"
@@ -103,56 +100,32 @@ export class SqliteStorage implements MigrationCapableStorage {
     }
 
     const stores = createSqliteStores(this.connection, {
-      runOntologyOperation: (run) => this.runRootOntologyOperation(run),
+      runOntologyOperation: async (run) => run(),
       transactionContext: null,
     })
-    const lock = <T>(run: () => Promise<T> | T) => this.runRootStorageOperation(run)
-    this.objects = createRootOperationFacade(stores.objects, OBJECT_ROOT_OPERATION_METHODS, lock)
-    this.ontology = stores.ontology
-    this.auth = createAuthStorageFacade(stores.auth, lock)
-    this.agents = createAgentStorageFacade(stores.agents, lock)
-    this.actionRuns = createRootOperationFacade(
-      stores.actionRuns,
-      ACTION_RUN_ROOT_OPERATION_METHODS,
-      lock
+    const assertRootOperationAvailable = () => this.assertRootOperationAvailable()
+    const scope = createStorageOperationScope(
+      (run) => this.runRootStorageOperation(run),
+      assertRootOperationAvailable
     )
-    this.pipelineRuns = createRootOperationFacade(
-      stores.pipelineRuns,
-      PIPELINE_RUN_ROOT_OPERATION_METHODS,
-      lock
+    const ontologyScope = createStorageOperationScope(
+      (run) => this.runRootOntologyOperation(run),
+      assertRootOperationAvailable
     )
-    this.timeseries = createRootOperationFacade(
-      stores.timeseries,
-      TIMESERIES_ROOT_OPERATION_METHODS,
-      lock
-    )
-    this.syncRuns = createRootOperationFacade(
-      stores.syncRuns,
-      SYNC_RUN_ROOT_OPERATION_METHODS,
-      lock
-    )
-    this.projectionRuns = createRootOperationFacade(
-      stores.projectionRuns,
-      PROJECTION_RUN_ROOT_OPERATION_METHODS,
-      lock
-    )
-    this.workflowRuns = createWorkflowRunStorageFacade(stores.workflowRuns, lock)
-    this.workflowInterventions = createRootOperationFacade(
-      stores.workflowInterventions,
-      WORKFLOW_INTERVENTION_ROOT_OPERATION_METHODS,
-      lock
-    )
-    this.webhookDeliveries = createRootOperationFacade(
-      stores.webhookDeliveries,
-      WEBHOOK_DELIVERY_ROOT_OPERATION_METHODS,
-      lock
-    )
-    this.webhookRuns = createRootOperationFacade(
-      stores.webhookRuns,
-      WEBHOOK_RUN_ROOT_OPERATION_METHODS,
-      lock
-    )
-    this.rules = createRootOperationFacade(stores.rules, RULES_ROOT_OPERATION_METHODS, lock)
+    this.objects = createOperationScopedFacade(stores.objects, scope)
+    this.ontology = createOntologyOperationScope(stores.ontology, ontologyScope)
+    this.auth = createAuthOperationScope(stores.auth, scope)
+    this.agents = createAgentOperationScope(stores.agents, scope)
+    this.actionRuns = createOperationScopedFacade(stores.actionRuns, scope)
+    this.pipelineRuns = createOperationScopedFacade(stores.pipelineRuns, scope)
+    this.timeseries = createOperationScopedFacade(stores.timeseries, scope)
+    this.syncRuns = createOperationScopedFacade(stores.syncRuns, scope)
+    this.projectionRuns = createOperationScopedFacade(stores.projectionRuns, scope)
+    this.workflowRuns = createWorkflowRunOperationScope(stores.workflowRuns, scope)
+    this.workflowInterventions = createOperationScopedFacade(stores.workflowInterventions, scope)
+    this.webhookDeliveries = createOperationScopedFacade(stores.webhookDeliveries, scope)
+    this.webhookRuns = createOperationScopedFacade(stores.webhookRuns, scope)
+    this.rules = createOperationScopedFacade(stores.rules, scope)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
   }
 
@@ -174,7 +147,11 @@ export class SqliteStorage implements MigrationCapableStorage {
     return this.withTransactionLock(async () => {
       let active = true
       const scope = { active: true }
-      const transactionContext: SqliteOntologyTransactionContext = { id: {}, active: true }
+      const transactionContext: SqliteOntologyTransactionContext = {
+        id: {},
+        materializations: new ProviderMaterializationTransactionLifecycle(),
+        active: true,
+      }
       const txStorage = this.createTransactionStorage(transactionContext)
       const tx = createTransactionStorageProxy(txStorage, () => active)
 
@@ -182,11 +159,14 @@ export class SqliteStorage implements MigrationCapableStorage {
         return await runImmediateTransactionAsync(this.connection.db, () =>
           this.transactionScope.run(scope, async () => {
             try {
-              return await run(tx)
+              const result = await run(tx)
+              transactionContext.materializations.assertCommittable()
+              return result
             } finally {
               scope.active = false
               transactionContext.active = false
               txStorage.ontology.deactivateSessions()
+              transactionContext.materializations.deactivate()
             }
           })
         )
@@ -222,13 +202,20 @@ export class SqliteStorage implements MigrationCapableStorage {
   }
 
   private runRootStorageOperation<T>(run: () => Promise<T> | T): Promise<T> {
-    if (this.transactionScope.getStore()?.active) return Promise.resolve(run())
+    this.assertRootOperationAvailable()
     return this.withTransactionLock(async () => run())
   }
 
   private runRootOntologyOperation<T>(run: () => Promise<T> | T): Promise<T> {
-    if (this.transactionScope.getStore()?.active) return Promise.resolve(run())
+    this.assertRootOperationAvailable()
     return this.withTransactionLock(() => runImmediateTransactionAsync(this.connection.db, run))
+  }
+
+  private assertRootOperationAvailable(): void {
+    if (!this.transactionScope.getStore()?.active) return
+    throw new StorageTransactionError(
+      "[SixbSqlite] Root storage cannot be used inside a transaction callback; use the provided tx storage."
+    )
   }
 
   private async withTransactionLock<T>(run: () => Promise<T>): Promise<T> {

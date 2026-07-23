@@ -6,6 +6,7 @@ import type {
 import type {
   MaterializationPlanFinalization,
   MaterializationPlanHeader,
+  MaterializationSession,
   OntologySourceRecord,
 } from "../storage/ontology"
 import {
@@ -16,6 +17,7 @@ import {
   commitEmptyEdit,
   commitExactObject,
   contractEditHeader,
+  contractEditResult,
   type OntologyContractStorage,
 } from "./ontology-contract-fixture"
 
@@ -132,24 +134,60 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
       })
     })
 
-    test("keeps sessions transaction-scoped and invalidates unfinished handles", async () => {
+    test("rejects unfinished sessions and rolls back their authoritative writes", async () => {
       await withStorage(async (storage) => {
         const header = contractEditHeader("session-contract")
         await expect(storage.ontology.materializations.begin(header)).rejects.toThrow(
           "active storage transaction"
         )
 
-        let unfinished: Awaited<ReturnType<typeof storage.ontology.materializations.begin>> | null =
-          null
-        await storage.transaction(async (tx) => {
-          unfinished = await tx.ontology.materializations.begin(header)
-        })
+        await expect(
+          commitExactObject(storage, "unfinished-session", { omitFinalize: true })
+        ).rejects.toThrow("unfinished materialization session")
+        expect(
+          await storage.objects.getByPrimaryId({
+            projectId: "contract-project",
+            objectTypeId: "ContractDevice",
+            primaryId: "unfinished-session",
+          })
+        ).toBeNull()
+        expect(
+          await storage.ontology.commits.getById({
+            projectId: "contract-project",
+            id: "unfinished-session",
+          })
+        ).toBeNull()
+        expect(
+          await storage.ontology.outbox.claim({
+            projectId: "contract-project",
+            now: "2027-01-01T00:00:00.000Z",
+            limit: 10,
+            leaseId: "unfinished-session-check",
+            leaseExpiresAt: "2027-01-01T01:00:00.000Z",
+          })
+        ).toEqual([])
+
+        let leakedSession: MaterializationSession | undefined
         await expect(
           storage.transaction(async (tx) => {
-            if (!unfinished) throw new Error("missing contract session")
-            await tx.ontology.materializations.stageWork({ session: unfinished, records: [] })
+            leakedSession = await tx.ontology.materializations.begin(
+              contractEditHeader("leaked-session")
+            )
           })
-        ).rejects.toThrow("inactive")
+        ).rejects.toThrow("unfinished materialization session")
+        if (!leakedSession) throw new Error("Expected an unfinished session handle")
+        const staleSession = leakedSession
+        await storage.transaction(async (tx) => {
+          await expect(
+            tx.ontology.materializations.finalize({
+              session: staleSession,
+              finalization: {
+                sourceActivations: [],
+                result: contractEditResult("leaked-session"),
+              },
+            })
+          ).rejects.toThrow("inactive")
+        })
       })
     })
 

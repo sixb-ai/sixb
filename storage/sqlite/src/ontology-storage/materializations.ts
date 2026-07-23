@@ -4,9 +4,7 @@ import type {
   EffectiveChangeCounts,
   ExpectedLinkRevision,
   ExpectedObjectRevision,
-  OntologyLinkRef,
-  OntologyObjectRef,
-} from "@sixb/core/internal/materializer"
+} from "@sixb/core/internal/materialization"
 import {
   assertPinnedDatasetWatermark,
   linkRefKey,
@@ -15,10 +13,9 @@ import {
   MaterializationConflictError,
   objectRefKey,
   objectRefSortKey,
-  projectionEntityKey,
   telemetryPointKey,
   telemetryPointSortKey,
-} from "@sixb/core/internal/materializer"
+} from "@sixb/core/internal/materialization"
 import {
   assertMaterializationFinalizationCorrelation,
   assertMaterializationHeader,
@@ -26,18 +23,13 @@ import {
   assertPageRows,
   assertPlanChunkCorrelations,
   assertSourceActivationCorrelation,
-  effectiveConflict,
   invalidCorrelation,
-  type OverrideEntity,
-  overrideEntityColumns as overrideColumns,
   sameNonnegativeCounts as sameCounts,
   uniqueSorted,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
   ApplyMaterializationChunkInput,
   ApplyMaterializationResult,
-  ExactEffectiveLinkWrite,
-  ExactEffectiveObjectWrite,
   FinalizeMaterializationInput,
   MaterializationCardinalityOccupantWorkRecord,
   MaterializationClassificationWorkRecord,
@@ -67,9 +59,9 @@ import {
   SQLITE_MATERIALIZATION_WORK_TABLE,
   SqliteMaterializationStateReader,
 } from "./materialization-state"
+import { SqliteMaterializationWriter } from "./materialization-writer"
 import {
   assertProjectionExecution,
-  assertTimestamp,
   canonicalJson,
   commitRecord,
   isSqliteConstraintError,
@@ -81,12 +73,14 @@ import {
 
 export class SqliteOntologyMaterializationStorage implements OntologyMaterializationStorage {
   private readonly sessions: SqliteMaterializationSessions
+  private readonly writer: SqliteMaterializationWriter
 
   constructor(
     private readonly db: Database,
     context: SqliteOntologyTransactionContext | null
   ) {
     this.sessions = new SqliteMaterializationSessions(db, context)
+    this.writer = new SqliteMaterializationWriter(db)
   }
 
   async begin(input: MaterializationPlanHeader): Promise<MaterializationSession> {
@@ -135,23 +129,19 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       this.sessions.require(input.session)
       const objects = uniqueSorted(request.objects, objectRefKey, objectRefSortKey)
       for (let offset = 0; offset < objects.length; offset += input.pageRows) {
-        const page = objects
-          .slice(offset, offset + input.pageRows)
-          .map((ref) => reader.objectState(ref))
+        const page = reader.objectStates(objects.slice(offset, offset + input.pageRows))
         yield { objects: page, links: [], linkScopes: [], points: [] }
       }
       const links = uniqueSorted(request.links, linkRefKey, linkRefSortKey)
       for (let offset = 0; offset < links.length; offset += input.pageRows) {
-        const page = links
-          .slice(offset, offset + input.pageRows)
-          .map((ref) => reader.linkState(ref))
+        const page = reader.linkStates(links.slice(offset, offset + input.pageRows))
         yield { objects: [], links: page, linkScopes: [], points: [] }
       }
       for (const refs of reader.incidentLinks(request.incidentObjects, input.pageRows)) {
         this.sessions.require(input.session)
         yield {
           objects: [],
-          links: refs.map((ref) => reader.linkState(ref)),
+          links: reader.linkStates(refs),
           linkScopes: [],
           points: [],
         }
@@ -162,11 +152,11 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
           JSON.stringify([scope.source.objectTypeId, scope.source.primaryId, scope.linkId]),
         (scope) => linkScopeSortKey(scope.source, scope.linkId)
       )
-      for (const scope of scopes) {
+      for (let offset = 0; offset < scopes.length; offset += input.pageRows) {
         yield {
           objects: [],
           links: [],
-          linkScopes: [reader.linkScope(scope.source, scope.linkId)],
+          linkScopes: reader.linkScopes(scopes.slice(offset, offset + input.pageRows)),
           points: [],
         }
       }
@@ -176,10 +166,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         (point) => telemetryPointSortKey(point.series, point.at)
       )
       for (let offset = 0; offset < points.length; offset += input.pageRows) {
-        const page = points.slice(offset, offset + input.pageRows).flatMap((point) => {
-          const stored = reader.exactPoint(point.series, point.at)
-          return stored ? [stored] : []
-        })
+        const page = reader.exactPoints(points.slice(offset, offset + input.pageRows))
         if (page.length > 0) yield { objects: [], links: [], linkScopes: [], points: page }
       }
     }
@@ -216,16 +203,18 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       })) {
         this.sessions.require(input.session)
         this.sessions.recordReplacementIdentities(session, identities)
-        yield {
-          objects: identities.map((identity) =>
-            reader.replacementObjectState(
-              replacement.sourceId,
-              replacement.candidateMaterializationId,
-              identity.ref as OntologyObjectRef
-            )
-          ),
-          links: [],
-        }
+        const refs = identities.map((identity) => {
+          if (identity.kind !== "object") {
+            invalidCorrelation("Object replacement returned a link identity.")
+          }
+          return identity.ref
+        })
+        const objects = reader.replacementObjectStates(
+          replacement.sourceId,
+          replacement.candidateMaterializationId,
+          refs
+        )
+        yield { objects, links: [] }
       }
       this.sessions.require(input.session)
       replacement.objectStreamCompleted = true
@@ -259,23 +248,19 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     })) {
       this.sessions.require(input.session)
       this.sessions.recordReplacementIdentities(session, identities)
-      yield {
-        objects: [],
-        links: identities.map((identity) => {
-          const ref = identity.ref as OntologyLinkRef
-          return reader.replacementLinkState(
-            replacement.sourceId,
-            replacement.candidateMaterializationId,
-            ref,
-            identity.diffRequired,
-            reader.sourceOwnsEntity(
-              replacement.sourceId,
-              materializationIds,
-              projectionEntityKey({ kind: "link", ref })
-            )
-          )
-        }),
-      }
+      const linkIdentities = identities.map((identity) => {
+        if (identity.kind !== "link") {
+          invalidCorrelation("Link replacement returned an object identity.")
+        }
+        return identity
+      })
+      const links = reader.replacementLinkStates(
+        replacement.sourceId,
+        replacement.candidateMaterializationId,
+        materializationIds,
+        linkIdentities
+      )
+      yield { objects: [], links }
     }
     this.sessions.require(input.session)
     replacement.linkStreamCompleted = true
@@ -306,10 +291,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     this.sessions.assertChunkSequence(session, input.chunk)
     this.db.run("SAVEPOINT sixb_ontology_apply_chunk")
     try {
-      this.applyOverrides(commit.projectId, input.chunk)
-      this.applyEffective(commit.projectId, input.chunk)
-      this.applyTimeseries(commit.projectId, input.chunk)
-      this.applyOutbox(commit.projectId, commit.id, input.chunk)
+      this.writer.apply(commit.projectId, commit.id, input.chunk)
       this.db.run("RELEASE SAVEPOINT sixb_ontology_apply_chunk")
     } catch (error) {
       this.db.run("ROLLBACK TO SAVEPOINT sixb_ontology_apply_chunk")
@@ -499,373 +481,6 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         "effective-state",
         `Expected link ${linkRefKey(expected.ref)} changed.`
       )
-    }
-  }
-
-  private applyOverrides(projectId: string, chunk: ApplyMaterializationChunkInput["chunk"]): void {
-    const upsert = (
-      entity: OverrideEntity,
-      item:
-        | (typeof chunk.overrides.objectUpserts)[number]
-        | (typeof chunk.overrides.linkUpserts)[number]
-    ): void => {
-      const kind = entity.kind
-      const key = kind === "object" ? objectRefKey(entity.ref) : linkRefKey(entity.ref)
-      const columns = overrideColumns(entity)
-      if (item.expectedLastCommitId === null) {
-        try {
-          this.db
-            .query(
-              `
-                INSERT INTO ontology_overrides (
-                  project_id, entity_kind, entity_key, entity_sort_key,
-                  object_type_id, primary_id, source_type_id, source_primary_id,
-                  link_id, target_type_id, target_primary_id,
-                  value, last_commit_id, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, json(?), ?, ?)
-              `
-            )
-            .run(
-              projectId,
-              kind,
-              key,
-              columns.sortKey,
-              columns.objectTypeId,
-              columns.primaryId,
-              columns.sourceTypeId,
-              columns.sourcePrimaryId,
-              columns.linkId,
-              columns.targetTypeId,
-              columns.targetPrimaryId,
-              canonicalJson(item.value),
-              item.lastCommitId,
-              item.updatedAt
-            )
-        } catch (error) {
-          if (isSqliteConstraintError(error))
-            throw effectiveConflict(`Expected ${kind} override changed.`)
-          throw error
-        }
-      } else {
-        requireChanges(
-          this.db
-            .query(
-              `
-                UPDATE ontology_overrides
-                SET value = json(?), last_commit_id = ?, updated_at = ?
-                WHERE project_id = ? AND entity_kind = ? AND entity_key = ?
-                  AND last_commit_id = ?
-              `
-            )
-            .run(
-              canonicalJson(item.value),
-              item.lastCommitId,
-              item.updatedAt,
-              projectId,
-              kind,
-              key,
-              item.expectedLastCommitId
-            ).changes,
-          "effective-state",
-          `Expected ${kind} override changed.`
-        )
-      }
-    }
-    for (const item of chunk.overrides.objectUpserts) {
-      upsert({ kind: "object", ref: item.ref }, item)
-    }
-    for (const item of chunk.overrides.objectDeletes) {
-      requireChanges(
-        this.db
-          .query(
-            `DELETE FROM ontology_overrides
-             WHERE project_id = ? AND entity_kind = 'object' AND entity_key = ? AND last_commit_id = ?`
-          )
-          .run(projectId, objectRefKey(item.ref), item.expectedLastCommitId).changes,
-        "effective-state",
-        "Expected object override changed."
-      )
-    }
-    for (const item of chunk.overrides.linkUpserts) {
-      upsert({ kind: "link", ref: item.ref }, item)
-    }
-    for (const item of chunk.overrides.linkDeletes) {
-      requireChanges(
-        this.db
-          .query(
-            `DELETE FROM ontology_overrides
-             WHERE project_id = ? AND entity_kind = 'link' AND entity_key = ? AND last_commit_id = ?`
-          )
-          .run(projectId, linkRefKey(item.ref), item.expectedLastCommitId).changes,
-        "effective-state",
-        "Expected link override changed."
-      )
-    }
-  }
-
-  private applyEffective(projectId: string, chunk: ApplyMaterializationChunkInput["chunk"]): void {
-    for (const item of chunk.effective.linkDeletes) {
-      requireChanges(
-        this.db
-          .query(
-            `
-              DELETE FROM links
-              WHERE project_id = ? AND source_type_id = ? AND source_id = ? AND link_id = ?
-                AND target_type_id = ? AND target_id = ? AND last_commit_id = ?
-            `
-          )
-          .run(
-            projectId,
-            item.ref.source.objectTypeId,
-            item.ref.source.primaryId,
-            item.ref.linkId,
-            item.ref.target.objectTypeId,
-            item.ref.target.primaryId,
-            item.expected.lastCommitId
-          ).changes,
-        "effective-state",
-        `Expected link ${linkRefKey(item.ref)} changed.`
-      )
-    }
-    for (const item of chunk.effective.objectDeletes) {
-      requireChanges(
-        this.db
-          .query(
-            `DELETE FROM objects
-             WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
-               AND version = ? AND last_commit_id = ?`
-          )
-          .run(
-            projectId,
-            item.ref.objectTypeId,
-            item.ref.primaryId,
-            item.expected.version,
-            item.expected.lastCommitId
-          ).changes,
-        "effective-state",
-        `Expected object ${objectRefKey(item.ref)} changed.`
-      )
-    }
-    for (const item of chunk.effective.objectUpserts) this.applyObject(projectId, item)
-    for (const item of chunk.effective.linkUpserts) this.applyLink(projectId, item)
-  }
-
-  private applyObject(projectId: string, item: ExactEffectiveObjectWrite): void {
-    const { row, expected } = item
-    if (!expected.exists) {
-      try {
-        this.db
-          .query(
-            `
-              INSERT INTO objects (
-                project_id, object_type_id, primary_id, properties, created_at,
-                updated_at, version, source_event_id, last_commit_id
-              ) VALUES (?, ?, ?, json(?), ?, ?, ?, NULL, ?)
-            `
-          )
-          .run(
-            projectId,
-            row.ref.objectTypeId,
-            row.ref.primaryId,
-            canonicalJson(row.properties),
-            row.createdAt,
-            row.updatedAt,
-            row.version,
-            row.lastCommitId
-          )
-      } catch (error) {
-        if (isSqliteConstraintError(error)) {
-          throw effectiveConflict(`Expected object ${objectRefKey(row.ref)} to be absent.`)
-        }
-        throw error
-      }
-      return
-    }
-    requireChanges(
-      this.db
-        .query(
-          `
-            UPDATE objects
-            SET properties = json(?), created_at = ?, updated_at = ?, version = ?,
-              source_event_id = NULL, last_commit_id = ?
-            WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
-              AND version = ? AND last_commit_id = ?
-          `
-        )
-        .run(
-          canonicalJson(row.properties),
-          row.createdAt,
-          row.updatedAt,
-          row.version,
-          row.lastCommitId,
-          projectId,
-          row.ref.objectTypeId,
-          row.ref.primaryId,
-          expected.version,
-          expected.lastCommitId
-        ).changes,
-      "effective-state",
-      `Expected object ${objectRefKey(row.ref)} changed.`
-    )
-  }
-
-  private applyLink(projectId: string, item: ExactEffectiveLinkWrite): void {
-    const { row, expected } = item
-    if (!expected.exists) {
-      try {
-        this.db
-          .query(
-            `
-              INSERT INTO links (
-                project_id, source_type_id, source_id, link_id, target_type_id, target_id,
-                properties, created_at, updated_at, source_event_id, last_commit_id
-              ) VALUES (?, ?, ?, ?, ?, ?, json(?), ?, ?, NULL, ?)
-            `
-          )
-          .run(
-            projectId,
-            row.ref.source.objectTypeId,
-            row.ref.source.primaryId,
-            row.ref.linkId,
-            row.ref.target.objectTypeId,
-            row.ref.target.primaryId,
-            row.properties === undefined ? null : canonicalJson(row.properties),
-            row.createdAt,
-            row.updatedAt,
-            row.lastCommitId
-          )
-      } catch (error) {
-        if (isSqliteConstraintError(error)) {
-          throw effectiveConflict(`Expected link ${linkRefKey(row.ref)} to be absent.`)
-        }
-        throw error
-      }
-      return
-    }
-    requireChanges(
-      this.db
-        .query(
-          `
-            UPDATE links
-            SET properties = json(?), created_at = ?, updated_at = ?,
-              source_event_id = NULL, last_commit_id = ?
-            WHERE project_id = ? AND source_type_id = ? AND source_id = ? AND link_id = ?
-              AND target_type_id = ? AND target_id = ? AND last_commit_id = ?
-          `
-        )
-        .run(
-          row.properties === undefined ? null : canonicalJson(row.properties),
-          row.createdAt,
-          row.updatedAt,
-          row.lastCommitId,
-          projectId,
-          row.ref.source.objectTypeId,
-          row.ref.source.primaryId,
-          row.ref.linkId,
-          row.ref.target.objectTypeId,
-          row.ref.target.primaryId,
-          expected.lastCommitId
-        ).changes,
-      "effective-state",
-      `Expected link ${linkRefKey(row.ref)} changed.`
-    )
-  }
-
-  private applyTimeseries(projectId: string, chunk: ApplyMaterializationChunkInput["chunk"]): void {
-    for (const item of chunk.timeseries.pointUpserts) {
-      const { point, expected } = item
-      if (expected.lastCommitId === null) {
-        try {
-          this.db
-            .query(
-              `
-                INSERT INTO timeseries (
-                  project_id, object_type_id, object_id, property_id,
-                  value, unit, at, source_event_id, last_commit_id
-                ) VALUES (?, ?, ?, ?, json(?), ?, ?, NULL, ?)
-              `
-            )
-            .run(
-              projectId,
-              point.series.object.objectTypeId,
-              point.series.object.primaryId,
-              point.series.propertyId,
-              canonicalJson(point.value),
-              point.unit ?? null,
-              point.at,
-              point.lastCommitId
-            )
-        } catch (error) {
-          if (isSqliteConstraintError(error)) {
-            throw new MaterializationConflictError(
-              "timeseries-point",
-              `Telemetry point ${telemetryPointKey(point.series, point.at)} changed.`
-            )
-          }
-          throw error
-        }
-      } else {
-        requireChanges(
-          this.db
-            .query(
-              `
-                UPDATE timeseries
-                SET value = json(?), unit = ?, source_event_id = NULL, last_commit_id = ?
-                WHERE project_id = ? AND object_type_id = ? AND object_id = ?
-                  AND property_id = ? AND at = ? AND last_commit_id = ?
-              `
-            )
-            .run(
-              canonicalJson(point.value),
-              point.unit ?? null,
-              point.lastCommitId,
-              projectId,
-              point.series.object.objectTypeId,
-              point.series.object.primaryId,
-              point.series.propertyId,
-              point.at,
-              expected.lastCommitId
-            ).changes,
-          "timeseries-point",
-          `Telemetry point ${telemetryPointKey(point.series, point.at)} changed.`
-        )
-      }
-    }
-  }
-
-  private applyOutbox(
-    projectId: string,
-    commitId: string,
-    chunk: ApplyMaterializationChunkInput["chunk"]
-  ): void {
-    const insert = this.db.query(
-      `
-        INSERT INTO ontology_outbox (
-          project_id, id, commit_id, commit_ordinal, envelope,
-          available_at, attempts, lease_id, lease_expires_at,
-          published_at, last_error, created_at
-        ) VALUES (?, ?, ?, ?, json(?), ?, 0, NULL, NULL, NULL, NULL, ?)
-      `
-    )
-    for (const item of chunk.outbox) {
-      assertTimestamp(item.availableAt, "Outbox availableAt")
-      assertTimestamp(item.createdAt, "Outbox createdAt")
-      try {
-        insert.run(
-          projectId,
-          item.envelope.id,
-          commitId,
-          item.envelope.commitOrdinal,
-          canonicalJson(item.envelope),
-          item.availableAt,
-          item.createdAt
-        )
-      } catch (error) {
-        if (isSqliteConstraintError(error)) {
-          throw effectiveConflict(`Duplicate outbox event '${item.envelope.id}'.`)
-        }
-        throw error
-      }
     }
   }
 

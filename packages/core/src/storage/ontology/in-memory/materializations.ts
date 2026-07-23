@@ -60,7 +60,12 @@ import type {
   StreamSourceReplacementStateInput,
 } from "../materializations"
 import type { OntologyMaterializationEvent } from "../outbox"
-import { appendScopeSnapshot, finishScopeAccumulator, startScopeAccumulator } from "../provider"
+import {
+  appendScopeSnapshot,
+  finishScopeAccumulator,
+  type ProviderMaterializationTransactionLifecycle,
+  startScopeAccumulator,
+} from "../provider"
 import type {
   StoredSourceAssertion,
   StoredSourceLinkAssertion,
@@ -111,8 +116,10 @@ import {
 } from "./shared-state"
 
 export interface SessionState {
+  readonly providerToken: object
   readonly header: MaterializationPlanHeader
   readonly transactionToken: object
+  readonly lifecycle: ProviderMaterializationTransactionLifecycle
   active: boolean
   writeOrdinal: number
   readonly work: Map<string, MaterializationWorkRecord>
@@ -174,12 +181,14 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     private readonly objects: InMemoryObjectStorage,
     private readonly timeseries: InMemoryTimeseriesStorage,
     private readonly getTransactionToken: () => object | null,
+    private readonly getMaterializationLifecycle: () => ProviderMaterializationTransactionLifecycle | null,
     private readonly hooks: InMemoryOntologyStorageTestHooks = {}
   ) {}
 
   async begin(input: MaterializationPlanHeader): Promise<MaterializationSession> {
     const transactionToken = this.getTransactionToken()
-    if (!transactionToken) {
+    const lifecycle = this.getMaterializationLifecycle()
+    if (!transactionToken || !lifecycle) {
       throw new MaterializationValidationError(
         "Materialization sessions require an active storage transaction."
       )
@@ -210,8 +219,10 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
 
     const providerToken = {}
     const session = {
+      providerToken,
       header: structuredClone(input),
       transactionToken,
+      lifecycle,
       active: true,
       writeOrdinal: 0,
       work: new Map<string, MaterializationWorkRecord>(),
@@ -234,6 +245,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     }
     this.sessions.set(providerToken, session)
     this.liveSessions.add(session)
+    lifecycle.register(providerToken)
     return { providerToken }
   }
 
@@ -259,6 +271,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     session.objectExistence.clear()
     session.replacement = null
     this.liveSessions.delete(session)
+    session.lifecycle.complete(session.providerToken)
   }
 
   async *streamState(

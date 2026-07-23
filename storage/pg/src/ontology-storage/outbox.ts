@@ -1,7 +1,7 @@
 import {
   MaterializationConflictError,
   MaterializationValidationError,
-} from "@sixb/core/internal/materializer"
+} from "@sixb/core/internal/materialization"
 import type {
   ClaimedOntologyOutboxRow,
   ClaimOntologyOutboxInput,

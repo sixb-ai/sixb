@@ -74,7 +74,11 @@ export async function commitEmptyEdit(storage: OntologyContractStorage, id: stri
 export async function commitExactObject(
   storage: OntologyContractStorage,
   id: string,
-  options: { readonly primaryId?: string; readonly throwAfterFinalize?: boolean } = {}
+  options: {
+    readonly primaryId?: string
+    readonly omitFinalize?: boolean
+    readonly throwAfterFinalize?: boolean
+  } = {}
 ): Promise<{ readonly eventId: string }> {
   const header = contractEditHeader(id)
   const ref = { objectTypeId: "ContractDevice", primaryId: options.primaryId ?? id }
@@ -172,10 +176,12 @@ export async function commitExactObject(
         }),
       },
     })
-    await materializations.finalize({
-      session,
-      finalization: { sourceActivations: [], result: contractEditResult(id, 1) },
-    })
+    if (!options.omitFinalize) {
+      await materializations.finalize({
+        session,
+        finalization: { sourceActivations: [], result: contractEditResult(id, 1) },
+      })
+    }
     if (options.throwAfterFinalize) throw new Error("contract rollback")
   })
 

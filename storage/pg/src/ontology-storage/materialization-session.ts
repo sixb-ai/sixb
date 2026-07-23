@@ -2,13 +2,14 @@ import {
   linkRefKey,
   MaterializationConflictError,
   objectRefKey,
-} from "@sixb/core/internal/materializer"
+} from "@sixb/core/internal/materialization"
 import {
   correlateMaterializationChunk,
   duplicateMaterializationWork as duplicateWork,
   invalidCorrelation,
   materializationPlanItems,
   ProviderMaterializationSessionState,
+  type ProviderMaterializationTransactionLifecycle,
   prepareMaterializationWork,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
@@ -31,6 +32,7 @@ import { jsonParameter } from "./shared"
 
 export interface PgOntologyTransactionContext {
   readonly id: object
+  readonly materializations: ProviderMaterializationTransactionLifecycle
   active: boolean
 }
 
@@ -84,6 +86,7 @@ export class PgMaterializationSessions {
     const session = new PgMaterializationSessionState(structuredClone(header), this.context.id)
     this.sessions.set(session.providerToken, session)
     this.live.add(session)
+    this.context.materializations.register(session.providerToken)
     return session
   }
 
@@ -109,6 +112,7 @@ export class PgMaterializationSessions {
     session.active = false
     session.replacement = null
     this.live.delete(session)
+    this.context?.materializations.complete(session.providerToken)
   }
 
   deactivateAll(): void {

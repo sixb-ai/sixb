@@ -1,6 +1,7 @@
 import type { InMemoryObjectStorage } from "../../objects"
 import type { InMemoryTimeseriesStorage } from "../../timeseries"
 import type { OntologyStorage } from ".."
+import type { ProviderMaterializationTransactionLifecycle } from "../provider"
 import type { AssertSourceMaterializationExecution } from "../sources"
 import { InMemoryOntologyCommitStorage } from "./commits"
 import { InMemoryOntologyMaterializationStorage } from "./materializations"
@@ -13,13 +14,17 @@ import {
   restoreOntologyState,
 } from "./shared-state"
 import { InMemoryOntologySourceStorage } from "./sources"
-import { registerInMemoryOntologyStorageTestingAdapter } from "./testing"
+import {
+  type InMemoryOntologyStorageTestingAdapter,
+  registerInMemoryOntologyStorageTestingAdapter,
+} from "./testing"
 
 export type InMemoryOntologyStorageSnapshot = InMemoryOntologyState
 
 interface InMemoryOntologyStorageOptions {
   readonly runRootOperation: <T>(run: () => Promise<T> | T) => Promise<T>
   readonly getTransactionToken: () => object | null
+  readonly getMaterializationLifecycle: () => ProviderMaterializationTransactionLifecycle | null
   readonly assertSourceMaterializationExecution: AssertSourceMaterializationExecution
 }
 
@@ -30,6 +35,10 @@ export class InMemoryOntologyStorage implements OntologyStorage {
   readonly materializations: InMemoryOntologyMaterializationStorage
   readonly outbox: InMemoryOntologyOutboxStorage
   private testHooks: InMemoryOntologyStorageTestHooks = {}
+  private readonly testingAdapter: InMemoryOntologyStorageTestingAdapter = {
+    setTestHooks: (hooks) => this.setTestHooks(hooks),
+    snapshot: () => this.snapshot(),
+  }
 
   constructor(
     objects: InMemoryObjectStorage,
@@ -48,6 +57,7 @@ export class InMemoryOntologyStorage implements OntologyStorage {
       objects,
       timeseries,
       options.getTransactionToken,
+      options.getMaterializationLifecycle,
       {
         beforeRead: (boundary) => this.testHooks.beforeRead?.(boundary),
         beforeWrite: (boundary, ordinal) => this.testHooks.beforeWrite?.(boundary, ordinal),
@@ -55,15 +65,17 @@ export class InMemoryOntologyStorage implements OntologyStorage {
         observeWork: (records) => this.testHooks.observeWork?.(records),
       }
     )
-    registerInMemoryOntologyStorageTestingAdapter(this, {
-      setTestHooks: (hooks) => this.setTestHooks(hooks),
-      snapshot: () => this.snapshot(),
-    })
+    registerInMemoryOntologyStorageTestingAdapter(this, this.testingAdapter)
   }
 
   /** @internal Test-only failure injection; not part of OntologyStorage. */
   setTestHooks(hooks: InMemoryOntologyStorageTestHooks): void {
     this.testHooks = hooks
+  }
+
+  /** @internal Register a decorated facade as an alias for the same test adapter. */
+  registerTestingAlias(storage: OntologyStorage): void {
+    registerInMemoryOntologyStorageTestingAdapter(storage, this.testingAdapter)
   }
 
   snapshot(): InMemoryOntologyStorageSnapshot {

@@ -7,6 +7,15 @@ import { type FileUploadSessionStore, InMemoryFileUploadSessions } from "../file
 import { InMemoryObjectStorage } from "../objects"
 import type { OntologyStorage } from "../ontology"
 import { InMemoryOntologyStorage } from "../ontology/in-memory"
+import { ProviderMaterializationTransactionLifecycle } from "../ontology/provider"
+import {
+  createAgentOperationScope,
+  createAuthOperationScope,
+  createOntologyOperationScope,
+  createOperationScopedFacade,
+  createStorageOperationScope,
+  createWorkflowRunOperationScope,
+} from "../operation-scope"
 import { InMemoryPipelineRunStorage, type PipelineRunStorage } from "../pipeline-runs"
 import { InMemoryProjectionRunStorage } from "../projection-runs"
 import { InMemoryRulesStorage, type RulesStorage } from "../rules"
@@ -21,50 +30,15 @@ import {
   type WorkflowInterventionStorage,
 } from "../workflow-interventions"
 import { InMemoryWorkflowRunStorage, type WorkflowRunStorage } from "../workflow-runs"
-import {
-  createAgentStorageFacade,
-  createAuthStorageFacade,
-  createWorkflowRunStorageFacade,
-  FILE_UPLOAD_SESSION_ROOT_OPERATION_METHODS,
-  OBJECT_ROOT_OPERATION_METHODS,
-  PIPELINE_RUN_ROOT_OPERATION_METHODS,
-  RULES_ROOT_OPERATION_METHODS,
-  SYNC_RUN_ROOT_OPERATION_METHODS,
-  TIMESERIES_ROOT_OPERATION_METHODS,
-  WEBHOOK_DELIVERY_ROOT_OPERATION_METHODS,
-  WEBHOOK_RUN_ROOT_OPERATION_METHODS,
-  WORKFLOW_INTERVENTION_ROOT_OPERATION_METHODS,
-} from "./manifests"
-import { createRootOperationFacade } from "./root-operation-facade"
 
 /**
  * In-memory {@link Storage} used for dev and tests.
  *
  * Every top-level storage call ("root operation") serializes against a single promise-chain lock
  * unless a transaction is already active, which is what gives {@link InMemoryStorage.transaction}
- * snapshot/rollback atomicity. Two complementary models attach that lock to the underlying stores:
- *
- * - **Façade-wrapped stores** (`objects`, `timeseries`, `auth`, `agents`, `syncRuns`,
- *   `pipelineRuns`, `workflowRuns`, `workflowInterventions`, `webhookDeliveries`, `webhookRuns`,
- *   `rules`, `fileUploadSessions`) are lock-unaware plain classes. They are wrapped externally by
- *   {@link createRootOperationFacade} using a static method manifest (see `./manifests.ts`). The
- *   façade uniformly re-acquires the lock for the listed methods while leaving the store ignorant
- *   of locking, and uses own-property descriptors (not a Proxy) so decoration and `spyOn` keep
- *   working.
- * - **Injected-runner stores** (`actionRuns`, `projectionRuns`, and `ontology`) receive
- *   `runRootOperation` in their constructor and call it inside their own method bodies. This gives
- *   them per-method control the façade cannot express: e.g. `projectionRuns` exposes
- *   `assertSourceMaterializationExecutionUnlocked`, a deliberately *unlocked* seam invoked from
- *   inside the ontology store's already-locked root operation to avoid re-entrantly acquiring the
- *   (non-reentrant) lock. The ontology store also fans `runRootOperation` out to its own child
- *   stores and needs extra injected seams (`getTransactionToken`,
- *   `assertSourceMaterializationExecution`), so it is inherently a runner consumer.
- *
- * The two models are intentionally not unified: converting the injected-runner stores to the
- * façade would require encoding their unlocked/re-entrant seams as manifest exclusions and lose
- * their per-method control, while converting the façade stores to the injected runner would spread
- * `runRootOperation` plumbing across a dozen otherwise lock-unaware stores. Either direction adds
- * code and risk for no behavioral gain.
+ * snapshot/rollback atomicity. The provider owns one operation scope and applies it to every async
+ * root capability. Transaction calls reuse the already-active scope and therefore never reacquire
+ * its non-reentrant lock.
  */
 export class InMemoryStorage implements Storage {
   readonly objects: InMemoryObjectStorage
@@ -75,8 +49,10 @@ export class InMemoryStorage implements Storage {
   private readonly ontologyStorage: InMemoryOntologyStorage
   private readonly authStorage = new InMemoryAuthStorage()
   private readonly agentStorage = new InMemoryAgentStorage()
+  private readonly actionRunStorage = new InMemoryActionRunStorage()
   private readonly syncRunStorage = new InMemorySyncRunStorage()
   private readonly pipelineRunStorage = new InMemoryPipelineRunStorage()
+  private readonly projectionRunStorage = new InMemoryProjectionRunStorage()
   private readonly workflowRunStorage = new InMemoryWorkflowRunStorage()
   private readonly workflowInterventionStorage = new InMemoryWorkflowInterventionStorage()
   private readonly webhookDeliveryStorage = new InMemoryWebhookDeliveryStorage()
@@ -97,68 +73,44 @@ export class InMemoryStorage implements Storage {
   readonly fileUploadSessions: FileUploadSessionStore
 
   constructor() {
-    const runRootOperation = <T>(run: () => Promise<T> | T) => this.withStorageOperation(run)
-    this.objects = createRootOperationFacade(
-      this.objectStorage,
-      OBJECT_ROOT_OPERATION_METHODS,
-      runRootOperation
+    const scope = createStorageOperationScope(
+      (run) => this.withStorageOperation(run),
+      () => this.assertRootOperationAvailable()
     )
-    this.timeseries = createRootOperationFacade(
-      this.timeseriesStorage,
-      TIMESERIES_ROOT_OPERATION_METHODS,
-      runRootOperation
-    )
-    this.auth = createAuthStorageFacade(this.authStorage, runRootOperation)
-    this.agents = createAgentStorageFacade(this.agentStorage, runRootOperation)
-    this.actionRuns = new InMemoryActionRunStorage({ runRootOperation })
-    this.syncRuns = createRootOperationFacade(
-      this.syncRunStorage,
-      SYNC_RUN_ROOT_OPERATION_METHODS,
-      runRootOperation
-    )
-    this.pipelineRuns = createRootOperationFacade(
-      this.pipelineRunStorage,
-      PIPELINE_RUN_ROOT_OPERATION_METHODS,
-      runRootOperation
-    )
-    this.projectionRuns = new InMemoryProjectionRunStorage({ runRootOperation })
-    this.workflowRuns = createWorkflowRunStorageFacade(this.workflowRunStorage, runRootOperation)
-    this.workflowInterventions = createRootOperationFacade(
+    this.objects = createOperationScopedFacade(this.objectStorage, scope)
+    this.timeseries = createOperationScopedFacade(this.timeseriesStorage, scope)
+    this.auth = createAuthOperationScope(this.authStorage, scope)
+    this.agents = createAgentOperationScope(this.agentStorage, scope)
+    this.actionRuns = createOperationScopedFacade(this.actionRunStorage, scope)
+    this.syncRuns = createOperationScopedFacade(this.syncRunStorage, scope)
+    this.pipelineRuns = createOperationScopedFacade(this.pipelineRunStorage, scope)
+    this.projectionRuns = createOperationScopedFacade(this.projectionRunStorage, scope)
+    this.workflowRuns = createWorkflowRunOperationScope(this.workflowRunStorage, scope)
+    this.workflowInterventions = createOperationScopedFacade(
       this.workflowInterventionStorage,
-      WORKFLOW_INTERVENTION_ROOT_OPERATION_METHODS,
-      runRootOperation
+      scope
     )
-    this.webhookDeliveries = createRootOperationFacade(
-      this.webhookDeliveryStorage,
-      WEBHOOK_DELIVERY_ROOT_OPERATION_METHODS,
-      runRootOperation
-    )
-    this.webhookRuns = createRootOperationFacade(
-      this.webhookRunStorage,
-      WEBHOOK_RUN_ROOT_OPERATION_METHODS,
-      runRootOperation
-    )
-    this.rules = createRootOperationFacade(
-      this.rulesStorage,
-      RULES_ROOT_OPERATION_METHODS,
-      runRootOperation
-    )
-    this.fileUploadSessions = createRootOperationFacade(
-      this.fileUploadSessionStorage,
-      FILE_UPLOAD_SESSION_ROOT_OPERATION_METHODS,
-      runRootOperation
-    )
+    this.webhookDeliveries = createOperationScopedFacade(this.webhookDeliveryStorage, scope)
+    this.webhookRuns = createOperationScopedFacade(this.webhookRunStorage, scope)
+    this.rules = createOperationScopedFacade(this.rulesStorage, scope)
+    this.fileUploadSessions = createOperationScopedFacade(this.fileUploadSessionStorage, scope)
     this.ontologyStorage = new InMemoryOntologyStorage(this.objectStorage, this.timeseriesStorage, {
-      runRootOperation,
+      runRootOperation: async (run) => run(),
       getTransactionToken: () => this.getActiveTransactionToken(),
+      getMaterializationLifecycle: () => this.getActiveMaterializationLifecycle(),
       assertSourceMaterializationExecution: (input) =>
-        this.projectionRuns.assertSourceMaterializationExecutionUnlocked(input),
+        this.projectionRunStorage.assertSourceMaterializationExecutionUnlocked(input),
     })
-    this.ontology = this.ontologyStorage
+    this.ontology = createOntologyOperationScope(this.ontologyStorage, scope)
+    this.ontologyStorage.registerTestingAlias(this.ontology)
   }
 
   private readonly transactionScope = new AsyncLocalStorage<object>()
   private readonly activeTransactionTokens = new WeakSet<object>()
+  private readonly materializationLifecycles = new WeakMap<
+    object,
+    ProviderMaterializationTransactionLifecycle
+  >()
   private transactionTail: Promise<void> = Promise.resolve()
 
   /**
@@ -185,12 +137,16 @@ export class InMemoryStorage implements Storage {
     return this.withTransactionLock(async () => {
       const snapshot = this.snapshot()
       let active = true
-      const tx = createTransactionStorageProxy(this, () => active)
+      const tx = createTransactionStorageProxy(this.createTransactionStorage(), () => active)
       const transactionToken = {}
+      const materializationLifecycle = new ProviderMaterializationTransactionLifecycle()
       this.activeTransactionTokens.add(transactionToken)
+      this.materializationLifecycles.set(transactionToken, materializationLifecycle)
 
       try {
-        return await this.transactionScope.run(transactionToken, async () => run(tx))
+        const result = await this.transactionScope.run(transactionToken, async () => run(tx))
+        materializationLifecycle.assertCommittable()
+        return result
       } catch (error) {
         // A failed rollback leaves the store in an unknown state. Surface that explicitly instead
         // of letting the restore error silently replace (mask) the original transaction error.
@@ -207,6 +163,7 @@ export class InMemoryStorage implements Storage {
         throw error
       } finally {
         this.ontologyStorage.completeTransaction(transactionToken)
+        materializationLifecycle.deactivate()
         this.activeTransactionTokens.delete(transactionToken)
         active = false
       }
@@ -214,15 +171,25 @@ export class InMemoryStorage implements Storage {
   }
 
   private async withStorageOperation<T>(run: () => Promise<T> | T): Promise<T> {
-    if (this.getActiveTransactionToken()) {
-      return await run()
-    }
+    this.assertRootOperationAvailable()
     return this.withTransactionLock(async () => run())
+  }
+
+  private assertRootOperationAvailable(): void {
+    if (!this.getActiveTransactionToken()) return
+    throw new StorageTransactionError(
+      "[Sixb] Root storage cannot be used inside a transaction callback; use the provided tx storage."
+    )
   }
 
   private getActiveTransactionToken(): object | null {
     const token = this.transactionScope.getStore()
     return token && this.activeTransactionTokens.has(token) ? token : null
+  }
+
+  private getActiveMaterializationLifecycle(): ProviderMaterializationTransactionLifecycle | null {
+    const token = this.getActiveTransactionToken()
+    return token ? (this.materializationLifecycles.get(token) ?? null) : null
   }
 
   private async withTransactionLock<T>(run: () => Promise<T>): Promise<T> {
@@ -240,6 +207,29 @@ export class InMemoryStorage implements Storage {
     }
   }
 
+  private createTransactionStorage(): Storage {
+    return {
+      objects: this.objectStorage,
+      timeseries: this.timeseriesStorage,
+      ontology: this.ontologyStorage,
+      auth: this.authStorage,
+      agents: this.agentStorage,
+      actionRuns: this.actionRunStorage,
+      syncRuns: this.syncRunStorage,
+      pipelineRuns: this.pipelineRunStorage,
+      projectionRuns: this.projectionRunStorage,
+      workflowRuns: this.workflowRunStorage,
+      workflowInterventions: this.workflowInterventionStorage,
+      webhookDeliveries: this.webhookDeliveryStorage,
+      webhookRuns: this.webhookRunStorage,
+      rules: this.rulesStorage,
+      fileUploadSessions: this.fileUploadSessionStorage,
+      transaction: async <T>(): Promise<T> => {
+        throwNestedStorageTransaction()
+      },
+    }
+  }
+
   private snapshot(): InMemoryStorageSnapshot {
     return {
       objects: this.objectStorage.snapshot(),
@@ -247,10 +237,10 @@ export class InMemoryStorage implements Storage {
       ontology: this.ontologyStorage.snapshot(),
       auth: this.authStorage.snapshot(),
       agents: this.agentStorage.snapshot(),
-      actionRuns: this.actionRuns.snapshot(),
+      actionRuns: this.actionRunStorage.snapshot(),
       syncRuns: this.syncRunStorage.snapshot(),
       pipelineRuns: this.pipelineRunStorage.snapshot(),
-      projectionRuns: this.projectionRuns.snapshot(),
+      projectionRuns: this.projectionRunStorage.snapshot(),
       workflowRuns: this.workflowRunStorage.snapshot(),
       workflowInterventions: this.workflowInterventionStorage.snapshot(),
       webhookDeliveries: this.webhookDeliveryStorage.snapshot(),
@@ -266,10 +256,10 @@ export class InMemoryStorage implements Storage {
     this.ontologyStorage.restore(snapshot.ontology)
     this.authStorage.restore(snapshot.auth)
     this.agentStorage.restore(snapshot.agents)
-    this.actionRuns.restore(snapshot.actionRuns)
+    this.actionRunStorage.restore(snapshot.actionRuns)
     this.syncRunStorage.restore(snapshot.syncRuns)
     this.pipelineRunStorage.restore(snapshot.pipelineRuns)
-    this.projectionRuns.restore(snapshot.projectionRuns)
+    this.projectionRunStorage.restore(snapshot.projectionRuns)
     this.workflowRunStorage.restore(snapshot.workflowRuns)
     this.workflowInterventionStorage.restore(snapshot.workflowInterventions)
     this.webhookDeliveryStorage.restore(snapshot.webhookDeliveries)

@@ -9,6 +9,15 @@ import type {
   StorageMigrator,
   StorageTransactionOptions,
 } from "@sixb/core"
+import { ProviderMaterializationTransactionLifecycle } from "@sixb/core/internal/ontology-storage-provider"
+import {
+  createAgentOperationScope,
+  createAuthOperationScope,
+  createOntologyOperationScope,
+  createOperationScopedFacade,
+  createStorageOperationScope,
+  createWorkflowRunOperationScope,
+} from "@sixb/core/internal/storage-operation-scope"
 import {
   createTransactionStorageProxy,
   StorageTransactionError,
@@ -179,20 +188,27 @@ export class PostgresStorage implements MigrationCapableStorage {
       runOntologyOperation: (run) => runPgTransaction(this.sql, run),
       transactionContext: null,
     })
-    this.objects = stores.objects
-    this.ontology = stores.ontology
-    this.auth = stores.auth
-    this.agents = stores.agents
-    this.actionRuns = stores.actionRuns
-    this.pipelineRuns = stores.pipelineRuns
-    this.workflowRuns = stores.workflowRuns
-    this.workflowInterventions = stores.workflowInterventions
-    this.syncRuns = stores.syncRuns
-    this.projectionRuns = stores.projectionRuns
-    this.timeseries = stores.timeseries
-    this.webhookDeliveries = stores.webhookDeliveries
-    this.webhookRuns = stores.webhookRuns
-    this.rules = stores.rules
+    const scope = createStorageOperationScope(
+      async (run) => {
+        this.assertRootOperationAvailable()
+        return run()
+      },
+      () => this.assertRootOperationAvailable()
+    )
+    this.objects = createOperationScopedFacade(stores.objects, scope)
+    this.ontology = createOntologyOperationScope(stores.ontology, scope)
+    this.auth = createAuthOperationScope(stores.auth, scope)
+    this.agents = createAgentOperationScope(stores.agents, scope)
+    this.actionRuns = createOperationScopedFacade(stores.actionRuns, scope)
+    this.pipelineRuns = createOperationScopedFacade(stores.pipelineRuns, scope)
+    this.workflowRuns = createWorkflowRunOperationScope(stores.workflowRuns, scope)
+    this.workflowInterventions = createOperationScopedFacade(stores.workflowInterventions, scope)
+    this.syncRuns = createOperationScopedFacade(stores.syncRuns, scope)
+    this.projectionRuns = createOperationScopedFacade(stores.projectionRuns, scope)
+    this.timeseries = createOperationScopedFacade(stores.timeseries, scope)
+    this.webhookDeliveries = createOperationScopedFacade(stores.webhookDeliveries, scope)
+    this.webhookRuns = createOperationScopedFacade(stores.webhookRuns, scope)
+    this.rules = createOperationScopedFacade(stores.rules, scope)
   }
 
   async transaction<T>(
@@ -208,15 +224,22 @@ export class PostgresStorage implements MigrationCapableStorage {
         this.sql,
         async (client) => {
           let active = true
-          const transactionContext: PgOntologyTransactionContext = { id: {}, active: true }
+          const transactionContext: PgOntologyTransactionContext = {
+            id: {},
+            materializations: new ProviderMaterializationTransactionLifecycle(),
+            active: true,
+          }
           const txStorage = this.createTransactionStorage(client, transactionContext)
           const tx = createTransactionStorageProxy(txStorage, () => active)
 
           try {
-            return await this.transactionScope.run(true, () => run(tx))
+            const result = await this.transactionScope.run(true, () => run(tx))
+            transactionContext.materializations.assertCommittable()
+            return result
           } finally {
             transactionContext.active = false
             txStorage.ontology.deactivateSessions()
+            transactionContext.materializations.deactivate()
             active = false
           }
         },
@@ -231,6 +254,13 @@ export class PostgresStorage implements MigrationCapableStorage {
       }
       throw error
     }
+  }
+
+  private assertRootOperationAvailable(): void {
+    if (!this.transactionScope.getStore()) return
+    throw new StorageTransactionError(
+      "[SixbPg] Root storage cannot be used inside a transaction callback; use the provided tx storage."
+    )
   }
 
   /**

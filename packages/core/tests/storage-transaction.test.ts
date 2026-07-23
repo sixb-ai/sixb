@@ -24,6 +24,19 @@ describe("InMemoryStorage.transaction", () => {
     expect(row?.properties).toEqual({ name: "Blue" })
   })
 
+  test("rejects root storage calls inside a transaction callback", async () => {
+    const storage = new InMemoryStorage()
+    await expect(
+      storage.transaction(async () => {
+        await storage.objects.getByPrimaryId({
+          projectId: "my-app",
+          objectTypeId: "Room",
+          primaryId: "room_1",
+        })
+      })
+    ).rejects.toThrow("use the provided tx storage")
+  })
+
   test("does not recursively lock object and timeseries batch methods", async () => {
     const storage = new InMemoryStorage()
 

@@ -49,11 +49,15 @@
       "@sixb/core/internal/events": ["./packages/core/src/events/index.ts"],
       "@sixb/core/internal/http": ["./packages/core/src/http/index.ts"],
       "@sixb/core/internal/logging": ["./packages/core/src/logging/index.ts"],
+      "@sixb/core/internal/materialization": ["./packages/core/src/materialization/index.ts"],
       "@sixb/core/internal/materializer": ["./packages/core/src/materializer/index.ts"],
       "@sixb/core/internal/objects": ["./packages/core/src/objects/index.ts"],
       "@sixb/core/internal/query": ["./packages/core/src/objects/query/index.ts"],
       "@sixb/core/internal/scheduler": ["./packages/core/src/scheduler/index.ts"],
       "@sixb/core/internal/schedules": ["./packages/core/src/schedules/index.ts"],
+      "@sixb/core/internal/storage-operation-scope": [
+        "./packages/core/src/storage/operation-scope.ts"
+      ],
       "@sixb/core/internal/workers": ["./packages/core/src/workers/index.ts"],
       "@sixb/core/internal/workflows": ["./packages/core/src/workflows/index.ts"],
       "@sixb/core/lake-storage": ["./packages/core/src/lake-storage/index.ts"],
