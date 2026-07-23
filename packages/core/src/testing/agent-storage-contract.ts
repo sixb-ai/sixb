@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { AGENT_MESSAGE_CONTENT_VERSION } from "../agents/message"
 import type { Principal } from "../auth"
 import {
   type AgentRunExecution,
@@ -652,7 +653,12 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
           authorPrincipal: owner,
           createdAt: at("2026-06-23T10:00:30.000Z"),
         })
-        expect(userMessage).toMatchObject({ seq: 1, role: "user", runId: null, contentVersion: 1 })
+        expect(userMessage).toMatchObject({
+          seq: 1,
+          role: "user",
+          runId: null,
+          contentVersion: AGENT_MESSAGE_CONTENT_VERSION,
+        })
         expect(userMessage.authorPrincipal).toEqual(owner)
 
         const run = await createAndStartRun(

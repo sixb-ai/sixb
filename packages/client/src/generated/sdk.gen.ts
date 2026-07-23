@@ -293,6 +293,9 @@ import type {
   RevokeAuthSessionData,
   RevokeAuthSessionErrors,
   RevokeAuthSessionResponses,
+  SearchObjectsData,
+  SearchObjectsErrors,
+  SearchObjectsResponses,
   SignFileUploadPartData,
   SignFileUploadPartErrors,
   SignFileUploadPartResponses,
@@ -1189,6 +1192,18 @@ export const getObjectType = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetObjectTypeResponses, GetObjectTypeErrors, ThrowOnError>({
     security: [{ scheme: "bearer", type: "http" }],
     url: "/api/object-types/{objectTypeId}",
+    ...options,
+  })
+
+/**
+ * Search objects
+ */
+export const searchObjects = <ThrowOnError extends boolean = false>(
+  options: Options<SearchObjectsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<SearchObjectsResponses, SearchObjectsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/objects/search",
     ...options,
   })
 

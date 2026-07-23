@@ -27,44 +27,50 @@ export function normalizeDurableParts(
   parts: readonly AgentMessagePart[],
   options: { readonly fileHref?: (partIndex: number) => string | undefined } = {}
 ): NormalizedPart[] {
-  return parts.map((part, index): NormalizedPart => {
+  // Context is rendered separately with the user message. It is invalid on assistant messages,
+  // but filtering keeps old or malformed durable data from turning into a fake step boundary.
+  return parts.flatMap((part, index): NormalizedPart[] => {
     switch (part.type) {
       case "text":
-        return { kind: "text", text: part.text }
+        return [{ kind: "text", text: part.text }]
       case "reasoning":
-        return { kind: "reasoning", text: part.text, streaming: false }
+        return [{ kind: "reasoning", text: part.text, streaming: false }]
       case "tool-call":
-        return {
-          kind: "tool",
-          tool:
-            part.state === "output-available"
-              ? {
-                  toolName: part.toolName,
-                  state: part.state,
-                  input: part.input,
-                  output: part.output,
-                }
-              : {
-                  toolName: part.toolName,
-                  state: part.state,
-                  input: part.input,
-                  errorText: part.errorText,
-                },
-        }
+        return [
+          {
+            kind: "tool",
+            tool:
+              part.state === "output-available"
+                ? {
+                    toolName: part.toolName,
+                    state: part.state,
+                    input: part.input,
+                    output: part.output,
+                  }
+                : {
+                    toolName: part.toolName,
+                    state: part.state,
+                    input: part.input,
+                    errorText: part.errorText,
+                  },
+          },
+        ]
       case "file":
-        return {
-          kind: "file",
-          fileRef: part.fileRef,
-          ...(options.fileHref === undefined ? {} : { href: options.fileHref(index) }),
-        }
+        return [
+          {
+            kind: "file",
+            fileRef: part.fileRef,
+            ...(options.fileHref === undefined ? {} : { href: options.fileHref(index) }),
+          },
+        ]
       case "step-start":
-        return { kind: "step-start" }
+        return [{ kind: "step-start" }]
+      case "context":
+        return []
       default:
-        // Compile error if the core message part union grows: handle the new kind above rather than
-        // letting a durable message render as an invisible step boundary. Still degrades gracefully
-        // at runtime for an unexpected payload.
+        // Compile error if the core message part union grows: handle the new kind above.
         part satisfies never
-        return { kind: "step-start" }
+        return []
     }
   })
 }

@@ -105,6 +105,7 @@ import {
   revokeAuthInvitation,
   revokeAuthServiceAccountAccessToken,
   revokeAuthSession,
+  searchObjects,
   signFileUploadPart,
   signOut,
   signOutAll,
@@ -387,6 +388,9 @@ import type {
   RevokeAuthSessionData,
   RevokeAuthSessionError,
   RevokeAuthSessionResponse,
+  SearchObjectsData,
+  SearchObjectsError,
+  SearchObjectsResponse,
   SignFileUploadPartData,
   SignFileUploadPartError,
   SignFileUploadPartResponse,
@@ -2316,6 +2320,31 @@ export const getObjectTypeOptions = (options: Options<GetObjectTypeData>) =>
       return data
     },
     queryKey: getObjectTypeQueryKey(options),
+  })
+
+export const searchObjectsQueryKey = (options: Options<SearchObjectsData>) =>
+  createQueryKey("searchObjects", options)
+
+/**
+ * Search objects
+ */
+export const searchObjectsOptions = (options: Options<SearchObjectsData>) =>
+  queryOptions<
+    SearchObjectsResponse,
+    SearchObjectsError,
+    SearchObjectsResponse,
+    ReturnType<typeof searchObjectsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await searchObjects({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: searchObjectsQueryKey(options),
   })
 
 export const listObjectsQueryKey = (options?: Options<ListObjectsData>) =>

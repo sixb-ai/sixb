@@ -9,7 +9,7 @@ import {
 } from "@sixb/client/hooks"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useReducer, useRef, useState } from "react"
-import { createLiveRunState, type LiveRunState, liveRunReducer } from "./liveRun"
+import { createLiveRunState, type LiveRunState, liveRunReducer } from "../liveRun"
 
 export interface UseThreadStreamOptions {
   readonly threadId: string | null

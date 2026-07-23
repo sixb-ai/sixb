@@ -9,6 +9,8 @@ import {
   AgentStorageError,
   type AgentThreadRecord,
 } from "../storage/agents"
+import type { AgentContextEntryInput } from "./context"
+import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
@@ -21,6 +23,8 @@ export interface RequestAgentRunInput {
   readonly text: string
   /** Blob-backed files attached to the trigger message. */
   readonly attachments?: readonly FileRef[]
+  /** Structured page/object context snapshotted onto the triggering user message. */
+  readonly context?: readonly AgentContextEntryInput[]
   /** Continue an existing thread. Omitted → a fresh thread is created for this agent. */
   readonly threadId?: string
   /** Title to stamp on the thread when one is created. */
@@ -54,6 +58,10 @@ export async function requestAgentRun(
   input: RequestAgentRunInput
 ): Promise<RequestAgentRunResult> {
   assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
+
+  // Resolve context before creating a thread: invalid or inaccessible references must not leave an
+  // empty conversation behind. The resulting parts are the exact snapshot persisted below.
+  const contextParts = await resolveAgentContextParts(runtime, input.context)
 
   const agents = requireAgentStorage(runtime)
   const projectId = runtime.projectId
@@ -94,6 +102,7 @@ export async function requestAgentRun(
         runId: null,
         role: "user",
         parts: [
+          ...contextParts,
           { type: "text", text: input.text },
           ...(input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef })),
         ],

@@ -304,6 +304,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: false,
   },
   {
+    operationId: "searchObjects",
+    method: "GET",
+    path: "/api/objects/search",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
     operationId: "listEvents",
     method: "GET",
     path: "/api/events",

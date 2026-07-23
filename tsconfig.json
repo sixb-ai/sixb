@@ -4,6 +4,7 @@
     "noEmit": true,
     "paths": {
       "@sixb/action-worker": ["./packages/action-worker/src/index.ts"],
+      "@sixb/agent-ui": ["./packages/agent-ui/src/index.ts"],
       "@sixb/agent-ui/react-router": ["./packages/agent-ui/src/react-router.tsx"],
       "@sixb/agent-worker": ["./packages/agent-worker/src/index.ts"],
       "@sixb/app": ["./packages/app/src/index.ts"],
@@ -33,6 +34,7 @@
       "@sixb/connector-teamleader": ["./connectors/teamleader/src/index.ts"],
       "@sixb/core": ["./packages/core/src/index.ts"],
       "@sixb/core/actions/worker": ["./packages/core/src/actions/worker.ts"],
+      "@sixb/core/agents/context": ["./packages/core/src/agents/context.ts"],
       "@sixb/core/agents/streams": ["./packages/core/src/agents/streams.ts"],
       "@sixb/core/auth/strategy": ["./packages/core/src/auth/strategy.ts"],
       "@sixb/core/blob-storage": ["./packages/core/src/blob-storage/browser.ts"],

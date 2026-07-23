@@ -4033,6 +4033,50 @@ export type GetObjectTypeResponses = {
 
 export type GetObjectTypeResponse = GetObjectTypeResponses[keyof GetObjectTypeResponses]
 
+export type SearchObjectsData = {
+  body?: never
+  path?: never
+  query: {
+    q: string
+    limit?: string
+  }
+  url: "/api/objects/search"
+}
+
+export type SearchObjectsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type SearchObjectsError = SearchObjectsErrors[keyof SearchObjectsErrors]
+
+export type SearchObjectsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    items: Array<{
+      ref: {
+        objectTypeId: string
+        primaryId: string
+      }
+      label: string
+    }>
+  }
+}
+
+export type SearchObjectsResponse = SearchObjectsResponses[keyof SearchObjectsResponses]
+
 export type ListObjectsData = {
   body?: never
   path?: never
@@ -5494,6 +5538,36 @@ export type ListAgentThreadMessagesResponses = {
               | null
           }
         | {
+            context:
+              | {
+                  kind: "object"
+                  ref: {
+                    objectTypeId: string
+                    primaryId: string
+                  }
+                }
+              | {
+                  kind: "app-state"
+                  id: string
+                  label: string
+                  description: string
+                  /**
+                   * Any JSON-compatible value.
+                   */
+                  value:
+                    | string
+                    | number
+                    | boolean
+                    | Array<unknown>
+                    | {
+                        [key: string]: unknown
+                      }
+                    | null
+                }
+            origin: "ambient" | "explicit"
+            type: "context"
+          }
+        | {
             type: "tool-call"
             toolCallId: string
             toolName: string
@@ -5618,6 +5692,35 @@ export type PostAgentThreadMessageData = {
       fileName?: string
       mediaType?: string
       logicalPath?: string
+    }>
+    context?: Array<{
+      context:
+        | {
+            kind: "object"
+            ref: {
+              objectTypeId: string
+              primaryId: string
+            }
+          }
+        | {
+            kind: "app-state"
+            id: string
+            label: string
+            description: string
+            /**
+             * Any JSON-compatible value.
+             */
+            value:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+      origin: "ambient" | "explicit"
     }>
     messageId?: string
   }

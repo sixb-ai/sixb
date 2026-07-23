@@ -14,11 +14,19 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { Check, ChevronLeft, History, Info, Search, SquarePen } from "lucide-react"
 import { useMemo, useState } from "react"
 import { groupThreadsByDate } from "../format"
 import type { LiveRunState } from "../liveRun"
-import type { Agent, AgentFileRef, AgentMessage, AgentThread } from "../types"
+import type {
+  Agent,
+  AgentContextEntryInput,
+  AgentContextInput,
+  AgentFileRef,
+  AgentMessage,
+  AgentThread,
+} from "../types"
 import { AgentAvatar } from "./AgentAvatar"
 import { Composer } from "./Composer"
 import { RunErrorMarker } from "./MessageView"
@@ -33,6 +41,7 @@ export interface ConversationPanelProps {
   readonly messagesError: string | null
   readonly pendingUserText?: string | null
   readonly pendingUserAttachments?: readonly AgentFileRef[]
+  readonly pendingUserContext?: readonly AgentContextEntryInput[]
   /** This client initiated the current turn, so keep the user prompt anchored while it streams. */
   readonly anchorCurrentTurn?: boolean
   /** A run has been requested and we're waiting on it — show the thinking shimmer immediately. */
@@ -52,7 +61,11 @@ export interface ConversationPanelProps {
   readonly agentThreads: readonly AgentThread[]
   /** Whether a home/landing exists to return to (i.e. more than one agent). */
   readonly canGoHome: boolean
-  readonly onSend: (text: string, attachments: readonly AgentFileRef[]) => void
+  readonly onSend: (
+    text: string,
+    attachments: readonly AgentFileRef[],
+    context: readonly AgentContextEntryInput[]
+  ) => void
   readonly onBackHome: () => void
   readonly onNewChat: () => void
   readonly onPickAgent: (agentId: string) => void
@@ -68,7 +81,10 @@ export interface ConversationPanelProps {
   /** Text to restore into the composer (e.g. after a failed send), applied when the nonce changes. */
   readonly composerDraft?: string
   readonly composerDraftAttachments?: readonly AgentFileRef[]
+  readonly composerDraftContext?: readonly AgentContextEntryInput[]
   readonly composerDraftNonce?: number
+  readonly ambientContext?: readonly AgentContextInput[]
+  readonly compact?: boolean
 }
 
 export function ConversationPanel({
@@ -80,6 +96,7 @@ export function ConversationPanel({
   messagesError,
   pendingUserText,
   pendingUserAttachments = [],
+  pendingUserContext = [],
   anchorCurrentTurn,
   awaitingResponse,
   waitingLonger,
@@ -105,7 +122,10 @@ export function ConversationPanel({
   composerPlaceholder,
   composerDraft,
   composerDraftAttachments,
+  composerDraftContext,
   composerDraftNonce,
+  ambientContext = [],
+  compact = false,
 }: ConversationPanelProps) {
   const name = agent?.name ?? "Agent"
   // Optimistic activity (a just-sent message or a live run) takes over the pane immediately, so the
@@ -113,6 +133,7 @@ export function ConversationPanel({
   const hasActivity =
     Boolean(pendingUserText) ||
     pendingUserAttachments.length > 0 ||
+    pendingUserContext.length > 0 ||
     live.parts.length > 0 ||
     awaitingResponse
   const showWelcome =
@@ -122,7 +143,8 @@ export function ConversationPanel({
     messages.length === 0 &&
     live.parts.length === 0 &&
     !pendingUserText &&
-    pendingUserAttachments.length === 0
+    pendingUserAttachments.length === 0 &&
+    pendingUserContext.length === 0
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -150,7 +172,12 @@ export function ConversationPanel({
       </header>
 
       {showWelcome ? (
-        <div className="flex min-h-0 flex-1 flex-col md:justify-center md:px-6 md:pb-[28vh] lg:pb-[30vh]">
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col",
+            !compact && "md:justify-center md:px-6 md:pb-[28vh] lg:pb-[30vh]"
+          )}
+        >
           <Welcome agent={agent} />
           <div className="shrink-0">
             {sendError ? (
@@ -170,7 +197,10 @@ export function ConversationPanel({
               className="md:bg-transparent md:px-0 md:pt-0 md:pb-0"
               draft={composerDraft}
               draftAttachments={composerDraftAttachments}
+              draftContext={composerDraftContext}
               draftNonce={composerDraftNonce}
+              ambientContext={ambientContext}
+              compact={compact}
             />
           </div>
         </div>
@@ -192,6 +222,7 @@ export function ConversationPanel({
                 live={live}
                 pendingUserText={pendingUserText}
                 pendingUserAttachments={pendingUserAttachments}
+                pendingUserContext={pendingUserContext}
                 anchorCurrentTurn={anchorCurrentTurn}
                 awaitingResponse={awaitingResponse}
                 waitingLonger={waitingLonger}
@@ -221,7 +252,10 @@ export function ConversationPanel({
               placeholder={composerPlaceholder}
               draft={composerDraft}
               draftAttachments={composerDraftAttachments}
+              draftContext={composerDraftContext}
               draftNonce={composerDraftNonce}
+              ambientContext={ambientContext}
+              compact={compact}
             />
           </div>
         </>

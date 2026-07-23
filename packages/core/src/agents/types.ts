@@ -1,6 +1,13 @@
 import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider"
 import type { GroupDefinition } from "../security"
 
+export type {
+  AgentContextEntryInput,
+  AgentContextInput,
+  AgentContextOrigin,
+  AgentContextPart,
+} from "./context"
+
 export type AgentReasoningLevel = NonNullable<LanguageModelV4CallOptions["reasoning"]>
 
 export const AGENT_REASONING_LEVELS = [

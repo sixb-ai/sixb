@@ -10,7 +10,13 @@ import {
 import { AlertTriangle, RotateCcw } from "lucide-react"
 import { isAwaitingFirstToken, type LiveRunState } from "../liveRun"
 import { normalizeDurableParts } from "../parts"
-import type { AgentFileRef, AgentMessage } from "../types"
+import type {
+  AgentContextEntryInput,
+  AgentContextInput,
+  AgentFileRef,
+  AgentMessage,
+} from "../types"
+import { ContextChips } from "./ContextChips"
 import { FileAttachmentCard } from "./FileAttachmentCard"
 import { AssistantBody } from "./MessageParts"
 
@@ -24,9 +30,11 @@ export function MessageView({ message }: { message: AgentMessage }) {
 function UserMessage({ message }: { message: AgentMessage }) {
   const text = textOf(message)
   const files = filePartsOf(message)
-  if (!text && files.length === 0) return null
+  const context = contextPartsOf(message)
+  if (!text && files.length === 0 && context.length === 0) return null
   return (
     <div className="flex flex-col items-end gap-1.5">
+      <ContextChips entries={context} className="max-w-[min(90%,40rem)] justify-end" />
       {files.length > 0 ? (
         <div className="flex max-w-[min(80%,32rem)] flex-col items-end gap-1.5">
           {files.map(({ part, index }) => (
@@ -191,6 +199,14 @@ function textOf(message: AgentMessage): string {
 function filePartsOf(message: AgentMessage) {
   return message.parts.flatMap((part, index) =>
     part.type === "file" ? [{ part: part as Extract<typeof part, { type: "file" }>, index }] : []
+  )
+}
+
+function contextPartsOf(message: AgentMessage): AgentContextEntryInput[] {
+  return message.parts.flatMap((part) =>
+    part.type === "context"
+      ? [{ context: part.context as AgentContextInput, origin: part.origin }]
+      : []
   )
 }
 

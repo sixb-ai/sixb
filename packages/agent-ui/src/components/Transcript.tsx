@@ -11,7 +11,8 @@ import {
 } from "@sixb/ui/components"
 import { useLayoutEffect, useMemo, useRef } from "react"
 import { hasLiveContent, type LiveRunState } from "../liveRun"
-import type { AgentFileRef, AgentMessage } from "../types"
+import type { AgentContextEntryInput, AgentFileRef, AgentMessage } from "../types"
+import { ContextChips } from "./ContextChips"
 import {
   LiveAssistant,
   MessageView,
@@ -29,6 +30,7 @@ export interface TranscriptProps {
   /** A just-sent user message echoed locally until durable state catches up. */
   readonly pendingUserText?: string | null
   readonly pendingUserAttachments?: readonly AgentFileRef[]
+  readonly pendingUserContext?: readonly AgentContextEntryInput[]
   /** This client initiated the current turn, so keep the user prompt anchored while it streams. */
   readonly anchorCurrentTurn?: boolean
   /** A run is requested but the live stream hasn't produced content yet — show a thinking shimmer. */
@@ -50,6 +52,7 @@ export function Transcript({
   live,
   pendingUserText,
   pendingUserAttachments = [],
+  pendingUserContext = [],
   anchorCurrentTurn,
   awaitingResponse,
   waitingLonger,
@@ -76,19 +79,31 @@ export function Transcript({
     anchorCurrentTurn &&
       (pendingUserText ||
         pendingUserAttachments.length > 0 ||
+        pendingUserContext.length > 0 ||
         showLive ||
         showThinking ||
         handoffPending ||
         live.finishStatus !== null)
   )
   const anchoredUserMessageId = useMemo(() => {
-    if (pendingUserText || pendingUserAttachments.length > 0 || !shouldAnchorCurrentTurn)
+    if (
+      pendingUserText ||
+      pendingUserAttachments.length > 0 ||
+      pendingUserContext.length > 0 ||
+      !shouldAnchorCurrentTurn
+    )
       return null
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "user") return messages[i].id
     }
     return null
-  }, [messages, pendingUserText, pendingUserAttachments.length, shouldAnchorCurrentTurn])
+  }, [
+    messages,
+    pendingUserText,
+    pendingUserAttachments.length,
+    pendingUserContext.length,
+    shouldAnchorCurrentTurn,
+  ])
 
   return (
     // Opening an existing thread should land at the bottom/latest message. New in-flight turns still
@@ -109,6 +124,7 @@ export function Transcript({
             messages.length > 0 ||
             Boolean(pendingUserText) ||
             pendingUserAttachments.length > 0 ||
+            pendingUserContext.length > 0 ||
             showLive ||
             showThinking
           }
@@ -128,9 +144,12 @@ export function Transcript({
                 <MessageView message={message} />
               </MessageScrollerItem>
             ))}
-            {pendingUserText || pendingUserAttachments.length > 0 ? (
+            {pendingUserText ||
+            pendingUserAttachments.length > 0 ||
+            pendingUserContext.length > 0 ? (
               <MessageScrollerItem messageId="pending-user" scrollAnchor>
                 <div className="flex flex-col items-end gap-1.5">
+                  <ContextChips entries={pendingUserContext} className="justify-end" />
                   {pendingUserAttachments.length > 0 ? (
                     <div className="flex max-w-[min(80%,32rem)] flex-col items-end gap-1.5">
                       {pendingUserAttachments.map((fileRef, index) => (
