@@ -155,6 +155,44 @@ export class ProviderMaterializationSessionState {
   }
 }
 
+/**
+ * Tracks the materialization sessions owned by one storage transaction.
+ *
+ * Applying a chunk mutates authoritative tables before `finalize()` inserts the commit ledger row.
+ * The transaction must therefore fail closed while any materialization session remains unfinished.
+ */
+export class ProviderMaterializationTransactionLifecycle {
+  private readonly openSessions = new Set<object>()
+  private active = true
+
+  register(sessionToken: object): void {
+    if (!this.active) {
+      throw new MaterializationValidationError(
+        "Cannot open a materialization session on an inactive storage transaction."
+      )
+    }
+    this.openSessions.add(sessionToken)
+  }
+
+  complete(sessionToken: object): void {
+    this.openSessions.delete(sessionToken)
+  }
+
+  assertCommittable(): void {
+    if (this.openSessions.size === 0) return
+    throw new MaterializationValidationError(
+      `Storage transaction has ${this.openSessions.size} unfinished materialization session${
+        this.openSessions.size === 1 ? "" : "s"
+      }; every session returned by begin() must be finalized.`
+    )
+  }
+
+  deactivate(): void {
+    this.active = false
+    this.openSessions.clear()
+  }
+}
+
 export interface PreparedMaterializationWork {
   readonly record: MaterializationWorkRecord
   readonly uniqueKey: string

@@ -1,4 +1,4 @@
-import { MaterializationValidationError } from "@sixb/core/internal/materializer"
+import { MaterializationValidationError } from "@sixb/core/internal/materialization"
 import {
   assertSourceBeginInput as assertBeginInput,
   assertSourceExecutionIdentity as assertExecutionIdentity,

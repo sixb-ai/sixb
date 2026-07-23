@@ -1,5 +1,5 @@
-import type { ProjectionEntityRef } from "@sixb/core/internal/materializer"
-import { MaterializationConflictError } from "@sixb/core/internal/materializer"
+import type { ProjectionEntityRef } from "@sixb/core/internal/materialization"
+import { MaterializationConflictError } from "@sixb/core/internal/materialization"
 import type {
   AssertSourceMaterializationExecutionInput,
   OntologyCommitRecord,

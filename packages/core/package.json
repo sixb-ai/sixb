@@ -127,17 +127,23 @@
       "import": "./dist/materializer/index.js",
       "default": "./dist/materializer/index.js"
     },
+    "./internal/materialization": {
+      "types": "./dist/materialization/index.d.ts",
+      "bun": "./src/materialization/index.ts",
+      "import": "./dist/materialization/index.js",
+      "default": "./dist/materialization/index.js"
+    },
     "./internal/ontology-storage-provider": {
       "types": "./dist/storage/ontology/provider.d.ts",
       "bun": "./src/storage/ontology/provider.ts",
       "import": "./dist/storage/ontology/provider.js",
       "default": "./dist/storage/ontology/provider.js"
     },
-    "./internal/storage-root-operations": {
-      "types": "./dist/storage/root-operations.d.ts",
-      "bun": "./src/storage/root-operations.ts",
-      "import": "./dist/storage/root-operations.js",
-      "default": "./dist/storage/root-operations.js"
+    "./internal/storage-operation-scope": {
+      "types": "./dist/storage/operation-scope.d.ts",
+      "bun": "./src/storage/operation-scope.ts",
+      "import": "./dist/storage/operation-scope.js",
+      "default": "./dist/storage/operation-scope.js"
     },
     "./internal/objects": {
       "types": "./dist/objects/index.d.ts",

@@ -31,6 +31,18 @@ describe("PostgresStorage.transaction", () => {
     expect(row?.properties).toEqual({ name: "Blue" })
   })
 
+  test("rejects root storage calls inside a transaction callback", async () => {
+    await expect(
+      storage.transaction(async () => {
+        await storage.objects.getByPrimaryId({
+          projectId: "my-app",
+          objectTypeId: "Room",
+          primaryId: "room_1",
+        })
+      })
+    ).rejects.toThrow("use the provided tx storage")
+  })
+
   test("rolls back writes across every mutated table when the transaction fails", async () => {
     await storage.objects.applyObjectUpsert(objectEvent("event_1", "room_1", { name: "Blue" }))
 

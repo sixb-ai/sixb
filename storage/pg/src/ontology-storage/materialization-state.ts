@@ -5,15 +5,16 @@ import type {
   OntologyObjectRef,
   ProjectionEntityRef,
   TelemetrySeriesRef,
-} from "@sixb/core/internal/materializer"
+} from "@sixb/core/internal/materialization"
 import {
   linkRefKey,
+  linkScopeSortKey,
   MaterializationConflictError,
   objectRefKey,
   projectionEntityKey,
   telemetryPointKey,
   telemetryPointSortKey,
-} from "@sixb/core/internal/materializer"
+} from "@sixb/core/internal/materialization"
 import {
   appendScopeSnapshot,
   finishScopeAccumulator,
@@ -88,6 +89,11 @@ interface LinkIdentityRow {
   readonly sort_key: string
 }
 
+interface LinkScopeRow extends EffectiveLinkRow {
+  readonly scope_sort_key: string
+  readonly link_sort_key: string
+}
+
 interface ObjectOverrideRow extends PgOntologyOverrideRow {
   readonly object_type_id: string
   readonly primary_id: string
@@ -152,7 +158,7 @@ export class PgMaterializationStateReader {
     const [effectiveRows, sourceRows, overrideRows, telemetryRows] = await Promise.all([
       this.sql<EffectiveObjectRow[]>`
         WITH requested AS (
-          SELECT * FROM jsonb_to_recordset(${requestedParameter})
+          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter})
             AS requested_values(object_type_id TEXT, primary_id TEXT)
         )
         SELECT objects.* FROM objects
@@ -161,7 +167,7 @@ export class PgMaterializationStateReader {
       `,
       this.sql<PgOntologySourceAssertionRow[]>`
         WITH requested AS (
-          SELECT * FROM jsonb_to_recordset(${requestedParameter})
+          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter})
             AS requested_values(object_type_id TEXT, primary_id TEXT)
         )
         SELECT rows.*
@@ -177,7 +183,7 @@ export class PgMaterializationStateReader {
       `,
       this.sql<ObjectOverrideRow[]>`
         WITH requested AS (
-          SELECT * FROM jsonb_to_recordset(${requestedParameter})
+          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter})
             AS requested_values(object_type_id TEXT, primary_id TEXT)
         )
         SELECT overrides.* FROM ontology_overrides AS overrides
@@ -187,7 +193,7 @@ export class PgMaterializationStateReader {
       `,
       this.sql<TelemetryRow[]>`
         WITH requested AS (
-          SELECT * FROM jsonb_to_recordset(${requestedParameter})
+          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter})
             AS requested_values(object_type_id TEXT, primary_id TEXT)
         ), ranked AS (
           SELECT timeseries.*,
@@ -263,7 +269,7 @@ export class PgMaterializationStateReader {
     const [effectiveRows, sourceRows, overrideRows] = await Promise.all([
       this.sql<EffectiveLinkRow[]>`
         WITH requested AS (
-          SELECT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
+          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
             source_type_id TEXT, source_id TEXT, link_id TEXT,
             target_type_id TEXT, target_id TEXT
           )
@@ -274,7 +280,7 @@ export class PgMaterializationStateReader {
       `,
       this.sql<PgOntologySourceAssertionRow[]>`
         WITH requested AS (
-          SELECT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
+          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
             source_type_id TEXT, source_primary_id TEXT, link_id TEXT,
             target_type_id TEXT, target_primary_id TEXT
           )
@@ -294,7 +300,7 @@ export class PgMaterializationStateReader {
       `,
       this.sql<LinkOverrideRow[]>`
         WITH requested AS (
-          SELECT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
+          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
             source_type_id TEXT, source_primary_id TEXT, link_id TEXT,
             target_type_id TEXT, target_primary_id TEXT
           )
@@ -350,7 +356,7 @@ export class PgMaterializationStateReader {
     const lockFragment = lock ? this.sql`FOR UPDATE OF timeseries` : this.sql``
     const rows = await this.sql<TelemetryRow[]>`
       WITH requested AS (
-        SELECT * FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)}) AS requested_values(
+        SELECT DISTINCT * FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)}) AS requested_values(
           object_type_id TEXT, object_id TEXT, property_id TEXT, at TIMESTAMPTZ
         )
       )
@@ -371,32 +377,76 @@ export class PgMaterializationStateReader {
     })
   }
 
+  async linkScopes(
+    scopes: readonly { readonly source: OntologyObjectRef; readonly linkId: string }[]
+  ): Promise<readonly MaterializationLinkScopeState[]> {
+    if (scopes.length === 0) return []
+    const requested = scopes.map(({ source, linkId }) => ({
+      scope_sort_key: linkScopeSortKey(source, linkId),
+      source_type_id: source.objectTypeId,
+      source_id: source.primaryId,
+      link_id: linkId,
+    }))
+    const accumulators = new Map(
+      scopes.map(({ source, linkId }) => {
+        const key = linkScopeSortKey(source, linkId)
+        return [key, startScopeAccumulator(source, linkId, key)] as const
+      })
+    )
+    let scopeCursor: string | null = null
+    let linkCursor: string | null = null
+    while (true) {
+      const rows: LinkScopeRow[] = await this.sql`
+        WITH requested AS (
+          SELECT DISTINCT * FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)})
+            AS requested_values(
+              scope_sort_key TEXT, source_type_id TEXT, source_id TEXT, link_id TEXT
+            )
+        ), selected AS (
+          SELECT requested.scope_sort_key, links.*,
+            ${this.sql.unsafe(linkSortExpression("links"))} AS link_sort_key
+          FROM links
+          JOIN requested USING (source_type_id, source_id, link_id)
+          WHERE links.project_id = ${this.projectId}
+        )
+        SELECT * FROM selected
+        WHERE (${scopeCursor}::text IS NULL OR (scope_sort_key, link_sort_key) >
+          (${scopeCursor}, ${linkCursor}))
+        ORDER BY scope_sort_key, link_sort_key
+        LIMIT 500
+      `
+      for (const row of rows) {
+        const accumulator = accumulators.get(row.scope_sort_key)
+        if (!accumulator) {
+          throw new MaterializationConflictError(
+            "effective-state",
+            `Unexpected link scope '${row.scope_sort_key}' returned by storage.`
+          )
+        }
+        appendScopeSnapshot(accumulator, effectiveLinkSnapshot(row))
+      }
+      if (rows.length < 500) break
+      const last: LinkScopeRow = rows[rows.length - 1]!
+      scopeCursor = last.scope_sort_key
+      linkCursor = last.link_sort_key
+    }
+    return scopes.map(({ source, linkId }) =>
+      finishScopeAccumulator(accumulators.get(linkScopeSortKey(source, linkId))!)
+    )
+  }
+
   async linkScope(
     source: OntologyObjectRef,
     linkId: string
   ): Promise<MaterializationLinkScopeState> {
-    const accumulator = startScopeAccumulator(source, linkId, "")
-    let cursor: string | null = null
-    while (true) {
-      const rows: (EffectiveLinkRow & { readonly sort_key: string })[] = await this.sql`
-        WITH selected AS (
-          SELECT links.*, ${this.sql.unsafe(linkSortExpression("links"))} AS sort_key
-          FROM links
-          WHERE project_id = ${this.projectId}
-            AND source_type_id = ${source.objectTypeId}
-            AND source_id = ${source.primaryId}
-            AND link_id = ${linkId}
-        )
-        SELECT * FROM selected
-        WHERE (${cursor}::text IS NULL OR sort_key > ${cursor})
-        ORDER BY sort_key
-        LIMIT 500
-      `
-      for (const row of rows) appendScopeSnapshot(accumulator, effectiveLinkSnapshot(row))
-      if (rows.length < 500) break
-      cursor = rows[rows.length - 1]?.sort_key ?? null
+    const [scope] = await this.linkScopes([{ source, linkId }])
+    if (!scope) {
+      throw new MaterializationConflictError(
+        "effective-state",
+        "Link scope lookup returned no row."
+      )
     }
-    return finishScopeAccumulator(accumulator)
+    return scope
   }
 
   async *incidentLinks(
@@ -566,7 +616,7 @@ export class PgMaterializationStateReader {
       }[]
     >`
       WITH requested AS (
-        SELECT * FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)})
+        SELECT DISTINCT * FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)})
           AS requested_values(object_type_id TEXT, primary_id TEXT)
       )
       SELECT objects.object_type_id, objects.primary_id, objects.version,
@@ -608,7 +658,7 @@ export class PgMaterializationStateReader {
     const lockFragment = lock ? this.sql`FOR UPDATE OF links` : this.sql``
     const rows = await this.sql<EffectiveLinkRow[]>`
       WITH requested AS (
-        SELECT * FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)})
+        SELECT DISTINCT * FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)})
           AS requested_values(
             source_type_id TEXT, source_id TEXT, link_id TEXT,
             target_type_id TEXT, target_id TEXT
