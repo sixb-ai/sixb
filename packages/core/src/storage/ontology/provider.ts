@@ -471,16 +471,16 @@ export function effectiveConflict(message: string): MaterializationConflictError
 
 export function materializationWorkColumns(record: MaterializationWorkRecord): {
   readonly lane: "none" | "apply" | "cardinality" | "event"
-  readonly rankOne: number
-  readonly rankTwo: number
+  readonly majorOrder: number
+  readonly minorOrder: number
   readonly sortOne: string
   readonly sortTwo: string
 } {
   if (record.kind === "plan") {
     return {
       lane: "apply",
-      rankOne: record.applyPhase,
-      rankTwo: materializationPlanKindRank(record.item.kind),
+      majorOrder: record.applyPhase,
+      minorOrder: materializationPlanKindRank(record.item.kind),
       sortOne: record.sortKey,
       sortTwo: "",
     }
@@ -488,8 +488,8 @@ export function materializationWorkColumns(record: MaterializationWorkRecord): {
   if (record.kind === "cardinality") {
     return {
       lane: "cardinality",
-      rankOne: 0,
-      rankTwo: 0,
+      majorOrder: 0,
+      minorOrder: 0,
       sortOne: record.scopeSortKey,
       sortTwo: record.linkSortKey,
     }
@@ -497,13 +497,13 @@ export function materializationWorkColumns(record: MaterializationWorkRecord): {
   if (record.kind === "event") {
     return {
       lane: "event",
-      rankOne: record.eventKindRank,
-      rankTwo: 0,
+      majorOrder: record.eventKindRank,
+      minorOrder: 0,
       sortOne: record.sortKey,
       sortTwo: "",
     }
   }
-  return { lane: "none", rankOne: 0, rankTwo: 0, sortOne: "", sortTwo: "" }
+  return { lane: "none", majorOrder: 0, minorOrder: 0, sortOne: "", sortTwo: "" }
 }
 
 function materializationPlanKindRank(kind: MaterializationPlanWorkItem["kind"]): number {

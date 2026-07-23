@@ -99,7 +99,7 @@ export class SqliteMaterializationSessions {
       `
         INSERT INTO ${SQLITE_MATERIALIZATION_WORK_TABLE} (
           session_id, record_key, unique_key, kind, lane,
-          rank_one, rank_two, sort_one, sort_two, payload
+          major_order, minor_order, sort_one, sort_two, payload
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, json(?))
       `
     )
@@ -111,8 +111,8 @@ export class SqliteMaterializationSessions {
           uniqueKey,
           record.kind,
           columns.lane,
-          columns.rankOne,
-          columns.rankTwo,
+          columns.majorOrder,
+          columns.minorOrder,
           columns.sortOne,
           columns.sortTwo,
           canonicalJson(record)
@@ -146,7 +146,7 @@ export class SqliteMaterializationSessions {
             SELECT payload
             FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
             WHERE session_id = ? AND lane = ?
-            ORDER BY rank_one, rank_two, sort_one, sort_two, record_key
+            ORDER BY major_order, minor_order, sort_one, sort_two, record_key
             LIMIT ? OFFSET ?
           `
         )
@@ -320,7 +320,7 @@ export class SqliteMaterializationSessions {
         `
           SELECT payload FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
           WHERE session_id = ? AND lane = 'apply'
-          ORDER BY rank_one, rank_two, sort_one, sort_two, record_key
+          ORDER BY major_order, minor_order, sort_one, sort_two, record_key
           LIMIT ? OFFSET ?
         `
       )
@@ -344,7 +344,7 @@ export class SqliteMaterializationSessions {
         `
           SELECT payload FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
           WHERE session_id = ? AND lane = 'event'
-          ORDER BY rank_one, rank_two, sort_one, sort_two, record_key
+          ORDER BY major_order, minor_order, sort_one, sort_two, record_key
           LIMIT ? OFFSET ?
         `
       )
@@ -360,8 +360,8 @@ export class SqliteMaterializationSessions {
         unique_key TEXT NOT NULL,
         kind TEXT NOT NULL,
         lane TEXT NOT NULL,
-        rank_one INTEGER NOT NULL,
-        rank_two INTEGER NOT NULL,
+        major_order INTEGER NOT NULL,
+        minor_order INTEGER NOT NULL,
         sort_one TEXT NOT NULL,
         sort_two TEXT NOT NULL,
         payload TEXT NOT NULL CHECK (json_valid(payload)),
@@ -370,7 +370,7 @@ export class SqliteMaterializationSessions {
       );
       CREATE INDEX IF NOT EXISTS idx_ontology_materialization_work_lane
         ON ${SQLITE_MATERIALIZATION_WORK_TABLE}(
-          session_id, lane, rank_one, rank_two, sort_one, sort_two, record_key
+          session_id, lane, major_order, minor_order, sort_one, sort_two, record_key
         );
       CREATE TEMP TABLE IF NOT EXISTS ${SQLITE_REPLACEMENT_WORK_TABLE} (
         session_id TEXT NOT NULL,

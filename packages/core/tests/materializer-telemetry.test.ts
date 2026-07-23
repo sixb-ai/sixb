@@ -3,6 +3,7 @@ import { InMemoryStorage, InMemoryTimeseriesStorage } from "../src"
 import type { StoredTelemetryAppendedEvent } from "../src/events"
 import type { Storage, StorageTransactionOptions } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
+import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import {
   claimProjectionExecution,
   createMaterializerFixture,
@@ -93,14 +94,15 @@ describe("ontology materializer telemetry", () => {
     await expect(materializer.projections.finishRun(emptyFinish)).rejects.toThrow(
       "before its input is exhausted"
     )
-    const finishMaterialization = storage.projectionRuns.finishMaterialization.bind(
-      storage.projectionRuns
-    )
     let rejectFinish = true
-    storage.projectionRuns.finishMaterialization = async (input) => {
-      if (rejectFinish) throw new Error("projection run finish failure")
-      return finishMaterialization(input)
-    }
+    decorateOperationScopedMethodForTesting(
+      storage.projectionRuns,
+      "finishMaterialization",
+      (finishMaterialization) => async (input) => {
+        if (rejectFinish) throw new Error("projection run finish failure")
+        return finishMaterialization(input)
+      }
+    )
     await expect(
       materializer.projections.finishRun({ ...emptyFinish, emptyInput: true })
     ).rejects.toThrow("projection run finish failure")
@@ -378,14 +380,15 @@ describe("ontology materializer telemetry", () => {
         points: [{ series, value, at: `2026-01-01T0${batchOrdinal + 1}:00:00Z` }],
       })
     let rejectCheckpoint = true
-    const advanceCheckpoint = storage.projectionRuns.advanceTelemetryCheckpoint.bind(
-      storage.projectionRuns
+    decorateOperationScopedMethodForTesting(
+      storage.projectionRuns,
+      "advanceTelemetryCheckpoint",
+      (advanceCheckpoint) => async (checkpoint) => {
+        const advanced = await advanceCheckpoint(checkpoint)
+        if (rejectCheckpoint) throw new Error("telemetry checkpoint failure")
+        return advanced
+      }
     )
-    storage.projectionRuns.advanceTelemetryCheckpoint = async (checkpoint) => {
-      const advanced = await advanceCheckpoint(checkpoint)
-      if (rejectCheckpoint) throw new Error("telemetry checkpoint failure")
-      return advanced
-    }
     await expect(append(0, 20, "telemetry-failed-run")).rejects.toThrow(
       "telemetry checkpoint failure"
     )
@@ -613,19 +616,20 @@ describe("ontology materializer telemetry", () => {
     await materializer.projections.replace(
       replacement("telemetry-counts", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
     )
-    const finalize = storage.ontology.materializations.finalize.bind(
-      storage.ontology.materializations
+    decorateOperationScopedMethodForTesting(
+      storage.ontology.materializations,
+      "finalize",
+      (finalize) => (input) => {
+        if (input.finalization.result.kind !== "telemetry") return finalize(input)
+        return finalize({
+          ...input,
+          finalization: {
+            ...input.finalization,
+            result: { ...input.finalization.result, pointsCreated: -1 },
+          },
+        })
+      }
     )
-    storage.ontology.materializations.finalize = (input) => {
-      if (input.finalization.result.kind !== "telemetry") return finalize(input)
-      return finalize({
-        ...input,
-        finalization: {
-          ...input.finalization,
-          result: { ...input.finalization.result, pointsCreated: -1 },
-        },
-      })
-    }
 
     await expect(
       materializer.telemetry.append({

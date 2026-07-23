@@ -52,10 +52,24 @@ CREATE TABLE timeseries (
   last_commit_id TEXT,
   -- A telemetry point's identity is (series, at): one value per instant per
   -- series. Appends upsert on this key, so no separate idempotency ledger is
-  -- needed. This primary-key index also serves point lookups and latest-value
-  -- reads (equality on the series prefix + range/backward scan on `at`), so no
-  -- additional timeseries indexes are required.
+  -- needed. This primary-key index serves exact point and ordered history reads;
+  -- `timeseries_latest` serves constant-cost latest-value reads.
   PRIMARY KEY (project_id, object_type_id, object_id, property_id, at)
+);
+
+-- Incremental projection used by ontology materialization. Reading the latest value must not scan
+-- the complete history of every telemetry property attached to an object.
+CREATE TABLE timeseries_latest (
+  project_id TEXT NOT NULL,
+  object_type_id TEXT NOT NULL,
+  object_id TEXT NOT NULL,
+  property_id TEXT NOT NULL,
+  value JSONB NOT NULL,
+  unit TEXT,
+  at TIMESTAMPTZ NOT NULL,
+  source_event_id TEXT,
+  last_commit_id TEXT,
+  PRIMARY KEY (project_id, object_type_id, object_id, property_id)
 );
 
 CREATE TABLE sync_runs (
@@ -444,11 +458,18 @@ CREATE INDEX idx_ontology_source_rows_root
   ON ontology_source_rows (
     project_id, source_id, materialization_id, root_sort_key, staging_ordinal, entity_sort_key
   );
+CREATE INDEX idx_ontology_source_rows_staging_ordinal
+  ON ontology_source_rows (project_id, source_id, materialization_id, staging_ordinal);
+CREATE INDEX idx_ontology_source_rows_entity_sort
+  ON ontology_source_rows (project_id, source_id, materialization_id, entity_sort_key);
 CREATE INDEX idx_ontology_source_rows_object
   ON ontology_source_rows (project_id, object_type_id, primary_id)
   WHERE entity_kind = 'object';
 CREATE INDEX idx_ontology_source_rows_link_source
-  ON ontology_source_rows (project_id, source_type_id, source_primary_id, link_id)
+  ON ontology_source_rows (
+    project_id, source_type_id, source_primary_id, link_id,
+    target_type_id, target_primary_id
+  )
   WHERE entity_kind = 'link';
 CREATE INDEX idx_ontology_source_rows_link_target
   ON ontology_source_rows (project_id, target_type_id, target_primary_id)
@@ -496,11 +517,17 @@ CREATE TABLE ontology_overrides (
 );
 
 CREATE INDEX idx_ontology_overrides_link_source
-  ON ontology_overrides (project_id, source_type_id, source_primary_id, link_id)
+  ON ontology_overrides (
+    project_id, source_type_id, source_primary_id, link_id,
+    target_type_id, target_primary_id
+  )
   WHERE entity_kind = 'link';
 CREATE INDEX idx_ontology_overrides_link_target
   ON ontology_overrides (project_id, target_type_id, target_primary_id)
   WHERE entity_kind = 'link';
+CREATE INDEX idx_ontology_overrides_object
+  ON ontology_overrides (project_id, object_type_id, primary_id)
+  WHERE entity_kind = 'object';
 
 CREATE TABLE ontology_outbox (
   project_id TEXT NOT NULL,

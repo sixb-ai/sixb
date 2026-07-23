@@ -35,10 +35,17 @@ export function authLockKey(kind: string, ...parts: readonly string[]): string {
 }
 
 export async function lockAdvisoryKeys(sql: SQLClient, keys: readonly string[]): Promise<void> {
-  for (const key of [...new Set(keys)].sort()) {
-    const [first, second] = advisoryLockParts(key)
-    await sql`SELECT pg_advisory_xact_lock(${first}, ${second})`
-  }
+  const locks = [...new Set(keys)].sort().map(advisoryLockParts)
+  if (locks.length === 0) return
+
+  await sql`
+    SELECT pg_advisory_xact_lock(locks.first_key, locks.second_key)
+    FROM unnest(
+      ${sql.array(locks.map(([first]) => first))}::integer[],
+      ${sql.array(locks.map(([, second]) => second))}::integer[]
+    ) WITH ORDINALITY AS locks(first_key, second_key, lock_order)
+    ORDER BY locks.lock_order
+  `
 }
 
 function advisoryLockParts(key: string): readonly [number, number] {

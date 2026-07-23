@@ -63,6 +63,15 @@ describe("Postgres storage migrations", () => {
       expect(await readTableColumns(schemaName, "objects")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "links")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "timeseries")).toContain("last_commit_id")
+      expect(await readTableColumns(schemaName, "timeseries_latest")).toEqual(
+        expect.arrayContaining([
+          "object_type_id",
+          "object_id",
+          "property_id",
+          "at",
+          "last_commit_id",
+        ])
+      )
       expect(await readTableColumns(schemaName, "projection_runs")).toEqual(
         expect.arrayContaining([
           "attempt",

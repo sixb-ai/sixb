@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { createEventId, MaterializationConflictError } from "../src/materializer"
 import { InMemoryStorage } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
+import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import {
   atomic,
   createMaterializerFixture,
@@ -167,17 +168,16 @@ describe("ontology materializer edits", () => {
       idempotencyKey: "action:run-recheck",
     })
     await storage.actionRuns.start({ id: "run-recheck", projectId: "project" })
-    const originalAssert = storage.actionRuns.assertMaterializationRun.bind(storage.actionRuns)
     let assertions = 0
-    Object.defineProperty(storage.actionRuns, "assertMaterializationRun", {
-      configurable: true,
-      value: async (input: Parameters<typeof originalAssert>[0]) => {
+    decorateOperationScopedMethodForTesting(
+      storage.actionRuns,
+      "assertMaterializationRun",
+      (assertMaterializationRun) => async (input) => {
         assertions += 1
         if (assertions === 2) throw new Error("injected transactional Action recheck failure")
-        return originalAssert(input)
-      },
-      writable: true,
-    })
+        return assertMaterializationRun(input)
+      }
+    )
     const { materializer } = createMaterializerFixture({ storage })
     const adapter = getInMemoryOntologyStorageTestingAdapter(storage.ontology)
     const before = adapter.snapshot()

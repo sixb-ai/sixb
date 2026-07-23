@@ -22,6 +22,7 @@ import {
   type StorageTransactionOptions,
 } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
+import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import {
   atomic,
   claimProjectionExecution,
@@ -930,21 +931,24 @@ describe("ontology materializer projection replacement", () => {
       dependencies: { batching: { statePageRows: 1 } },
     })
     const materializations = storage.ontology.materializations
-    const original = materializations.streamSourceReplacementState.bind(materializations)
     let shuffled = false
-    materializations.streamSourceReplacementState = (input) => {
-      const streamed = original(input)
-      if (input.entityKind !== "link") return streamed
-      return {
-        async *[Symbol.asyncIterator]() {
-          const links: SourceReplacementLinkState[] = []
-          for await (const page of streamed) links.push(...page.links)
-          links.reverse()
-          shuffled = links.length > 1
-          for (const link of links) yield { objects: [], links: [link] }
-        },
+    decorateOperationScopedMethodForTesting(
+      materializations,
+      "streamSourceReplacementState",
+      (streamSourceReplacementState) => (input) => {
+        const streamed = streamSourceReplacementState(input)
+        if (input.entityKind !== "link") return streamed
+        return {
+          async *[Symbol.asyncIterator]() {
+            const links: SourceReplacementLinkState[] = []
+            for await (const page of streamed) links.push(...page.links)
+            links.reverse()
+            shuffled = links.length > 1
+            for (const link of links) yield { objects: [], links: [link] }
+          },
+        }
       }
-    }
+    )
     const result = await materializer.projections.replace(
       replacement("shuffled-links", "2026-01-01T00:00:00Z", [
         sourceEntryWithParent("one", "one", "three"),
@@ -972,20 +976,23 @@ describe("ontology materializer projection replacement", () => {
       dependencies: { batching: { statePageRows: 1 } },
     })
     const conflictStorage = conflict.storage.ontology.materializations
-    const conflictOriginal = conflictStorage.streamSourceReplacementState.bind(conflictStorage)
-    conflictStorage.streamSourceReplacementState = (input) => {
-      const streamed = conflictOriginal(input)
-      if (input.entityKind !== "link") return streamed
-      return {
-        async *[Symbol.asyncIterator]() {
-          const links: SourceReplacementLinkState[] = []
-          for await (const page of streamed) links.push(...page.links)
-          for (const link of links.reverse()) {
-            yield { objects: [], links: [link] }
-          }
-        },
+    decorateOperationScopedMethodForTesting(
+      conflictStorage,
+      "streamSourceReplacementState",
+      (streamSourceReplacementState) => (input) => {
+        const streamed = streamSourceReplacementState(input)
+        if (input.entityKind !== "link") return streamed
+        return {
+          async *[Symbol.asyncIterator]() {
+            const links: SourceReplacementLinkState[] = []
+            for await (const page of streamed) links.push(...page.links)
+            for (const link of links.reverse()) {
+              yield { objects: [], links: [link] }
+            }
+          },
+        }
       }
-    }
+    )
     await expect(
       conflict.materializer.projections.replace(
         replacement("shuffled-conflict", "2026-01-01T00:00:00Z", [
@@ -1012,22 +1019,23 @@ describe("ontology materializer projection replacement", () => {
 
   test("rejects fabricated projection result counts before recording the commit", async () => {
     const { materializer, storage } = createMaterializerFixture()
-    const finalize = storage.ontology.materializations.finalize.bind(
-      storage.ontology.materializations
-    )
-    storage.ontology.materializations.finalize = (input) => {
-      if (input.finalization.result.kind !== "projection") return finalize(input)
-      return finalize({
-        ...input,
-        finalization: {
-          ...input.finalization,
-          result: {
-            ...input.finalization.result,
-            counts: { ...input.finalization.result.counts, objectsCreated: -1 },
+    decorateOperationScopedMethodForTesting(
+      storage.ontology.materializations,
+      "finalize",
+      (finalize) => (input) => {
+        if (input.finalization.result.kind !== "projection") return finalize(input)
+        return finalize({
+          ...input,
+          finalization: {
+            ...input.finalization,
+            result: {
+              ...input.finalization.result,
+              counts: { ...input.finalization.result.counts, objectsCreated: -1 },
+            },
           },
-        },
-      })
-    }
+        })
+      }
+    )
 
     await expect(
       materializer.projections.replace(

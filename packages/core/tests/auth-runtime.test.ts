@@ -1,4 +1,4 @@
-import { describe, expect, setSystemTime, spyOn, test } from "bun:test"
+import { describe, expect, setSystemTime, test } from "bun:test"
 import {
   type AuthSessionOptions,
   type AuthStrategy,
@@ -22,6 +22,7 @@ import {
   resolveAuthCookieOptions,
   verifyDoubleSubmitCsrf,
 } from "../src/auth"
+import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const authStrategy = {
@@ -885,7 +886,15 @@ describe("Sixb auth runtime", () => {
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
     })
-    const spy = spyOn(deps.storage.auth.sessions, "findValidByTokenHash")
+    let findCalls = 0
+    decorateOperationScopedMethodForTesting(
+      deps.storage.auth.sessions,
+      "findValidByTokenHash",
+      (findValidByTokenHash) => async (input) => {
+        findCalls += 1
+        return findValidByTokenHash(input)
+      }
+    )
     const request = () =>
       new Request("http://localhost/api/project", {
         headers: { cookie: `sixb_session=${credential.cookieValue}` },
@@ -894,12 +903,11 @@ describe("Sixb auth runtime", () => {
     await expect(sixb.auth.getSession(request())).resolves.toMatchObject({ authenticated: true })
     await expect(sixb.auth.getSession(request())).resolves.toMatchObject({ authenticated: true })
     // Second resolution served from cache — storage hit only once.
-    expect(spy).toHaveBeenCalledTimes(1)
+    expect(findCalls).toBe(1)
 
     sixb.auth.invalidateSession(credential.sessionId)
     await expect(sixb.auth.getSession(request())).resolves.toMatchObject({ authenticated: true })
-    expect(spy).toHaveBeenCalledTimes(2)
-    spy.mockRestore()
+    expect(findCalls).toBe(2)
   })
 
   test("session cache is bound to the token secret, not just the session id", async () => {
@@ -1086,7 +1094,15 @@ describe("Sixb auth runtime", () => {
         createdAt: now,
         expiresAt: new Date(now.getTime() + 5 * 60_000),
       })
-      const renew = spyOn(deps.storage.auth.sessions, "renewIfValid")
+      let renewCalls = 0
+      decorateOperationScopedMethodForTesting(
+        deps.storage.auth.sessions,
+        "renewIfValid",
+        (renewIfValid) => async (input) => {
+          renewCalls += 1
+          return renewIfValid(input)
+        }
+      )
       const request = () =>
         new Request("http://localhost/api/project", {
           headers: { cookie: `sixb_session=${credential.cookieValue}` },
@@ -1095,7 +1111,7 @@ describe("Sixb auth runtime", () => {
       const background = await sixb.auth.getSession(request())
       expect(background).toMatchObject({ authenticated: true })
       expect(background.authenticated && background.sessionRenewed).toBeUndefined()
-      expect(renew).not.toHaveBeenCalled()
+      expect(renewCalls).toBe(0)
 
       const foreground = await sixb.auth.getSession(request(), {
         sessionActivity: "foreground",
@@ -1105,7 +1121,7 @@ describe("Sixb auth runtime", () => {
         sessionRenewed: true,
         session: { expiresAt: new Date(now.getTime() + 30 * 60_000) },
       })
-      expect(renew).toHaveBeenCalledTimes(1)
+      expect(renewCalls).toBe(1)
     } finally {
       setSystemTime()
     }
@@ -1146,15 +1162,31 @@ describe("Sixb auth runtime", () => {
         expiresAt: new Date(now.getTime() + 12 * 60_000),
         absoluteExpiresAt: new Date(now.getTime() + 30 * 60_000),
       })
-      const find = spyOn(deps.storage.auth.sessions, "findValidByTokenHash")
-      const renew = spyOn(deps.storage.auth.sessions, "renewIfValid")
+      let findCalls = 0
+      let renewCalls = 0
+      decorateOperationScopedMethodForTesting(
+        deps.storage.auth.sessions,
+        "findValidByTokenHash",
+        (findValidByTokenHash) => async (input) => {
+          findCalls += 1
+          return findValidByTokenHash(input)
+        }
+      )
+      decorateOperationScopedMethodForTesting(
+        deps.storage.auth.sessions,
+        "renewIfValid",
+        (renewIfValid) => async (input) => {
+          renewCalls += 1
+          return renewIfValid(input)
+        }
+      )
       const request = () =>
         new Request("http://localhost/api/project", {
           headers: { cookie: `sixb_session=${credential.cookieValue}` },
         })
 
       await sixb.auth.getSession(request(), { sessionActivity: "foreground" })
-      expect(renew).not.toHaveBeenCalled()
+      expect(renewCalls).toBe(0)
 
       setSystemTime(new Date(now.getTime() + 2 * 60_000))
       const renewed = await sixb.auth.getSession(request(), { sessionActivity: "foreground" })
@@ -1163,13 +1195,13 @@ describe("Sixb auth runtime", () => {
         sessionRenewed: true,
         session: { expiresAt: new Date(now.getTime() + 30 * 60_000) },
       })
-      expect(find).toHaveBeenCalledTimes(2)
-      expect(renew).toHaveBeenCalledTimes(1)
+      expect(findCalls).toBe(2)
+      expect(renewCalls).toBe(1)
 
       setSystemTime(new Date(now.getTime() + 21 * 60_000))
       const capped = await sixb.auth.getSession(request(), { sessionActivity: "foreground" })
       expect(capped.authenticated && capped.sessionRenewed).toBeUndefined()
-      expect(renew).toHaveBeenCalledTimes(1)
+      expect(renewCalls).toBe(1)
     } finally {
       setSystemTime()
     }
@@ -1198,7 +1230,15 @@ describe("Sixb auth runtime", () => {
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
     })
-    const spy = spyOn(deps.storage.auth.sessions, "findValidByTokenHash")
+    let findCalls = 0
+    decorateOperationScopedMethodForTesting(
+      deps.storage.auth.sessions,
+      "findValidByTokenHash",
+      (findValidByTokenHash) => async (input) => {
+        findCalls += 1
+        return findValidByTokenHash(input)
+      }
+    )
     const request = () =>
       new Request("http://localhost/api/project", {
         headers: { cookie: `sixb_session=${credential.cookieValue}` },
@@ -1206,8 +1246,7 @@ describe("Sixb auth runtime", () => {
 
     await sixb.auth.getSession(request())
     await sixb.auth.getSession(request())
-    expect(spy).toHaveBeenCalledTimes(2)
-    spy.mockRestore()
+    expect(findCalls).toBe(2)
   })
 
   test("rejects invalid session cacheTtlMs", () => {

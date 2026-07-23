@@ -1,8 +1,4 @@
-import {
-  linkRefKey,
-  MaterializationConflictError,
-  objectRefKey,
-} from "@sixb/core/internal/materialization"
+import { MaterializationConflictError } from "@sixb/core/internal/materialization"
 import {
   correlateMaterializationChunk,
   duplicateMaterializationWork as duplicateWork,
@@ -23,11 +19,7 @@ import type {
   StreamMaterializationWorkInput,
 } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
-import {
-  PG_MATERIALIZATION_WORK_TABLE,
-  PG_REPLACEMENT_WORK_TABLE,
-  type ReplacementIdentity,
-} from "./materialization-state"
+import { PG_MATERIALIZATION_WORK_TABLE, PG_REPLACEMENT_WORK_TABLE } from "./materialization-state"
 import { jsonParameter } from "./shared"
 
 export interface PgOntologyTransactionContext {
@@ -37,8 +29,8 @@ export interface PgOntologyTransactionContext {
 }
 
 interface WorkCursor {
-  readonly rankOne: number
-  readonly rankTwo: number
+  readonly majorOrder: number
+  readonly minorOrder: number
   readonly sortOne: string
   readonly sortTwo: string
   readonly recordKey: string
@@ -58,8 +50,8 @@ export class PgMaterializationSessionState extends ProviderMaterializationSessio
 
 interface WorkDatabaseRow {
   readonly record_key: string
-  readonly rank_one: number
-  readonly rank_two: number
+  readonly major_order: number
+  readonly minor_order: number
   readonly sort_one: string
   readonly sort_two: string
   readonly payload: unknown
@@ -148,8 +140,8 @@ export class PgMaterializationSessions {
         uniqueKey,
         kind: record.kind,
         lane: columns.lane,
-        rankOne: columns.rankOne,
-        rankTwo: columns.rankTwo,
+        majorOrder: columns.majorOrder,
+        minorOrder: columns.minorOrder,
         sortOne: columns.sortOne,
         sortTwo: columns.sortTwo,
         record,
@@ -161,10 +153,10 @@ export class PgMaterializationSessions {
       )
       INSERT INTO ${this.sql(PG_MATERIALIZATION_WORK_TABLE)} (
         session_id, record_key, unique_key, kind, lane,
-        rank_one, rank_two, sort_one, sort_two, payload
+        major_order, minor_order, sort_one, sort_two, payload
       )
       SELECT ${session.id}, value->>'recordKey', value->>'uniqueKey', value->>'kind',
-        value->>'lane', (value->>'rankOne')::integer, (value->>'rankTwo')::integer,
+        value->>'lane', (value->>'majorOrder')::integer, (value->>'minorOrder')::integer,
         value->>'sortOne', value->>'sortTwo', value->'record'
       FROM staged
     `
@@ -288,32 +280,6 @@ export class PgMaterializationSessions {
     session.appliedEventCursor = progress.appliedEventCursor
   }
 
-  async recordReplacementIdentities(
-    session: PgMaterializationSessionState,
-    identities: readonly ReplacementIdentity[]
-  ): Promise<void> {
-    if (identities.length === 0) return
-    const payload = identities.map((identity) => ({
-      kind: identity.kind,
-      identityKey: replacementIdentityKey(identity),
-      diffRequired: identity.diffRequired,
-    }))
-    await this.sql`
-      WITH staged AS (
-        SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, payload)}::jsonb)
-      )
-      INSERT INTO ${this.sql(PG_REPLACEMENT_WORK_TABLE)} (
-        session_id, entity_kind, identity_key, diff_required
-      )
-      SELECT ${session.id}, value->>'kind', value->>'identityKey',
-        (value->>'diffRequired')::boolean
-      FROM staged
-      ON CONFLICT (session_id, entity_kind, identity_key) DO UPDATE SET
-        diff_required = ${this.sql(PG_REPLACEMENT_WORK_TABLE)}.diff_required
-          OR EXCLUDED.diff_required
-    `
-  }
-
   async count(session: PgMaterializationSessionState, kind: string): Promise<number> {
     const [row] = await this.sql<{ readonly count: number | string }[]>`
       SELECT COUNT(*) AS count FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
@@ -339,18 +305,6 @@ export class PgMaterializationSessions {
     return counts
   }
 
-  async records(
-    session: PgMaterializationSessionState,
-    kind?: string
-  ): Promise<MaterializationWorkRecord[]> {
-    const kindFilter = kind === undefined ? this.sql`` : this.sql`AND kind = ${kind}`
-    const rows = await this.sql<{ readonly payload: unknown }[]>`
-      SELECT payload FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
-      WHERE session_id = ${session.id} ${kindFilter}
-    `
-    return rows.map((row) => structuredClone(row.payload) as MaterializationWorkRecord)
-  }
-
   async assertClassificationCoverage(session: PgMaterializationSessionState): Promise<void> {
     if (!session.replacement) return
     const includeObjects = session.replacement.projectionKind === "object"
@@ -370,16 +324,16 @@ export class PgMaterializationSessions {
         (SELECT * FROM expected EXCEPT SELECT * FROM actual)
         UNION ALL
         (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+      ), invalid AS (
+        SELECT 1 AS marker FROM differences
+        UNION ALL
+        SELECT 1 AS marker FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
+        WHERE session_id = ${session.id} AND kind = 'classification'
+          AND payload->>'entityKind' = 'point'
       )
-      SELECT 1 AS marker FROM differences LIMIT 1
+      SELECT marker FROM invalid LIMIT 1
     `
-    const [pointClassification] = await this.sql<{ readonly marker: number }[]>`
-      SELECT 1 AS marker FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
-      WHERE session_id = ${session.id} AND kind = 'classification'
-        AND payload->>'entityKind' = 'point'
-      LIMIT 1
-    `
-    if (mismatch || pointClassification) {
+    if (mismatch) {
       invalidCorrelation(
         "Projection replacement classification coverage does not match its streamed state."
       )
@@ -394,15 +348,15 @@ export class PgMaterializationSessions {
   ): Promise<WorkDatabaseRow[]> {
     if (limit === 0) return []
     const after = cursor
-      ? this.sql`AND (rank_one, rank_two, sort_one, sort_two, record_key) >
-          (${cursor.rankOne}, ${cursor.rankTwo}, ${cursor.sortOne}, ${cursor.sortTwo},
+      ? this.sql`AND (major_order, minor_order, sort_one, sort_two, record_key) >
+          (${cursor.majorOrder}, ${cursor.minorOrder}, ${cursor.sortOne}, ${cursor.sortTwo},
             ${cursor.recordKey})`
       : this.sql``
     return this.sql<WorkDatabaseRow[]>`
-      SELECT record_key, rank_one, rank_two, sort_one, sort_two, payload
+      SELECT record_key, major_order, minor_order, sort_one, sort_two, payload
       FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
       WHERE session_id = ${sessionId} AND lane = ${lane} ${after}
-      ORDER BY rank_one, rank_two, sort_one, sort_two, record_key
+      ORDER BY major_order, minor_order, sort_one, sort_two, record_key
       LIMIT ${limit}
     `
   }
@@ -416,8 +370,8 @@ export class PgMaterializationSessions {
         unique_key TEXT NOT NULL,
         kind TEXT NOT NULL,
         lane TEXT NOT NULL,
-        rank_one INTEGER NOT NULL,
-        rank_two INTEGER NOT NULL,
+        major_order INTEGER NOT NULL,
+        minor_order INTEGER NOT NULL,
         sort_one TEXT COLLATE "C" NOT NULL,
         sort_two TEXT COLLATE "C" NOT NULL,
         payload JSONB NOT NULL,
@@ -428,7 +382,7 @@ export class PgMaterializationSessions {
     await this.sql`
       CREATE INDEX ontology_materialization_work_lane
       ON ${this.sql(PG_MATERIALIZATION_WORK_TABLE)} (
-        session_id, lane, rank_one, rank_two, sort_one, sort_two, record_key
+        session_id, lane, major_order, minor_order, sort_one, sort_two, record_key
       )
     `
     await this.sql`
@@ -436,9 +390,16 @@ export class PgMaterializationSessions {
         session_id TEXT NOT NULL,
         entity_kind TEXT NOT NULL,
         identity_key TEXT COLLATE "C" NOT NULL,
+        sort_key TEXT COLLATE "C" NOT NULL,
         diff_required BOOLEAN NOT NULL,
         PRIMARY KEY (session_id, entity_kind, identity_key)
       ) ON COMMIT DROP
+    `
+    await this.sql`
+      CREATE INDEX ontology_replacement_work_order
+      ON ${this.sql(PG_REPLACEMENT_WORK_TABLE)} (
+        session_id, entity_kind, sort_key, identity_key
+      )
     `
     this.tablesReady = true
   }
@@ -454,14 +415,10 @@ export class PgMaterializationSessions {
   }
 }
 
-function replacementIdentityKey(identity: ReplacementIdentity): string {
-  return identity.kind === "object" ? objectRefKey(identity.ref) : linkRefKey(identity.ref)
-}
-
 function workCursor(row: WorkDatabaseRow): WorkCursor {
   return {
-    rankOne: row.rank_one,
-    rankTwo: row.rank_two,
+    majorOrder: row.major_order,
+    minorOrder: row.minor_order,
     sortOne: row.sort_one,
     sortTwo: row.sort_two,
     recordKey: row.record_key,

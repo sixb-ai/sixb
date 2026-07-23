@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks"
 import type { AgentStorage } from "./agents"
 import type { AuthStorage } from "./auth"
 import type { OntologyStorage } from "./ontology"
@@ -17,8 +18,27 @@ export function createStorageOperationScope(
   run: StorageOperationRunner,
   assertAvailable: () => void = () => undefined
 ): StorageOperationScope {
-  return { assertAvailable, run }
+  const executions = new AsyncLocalStorage<{ active: boolean }>()
+  return {
+    assertAvailable,
+    async run(operation) {
+      const inherited = executions.getStore()
+      if (inherited?.active) {
+        assertAvailable()
+        return operation()
+      }
+
+      const execution = { active: true }
+      try {
+        return await executions.run(execution, () => run(operation))
+      } finally {
+        execution.active = false
+      }
+    },
+  }
 }
+
+const operationScopeTargets = new WeakMap<object, object>()
 
 /**
  * Give every async operation exposed by a store one provider-owned execution scope.
@@ -33,7 +53,93 @@ export function createOperationScopedFacade<T extends object>(
   scope: StorageOperationScope,
   propertyOverrides: Partial<T> = {}
 ): T {
-  const facadeTarget = Object.create(Object.getPrototypeOf(target)) as T
+  const methodKinds = discoverMethodKinds(target)
+  const overrideKeys = new Set(Reflect.ownKeys(propertyOverrides))
+  const methodCache = new Map<
+    PropertyKey,
+    { implementation: (...args: unknown[]) => unknown; exposed: (...args: unknown[]) => unknown }
+  >()
+
+  const facade = new Proxy(target, {
+    get(current, property) {
+      if (overrideKeys.has(property)) {
+        return Reflect.get(propertyOverrides, property, propertyOverrides)
+      }
+
+      const value = Reflect.get(current, property, current)
+      const kind = methodKinds.get(property)
+      if (!kind || typeof value !== "function") return value
+      const implementation = value as (...args: unknown[]) => unknown
+
+      const cached = methodCache.get(property)
+      if (cached?.implementation === implementation) return cached.exposed
+
+      const exposed = scopeMethod(implementation, kind, current, scope)
+      methodCache.set(property, { implementation, exposed })
+      return exposed
+    },
+    set(current, property, value) {
+      if (overrideKeys.has(property)) return false
+      return Reflect.set(current, property, value, current)
+    },
+    defineProperty(current, property, attributes) {
+      if (overrideKeys.has(property)) return false
+      return Reflect.defineProperty(current, property, attributes)
+    },
+    deleteProperty(current, property) {
+      if (overrideKeys.has(property)) return false
+      return Reflect.deleteProperty(current, property)
+    },
+  })
+  operationScopeTargets.set(facade, target)
+  return facade
+}
+
+type StorageMethod = (...args: never[]) => unknown
+type StorageMethodKey<T> = {
+  [TKey in keyof T]-?: T[TKey] extends StorageMethod ? TKey : never
+}[keyof T]
+
+/** Replace a provider method behind its scoped facade without exposing the raw provider. */
+export function decorateOperationScopedMethodForTesting<
+  T extends object,
+  TKey extends StorageMethodKey<T>,
+>(
+  facade: T,
+  property: TKey,
+  decorate: (implementation: Extract<T[TKey], StorageMethod>) => Extract<T[TKey], StorageMethod>
+): () => void {
+  const target = operationScopeTargets.get(facade)
+  if (!target) throw new Error("[Sixb] Expected an operation-scoped storage facade.")
+
+  const previousDescriptor = Reflect.getOwnPropertyDescriptor(target, property)
+  const implementation = Reflect.get(target, property, target)
+  if (typeof implementation !== "function") {
+    throw new Error(`[Sixb] Storage property '${String(property)}' is not a method.`)
+  }
+
+  const boundImplementation = ((...args: never[]) =>
+    Reflect.apply(implementation, target, args)) as Extract<T[TKey], StorageMethod>
+  const decorated = decorate(boundImplementation)
+  Reflect.defineProperty(target, property, {
+    configurable: true,
+    enumerable: previousDescriptor?.enumerable ?? false,
+    writable: true,
+    value: decorated,
+  })
+
+  return () => {
+    if (previousDescriptor) {
+      Reflect.defineProperty(target, property, previousDescriptor)
+    } else {
+      Reflect.deleteProperty(target, property)
+    }
+  }
+}
+
+type StorageMethodKind = "async" | "async-generator" | "sync"
+
+function discoverMethodKinds(target: object): ReadonlyMap<PropertyKey, StorageMethodKind> {
   const methodKeys = new Set<PropertyKey>()
   for (
     let current: object | null = target;
@@ -45,36 +151,39 @@ export function createOperationScopedFacade<T extends object>(
     }
   }
 
+  const methodKinds = new Map<PropertyKey, StorageMethodKind>()
   for (const property of methodKeys) {
     const implementation = Reflect.get(target, property, target)
     if (typeof implementation !== "function") continue
-    let value = implementation.bind(target)
-    if (isAsyncFunction(implementation)) {
-      value = (...args: unknown[]) => scope.run(() => Reflect.apply(implementation, target, args))
-    } else if (isAsyncGeneratorFunction(implementation)) {
-      value = (...args: unknown[]) => {
-        scope.assertAvailable()
-        return Reflect.apply(implementation, target, args)
-      }
+    methodKinds.set(property, methodKind(implementation))
+  }
+  return methodKinds
+}
+
+function methodKind(implementation: (...args: unknown[]) => unknown): StorageMethodKind {
+  if (isAsyncFunction(implementation)) return "async"
+  if (isAsyncGeneratorFunction(implementation)) return "async-generator"
+  return "sync"
+}
+
+function scopeMethod(
+  implementation: (...args: unknown[]) => unknown,
+  kind: StorageMethodKind,
+  target: object,
+  scope: StorageOperationScope
+): (...args: unknown[]) => unknown {
+  if (kind === "async") {
+    return (...args: unknown[]) => scope.run(() => Reflect.apply(implementation, target, args))
+  }
+
+  if (kind === "async-generator") {
+    return (...args: unknown[]) => {
+      scope.assertAvailable()
+      return Reflect.apply(implementation, target, args)
     }
-    Reflect.defineProperty(facadeTarget, property, {
-      configurable: true,
-      enumerable: false,
-      writable: true,
-      value,
-    })
   }
 
-  for (const property of Reflect.ownKeys(propertyOverrides)) {
-    Reflect.defineProperty(facadeTarget, property, {
-      configurable: true,
-      enumerable: true,
-      writable: false,
-      value: Reflect.get(propertyOverrides, property, propertyOverrides),
-    })
-  }
-
-  return facadeTarget
+  return implementation.bind(target)
 }
 
 export function createAuthOperationScope<T extends AuthStorage>(

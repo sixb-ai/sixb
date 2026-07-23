@@ -350,11 +350,18 @@ CREATE INDEX idx_ontology_source_rows_root
   ON ontology_source_rows(
     project_id, source_id, materialization_id, root_sort_key, staging_ordinal, entity_sort_key
   );
+CREATE INDEX idx_ontology_source_rows_staging_ordinal
+  ON ontology_source_rows(project_id, source_id, materialization_id, staging_ordinal);
+CREATE INDEX idx_ontology_source_rows_entity_sort
+  ON ontology_source_rows(project_id, source_id, materialization_id, entity_sort_key);
 CREATE INDEX idx_ontology_source_rows_object
   ON ontology_source_rows(project_id, object_type_id, primary_id)
   WHERE entity_kind = 'object';
 CREATE INDEX idx_ontology_source_rows_link_source
-  ON ontology_source_rows(project_id, source_type_id, source_primary_id, link_id)
+  ON ontology_source_rows(
+    project_id, source_type_id, source_primary_id, link_id,
+    target_type_id, target_primary_id
+  )
   WHERE entity_kind = 'link';
 CREATE INDEX idx_ontology_source_rows_link_target
   ON ontology_source_rows(project_id, target_type_id, target_primary_id)
@@ -388,11 +395,17 @@ CREATE TABLE ontology_overrides (
 );
 
 CREATE INDEX idx_ontology_overrides_link_source
-  ON ontology_overrides(project_id, source_type_id, source_primary_id, link_id)
+  ON ontology_overrides(
+    project_id, source_type_id, source_primary_id, link_id,
+    target_type_id, target_primary_id
+  )
   WHERE entity_kind = 'link';
 CREATE INDEX idx_ontology_overrides_link_target
   ON ontology_overrides(project_id, target_type_id, target_primary_id)
   WHERE entity_kind = 'link';
+CREATE INDEX idx_ontology_overrides_object
+  ON ontology_overrides(project_id, object_type_id, primary_id)
+  WHERE entity_kind = 'object';
 
 CREATE TABLE ontology_outbox (
   project_id TEXT NOT NULL,
