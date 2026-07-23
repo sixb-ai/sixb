@@ -41,11 +41,6 @@ export async function requestWorkflowRun(
   options: WorkflowRunRequestOptions = {}
 ): Promise<WorkflowRunRequestResult> {
   assertAuthorized(runtime, { kind: "workflow.run", workflowId: workflow.id })
-  for (const node of workflow.nodes) {
-    if (node.type === "agent") {
-      assertAuthorized(runtime, { kind: "agent.run", agentId: node.agentStep.agent.id })
-    }
-  }
   const storage = runtime.storage.workflowRuns
   if (!storage) {
     throw new WorkflowValidationError("[Sixb] Workflow run storage is not configured.")

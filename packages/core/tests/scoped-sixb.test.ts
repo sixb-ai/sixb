@@ -394,14 +394,33 @@ describe("sixb.as() operational access", () => {
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
     expect(operator.listWorkflows()).toEqual([])
     expect(operator.getWorkflowById("renew-contract")).toBeNull()
+  })
 
+  test("workflow permission encapsulates agent nodes", async () => {
+    const sixb = createRuntime()
     const workflowOnlyPrincipal = sixb.as(contextFor(sixb, ["workflow-only"]))
-    expect(workflowOnlyPrincipal.listWorkflows()).toEqual([])
-    expect(workflowOnlyPrincipal.getWorkflowById("agent-review-contract")).toBeNull()
+
+    expect(workflowOnlyPrincipal.listWorkflows().map((workflow) => workflow.id)).toEqual([
+      "agent-review-contract",
+    ])
+    expect(workflowOnlyPrincipal.getWorkflowById("agent-review-contract")?.id).toBe(
+      "agent-review-contract"
+    )
+
+    const { runId } = await workflowOnlyPrincipal.runWorkflow({
+      workflowId: "agent-review-contract",
+      input: { contract: { objectTypeId: "contract", primaryId: "c1" } },
+    })
+    expect(runId).toBeString()
+
+    // A workflow grant authorizes the composite workflow, not direct access
+    // to the agents used by its implementation.
+    expect(workflowOnlyPrincipal.listAgents()).toEqual([])
+    expect(workflowOnlyPrincipal.getAgentById("contract-agent")).toBeNull()
     expect(
-      workflowOnlyPrincipal.runWorkflow({
-        workflowId: "agent-review-contract",
-        input: { contract: { objectTypeId: "contract", primaryId: "c1" } },
+      workflowOnlyPrincipal.requestAgentRun({
+        agentId: "contract-agent",
+        text: "Review this contract.",
       })
     ).rejects.toThrow(AuthorizationError)
   })
