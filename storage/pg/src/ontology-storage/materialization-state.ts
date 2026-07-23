@@ -3,6 +3,7 @@ import type {
   EffectiveObjectSnapshot,
   OntologyLinkRef,
   OntologyObjectRef,
+  ProjectionEntityRef,
   TelemetrySeriesRef,
 } from "@sixb/core/internal/materializer"
 import {
@@ -10,6 +11,7 @@ import {
   MaterializationConflictError,
   objectRefKey,
   projectionEntityKey,
+  telemetryPointKey,
   telemetryPointSortKey,
 } from "@sixb/core/internal/materializer"
 import {
@@ -86,11 +88,36 @@ interface LinkIdentityRow {
   readonly sort_key: string
 }
 
-export interface ReplacementIdentity {
-  readonly kind: "object" | "link"
-  readonly ref: OntologyObjectRef | OntologyLinkRef
-  readonly sortKey: string
-  readonly diffRequired: boolean
+interface ObjectOverrideRow extends PgOntologyOverrideRow {
+  readonly object_type_id: string
+  readonly primary_id: string
+}
+
+interface LinkOverrideRow extends PgOntologyOverrideRow {
+  readonly source_type_id: string
+  readonly source_primary_id: string
+  readonly link_id: string
+  readonly target_type_id: string
+  readonly target_primary_id: string
+}
+
+export type ReplacementIdentity =
+  | {
+      readonly kind: "object"
+      readonly ref: OntologyObjectRef
+      readonly sortKey: string
+      readonly diffRequired: true
+    }
+  | {
+      readonly kind: "link"
+      readonly ref: OntologyLinkRef
+      readonly sortKey: string
+      readonly diffRequired: boolean
+    }
+
+interface ReplacementSources {
+  readonly owned: ReadonlySet<string>
+  readonly byMaterialization: ReadonlyMap<string, ReadonlyMap<string, StoredSourceAssertion>>
 }
 
 interface ReplacementIdentityInput {
@@ -109,29 +136,196 @@ export class PgMaterializationStateReader {
   ) {}
 
   async objectState(ref: OntologyObjectRef): Promise<MaterializationObjectState> {
-    const [effective] = await this.sql<EffectiveObjectRow[]>`
-      SELECT * FROM objects
-      WHERE project_id = ${this.projectId}
-        AND object_type_id = ${ref.objectTypeId}
-        AND primary_id = ${ref.primaryId}
-    `
-    return {
-      ref: structuredClone(ref),
-      source: await this.activeObjectSource(ref),
-      override: await this.objectOverride(ref),
-      effective: effective ? effectiveObjectSnapshot(effective) : null,
-      latestTelemetry: await this.latestTelemetry(ref),
+    const [state] = await this.objectStates([ref])
+    return state!
+  }
+
+  async objectStates(
+    refs: readonly OntologyObjectRef[]
+  ): Promise<readonly MaterializationObjectState[]> {
+    if (refs.length === 0) return []
+    const requested = refs.map((ref) => ({
+      object_type_id: ref.objectTypeId,
+      primary_id: ref.primaryId,
+    }))
+    const requestedParameter = jsonParameter(this.sql, requested)
+    const [effectiveRows, sourceRows, overrideRows, telemetryRows] = await Promise.all([
+      this.sql<EffectiveObjectRow[]>`
+        WITH requested AS (
+          SELECT * FROM jsonb_to_recordset(${requestedParameter})
+            AS requested_values(object_type_id TEXT, primary_id TEXT)
+        )
+        SELECT objects.* FROM objects
+        JOIN requested USING (object_type_id, primary_id)
+        WHERE objects.project_id = ${this.projectId}
+      `,
+      this.sql<PgOntologySourceAssertionRow[]>`
+        WITH requested AS (
+          SELECT * FROM jsonb_to_recordset(${requestedParameter})
+            AS requested_values(object_type_id TEXT, primary_id TEXT)
+        )
+        SELECT rows.*
+        FROM ontology_source_rows AS rows
+        JOIN requested USING (object_type_id, primary_id)
+        JOIN ontology_sources AS sources
+          ON sources.project_id = rows.project_id
+         AND sources.source_id = rows.source_id
+         AND sources.materialization_id = rows.materialization_id
+        WHERE rows.project_id = ${this.projectId}
+          AND rows.entity_kind = 'object'
+          AND sources.status = 'active'
+      `,
+      this.sql<ObjectOverrideRow[]>`
+        WITH requested AS (
+          SELECT * FROM jsonb_to_recordset(${requestedParameter})
+            AS requested_values(object_type_id TEXT, primary_id TEXT)
+        )
+        SELECT overrides.* FROM ontology_overrides AS overrides
+        JOIN requested USING (object_type_id, primary_id)
+        WHERE overrides.project_id = ${this.projectId}
+          AND overrides.entity_kind = 'object'
+      `,
+      this.sql<TelemetryRow[]>`
+        WITH requested AS (
+          SELECT * FROM jsonb_to_recordset(${requestedParameter})
+            AS requested_values(object_type_id TEXT, primary_id TEXT)
+        ), ranked AS (
+          SELECT timeseries.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY timeseries.object_type_id, timeseries.object_id,
+                timeseries.property_id
+              ORDER BY timeseries.at DESC
+            ) AS rank
+          FROM timeseries
+          JOIN requested
+            ON requested.object_type_id = timeseries.object_type_id
+           AND requested.primary_id = timeseries.object_id
+          WHERE timeseries.project_id = ${this.projectId}
+        )
+        SELECT * FROM ranked WHERE rank = 1
+      `,
+    ])
+
+    const effective = new Map(
+      effectiveRows.map((row) => [objectRefKey(objectRefFromColumns(row)), row] as const)
+    )
+    const sources = activeSourceMap(sourceRows)
+    const overrides = new Map(
+      overrideRows.map(
+        (row) => [objectRefKey(objectRefFromColumns(row)), storedObjectOverride(row)] as const
+      )
+    )
+    const telemetry = new Map<string, StoredTelemetryPoint[]>()
+    for (const row of telemetryRows) {
+      const key = objectRefKey({ objectTypeId: row.object_type_id, primaryId: row.object_id })
+      const points = telemetry.get(key) ?? []
+      points.push(storedPoint(row))
+      telemetry.set(key, points)
     }
+    for (const points of telemetry.values()) {
+      points.sort((left, right) =>
+        telemetryPointSortKey(left.series, left.at).localeCompare(
+          telemetryPointSortKey(right.series, right.at)
+        )
+      )
+    }
+
+    return refs.map((ref) => {
+      const key = objectRefKey(ref)
+      const effectiveRow = effective.get(key)
+      return {
+        ref: structuredClone(ref),
+        source: sourceObject(sources.get(projectionEntityKey({ kind: "object", ref }))),
+        override: overrides.get(key) ?? null,
+        effective: effectiveRow ? effectiveObjectSnapshot(effectiveRow) : null,
+        latestTelemetry: telemetry.get(key) ?? [],
+      }
+    })
   }
 
   async linkState(ref: OntologyLinkRef): Promise<MaterializationLinkState> {
-    const effective = await this.getEffectiveLink(ref)
-    return {
-      ref: structuredClone(ref),
-      source: await this.activeLinkSource(ref),
-      override: await this.linkOverride(ref),
-      effective: effective ? effectiveLinkSnapshot(effective) : null,
-    }
+    const [state] = await this.linkStates([ref])
+    return state!
+  }
+
+  async linkStates(refs: readonly OntologyLinkRef[]): Promise<readonly MaterializationLinkState[]> {
+    if (refs.length === 0) return []
+    const requested = refs.map((ref) => ({
+      source_type_id: ref.source.objectTypeId,
+      source_id: ref.source.primaryId,
+      source_primary_id: ref.source.primaryId,
+      link_id: ref.linkId,
+      target_type_id: ref.target.objectTypeId,
+      target_id: ref.target.primaryId,
+      target_primary_id: ref.target.primaryId,
+    }))
+    const requestedParameter = jsonParameter(this.sql, requested)
+    const [effectiveRows, sourceRows, overrideRows] = await Promise.all([
+      this.sql<EffectiveLinkRow[]>`
+        WITH requested AS (
+          SELECT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
+            source_type_id TEXT, source_id TEXT, link_id TEXT,
+            target_type_id TEXT, target_id TEXT
+          )
+        )
+        SELECT links.* FROM links
+        JOIN requested USING (source_type_id, source_id, link_id, target_type_id, target_id)
+        WHERE links.project_id = ${this.projectId}
+      `,
+      this.sql<PgOntologySourceAssertionRow[]>`
+        WITH requested AS (
+          SELECT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
+            source_type_id TEXT, source_primary_id TEXT, link_id TEXT,
+            target_type_id TEXT, target_primary_id TEXT
+          )
+        )
+        SELECT rows.*
+        FROM ontology_source_rows AS rows
+        JOIN requested USING (
+          source_type_id, source_primary_id, link_id, target_type_id, target_primary_id
+        )
+        JOIN ontology_sources AS sources
+          ON sources.project_id = rows.project_id
+         AND sources.source_id = rows.source_id
+         AND sources.materialization_id = rows.materialization_id
+        WHERE rows.project_id = ${this.projectId}
+          AND rows.entity_kind = 'link'
+          AND sources.status = 'active'
+      `,
+      this.sql<LinkOverrideRow[]>`
+        WITH requested AS (
+          SELECT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
+            source_type_id TEXT, source_primary_id TEXT, link_id TEXT,
+            target_type_id TEXT, target_primary_id TEXT
+          )
+        )
+        SELECT overrides.* FROM ontology_overrides AS overrides
+        JOIN requested USING (
+          source_type_id, source_primary_id, link_id, target_type_id, target_primary_id
+        )
+        WHERE overrides.project_id = ${this.projectId}
+          AND overrides.entity_kind = 'link'
+      `,
+    ])
+    const effective = new Map(
+      effectiveRows.map((row) => [linkRefKey(linkRefFromColumns(row)), row] as const)
+    )
+    const sources = activeSourceMap(sourceRows)
+    const overrides = new Map(
+      overrideRows.map(
+        (row) => [linkRefKey(linkRefFromOverrideColumns(row)), storedLinkOverride(row)] as const
+      )
+    )
+    return refs.map((ref) => {
+      const key = linkRefKey(ref)
+      const effectiveRow = effective.get(key)
+      return {
+        ref: structuredClone(ref),
+        source: sourceLink(sources.get(projectionEntityKey({ kind: "link", ref }))),
+        override: overrides.get(key) ?? null,
+        effective: effectiveRow ? effectiveLinkSnapshot(effectiveRow) : null,
+      }
+    })
   }
 
   async exactPoint(
@@ -139,17 +333,42 @@ export class PgMaterializationStateReader {
     at: string,
     lock = false
   ): Promise<StoredTelemetryPoint | null> {
-    const lockFragment = lock ? this.sql`FOR UPDATE` : this.sql``
-    const [row] = await this.sql<TelemetryRow[]>`
-      SELECT * FROM timeseries
-      WHERE project_id = ${this.projectId}
-        AND object_type_id = ${series.object.objectTypeId}
-        AND object_id = ${series.object.primaryId}
-        AND property_id = ${series.propertyId}
-        AND at = ${at}
+    return (await this.exactPoints([{ series, at }], lock))[0] ?? null
+  }
+
+  async exactPoints(
+    points: readonly { readonly series: TelemetrySeriesRef; readonly at: string }[],
+    lock = false
+  ): Promise<readonly StoredTelemetryPoint[]> {
+    if (points.length === 0) return []
+    const requested = points.map(({ series, at }) => ({
+      object_type_id: series.object.objectTypeId,
+      object_id: series.object.primaryId,
+      property_id: series.propertyId,
+      at,
+    }))
+    const lockFragment = lock ? this.sql`FOR UPDATE OF timeseries` : this.sql``
+    const rows = await this.sql<TelemetryRow[]>`
+      WITH requested AS (
+        SELECT * FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)}) AS requested_values(
+          object_type_id TEXT, object_id TEXT, property_id TEXT, at TIMESTAMPTZ
+        )
+      )
+      SELECT timeseries.* FROM timeseries
+      JOIN requested USING (object_type_id, object_id, property_id, at)
+      WHERE timeseries.project_id = ${this.projectId}
       ${lockFragment}
     `
-    return row ? storedPoint(row) : null
+    const found = new Map(
+      rows.map((row) => {
+        const point = storedPoint(row)
+        return [telemetryPointKey(point.series, point.at), point] as const
+      })
+    )
+    return points.flatMap((point) => {
+      const stored = found.get(telemetryPointKey(point.series, point.at))
+      return stored ? [stored] : []
+    })
   }
 
   async linkScope(
@@ -267,90 +486,142 @@ export class PgMaterializationStateReader {
     }
   }
 
-  async replacementObjectState(
+  async replacementObjectStates(
     sourceId: string,
     candidateMaterializationId: string,
-    ref: OntologyObjectRef
-  ): Promise<SourceReplacementObjectState> {
-    const base = await this.objectState(ref)
-    return {
-      ref: base.ref,
-      candidateSource: await this.candidateObjectSource(sourceId, candidateMaterializationId, ref),
-      override: base.override,
-      effective: base.effective,
-      latestTelemetry: base.latestTelemetry,
-    }
+    refs: readonly OntologyObjectRef[]
+  ): Promise<readonly SourceReplacementObjectState[]> {
+    const base = await this.objectStates(refs)
+    const candidates = await this.replacementSources(
+      sourceId,
+      [candidateMaterializationId],
+      refs.map((ref) => ({ kind: "object" as const, ref }))
+    )
+    return base.map((state) => ({
+      ref: state.ref,
+      candidateSource: sourceObject(
+        candidates.byMaterialization
+          .get(candidateMaterializationId)
+          ?.get(projectionEntityKey({ kind: "object", ref: state.ref }))
+      ),
+      override: state.override,
+      effective: state.effective,
+      latestTelemetry: state.latestTelemetry,
+    }))
   }
 
-  async replacementLinkState(
+  async replacementLinkStates(
     sourceId: string,
     candidateMaterializationId: string,
-    ref: OntologyLinkRef,
-    diffRequired: boolean,
-    ownedByReplacement: boolean
-  ): Promise<SourceReplacementLinkState> {
-    const base = await this.linkState(ref)
-    return {
-      ref: base.ref,
-      candidateSource: ownedByReplacement
-        ? await this.candidateLinkSource(sourceId, candidateMaterializationId, ref)
-        : base.source,
-      override: base.override,
-      effective: base.effective,
-      diffRequired,
-    }
-  }
-
-  async sourceOwnsEntity(
-    sourceId: string,
     materializationIds: readonly string[],
-    entityKey: string
-  ): Promise<boolean> {
-    if (materializationIds.length === 0) return false
-    const [row] = await this.sql<{ readonly marker: number }[]>`
-      SELECT 1 AS marker FROM ontology_source_rows
-      WHERE project_id = ${this.projectId}
-        AND source_id = ${sourceId}
-        AND materialization_id = ANY(${this.sql.array([...materializationIds])}::text[])
-        AND entity_key = ${jsonKeyParameter(this.sql, entityKey)}
-      LIMIT 1
-    `
-    return row !== undefined
+    identities: readonly Extract<ReplacementIdentity, { readonly kind: "link" }>[]
+  ): Promise<readonly SourceReplacementLinkState[]> {
+    const refs = identities.map((identity) => identity.ref)
+    const base = await this.linkStates(refs)
+    const replacements = await this.replacementSources(
+      sourceId,
+      materializationIds,
+      refs.map((ref) => ({ kind: "link" as const, ref }))
+    )
+    const candidate = replacements.byMaterialization.get(candidateMaterializationId)
+    return base.map((state, index) => {
+      const key = projectionEntityKey({ kind: "link", ref: state.ref })
+      return {
+        ref: state.ref,
+        candidateSource: replacements.owned.has(key)
+          ? sourceLink(candidate?.get(key))
+          : state.source,
+        override: state.override,
+        effective: state.effective,
+        diffRequired: identities[index]!.diffRequired,
+      }
+    })
   }
 
   async effectiveObjectRevision(
     ref: OntologyObjectRef,
     lock = false
   ): Promise<{ readonly version: number; readonly lastCommitId: string | null } | null> {
-    const lockFragment = lock ? this.sql`FOR UPDATE` : this.sql``
-    const [row] = await this.sql<
-      { readonly version: number; readonly last_commit_id: string | null }[]
+    return (await this.effectiveObjectRevisions([ref], lock)).get(objectRefKey(ref)) ?? null
+  }
+
+  async effectiveObjectRevisions(
+    refs: readonly OntologyObjectRef[],
+    lock = false
+  ): Promise<
+    ReadonlyMap<string, { readonly version: number; readonly lastCommitId: string | null }>
+  > {
+    if (refs.length === 0) return new Map()
+    const requested = refs.map((ref) => ({
+      object_type_id: ref.objectTypeId,
+      primary_id: ref.primaryId,
+    }))
+    const lockFragment = lock ? this.sql`FOR UPDATE OF objects` : this.sql``
+    const rows = await this.sql<
+      {
+        readonly object_type_id: string
+        readonly primary_id: string
+        readonly version: number
+        readonly last_commit_id: string | null
+      }[]
     >`
-      SELECT version, last_commit_id FROM objects
-      WHERE project_id = ${this.projectId}
-        AND object_type_id = ${ref.objectTypeId}
-        AND primary_id = ${ref.primaryId}
+      WITH requested AS (
+        SELECT * FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)})
+          AS requested_values(object_type_id TEXT, primary_id TEXT)
+      )
+      SELECT objects.object_type_id, objects.primary_id, objects.version,
+        objects.last_commit_id
+      FROM objects JOIN requested USING (object_type_id, primary_id)
+      WHERE objects.project_id = ${this.projectId}
       ${lockFragment}
     `
-    return row ? { version: row.version, lastCommitId: row.last_commit_id } : null
+    return new Map(
+      rows.map(
+        (row) =>
+          [
+            objectRefKey(objectRefFromColumns(row)),
+            { version: row.version, lastCommitId: row.last_commit_id },
+          ] as const
+      )
+    )
   }
 
   async effectiveLinkLastCommit(
     ref: OntologyLinkRef,
     lock = false
   ): Promise<string | null | undefined> {
-    const lockFragment = lock ? this.sql`FOR UPDATE` : this.sql``
-    const [row] = await this.sql<{ readonly last_commit_id: string | null }[]>`
-      SELECT last_commit_id FROM links
-      WHERE project_id = ${this.projectId}
-        AND source_type_id = ${ref.source.objectTypeId}
-        AND source_id = ${ref.source.primaryId}
-        AND link_id = ${ref.linkId}
-        AND target_type_id = ${ref.target.objectTypeId}
-        AND target_id = ${ref.target.primaryId}
+    return (await this.effectiveLinkLastCommits([ref], lock)).get(linkRefKey(ref))
+  }
+
+  async effectiveLinkLastCommits(
+    refs: readonly OntologyLinkRef[],
+    lock = false
+  ): Promise<ReadonlyMap<string, string | null>> {
+    if (refs.length === 0) return new Map()
+    const requested = refs.map((ref) => ({
+      source_type_id: ref.source.objectTypeId,
+      source_id: ref.source.primaryId,
+      link_id: ref.linkId,
+      target_type_id: ref.target.objectTypeId,
+      target_id: ref.target.primaryId,
+    }))
+    const lockFragment = lock ? this.sql`FOR UPDATE OF links` : this.sql``
+    const rows = await this.sql<EffectiveLinkRow[]>`
+      WITH requested AS (
+        SELECT * FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)})
+          AS requested_values(
+            source_type_id TEXT, source_id TEXT, link_id TEXT,
+            target_type_id TEXT, target_id TEXT
+          )
+      )
+      SELECT links.* FROM links
+      JOIN requested USING (source_type_id, source_id, link_id, target_type_id, target_id)
+      WHERE links.project_id = ${this.projectId}
       ${lockFragment}
     `
-    return row ? row.last_commit_id : undefined
+    return new Map(
+      rows.map((row) => [linkRefKey(linkRefFromColumns(row)), row.last_commit_id] as const)
+    )
   }
 
   async overrideLastCommit(kind: "object" | "link", entityKey: string): Promise<string | null> {
@@ -363,144 +634,39 @@ export class PgMaterializationStateReader {
     return row?.last_commit_id ?? null
   }
 
-  private async latestTelemetry(ref: OntologyObjectRef): Promise<StoredTelemetryPoint[]> {
-    const rows = await this.sql<TelemetryRow[]>`
-      SELECT * FROM (
-        SELECT timeseries.*,
-          ROW_NUMBER() OVER (PARTITION BY property_id ORDER BY at DESC) AS rank
-        FROM timeseries
-        WHERE project_id = ${this.projectId}
-          AND object_type_id = ${ref.objectTypeId}
-          AND object_id = ${ref.primaryId}
-      ) AS ranked
-      WHERE rank = 1
-      ORDER BY ${this.sql.unsafe(pointSortExpression("ranked"))}
-    `
-    return rows.map(storedPoint)
-  }
-
-  private async getEffectiveLink(ref: OntologyLinkRef): Promise<EffectiveLinkRow | null> {
-    const [row] = await this.sql<EffectiveLinkRow[]>`
-      SELECT * FROM links
-      WHERE project_id = ${this.projectId}
-        AND source_type_id = ${ref.source.objectTypeId}
-        AND source_id = ${ref.source.primaryId}
-        AND link_id = ${ref.linkId}
-        AND target_type_id = ${ref.target.objectTypeId}
-        AND target_id = ${ref.target.primaryId}
-    `
-    return row ?? null
-  }
-
-  private async objectOverride(ref: OntologyObjectRef): Promise<StoredObjectOverride | null> {
-    const [row] = await this.sql<PgOntologyOverrideRow[]>`
-      SELECT entity_kind, value, last_commit_id, updated_at
-      FROM ontology_overrides
-      WHERE project_id = ${this.projectId}
-        AND entity_kind = 'object'
-        AND entity_key = ${jsonKeyParameter(this.sql, objectRefKey(ref))}
-    `
-    return row
-      ? {
-          ref: structuredClone(ref),
-          value: structuredClone(row.value) as StoredObjectOverride["value"],
-          lastCommitId: row.last_commit_id,
-          updatedAt: toIsoString(row.updated_at),
-        }
-      : null
-  }
-
-  private async linkOverride(ref: OntologyLinkRef): Promise<StoredLinkOverride | null> {
-    const [row] = await this.sql<PgOntologyOverrideRow[]>`
-      SELECT entity_kind, value, last_commit_id, updated_at
-      FROM ontology_overrides
-      WHERE project_id = ${this.projectId}
-        AND entity_kind = 'link'
-        AND entity_key = ${jsonKeyParameter(this.sql, linkRefKey(ref))}
-    `
-    return row
-      ? {
-          ref: structuredClone(ref),
-          value: structuredClone(row.value) as StoredLinkOverride["value"],
-          lastCommitId: row.last_commit_id,
-          updatedAt: toIsoString(row.updated_at),
-        }
-      : null
-  }
-
-  private async activeObjectSource(
-    ref: OntologyObjectRef
-  ): Promise<StoredSourceObjectAssertion | null> {
-    const found = await this.activeSource(projectionEntityKey({ kind: "object", ref }))
-    return found?.assertion.kind === "object" ? (found as StoredSourceObjectAssertion) : null
-  }
-
-  private async activeLinkSource(ref: OntologyLinkRef): Promise<StoredSourceLinkAssertion | null> {
-    const found = await this.activeSource(projectionEntityKey({ kind: "link", ref }))
-    return found?.assertion.kind === "link" ? (found as StoredSourceLinkAssertion) : null
-  }
-
-  private async activeSource(entityKey: string): Promise<StoredSourceAssertion | null> {
-    const rows = await this.sql<PgOntologySourceAssertionRow[]>`
-      SELECT rows.*
-      FROM ontology_source_rows AS rows
-      JOIN ontology_sources AS sources
-        ON sources.project_id = rows.project_id
-       AND sources.source_id = rows.source_id
-       AND sources.materialization_id = rows.materialization_id
-      WHERE rows.project_id = ${this.projectId}
-        AND rows.entity_key = ${jsonKeyParameter(this.sql, entityKey)}
-        AND sources.status = 'active'
-      LIMIT 2
-    `
-    if (rows.length > 1) {
-      throw new MaterializationConflictError(
-        "source-materialization",
-        `Multiple active sources assert ${entityKey}.`
-      )
+  private async replacementSources(
+    sourceId: string,
+    materializationIds: readonly string[],
+    refs: readonly ProjectionEntityRef[]
+  ): Promise<ReplacementSources> {
+    if (materializationIds.length === 0 || refs.length === 0) {
+      return { owned: new Set(), byMaterialization: new Map() }
     }
-    return rows[0] ? storedSource(rows[0]) : null
-  }
-
-  private async candidateObjectSource(
-    sourceId: string,
-    materializationId: string,
-    ref: OntologyObjectRef
-  ): Promise<StoredSourceObjectAssertion | null> {
-    const row = await this.candidateSource(
-      sourceId,
-      materializationId,
-      projectionEntityKey({ kind: "object", ref })
-    )
-    return row?.assertion.kind === "object" ? (row as StoredSourceObjectAssertion) : null
-  }
-
-  private async candidateLinkSource(
-    sourceId: string,
-    materializationId: string,
-    ref: OntologyLinkRef
-  ): Promise<StoredSourceLinkAssertion | null> {
-    const row = await this.candidateSource(
-      sourceId,
-      materializationId,
-      projectionEntityKey({ kind: "link", ref })
-    )
-    return row?.assertion.kind === "link" ? (row as StoredSourceLinkAssertion) : null
-  }
-
-  private async candidateSource(
-    sourceId: string,
-    materializationId: string,
-    entityKey: string
-  ): Promise<StoredSourceAssertion | null> {
-    const [row] = await this.sql<PgOntologySourceAssertionRow[]>`
-      SELECT * FROM ontology_source_rows
-      WHERE project_id = ${this.projectId}
-        AND source_id = ${sourceId}
-        AND materialization_id = ${materializationId}
-        AND entity_key = ${jsonKeyParameter(this.sql, entityKey)}
+    const keys = refs.map((ref) => JSON.parse(projectionEntityKey(ref)) as unknown)
+    const rows = await this.sql<PgOntologySourceAssertionRow[]>`
+      WITH requested AS (
+        SELECT value AS entity_key
+        FROM jsonb_array_elements(${jsonParameter(this.sql, keys)}::jsonb)
+      )
+      SELECT rows.* FROM ontology_source_rows AS rows
+      JOIN requested USING (entity_key)
+      WHERE rows.project_id = ${this.projectId}
+        AND rows.source_id = ${sourceId}
+        AND rows.materialization_id = ANY(
+          ${this.sql.array([...new Set(materializationIds)])}::text[]
+        )
     `
-    return row ? storedSource(row) : null
+    const owned = new Set<string>()
+    const byMaterialization = new Map<string, Map<string, StoredSourceAssertion>>()
+    for (const row of rows) {
+      const source = storedSource(row)
+      const key = projectionEntityKey(source.assertion)
+      owned.add(key)
+      const materialization = byMaterialization.get(row.materialization_id) ?? new Map()
+      materialization.set(key, source)
+      byMaterialization.set(row.materialization_id, materialization)
+    }
+    return { owned, byMaterialization }
   }
 
   private async replacementObjectRows(
@@ -605,6 +771,62 @@ export class PgMaterializationStateReader {
       ORDER BY sort_key
       LIMIT ${input.pageRows}
     `
+  }
+}
+
+function activeSourceMap(
+  rows: readonly PgOntologySourceAssertionRow[]
+): ReadonlyMap<string, StoredSourceAssertion> {
+  const result = new Map<string, StoredSourceAssertion>()
+  for (const row of rows) {
+    const source = storedSource(row)
+    const key = projectionEntityKey(source.assertion)
+    if (result.has(key)) {
+      throw new MaterializationConflictError(
+        "source-materialization",
+        `Multiple active sources assert ${key}.`
+      )
+    }
+    result.set(key, source)
+  }
+  return result
+}
+
+function sourceObject(
+  source: StoredSourceAssertion | undefined
+): StoredSourceObjectAssertion | null {
+  return source?.assertion.kind === "object" ? (source as StoredSourceObjectAssertion) : null
+}
+
+function sourceLink(source: StoredSourceAssertion | undefined): StoredSourceLinkAssertion | null {
+  return source?.assertion.kind === "link" ? (source as StoredSourceLinkAssertion) : null
+}
+
+function storedObjectOverride(row: ObjectOverrideRow): StoredObjectOverride {
+  const ref = objectRefFromColumns(row)
+  return {
+    ref,
+    value: structuredClone(row.value) as StoredObjectOverride["value"],
+    lastCommitId: row.last_commit_id,
+    updatedAt: toIsoString(row.updated_at),
+  }
+}
+
+function storedLinkOverride(row: LinkOverrideRow): StoredLinkOverride {
+  const ref = linkRefFromOverrideColumns(row)
+  return {
+    ref,
+    value: structuredClone(row.value) as StoredLinkOverride["value"],
+    lastCommitId: row.last_commit_id,
+    updatedAt: toIsoString(row.updated_at),
+  }
+}
+
+function linkRefFromOverrideColumns(row: LinkOverrideRow): OntologyLinkRef {
+  return {
+    source: { objectTypeId: row.source_type_id, primaryId: row.source_primary_id },
+    linkId: row.link_id,
+    target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
   }
 }
 

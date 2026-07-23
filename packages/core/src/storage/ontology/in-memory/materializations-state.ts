@@ -1,17 +1,13 @@
-import { createHash } from "node:crypto"
-import { stableJsonStringify } from "../../../json"
 import { MaterializationConflictError } from "../../../materialization/errors"
 import type {
   EffectiveLinkSnapshot,
   EffectiveObjectSnapshot,
   OntologyLinkRef,
-  OntologyObjectRef,
 } from "../../../materialization/model"
 import { linkRefKey, linkRefSortKey, linkScopeSortKey } from "../../../materialization/refs"
 import type { ObjectLinkRow, ObjectRow } from "../../objects/types"
 import type { TimeseriesPoint } from "../../timeseries/types"
 import type {
-  MaterializationLinkScopeState,
   StoredLinkOverride,
   StoredObjectOverride,
   StoredTelemetryPoint,
@@ -44,57 +40,6 @@ export function publicLinkOverride(
   if (!value) return null
   const { projectId: _, ...stored } = value
   return stored
-}
-
-export interface LinkScopeAccumulator {
-  readonly scopeSortKey: string
-  readonly source: OntologyObjectRef
-  readonly linkId: string
-  readonly hash: ReturnType<typeof createHash>
-  effectiveCount: number
-}
-
-export function startScopeAccumulator(
-  source: OntologyObjectRef,
-  linkId: string,
-  scopeSortKey: string
-): LinkScopeAccumulator {
-  const hash = createHash("sha256")
-  hash.update("[")
-  return {
-    scopeSortKey,
-    source: structuredClone(source),
-    linkId,
-    hash,
-    effectiveCount: 0,
-  }
-}
-
-export function appendScopeSnapshot(
-  accumulator: LinkScopeAccumulator,
-  snapshot: EffectiveLinkSnapshot
-): void {
-  if (accumulator.effectiveCount > 0) accumulator.hash.update(",")
-  accumulator.hash.update(
-    stableJsonStringify({
-      ref: snapshot.ref,
-      properties: snapshot.properties ?? {},
-      lastCommitId: snapshot.lastCommitId,
-    })
-  )
-  accumulator.effectiveCount += 1
-}
-
-export function finishScopeAccumulator(
-  accumulator: LinkScopeAccumulator
-): MaterializationLinkScopeState {
-  accumulator.hash.update("]")
-  return {
-    source: accumulator.source,
-    linkId: accumulator.linkId,
-    effectiveCount: accumulator.effectiveCount,
-    fingerprint: accumulator.hash.digest("hex"),
-  }
 }
 
 export function uniqueBy<T>(values: readonly T[], keyOf: (value: T) => string): T[] {

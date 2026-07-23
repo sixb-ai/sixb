@@ -9,6 +9,22 @@ import type {
   StorageMigrator,
   StorageTransactionOptions,
 } from "@sixb/core"
+import {
+  ACTION_RUN_ROOT_OPERATION_METHODS,
+  createAgentStorageFacade,
+  createAuthStorageFacade,
+  createRootOperationFacade,
+  createWorkflowRunStorageFacade,
+  OBJECT_ROOT_OPERATION_METHODS,
+  PIPELINE_RUN_ROOT_OPERATION_METHODS,
+  PROJECTION_RUN_ROOT_OPERATION_METHODS,
+  RULES_ROOT_OPERATION_METHODS,
+  SYNC_RUN_ROOT_OPERATION_METHODS,
+  TIMESERIES_ROOT_OPERATION_METHODS,
+  WEBHOOK_DELIVERY_ROOT_OPERATION_METHODS,
+  WEBHOOK_RUN_ROOT_OPERATION_METHODS,
+  WORKFLOW_INTERVENTION_ROOT_OPERATION_METHODS,
+} from "@sixb/core/internal/storage-root-operations"
 import { createTransactionStorageProxy, throwNestedStorageTransaction } from "@sixb/core/storage"
 import { SqliteActionRunStorage } from "./action-run-storage"
 import { SqliteAgentStorage } from "./agents"
@@ -91,20 +107,52 @@ export class SqliteStorage implements MigrationCapableStorage {
       transactionContext: null,
     })
     const lock = <T>(run: () => Promise<T> | T) => this.runRootStorageOperation(run)
-    this.objects = createSqliteRootFacade(stores.objects, lock)
+    this.objects = createRootOperationFacade(stores.objects, OBJECT_ROOT_OPERATION_METHODS, lock)
     this.ontology = stores.ontology
-    this.auth = createSqliteRootFacade(stores.auth, lock)
-    this.agents = createSqliteRootFacade(stores.agents, lock)
-    this.actionRuns = createSqliteRootFacade(stores.actionRuns, lock)
-    this.pipelineRuns = createSqliteRootFacade(stores.pipelineRuns, lock)
-    this.timeseries = createSqliteRootFacade(stores.timeseries, lock)
-    this.syncRuns = createSqliteRootFacade(stores.syncRuns, lock)
-    this.projectionRuns = createSqliteRootFacade(stores.projectionRuns, lock)
-    this.workflowRuns = createSqliteRootFacade(stores.workflowRuns, lock)
-    this.workflowInterventions = createSqliteRootFacade(stores.workflowInterventions, lock)
-    this.webhookDeliveries = createSqliteRootFacade(stores.webhookDeliveries, lock)
-    this.webhookRuns = createSqliteRootFacade(stores.webhookRuns, lock)
-    this.rules = createSqliteRootFacade(stores.rules, lock)
+    this.auth = createAuthStorageFacade(stores.auth, lock)
+    this.agents = createAgentStorageFacade(stores.agents, lock)
+    this.actionRuns = createRootOperationFacade(
+      stores.actionRuns,
+      ACTION_RUN_ROOT_OPERATION_METHODS,
+      lock
+    )
+    this.pipelineRuns = createRootOperationFacade(
+      stores.pipelineRuns,
+      PIPELINE_RUN_ROOT_OPERATION_METHODS,
+      lock
+    )
+    this.timeseries = createRootOperationFacade(
+      stores.timeseries,
+      TIMESERIES_ROOT_OPERATION_METHODS,
+      lock
+    )
+    this.syncRuns = createRootOperationFacade(
+      stores.syncRuns,
+      SYNC_RUN_ROOT_OPERATION_METHODS,
+      lock
+    )
+    this.projectionRuns = createRootOperationFacade(
+      stores.projectionRuns,
+      PROJECTION_RUN_ROOT_OPERATION_METHODS,
+      lock
+    )
+    this.workflowRuns = createWorkflowRunStorageFacade(stores.workflowRuns, lock)
+    this.workflowInterventions = createRootOperationFacade(
+      stores.workflowInterventions,
+      WORKFLOW_INTERVENTION_ROOT_OPERATION_METHODS,
+      lock
+    )
+    this.webhookDeliveries = createRootOperationFacade(
+      stores.webhookDeliveries,
+      WEBHOOK_DELIVERY_ROOT_OPERATION_METHODS,
+      lock
+    )
+    this.webhookRuns = createRootOperationFacade(
+      stores.webhookRuns,
+      WEBHOOK_RUN_ROOT_OPERATION_METHODS,
+      lock
+    )
+    this.rules = createRootOperationFacade(stores.rules, RULES_ROOT_OPERATION_METHODS, lock)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
   }
 
@@ -226,33 +274,6 @@ function createSqliteStores(
     webhookRuns: new SqliteWebhookRunStorage({ connection }),
     rules: new SqliteRulesStorage({ connection }),
   }
-}
-
-function createSqliteRootFacade<T extends object>(
-  target: T,
-  runRootOperation: <TResult>(run: () => Promise<TResult> | TResult) => Promise<TResult>
-): T {
-  const nested = new WeakMap<object, object>()
-  return new Proxy(target, {
-    get(current, property) {
-      const value = Reflect.get(current, property, current) as unknown
-      if (typeof value === "function") {
-        if (property === "close" || property === "queryCapabilities") {
-          return value.bind(current)
-        }
-        return (...args: readonly unknown[]) =>
-          runRootOperation(() => Reflect.apply(value, current, args) as unknown)
-      }
-      if (typeof value === "object" && value !== null) {
-        const existing = nested.get(value)
-        if (existing) return existing
-        const facade = createSqliteRootFacade(value, runRootOperation)
-        nested.set(value, facade)
-        return facade
-      }
-      return value
-    },
-  })
 }
 
 interface SqliteStoreSet {

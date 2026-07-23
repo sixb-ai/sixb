@@ -3,11 +3,10 @@ import type { OntologyRegistry } from "../ontology"
 import type { ProjectionRegistry } from "../projections/registry"
 import { computeOntologyRevision } from "../projections/revision"
 import type { Storage } from "../storage"
-import type { OntologyStorage } from "../storage/ontology"
 import { type MaterializationBatching, resolveMaterializationBatching } from "./shared/batching"
 import { createProjectionMaterializationId } from "./shared/identity"
 
-export type MaterializerStorage = Storage & { readonly ontology: OntologyStorage }
+export type MaterializerStorage = Storage
 
 export interface OntologyMaterializerDependencies {
   readonly batching?: Partial<MaterializationBatching>

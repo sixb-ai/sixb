@@ -20,11 +20,15 @@ import {
   telemetryPointSortKey,
 } from "@sixb/core/internal/materializer"
 import {
+  assertMaterializationFinalizationCorrelation,
   assertMaterializationHeader,
+  assertMaterializationLaneCompletion,
   assertPageRows,
   assertPlanChunkCorrelations,
+  assertSourceActivationCorrelation,
   effectiveConflict,
   invalidCorrelation,
+  type OverrideEntity,
   overrideEntityColumns as overrideColumns,
   sameNonnegativeCounts as sameCounts,
   uniqueSorted,
@@ -500,17 +504,14 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
 
   private applyOverrides(projectId: string, chunk: ApplyMaterializationChunkInput["chunk"]): void {
     const upsert = (
-      kind: "object" | "link",
+      entity: OverrideEntity,
       item:
         | (typeof chunk.overrides.objectUpserts)[number]
         | (typeof chunk.overrides.linkUpserts)[number]
     ): void => {
-      const ref = item.ref
-      const key =
-        kind === "object"
-          ? objectRefKey(ref as OntologyObjectRef)
-          : linkRefKey(ref as OntologyLinkRef)
-      const columns = overrideColumns(kind, ref)
+      const kind = entity.kind
+      const key = kind === "object" ? objectRefKey(entity.ref) : linkRefKey(entity.ref)
+      const columns = overrideColumns(entity)
       if (item.expectedLastCommitId === null) {
         try {
           this.db
@@ -570,7 +571,9 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         )
       }
     }
-    for (const item of chunk.overrides.objectUpserts) upsert("object", item)
+    for (const item of chunk.overrides.objectUpserts) {
+      upsert({ kind: "object", ref: item.ref }, item)
+    }
     for (const item of chunk.overrides.objectDeletes) {
       requireChanges(
         this.db
@@ -583,7 +586,9 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         "Expected object override changed."
       )
     }
-    for (const item of chunk.overrides.linkUpserts) upsert("link", item)
+    for (const item of chunk.overrides.linkUpserts) {
+      upsert({ kind: "link", ref: item.ref }, item)
+    }
     for (const item of chunk.overrides.linkDeletes) {
       requireChanges(
         this.db
@@ -869,51 +874,12 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     input: FinalizeMaterializationInput
   ): void {
     const { commit } = session.header
-    const { result, sourceActivations } = input.finalization
-    if (
-      result.commitId !== commit.id ||
-      result.kind !== commit.intent.kind ||
-      result.created !== true ||
-      !Number.isSafeInteger(result.eventCount) ||
-      result.eventCount < 0 ||
-      result.eventCount !== session.appliedOutboxCount
-    ) {
-      invalidCorrelation("Materialization result does not correlate with its commit intent.")
-    }
-    if (commit.intent.kind === "edit") {
-      if (result.kind !== "edit" || result.outcomes.length !== commit.intent.operationCount) {
-        invalidCorrelation("Edit result does not correlate with its operation count.")
-      }
-      if (sourceActivations.length !== 0) {
-        invalidCorrelation("Edit materialization cannot activate a source materialization.")
-      }
-    } else if (commit.intent.kind === "projection") {
-      if (result.kind !== "projection" || sourceActivations.length !== 1) {
-        invalidCorrelation("Projection result requires exactly one correlated source activation.")
-      }
-    } else if (result.kind !== "telemetry" || sourceActivations.length !== 0) {
-      invalidCorrelation("Telemetry result does not correlate with its point intent.")
-    }
-
-    const applyCount = this.sessions.laneCount(session, "apply")
-    if (applyCount > 0 && !session.workStreams.apply.completed) {
-      invalidCorrelation("Materialization plan work was not fully streamed.")
-    }
-    if (session.appliedPlanCount !== applyCount) {
-      invalidCorrelation("Materialization plan work was not applied exactly once.")
-    }
-    const cardinalityCount = this.sessions.laneCount(session, "cardinality")
-    if (cardinalityCount > 0 && !session.workStreams.cardinality.completed) {
-      invalidCorrelation("Materialization cardinality work was not fully validated.")
-    }
+    const { result } = input.finalization
+    assertMaterializationFinalizationCorrelation(session, input)
+    const laneCounts = this.sessions.laneCounts(session)
+    assertMaterializationLaneCompletion(session, laneCounts)
     this.assertFinalCardinality(session)
-    const eventCount = this.sessions.laneCount(session, "event")
-    if (eventCount > 0 && !session.workStreams.event.completed) {
-      invalidCorrelation("Materialization event work was not fully drained.")
-    }
-    if (eventCount !== session.appliedOutboxCount) {
-      invalidCorrelation("Materialization event work was not fully written to the outbox.")
-    }
+    const eventCount = laneCounts.event
     const outbox = this.db
       .query(
         `
@@ -1083,38 +1049,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     activation: SourceActivationWrite
   ): void {
     const { commit } = session.header
-    if (
-      commit.intent.kind !== "projection" ||
-      commit.origin.kind !== "projection" ||
-      activation.source.projectionId !== commit.intent.source.projectionId ||
-      activation.source.projectionId !== commit.origin.projectionId ||
-      activation.execution.projectionRunId !== commit.origin.projectionRunId ||
-      activation.protocol !== "replacement" ||
-      stableJsonStringify(activation.datasetVersion) !==
-        stableJsonStringify(commit.intent.datasetVersion) ||
-      activation.projectionRevision !== commit.projectionRevision ||
-      activation.ownershipHash !== commit.ownershipHash ||
-      activation.ontologyRevision !== commit.ontologyRevision ||
-      activation.lastCommitId !== commit.id ||
-      activation.updatedAt !== commit.committedAt ||
-      !session.header.expected.sources.some(
-        (expected) => stableJsonStringify(expected) === stableJsonStringify(activation.expected)
-      )
-    ) {
-      invalidCorrelation("Source activation does not correlate with its projection commit.")
-    }
-    const replacement = session.replacement
-    if (
-      !replacement ||
-      replacement.sourceId !== activation.source.projectionId ||
-      replacement.candidateMaterializationId !== activation.materializationId ||
-      replacement.projectionKind !== activation.projectionKind ||
-      (activation.projectionKind === "object" &&
-        (!replacement.objectStreamCompleted || !replacement.linkStreamCompleted)) ||
-      (activation.projectionKind === "link" && !replacement.linkStreamCompleted)
-    ) {
-      invalidCorrelation("Source activation does not match fully streamed replacement state.")
-    }
+    assertSourceActivationCorrelation(session, activation)
     const candidate = this.getSource(
       commit.projectId,
       activation.source.projectionId,

@@ -14,7 +14,7 @@ import type {
 } from "../../storage"
 import type { OntologyCommitRecord } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
-import { requireOntologyStorage, withSerializationRetry } from "../execution/commit-lifecycle"
+import { withSerializationRetry } from "../execution/commit-lifecycle"
 import { assertProjectionMaterializationExecution } from "../execution/run-correlation"
 import {
   normalizePinnedDatasetVersion,
@@ -37,10 +37,9 @@ export async function finishProjectionRun(
 ): Promise<void> {
   const command = prepareProjectionRunFinish(context, raw)
   await withSerializationRetry(context, () =>
-    context.storage.transaction(
-      (txBase) => finishProjectionRunTransaction(requireOntologyStorage(txBase), command),
-      { isolation: "serializable" }
-    )
+    context.storage.transaction((storage) => finishProjectionRunTransaction(storage, command), {
+      isolation: "serializable",
+    })
   )
 }
 

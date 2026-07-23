@@ -39,65 +39,47 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
         )
       }
 
-      const ids = this.db
+      const rows = this.db
         .query(
           `
-            SELECT id
-            FROM ontology_outbox
-            WHERE project_id = ? AND published_at IS NULL AND available_at <= ?
-              AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-            ORDER BY created_at, id
-            LIMIT ?
+            UPDATE ontology_outbox
+            SET attempts = attempts + 1, lease_id = ?, lease_expires_at = ?
+            WHERE rowid IN (
+              SELECT rowid
+              FROM ontology_outbox
+              WHERE project_id = ? AND published_at IS NULL AND available_at <= ?
+                AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+              ORDER BY created_at, id
+              LIMIT ?
+            )
+            RETURNING envelope, available_at, attempts, lease_id, lease_expires_at,
+              published_at, last_error, created_at
           `
         )
-        .all(input.projectId, input.now, input.now, input.limit) as { readonly id: string }[]
-      const update = this.db.query(
-        `
-          UPDATE ontology_outbox
-          SET attempts = attempts + 1, lease_id = ?, lease_expires_at = ?
-          WHERE project_id = ? AND id = ? AND published_at IS NULL AND available_at <= ?
-            AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-        `
-      )
-      for (const row of ids) {
-        const changed = update.run(
+        .all(
           input.leaseId,
           input.leaseExpiresAt,
           input.projectId,
-          row.id,
           input.now,
-          input.now
-        ).changes
-        if (changed !== 1) {
-          throw new MaterializationConflictError(
-            "outbox-lease",
-            "Ontology outbox claim changed while acquiring its lease."
-          )
-        }
-      }
-      if (ids.length === 0) return []
-      const rows = ids.map(({ id }) =>
-        this.db
-          .query(
-            `
-              SELECT envelope, available_at, attempts, lease_id, lease_expires_at,
-                published_at, last_error, created_at
-              FROM ontology_outbox
-              WHERE project_id = ? AND id = ?
-            `
-          )
-          .get(input.projectId, id)
-      ) as SqliteOntologyOutboxRow[]
-      return rows.map((row) => {
-        const record = outboxRecord(row)
-        if (record.leaseId === null || record.leaseExpiresAt === null) {
-          throw new MaterializationConflictError(
-            "outbox-lease",
-            "Ontology outbox claim returned an unpaired lease."
-          )
-        }
-        return { ...record, leaseId: record.leaseId, leaseExpiresAt: record.leaseExpiresAt }
-      })
+          input.now,
+          input.limit
+        ) as SqliteOntologyOutboxRow[]
+      return rows
+        .map((row) => outboxRecord(row))
+        .sort(
+          (left, right) =>
+            left.createdAt.localeCompare(right.createdAt) ||
+            left.envelope.id.localeCompare(right.envelope.id)
+        )
+        .map((record) => {
+          if (record.leaseId === null || record.leaseExpiresAt === null) {
+            throw new MaterializationConflictError(
+              "outbox-lease",
+              "Ontology outbox claim returned an unpaired lease."
+            )
+          }
+          return { ...record, leaseId: record.leaseId, leaseExpiresAt: record.leaseExpiresAt }
+        })
     })
   }
 
@@ -105,19 +87,36 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
     await this.runRootOperation(() => {
       assertLeaseInput(input)
       assertTimestamp(input.publishedAt, "Ontology outbox publishedAt")
-      this.assertLeaseBatch(input.projectId, input.ids, input.leaseId)
-      const update = this.db.query(
-        `
-          UPDATE ontology_outbox
-          SET published_at = ?, lease_id = NULL, lease_expires_at = NULL
-          WHERE project_id = ? AND id = ? AND lease_id = ? AND lease_expires_at IS NOT NULL
-        `
-      )
-      for (const id of input.ids) {
-        if (update.run(input.publishedAt, input.projectId, id, input.leaseId).changes !== 1) {
-          throw leaseConflict()
-        }
-      }
+      const ids = validateLeaseIds(input.ids)
+      const changed = this.db
+        .query(
+          `
+            WITH requested(id) AS MATERIALIZED (
+              SELECT CAST(value AS TEXT) FROM json_each(?)
+            ), leased(id) AS MATERIALIZED (
+              SELECT outbox.id FROM ontology_outbox AS outbox
+              JOIN requested USING (id)
+              WHERE outbox.project_id = ? AND outbox.lease_id = ?
+                AND outbox.lease_expires_at IS NOT NULL
+            ), eligible(id) AS (
+              SELECT id FROM leased WHERE (SELECT COUNT(*) FROM leased) = ?
+            )
+            UPDATE ontology_outbox
+            SET published_at = ?, lease_id = NULL, lease_expires_at = NULL
+            WHERE project_id = ? AND id IN (SELECT id FROM eligible)
+              AND lease_id = ? AND lease_expires_at IS NOT NULL
+          `
+        )
+        .run(
+          JSON.stringify(ids),
+          input.projectId,
+          input.leaseId,
+          ids.length,
+          input.publishedAt,
+          input.projectId,
+          input.leaseId
+        ).changes
+      if (changed !== ids.length) throw leaseConflict()
     })
   }
 
@@ -125,22 +124,37 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
     await this.runRootOperation(() => {
       assertLeaseInput(input)
       assertTimestamp(input.availableAt, "Ontology outbox availableAt")
-      this.assertLeaseBatch(input.projectId, input.ids, input.leaseId)
-      const update = this.db.query(
-        `
-          UPDATE ontology_outbox
-          SET available_at = ?, last_error = ?, lease_id = NULL, lease_expires_at = NULL
-          WHERE project_id = ? AND id = ? AND lease_id = ? AND lease_expires_at IS NOT NULL
-        `
-      )
-      for (const id of input.ids) {
-        if (
-          update.run(input.availableAt, input.error, input.projectId, id, input.leaseId).changes !==
-          1
-        ) {
-          throw leaseConflict()
-        }
-      }
+      const ids = validateLeaseIds(input.ids)
+      const changed = this.db
+        .query(
+          `
+            WITH requested(id) AS MATERIALIZED (
+              SELECT CAST(value AS TEXT) FROM json_each(?)
+            ), leased(id) AS MATERIALIZED (
+              SELECT outbox.id FROM ontology_outbox AS outbox
+              JOIN requested USING (id)
+              WHERE outbox.project_id = ? AND outbox.lease_id = ?
+                AND outbox.lease_expires_at IS NOT NULL
+            ), eligible(id) AS (
+              SELECT id FROM leased WHERE (SELECT COUNT(*) FROM leased) = ?
+            )
+            UPDATE ontology_outbox
+            SET available_at = ?, last_error = ?, lease_id = NULL, lease_expires_at = NULL
+            WHERE project_id = ? AND id IN (SELECT id FROM eligible)
+              AND lease_id = ? AND lease_expires_at IS NOT NULL
+          `
+        )
+        .run(
+          JSON.stringify(ids),
+          input.projectId,
+          input.leaseId,
+          ids.length,
+          input.availableAt,
+          input.error,
+          input.projectId,
+          input.leaseId
+        ).changes
+      if (changed !== ids.length) throw leaseConflict()
     })
   }
 
@@ -164,33 +178,18 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
         .run(input.projectId, input.publishedBefore, input.limit).changes
     })
   }
+}
 
-  private assertLeaseBatch(projectId: string, ids: readonly string[], leaseId: string): void {
-    const seen = new Set<string>()
-    const lookup = this.db.query(
-      `
-        SELECT lease_id, lease_expires_at
-        FROM ontology_outbox
-        WHERE project_id = ? AND id = ?
-      `
-    )
-    for (const id of ids) {
-      assertNonblank(id, "Ontology outbox event id")
-      if (seen.has(id)) {
-        throw new MaterializationValidationError(
-          `Ontology outbox lease batch repeats event '${id}'.`
-        )
-      }
-      seen.add(id)
-      const row = lookup.get(projectId, id) as {
-        readonly lease_id: string | null
-        readonly lease_expires_at: string | null
-      } | null
-      if (!row || row.lease_id !== leaseId || row.lease_expires_at === null) {
-        throw leaseConflict()
-      }
+function validateLeaseIds(ids: readonly string[]): string[] {
+  const seen = new Set<string>()
+  for (const id of ids) {
+    assertNonblank(id, "Ontology outbox event id")
+    if (seen.has(id)) {
+      throw new MaterializationValidationError(`Ontology outbox lease batch repeats event '${id}'.`)
     }
+    seen.add(id)
   }
+  return [...seen]
 }
 
 function assertLeaseInput(input: {

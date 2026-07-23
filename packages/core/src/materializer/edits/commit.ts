@@ -13,11 +13,7 @@ import type {
   OntologyMaterializationStorage,
 } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
-import {
-  replayCommit,
-  requireOntologyStorage,
-  withSerializationRetry,
-} from "../execution/commit-lifecycle"
+import { replayCommit, withSerializationRetry } from "../execution/commit-lifecycle"
 import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
 import {
   createActionIdempotencyKey,
@@ -99,8 +95,7 @@ async function replayEditCommit(
   if (!replay || command.input.source.kind !== "action") return replay
   return withSerializationRetry(context, () =>
     context.storage.transaction(
-      async (txBase) => {
-        const storage = requireOntologyStorage(txBase)
+      async (storage) => {
         await assertActionRun(storage, context.projectId, command.input)
         return replayCommit<EditCommitResult>(context, command.identity, storage)
       },
@@ -114,10 +109,9 @@ async function executeEditCommit(
   command: PreparedEditCommit
 ): Promise<EditCommitResult> {
   return withSerializationRetry(context, () =>
-    context.storage.transaction(
-      (txBase) => executeEditTransaction(context, requireOntologyStorage(txBase), command),
-      { isolation: "serializable" }
-    )
+    context.storage.transaction((storage) => executeEditTransaction(context, storage, command), {
+      isolation: "serializable",
+    })
   )
 }
 

@@ -76,17 +76,27 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
     await this.runRootOperation(async (sql) => {
       assertLeaseInput(input)
       assertTimestamp(input.publishedAt, "Ontology outbox publishedAt")
-      await assertLeaseBatch(sql, input.projectId, input.ids, input.leaseId)
-      for (const id of input.ids) {
-        const rows = await sql<{ readonly id: string }[]>`
-          UPDATE ontology_outbox
-          SET published_at = ${input.publishedAt}, lease_id = NULL, lease_expires_at = NULL
-          WHERE project_id = ${input.projectId} AND id = ${id}
-            AND lease_id = ${input.leaseId} AND lease_expires_at IS NOT NULL
-          RETURNING id
-        `
-        if (rows.length !== 1) throw leaseConflict()
-      }
+      const ids = validateLeaseIds(input.ids)
+      if (ids.length === 0) return
+      const rows = await sql<{ readonly id: string }[]>`
+        WITH leased AS MATERIALIZED (
+          SELECT id FROM ontology_outbox
+          WHERE project_id = ${input.projectId}
+            AND id = ANY(${sql.array(ids)}::text[])
+            AND lease_id = ${input.leaseId}
+            AND lease_expires_at IS NOT NULL
+          FOR UPDATE
+        ), eligible AS (
+          SELECT id FROM leased
+          WHERE (SELECT COUNT(*) FROM leased) = ${ids.length}
+        )
+        UPDATE ontology_outbox AS outbox
+        SET published_at = ${input.publishedAt}, lease_id = NULL, lease_expires_at = NULL
+        FROM eligible
+        WHERE outbox.project_id = ${input.projectId} AND outbox.id = eligible.id
+        RETURNING outbox.id
+      `
+      if (rows.length !== ids.length) throw leaseConflict()
     })
   }
 
@@ -94,18 +104,28 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
     await this.runRootOperation(async (sql) => {
       assertLeaseInput(input)
       assertTimestamp(input.availableAt, "Ontology outbox availableAt")
-      await assertLeaseBatch(sql, input.projectId, input.ids, input.leaseId)
-      for (const id of input.ids) {
-        const rows = await sql<{ readonly id: string }[]>`
-          UPDATE ontology_outbox
-          SET available_at = ${input.availableAt}, last_error = ${input.error},
-            lease_id = NULL, lease_expires_at = NULL
-          WHERE project_id = ${input.projectId} AND id = ${id}
-            AND lease_id = ${input.leaseId} AND lease_expires_at IS NOT NULL
-          RETURNING id
-        `
-        if (rows.length !== 1) throw leaseConflict()
-      }
+      const ids = validateLeaseIds(input.ids)
+      if (ids.length === 0) return
+      const rows = await sql<{ readonly id: string }[]>`
+        WITH leased AS MATERIALIZED (
+          SELECT id FROM ontology_outbox
+          WHERE project_id = ${input.projectId}
+            AND id = ANY(${sql.array(ids)}::text[])
+            AND lease_id = ${input.leaseId}
+            AND lease_expires_at IS NOT NULL
+          FOR UPDATE
+        ), eligible AS (
+          SELECT id FROM leased
+          WHERE (SELECT COUNT(*) FROM leased) = ${ids.length}
+        )
+        UPDATE ontology_outbox AS outbox
+        SET available_at = ${input.availableAt}, last_error = ${input.error},
+          lease_id = NULL, lease_expires_at = NULL
+        FROM eligible
+        WHERE outbox.project_id = ${input.projectId} AND outbox.id = eligible.id
+        RETURNING outbox.id
+      `
+      if (rows.length !== ids.length) throw leaseConflict()
     })
   }
 
@@ -135,12 +155,7 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
   }
 }
 
-async function assertLeaseBatch(
-  sql: import("../pg-client").SQLClient,
-  projectId: string,
-  ids: readonly string[],
-  leaseId: string
-): Promise<void> {
+function validateLeaseIds(ids: readonly string[]): string[] {
   const seen = new Set<string>()
   for (const id of ids) {
     assertNonblank(id, "Ontology outbox event id")
@@ -149,19 +164,7 @@ async function assertLeaseBatch(
     }
     seen.add(id)
   }
-  for (const id of [...seen].sort()) {
-    const [row] = await sql<
-      { readonly lease_id: string | null; readonly lease_expires_at: Date | string | null }[]
-    >`
-      SELECT lease_id, lease_expires_at
-      FROM ontology_outbox
-      WHERE project_id = ${projectId} AND id = ${id}
-      FOR UPDATE
-    `
-    if (!row || row.lease_id !== leaseId || row.lease_expires_at === null) {
-      throw leaseConflict()
-    }
-  }
+  return [...seen]
 }
 
 function assertLeaseInput(input: {

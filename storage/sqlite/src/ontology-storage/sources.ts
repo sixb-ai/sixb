@@ -1,19 +1,19 @@
 import type { Database } from "bun:sqlite"
-import {
-  MaterializationValidationError,
-  projectionEntityKey,
-} from "@sixb/core/internal/materializer"
+import { MaterializationValidationError } from "@sixb/core/internal/materializer"
 import {
   assertSourceBeginInput as assertBeginInput,
   assertSourceExecutionIdentity as assertExecutionIdentity,
   assertSourceProject as assertProjectAndSource,
   assertSourceCandidateOwner,
-  assertSourceStagedRow,
   assertSourceWriteIdentity as assertWriteIdentity,
   sourceEntityColumns as entityColumns,
   isExactStagingManifest,
+  reconcileSourceStageRows,
+  type SourceStageRow,
   sourceConflict,
   sourceMaterializationIdentity,
+  sourceStageRow,
+  sourceStageRows,
   utf8SortKey,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
@@ -28,7 +28,6 @@ import type {
   OntologySourceRecord,
   OntologySourceStorage,
   ReclaimSourceMaterializationInput,
-  StageSourceAssertion,
   StageSourceRowsInput,
   StageSourceRowsResult,
 } from "@sixb/core/storage"
@@ -43,7 +42,6 @@ import {
   type SqliteOntologySourceRow,
   type SqliteRootOperation,
   sourceAssertion,
-  sourceEntityKey,
   sourceRecord,
 } from "./shared"
 
@@ -140,94 +138,11 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
         )
       }
 
-      const pending = new Map<string, StageSourceAssertion>()
-      const rootOrdinals = new Map<string, number>()
-      const ordinalRoots = new Map<number, string>()
-      let unchanged = 0
-      for (const row of input.rows) {
-        assertSourceStagedRow(manifest.projection_kind, row)
-        const rootKey = projectionEntityKey(row.root)
-        const entityKey = sourceEntityKey(row)
-        const rootOrdinal = this.findRootOrdinal(input, rootKey) ?? rootOrdinals.get(rootKey)
-        if (rootOrdinal !== undefined && rootOrdinal !== row.stagingOrdinal) {
-          throw new MaterializationValidationError(
-            `Source materialization repeats root ${rootKey} at a different stream ordinal.`
-          )
-        }
-        const ordinalRoot =
-          this.findOrdinalRoot(input, row.stagingOrdinal) ?? ordinalRoots.get(row.stagingOrdinal)
-        if (ordinalRoot !== undefined && ordinalRoot !== rootKey) {
-          throw new MaterializationValidationError(
-            `Source materialization repeats stream ordinal ${row.stagingOrdinal} for another root.`
-          )
-        }
-
-        const existing = this.getAssertion(input, entityKey) ?? pending.get(entityKey)
-        if (existing) {
-          if (canonicalJson(existing) === canonicalJson(row)) {
-            unchanged += 1
-            continue
-          }
-          throw new MaterializationValidationError(
-            `Source materialization repeats asserted entity ${entityKey}.`
-          )
-        }
-        rootOrdinals.set(rootKey, row.stagingOrdinal)
-        ordinalRoots.set(row.stagingOrdinal, rootKey)
-        pending.set(entityKey, structuredClone(row))
-      }
-
-      const insert = this.db.query(
-        `
-          INSERT INTO ontology_source_rows (
-            project_id, source_id, materialization_id,
-            entity_kind, entity_key, entity_sort_key,
-            root_kind, root_key, root_sort_key, staging_ordinal,
-            root, assertion,
-            object_type_id, primary_id,
-            source_type_id, source_primary_id, link_id, target_type_id, target_primary_id,
-            root_object_type_id, root_primary_id,
-            root_source_type_id, root_source_primary_id, root_link_id,
-            root_target_type_id, root_target_primary_id
-          ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, json(?), json(?),
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-          )
-        `
-      )
-      for (const [entityKey, row] of pending) {
-        const entity = entityColumns(row.assertion)
-        const root = entityColumns(row.root)
-        insert.run(
-          input.projectId,
-          input.source.projectionId,
-          input.materializationId,
-          row.assertion.kind,
-          entityKey,
-          utf8SortKey(entityKey),
-          row.root.kind,
-          projectionEntityKey(row.root),
-          utf8SortKey(projectionEntityKey(row.root)),
-          row.stagingOrdinal,
-          canonicalJson(row.root),
-          canonicalJson(row.assertion),
-          entity.objectTypeId,
-          entity.primaryId,
-          entity.sourceTypeId,
-          entity.sourcePrimaryId,
-          entity.linkId,
-          entity.targetTypeId,
-          entity.targetPrimaryId,
-          root.objectTypeId,
-          root.primaryId,
-          root.sourceTypeId,
-          root.sourcePrimaryId,
-          root.linkId,
-          root.targetTypeId,
-          root.targetPrimaryId
-        )
-      }
-      return { inserted: pending.size, unchanged }
+      const rows = sourceStageRows(manifest.projection_kind, input.rows)
+      const existing = this.findStageRows(input, rows)
+      const { pending, unchanged } = reconcileSourceStageRows(rows, existing)
+      this.insertStageRows(input, pending)
+      return { inserted: pending.length, unchanged }
     })
   }
 
@@ -565,54 +480,107 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
     }
   }
 
-  private findRootOrdinal(input: StageSourceRowsInput, rootKey: string): number | undefined {
-    const row = this.db
-      .query(
-        `
-          SELECT staging_ordinal FROM ontology_source_rows
-          WHERE project_id = ? AND source_id = ? AND materialization_id = ? AND root_key = ?
-          LIMIT 1
-        `
-      )
-      .get(input.projectId, input.source.projectionId, input.materializationId, rootKey) as {
-      staging_ordinal: number
-    } | null
-    return row?.staging_ordinal
-  }
-
-  private findOrdinalRoot(input: StageSourceRowsInput, ordinal: number): string | undefined {
-    const row = this.db
-      .query(
-        `
-          SELECT root_key FROM ontology_source_rows
-          WHERE project_id = ? AND source_id = ? AND materialization_id = ? AND staging_ordinal = ?
-          LIMIT 1
-        `
-      )
-      .get(input.projectId, input.source.projectionId, input.materializationId, ordinal) as {
-      root_key: string
-    } | null
-    return row?.root_key
-  }
-
-  private getAssertion(
+  private findStageRows(
     input: StageSourceRowsInput,
-    entityKey: string
-  ): StageSourceAssertion | undefined {
-    const row = this.db
+    rows: readonly SourceStageRow[]
+  ): readonly SourceStageRow[] {
+    if (rows.length === 0) return []
+    const rootSortKeys = [...new Set(rows.map((row) => utf8SortKey(row.rootKey)))]
+    const ordinals = [...new Set(rows.map((row) => row.row.stagingOrdinal))]
+    const entitySortKeys = [...new Set(rows.map((row) => utf8SortKey(row.entityKey)))]
+    const existing = this.db
       .query(
         `
           SELECT * FROM ontology_source_rows
-          WHERE project_id = ? AND source_id = ? AND materialization_id = ? AND entity_key = ?
+          WHERE project_id = ? AND source_id = ? AND materialization_id = ?
+            AND (
+              root_sort_key IN (SELECT CAST(value AS TEXT) FROM json_each(?))
+              OR staging_ordinal IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
+              OR entity_sort_key IN (SELECT CAST(value AS TEXT) FROM json_each(?))
+            )
         `
       )
-      .get(
+      .all(
         input.projectId,
         input.source.projectionId,
         input.materializationId,
-        entityKey
-      ) as SqliteOntologySourceAssertionRow | null
-    return row ? sourceAssertion(row) : undefined
+        JSON.stringify(rootSortKeys),
+        JSON.stringify(ordinals),
+        JSON.stringify(entitySortKeys)
+      ) as SqliteOntologySourceAssertionRow[]
+    return existing.map((row) => sourceStageRow(sourceAssertion(row)))
+  }
+
+  private insertStageRows(input: StageSourceRowsInput, rows: readonly SourceStageRow[]): void {
+    if (rows.length === 0) return
+    const payload = rows.map(({ entityKey, rootKey, row }) => {
+      const entity = entityColumns(row.assertion)
+      const root = entityColumns(row.root)
+      return {
+        entityKind: row.assertion.kind,
+        entityKey,
+        entitySortKey: utf8SortKey(entityKey),
+        rootKind: row.root.kind,
+        rootKey,
+        rootSortKey: utf8SortKey(rootKey),
+        stagingOrdinal: row.stagingOrdinal,
+        root: row.root,
+        assertion: row.assertion,
+        objectTypeId: entity.objectTypeId,
+        primaryId: entity.primaryId,
+        sourceTypeId: entity.sourceTypeId,
+        sourcePrimaryId: entity.sourcePrimaryId,
+        linkId: entity.linkId,
+        targetTypeId: entity.targetTypeId,
+        targetPrimaryId: entity.targetPrimaryId,
+        rootObjectTypeId: root.objectTypeId,
+        rootPrimaryId: root.primaryId,
+        rootSourceTypeId: root.sourceTypeId,
+        rootSourcePrimaryId: root.sourcePrimaryId,
+        rootLinkId: root.linkId,
+        rootTargetTypeId: root.targetTypeId,
+        rootTargetPrimaryId: root.targetPrimaryId,
+      }
+    })
+    this.db
+      .query(
+        `
+          WITH staged(value) AS (SELECT value FROM json_each(?))
+          INSERT INTO ontology_source_rows (
+            project_id, source_id, materialization_id,
+            entity_kind, entity_key, entity_sort_key,
+            root_kind, root_key, root_sort_key, staging_ordinal,
+            root, assertion,
+            object_type_id, primary_id,
+            source_type_id, source_primary_id, link_id, target_type_id, target_primary_id,
+            root_object_type_id, root_primary_id,
+            root_source_type_id, root_source_primary_id, root_link_id,
+            root_target_type_id, root_target_primary_id
+          )
+          SELECT
+            ?, ?, ?,
+            json_extract(value, '$.entityKind'), json_extract(value, '$.entityKey'),
+            json_extract(value, '$.entitySortKey'),
+            json_extract(value, '$.rootKind'), json_extract(value, '$.rootKey'),
+            json_extract(value, '$.rootSortKey'), json_extract(value, '$.stagingOrdinal'),
+            json(json_extract(value, '$.root')), json(json_extract(value, '$.assertion')),
+            json_extract(value, '$.objectTypeId'), json_extract(value, '$.primaryId'),
+            json_extract(value, '$.sourceTypeId'), json_extract(value, '$.sourcePrimaryId'),
+            json_extract(value, '$.linkId'), json_extract(value, '$.targetTypeId'),
+            json_extract(value, '$.targetPrimaryId'),
+            json_extract(value, '$.rootObjectTypeId'), json_extract(value, '$.rootPrimaryId'),
+            json_extract(value, '$.rootSourceTypeId'),
+            json_extract(value, '$.rootSourcePrimaryId'), json_extract(value, '$.rootLinkId'),
+            json_extract(value, '$.rootTargetTypeId'), json_extract(value, '$.rootTargetPrimaryId')
+          FROM staged
+        `
+      )
+      .run(
+        canonicalJson(payload),
+        input.projectId,
+        input.source.projectionId,
+        input.materializationId
+      )
   }
 
   private assertExecution(
