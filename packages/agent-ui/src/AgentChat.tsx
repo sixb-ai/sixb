@@ -80,7 +80,7 @@ export function AgentChat({
   return (
     <div
       data-agent-panel={compact ? "" : undefined}
-      className={cn("flex h-full min-h-0 flex-col", className)}
+      className={cn("relative flex h-full min-h-0 flex-col", className)}
     >
       {conversation.home ? (
         <AgentsHome

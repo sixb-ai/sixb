@@ -1,4 +1,5 @@
 import type { AppMetadata } from "@sixb/app"
+import { AgentContextProvider } from "@sixb/app/agents"
 import type { PropsWithChildren } from "react"
 
 export const metadata = {
@@ -10,5 +11,5 @@ export const metadata = {
 } satisfies AppMetadata
 
 export default function RootLayout({ children }: PropsWithChildren) {
-  return <>{children}</>
+  return <AgentContextProvider>{children}</AgentContextProvider>
 }

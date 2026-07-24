@@ -178,7 +178,7 @@ export function ConversationPanel({
             !compact && "md:justify-center md:px-6 md:pb-[28vh] lg:pb-[30vh]"
           )}
         >
-          <Welcome agent={agent} />
+          <Welcome agent={agent} compact={compact} />
           <div className="shrink-0">
             {sendError ? (
               <div className="mx-auto w-full max-w-3xl px-4 pb-1 md:px-0">
@@ -194,7 +194,7 @@ export function ConversationPanel({
               stopping={composerStopping}
               onStop={onStop}
               placeholder={composerPlaceholder}
-              className="md:bg-transparent md:px-0 md:pt-0 md:pb-0"
+              className={compact ? "px-4 pt-2 pb-4" : "md:bg-transparent md:px-0 md:pt-0 md:pb-0"}
               draft={composerDraft}
               draftAttachments={composerDraftAttachments}
               draftContext={composerDraftContext}
@@ -250,6 +250,7 @@ export function ConversationPanel({
               stopping={composerStopping}
               onStop={onStop}
               placeholder={composerPlaceholder}
+              className={compact ? "px-4 pt-2 pb-4" : undefined}
               draft={composerDraft}
               draftAttachments={composerDraftAttachments}
               draftContext={composerDraftContext}
@@ -395,12 +396,19 @@ function AgentIdentity({
   )
 }
 
-function Welcome({ agent }: { agent: Agent | undefined }) {
+function Welcome({ agent, compact }: { agent: Agent | undefined; compact: boolean }) {
   const name = agent?.name ?? "Agent"
   const description = agent?.description?.trim()
 
   return (
-    <div className="flex flex-1 items-start justify-center px-4 pt-[32vh] text-center md:flex-none md:items-end md:px-0 md:pt-0 md:pb-8">
+    <div
+      className={cn(
+        "flex justify-center px-4 text-center",
+        compact
+          ? "min-h-0 flex-1 -translate-y-3 items-center"
+          : "flex-1 items-start pt-[32vh] md:flex-none md:items-end md:px-0 md:pt-0 md:pb-8"
+      )}
+    >
       <div className="inline-flex max-w-full items-center justify-center gap-3">
         <AgentAvatar name={name} className="size-9 text-sm md:size-10" />
         <p className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
