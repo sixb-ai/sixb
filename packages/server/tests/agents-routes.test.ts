@@ -4,6 +4,7 @@ import {
   can,
   defineAgent,
   defineGroup,
+  defineObjectType,
   defineRole,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -11,6 +12,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type OntologySource,
+  prop,
   Sixb,
 } from "@sixb/core"
 import { agentRunControlStreamId, agentRunStreamId } from "@sixb/core/agents/streams"
@@ -62,13 +64,27 @@ const ops = defineAgent("ops", {
   instructions: "Internal ops instructions.",
 })
 
+const Invoice = defineObjectType({
+  id: "Invoice",
+  name: "Invoice",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("name", "string", {
+      required: true,
+      query: { searchable: true, text: true },
+    }),
+  ],
+  search: { title: "name", defaultText: ["name"] },
+})
+
 const supportUsers = defineGroup("support-users")
 const opsUsers = defineGroup("ops-users")
 const admins = defineGroup("admins")
+const agentOnlyUsers = defineGroup("agent-only-users")
 
 const supportAgentRunner = defineRole("support.agent-runner", {
   grantedTo: [supportUsers],
-  grants: [can.run(assistant)],
+  grants: [can.run(assistant), can.view(Invoice)],
 })
 
 const opsAgentRunner = defineRole("ops.agent-runner", {
@@ -81,20 +97,25 @@ const adminAgentRunner = defineRole("admin.agent-runner", {
   grants: [can.run(agentScope())],
 })
 
+const agentOnlyRunner = defineRole("agent-only.runner", {
+  grantedTo: [agentOnlyUsers],
+  grants: [can.run(assistant)],
+})
+
 function createRuntime(options: { readonly auth?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const queues = new InMemoryQueues()
   const sixb = new Sixb<readonly OntologySource[]>({
     id: "agent-route-tests",
-    ontology: [],
+    ontology: [Invoice],
     agents: [assistant, ops],
     broker: new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues,
-    groups: [supportUsers, opsUsers, admins],
-    roles: [supportAgentRunner, opsAgentRunner, adminAgentRunner],
+    groups: [supportUsers, opsUsers, admins, agentOnlyUsers],
+    roles: [supportAgentRunner, opsAgentRunner, adminAgentRunner, agentOnlyRunner],
     auth: options.auth ? { id: "test", kind: "dev" as const } : undefined,
   })
 
@@ -164,6 +185,122 @@ function jsonRequest(
 }
 
 describe("agent routes", () => {
+  test("authorizes object context and persists the exact context snapshot", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const support = await seedSession(storage, "usr_context", ["support-users"])
+    const agentOnly = await seedSession(storage, "usr_agent_only", ["agent-only-users"])
+    await sixb.objects(Invoice).upsert({
+      properties: { id: "inv-123", name: "July maintenance" },
+    })
+
+    const agentOnlyThreadResponse = await app.fetch(
+      jsonRequest("/api/agent-threads", "POST", { agentId: "assistant" }, agentOnly.csrfHeaders)
+    )
+    const agentOnlyThread = (await agentOnlyThreadResponse.json()) as { thread: { id: string } }
+    const deniedContext = await app.fetch(
+      jsonRequest(
+        `/api/agent-threads/${agentOnlyThread.thread.id}/messages`,
+        "POST",
+        {
+          text: "Check this invoice",
+          context: [
+            {
+              context: {
+                kind: "object",
+                ref: { objectTypeId: "Invoice", primaryId: "inv-123" },
+              },
+              origin: "ambient",
+            },
+          ],
+        },
+        agentOnly.csrfHeaders
+      )
+    )
+    expect(deniedContext.status).toBe(403)
+    await expect(
+      storage.agents.messages.list({ projectId: sixb.id, threadId: agentOnlyThread.thread.id })
+    ).resolves.toMatchObject({ total: 0 })
+
+    const threadResponse = await app.fetch(
+      jsonRequest("/api/agent-threads", "POST", { agentId: "assistant" }, support.csrfHeaders)
+    )
+    const thread = (await threadResponse.json()) as { thread: { id: string } }
+    const context = [
+      {
+        context: {
+          kind: "object",
+          ref: { objectTypeId: "Invoice", primaryId: "inv-123" },
+        },
+        origin: "ambient",
+      },
+      {
+        context: {
+          kind: "app-state",
+          id: "invoice-view",
+          label: "Invoice view",
+          description: "Current invoice view state",
+          value: { activeTab: "history" },
+        },
+        origin: "explicit",
+      },
+    ]
+    const post = await app.fetch(
+      jsonRequest(
+        `/api/agent-threads/${thread.thread.id}/messages`,
+        "POST",
+        { text: "What should I do next?", context },
+        support.csrfHeaders
+      )
+    )
+    expect(post.status).toBe(202)
+
+    const persisted = await storage.agents.messages.list({
+      projectId: sixb.id,
+      threadId: thread.thread.id,
+    })
+    expect(persisted.messages[0]).toMatchObject({
+      contentVersion: 1,
+      parts: [
+        { type: "context", ...context[0] },
+        { type: "context", ...context[1] },
+        { type: "text", text: "What should I do next?" },
+      ],
+    })
+  })
+
+  test("rejects a missing object context before persisting a message or run", async () => {
+    const { app, storage, sixb } = createApp()
+    const thread = await storage.agents.threads.create({
+      id: "thread-missing-context",
+      projectId: sixb.id,
+      agentId: "assistant",
+      ownerPrincipal: { type: "system", id: "system" },
+    })
+
+    const response = await app.fetch(
+      jsonRequest(`/api/agent-threads/${thread.id}/messages`, "POST", {
+        text: "Check this invoice",
+        context: [
+          {
+            context: {
+              kind: "object",
+              ref: { objectTypeId: "Invoice", primaryId: "missing" },
+            },
+            origin: "ambient",
+          },
+        ],
+      })
+    )
+
+    expect(response.status).toBe(400)
+    await expect(
+      storage.agents.messages.list({ projectId: sixb.id, threadId: thread.id })
+    ).resolves.toMatchObject({ total: 0 })
+    await expect(
+      storage.agents.runs.list({ projectId: sixb.id, threadId: thread.id })
+    ).resolves.toMatchObject({ total: 0 })
+  })
+
   test("lists and reads registered agents without private runtime fields", async () => {
     const { app } = createApp()
 

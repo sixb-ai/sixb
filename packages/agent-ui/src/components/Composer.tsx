@@ -1,6 +1,14 @@
-import { useUploadFile } from "@sixb/client/hooks"
+import { searchObjectsOptions, useUploadFile } from "@sixb/client/hooks"
+import {
+  type AgentContextEntryInput,
+  type AgentContextInput,
+  agentContextFingerprint,
+  agentContextIdentity,
+  MAX_AGENT_CONTEXT_ENTRIES,
+} from "@sixb/core/agents/context"
 import { Spinner, Textarea } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
+import { useQuery } from "@tanstack/react-query"
 import {
   ArrowUp,
   File as FileIcon,
@@ -17,13 +25,26 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react"
 import type { AgentFileRef } from "../types"
+import { agentContextLabel, mergeAgentContext } from "../utils/contextDisplay"
+import {
+  type AgentContextMention,
+  findAgentContextMention,
+  removeAgentContextMention,
+} from "../utils/contextMention"
+import { ContextChips } from "./ContextChips"
+import { ContextPicker } from "./ContextPicker"
 
 export interface ComposerProps {
-  readonly onSend: (text: string, attachments: readonly AgentFileRef[]) => void
+  readonly onSend: (
+    text: string,
+    attachments: readonly AgentFileRef[],
+    context: readonly AgentContextEntryInput[]
+  ) => void
   readonly disabled?: boolean
   readonly pending?: boolean
   /** A run is in flight: the send button becomes a stop button that calls {@link onStop}. */
@@ -42,7 +63,13 @@ export interface ComposerProps {
    */
   readonly draft?: string
   readonly draftAttachments?: readonly AgentFileRef[]
+  /** Exact context snapshot to restore after a failed send. */
+  readonly draftContext?: readonly AgentContextEntryInput[]
   readonly draftNonce?: number
+  /** Ambient context offered for the next turn. Explicit @ selections remain composer-local. */
+  readonly ambientContext?: readonly AgentContextInput[]
+  /** Scope drag/drop and overlays to an embedded panel instead of the whole viewport. */
+  readonly compact?: boolean
 }
 
 type ComposerAttachment =
@@ -81,16 +108,53 @@ export function Composer({
   hint,
   draft,
   draftAttachments,
+  draftContext,
   draftNonce,
+  ambientContext = [],
+  compact = false,
 }: ComposerProps) {
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
+  const [contextEntries, setContextEntries] = useState<AgentContextEntryInput[]>(() =>
+    ambientContext.map((context) => ({ context, origin: "ambient" }))
+  )
+  const [mention, setMention] = useState<AgentContextMention | null>(null)
+  const [dismissedMention, setDismissedMention] = useState<string | null>(null)
+  const [activeContextResult, setActiveContextResult] = useState(0)
   const [draggingFiles, setDraggingFiles] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
   const uploadFile = useUploadFile()
   const wasRunningRef = useRef(Boolean(running))
+  const dismissedAmbientRef = useRef(new Set<string>())
+  const ambientKey = JSON.stringify(ambientContext.map(agentContextFingerprint))
+
+  const mentionQuery = mention?.query.trim() ?? ""
+  const contextSearch = useQuery({
+    ...searchObjectsOptions({ query: { q: mentionQuery || "_", limit: "20" } }),
+    enabled: mention !== null && mentionQuery.length > 0,
+  })
+  const contextResults = useMemo(() => {
+    if (!mention || mention.query.trim().length === 0) return []
+    const normalizedQuery = mention.query.trim().toLowerCase()
+    const local = ambientContext.filter((context) =>
+      agentContextLabel(context).toLowerCase().includes(normalizedQuery)
+    )
+    const remote = (contextSearch.data?.items ?? []).map(
+      (item) => ({ kind: "object", ref: item.ref }) as const satisfies AgentContextInput
+    )
+    return mergeAgentContext(local, remote).map((context) => ({
+      context,
+      label:
+        contextSearch.data?.items.find(
+          (item) =>
+            agentContextIdentity({ kind: "object", ref: item.ref }) ===
+            agentContextIdentity(context)
+        )?.label ?? agentContextLabel(context),
+    }))
+  }, [ambientContext, contextSearch.data?.items, mention])
 
   const uploading = attachments.some((attachment) => attachment.status === "uploading")
   const readyAttachments = attachments.flatMap((attachment) =>
@@ -99,7 +163,33 @@ export function Composer({
   const failedCount = attachments.filter((attachment) => attachment.status === "error").length
   const canAttachFiles = !disabled && !pending
   const canSend =
-    value.trim().length > 0 && !disabled && !pending && !uploading && failedCount === 0
+    value.trim().length > 0 &&
+    mention === null &&
+    !disabled &&
+    !pending &&
+    !uploading &&
+    failedCount === 0
+
+  // Reconcile page context by canonical identity. A removed ambient chip stays removed for the
+  // current draft, while explicit @ selections survive unrelated page-context updates.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: ambientKey is the semantic dependency
+  useEffect(() => {
+    const ambientIdentities = new Set(ambientContext.map(agentContextIdentity))
+    dismissedAmbientRef.current = new Set(
+      [...dismissedAmbientRef.current].filter((identity) => ambientIdentities.has(identity))
+    )
+    setContextEntries((current) => {
+      const explicit = current.filter((entry) => entry.origin === "explicit")
+      const explicitIdentities = new Set(
+        explicit.map((entry) => agentContextIdentity(entry.context))
+      )
+      const ambient = ambientContext
+        .filter((context) => !dismissedAmbientRef.current.has(agentContextIdentity(context)))
+        .filter((context) => !explicitIdentities.has(agentContextIdentity(context)))
+        .map((context) => ({ context, origin: "ambient" as const }))
+      return [...ambient, ...explicit]
+    })
+  }, [ambientKey])
 
   // Reseed the input on demand (a failed send hands the text and already-uploaded attachments back).
   // Keyed on the nonce so restoring the same draft twice still fires; ignored on mount (nonce 0) so
@@ -115,6 +205,17 @@ export function Composer({
         fileRef,
       }))
     )
+    const restoredContext = [...(draftContext ?? [])]
+    setContextEntries(restoredContext)
+    const restoredIdentities = new Set(
+      restoredContext.map((entry) => agentContextIdentity(entry.context))
+    )
+    dismissedAmbientRef.current = new Set(
+      ambientContext
+        .map(agentContextIdentity)
+        .filter((identity) => !restoredIdentities.has(identity))
+    )
+    setMention(null)
     textareaRef.current?.focus()
   }, [draftNonce])
 
@@ -137,13 +238,16 @@ export function Composer({
     el.style.height = "auto"
     el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? "auto" : "hidden"
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`
-  }, [value, attachments.length])
+  }, [value, attachments.length, contextEntries.length])
 
   const submit = () => {
     if (!canSend) return
-    onSend(value.trim(), readyAttachments)
+    onSend(value.trim(), readyAttachments, contextEntries)
     setValue("")
     setAttachments([])
+    dismissedAmbientRef.current.clear()
+    setContextEntries(ambientContext.map((context) => ({ context, origin: "ambient" })))
+    setMention(null)
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
@@ -256,26 +360,123 @@ export function Composer({
       if (canAttachFiles) handleFilesSelected(files)
     }
 
-    window.addEventListener("dragenter", handleDragEnter)
-    window.addEventListener("dragover", handleDragOver)
-    window.addEventListener("dragleave", handleDragLeave)
-    window.addEventListener("drop", handleDrop)
-    window.addEventListener("dragend", resetDragState)
+    const target: Window | Element | null = compact
+      ? (rootRef.current?.closest("[data-agent-panel]") ?? rootRef.current)
+      : window
+    if (!target) return
+    target.addEventListener("dragenter", handleDragEnter as EventListener)
+    target.addEventListener("dragover", handleDragOver as EventListener)
+    target.addEventListener("dragleave", handleDragLeave as EventListener)
+    target.addEventListener("drop", handleDrop as EventListener)
+    target.addEventListener("dragend", resetDragState)
     return () => {
-      window.removeEventListener("dragenter", handleDragEnter)
-      window.removeEventListener("dragover", handleDragOver)
-      window.removeEventListener("dragleave", handleDragLeave)
-      window.removeEventListener("drop", handleDrop)
-      window.removeEventListener("dragend", resetDragState)
+      target.removeEventListener("dragenter", handleDragEnter as EventListener)
+      target.removeEventListener("dragover", handleDragOver as EventListener)
+      target.removeEventListener("dragleave", handleDragLeave as EventListener)
+      target.removeEventListener("drop", handleDrop as EventListener)
+      target.removeEventListener("dragend", resetDragState)
     }
-  }, [canAttachFiles, handleFilesSelected])
+  }, [canAttachFiles, compact, handleFilesSelected])
 
   const removeAttachment = (id: string) => {
     setAttachments((current) => current.filter((attachment) => attachment.id !== id))
   }
 
+  const removeContext = (index: number) => {
+    setContextEntries((current) => {
+      const entry = current[index]
+      if (entry?.origin === "ambient") {
+        dismissedAmbientRef.current.add(agentContextIdentity(entry.context))
+      }
+      return current.filter((_, candidateIndex) => candidateIndex !== index)
+    })
+  }
+
+  const updateMention = (nextValue: string, caret: number | null) => {
+    const candidate = findAgentContextMention(nextValue, caret ?? nextValue.length)
+    setActiveContextResult(0)
+    setMention(candidate && mentionKey(candidate) !== dismissedMention ? candidate : null)
+  }
+
+  const dismissMention = () => {
+    if (mention) setDismissedMention(mentionKey(mention))
+    setMention(null)
+  }
+
+  useEffect(() => {
+    if (!mention) return
+    const dismissedKey = mentionKey(mention)
+    const handlePointerDown = (event: PointerEvent) => {
+      if (rootRef.current?.contains(event.target as Node)) return
+      setDismissedMention(dismissedKey)
+      setMention(null)
+    }
+    document.addEventListener("pointerdown", handlePointerDown)
+    return () => document.removeEventListener("pointerdown", handlePointerDown)
+  }, [mention])
+
+  const selectContextResult = (context: AgentContextInput) => {
+    if (!mention) return
+    const identity = agentContextIdentity(context)
+    setContextEntries((current) => {
+      const withoutDuplicate = current.filter(
+        (entry) => agentContextIdentity(entry.context) !== identity
+      )
+      if (withoutDuplicate.length >= MAX_AGENT_CONTEXT_ENTRIES) return current
+      return [...withoutDuplicate, { context, origin: "explicit" }]
+    })
+    dismissedAmbientRef.current.delete(identity)
+    const next = removeAgentContextMention(value, mention)
+    setValue(next.value)
+    setMention(null)
+    setDismissedMention(null)
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+      textarea.focus()
+      textarea.selectionStart = next.caret
+      textarea.selectionEnd = next.caret
+    })
+  }
+
   // Enter sends; Cmd/Ctrl+Enter and Shift+Enter insert a newline (and let the field grow).
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mention) {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        dismissMention()
+        return
+      }
+      if (contextResults.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+        event.preventDefault()
+        const direction = event.key === "ArrowDown" ? 1 : -1
+        setActiveContextResult(
+          (current) => (current + direction + contextResults.length) % contextResults.length
+        )
+        return
+      }
+      if (
+        contextResults.length > 0 &&
+        (event.key === "Enter" || event.key === "Tab") &&
+        !event.shiftKey &&
+        !event.metaKey &&
+        !event.ctrlKey
+      ) {
+        event.preventDefault()
+        const result = contextResults[activeContextResult % contextResults.length]
+        if (result) selectContextResult(result.context)
+        return
+      }
+      if (
+        event.key === "Tab" ||
+        (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey)
+      ) {
+        // An open mention is incomplete UI syntax. Escape closes the picker when the user really
+        // wants to keep literal @text in the message.
+        event.preventDefault()
+        return
+      }
+    }
     if (event.key !== "Enter") return
     if (event.shiftKey) return
     event.preventDefault()
@@ -295,15 +496,29 @@ export function Composer({
         : hint
 
   return (
-    <div className={cn("bg-background px-4 pt-2 pb-3", className)}>
-      {draggingFiles ? <DropFilesOverlay /> : null}
+    <div ref={rootRef} className={cn("relative bg-background px-4 pt-2 pb-3", className)}>
+      {draggingFiles ? <DropFilesOverlay compact={compact} /> : null}
       <div className="mx-auto w-full max-w-2xl">
         <div
           className={cn(
-            "rounded-3xl border border-border bg-card shadow-sm transition-[border-color,box-shadow] duration-500",
+            "relative rounded-3xl border border-border bg-card shadow-sm transition-[border-color,box-shadow] duration-500",
             draggingFiles && "border-primary/50 ring-2 ring-primary/15"
           )}
         >
+          <ContextPicker
+            open={mention !== null}
+            query={mentionQuery}
+            loading={contextSearch.isFetching}
+            results={contextResults}
+            activeIndex={activeContextResult}
+            onActiveIndexChange={setActiveContextResult}
+            onSelect={selectContextResult}
+          />
+          <ContextChips
+            entries={contextEntries}
+            onRemove={removeContext}
+            className="px-4 pt-3 pb-1"
+          />
           {attachments.length > 0 ? (
             <div className="flex flex-wrap gap-2 px-4 pt-3 pb-1">
               {attachments.map((attachment) => (
@@ -340,7 +555,14 @@ export function Composer({
             <Textarea
               ref={textareaRef}
               value={value}
-              onChange={(event) => setValue(event.target.value)}
+              onChange={(event) => {
+                setValue(event.target.value)
+                setDismissedMention(null)
+                updateMention(event.target.value, event.target.selectionStart)
+              }}
+              onSelect={(event) =>
+                updateMention(event.currentTarget.value, event.currentTarget.selectionStart)
+              }
               onKeyDown={handleKeyDown}
               disabled={disabled}
               rows={1}
@@ -402,9 +624,14 @@ export function Composer({
   )
 }
 
-function DropFilesOverlay() {
+function DropFilesOverlay({ compact }: { readonly compact: boolean }) {
   return (
-    <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/70 px-6 backdrop-blur-[2px]">
+    <div
+      className={cn(
+        "pointer-events-none inset-0 z-50 flex items-center justify-center bg-background/70 px-6 backdrop-blur-[2px]",
+        compact ? "absolute" : "fixed"
+      )}
+    >
       <div className="flex max-w-sm flex-col items-center rounded-3xl border border-border/80 bg-card/95 px-8 py-7 text-center shadow-2xl shadow-black/10">
         <div className="relative mb-4 flex size-20 items-center justify-center">
           <div className="absolute -left-2 top-3 flex size-11 rotate-[-10deg] items-center justify-center rounded-2xl bg-blue-500 text-white shadow-lg shadow-blue-500/20">
@@ -517,6 +744,10 @@ function fileKind(fileName: string | undefined, mediaType: string | undefined) {
 
 function attachmentId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `attachment-${Date.now()}-${Math.random()}`
+}
+
+function mentionKey(candidate: AgentContextMention): string {
+  return `${candidate.start}:${candidate.end}:${candidate.query}`
 }
 
 function hasDraggedFiles(event: DragEvent): boolean {

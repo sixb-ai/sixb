@@ -1,4 +1,4 @@
-import { AGENT_REASONING_LEVELS } from "@sixb/core"
+import { AGENT_REASONING_LEVELS, MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
 import { AGENT_RUN_DIAGNOSTIC_CODES } from "@sixb/core/storage"
 import { z } from "zod"
 import { JsonValueSchema } from "./common"
@@ -23,6 +23,38 @@ export const AgentMessageFileContentParamsSchema = AgentThreadParamsSchema.exten
 export const AgentPrincipalSchema = z.object({
   type: z.enum(["user", "serviceAccount", "system"]),
   id: z.string().min(1),
+})
+
+export const AgentObjectContextSchema = z.object({
+  kind: z.literal("object"),
+  ref: z.object({
+    objectTypeId: z.string().min(1),
+    primaryId: z.string().min(1),
+  }),
+})
+
+export const AgentAppStateContextSchema = z.object({
+  kind: z.literal("app-state"),
+  id: z.string().min(1),
+  label: z.string().min(1),
+  description: z.string().min(1),
+  value: JsonValueSchema,
+})
+
+export const AgentContextInputSchema = z.discriminatedUnion("kind", [
+  AgentObjectContextSchema,
+  AgentAppStateContextSchema,
+])
+
+export const AgentContextOriginSchema = z.enum(["ambient", "explicit"])
+
+export const AgentContextEntryInputSchema = z.object({
+  context: AgentContextInputSchema,
+  origin: AgentContextOriginSchema,
+})
+
+export const AgentContextPartSchema = AgentContextEntryInputSchema.extend({
+  type: z.literal("context"),
 })
 
 export const AgentLoopConfigSchema = z.object({
@@ -134,6 +166,7 @@ export const AgentMessagePartSchema = z.union([
   AgentReasoningPartSchema,
   AgentStepStartPartSchema,
   AgentFilePartSchema,
+  AgentContextPartSchema,
   AgentToolCallOutputSchema,
   AgentToolCallErrorSchema,
 ])
@@ -179,6 +212,7 @@ export const AgentMessageListResponseSchema = z.object({
 export const PostAgentMessageBodySchema = z.object({
   text: z.string().trim().min(1),
   attachments: z.array(FileRefSchema).optional(),
+  context: z.array(AgentContextEntryInputSchema).max(MAX_AGENT_CONTEXT_ENTRIES).optional(),
   messageId: z.string().trim().min(1).optional(),
 })
 

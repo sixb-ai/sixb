@@ -21,6 +21,7 @@ export type AgentRequestErrorCode =
   | "thread_not_found"
   | "thread_agent_mismatch"
   | "active_run_exists"
+  | "invalid_context"
   | "storage_unavailable"
 
 /**

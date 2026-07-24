@@ -15,6 +15,9 @@
   "include": ["src/**/*"],
   "references": [
     {
+      "path": "../core/tsconfig.build.json"
+    },
+    {
       "path": "../client/tsconfig.build.json"
     },
     {

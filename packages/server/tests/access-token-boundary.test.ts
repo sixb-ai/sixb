@@ -26,6 +26,7 @@ describe("access token auth boundary", () => {
       ["GET", "/api/object-types"],
       ["GET", "/api/object-types/device"],
       ["GET", "/api/objects?objectTypeId=device"],
+      ["GET", "/api/objects/search?q=fan"],
       ["POST", "/api/objects/query"],
       ["POST", "/api/objects/query/count"],
       ["POST", "/api/objects/query/exists"],

@@ -17,6 +17,13 @@
       "import": "./dist/actions/worker.js",
       "default": "./dist/actions/worker.js"
     },
+    "./agents/context": {
+      "types": "./dist/agents/context.d.ts",
+      "browser": "./src/agents/context.ts",
+      "bun": "./src/agents/context.ts",
+      "import": "./dist/agents/context.js",
+      "default": "./dist/agents/context.js"
+    },
     "./agents/streams": {
       "types": "./dist/agents/streams.d.ts",
       "bun": "./src/agents/streams.ts",

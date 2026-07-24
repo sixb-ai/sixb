@@ -1,5 +1,12 @@
 import { type FileRef, isFileRef } from "../blob-storage"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
+import {
+  type AgentContextEntryInput,
+  type AgentContextInput,
+  type AgentContextOrigin,
+  normalizeAgentContextEntries,
+} from "./context"
+import { serializeAgentContextForModel } from "./context-model"
 import { AgentMessageAdapterError } from "./errors"
 import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "./message"
 
@@ -28,6 +35,8 @@ export interface AgentInboundUiMessagePart {
   readonly errorText?: string
   readonly callProviderMetadata?: unknown
   readonly fileRef?: unknown
+  readonly context?: unknown
+  readonly origin?: unknown
 }
 
 export interface AgentInboundUiMessage {
@@ -70,6 +79,11 @@ export type AgentUiMessagePart =
   | { readonly type: "reasoning"; readonly text: string; readonly providerMetadata?: JsonValue }
   | { readonly type: "step-start" }
   | { readonly type: "file"; readonly fileRef: FileRef; readonly providerMetadata?: JsonValue }
+  | {
+      readonly type: "context"
+      readonly context: AgentContextInput
+      readonly origin: AgentContextOrigin
+    }
   | AgentUiToolPart
 
 export interface AgentUiMessage {
@@ -262,6 +276,10 @@ export function fromAiSdk(message: AgentInboundUiMessage): AgentMessage {
   )
 
   const parts: AgentMessagePart[] = message.parts.map((part) => fromAiSdkPart(part))
+  assertAdapter(
+    role === "user" || !parts.some((part) => part.type === "context"),
+    "context parts are only valid on user messages"
+  )
   const metadata = optionalJson(message.metadata, "metadata")
 
   return {
@@ -298,6 +316,8 @@ function fromAiSdkPart(part: AgentInboundUiMessagePart): AgentMessagePart {
         ...(providerMetadata === undefined ? {} : { providerMetadata }),
       }
     }
+    case "context":
+      return fromUiContextPart(part)
     default: {
       assertAdapter(
         isToolType(part.type),
@@ -305,6 +325,19 @@ function fromAiSdkPart(part: AgentInboundUiMessagePart): AgentMessagePart {
       )
       return fromAiSdkToolPart(part)
     }
+  }
+}
+
+function fromUiContextPart(part: AgentInboundUiMessagePart): AgentMessagePart {
+  try {
+    const [entry] = normalizeAgentContextEntries([
+      { context: part.context, origin: part.origin } as AgentContextEntryInput,
+    ])
+    return { type: "context", ...entry }
+  } catch (error) {
+    throw new AgentMessageAdapterError(
+      error instanceof Error ? error.message : "[Sixb] Invalid agent context part."
+    )
   }
 }
 
@@ -374,6 +407,8 @@ function toUiPart(part: AgentMessagePart): AgentUiMessagePart {
         fileRef: part.fileRef,
         ...(part.providerMetadata === undefined ? {} : { providerMetadata: part.providerMetadata }),
       }
+    case "context":
+      return { type: "context", context: part.context, origin: part.origin }
     case "tool-call":
       return toUiToolPart(part)
   }
@@ -458,6 +493,12 @@ function userModelMessage<TMessage extends AgentMessage>(
   options: ToModelMessagesOptions<TMessage>
 ): AgentModelMessage {
   const content: (AgentModelTextPart | AgentModelFilePart)[] = []
+  const serializedContext = serializeAgentContextForModel(
+    message.parts.filter((part) => part.type === "context")
+  )
+  if (serializedContext) {
+    content.push({ type: "text", text: `${serializedContext}\n\n` })
+  }
   message.parts.forEach((part, partIndex) => {
     if (part.type === "text") {
       content.push({

@@ -819,6 +819,10 @@ export { defineFunction } from "./functions"
 // ── Agents ──────────────────────────────────────────────────
 
 export type {
+  AgentContextEntryInput,
+  AgentContextInput,
+  AgentContextOrigin,
+  AgentContextPart,
   AgentDefinition,
   AgentFileDataProjection,
   AgentFileDataResolverInput,
@@ -856,8 +860,13 @@ export {
   AGENT_REASONING_LEVELS,
   AgentDefinitionError,
   AgentRequestError,
+  agentContext,
+  agentContextIdentity,
   defineAgent,
   isAgentDefinition,
+  MAX_AGENT_APP_STATE_ENTRY_BYTES,
+  MAX_AGENT_APP_STATE_TOTAL_BYTES,
+  MAX_AGENT_CONTEXT_ENTRIES,
   requestAgentRun,
 } from "./agents"
 

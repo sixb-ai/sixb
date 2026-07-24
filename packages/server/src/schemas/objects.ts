@@ -11,6 +11,23 @@ export const ObjectParamsSchema = z.object({
   objectId: z.string().min(1),
 })
 
+export const ObjectSearchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(200),
+  limit: z.string().regex(/^\d+$/).optional(),
+})
+
+export const ObjectSearchResponseSchema = z.object({
+  items: z.array(
+    z.object({
+      ref: z.object({
+        objectTypeId: z.string(),
+        primaryId: z.string(),
+      }),
+      label: z.string(),
+    })
+  ),
+})
+
 const OBJECT_LIST_MAX_LIMIT = 1_000
 const Rfc3339DateSchema = z.string().datetime({ offset: true })
 

@@ -1,5 +1,6 @@
 import type { FileRef } from "../blob-storage"
 import type { JsonValue } from "../json"
+import type { AgentContextPart } from "./context"
 
 /**
  * The agent's own, SDK-independent message. We store messages and threads — not an SDK transport —
@@ -75,6 +76,7 @@ export type AgentMessagePart =
   | AgentReasoningPart
   | AgentStepStartPart
   | AgentFilePart
+  | AgentContextPart
   | AgentToolCallPart
 
 export type AgentMessagePartType = AgentMessagePart["type"]

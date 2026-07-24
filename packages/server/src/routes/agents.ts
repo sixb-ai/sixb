@@ -221,6 +221,7 @@ function handleAgentRouteError(
         break
       case "storage_unavailable":
       case "thread_agent_mismatch":
+      case "invalid_context":
         set.status = 400
         break
     }
@@ -610,6 +611,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             threadId: thread.id,
             text: parsed.text,
             attachments: parsed.attachments as readonly FileRef[] | undefined,
+            context: parsed.context,
             messageId: parsed.messageId,
             principal: principalForRequest(authz),
           }

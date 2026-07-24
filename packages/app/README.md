@@ -48,6 +48,52 @@ These routes are generated only when the project has at least one `app/` page, s
 
 The default agent UI is imported through `@sixb/app/agents`, so app projects do not need to import `@sixb/agent-ui` directly. A framework-owned `agent-ui.css` bundle is generated before the app stylesheet and imports normal `@sixb/ui` styles, which means app-level token overrides in `app/globals.css` still apply in the usual way.
 
+### Embedded Agent Panel
+
+Embed the same conversation runtime without changing the page route:
+
+```tsx
+import {
+  AgentContextProvider,
+  AgentPanel,
+  agentContext,
+  useAgentContext,
+} from "@sixb/app/agents"
+
+function InvoicePage({ invoiceId }: { invoiceId: string }) {
+  useAgentContext(agentContext.object(Invoice, invoiceId))
+  return <InvoiceDetails invoiceId={invoiceId} />
+}
+
+function Layout() {
+  return (
+    <AgentContextProvider>
+      <main><InvoicePage invoiceId="inv-123" /></main>
+      <aside className="h-[42rem]">
+        <AgentPanel agentId="invoice-assistant" />
+      </aside>
+    </AgentContextProvider>
+  )
+}
+```
+
+`AgentPanel.context` is controlled: when provided, it replaces provider context. `threadId` and
+`onThreadChange` similarly opt into controlled thread state.
+
+```tsx
+const view = agentContext.appState("invoice-view", {
+  label: "Invoice view",
+  description: "Current invoice filters and selected tab",
+  value: { activeTab, filters },
+})
+
+<AgentPanel agentId="invoice-assistant" context={[view]} />
+```
+
+Context is visible and removable before send, then stored on that user message. `@` adds authorized
+object references explicitly. V1 accepts 12 entries, 16 KB per app-state entry, and 64 KB of app
+state per message. Object references identify live data; they do not grant access.
+
 ### Styling and Tailwind
 
 `app/globals.css` is treated as source:
@@ -123,4 +169,4 @@ A file at `app/public/app.webmanifest` is ignored because the generated manifest
 | `createCustomApp(options)` | High-level custom app toolkit for dev/build/start |
 | `AppMetadata` | Metadata shape exported by `app/layout.tsx` |
 | `createTailwindCssCompiler(options)` | Shared Tailwind v4 build pipeline (also used by Atlas) |
-| `@sixb/app/agents` | Default mounted agent chat page used by generated custom app routes |
+| `@sixb/app/agents` | Full-page agent route plus `AgentPanel`, context provider/hooks, and helpers |

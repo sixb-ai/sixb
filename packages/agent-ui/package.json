@@ -3,9 +3,15 @@
   "version": "0.1.0",
   "description": "Shared Sixb agent chat UI for Atlas and custom apps",
   "type": "module",
-  "main": "./dist/react-router.js",
-  "types": "./dist/react-router.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
     "./react-router": {
       "types": "./dist/react-router.d.ts",
       "bun": "./src/react-router.tsx",
@@ -22,6 +28,7 @@
   },
   "dependencies": {
     "@sixb/client": "workspace:*",
+    "@sixb/core": "workspace:*",
     "@sixb/ui": "workspace:*",
     "lucide-react": "^0.562.0"
   },

@@ -213,6 +213,19 @@ describe("envelope round-trip (fromAiSdk ∘ toUiMessage)", () => {
       { type: "text", text: "b" },
     ]),
     "file attachment": sixbMessage("user", [{ type: "file", fileRef }]),
+    context: sixbMessage("user", [
+      {
+        type: "context",
+        context: {
+          kind: "app-state",
+          id: "invoice-view",
+          label: "Invoice view",
+          description: "Current invoice view state",
+          value: { activeTab: "history" },
+        },
+        origin: "ambient",
+      },
+    ]),
     "static tool ok": sixbMessage("assistant", [
       {
         type: "tool-call",
@@ -249,6 +262,44 @@ describe("toModelMessages", () => {
   test("projects a user message", () => {
     expect(toModelMessages([sixbMessage("user", [{ type: "text", text: "hi" }])])).toEqual([
       { role: "user", content: [{ type: "text", text: "hi" }] },
+    ])
+  })
+
+  test("projects context once before the user text", () => {
+    expect(
+      toModelMessages([
+        sixbMessage("user", [
+          { type: "text", text: "What should I do next?" },
+          {
+            type: "context",
+            context: {
+              kind: "object",
+              ref: { objectTypeId: "Invoice", primaryId: "inv-123" },
+            },
+            origin: "ambient",
+          },
+        ]),
+      ])
+    ).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "<sixb_user_context>",
+              "  <object_context>",
+              "    <object_type_id>Invoice</object_type_id>",
+              "    <primary_id>inv-123</primary_id>",
+              "  </object_context>",
+              "</sixb_user_context>",
+              "",
+              "",
+            ].join("\n"),
+          },
+          { type: "text", text: "What should I do next?" },
+        ],
+      },
     ])
   })
 

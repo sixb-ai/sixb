@@ -1,9 +1,11 @@
 import {
   AuthorizationError,
+  isAllowed,
   type ObjectQuery,
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
   ObjectQueryValidationError,
+  type ObjectRef,
   type OntologySource,
   type Sixb,
 } from "@sixb/core"
@@ -13,11 +15,16 @@ import {
   existsObjects,
   facetObjects,
 } from "@sixb/core/internal/query"
-import type { ExpandedLinkValue, ExpandedObjectRow, ObjectRowLinks } from "@sixb/core/storage"
+import type {
+  ExpandedLinkValue,
+  ExpandedObjectRow,
+  ObjectRow,
+  ObjectRowLinks,
+} from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requestAuthState } from "../auth/scope"
+import { type RequestAuthState, requestAuthState } from "../auth/scope"
 import {
   createContextualFileContentResponse,
   fileContentGetResponses,
@@ -34,11 +41,13 @@ import {
   ObjectQueryExistsRequestSchema,
   ObjectQueryFacetsRequestSchema,
   ObjectQueryRequestSchema,
+  ObjectSearchQuerySchema,
+  ObjectSearchResponseSchema,
   ObjectsQuerySchema,
   TwinObjectSchema,
   UpsertObjectBodySchema,
 } from "../schemas/objects"
-import { toIsoString } from "../utils/http"
+import { parseOptionalInt, toIsoString } from "../utils/http"
 
 const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
   path: z
@@ -178,6 +187,91 @@ async function getObjectRow(
   })
 }
 
+interface ObjectSearchItem {
+  readonly ref: ObjectRef
+  readonly label: string
+}
+
+async function searchObjects(
+  sixb: Sixb<readonly OntologySource[]>,
+  authState: RequestAuthState,
+  query: string,
+  limit: number
+): Promise<readonly ObjectSearchItem[]> {
+  // Primary ids are available on every object store and form the reliable fallback. Scoped.list()
+  // narrows broad searches to viewable types before storage, rather than filtering rows afterwards.
+  const primaryMatches = await (authState.scoped
+    ? authState.scoped.list({ idPrefix: query, limit })
+    : sixb.list({ idPrefix: query, limit }))
+
+  const capabilities = sixb.storage.objects.queryCapabilities()
+  const supportsTextSearch =
+    capabilities.queryObjects === true &&
+    capabilities.nodes?.start === true &&
+    capabilities.nodes?.text === true &&
+    capabilities.nodes?.limit === true &&
+    typeof sixb.storage.objects.queryObjects === "function"
+
+  const searchableTypes = supportsTextSearch
+    ? sixb.listObjectTypes().filter(
+        (objectType) =>
+          Boolean(objectType.search?.defaultText?.length) &&
+          isAllowed(authState.authz, {
+            kind: "object.view",
+            objectTypeId: objectType.id,
+          })
+      )
+    : []
+
+  const textMatches = await Promise.all(
+    searchableTypes.map(async (objectType) => {
+      const objectQuery: ObjectQuery = {
+        kind: "limit",
+        limit,
+        input: {
+          kind: "text",
+          query,
+          input: { kind: "start", objectTypeId: objectType.id },
+        },
+      }
+      const result = await executeObjectQuery(
+        { projectId: sixb.id, query: objectQuery },
+        {
+          ontology: sixb.ontology,
+          storage: sixb.storage.objects,
+          authorization: authState.authz ?? undefined,
+        }
+      )
+      return result.objects
+    })
+  )
+
+  const items = new Map<string, ObjectSearchItem>()
+  for (const row of [...primaryMatches.objects, ...textMatches.flat()]) {
+    const ref = { objectTypeId: row.objectTypeId, primaryId: row.primaryId }
+    const identity = objectRefIdentity(ref)
+    if (items.has(identity)) continue
+    items.set(identity, { ref, label: objectSearchLabel(sixb, row) })
+    if (items.size === limit) break
+  }
+  return [...items.values()]
+}
+
+function objectSearchLabel(sixb: Sixb<readonly OntologySource[]>, row: ObjectRow): string {
+  const objectType = sixb.resolveObjectType(row.objectTypeId)
+  const titlePropertyId = objectType.search?.title
+  const title = titlePropertyId ? row.properties[titlePropertyId] : undefined
+  const displayTitle =
+    typeof title === "string" || typeof title === "number" ? String(title).trim() : ""
+  return displayTitle && displayTitle !== row.primaryId
+    ? `${objectType.name}: ${displayTitle} (${row.primaryId})`
+    : `${objectType.name} ${row.primaryId}`
+}
+
+function objectRefIdentity(ref: ObjectRef): string {
+  return `${encodeURIComponent(ref.objectTypeId)}:${encodeURIComponent(ref.primaryId)}`
+}
+
 async function objectFileContentResponse(
   sixb: Sixb<readonly OntologySource[]>,
   context: {
@@ -211,6 +305,38 @@ async function objectFileContentResponse(
 
 export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
+    .get(
+      "/api/objects/search",
+      async (context) => {
+        const { query, set } = context
+        try {
+          const parsed = ObjectSearchQuerySchema.parse(query)
+          const limit = Math.min(parseOptionalInt(parsed.limit) ?? 20, 50)
+          if (limit < 1) {
+            set.status = 400
+            return { error: "Object search limit must be positive" }
+          }
+          const items = await searchObjects(sixb, requestAuthState(context), parsed.q, limit)
+          return ObjectSearchResponseSchema.parse({ items })
+        } catch (error) {
+          return handleObjectQueryError(error, set)
+        }
+      },
+      {
+        query: ObjectSearchQuerySchema,
+        response: {
+          200: ObjectSearchResponseSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Search objects",
+          tags: [OPENAPI_TAGS.objects.name],
+          operationId: "searchObjects",
+          security: bearerSecurityRequirement("searchObjects"),
+        },
+      }
+    )
     .get(
       "/api/objects",
       async (context) => {

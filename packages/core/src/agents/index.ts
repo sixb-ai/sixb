@@ -27,6 +27,23 @@ export {
 } from "./api-gateway"
 export { defineAgent } from "./builders"
 export type {
+  AgentContextEntryInput,
+  AgentContextInput,
+  AgentContextOrigin,
+  AgentContextPart,
+} from "./context"
+export {
+  agentContext,
+  agentContextFingerprint,
+  agentContextIdentity,
+  MAX_AGENT_APP_STATE_ENTRY_BYTES,
+  MAX_AGENT_APP_STATE_TOTAL_BYTES,
+  MAX_AGENT_CONTEXT_ENTRIES,
+  normalizeAgentContextEntries,
+} from "./context"
+export { serializeAgentContextForModel } from "./context-model"
+export { resolveAgentContextParts } from "./context-resolution"
+export type {
   AgentRunDispatchFailure,
   DispatchedAgentRun,
   DispatchQueuedAgentRunsInput,
