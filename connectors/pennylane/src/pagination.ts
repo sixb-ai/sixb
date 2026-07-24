@@ -1,13 +1,16 @@
 import type { PennylaneCursorOptions, PennylaneCursorPage } from "./types"
 
-type CursorListMethod<TOptions extends PennylaneCursorOptions, TItem> = (
-  options?: TOptions
-) => Promise<PennylaneCursorPage<TItem>>
+type CursorListMethod<
+  TOptions extends PennylaneCursorOptions,
+  TItem,
+  THasMore extends boolean | null,
+> = (options?: TOptions) => Promise<PennylaneCursorPage<TItem, THasMore>>
 
-export async function* listAllCursor<TOptions extends PennylaneCursorOptions, TItem>(
-  list: CursorListMethod<TOptions, TItem>,
-  options?: TOptions
-): AsyncIterable<TItem> {
+export async function* listAllCursor<
+  TOptions extends PennylaneCursorOptions,
+  TItem,
+  THasMore extends boolean | null,
+>(list: CursorListMethod<TOptions, TItem, THasMore>, options?: TOptions): AsyncIterable<TItem> {
   let cursor = options?.cursor
   const seenCursors = new Set<string>()
   if (cursor) {
@@ -20,7 +23,7 @@ export async function* listAllCursor<TOptions extends PennylaneCursorOptions, TI
       yield item
     }
 
-    if (!page.has_more) {
+    if (page.has_more !== true) {
       return
     }
 

@@ -37,8 +37,8 @@ export interface PennylaneCursorOptions {
   readonly limit?: number
 }
 
-export interface PennylaneCursorPage<TItem> {
-  readonly has_more: boolean
+export interface PennylaneCursorPage<TItem, THasMore extends boolean | null = boolean> {
+  readonly has_more: THasMore
   readonly next_cursor: string | null
   readonly items: readonly TItem[]
 }
