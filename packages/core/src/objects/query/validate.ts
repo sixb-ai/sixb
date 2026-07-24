@@ -1,4 +1,5 @@
 import type { ObjectType, OntologyRegistry, Property, Schema, ValueType } from "../../ontology"
+import { normalizeDecimalValue } from "../../ontology"
 import { formatUnknownObjectTypeMessage } from "../../ontology/errors"
 import { validatePropertyValue, validateSchemaValue } from "../../ontology/validation"
 import { ObjectQueryValidationError } from "./errors"
@@ -8,6 +9,7 @@ import type {
   ObjectQueryPredicate,
   ObjectQueryResultShape,
   ObjectQuerySortField,
+  QueryScalarKind,
 } from "./ir"
 import { normalizeObjectQuery } from "./normalize"
 
@@ -125,8 +127,8 @@ function dispatchQueryNode(
       return validateStart(query.objectTypeId, query.includeSubtypes, path, ctx)
     case "filter": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
-      validatePredicate(query.predicate, input.result, `${path}.predicate`, ctx)
-      return { result: input.result, query: { ...query, input: input.query } }
+      const predicate = validatePredicate(query.predicate, input.result, `${path}.predicate`, ctx)
+      return { result: input.result, query: { ...query, input: input.query, predicate } }
     }
     case "text": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
@@ -164,8 +166,8 @@ function dispatchQueryNode(
       return validateSet(query.inputs, query.op, path, ctx)
     case "sort": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
-      validateSortFields(query.fields, input.result, path, ctx)
-      return { result: input.result, query: { ...query, input: input.query } }
+      const fields = validateSortFields(query.fields, input.result, path, ctx)
+      return { result: input.result, query: { ...query, input: input.query, fields } }
     }
     case "limit": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
@@ -186,8 +188,13 @@ function dispatchQueryNode(
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
       // expand is output-shaping: it attaches links without changing the matched
       // set, so the result type is the input's result type.
-      validateExpansions(query.expansions, input.result, `${path}.expansions`, ctx)
-      return { result: input.result, query: { ...query, input: input.query } }
+      const expansions = validateExpansions(
+        query.expansions,
+        input.result,
+        `${path}.expansions`,
+        ctx
+      )
+      return { result: input.result, query: { ...query, input: input.query, expansions } }
     }
   }
 }
@@ -220,7 +227,7 @@ function validatePredicate(
   shape: ObjectQueryResultShape,
   path: string,
   ctx: QueryValidationContext
-): void {
+): ObjectQueryPredicate {
   switch (predicate.op) {
     case "and":
     case "or":
@@ -232,55 +239,87 @@ function validatePredicate(
           `Predicate '${predicate.op}' must not be empty`
         )
       }
-      predicate.items.forEach((item, index) => {
-        validatePredicate(item, shape, `${path}.items[${index}]`, ctx)
-      })
-      return
+      return {
+        ...predicate,
+        items: predicate.items.map((item, index) =>
+          validatePredicate(item, shape, `${path}.items[${index}]`, ctx)
+        ),
+      }
     case "not":
-      validatePredicate(predicate.item, shape, `${path}.item`, ctx)
-      return
+      return {
+        ...predicate,
+        item: validatePredicate(predicate.item, shape, `${path}.item`, ctx),
+      }
     case "eq":
     case "neq":
     case "lt":
     case "lte":
     case "gt":
-    case "gte":
-      validatePredicateProperty(predicate.propertyId, predicate.op, shape, path, ctx)
+    case "gte": {
+      const { scalarKind: _authoredScalarKind, ...authoredPredicate } = predicate
+      const scalarKind = resolveAndValidatePredicateProperty(
+        predicate.propertyId,
+        predicate.op,
+        shape,
+        path,
+        ctx
+      )
       validatePredicateValue(predicate.propertyId, predicate.value, shape, path, ctx)
-      return
-    case "in":
-      validatePredicateProperty(predicate.propertyId, predicate.op, shape, path, ctx)
+      return {
+        ...authoredPredicate,
+        value: normalizeObjectQueryValue(predicate.value, scalarKind),
+        ...(scalarKind ? { scalarKind } : {}),
+      }
+    }
+    case "in": {
+      const { scalarKind: _authoredScalarKind, ...authoredPredicate } = predicate
+      const scalarKind = resolveAndValidatePredicateProperty(
+        predicate.propertyId,
+        predicate.op,
+        shape,
+        path,
+        ctx
+      )
       if (predicate.values.length === 0) {
         addIssue(ctx, path, "empty_in_values", "Predicate 'in' must include at least one value")
       }
       predicate.values.forEach((value, index) => {
         validatePredicateValue(predicate.propertyId, value, shape, `${path}.values[${index}]`, ctx)
       })
-      return
+      return {
+        ...authoredPredicate,
+        values: predicate.values.map((value) => normalizeObjectQueryValue(value, scalarKind)),
+        ...(scalarKind ? { scalarKind } : {}),
+      }
+    }
     case "exists":
-      validatePredicateProperty(predicate.propertyId, predicate.op, shape, path, ctx)
+      resolveAndValidatePredicateProperty(predicate.propertyId, predicate.op, shape, path, ctx)
       if (typeof predicate.value !== "boolean") {
         addIssue(ctx, path, "invalid_exists_value", "Predicate 'exists' value must be boolean")
       }
-      return
+      return predicate
     case "contains":
-      validatePredicateProperty(predicate.propertyId, predicate.op, shape, path, ctx)
+      resolveAndValidatePredicateProperty(predicate.propertyId, predicate.op, shape, path, ctx)
       validateContainsValue(predicate.propertyId, predicate.value, shape, path, ctx)
-      return
+      return predicate
   }
 }
 
-function validatePredicateProperty(
+function resolveAndValidatePredicateProperty(
   propertyId: string,
   op: ObjectQueryPredicate["op"],
   shape: ObjectQueryResultShape,
   path: string,
   ctx: QueryValidationContext
-): void {
+): QueryScalarKind | undefined {
   const properties = getPropertiesForResult(propertyId, shape, path, ctx)
-  if (properties.length === 0) return
+  if (properties.length === 0) return undefined
+  const schemas: Schema[] = []
 
   for (const { objectType, property } of properties) {
+    const schema = resolveSchemaForProperty(property, objectType.id, ctx, path)
+    if (schema) schemas.push(schema)
+
     if (isPrimaryExactPredicate(property, op)) {
       continue
     }
@@ -295,7 +334,6 @@ function validatePredicateProperty(
       continue
     }
 
-    const schema = resolveSchemaForProperty(property, objectType.id, ctx, path)
     if (!schema) continue
 
     if ((op === "lt" || op === "lte" || op === "gt" || op === "gte") && !isSortableSchema(schema)) {
@@ -325,6 +363,49 @@ function validatePredicateProperty(
       )
     }
   }
+
+  if (op === "exists" || op === "contains") return undefined
+  return resolveCommonQueryScalarKind(schemas, propertyId, path, ctx)
+}
+
+function normalizeObjectQueryValue(value: unknown, scalarKind: QueryScalarKind | undefined) {
+  if (scalarKind !== "decimal" || typeof value !== "string") return value
+  try {
+    return normalizeDecimalValue(value)
+  } catch {
+    return value
+  }
+}
+
+function resolveCommonQueryScalarKind(
+  schemas: readonly Schema[],
+  propertyId: string,
+  path: string,
+  ctx: QueryValidationContext
+): QueryScalarKind | undefined {
+  const scalarKinds = schemas.map(queryScalarKindForSchema)
+  if (scalarKinds.length === 0 || scalarKinds.some((kind) => kind === undefined)) {
+    return undefined
+  }
+
+  const resolvedKinds = new Set(scalarKinds)
+  if (resolvedKinds.size === 1) return scalarKinds[0]
+
+  addIssue(
+    ctx,
+    path,
+    "incompatible_property_scalar_kinds",
+    `Property '${propertyId}' resolves to incompatible scalar schemas: ${[...resolvedKinds].join(
+      ", "
+    )}`
+  )
+  return undefined
+}
+
+function queryScalarKindForSchema(schema: Schema): QueryScalarKind | undefined {
+  if (typeof schema === "string") return schema === "fileRef" ? undefined : schema
+  if (schema.type === "enum") return schema.valueType === "integer" ? "integer" : "string"
+  return undefined
 }
 
 function validatePredicateValue(
@@ -660,10 +741,10 @@ function validateExpansions(
   shape: ObjectQueryResultShape,
   path: string,
   ctx: QueryValidationContext
-): void {
-  expansions.forEach((expansion, index) => {
+): ObjectExpansion[] {
+  return expansions.map((expansion, index) =>
     validateExpansion(expansion, shape, `${path}[${index}]`, ctx)
-  })
+  )
 }
 
 function validateExpansion(
@@ -671,10 +752,10 @@ function validateExpansion(
   shape: ObjectQueryResultShape,
   path: string,
   ctx: QueryValidationContext
-): void {
+): ObjectExpansion {
   if (!expansion.linkId) {
     addIssue(ctx, path, "missing_expand_link", "expand.linkId is required")
-    return
+    return expansion
   }
 
   const targetShape =
@@ -703,13 +784,14 @@ function validateExpansion(
   }
 
   validateExpansionLimit(expansion.limit, path, ctx)
-  if (expansion.orderBy) {
-    validateSortFields(expansion.orderBy, targetShape, `${path}.orderBy`, ctx)
-  }
+  const orderBy = expansion.orderBy
+    ? validateSortFields(expansion.orderBy, targetShape, `${path}.orderBy`, ctx)
+    : undefined
+  const expand = expansion.expand
+    ? validateExpansions(expansion.expand, targetShape, `${path}.expand`, ctx)
+    : undefined
 
-  if (expansion.expand) {
-    validateExpansions(expansion.expand, targetShape, `${path}.expand`, ctx)
-  }
+  return { ...expansion, orderBy, expand }
 }
 
 function resolveOutgoingExpansionTargets(
@@ -889,14 +971,14 @@ function validateSortFields(
   shape: ObjectQueryResultShape,
   path: string,
   ctx: QueryValidationContext
-): void {
+): ObjectQuerySortField[] {
   if (fields.length === 0) {
     addIssue(ctx, path, "empty_sort", "Sort must include at least one field")
-    return
+    return []
   }
 
   const seen = new Set<string>()
-  fields.forEach((field, index) => {
+  return fields.map((field, index) => {
     if (field.direction && field.direction !== "asc" && field.direction !== "desc") {
       addIssue(
         ctx,
@@ -917,7 +999,11 @@ function validateSortFields(
     }
     seen.add(key)
 
-    if (field.kind === "relevance") return
+    if (field.kind === "relevance") return field
+
+    const { scalarKind: _authoredScalarKind, ...authoredField } = field
+
+    const schemas: Schema[] = []
 
     for (const { objectType, property } of getPropertiesForResult(
       field.propertyId,
@@ -941,6 +1027,7 @@ function validateSortFields(
         ctx,
         `${path}.fields[${index}]`
       )
+      if (schema) schemas.push(schema)
       if (schema && !isSortableSchema(schema)) {
         addIssue(
           ctx,
@@ -950,6 +1037,14 @@ function validateSortFields(
         )
       }
     }
+
+    const scalarKind = resolveCommonQueryScalarKind(
+      schemas,
+      field.propertyId,
+      `${path}.fields[${index}]`,
+      ctx
+    )
+    return { ...authoredField, ...(scalarKind ? { scalarKind } : {}) }
   })
 }
 

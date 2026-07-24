@@ -4,6 +4,7 @@ import type {
   ActionParam as ObjectActionParam,
 } from "@sixb/client"
 import { isFileRef } from "@sixb/core/blob-storage"
+import { normalizeDecimalValue } from "@sixb/core/ontology"
 
 type ActionCatalogItem = ListActionsResponse[number]
 type ActionParam = ActionCatalogItem["params"][number]
@@ -23,6 +24,7 @@ export type ActionRequestPayload = {
 export type ActionParamInputDescriptor =
   | { kind: "text" }
   | { kind: "number"; integer?: boolean }
+  | { kind: "decimal" }
   | { kind: "boolean" }
   | { kind: "fileRef" }
   | { kind: "json" }
@@ -105,9 +107,10 @@ export function describeActionParamInput(schema: unknown): ActionParamInputDescr
   if (resolved === "integer") {
     return { kind: "number", integer: true }
   }
-  if (resolved === "double" || resolved === "decimal") {
+  if (resolved === "double") {
     return { kind: "number" }
   }
+  if (resolved === "decimal") return { kind: "decimal" }
   if (resolved === "boolean") {
     return { kind: "boolean" }
   }
@@ -167,6 +170,12 @@ function parseActionParamValue(param: ActionParam, rawValue: string): unknown {
       }
       return value
     }
+    case "decimal":
+      try {
+        return normalizeDecimalValue(rawValue)
+      } catch {
+        throw new Error("Expected an exact decimal.")
+      }
     case "boolean":
       return rawValue === "true"
     case "fileRef": {

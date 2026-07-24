@@ -1,5 +1,6 @@
 import { listObjectsInfiniteOptions } from "@sixb/client/hooks"
 import { isFileRef } from "@sixb/core/blob-storage"
+import { normalizeDecimalValue } from "@sixb/core/ontology"
 import {
   Combobox,
   Input,
@@ -402,9 +403,7 @@ function PrimitiveInput({
     <Input
       id={id}
       type={inputTypeForPrimitive(schema)}
-      step={
-        schema === "integer" ? "1" : schema === "double" || schema === "decimal" ? "any" : undefined
-      }
+      step={schema === "integer" ? "1" : schema === "double" ? "any" : undefined}
       value={value}
       onChange={(event) => onChange(path, event.target.value)}
       placeholder={placeholderForPrimitive(schema)}
@@ -569,13 +568,22 @@ function parseFieldValue({
       return { present: true, value: parsed }
     }
 
-    if (schema === "double" || schema === "decimal") {
+    if (schema === "double") {
       const parsed = Number(trimmed)
       if (!Number.isFinite(parsed)) {
         errors[key] = `${fieldLabel(path)} must be numeric.`
         return { present: false }
       }
       return { present: true, value: parsed }
+    }
+
+    if (schema === "decimal") {
+      try {
+        return { present: true, value: normalizeDecimalValue(trimmed) }
+      } catch {
+        errors[key] = `${fieldLabel(path)} must be an exact decimal.`
+        return { present: false }
+      }
     }
 
     if (schema === "timestamp") {
@@ -743,7 +751,7 @@ function timestampInputValue(value: string): string {
 }
 
 function inputTypeForPrimitive(schema: PrimitiveSchema): string {
-  if (schema === "integer" || schema === "double" || schema === "decimal") return "number"
+  if (schema === "integer" || schema === "double") return "number"
   if (schema === "date") return "date"
   if (schema === "timestamp") return "datetime-local"
   return "text"

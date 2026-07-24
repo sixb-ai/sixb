@@ -79,8 +79,11 @@ describe("validateSchemaValue", () => {
     expect(() => validateSchemaValue("double", NaN, "test", emptyMap)).toThrow("must be numeric")
   })
 
-  test("decimal schema accepts numbers", () => {
-    expect(() => validateSchemaValue("decimal", 99.99, "test", emptyMap)).not.toThrow()
+  test("decimal schema accepts exact strings and rejects numbers", () => {
+    expect(() => validateSchemaValue("decimal", "99.99", "test", emptyMap)).not.toThrow()
+    expect(() => validateSchemaValue("decimal", 99.99, "test", emptyMap)).toThrow(
+      "must be an exact decimal string"
+    )
   })
 
   test("date schema accepts Date objects", () => {

@@ -35,6 +35,7 @@ const Room = defineObjectType({
       query: { searchable: true, filterable: true, exact: true },
     }),
     prop("currentTemperature", "double", { mode: "telemetry", semanticType: "Temperature" }),
+    prop("exactReading", "decimal", { mode: "telemetry" }),
   ],
   links: [link.ref("hasThermostat", "Thermostat", { cardinality: "one" })],
 })
@@ -738,6 +739,29 @@ describe("Sixb runtime", () => {
       types: ["telemetry.appended"],
     })
     expect(events).toHaveLength(2)
+  })
+
+  test("canonicalizes exact decimal telemetry before persistence", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const sixb = new Sixb({ id: "decimal-telemetry-test", ontology: [Room], ...runtimeDeps })
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
+    })
+
+    await sixb.objects(Room).appendTelemetryBatch([
+      {
+        id: "room:101",
+        properties: { exactReading: "+009007199254740993.0100" as never },
+      },
+    ])
+
+    const latest = await runtimeDeps.storage.timeseries.getLatest({
+      projectId: "decimal-telemetry-test",
+      objectTypeId: "Room",
+      objectId: "room:101",
+      propertyId: "exactReading",
+    })
+    expect(latest?.value).toBe("9007199254740993.01")
   })
 
   test("late-arriving telemetry does not replace the object latest value", async () => {

@@ -10,6 +10,14 @@
 
 // ── Types ───────────────────────────────────────────────────
 
+export type { DecimalValue } from "./decimal"
+export {
+  compareDecimalValues,
+  decimal,
+  isDecimalString,
+  isDecimalValue,
+  normalizeDecimalValue,
+} from "./decimal"
 export type { InferSchemaOrRef, ObjectRef, ObjectRefSchema, SchemaOrRef } from "./refs"
 export { isObjectRefSchema, ref, validateSchemaOrRefValue } from "./refs"
 export type {

@@ -90,6 +90,16 @@ const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     intersect: true,
     subtract: true,
   },
+  scalarOperations: {
+    string: { equality: true, ordering: true },
+    uuid: { equality: true, ordering: true },
+    boolean: { equality: true },
+    integer: { equality: true, ordering: true },
+    double: { equality: true, ordering: true },
+    decimal: { equality: true },
+    date: { equality: true, ordering: true },
+    timestamp: { equality: true, ordering: true },
+  },
   limits: {
     totalCount: true,
     stablePageTokens: true,
@@ -97,6 +107,7 @@ const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   notes: [
     "SQLite object query pushdown supports start/filter/text/sort/limit/page/traverse/set/project/expand over JSON properties and object links.",
     "expand hydrates linked objects in-database (top-N per parent via row_number() + json_group_array); core resolves each expansion's cardinality before pushdown, and a mixed/unresolved one stays on the fallback.",
+    "Ordered decimal predicates and sorting use the bounded core fallback because SQLite has no native exact decimal type; canonical decimal equality remains pushdown-safe.",
     "Relevance sorting, vector search, and unresolved start.includeSubtypes remain planner fallback or rejection cases.",
   ],
 }

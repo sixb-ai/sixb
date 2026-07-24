@@ -574,6 +574,13 @@ function compileExpansionOrder(
   for (const field of expansion.orderBy ?? []) {
     // Relevance is a no-op in the fallback comparator; mirror that by skipping it.
     if (field.kind !== "property") continue
+    if (field.scalarKind === "decimal") {
+      throw new ObjectQueryExecutionError(
+        "exact_decimal_not_supported",
+        "SQLite object storage cannot push down exact decimal expansion sorting",
+        "$.expand.orderBy"
+      )
+    }
     const direction = field.direction === "desc" ? "DESC" : "ASC"
     const path = jsonPath(field.propertyId)
     clauses.push(
@@ -736,6 +743,21 @@ function compileProjectionExpression(properties: readonly string[]): CompiledPre
 }
 
 function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
+  if (
+    "scalarKind" in predicate &&
+    predicate.scalarKind === "decimal" &&
+    (predicate.op === "lt" ||
+      predicate.op === "lte" ||
+      predicate.op === "gt" ||
+      predicate.op === "gte")
+  ) {
+    throw new ObjectQueryExecutionError(
+      "exact_decimal_not_supported",
+      "SQLite object storage cannot push down exact decimal predicates",
+      "$.predicate"
+    )
+  }
+
   switch (predicate.op) {
     case "and":
     case "or": {
@@ -928,6 +950,13 @@ function sortOrderFields(fields: readonly ObjectQuerySortField[]): readonly Comp
   for (const field of fields) {
     if (field.kind !== "property") {
       throw new Error("[Sixb] SQLite object storage does not support relevance sorting")
+    }
+    if (field.scalarKind === "decimal") {
+      throw new ObjectQueryExecutionError(
+        "exact_decimal_not_supported",
+        "SQLite object storage cannot push down exact decimal sorting",
+        "$.sort"
+      )
     }
 
     orderFields.push({

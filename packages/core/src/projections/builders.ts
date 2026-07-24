@@ -94,7 +94,7 @@ type ProjectionSchemaByDatasetColumnType = {
   readonly string: StringCompatibleProjectionSchema
   readonly boolean: "boolean"
   readonly int64: IntegerCompatibleProjectionSchema
-  readonly float64: "double" | "decimal"
+  readonly float64: "double"
   readonly decimal: "decimal" | "double"
   readonly date: "date"
   readonly timestamp: "timestamp"

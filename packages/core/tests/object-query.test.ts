@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  decimal,
   defineObjectType,
   InMemoryObjectStorage,
   link,
@@ -127,8 +128,20 @@ const TextNoDefault = defineObjectType({
   ],
 })
 
+const Balance = defineObjectType({
+  id: "Balance",
+  name: "Balance",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("amount", "decimal", {
+      required: true,
+      query: { searchable: true, filterable: true, sortable: true },
+    }),
+  ],
+})
+
 const ontology = new OntologyRegistry({
-  sources: [Customer, Order, WildcardSource, SearchProfileCustomer, TextNoDefault],
+  sources: [Customer, Order, WildcardSource, SearchProfileCustomer, TextNoDefault, Balance],
 })
 
 function makeObjectMutationEvent(
@@ -397,6 +410,57 @@ describe("object query IR normalization", () => {
 })
 
 describe("object query validation", () => {
+  test("resolves and canonicalizes exact decimal predicate and sort semantics", () => {
+    const validated = validateObjectQuery(
+      {
+        kind: "sort",
+        fields: [{ kind: "property", propertyId: "amount", direction: "asc" }],
+        input: {
+          kind: "filter",
+          predicate: { op: "gte", propertyId: "amount", value: "+009007199254740993.0100" },
+          input: { kind: "start", objectTypeId: "Balance" },
+        },
+      },
+      { ontology }
+    )
+
+    expect(validated.query).toMatchObject({
+      fields: [{ propertyId: "amount", scalarKind: "decimal" }],
+      input: {
+        predicate: {
+          propertyId: "amount",
+          value: "9007199254740993.01",
+          scalarKind: "decimal",
+        },
+      },
+    })
+  })
+
+  test("ignores caller-authored scalar kinds and resolves them from the ontology", () => {
+    const validated = validateObjectQuery(
+      {
+        kind: "sort",
+        fields: [{ kind: "property", propertyId: "name", scalarKind: "decimal" }],
+        input: {
+          kind: "filter",
+          predicate: {
+            op: "eq",
+            propertyId: "status",
+            value: "active",
+            scalarKind: "decimal",
+          },
+          input: { kind: "start", objectTypeId: "Customer" },
+        },
+      },
+      { ontology }
+    )
+
+    expect(validated.query).toMatchObject({
+      fields: [{ propertyId: "name", scalarKind: "string" }],
+      input: { predicate: { propertyId: "status", scalarKind: "string" } },
+    })
+  })
+
   test("accepts text, filter, sort, project, and limit queries", () => {
     const query: ObjectQuery = {
       kind: "limit",
@@ -719,6 +783,115 @@ describe("object query explain", () => {
 })
 
 describe("object query planner and executor", () => {
+  test("filters and sorts decimals exactly beyond JS number precision", async () => {
+    const storage = new InMemoryObjectStorage()
+    for (const [primaryId, amount] of [
+      ["small", decimal("0.00000000000000000002")],
+      ["large-a", decimal("9007199254740992")],
+      ["large-b", decimal("9007199254740993")],
+    ] as const) {
+      await storage.applyObjectUpsert(
+        makeObjectMutationEvent("p1", "Balance", primaryId, { id: primaryId, amount })
+      )
+    }
+
+    const query: ObjectQuery = {
+      kind: "limit",
+      limit: 10,
+      input: {
+        kind: "sort",
+        fields: [{ kind: "property", propertyId: "amount", direction: "asc" }],
+        input: {
+          kind: "filter",
+          predicate: { op: "gt", propertyId: "amount", value: "9007199254740992" },
+          input: { kind: "start", objectTypeId: "Balance" },
+        },
+      },
+    }
+    const result = await executeObjectQuery({ projectId: "p1", query }, { ontology, storage })
+
+    expect(result.objects.map((row) => row.primaryId)).toEqual(["large-b"])
+  })
+
+  test("falls back when a provider cannot guarantee exact decimal semantics", () => {
+    const validated = validateObjectQuery(
+      {
+        kind: "limit",
+        limit: 10,
+        input: {
+          kind: "sort",
+          fields: [{ kind: "property", propertyId: "amount" }],
+          input: {
+            kind: "filter",
+            predicate: { op: "gt", propertyId: "amount", value: "1" },
+            input: { kind: "start", objectTypeId: "Balance" },
+          },
+        },
+      },
+      { ontology }
+    )
+    const plan = planObjectQuery(validated.query, {
+      capabilities: {
+        queryObjects: true,
+        nodes: { start: true, filter: true, sort: true, limit: true },
+        predicateOps: { gt: true },
+        sortKinds: { property: true },
+      },
+      hasQueryObjects: true,
+      maxFallbackRows: 10,
+    })
+
+    expect(plan.mode).toBe("fallback")
+    expect(plan.providerIssues.map((issue) => issue.code)).toEqual([
+      "scalar_operation_not_supported",
+      "scalar_operation_not_supported",
+    ])
+  })
+
+  test("plans scalar operation capabilities independently of decimal", () => {
+    const validated = validateObjectQuery(
+      {
+        kind: "limit",
+        limit: 10,
+        input: {
+          kind: "sort",
+          fields: [{ kind: "property", propertyId: "total" }],
+          input: { kind: "start", objectTypeId: "Order" },
+        },
+      },
+      { ontology }
+    )
+    expect(validated.query).toHaveProperty("input.fields[0].scalarKind", "double")
+
+    const capabilities: ObjectQueryCapabilities = {
+      queryObjects: true,
+      nodes: { start: true, sort: true, limit: true },
+      sortKinds: { property: true },
+      scalarOperations: { double: { equality: true } },
+    }
+    const fallback = planObjectQuery(validated.query, {
+      capabilities,
+      hasQueryObjects: true,
+      maxFallbackRows: 10,
+    })
+    expect(fallback.mode).toBe("fallback")
+    expect(fallback.providerIssues).toContainEqual(
+      expect.objectContaining({
+        code: "scalar_operation_not_supported",
+        message: "Provider does not support ordering for 'double' values",
+      })
+    )
+
+    const pushdown = planObjectQuery(validated.query, {
+      capabilities: {
+        ...capabilities,
+        scalarOperations: { double: { equality: true, ordering: true } },
+      },
+      hasQueryObjects: true,
+    })
+    expect(pushdown.mode).toBe("pushdown")
+  })
+
   test("plans and executes full provider pushdown", async () => {
     const storage = new CountingQueryStorage()
     await seedCustomers(storage)

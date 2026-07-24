@@ -4,7 +4,11 @@
 import { assertPrivileged } from "../../authorization"
 import { buildLinkUpsertEvent, hasPropertyChanges } from "../../events"
 import { OntologyValidationError } from "../../ontology/errors"
-import { assertLinkTargetType, validateLinkProperties } from "../../ontology/validation"
+import {
+  assertLinkTargetType,
+  normalizeLinkProperties,
+  validateLinkProperties,
+} from "../../ontology/validation"
 import type { ResolvedLinkContext } from "../context"
 import { ObjectError } from "../errors"
 import { requireObject } from "../helpers"
@@ -41,19 +45,26 @@ export async function upsertLink(
     (existing) => existing.targetTypeId === targetTypeId && existing.targetId === targetId
   )
 
+  const valueTypesById = ontology.getValueTypesById()
   validateLinkProperties(
     objectType,
     linkDefinition,
     properties,
     sameLink?.properties,
-    ontology.getValueTypesById()
+    valueTypesById
+  )
+  const normalizedProperties = normalizeLinkProperties(
+    objectType,
+    linkDefinition,
+    properties,
+    valueTypesById
   )
 
   const mergedProperties =
-    properties !== undefined || sameLink?.properties !== undefined
+    normalizedProperties !== undefined || sameLink?.properties !== undefined
       ? {
           ...(sameLink?.properties ?? {}),
-          ...(properties ?? {}),
+          ...(normalizedProperties ?? {}),
         }
       : undefined
 

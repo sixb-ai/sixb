@@ -1,5 +1,6 @@
 import { assertJsonValue, cloneJsonValue, type JsonValue } from "../../json"
 import type { ObjectFieldSchema, Property, Schema, ValueType } from ".."
+import { normalizeDecimalValue } from "../decimal"
 import { OntologyValidationError } from "../errors"
 import { resolveValueTypeSchema } from "./schema"
 
@@ -41,6 +42,8 @@ export function normalizeSchemaValue(
         return normalizeDateValue(value, path)
       case "timestamp":
         return normalizeTimestampValue(value, path)
+      case "decimal":
+        return normalizeDecimal(value, path)
       default:
         assertJsonValue(value, path)
         return cloneJsonValue(value)
@@ -124,6 +127,18 @@ function normalizeDateValue(value: unknown, path: string): string {
 
 function normalizeTimestampValue(value: unknown, path: string): string {
   return normalizeDateLike(value, path).toISOString()
+}
+
+function normalizeDecimal(value: unknown, path: string): string {
+  if (typeof value !== "string") {
+    throw new OntologyValidationError(`[Sixb] Property ${path} must be an exact decimal string`)
+  }
+
+  try {
+    return normalizeDecimalValue(value)
+  } catch {
+    throw new OntologyValidationError(`[Sixb] Property ${path} must be an exact decimal string`)
+  }
 }
 
 function normalizeDateLike(value: unknown, path: string): Date {

@@ -8,7 +8,7 @@
 import { assertPrivileged } from "../../authorization"
 import { buildLinkUpsertEvent, hasPropertyChanges } from "../../events"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
-import { validateLinkBatch } from "../../ontology/validation"
+import { normalizeLinkProperties, validateLinkBatch } from "../../ontology/validation"
 import type { BatchItemResult, SixbRuntimeContext } from "../../runtime/types"
 import { ObjectNotFoundError } from "../../storage/errors"
 import type { ResolvedLinkBatchItem } from "../context"
@@ -72,7 +72,8 @@ export async function upsertLinkBatch(
   const linkLookups = collectLinkLookups(afterExistence)
   const linksMap = await storage.objects.listLinksBatch({ projectId, items: linkLookups })
 
-  const validation = validateLinkBatch(afterExistence, linksMap, ontology.getValueTypesById())
+  const valueTypesById = ontology.getValueTypesById()
+  const validation = validateLinkBatch(afterExistence, linksMap, valueTypesById)
   for (const { index, error } of validation.errors) results[index] = { ok: false, error }
   if (validation.valid.length === 0) return results
 
@@ -89,11 +90,17 @@ export async function upsertLinkBatch(
       (candidate) =>
         candidate.targetTypeId === item.targetTypeId && candidate.targetId === item.targetId
     )
+    const normalizedProperties = normalizeLinkProperties(
+      item.objectType,
+      item.linkDefinition,
+      item.properties,
+      valueTypesById
+    )
     const mergedProperties =
-      item.properties !== undefined || sameLink?.properties !== undefined
+      normalizedProperties !== undefined || sameLink?.properties !== undefined
         ? {
             ...(sameLink?.properties ?? {}),
-            ...(item.properties ?? {}),
+            ...(normalizedProperties ?? {}),
           }
         : undefined
 

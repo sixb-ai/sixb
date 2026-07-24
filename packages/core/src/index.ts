@@ -181,6 +181,17 @@ export {
   quantitativeTypes,
 } from "./ontology/units"
 
+// ── Exact decimals ──────────────────────────────────────────
+
+export type { DecimalValue } from "./ontology/decimal"
+export {
+  compareDecimalValues,
+  decimal,
+  isDecimalString,
+  isDecimalValue,
+  normalizeDecimalValue,
+} from "./ontology/decimal"
+
 // ── Ontology SDK typing ─────────────────────────────────────
 
 export type {
@@ -563,6 +574,7 @@ export type {
   ObjectQueryValidationIssue,
   ObjectQueryValidationOptions,
   ObjectQueryVector,
+  QueryScalarKind,
   ValidatedObjectQuery,
 } from "./objects/query"
 export {

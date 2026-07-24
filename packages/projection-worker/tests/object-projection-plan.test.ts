@@ -10,6 +10,41 @@ import {
 import { buildObjectProjectionPlan, projectObjectRow } from "../src/object-projection-plan"
 
 describe("object projection plan", () => {
+  test("preserves decimal precision from dataset row to object properties", () => {
+    const Invoice = defineObjectType({
+      id: "Invoice",
+      name: "Invoice",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("amount", "decimal", { required: true }),
+      ],
+    })
+    const invoices = defineDataset("canonical.invoices", {
+      schema: [col("id", "string"), col("amount", "decimal")],
+    })
+    const projection = defineProjection("invoice-projection", Invoice)
+      .fromDataset(invoices)
+      .properties({ id: "id", amount: "amount" })
+    const ontology = new OntologyRegistry({ sources: [Invoice] })
+    const plan = buildObjectProjectionPlan({
+      ontology,
+      projection,
+      dataset: invoices,
+      primaryPropertyId: "id",
+    })
+
+    expect(projectObjectRow(plan, { id: "invoice-1", amount: "+009007199254740993.0100" })).toEqual(
+      {
+        ok: true,
+        row: {
+          properties: { id: "invoice-1", amount: "9007199254740993.01" },
+          primaryValue: "invoice-1",
+          foreignKeyValues: {},
+        },
+      }
+    )
+  })
+
   test("validates original dataset row before numeric projection coercion", () => {
     const Meter = defineObjectType({
       id: "Meter",

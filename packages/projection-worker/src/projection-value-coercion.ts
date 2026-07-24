@@ -1,4 +1,4 @@
-import type { DatasetColumnDefinition, Schema } from "@sixb/core"
+import { type DatasetColumnDefinition, normalizeDecimalValue, type Schema } from "@sixb/core"
 import { isIntegerEnumSchema } from "./projection-schema"
 
 export type ProjectedValueCoercionResult =
@@ -24,17 +24,65 @@ export function normalizeProjectedValue(input: {
     if (isIntegerLikeSchema(schema)) {
       return coerceSafeInteger(value)
     }
+  }
 
-    if (isNumberSchema(schema)) {
-      return coerceFiniteNumber(value)
+  if (schema === "decimal") {
+    if (columnType === "int64") {
+      return coerceExactDecimal(value, true)
+    }
+
+    if (columnType === "decimal") {
+      return coerceExactDecimal(value, false)
     }
   }
 
-  if ((columnType === "decimal" || columnType === "float64") && isNumberSchema(schema)) {
+  if (
+    schema === "double" &&
+    (columnType === "int64" || columnType === "decimal" || columnType === "float64")
+  ) {
     return coerceFiniteNumber(value)
   }
 
   return { ok: true, value }
+}
+
+function coerceExactDecimal(
+  value: unknown,
+  allowSafeIntegerNumber: boolean
+): ProjectedValueCoercionResult {
+  if (typeof value === "number") {
+    if (!allowSafeIntegerNumber || !Number.isSafeInteger(value)) {
+      return {
+        ok: false,
+        errorMessage: `cannot safely coerce value ${formatProjectionValue(value)} to an exact decimal`,
+      }
+    }
+    return normalizeExactDecimal(String(value))
+  }
+
+  if (typeof value === "bigint") {
+    return normalizeExactDecimal(value.toString())
+  }
+
+  if (typeof value === "string") {
+    return normalizeExactDecimal(value)
+  }
+
+  return {
+    ok: false,
+    errorMessage: `cannot coerce value ${formatProjectionValue(value)} to an exact decimal`,
+  }
+}
+
+function normalizeExactDecimal(value: string): ProjectedValueCoercionResult {
+  try {
+    return { ok: true, value: normalizeDecimalValue(value) }
+  } catch {
+    return {
+      ok: false,
+      errorMessage: `cannot coerce value ${formatProjectionValue(value)} to an exact decimal`,
+    }
+  }
 }
 
 function coerceSafeInteger(value: unknown): ProjectedValueCoercionResult {
@@ -131,10 +179,6 @@ function coerceFiniteNumber(value: unknown): ProjectedValueCoercionResult {
 
 function isIntegerLikeSchema(schema: Schema): boolean {
   return schema === "integer" || isIntegerEnumSchema(schema)
-}
-
-function isNumberSchema(schema: Schema): boolean {
-  return schema === "double" || schema === "decimal"
 }
 
 function formatProjectionValue(value: unknown): string {

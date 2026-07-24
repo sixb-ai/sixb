@@ -8,6 +8,9 @@ import type {
 import type { OntologyRegistry } from "../../ontology"
 import {
   assertKnownProperties,
+  normalizeLinkProperties,
+  normalizeObjectProperties,
+  normalizeSchemaValue,
   validateLinkProperties,
   validateObjectProperties,
   validatePropertyValue,
@@ -60,8 +63,9 @@ export function validateObjectAuthorityProperties(
         )
       }
     }
-    validateObjectProperties(objectType, result, ontology.getValueTypesById())
-    return result
+    const valueTypesById = ontology.getValueTypesById()
+    validateObjectProperties(objectType, result, valueTypesById)
+    return normalizeObjectProperties(objectType.properties, result, valueTypesById, objectType.id)
   })
 }
 
@@ -132,16 +136,17 @@ export function validateLinkAuthorityProperties(
         `[Sixb] Link '${ref.source.objectTypeId}.${ref.linkId}' cannot target '${ref.target.objectTypeId}'.`
       )
     }
-    validateLinkProperties(objectType, link, properties, undefined, ontology.getValueTypesById())
-    return properties
+    const valueTypesById = ontology.getValueTypesById()
+    validateLinkProperties(objectType, link, properties, undefined, valueTypesById)
+    return normalizeLinkProperties(objectType, link, properties, valueTypesById)
   })
 }
 
 export function validateTelemetryPoint(
   ontology: OntologyRegistry,
   point: TelemetryPointWrite
-): void {
-  materializationValidation(() => {
+): TelemetryPointWrite {
+  return materializationValidation(() => {
     const objectType = ontology.resolveObjectType(point.series.object.objectTypeId)
     const property = objectType.properties.find(
       (candidate) => candidate.id === point.series.propertyId
@@ -151,18 +156,17 @@ export function validateTelemetryPoint(
         `[Sixb] Property '${point.series.object.objectTypeId}.${point.series.propertyId}' is not telemetry-enabled.`
       )
     }
-    validatePropertyValue(
-      property,
-      point.value,
-      `${objectType.id}.${property.id}`,
-      ontology.getValueTypesById()
-    )
-    validateTelemetryUnit(
-      property,
-      `${objectType.id}.${property.id}`,
-      point.unit,
-      ontology.getValueTypesById()
-    )
+    const path = `${objectType.id}.${property.id}`
+    const valueTypesById = ontology.getValueTypesById()
+    validatePropertyValue(property, point.value, path, valueTypesById)
+    validateTelemetryUnit(property, path, point.unit, valueTypesById)
+    return {
+      ...point,
+      value:
+        point.value === null
+          ? null
+          : normalizeSchemaValue(property.schema, point.value, path, valueTypesById),
+    }
   })
 }
 

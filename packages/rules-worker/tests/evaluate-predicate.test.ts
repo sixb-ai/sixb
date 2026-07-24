@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { RulePredicate } from "@sixb/core"
+import { decimal, type RulePredicate } from "@sixb/core"
 import type { ObjectLinkRow, ObjectRow } from "@sixb/core/storage"
 import { evaluateRulePredicate } from "../src/evaluate-predicate"
 import type { RuleLinkMap } from "../src/types"
@@ -108,6 +108,31 @@ describe("evaluateRulePredicate", () => {
         properties: { amount: 11 },
       })
     ).toBe(false)
+  })
+
+  test("evaluates decimal comparisons without JS number coercion", () => {
+    expect(
+      evaluate({
+        predicate: {
+          kind: "property",
+          propertyId: "amount",
+          op: "gt",
+          value: decimal("9007199254740992"),
+        },
+        properties: { amount: decimal("9007199254740993") },
+      })
+    ).toBe(true)
+    expect(
+      evaluate({
+        predicate: {
+          kind: "property",
+          propertyId: "amount",
+          op: "lt",
+          value: decimal("0.0000000000000000001"),
+        },
+        properties: { amount: decimal("0.00000000000000000002") },
+      })
+    ).toBe(true)
   })
 
   test("evaluates property presence and missingness", () => {

@@ -9,6 +9,7 @@ import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import {
   assertPropertyTokenBelongsToObjectType,
   assertTelemetryProperty,
+  normalizeSchemaValue,
   validatePropertyValue,
   validateTelemetryUnit,
 } from "../../ontology/validation"
@@ -61,6 +62,13 @@ export function createTelemetryAppender<
           ontology.getValueTypesById()
         )
 
+        const normalizedValue = normalizeSchemaValue(
+          telemetryProperty.schema,
+          input.value,
+          propertyPath,
+          ontology.getValueTypesById()
+        )
+
         await writeTelemetryBatch(ctx, [
           {
             type: "telemetry.appended",
@@ -68,7 +76,7 @@ export function createTelemetryAppender<
               objectTypeId: ctx.objectType.id,
               objectId: primaryId,
               propertyId: property.id,
-              value: input.value,
+              value: normalizedValue,
               ...(input.unit !== undefined ? { unit: input.unit } : {}),
               at: input.at.toISOString(),
             },

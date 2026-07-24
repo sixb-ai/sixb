@@ -11,6 +11,7 @@ import type {
   ObjectQueryPredicate,
   ObjectQuerySetOperation,
   ObjectQuerySortField,
+  QueryScalarKind,
 } from "../../objects/query"
 
 /**
@@ -74,6 +75,12 @@ export type LinkDirection = "outgoing" | "incoming" | "both"
 
 export type ObjectQueryCapabilityMap<T extends string> = Readonly<Partial<Record<T, boolean>>>
 
+export type ObjectQueryScalarOperation = "equality" | "ordering"
+
+export type ObjectQueryScalarOperations = Readonly<
+  Partial<Record<QueryScalarKind, ObjectQueryCapabilityMap<ObjectQueryScalarOperation>>>
+>
+
 /**
  * Provider-declared object query support.
  *
@@ -95,6 +102,8 @@ export interface ObjectQueryCapabilities {
   sortKinds?: ObjectQueryCapabilityMap<ObjectQuerySortField["kind"]>
   traversalDirections?: ObjectQueryCapabilityMap<ObjectQueryDirection>
   setOps?: ObjectQueryCapabilityMap<ObjectQuerySetOperation>
+  /** Scalar operations whose semantics the provider can preserve exactly. */
+  scalarOperations?: ObjectQueryScalarOperations
   features?: {
     /**
      * True only when the provider can expand `start.includeSubtypes` itself.

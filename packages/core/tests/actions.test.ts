@@ -94,6 +94,10 @@ const recordNullableNote = defineAction("recordNullableNote")
   .params({ note: param("string", { nullable: true }) })
   .writeback(async () => {})
 
+const recordExactAmount = defineAction("recordExactAmount")
+  .params({ amount: param("decimal") })
+  .writeback(async () => {})
+
 function actionDefinition(action: unknown): ActionDefinition {
   return action as ActionDefinition
 }
@@ -502,6 +506,33 @@ describe("requestAction", () => {
         params: { category: "unsupported" },
       })
     ).rejects.toThrow("must be one of: general_services, construction")
+  })
+
+  test("canonicalizes exact decimal params and rejects JS numbers", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const sixb = new Sixb({
+      id: "decimal-action-test",
+      ontology: [],
+      actions: [actionDefinition(recordExactAmount)],
+      ...runtimeDeps,
+    })
+
+    const requested = await sixb.actions.request({
+      actionId: "recordExactAmount",
+      params: { amount: "+009007199254740993.0100" } as never,
+    })
+    const stored = await runtimeDeps.storage.actionRuns?.getById({
+      projectId: "decimal-action-test",
+      id: requested.runId,
+    })
+
+    expect(stored?.params).toEqual({ amount: "9007199254740993.01" })
+    await expect(
+      sixb.actions.request({
+        actionId: "recordExactAmount",
+        params: { amount: 1.1 } as never,
+      })
+    ).rejects.toThrow("must be an exact decimal string")
   })
 
   test("accepts object ref params", async () => {

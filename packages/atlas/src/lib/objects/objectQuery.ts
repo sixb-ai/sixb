@@ -10,6 +10,7 @@ import {
   queryObjects,
   toObjectSummary,
 } from "@sixb/client"
+import { normalizeDecimalValue } from "@sixb/core/ontology"
 import { formatValue } from "../formatValue"
 import { humanizeIdentifier } from "../labels"
 
@@ -125,7 +126,11 @@ export function arrayItemSchema(schema: unknown): unknown {
 
 export function isNumberSchema(schema: unknown): boolean {
   const type = schemaType(schema)
-  return type === "integer" || type === "double" || type === "decimal" || type === "number"
+  return type === "integer" || type === "double" || type === "number"
+}
+
+export function isDecimalSchema(schema: unknown): boolean {
+  return schemaType(schema) === "decimal"
 }
 
 export function isBooleanSchema(schema: unknown): boolean {
@@ -196,6 +201,14 @@ export function parseValueForSchema(
     if (trimmed === "true") return { ok: true, value: true }
     if (trimmed === "false") return { ok: true, value: false }
     return { ok: false, error: "Use true or false." }
+  }
+
+  if (isDecimalSchema(schema)) {
+    try {
+      return { ok: true, value: normalizeDecimalValue(trimmed) }
+    } catch {
+      return { ok: false, error: "Use an exact decimal value." }
+    }
   }
 
   if (isNumberSchema(schema)) {

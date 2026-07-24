@@ -130,3 +130,54 @@ test("vector remains an unsupported query node", () => {
   // expand is now supported and compiles without throwing.
   expect(() => compileObjectQuery("project-a", expandableQuery)).not.toThrow()
 })
+
+test("rejects direct exact decimal pushdown instead of using lossy SQLite comparisons", () => {
+  expect(() =>
+    compileObjectQuery("project-a", {
+      kind: "filter",
+      predicate: {
+        op: "eq",
+        propertyId: "amount",
+        value: "9007199254740993",
+        scalarKind: "decimal",
+      },
+      input: { kind: "start", objectTypeId: "Balance" },
+    })
+  ).not.toThrow()
+
+  expect(() =>
+    compileObjectQuery("project-a", {
+      kind: "filter",
+      predicate: {
+        op: "gt",
+        propertyId: "amount",
+        value: "9007199254740993",
+        scalarKind: "decimal",
+      },
+      input: { kind: "start", objectTypeId: "Balance" },
+    })
+  ).toThrow("cannot push down exact decimal predicates")
+
+  expect(() =>
+    compileObjectQuery("project-a", {
+      kind: "sort",
+      fields: [{ kind: "property", propertyId: "amount", scalarKind: "decimal" }],
+      input: { kind: "start", objectTypeId: "Balance" },
+    })
+  ).toThrow("cannot push down exact decimal sorting")
+
+  expect(() =>
+    compileObjectQuery("project-a", {
+      kind: "expand",
+      input: { kind: "start", objectTypeId: "Account" },
+      expansions: [
+        {
+          linkId: "balances",
+          direction: "outgoing",
+          cardinality: "many",
+          orderBy: [{ kind: "property", propertyId: "amount", scalarKind: "decimal" }],
+        },
+      ],
+    })
+  ).toThrow("cannot push down exact decimal expansion sorting")
+})

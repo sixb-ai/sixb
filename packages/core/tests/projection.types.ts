@@ -43,6 +43,7 @@ const _Room = defineObjectType({
     prop("buildingRef", "string"),
     prop("roomNumber", "integer"),
     prop("area", "double"),
+    prop("exactAmount", "decimal"),
     prop("openedOn", "date"),
     prop("lastSeenAt", "timestamp"),
     prop("currentTemperature", "double", { mode: "telemetry" }),
@@ -69,6 +70,7 @@ const roomDataset = defineDataset("canonical.rooms", {
     col("col_ref", "string"),
     col("col_room_number", "int64"),
     col("col_area", "float64"),
+    col("col_exact_amount", "decimal"),
     col("col_temperature", "float64"),
     col("col_opened_on", "date"),
     col("col_last_seen_at", "timestamp"),
@@ -90,6 +92,7 @@ const projection = defineProjection("test", _Room).fromDataset(roomDataset).prop
   buildingRef: "col_ref",
   roomNumber: "col_room_number",
   area: "col_area",
+  exactAmount: "col_exact_amount",
   openedOn: "col_opened_on",
   lastSeenAt: "col_last_seen_at",
   mode: "col_mode",
@@ -117,6 +120,11 @@ defineProjection("test", _Room)
   .fromDataset(roomDataset)
   // @ts-expect-error — int64 column cannot map to a string property
   .properties({ id: "col_room_number" })
+
+defineProjection("test", _Room)
+  .fromDataset(roomDataset)
+  // @ts-expect-error — float64 values cannot be proven exact for decimal properties
+  .properties({ exactAmount: "col_area" })
 
 // 6. unresolved valueTypeRef properties are rejected
 defineProjection("test", _Room)

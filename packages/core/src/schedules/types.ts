@@ -6,8 +6,14 @@ import type {
   ObjectEventSelectorContext,
 } from "../events/selectors"
 import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from "../ontology"
-import type { InferPropertyValue } from "../ontology/inference"
-import type { FieldPredicate, Predicate, PredicateValue, PropertyPredicate } from "../predicates"
+import type {
+  FieldPredicate,
+  OrderedPredicateValueFor,
+  Predicate,
+  PredicateValueFor,
+  PropertyPredicate,
+  PropertyPredicateBuilder,
+} from "../predicates"
 
 declare const scheduleEventType: unique symbol
 
@@ -164,19 +170,10 @@ export type EventSchedulePredicateSubject<
   not(predicate: EventScheduleCondition): EventScheduleCondition
 }
 
-export interface EventSchedulePropertyPredicateBuilder<
+export type EventSchedulePropertyPredicateBuilder<
   TScope extends EventScheduleConditionScope = EventScheduleConditionScope,
   TProperty extends Property = Property,
-> {
-  eq(value: EventScheduleSerializableValue<TProperty>): EventScheduleConditionFor<TScope>
-  notEq(value: EventScheduleSerializableValue<TProperty>): EventScheduleConditionFor<TScope>
-  gt(value: EventScheduleNumericValue<TProperty>): EventScheduleConditionFor<TScope>
-  gte(value: EventScheduleNumericValue<TProperty>): EventScheduleConditionFor<TScope>
-  lt(value: EventScheduleNumericValue<TProperty>): EventScheduleConditionFor<TScope>
-  lte(value: EventScheduleNumericValue<TProperty>): EventScheduleConditionFor<TScope>
-  isPresent(): EventScheduleConditionFor<TScope>
-  isMissing(): EventScheduleConditionFor<TScope>
-}
+> = PropertyPredicateBuilder<TProperty, EventScheduleConditionFor<TScope>>
 
 export type EventScheduleConditionFor<
   TScope extends EventScheduleConditionScope,
@@ -186,21 +183,11 @@ export type EventScheduleConditionFor<
   readonly predicate: TPredicate
 }
 
-export type EventScheduleSerializableValue<TProperty extends Property> = Extract<
-  string extends TProperty["id"] ? PredicateValue : InferPropertyValue<TProperty>,
-  PredicateValue
->
+export type EventScheduleSerializableValue<TProperty extends Property> =
+  PredicateValueFor<TProperty>
 
-export type EventScheduleNumericValue<TProperty extends Property> = Extract<
-  string extends TProperty["id"]
-    ? number
-    : TProperty["schema"] extends "integer" | "double" | "decimal"
-      ? number
-      : TProperty["schema"] extends { type: "enum"; valueType: "integer" }
-        ? number
-        : never,
-  number
->
+export type EventScheduleNumericValue<TProperty extends Property> =
+  OrderedPredicateValueFor<TProperty>
 
 type LinkPropertyTokens<TLink extends LinkToken> =
   NonNullable<TLink["link"]["properties"]> extends readonly Property[]

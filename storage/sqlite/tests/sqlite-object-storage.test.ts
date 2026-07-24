@@ -200,6 +200,8 @@ describe("SqliteObjectStorage", () => {
     expect(capabilities.setOps?.union).toBe(true)
     expect(capabilities.setOps?.intersect).toBe(true)
     expect(capabilities.setOps?.subtract).toBe(true)
+    expect(capabilities.scalarOperations?.decimal?.equality).toBe(true)
+    expect(capabilities.scalarOperations?.decimal?.ordering).toBeUndefined()
     expect(capabilities.features?.includeSubtypes).toBeUndefined()
     expect(capabilities.limits?.stablePageTokens).toBe(true)
   })

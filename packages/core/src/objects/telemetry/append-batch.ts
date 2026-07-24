@@ -6,6 +6,7 @@ import type { EventDraft } from "../../events"
 import { OntologyValidationError } from "../../ontology/errors"
 import {
   assertTelemetryProperty,
+  normalizeSchemaValue,
   validatePropertyValue,
   validateTelemetryUnit,
 } from "../../ontology/validation"
@@ -83,13 +84,20 @@ export async function appendTelemetryBatch(
         ontology.getValueTypesById()
       )
 
+      const normalizedValue = normalizeSchemaValue(
+        propertyToken.property.schema,
+        value,
+        propertyPath,
+        ontology.getValueTypesById()
+      )
+
       events.push({
         type: "telemetry.appended",
         payload: {
           objectTypeId: objectType.id,
           objectId: item.id,
           propertyId: propertyToken.id,
-          value,
+          value: normalizedValue,
           ...(unit !== undefined ? { unit } : {}),
           at,
         },

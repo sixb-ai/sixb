@@ -1,5 +1,7 @@
 import {
   type ActionDefinition,
+  type DecimalValue,
+  decimal,
   defineAction,
   defineObjectType,
   type InferActionParams,
@@ -266,6 +268,19 @@ const createInvoice = defineAction("createInvoice")
     const changedObjects = commit.diff.objects
     void externalId
     void changedObjects
+  })
+
+defineAction("createExactInvoice")
+  .params({ amount: param("decimal") })
+  .writeback(({ params }) => {
+    const amount: DecimalValue = params.amount
+    const sameAmount: typeof amount = decimal("9007199254740993.01")
+
+    // @ts-expect-error Decimal params cannot be treated as JS numbers.
+    const numberAmount: number = params.amount
+
+    void sameAmount
+    void numberAmount
   })
 
 defineAction("inspectRoomLinks")

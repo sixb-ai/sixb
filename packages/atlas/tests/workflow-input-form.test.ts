@@ -11,6 +11,17 @@ const fileRef: FileRef = {
 }
 
 describe("WorkflowRunInputForm", () => {
+  test("builds exact decimal strings without Number coercion", () => {
+    expect(
+      buildWorkflowInput({ amount: "decimal" }, { amount: "+009007199254740993.0100" })
+    ).toEqual({ input: { amount: "9007199254740993.01" }, errors: {} })
+
+    expect(buildWorkflowInput({ amount: "decimal" }, { amount: "1e3" })).toEqual({
+      input: {},
+      errors: { amount: "amount must be an exact decimal." },
+    })
+  })
+
   test("validates fileRef inputs before building workflow input", () => {
     expect(
       buildWorkflowInput({ sourceFile: "fileRef" }, { sourceFile: JSON.stringify(fileRef) })
