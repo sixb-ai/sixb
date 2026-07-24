@@ -10,9 +10,13 @@ import type {
 } from "./common"
 import type {
   TeamleaderCompany,
+  TeamleaderCompanyAddRequest,
   TeamleaderCompanyInfoRequest,
   TeamleaderCompanyListItem,
   TeamleaderCompanyListRequest,
+  TeamleaderCompanyTagRequest,
+  TeamleaderCompanyUpdateRequest,
+  TeamleaderCompanyUploadLogoRequest,
 } from "./companies"
 import type {
   TeamleaderContact,
@@ -258,6 +262,21 @@ export interface TeamleaderClient {
       request: TeamleaderCompanyInfoRequest,
       options?: TeamleaderRequestOptions
     ): Promise<TeamleaderSingleResponse<TeamleaderCompany>>
+    add(
+      request: TeamleaderCompanyAddRequest,
+      options?: TeamleaderRequestOptions
+    ): Promise<TeamleaderSingleResponse<TeamleaderTypeAndId<"company">>>
+    update(
+      request: TeamleaderCompanyUpdateRequest,
+      options?: TeamleaderRequestOptions
+    ): Promise<void>
+    delete(request: TeamleaderInfoRequest, options?: TeamleaderRequestOptions): Promise<void>
+    tag(request: TeamleaderCompanyTagRequest, options?: TeamleaderRequestOptions): Promise<void>
+    untag(request: TeamleaderCompanyTagRequest, options?: TeamleaderRequestOptions): Promise<void>
+    uploadLogo(
+      request: TeamleaderCompanyUploadLogoRequest,
+      options?: TeamleaderRequestOptions
+    ): Promise<void>
   }
   readonly customFieldDefinitions: {
     list(
