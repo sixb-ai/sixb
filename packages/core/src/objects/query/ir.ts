@@ -8,6 +8,16 @@
 export type ObjectQueryDirection = "outgoing" | "incoming"
 export type ObjectQuerySetOperation = "union" | "intersect" | "subtract"
 export type ObjectQuerySortDirection = "asc" | "desc"
+/** Scalar schema resolved by core validation for provider-neutral value semantics. */
+export type QueryScalarKind =
+  | "string"
+  | "uuid"
+  | "boolean"
+  | "integer"
+  | "double"
+  | "decimal"
+  | "date"
+  | "timestamp"
 
 export type ObjectQuery =
   | ObjectQueryStart
@@ -162,12 +172,16 @@ export interface ObjectQueryPredicateComparison {
   op: "eq" | "neq" | "lt" | "lte" | "gt" | "gte"
   propertyId: string
   value: unknown
+  /** Core-resolved scalar schema used by providers; never authored by callers. */
+  scalarKind?: QueryScalarKind
 }
 
 export interface ObjectQueryPredicateIn {
   op: "in"
   propertyId: string
   values: readonly unknown[]
+  /** Core-resolved scalar schema used by providers; never authored by callers. */
+  scalarKind?: QueryScalarKind
 }
 
 export interface ObjectQueryPredicateExists {
@@ -183,7 +197,13 @@ export interface ObjectQueryPredicateContains {
 }
 
 export type ObjectQuerySortField =
-  | { kind: "property"; propertyId: string; direction?: ObjectQuerySortDirection }
+  | {
+      kind: "property"
+      propertyId: string
+      direction?: ObjectQuerySortDirection
+      /** Core-resolved scalar schema used by providers; never authored by callers. */
+      scalarKind?: QueryScalarKind
+    }
   | { kind: "relevance"; direction?: ObjectQuerySortDirection }
 
 export interface ObjectQueryResultShape {

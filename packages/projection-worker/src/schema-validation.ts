@@ -363,7 +363,7 @@ function isDatasetColumnCompatibleWithSchema(
         isIntegerEnumSchema(resolved)
       )
     case "float64":
-      return resolved === "double" || resolved === "decimal"
+      return resolved === "double"
     case "decimal":
       return resolved === "decimal" || resolved === "double"
     case "date":

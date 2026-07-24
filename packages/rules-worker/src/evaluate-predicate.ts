@@ -1,4 +1,4 @@
-import type { RulePredicate } from "@sixb/core"
+import { compareDecimalValues, isDecimalValue, type RulePredicate } from "@sixb/core"
 import type { EvaluateRulePredicateInput } from "./types"
 
 type RulePropertyPredicate = Extract<RulePredicate, { kind: "property" }>
@@ -38,13 +38,13 @@ function evaluatePropertyPredicate(predicate: RulePropertyPredicate, value: unkn
     // Numeric comparisons intentionally do not coerce strings or other scalar
     // values. A malformed or non-numeric value simply does not satisfy the rule.
     case "gt":
-      return isNumber(value) && isNumber(predicate.value) && value > predicate.value
+      return compareOrderedValues(value, predicate.value, (comparison) => comparison > 0)
     case "gte":
-      return isNumber(value) && isNumber(predicate.value) && value >= predicate.value
+      return compareOrderedValues(value, predicate.value, (comparison) => comparison >= 0)
     case "lt":
-      return isNumber(value) && isNumber(predicate.value) && value < predicate.value
+      return compareOrderedValues(value, predicate.value, (comparison) => comparison < 0)
     case "lte":
-      return isNumber(value) && isNumber(predicate.value) && value <= predicate.value
+      return compareOrderedValues(value, predicate.value, (comparison) => comparison <= 0)
     case "isPresent":
       return value !== null && value !== undefined
     case "isMissing":
@@ -67,4 +67,16 @@ function evaluateLinkPredicate(predicate: RuleLinkPredicate, links: readonly unk
 
 function isNumber(value: unknown): value is number {
   return typeof value === "number"
+}
+
+function compareOrderedValues(
+  left: unknown,
+  right: unknown,
+  matches: (comparison: number) => boolean
+): boolean {
+  if (isNumber(left) && isNumber(right)) return matches(left - right)
+  if (isDecimalValue(left) && isDecimalValue(right)) {
+    return matches(compareDecimalValues(left, right))
+  }
+  return false
 }

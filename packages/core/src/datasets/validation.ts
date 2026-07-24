@@ -1,5 +1,6 @@
 import { isFileRef } from "../blob-storage"
 import { isJsonValue } from "../json"
+import { isDecimalString } from "../ontology/decimal"
 import { DatasetValidationError } from "./errors"
 import type {
   DatasetColumnDefinition,
@@ -63,10 +64,7 @@ function matchesColumnType(value: unknown, type: DatasetColumnType): boolean {
     case "float64":
       return typeof value === "number" && Number.isFinite(value)
     case "decimal":
-      return (
-        (typeof value === "number" && Number.isFinite(value)) ||
-        (typeof value === "string" && /^-?\d+(?:\.\d+)?$/.test(value))
-      )
+      return isDecimalString(value)
     case "date":
       return isValidDateValue(value) || isDateString(value)
     case "timestamp":

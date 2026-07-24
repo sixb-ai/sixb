@@ -1,4 +1,6 @@
 import {
+  type DecimalValue,
+  decimal,
   defineObjectType,
   defineValueType,
   type FileRef,
@@ -92,6 +94,13 @@ type CurrentTemperatureUnit = InferPropertyUnit<
 >
 type _currentTemperatureUnit = Expect<Equal<CurrentTemperatureUnit, UnitsOf<"Temperature">>>
 type _fileRefSchema = Expect<Equal<InferSchema<"fileRef">, FileRef>>
+type _decimalSchema = Expect<Equal<InferSchema<"decimal">, DecimalValue>>
+
+const exactAmount: InferSchema<"decimal"> = decimal("9007199254740993.01")
+// @ts-expect-error Decimal ontology values must be constructed from exact strings or bigints.
+const impreciseAmount: InferSchema<"decimal"> = 9_007_199_254_740_994
+// @ts-expect-error Ordinary strings are not branded exact decimal values.
+const unbrandedAmount: InferSchema<"decimal"> = "9007199254740993.01"
 
 const validTelemetryAppend: {
   value: CurrentTemperatureValue
@@ -197,3 +206,6 @@ void invalidRoomRequiredProperty
 void validTelemetryAppend
 void invalidTelemetryValue
 void invalidTelemetryUnit
+void exactAmount
+void impreciseAmount
+void unbrandedAmount

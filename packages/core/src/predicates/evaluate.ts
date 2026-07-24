@@ -1,3 +1,4 @@
+import { compareDecimalValues, isDecimalValue } from "../ontology/decimal"
 import type {
   FieldPredicate,
   LinkPredicate,
@@ -52,13 +53,13 @@ function evaluatePropertyPredicate(
     case "notEq":
       return !isPresent || !predicateValueEquals(value, predicate.value)
     case "gt":
-      return isNumber(value) && isNumber(predicate.value) && value > predicate.value
+      return compareOrderedValues(value, predicate.value, (comparison) => comparison > 0)
     case "gte":
-      return isNumber(value) && isNumber(predicate.value) && value >= predicate.value
+      return compareOrderedValues(value, predicate.value, (comparison) => comparison >= 0)
     case "lt":
-      return isNumber(value) && isNumber(predicate.value) && value < predicate.value
+      return compareOrderedValues(value, predicate.value, (comparison) => comparison < 0)
     case "lte":
-      return isNumber(value) && isNumber(predicate.value) && value <= predicate.value
+      return compareOrderedValues(value, predicate.value, (comparison) => comparison <= 0)
     case "isPresent":
       return isPresent
     case "isMissing":
@@ -91,4 +92,16 @@ function isPredicateComparableValue(value: unknown): value is PredicateValue {
 
 function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value)
+}
+
+function compareOrderedValues(
+  left: unknown,
+  right: unknown,
+  matches: (comparison: number) => boolean
+): boolean {
+  if (isNumber(left) && isNumber(right)) return matches(left - right)
+  if (isDecimalValue(left) && isDecimalValue(right)) {
+    return matches(compareDecimalValues(left, right))
+  }
+  return false
 }

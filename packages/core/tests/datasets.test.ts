@@ -8,6 +8,7 @@ import {
   definePipeline,
   definePipelineStep,
   defineSync,
+  getDatasetRowValidationError,
   prop,
   RuntimeError,
   Sixb,
@@ -122,6 +123,17 @@ describe("defineDataset", () => {
       } as never)
     ).toThrow(
       "Dataset derive pick column 'missing' is not declared on parent dataset 'raw.erp.orders'."
+    )
+  })
+
+  test("requires decimal columns to use exact strings", () => {
+    const amounts = defineDataset("canonical.amounts", {
+      schema: [col("amount", "decimal")],
+    })
+
+    expect(getDatasetRowValidationError({ amount: "9007199254740993.01" }, amounts)).toBeNull()
+    expect(getDatasetRowValidationError({ amount: 1.1 }, amounts)).toContain(
+      "must match type 'decimal'"
     )
   })
 })

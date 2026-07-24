@@ -84,6 +84,16 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     intersect: true,
     subtract: true,
   },
+  scalarOperations: {
+    string: { equality: true, ordering: true },
+    uuid: { equality: true, ordering: true },
+    boolean: { equality: true },
+    integer: { equality: true, ordering: true },
+    double: { equality: true, ordering: true },
+    decimal: { equality: true, ordering: true },
+    date: { equality: true, ordering: true },
+    timestamp: { equality: true, ordering: true },
+  },
   limits: {
     totalCount: true,
     stablePageTokens: true,
@@ -91,6 +101,7 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   notes: [
     "PostgreSQL object query pushdown supports start/filter/text/sort/limit/page/traverse/set/project/expand over JSONB properties and object links.",
     "expand hydrates linked objects in-database (top-N per parent via LATERAL + jsonb_agg); core resolves each expansion's cardinality before pushdown, and a mixed/unresolved one stays on the fallback.",
+    "Exact decimal predicates, ordering, and keyset pagination use PostgreSQL numeric casts.",
     "Relevance sorting, vector search, and unresolved start.includeSubtypes remain planner fallback or rejection cases.",
   ],
 }

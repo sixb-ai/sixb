@@ -26,6 +26,24 @@ function actionWithParam(param: ListActionsResponse[number]["params"][number]) {
 }
 
 describe("Atlas action params", () => {
+  test("keeps decimal params exact and canonical", () => {
+    const action = actionWithParam({
+      id: "amount",
+      name: "Amount",
+      schema: "decimal",
+      required: true,
+    })
+
+    expect(describeActionParamInput("decimal")).toEqual({ kind: "decimal" })
+    expect(buildActionParams(action, { amount: "+009007199254740993.0100" })).toEqual({
+      params: { amount: "9007199254740993.01" },
+      errors: {},
+    })
+    expect(buildActionParams(action, { amount: "1e3" }).errors).toEqual({
+      amount: "Expected an exact decimal.",
+    })
+  })
+
   test("preserves omitted, null, and concrete catalog values", () => {
     const optional = actionWithParam({
       id: "category",

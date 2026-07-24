@@ -30,6 +30,13 @@ const objectType: ObjectTypeDefinition = {
           required: false,
           nullable: true,
         },
+        {
+          id: "amount",
+          name: "amount",
+          schema: "decimal",
+          required: true,
+          nullable: false,
+        },
       ],
     },
   ],
@@ -42,6 +49,10 @@ describe("client object models", () => {
     expect(summary.actions.updateCategory?.params?.category).toMatchObject({
       required: false,
       nullable: true,
+    })
+    expect(summary.actions.updateCategory?.params?.amount).toMatchObject({
+      type: "string",
+      required: true,
     })
   })
 })

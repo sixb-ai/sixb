@@ -5,6 +5,7 @@ import {
   type ObjectQueryPredicate,
   type ObjectQuerySetOperation,
   type ObjectQuerySortField,
+  type QueryScalarKind,
 } from "@sixb/core"
 
 export interface PgObjectQueryPageRow {
@@ -68,6 +69,7 @@ type CompiledOrderField =
       kind: "property"
       propertyId: string
       direction: "asc" | "desc"
+      scalarKind?: QueryScalarKind
     }
   | {
       kind: "column"
@@ -645,7 +647,11 @@ function compileExpansionOrder(
     const direction = field.direction === "desc" ? "DESC" : "ASC"
     clauses.push(
       `CASE WHEN ${jsonTypeExpression(propertyColumn)} IS NULL OR ${jsonTypeExpression(propertyColumn)} = 'null' THEN 1 ELSE 0 END ASC`,
-      `${jsonValueExpression(propertyColumn)} ${direction}`
+      `${
+        field.scalarKind === "decimal"
+          ? `(${jsonTextExpression(propertyColumn)})::numeric`
+          : jsonValueExpression(propertyColumn)
+      } ${direction}`
     )
     args.push(field.propertyId, field.propertyId, field.propertyId)
   }
@@ -984,21 +990,33 @@ function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
       return negatePredicate(item)
     }
     case "eq":
-      return compileEqualityPredicate(predicate.propertyId, "eq", predicate.value)
+      return predicate.scalarKind === "decimal"
+        ? compileDecimalEqualityPredicate(predicate.propertyId, "eq", predicate.value)
+        : compileEqualityPredicate(predicate.propertyId, "eq", predicate.value)
     case "neq":
-      return compileEqualityPredicate(predicate.propertyId, "neq", predicate.value)
+      return predicate.scalarKind === "decimal"
+        ? compileDecimalEqualityPredicate(predicate.propertyId, "neq", predicate.value)
+        : compileEqualityPredicate(predicate.propertyId, "neq", predicate.value)
     case "lt":
     case "lte":
     case "gt":
     case "gte": {
       const op = sqlComparisonOperator(predicate.op)
+      if (predicate.scalarKind === "decimal") {
+        return {
+          sql: `(${jsonTypeExpression()} = 'string' AND (${jsonTextExpression()})::numeric ${op} ?::numeric)`,
+          args: [predicate.propertyId, predicate.propertyId, predicate.value],
+        }
+      }
       return {
         sql: `${jsonValueExpression()} ${op} ?::text::jsonb`,
         args: [predicate.propertyId, jsonbValue(predicate.value)],
       }
     }
     case "in":
-      return compileInPredicate(predicate.propertyId, predicate.values)
+      return predicate.scalarKind === "decimal"
+        ? compileDecimalInPredicate(predicate.propertyId, predicate.values)
+        : compileInPredicate(predicate.propertyId, predicate.values)
     case "exists": {
       const sql = `jsonb_exists(properties, ?::text)`
       const item: CompiledPredicate = { sql, args: [predicate.propertyId] }
@@ -1006,6 +1024,59 @@ function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
     }
     case "contains":
       return compileContainsPredicate(predicate.propertyId, predicate.value)
+  }
+}
+
+function compileDecimalEqualityPredicate(
+  propertyId: string,
+  op: "eq" | "neq",
+  value: unknown
+): CompiledPredicate {
+  if (value === null) {
+    const sql = `${jsonTypeExpression()} = 'null'`
+    const item: CompiledPredicate = { sql, args: [propertyId] }
+    return op === "eq" ? item : negatePredicate(item)
+  }
+
+  if (op === "eq") {
+    return {
+      sql: `(${jsonTypeExpression()} = 'string' AND (${jsonTextExpression()})::numeric = ?::numeric)`,
+      args: [propertyId, propertyId, value],
+    }
+  }
+
+  return {
+    sql: `(${jsonTypeExpression()} IS NULL OR ${jsonTypeExpression()} = 'null' OR ${jsonTypeExpression()} <> 'string' OR (${jsonTextExpression()})::numeric <> ?::numeric)`,
+    args: [propertyId, propertyId, propertyId, propertyId, value],
+  }
+}
+
+function compileDecimalInPredicate(
+  propertyId: string,
+  values: readonly unknown[]
+): CompiledPredicate {
+  if (values.length === 0) return { sql: "0 = 1", args: [] }
+  const nonNullValues = values.filter((value) => value !== null)
+  const clauses: string[] = []
+  const args: unknown[] = []
+
+  if (nonNullValues.length !== values.length) {
+    clauses.push(`${jsonTypeExpression()} = 'null'`)
+    args.push(propertyId)
+  }
+
+  if (nonNullValues.length > 0) {
+    clauses.push(
+      `(${jsonTypeExpression()} = 'string' AND (${jsonTextExpression()})::numeric IN (${nonNullValues
+        .map(() => "?::numeric")
+        .join(", ")}))`
+    )
+    args.push(propertyId, propertyId, ...nonNullValues)
+  }
+
+  return {
+    sql: `(${clauses.join(" OR ")})`,
+    args,
   }
 }
 
@@ -1190,7 +1261,7 @@ function compileOrder(
     const direction = field.direction === "desc" ? "DESC" : "ASC"
     clauses.push(
       `CASE WHEN ${jsonTypeExpression(propertyColumn)} IS NULL OR ${jsonTypeExpression(propertyColumn)} = 'null' THEN 1 ELSE 0 END ASC`,
-      `${jsonValueExpression(propertyColumn)} ${direction}`
+      `${compiledPropertyValueExpression(field, propertyColumn)} ${direction}`
     )
     args.push(field.propertyId, field.propertyId, field.propertyId)
   }
@@ -1209,6 +1280,7 @@ function sortOrderFields(fields: readonly ObjectQuerySortField[]): readonly Comp
       kind: "property",
       propertyId: field.propertyId,
       direction: field.direction === "desc" ? "desc" : "asc",
+      scalarKind: field.scalarKind,
     })
   }
   orderFields.push(...identityOrderFields())
@@ -1273,8 +1345,13 @@ function compileFieldEquality(
   }
 
   return {
-    sql: `(${jsonTypeExpression(propertyColumn)} IS NOT NULL AND ${jsonTypeExpression(propertyColumn)} != 'null' AND ${jsonValueExpression(propertyColumn)} = ?::text::jsonb)`,
-    args: [field.propertyId, field.propertyId, field.propertyId, jsonbValue(cursor.value)],
+    sql: `(${jsonTypeExpression(propertyColumn)} IS NOT NULL AND ${jsonTypeExpression(propertyColumn)} != 'null' AND ${compiledPropertyValueExpression(field, propertyColumn)} = ${field.scalarKind === "decimal" ? "?::numeric" : "?::text::jsonb"})`,
+    args: [
+      field.propertyId,
+      field.propertyId,
+      field.propertyId,
+      field.scalarKind === "decimal" ? cursor.value : jsonbValue(cursor.value),
+    ],
   }
 }
 
@@ -1296,14 +1373,14 @@ function compileFieldAfter(
   const valueOperator = field.direction === "desc" ? "<" : ">"
 
   return {
-    sql: `(${rankSql} > 0 OR (${rankSql} = 0 AND ${jsonValueExpression(propertyColumn)} ${valueOperator} ?::text::jsonb))`,
+    sql: `(${rankSql} > 0 OR (${rankSql} = 0 AND ${compiledPropertyValueExpression(field, propertyColumn)} ${valueOperator} ${field.scalarKind === "decimal" ? "?::numeric" : "?::text::jsonb"}))`,
     args: [
       field.propertyId,
       field.propertyId,
       field.propertyId,
       field.propertyId,
       field.propertyId,
-      jsonbValue(cursor.value),
+      field.scalarKind === "decimal" ? cursor.value : jsonbValue(cursor.value),
     ],
   }
 }
@@ -1386,7 +1463,16 @@ function cursorValueForField(
 function orderFieldKey(field: CompiledOrderField): string {
   return field.kind === "column"
     ? `column:${field.column}:${field.direction}`
-    : `property:${field.propertyId}:${field.direction}`
+    : `property:${field.propertyId}:${field.scalarKind ?? "json"}:${field.direction}`
+}
+
+function compiledPropertyValueExpression(
+  field: Extract<CompiledOrderField, { kind: "property" }>,
+  propertyColumn = "properties"
+): string {
+  return field.scalarKind === "decimal"
+    ? `(${jsonTextExpression(propertyColumn)})::numeric`
+    : jsonValueExpression(propertyColumn)
 }
 
 function columnExpression(column: "object_type_id" | "primary_id", qualifier?: string): string {

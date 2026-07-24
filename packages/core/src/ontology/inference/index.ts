@@ -1,5 +1,18 @@
 import type { FileRef } from "../../blob-storage"
-import type { ObjectFieldSchema, Property, Schema, ValueType } from ".."
+import type {
+  ArraySchema,
+  ComplexSchema,
+  EnumSchema,
+  MapSchema,
+  ObjectFieldSchema,
+  ObjectSchema,
+  PrimitiveSchema,
+  Property,
+  Schema,
+  ValueType,
+  ValueTypeRefSchema,
+} from ".."
+import type { DecimalValue } from "../decimal"
 import type { QuantitativeTypeId, UnitsOf } from "../units"
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
@@ -53,6 +66,38 @@ type InferObjectFields<
   }
 >
 
+interface PrimitiveSchemaValueMap {
+  fileRef: FileRef
+  string: string
+  uuid: string
+  boolean: boolean
+  integer: number
+  double: number
+  decimal: DecimalValue
+  date: Date | string
+  timestamp: Date | string
+}
+
+type InferComplexSchema<
+  TSchema extends ComplexSchema,
+  TValueTypes extends readonly ValueType[],
+> = TSchema extends EnumSchema
+  ? TSchema["values"][number]
+  : TSchema extends ArraySchema
+    ? InferSchema<TSchema["items"], TValueTypes>[]
+    : TSchema extends MapSchema
+      ? Record<string, InferSchema<TSchema["valueSchema"], TValueTypes>>
+      : TSchema extends ObjectSchema
+        ? InferObjectFields<TSchema["properties"], TValueTypes>
+        : never
+
+type InferValueTypeRefSchema<
+  TSchema extends ValueTypeRefSchema,
+  TValueTypes extends readonly ValueType[],
+> = TSchema extends { _resolved: infer TResolved extends Schema }
+  ? InferSchema<TResolved, TValueTypes>
+  : InferValueTypeRef<TSchema["valueTypeId"], TValueTypes>
+
 /**
  * Convert ontology schema definitions into runtime value types.
  *
@@ -61,44 +106,13 @@ type InferObjectFields<
 export type InferSchema<
   TSchema extends Schema,
   TValueTypes extends readonly ValueType[] = [],
-> = TSchema extends "fileRef"
-  ? FileRef
-  : TSchema extends "string"
-    ? string
-    : TSchema extends "uuid"
-      ? string
-      : TSchema extends "boolean"
-        ? boolean
-        : TSchema extends "integer" | "double" | "decimal"
-          ? number
-          : TSchema extends "date" | "timestamp"
-            ? Date | string
-            : TSchema extends { type: "enum"; values: readonly (infer TValue)[] }
-              ? TValue
-              : TSchema extends { type: "array"; items: infer TItems extends Schema }
-                ? InferSchema<TItems, TValueTypes>[]
-                : TSchema extends {
-                      type: "map"
-                      keySchema: "string"
-                      valueSchema: infer TValueSchema extends Schema
-                    }
-                  ? Record<string, InferSchema<TValueSchema, TValueTypes>>
-                  : TSchema extends {
-                        type: "object"
-                        properties: infer TFields extends Record<string, ObjectFieldSchema>
-                      }
-                    ? InferObjectFields<TFields, TValueTypes>
-                    : TSchema extends {
-                          type: "valueTypeRef"
-                          _resolved: infer TResolved extends Schema
-                        }
-                      ? InferSchema<TResolved, TValueTypes>
-                      : TSchema extends {
-                            type: "valueTypeRef"
-                            valueTypeId: infer TValueTypeId extends string
-                          }
-                        ? InferValueTypeRef<TValueTypeId, TValueTypes>
-                        : never
+> = TSchema extends PrimitiveSchema
+  ? PrimitiveSchemaValueMap[TSchema]
+  : TSchema extends ComplexSchema
+    ? InferComplexSchema<TSchema, TValueTypes>
+    : TSchema extends ValueTypeRefSchema
+      ? InferValueTypeRefSchema<TSchema, TValueTypes>
+      : never
 
 /** Property-level value inference with nullable support. */
 export type InferPropertyValue<

@@ -1,4 +1,5 @@
 import type {
+  DecimalValue,
   InferSchemaOrRef,
   ObjectRef,
   ObjectRefSchema,
@@ -39,7 +40,7 @@ export type ActionPrimitiveSchemaValues = {
   boolean: boolean
   integer: number
   double: number
-  decimal: number
+  decimal: DecimalValue
   date: Date
   timestamp: Date
 }

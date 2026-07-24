@@ -1,5 +1,6 @@
 import { isFileRef } from "../../blob-storage/validation"
 import type { ObjectFieldSchema, Schema, ValueType, ValueTypeRefSchema } from ".."
+import { isDecimalString } from "../decimal"
 import { OntologyValidationError } from "../errors"
 
 /** Recursive schema validator used by both object and link property validation. */
@@ -30,10 +31,17 @@ export function validateSchemaValue(
         }
         return
       }
-      case "double":
-      case "decimal": {
-        if (typeof value !== "number" || Number.isNaN(value)) {
+      case "double": {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
           throw new OntologyValidationError(`[Sixb] Property ${path} must be numeric`)
+        }
+        return
+      }
+      case "decimal": {
+        if (!isDecimalString(value)) {
+          throw new OntologyValidationError(
+            `[Sixb] Property ${path} must be an exact decimal string`
+          )
         }
         return
       }

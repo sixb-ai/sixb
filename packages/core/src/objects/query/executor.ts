@@ -29,6 +29,7 @@ import type {
 } from "./ir"
 import { normalizeObjectQuery } from "./normalize"
 import { type ObjectQueryPlan, type ObjectQueryPlanningOptions, planObjectQuery } from "./planner"
+import { compareQueryScalarValues, queryScalarValuesEqual } from "./scalar-values"
 import {
   type ObjectQueryValidationIssue,
   resolveObjectQueryResultShape,
@@ -941,7 +942,7 @@ function compareRowsBySortField(
   if (leftMissing) return 1
   if (rightMissing) return -1
 
-  const comparison = comparePropertyValues(leftValue, rightValue)
+  const comparison = compareQueryScalarValues(leftValue, rightValue, field.scalarKind)
   if (Number.isNaN(comparison)) return 0
   return field.direction === "desc" ? -comparison : comparison
 }
@@ -1023,20 +1024,52 @@ function matchesPredicate(row: ObjectRow, predicate: ObjectQueryPredicate): bool
     case "not":
       return !matchesPredicate(row, predicate.item)
     case "eq":
-      return valuesEqual(row.properties[predicate.propertyId], predicate.value)
+      return queryScalarValuesEqual(
+        row.properties[predicate.propertyId],
+        predicate.value,
+        predicate.scalarKind
+      )
     case "neq":
-      return !valuesEqual(row.properties[predicate.propertyId], predicate.value)
+      return !queryScalarValuesEqual(
+        row.properties[predicate.propertyId],
+        predicate.value,
+        predicate.scalarKind
+      )
     case "lt":
-      return comparePropertyValues(row.properties[predicate.propertyId], predicate.value) < 0
+      return (
+        compareQueryScalarValues(
+          row.properties[predicate.propertyId],
+          predicate.value,
+          predicate.scalarKind
+        ) < 0
+      )
     case "lte":
-      return comparePropertyValues(row.properties[predicate.propertyId], predicate.value) <= 0
+      return (
+        compareQueryScalarValues(
+          row.properties[predicate.propertyId],
+          predicate.value,
+          predicate.scalarKind
+        ) <= 0
+      )
     case "gt":
-      return comparePropertyValues(row.properties[predicate.propertyId], predicate.value) > 0
+      return (
+        compareQueryScalarValues(
+          row.properties[predicate.propertyId],
+          predicate.value,
+          predicate.scalarKind
+        ) > 0
+      )
     case "gte":
-      return comparePropertyValues(row.properties[predicate.propertyId], predicate.value) >= 0
+      return (
+        compareQueryScalarValues(
+          row.properties[predicate.propertyId],
+          predicate.value,
+          predicate.scalarKind
+        ) >= 0
+      )
     case "in":
       return predicate.values.some((value) =>
-        valuesEqual(row.properties[predicate.propertyId], value)
+        queryScalarValuesEqual(row.properties[predicate.propertyId], value, predicate.scalarKind)
       )
     case "exists": {
       const exists =
@@ -1055,7 +1088,7 @@ function containsValue(actual: unknown, expected: unknown): boolean {
   }
 
   if (Array.isArray(actual)) {
-    return actual.some((item) => valuesEqual(item, expected))
+    return actual.some((item) => queryScalarValuesEqual(item, expected))
   }
 
   if (isPlainObject(actual) && typeof expected === "string") {
@@ -1097,7 +1130,7 @@ function compareSortField(
   if (leftMissing) return 1
   if (rightMissing) return -1
 
-  const comparison = comparePropertyValues(leftValue, rightValue)
+  const comparison = compareQueryScalarValues(leftValue, rightValue, field.scalarKind)
   if (Number.isNaN(comparison)) return 0
   return field.direction === "desc" ? -comparison : comparison
 }
@@ -1278,43 +1311,6 @@ function facetValueKey(value: unknown): string {
 
 function facetValueSortKey(value: unknown): string {
   return JSON.stringify(value) ?? String(value)
-}
-
-function valuesEqual(left: unknown, right: unknown): boolean {
-  if (left instanceof Date || right instanceof Date) {
-    const leftTime = dateTime(left)
-    const rightTime = dateTime(right)
-    return leftTime !== null && rightTime !== null && leftTime === rightTime
-  }
-  return Object.is(left, right)
-}
-
-function comparePropertyValues(left: unknown, right: unknown): number {
-  if (left === undefined || right === undefined || left === null || right === null) {
-    return Number.NaN
-  }
-
-  if (typeof left === "number" && typeof right === "number") return left - right
-  if (typeof left === "string" && typeof right === "string") return left.localeCompare(right)
-  if (typeof left === "boolean" && typeof right === "boolean") return Number(left) - Number(right)
-
-  if (left instanceof Date || right instanceof Date) {
-    const leftTime = dateTime(left)
-    const rightTime = dateTime(right)
-    if (leftTime === null || rightTime === null) return Number.NaN
-    return leftTime - rightTime
-  }
-
-  return Number.NaN
-}
-
-function dateTime(value: unknown): number | null {
-  if (value instanceof Date) return value.getTime()
-  if (typeof value === "string" || typeof value === "number") {
-    const time = new Date(value).getTime()
-    return Number.isNaN(time) ? null : time
-  }
-  return null
 }
 
 function rowIdentityKey(row: ObjectRow): string {

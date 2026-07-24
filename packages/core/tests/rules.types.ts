@@ -1,4 +1,4 @@
-import { defineObjectType, defineRule, link, prop } from "../src"
+import { decimal, defineObjectType, defineRule, link, prop } from "../src"
 
 const Document = defineObjectType({
   id: "document",
@@ -13,6 +13,7 @@ const Transaction = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("status", "string"),
     prop("amount", "double"),
+    prop("exactAmount", "decimal"),
   ],
   links: [link("document", Document, { cardinality: "one" })],
 })
@@ -26,6 +27,10 @@ defineRule("transaction.typed-properties")
   .where((tx) => {
     tx.p.status.eq("posted")
     tx.p.amount.gt(0)
+    tx.p.exactAmount.gt(decimal("9007199254740993.01"))
+
+    // @ts-expect-error Decimal predicates do not accept imprecise JS numbers.
+    tx.p.exactAmount.eq(1.1)
 
     // @ts-expect-error unknown properties are not exposed by the subject builder
     tx.p.missing.eq("nope")

@@ -154,7 +154,8 @@ function parseLocation(
 
 function inferPrimitiveType(schema: unknown): "string" | "number" | "boolean" | "fileRef" {
   if (typeof schema === "string") {
-    if (schema === "integer" || schema === "double" || schema === "decimal") return "number"
+    if (schema === "integer" || schema === "double") return "number"
+    if (schema === "decimal") return "string"
     if (schema === "boolean") return "boolean"
     if (schema === "fileRef") return "fileRef"
     return "string"

@@ -12,6 +12,71 @@ const sitePointQuery: ObjectQuery = {
   input: { kind: "start", objectTypeId: "BacnetPoint" },
 }
 
+test("decimal predicates and ordering compile to exact PostgreSQL numeric operations", () => {
+  const compiled = compilePgObjectQuery("project-a", {
+    kind: "sort",
+    fields: [{ kind: "property", propertyId: "amount", direction: "asc", scalarKind: "decimal" }],
+    input: {
+      kind: "filter",
+      predicate: {
+        op: "gt",
+        propertyId: "amount",
+        value: "9007199254740992.0000000000000001",
+        scalarKind: "decimal",
+      },
+      input: { kind: "start", objectTypeId: "Balance" },
+    },
+  })
+
+  expect(compiled.sql).toContain("::numeric >")
+  expect(compiled.sql).toContain("::numeric ASC")
+  expect(compiled.args).toEqual([
+    "project-a",
+    "Balance",
+    "amount",
+    "amount",
+    "9007199254740992.0000000000000001",
+    "amount",
+    "amount",
+    "amount",
+  ])
+})
+
+test("decimal equality and membership compare numeric value rather than JSON text", () => {
+  const equality = compilePgObjectQuery("project-a", {
+    kind: "filter",
+    predicate: {
+      op: "eq",
+      propertyId: "amount",
+      value: "1.2300",
+      scalarKind: "decimal",
+    },
+    input: { kind: "start", objectTypeId: "Balance" },
+  })
+  const membership = compilePgObjectQuery("project-a", {
+    kind: "filter",
+    predicate: {
+      op: "in",
+      propertyId: "amount",
+      values: ["1.23", "9007199254740993"],
+      scalarKind: "decimal",
+    },
+    input: { kind: "start", objectTypeId: "Balance" },
+  })
+
+  expect(equality.sql).toContain("::numeric =")
+  expect(equality.args).toContain("1.2300")
+  expect(membership.sql).toContain("::numeric IN")
+  expect(membership.args).toEqual([
+    "project-a",
+    "Balance",
+    "amount",
+    "amount",
+    "1.23",
+    "9007199254740993",
+  ])
+})
+
 test("count aggregate SQL omits inherited row ordering", () => {
   const compiled = compilePgObjectCountQuery("project-a", sitePointQuery)
 
@@ -192,6 +257,26 @@ test("expand SQL orders a bounded many link by target properties, nulls last", (
     "Room",
     10,
   ])
+})
+
+test("expand SQL orders exact decimal target properties numerically", () => {
+  const compiled = compilePgObjectQuery("project-a", {
+    kind: "expand",
+    input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Account" } },
+    expansions: [
+      {
+        linkId: "balances",
+        direction: "outgoing",
+        cardinality: "many",
+        limit: 5,
+        orderBy: [
+          { kind: "property", propertyId: "amount", direction: "asc", scalarKind: "decimal" },
+        ],
+      },
+    ],
+  })
+
+  expect(compiled.sql).toContain("(tgt_0.properties ->> ($4::text))::numeric ASC")
 })
 
 test("expand SQL nests a child expansion correlated on the parent neighbour", () => {

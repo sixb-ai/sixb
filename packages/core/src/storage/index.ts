@@ -216,6 +216,8 @@ export type {
   ObjectLinkRow,
   ObjectQueryCapabilities,
   ObjectQueryCapabilityMap,
+  ObjectQueryScalarOperation,
+  ObjectQueryScalarOperations,
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,

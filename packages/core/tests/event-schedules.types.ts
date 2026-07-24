@@ -1,5 +1,6 @@
 import type { ObjectRef } from "../src"
 import {
+  decimal,
   defineObjectType,
   defineRule,
   defineSchedule,
@@ -24,6 +25,7 @@ const Invoice = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("status", "string"),
     prop("amount", "double"),
+    prop("exactAmount", "decimal"),
   ],
   links: [
     link("payments", Payment, {
@@ -75,6 +77,10 @@ defineSchedule("invoice.object-updated")
   .where((event) => {
     event.object.p.status.eq("posted")
     event.object.p.amount.gte(500)
+    event.object.p.exactAmount.gte(decimal("9007199254740993.01"))
+
+    // @ts-expect-error Decimal schedule predicates do not accept JS numbers.
+    event.object.p.exactAmount.gte(500)
 
     // @ts-expect-error link event context is not exposed on object trigger conditions in V1
     event.link

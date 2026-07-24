@@ -55,6 +55,7 @@ export type {
   ObjectQueryText,
   ObjectQueryTraverse,
   ObjectQueryVector,
+  QueryScalarKind,
 } from "./ir"
 export { normalizeObjectQuery, normalizeObjectQueryPredicate } from "./normalize"
 export type {

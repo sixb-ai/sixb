@@ -120,6 +120,8 @@ describe("InMemoryObjectStorage", () => {
     expect(capabilities.sortKinds?.relevance).toBe(true)
     expect(capabilities.traversalDirections?.incoming).toBe(true)
     expect(capabilities.setOps?.intersect).toBe(true)
+    expect(capabilities.scalarOperations?.decimal?.equality).toBe(true)
+    expect(capabilities.scalarOperations?.decimal?.ordering).toBe(true)
     expect(objectStorage.queryObjects).toBeDefined()
     expect(objectStorage.countObjects).toBeDefined()
     expect(objectStorage.existsObjects).toBeDefined()

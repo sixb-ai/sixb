@@ -1,4 +1,4 @@
-import type { ObjectQueryCapabilities } from "../../storage"
+import type { ObjectQueryCapabilities, ObjectQueryScalarOperation } from "../../storage"
 import type { ObjectQueryPlanningIssue } from "./errors"
 import type { ObjectExpansion, ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "./ir"
 
@@ -250,7 +250,12 @@ function collectNodeProviderIssues(
       return
     case "expand":
       query.expansions.forEach((expansion, index) => {
-        collectExpansionProviderIssues(expansion, `${path}.expansions[${index}]`, issues)
+        collectExpansionProviderIssues(
+          expansion,
+          `${path}.expansions[${index}]`,
+          capabilities,
+          issues
+        )
       })
       collectNodeProviderIssues(query.input, `${path}.input`, capabilities, issues)
       return
@@ -263,6 +268,7 @@ function collectNodeProviderIssues(
 function collectExpansionProviderIssues(
   expansion: ObjectExpansion,
   path: string,
+  capabilities: ObjectQueryCapabilities,
   issues: ObjectQueryPlanningIssue[]
 ): void {
   if (expansion.cardinality === undefined) {
@@ -274,8 +280,12 @@ function collectExpansionProviderIssues(
     )
   }
 
+  expansion.orderBy?.forEach((field, index) => {
+    collectSortProviderIssues(field, `${path}.orderBy[${index}]`, capabilities, issues)
+  })
+
   expansion.expand?.forEach((nested, index) => {
-    collectExpansionProviderIssues(nested, `${path}.expand[${index}]`, issues)
+    collectExpansionProviderIssues(nested, `${path}.expand[${index}]`, capabilities, issues)
   })
 }
 
@@ -285,6 +295,21 @@ function collectPredicateProviderIssues(
   capabilities: ObjectQueryCapabilities,
   issues: ObjectQueryPlanningIssue[]
 ): void {
+  const scalarOperation = predicateScalarOperation(predicate)
+  if (
+    "scalarKind" in predicate &&
+    predicate.scalarKind !== undefined &&
+    scalarOperation !== undefined &&
+    capabilities.scalarOperations?.[predicate.scalarKind]?.[scalarOperation] !== true
+  ) {
+    addIssue(
+      issues,
+      path,
+      "scalar_operation_not_supported",
+      `Provider does not support ${scalarOperation} for '${predicate.scalarKind}' values`
+    )
+  }
+
   if (capabilities.predicateOps?.[predicate.op] !== true) {
     addIssue(
       issues,
@@ -309,12 +334,43 @@ function collectPredicateProviderIssues(
   }
 }
 
+function predicateScalarOperation(
+  predicate: ObjectQueryPredicate
+): ObjectQueryScalarOperation | undefined {
+  switch (predicate.op) {
+    case "eq":
+    case "neq":
+    case "in":
+      return "equality"
+    case "lt":
+    case "lte":
+    case "gt":
+    case "gte":
+      return "ordering"
+    default:
+      return undefined
+  }
+}
+
 function collectSortProviderIssues(
   field: ObjectQuerySortField,
   path: string,
   capabilities: ObjectQueryCapabilities,
   issues: ObjectQueryPlanningIssue[]
 ): void {
+  if (
+    field.kind === "property" &&
+    field.scalarKind !== undefined &&
+    capabilities.scalarOperations?.[field.scalarKind]?.ordering !== true
+  ) {
+    addIssue(
+      issues,
+      path,
+      "scalar_operation_not_supported",
+      `Provider does not support ordering for '${field.scalarKind}' values`
+    )
+  }
+
   if (capabilities.sortKinds?.[field.kind] === true) return
   addIssue(
     issues,
