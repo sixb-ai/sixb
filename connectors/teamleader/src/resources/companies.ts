@@ -6,6 +6,7 @@ import type {
   TeamleaderCompanyListItem,
   TeamleaderListResponse,
   TeamleaderSingleResponse,
+  TeamleaderTypeAndId,
 } from "../types"
 
 export function createCompaniesResource(
@@ -28,6 +29,28 @@ export function createCompaniesResource(
         body,
         requestOptions
       )
+    },
+    add(body, requestOptions) {
+      return request<TeamleaderSingleResponse<TeamleaderTypeAndId<"company">>>(
+        "/companies.add",
+        body,
+        requestOptions
+      )
+    },
+    update(body, requestOptions) {
+      return request<void>("/companies.update", body, requestOptions)
+    },
+    delete(body, requestOptions) {
+      return request<void>("/companies.delete", body, requestOptions)
+    },
+    tag(body, requestOptions) {
+      return request<void>("/companies.tag", body, requestOptions)
+    },
+    untag(body, requestOptions) {
+      return request<void>("/companies.untag", body, requestOptions)
+    },
+    uploadLogo(body, requestOptions) {
+      return request<void>("/companies.uploadLogo", body, requestOptions)
     },
   }
 

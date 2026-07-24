@@ -14,6 +14,7 @@ V1 covers:
 - Contacts
 - Contact actions
 - Companies
+- Company actions
 - Custom field definitions
 
 The connector expects an already valid Teamleader access token. It does not implement OAuth,
@@ -110,6 +111,12 @@ client.contacts.uploadAvatar(...)
 client.companies.list(...)
 client.companies.listAll(...)
 client.companies.info(...)
+client.companies.add(...)
+client.companies.update(...)
+client.companies.delete(...)
+client.companies.tag(...)
+client.companies.untag(...)
+client.companies.uploadLogo(...)
 
 client.customFieldDefinitions.list(...)
 client.customFieldDefinitions.listAll(...)
