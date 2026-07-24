@@ -1,5 +1,6 @@
 import { mkdirSync } from "node:fs"
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -371,9 +372,23 @@ function bindSftpHandlers(
         sftp.status(reqid, mapErrorToStatus(error))
       }
     })
-    .on("MKDIR", async (reqid, path) => {
+    .on("SETSTAT", async (reqid, path, attrs) => {
+      if (typeof attrs.mode !== "number") {
+        sftp.status(reqid, utils.sftp.STATUS_CODE.OP_UNSUPPORTED)
+        return
+      }
+
       try {
-        await mkdir(resolveRemotePath(rootDir, path))
+        await chmod(resolveRemotePath(rootDir, path), attrs.mode)
+        sftp.status(reqid, utils.sftp.STATUS_CODE.OK)
+      } catch (error) {
+        sftp.status(reqid, mapErrorToStatus(error))
+      }
+    })
+    .on("MKDIR", async (reqid, path, attrs) => {
+      try {
+        const options = typeof attrs.mode === "number" ? { mode: attrs.mode } : undefined
+        await mkdir(resolveRemotePath(rootDir, path), options)
         sftp.status(reqid, utils.sftp.STATUS_CODE.OK)
       } catch (error) {
         sftp.status(reqid, mapErrorToStatus(error))

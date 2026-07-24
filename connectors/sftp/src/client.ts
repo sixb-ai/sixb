@@ -1,8 +1,14 @@
 import { posix } from "node:path"
 import { Readable } from "node:stream"
-import type { Callback, SFTPWrapper, ReadStream as Ssh2ReadStream } from "ssh2"
+import type { Callback, InputAttributes, SFTPWrapper, ReadStream as Ssh2ReadStream } from "ssh2"
 import { openSftpReadAheadStream } from "./read-ahead"
-import type { SftpClient, SftpOpenOptions, SftpStats, SftpWriteData } from "./types"
+import type {
+  SftpClient,
+  SftpMkdirOptions,
+  SftpOpenOptions,
+  SftpStats,
+  SftpWriteData,
+} from "./types"
 
 type SftpClientOptions = {
   readonly readAheadRequests: number
@@ -24,8 +30,8 @@ export function createSftpClient(
         sftpClient.exists(path, (exists) => resolve(exists))
       })
     },
-    ensureDir(path) {
-      return ensureSftpDirectory(sftpClient, path)
+    ensureDir(path, options) {
+      return ensureSftpDirectory(sftpClient, path, options)
     },
     open(path, openOptions) {
       return openSftpStream(sftpClient, path, clientOptions, openOptions)
@@ -42,8 +48,12 @@ export function createSftpClient(
     delete(path) {
       return callVoid((callback) => sftpClient.unlink(path, callback))
     },
-    mkdir(path) {
-      return callVoid((callback) => sftpClient.mkdir(path, callback))
+    mkdir(path, options) {
+      return createSftpDirectory(sftpClient, path, options)
+    },
+    chmod(path, mode) {
+      assertSftpMode(mode, "chmod")
+      return callVoid((callback) => sftpClient.chmod(path, mode, callback))
     },
     rmdir(path) {
       return callVoid((callback) => sftpClient.rmdir(path, callback))
@@ -139,7 +149,13 @@ function abortError(signal: AbortSignal): Error {
     : new DOMException("The operation was aborted", "AbortError")
 }
 
-async function ensureSftpDirectory(sftpClient: SFTPWrapper, path: string): Promise<void> {
+async function ensureSftpDirectory(
+  sftpClient: SFTPWrapper,
+  path: string,
+  options?: SftpMkdirOptions
+): Promise<void> {
+  const attributes = mkdirAttributes(options, "ensureDir")
+
   for (const directoryPath of directoryHierarchy(path)) {
     const exists = await new Promise<boolean>((resolve) => {
       sftpClient.exists(directoryPath, (value) => resolve(value))
@@ -151,7 +167,7 @@ async function ensureSftpDirectory(sftpClient: SFTPWrapper, path: string): Promi
     }
 
     try {
-      await callVoid((callback) => sftpClient.mkdir(directoryPath, callback))
+      await sendSftpMkdir(sftpClient, directoryPath, attributes)
     } catch (error) {
       const stats = await statIfExists(sftpClient, directoryPath)
 
@@ -167,6 +183,46 @@ async function ensureSftpDirectory(sftpClient: SFTPWrapper, path: string): Promi
 
       throw error
     }
+  }
+}
+
+function createSftpDirectory(
+  sftpClient: SFTPWrapper,
+  path: string,
+  options: SftpMkdirOptions | undefined
+): Promise<void> {
+  return sendSftpMkdir(sftpClient, path, mkdirAttributes(options, "mkdir"))
+}
+
+function sendSftpMkdir(
+  sftpClient: SFTPWrapper,
+  path: string,
+  attributes: InputAttributes | undefined
+): Promise<void> {
+  return callVoid((callback) => {
+    if (attributes) {
+      sftpClient.mkdir(path, attributes, callback)
+      return
+    }
+    sftpClient.mkdir(path, callback)
+  })
+}
+
+function mkdirAttributes(
+  options: SftpMkdirOptions | undefined,
+  operation: "mkdir" | "ensureDir"
+): InputAttributes | undefined {
+  if (options?.mode === undefined) {
+    return undefined
+  }
+
+  assertSftpMode(options.mode, operation)
+  return { mode: options.mode }
+}
+
+function assertSftpMode(mode: number, operation: "chmod" | "mkdir" | "ensureDir"): void {
+  if (!Number.isSafeInteger(mode) || mode < 0 || mode > 0o7777) {
+    throw new Error(`[SixbSftp] ${operation} mode must be an integer between 0o0000 and 0o7777.`)
   }
 }
 

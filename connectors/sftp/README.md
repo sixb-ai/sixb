@@ -37,6 +37,28 @@ const fileRef = await blobs.put({ body, expectedSizeBytes: size, signal })
 `read(...)` returns a `Buffer` and remains useful when the complete file is intentionally needed in
 memory.
 
+### Directory permissions
+
+`mkdir(...)` and `ensureDir(...)` accept optional POSIX permission bits. `ensureDir(...)` applies
+the requested mode only to path segments created by that call and never changes existing directory
+permissions:
+
+```ts
+await client.mkdir("/exports/private", { mode: 0o700 })
+await client.ensureDir("/exports/shared/2026", { mode: 0o770 })
+```
+
+The SFTP server can restrict a requested creation mode through its umask or ACL policy. Use
+`stat(...)` when the effective mode is a required postcondition. Use `chmod(...)` only when an
+existing path must be changed explicitly:
+
+```ts
+await client.chmod("/exports/shared", 0o770)
+const effectiveMode = (await client.stat("/exports/shared")).mode & 0o7777
+```
+
+Modes must be integers between `0o0000` and `0o7777`.
+
 ### Stream read-ahead
 
 `readAheadRequests` controls how many ordered SFTP reads may be in flight for each streamed file.
