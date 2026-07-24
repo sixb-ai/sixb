@@ -47,6 +47,20 @@ export class WorkflowNodeRunner {
     })
 
     if (outcome.status === "waiting") {
+      if ("agentExecution" in outcome) {
+        if (outcome.agentExecution.nodeRunId !== nodeRun.id || outcome.nodeRun.id !== nodeRun.id) {
+          throw new WorkflowWorkerError(
+            `[SixbWorkflowWorker] Workflow '${input.context.workflow.id}' agent node '${input.node.id}' parked a different node run.`
+          )
+        }
+        await this.dependencies.recorder.recordParkedNode({
+          node: outcome.nodeRun,
+          run: outcome.run,
+          waitingAt: outcome.waitingAt,
+        })
+        return { status: "waiting", run: outcome.run }
+      }
+
       if (outcome.intervention.nodeRunId !== nodeRun.id) {
         throw new WorkflowWorkerError(
           `[SixbWorkflowWorker] Workflow '${input.context.workflow.id}' intervention node '${input.node.id}' returned an intervention for a different node run.`

@@ -1,14 +1,17 @@
 import { isActionDefinition } from "../actions"
+import { isAgentDefinition } from "../agents"
 import type { SchemaOrRef, ValueType } from "../ontology"
 import { validateSchemaOrRefValue } from "../ontology"
 import type { ScheduleDefinition } from "../schedules"
 import { WorkflowDefinitionError, WorkflowValidationError } from "./errors"
 import type {
+  AgentStepDefinition,
   InterventionDefinition,
   InterventionFieldConfig,
   InterventionResponseConfig,
   StepDefinition,
   WorkflowActionNodeDefinition,
+  WorkflowAgentNodeDefinition,
   WorkflowDefinition,
   WorkflowInterventionNodeDefinition,
   WorkflowNodeDefinition,
@@ -18,7 +21,7 @@ import type {
 
 export function assertNonEmpty(
   value: string,
-  subject: "Step" | "Workflow" | "Intervention",
+  subject: "Step" | "Agent step" | "Workflow" | "Intervention",
   field: string
 ): void {
   if (!value.trim()) {
@@ -34,6 +37,18 @@ export function isStepDefinition(value: unknown): value is StepDefinition {
     isRecord(value.input) &&
     isRecord(value.output) &&
     typeof value.handler === "function"
+  )
+}
+
+export function isAgentStepDefinition(value: unknown): value is AgentStepDefinition {
+  return (
+    isRecord(value) &&
+    value.kind === "agentStep" &&
+    typeof value.id === "string" &&
+    isAgentDefinition(value.agent) &&
+    isRecord(value.input) &&
+    isRecord(value.output) &&
+    typeof value.prompt === "function"
   )
 }
 
@@ -96,6 +111,7 @@ export function validateWorkflowsAtStartup(options: {
   workflows: readonly WorkflowDefinition[]
   registeredSchedules: ReadonlyMap<string, ScheduleDefinition>
   registeredActionIds: ReadonlySet<string>
+  registeredAgentIds: ReadonlySet<string>
 }): readonly WorkflowDefinition[] {
   for (const workflow of options.workflows) {
     validateWorkflowDefinition(workflow)
@@ -113,6 +129,11 @@ export function validateWorkflowsAtStartup(options: {
       if (node.type === "action" && !options.registeredActionIds.has(node.action.id)) {
         throw new WorkflowDefinitionError(
           `Workflow "${workflow.id}" references unknown action "${node.action.id}". Add it to 'actions' in createSixb() or export it from 'actions/'.`
+        )
+      }
+      if (node.type === "agent" && !options.registeredAgentIds.has(node.agentStep.agent.id)) {
+        throw new WorkflowDefinitionError(
+          `Workflow "${workflow.id}" references unknown agent "${node.agentStep.agent.id}". Add it to 'agents' in createSixb() or export it from 'agents/'.`
         )
       }
     }
@@ -266,6 +287,11 @@ function validateWorkflowNodeDefinition(workflowId: string, node: WorkflowNodeDe
     return
   }
 
+  if (node.type === "agent") {
+    validateAgentNodeDefinition(workflowId, node)
+    return
+  }
+
   if (node.type === "intervention") {
     validateInterventionNodeDefinition(workflowId, node)
     return
@@ -277,6 +303,62 @@ function validateWorkflowNodeDefinition(workflowId: string, node: WorkflowNodeDe
   }
 
   throw new WorkflowDefinitionError(`Workflow "${workflowId}" contains an unsupported node type.`)
+}
+
+function validateAgentNodeDefinition(workflowId: string, node: WorkflowAgentNodeDefinition): void {
+  if (typeof node.id !== "string" || !node.id.trim()) {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" contains an agent step with an empty id.`
+    )
+  }
+  if (typeof node.key !== "string" || !node.key.trim()) {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" contains agent step "${node.id}" with an empty derived key.`
+    )
+  }
+  if (!isAgentStepDefinition(node.agentStep)) {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" contains an invalid agent node "${node.id}".`
+    )
+  }
+  if (node.id !== node.agentStep.id) {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" agent node id "${node.id}" does not match agent step definition id "${node.agentStep.id}".`
+    )
+  }
+  if (node.mapper !== undefined && typeof node.mapper !== "function") {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" agent node "${node.id}" mapper must be a function.`
+    )
+  }
+}
+
+export function validateWorkflowAgentStepInput(params: {
+  readonly workflowId: string
+  readonly agentStep: AgentStepDefinition
+  readonly value: unknown
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): Readonly<Record<string, unknown>> {
+  return validateWorkflowContractRecord({
+    shape: params.agentStep.input,
+    value: params.value,
+    path: `Workflow "${params.workflowId}" agent step "${params.agentStep.id}" input`,
+    valueTypesById: params.valueTypesById,
+  })
+}
+
+export function validateWorkflowAgentStepOutput(params: {
+  readonly workflowId: string
+  readonly agentStep: AgentStepDefinition
+  readonly value: unknown
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): Readonly<Record<string, unknown>> {
+  return validateWorkflowContractRecord({
+    shape: params.agentStep.output,
+    value: params.value,
+    path: `Workflow "${params.workflowId}" agent step "${params.agentStep.id}" output`,
+    valueTypesById: params.valueTypesById,
+  })
 }
 
 function validateStepNodeDefinition(workflowId: string, node: WorkflowStepNodeDefinition): void {

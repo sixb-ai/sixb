@@ -678,6 +678,14 @@ export {
 // ── Workflows ───────────────────────────────────────────────
 
 export type {
+  AgentStepBuilder,
+  AgentStepDefinition,
+  AgentStepOutputBuilder,
+  AgentStepPrompt,
+  AgentStepPromptBuilder,
+  AgentStepPromptContext,
+  InferAgentStepInput,
+  InferAgentStepOutput,
   InferInterventionInput,
   InferInterventionResponse,
   InferStepInput,
@@ -703,6 +711,7 @@ export type {
   WorkflowActionDefinition,
   WorkflowActionMapper,
   WorkflowActionMapperResult,
+  WorkflowAgentNodeDefinition,
   WorkflowBuilder,
   WorkflowChainDefinition,
   WorkflowDefinition,
@@ -718,10 +727,12 @@ export type {
   WorkflowTriggerDefinition,
 } from "./workflows"
 export {
+  defineAgentStep,
   defineIntervention,
   defineWorkflow,
   defineWorkflowStep,
   interventionField,
+  isAgentStepDefinition,
   isInterventionDefinition,
   isStepDefinition,
   isWorkflowDefinition,

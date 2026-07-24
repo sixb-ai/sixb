@@ -1,9 +1,13 @@
 import {
   defineAction,
+  defineAgent,
+  defineAgentStep,
   defineIntervention,
   defineObjectType,
   defineWorkflow,
   defineWorkflowStep,
+  type InferAgentStepInput,
+  type InferAgentStepOutput,
   type InferInterventionResponse,
   type InferSchemaOrRef,
   interventionField,
@@ -29,6 +33,31 @@ const Invoice = defineObjectType({
   name: "Invoice",
   properties: [prop("id", "string", { required: true, primary: true })],
 })
+
+const resolverAgent = defineAgent("resolver", {
+  name: "Resolver",
+  model: {} as Parameters<typeof defineAgent>[1]["model"],
+  instructions: "Resolve invoices.",
+})
+
+const resolveInvoiceWithAgent = defineAgentStep("resolve-invoice", resolverAgent)
+  .input({ transaction: ref(Transaction) })
+  .output({ invoice: ref(Invoice), confidence: "double", reason: "string" })
+  .prompt(({ input }) => {
+    const transaction: ObjectRef<"Transaction"> = input.transaction
+    // @ts-expect-error prompts only receive the declared step input
+    input.invoice
+    return `Resolve ${transaction.primaryId}`
+  })
+
+type ResolveAgentInput = InferAgentStepInput<typeof resolveInvoiceWithAgent>
+type _resolveAgentInput = Expect<
+  Equal<ResolveAgentInput, { transaction: ObjectRef<"Transaction"> }>
+>
+type ResolveAgentOutput = InferAgentStepOutput<typeof resolveInvoiceWithAgent>
+type _resolveAgentOutput = Expect<
+  Equal<ResolveAgentOutput, { invoice: ObjectRef<"Invoice">; confidence: number; reason: string }>
+>
 
 const workflowInput = {
   transaction: ref(Transaction),
@@ -229,6 +258,7 @@ const workflow = defineWorkflow("reconcile-transaction")
       confidence,
     }
   })
+
   .then(attachInvoice, ({ input, steps }) => ({
     subject: input.transaction,
     params: {
@@ -252,6 +282,22 @@ const workflow = defineWorkflow("reconcile-transaction")
       invoice: steps.reviewInvoiceMatch.invoice,
     }
   })
+
+defineWorkflow("agent-direct-dataflow")
+  .input(workflowInput)
+  .then(resolveInvoiceWithAgent)
+  .then(persistReview, ({ steps }) => ({ invoice: steps.resolveInvoice.invoice }))
+
+defineWorkflow("agent-mapped-dataflow")
+  .input({ invoice: ref(Invoice) })
+  .then(resolveInvoiceWithAgent, () => ({
+    transaction: { objectTypeId: "Transaction", primaryId: "transaction:1" } as const,
+  }))
+
+defineWorkflow("agent-invalid-direct-dataflow")
+  .input({ invoice: ref(Invoice) })
+  // @ts-expect-error current data must satisfy the agent step input contract
+  .then(resolveInvoiceWithAgent)
 
 defineWorkflow("intervention-direct-dataflow")
   .input(workflowInput)
@@ -331,8 +377,8 @@ defineWorkflow("step-mapper-alias")
 defineWorkflow("bad-action-target")
   .input(workflowInput)
   .then(findBestInvoice)
-  // @ts-expect-error action subject must be a Transaction ref
   .then(attachInvoice, ({ steps }) => ({
+    // @ts-expect-error action subject must be a Transaction ref
     subject: steps.findBestInvoice.invoice,
     params: {
       invoice: steps.findBestInvoice.invoice,
@@ -342,18 +388,18 @@ defineWorkflow("bad-action-target")
 defineWorkflow("bad-action-param")
   .input(workflowInput)
   .then(findBestInvoice)
-  // @ts-expect-error invoice param must be an Invoice ref
   .then(attachInvoice, ({ input }) => ({
     subject: input.transaction,
     params: {
+      // @ts-expect-error invoice param must be an Invoice ref
       invoice: input.transaction,
     },
   }))
 
 defineWorkflow("bad-global-action-subject")
   .input(workflowInput)
-  // @ts-expect-error global action mappers must not return subject
   .then(createInvoice, ({ input }) => ({
+    // @ts-expect-error global action mappers must not return subject
     subject: input.transaction,
     params: {
       amount: 250,

@@ -1,4 +1,5 @@
 export {
+  defineAgentStep,
   defineIntervention,
   defineWorkflow,
   defineWorkflowStep,
@@ -14,6 +15,8 @@ export { requestWorkflowRun } from "./request"
 export { WorkflowsRuntime } from "./runtime"
 export {
   snapshotWorkflowActionInput,
+  snapshotWorkflowAgentStepInput,
+  snapshotWorkflowAgentStepOutput,
   snapshotWorkflowInput,
   snapshotWorkflowInterventionDefaultResponse,
   snapshotWorkflowInterventionInput,
@@ -22,7 +25,15 @@ export {
   snapshotWorkflowStepOutput,
 } from "./snapshot"
 export type {
+  AgentStepBuilder,
+  AgentStepDefinition,
+  AgentStepOutputBuilder,
+  AgentStepPrompt,
+  AgentStepPromptBuilder,
+  AgentStepPromptContext,
   DerivedWorkflowNodeKey,
+  InferAgentStepInput,
+  InferAgentStepOutput,
   InferInterventionInput,
   InferInterventionResponse,
   InferStepInput,
@@ -48,6 +59,7 @@ export type {
   WorkflowActionMapper,
   WorkflowActionMapperResult,
   WorkflowActionNodeDefinition,
+  WorkflowAgentNodeDefinition,
   WorkflowBuilder,
   WorkflowChainDefinition,
   WorkflowDefinition,
@@ -65,9 +77,12 @@ export type {
   WorkflowTriggerDefinition,
 } from "./types"
 export {
+  isAgentStepDefinition,
   isInterventionDefinition,
   isStepDefinition,
   isWorkflowDefinition,
+  validateWorkflowAgentStepInput,
+  validateWorkflowAgentStepOutput,
   validateWorkflowDefinition,
   validateWorkflowInput,
   validateWorkflowInterventionDefaultResponse,

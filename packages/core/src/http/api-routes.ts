@@ -262,6 +262,20 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: false,
   },
   {
+    operationId: "cancelWorkflowRun",
+    method: "POST",
+    path: "/api/workflow-runs/:runId/cancel",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "getWorkflowAgentNodeExecution",
+    method: "GET",
+    path: "/api/workflow-runs/:runId/nodes/:nodeKey/agent-execution",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
     operationId: "getWorkflowRunFileContent",
     method: "GET",
     path: "/api/workflow-runs/:runId/files/content",

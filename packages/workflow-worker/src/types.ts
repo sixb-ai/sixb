@@ -8,9 +8,11 @@ import type {
 } from "@sixb/core"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
 import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
+import type { WorkflowRunResumeCause } from "@sixb/core/queues"
 import type {
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
+  WorkflowRunExecution,
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
@@ -35,12 +37,14 @@ export interface WorkflowJob {
   readonly workflowId: string
   readonly input?: Readonly<Record<string, unknown>>
   readonly source?: WorkflowRunSource
+  readonly execution?: WorkflowRunExecution
 }
 
 export interface WorkflowResumeJob {
   readonly id: string
   readonly workflowId: string
-  readonly pendingInterventionId: string
+  readonly resume: WorkflowRunResumeCause
+  readonly execution?: WorkflowRunExecution
 }
 
 export type WorkflowRunFailureReporter = (error: unknown, run: WorkflowRunRecord) => void

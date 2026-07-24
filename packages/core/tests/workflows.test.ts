@@ -1,13 +1,18 @@
 import { describe, expect, test } from "bun:test"
+import type { LanguageModelV4 } from "@ai-sdk/provider"
 import {
   defineAction,
+  defineAgent,
+  defineAgentStep,
   defineIntervention,
   defineObjectType,
   defineSchedule,
+  defineValueType,
   defineWorkflow,
   defineWorkflowStep,
   events,
   interventionField,
+  isAgentStepDefinition,
   isInterventionDefinition,
   isStepDefinition,
   isWorkflowDefinition,
@@ -17,9 +22,11 @@ import {
   ref,
   Sixb,
   stringEnum,
+  valueTypeRef,
   type WorkflowDefinition,
   WorkflowDefinitionError,
 } from "../src"
+import { schemaRecordToJsonSchema } from "../src/ontology/internal"
 import { validateWorkflowDefinition } from "../src/workflows"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -34,6 +41,17 @@ const Invoice = defineObjectType({
   name: "Invoice",
   properties: [prop("id", "string", { required: true, primary: true })],
 })
+
+const resolverAgent = defineAgent("invoice-resolver", {
+  name: "Invoice resolver",
+  model: {} as LanguageModelV4,
+  instructions: "Resolve invoices from transaction evidence.",
+})
+
+const resolveInvoice = defineAgentStep("resolve-invoice", resolverAgent)
+  .input({ transaction: ref(Transaction) })
+  .output({ invoice: ref(Invoice), confidence: "double", reason: "string" })
+  .prompt(({ input }) => `Resolve transaction '${input.transaction.primaryId}'.`)
 
 type RuntimeWorkflowNode = {
   readonly type: string
@@ -132,6 +150,102 @@ describe("defineWorkflowStep", () => {
   test("rejects empty step ids", () => {
     expect(() => runtimeDefineWorkflowStep("")).toThrow(WorkflowDefinitionError)
     expect(() => runtimeDefineWorkflowStep("")).toThrow("Step id must not be empty")
+  })
+})
+
+describe("defineAgentStep", () => {
+  test("builds an inert structured agent step", () => {
+    expect(resolveInvoice.kind).toBe("agentStep")
+    expect(resolveInvoice.agent).toBe(resolverAgent)
+    expect(resolveInvoice.input).toEqual({
+      transaction: { type: "objectRef", objectTypeId: "Transaction" },
+    })
+    expect(resolveInvoice.output).toEqual({
+      invoice: { type: "objectRef", objectTypeId: "Invoice" },
+      confidence: "double",
+      reason: "string",
+    })
+    expect(
+      resolveInvoice.prompt({
+        input: { transaction: { objectTypeId: "Transaction", primaryId: "txn_1" } },
+      })
+    ).toContain("txn_1")
+    expect(isAgentStepDefinition(resolveInvoice)).toBe(true)
+  })
+})
+
+describe("schemaRecordToJsonSchema", () => {
+  test("converts workflow output contracts, including refs and reusable value types", () => {
+    const MatchEvidence = defineValueType({
+      id: "MatchEvidence",
+      name: "Match evidence",
+      schema: {
+        type: "object",
+        properties: {
+          source: { schema: "string", required: true },
+          notes: { schema: { type: "array", items: "string" } },
+        },
+      },
+    })
+
+    expect(
+      schemaRecordToJsonSchema({
+        shape: {
+          project: ref(Invoice),
+          evidence: valueTypeRef(MatchEvidence.id),
+          scores: { type: "map", keySchema: "string", valueSchema: "double" },
+          attachment: "fileRef",
+        },
+        valueTypesById: new Map([[MatchEvidence.id, MatchEvidence]]),
+      })
+    ).toEqual({
+      type: "object",
+      properties: {
+        project: {
+          type: "object",
+          properties: {
+            objectTypeId: { type: "string", const: "Invoice" },
+            primaryId: { type: "string" },
+          },
+          required: ["objectTypeId", "primaryId"],
+          additionalProperties: false,
+        },
+        evidence: {
+          type: "object",
+          properties: {
+            source: { type: "string" },
+            notes: { type: "array", items: { type: "string" } },
+          },
+          required: ["source"],
+          additionalProperties: false,
+        },
+        scores: { type: "object", additionalProperties: { type: "number" } },
+        attachment: {
+          type: "object",
+          properties: {
+            blobId: { type: "string" },
+            digest: { type: "string", pattern: "^sha256:[a-fA-F0-9]{64}$" },
+            sizeBytes: { type: "integer", minimum: 0 },
+            fileName: { type: "string" },
+            mediaType: { type: "string" },
+            logicalPath: { type: "string" },
+          },
+          required: ["blobId", "digest", "sizeBytes"],
+          additionalProperties: false,
+        },
+      },
+      required: ["project", "evidence", "scores", "attachment"],
+      additionalProperties: false,
+    })
+  })
+
+  test("rejects unresolved reusable value types", () => {
+    expect(() =>
+      schemaRecordToJsonSchema({
+        shape: { evidence: valueTypeRef("MissingEvidence") },
+        valueTypesById: new Map(),
+      })
+    ).toThrow("unknown value type 'MissingEvidence'")
   })
 })
 
@@ -342,6 +456,19 @@ describe("defineWorkflow", () => {
     })
   })
 
+  test("stores agent nodes as first-class workflow nodes", () => {
+    const workflow = defineWorkflow("resolve-with-agent")
+      .input({ transaction: ref(Transaction) })
+      .then(resolveInvoice)
+
+    expect(workflow.nodes[0]).toMatchObject({
+      type: "agent",
+      id: "resolve-invoice",
+      key: "resolveInvoice",
+      agentStep: resolveInvoice,
+    })
+  })
+
   test("rejects duplicate node ids", () => {
     expect(() => {
       runtimeDefineWorkflow("duplicate-node-id")
@@ -509,6 +636,28 @@ describe("Sixb workflow registration", () => {
     })
 
     expect(sixb.workflows.getById("review-match")).toBe(workflow)
+  })
+
+  test("requires every workflow agent to be registered", () => {
+    const workflow = defineWorkflow("agent-resolution")
+      .input({ transaction: ref(Transaction) })
+      .then(resolveInvoice)
+
+    expect(() => {
+      new Sixb({
+        ontology: [Transaction, Invoice],
+        workflows: [workflow],
+        ...createTestRuntimeDeps(),
+      })
+    }).toThrow('references unknown agent "invoice-resolver"')
+
+    const sixb = new Sixb({
+      ontology: [Transaction, Invoice],
+      agents: [resolverAgent],
+      workflows: [workflow],
+      ...createTestRuntimeDeps(),
+    })
+    expect(sixb.workflows.getById(workflow.id)).toBe(workflow)
   })
 
   test("rejects duplicate workflow ids", () => {

@@ -277,10 +277,6 @@ export default function ReviewDetailPage() {
                         message: message.trim(),
                         ...(reviewerNote.trim() ? { reviewerNote: reviewerNote.trim() } : {}),
                       },
-                      submittedBy: {
-                        principalType: "user",
-                        principalId: "acme-reviewer",
-                      },
                     },
                   })
                 }}
@@ -295,12 +291,7 @@ export default function ReviewDetailPage() {
                 onClick={() => {
                   cancelReview.mutate({
                     path,
-                    body: {
-                      cancelledBy: {
-                        principalType: "user",
-                        principalId: "acme-reviewer",
-                      },
-                    },
+                    body: {},
                   })
                 }}
               >

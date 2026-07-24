@@ -151,6 +151,12 @@
       "import": "./dist/objects/index.js",
       "default": "./dist/objects/index.js"
     },
+    "./internal/ontology": {
+      "types": "./dist/ontology/internal.d.ts",
+      "bun": "./src/ontology/internal.ts",
+      "import": "./dist/ontology/internal.js",
+      "default": "./dist/ontology/internal.js"
+    },
     "./internal/query": {
       "types": "./dist/objects/query/index.d.ts",
       "bun": "./src/objects/query/index.ts",

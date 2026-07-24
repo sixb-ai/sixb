@@ -4,6 +4,7 @@ import type {
   InferActionParams,
   ObjectActionDefinition,
 } from "../actions"
+import type { AgentDefinition } from "../agents/types"
 import type { Principal } from "../auth"
 import type { JsonValue } from "../json"
 import type { Logger } from "../logging"
@@ -18,11 +19,13 @@ type SchemaOrRefInput<TShape extends Record<string, unknown>> = {
   readonly [K in keyof TShape]: TShape[K] extends SchemaOrRef ? TShape[K] : never
 }
 type InferSchemaOrRefRecord<TShape extends Record<string, unknown>> = Simplify<{
-  [K in keyof TShape]: TShape[K] extends SchemaOrRef ? InferSchemaOrRef<TShape[K]> : never
+  -readonly [K in keyof TShape]: TShape[K] extends SchemaOrRef ? InferSchemaOrRef<TShape[K]> : never
 }>
 type WordSeparator = "-" | "_" | "." | " "
 declare const stepInputValueType: unique symbol
 declare const stepOutputValueType: unique symbol
+declare const agentStepInputValueType: unique symbol
+declare const agentStepOutputValueType: unique symbol
 declare const interventionInputValueType: unique symbol
 declare const interventionResponseValueType: unique symbol
 
@@ -88,6 +91,78 @@ export interface StepBuilder<TId extends string> {
     input: TInput & SchemaOrRefInput<TInput>
   ): StepOutputBuilder<TId, TInput>
 }
+
+export interface AgentStepPromptContext<TInput extends Record<string, unknown>> {
+  readonly input: TInput
+}
+
+export type AgentStepPrompt<TInput extends Record<string, unknown>> = (
+  ctx: AgentStepPromptContext<TInput>
+) => string | Promise<string>
+
+export interface AgentStepDefinition<
+  TId extends string = string,
+  TAgent extends AgentDefinition = AgentDefinition,
+  TInput extends Record<string, unknown> = Record<string, unknown>,
+  TOutput extends Record<string, unknown> = Record<string, unknown>,
+  TInputValue extends Record<string, unknown> = Record<string, unknown>,
+  TOutputValue extends Record<string, unknown> = Record<string, unknown>,
+> {
+  readonly kind: "agentStep"
+  readonly id: TId
+  readonly agent: TAgent
+  readonly input: TInput
+  readonly output: TOutput
+  readonly prompt: AgentStepPrompt<Record<string, unknown>>
+  readonly [agentStepInputValueType]?: TInputValue
+  readonly [agentStepOutputValueType]?: TOutputValue
+}
+
+export interface AgentStepPromptBuilder<
+  TId extends string,
+  TAgent extends AgentDefinition,
+  TInput extends Record<string, unknown>,
+  TOutput extends Record<string, unknown>,
+> {
+  prompt(
+    prompt: AgentStepPrompt<InferSchemaOrRefRecord<TInput>>
+  ): AgentStepDefinition<
+    TId,
+    TAgent,
+    TInput,
+    TOutput,
+    InferSchemaOrRefRecord<TInput>,
+    InferSchemaOrRefRecord<TOutput>
+  >
+}
+
+export interface AgentStepOutputBuilder<
+  TId extends string,
+  TAgent extends AgentDefinition,
+  TInput extends Record<string, unknown>,
+> {
+  output<const TOutput extends Record<string, unknown>>(
+    output: TOutput & SchemaOrRefInput<TOutput>
+  ): AgentStepPromptBuilder<TId, TAgent, TInput, TOutput>
+}
+
+export interface AgentStepBuilder<TId extends string, TAgent extends AgentDefinition> {
+  input<const TInput extends Record<string, unknown>>(
+    input: TInput & SchemaOrRefInput<TInput>
+  ): AgentStepOutputBuilder<TId, TAgent, TInput>
+}
+
+export type InferAgentStepInput<TStep extends AgentStepDefinition> = TStep extends {
+  readonly [agentStepInputValueType]?: infer TInputValue
+}
+  ? NonNullable<TInputValue>
+  : never
+
+export type InferAgentStepOutput<TStep extends AgentStepDefinition> = TStep extends {
+  readonly [agentStepOutputValueType]?: infer TOutputValue
+}
+  ? NonNullable<TOutputValue>
+  : never
 
 export type WorkflowScheduleMapper<
   TEvent = unknown,
@@ -384,10 +459,22 @@ export interface WorkflowInterventionNodeDefinition<
   readonly mapper?: TMapper
 }
 
+export interface WorkflowAgentNodeDefinition<
+  TAgentStep extends AgentStepDefinition = AgentStepDefinition,
+  TMapper = unknown,
+> {
+  readonly type: "agent"
+  readonly id: TAgentStep["id"]
+  readonly key: DerivedWorkflowNodeKey<TAgentStep["id"]>
+  readonly agentStep: TAgentStep
+  readonly mapper?: TMapper
+}
+
 export type WorkflowNodeDefinition =
   | WorkflowStepNodeDefinition
   | WorkflowActionNodeDefinition
   | WorkflowInterventionNodeDefinition
+  | WorkflowAgentNodeDefinition
 
 type AddStepOutput<TSteps extends WorkflowStepOutputs, TStep extends StepDefinition> = Simplify<
   TSteps & {
@@ -404,6 +491,15 @@ type AddInterventionOutput<
   }
 >
 
+type AddAgentStepOutput<
+  TSteps extends WorkflowStepOutputs,
+  TAgentStep extends AgentStepDefinition,
+> = Simplify<
+  TSteps & {
+    [K in DerivedWorkflowNodeKey<TAgentStep["id"]>]: InferAgentStepOutput<TAgentStep>
+  }
+>
+
 type DirectDataflowGuard<TCurrent extends Record<string, unknown>, TStep extends StepDefinition> =
   TCurrent extends InferStepInput<TStep> ? unknown : never
 
@@ -411,6 +507,11 @@ type DirectInterventionDataflowGuard<
   TCurrent extends Record<string, unknown>,
   TIntervention extends InterventionDefinition,
 > = TCurrent extends InferInterventionInput<TIntervention> ? unknown : never
+
+type DirectAgentStepDataflowGuard<
+  TCurrent extends Record<string, unknown>,
+  TAgentStep extends AgentStepDefinition,
+> = TCurrent extends InferAgentStepInput<TAgentStep> ? unknown : never
 
 export interface WorkflowDefinition<
   TId extends string = string,
@@ -460,6 +561,35 @@ export interface WorkflowChainDefinition<
     >,
     InferStepOutput<TStep>,
     AddStepOutput<TSteps, TStep>
+  >
+  then<const TAgentStep extends AgentStepDefinition>(
+    agentStep: TAgentStep & DirectAgentStepDataflowGuard<TCurrent, TAgentStep>
+  ): WorkflowChainDefinition<
+    TId,
+    TInput,
+    Append<TNodes, WorkflowAgentNodeDefinition<TAgentStep, undefined>>,
+    InferAgentStepOutput<TAgentStep>,
+    AddAgentStepOutput<TSteps, TAgentStep>
+  >
+  then<const TAgentStep extends AgentStepDefinition>(
+    agentStep: TAgentStep,
+    mapper: WorkflowStepMapper<
+      InferSchemaOrRefRecord<TInput>,
+      TSteps,
+      InferAgentStepInput<TAgentStep>
+    >
+  ): WorkflowChainDefinition<
+    TId,
+    TInput,
+    Append<
+      TNodes,
+      WorkflowAgentNodeDefinition<
+        TAgentStep,
+        WorkflowStepMapper<InferSchemaOrRefRecord<TInput>, TSteps, InferAgentStepInput<TAgentStep>>
+      >
+    >,
+    InferAgentStepOutput<TAgentStep>,
+    AddAgentStepOutput<TSteps, TAgentStep>
   >
   then<const TIntervention extends InterventionDefinition>(
     intervention: TIntervention & DirectInterventionDataflowGuard<TCurrent, TIntervention>
@@ -557,6 +687,34 @@ export interface WorkflowDraftBuilder<
     ],
     InferStepOutput<TStep>,
     AddStepOutput<TSteps, TStep>
+  >
+  then<const TAgentStep extends AgentStepDefinition>(
+    agentStep: TAgentStep & DirectAgentStepDataflowGuard<TCurrent, TAgentStep>
+  ): WorkflowChainDefinition<
+    TId,
+    TInput,
+    [WorkflowAgentNodeDefinition<TAgentStep, undefined>],
+    InferAgentStepOutput<TAgentStep>,
+    AddAgentStepOutput<TSteps, TAgentStep>
+  >
+  then<const TAgentStep extends AgentStepDefinition>(
+    agentStep: TAgentStep,
+    mapper: WorkflowStepMapper<
+      InferSchemaOrRefRecord<TInput>,
+      TSteps,
+      InferAgentStepInput<TAgentStep>
+    >
+  ): WorkflowChainDefinition<
+    TId,
+    TInput,
+    [
+      WorkflowAgentNodeDefinition<
+        TAgentStep,
+        WorkflowStepMapper<InferSchemaOrRefRecord<TInput>, TSteps, InferAgentStepInput<TAgentStep>>
+      >,
+    ],
+    InferAgentStepOutput<TAgentStep>,
+    AddAgentStepOutput<TSteps, TAgentStep>
   >
   then<const TIntervention extends InterventionDefinition>(
     intervention: TIntervention & DirectInterventionDataflowGuard<TCurrent, TIntervention>

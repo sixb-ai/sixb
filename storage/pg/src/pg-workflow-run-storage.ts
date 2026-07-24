@@ -1,20 +1,32 @@
-import type { WorkflowRunSource } from "@sixb/core"
+import type { Principal, WorkflowRunSource } from "@sixb/core"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
+  CancelWorkflowAgentNodeRunInput,
+  ConfirmWorkflowAgentNodeRunExecutionOwnershipInput,
+  ConfirmWorkflowRunExecutionOwnershipInput,
+  CreateWorkflowAgentNodeRunInput,
+  FinishWorkflowAgentNodeRunInput,
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
   ListLatestWorkflowRunsInput,
   ListLatestWorkflowRunsResult,
+  ListWorkflowAgentNodeRunsInput,
+  ListWorkflowAgentNodeRunsResult,
   ListWorkflowNodeRunsInput,
   ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,
   ListWorkflowRunsResult,
   QueueWorkflowRunInput,
+  ReclaimWorkflowAgentNodeRunInput,
+  ReclaimWorkflowRunInput,
   ResumeWorkflowRunInput,
+  StartWorkflowAgentNodeRunInput,
   StartWorkflowNodeRunInput,
   StartWorkflowRunInput,
   WaitWorkflowNodeRunInput,
   WaitWorkflowRunInput,
+  WorkflowAgentNodeRunRecord,
+  WorkflowAgentNodeRunStorage,
   WorkflowNodeRunRecord,
   WorkflowNodeRunStorage,
   WorkflowRunRecord,
@@ -29,9 +41,11 @@ import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgWorkflowRunStorage implements WorkflowRunStorage {
   readonly nodes: PgWorkflowNodeRunStorage
+  readonly agentNodes: PgWorkflowAgentNodeRunStorage
 
   constructor(private readonly sql: PgStoreClient) {
     this.nodes = new PgWorkflowNodeRunStorage(sql)
+    this.agentNodes = new PgWorkflowAgentNodeRunStorage(sql)
   }
 
   async queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord> {
@@ -47,7 +61,10 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           input,
           queued_at,
           started_at,
-          source
+          source,
+          requested_by_principal_type,
+          requested_by_principal_id,
+          attempt
         ) VALUES (
           ${input.projectId},
           ${input.id},
@@ -56,7 +73,10 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           ${serializeRecord(input.input)}::text::jsonb,
           ${queuedAt},
           ${queuedAt},
-          ${input.source ? JSON.stringify(input.source) : null}::text::jsonb
+          ${input.source ? JSON.stringify(input.source) : null}::text::jsonb,
+          ${input.requestedByPrincipal?.type ?? "system"},
+          ${input.requestedByPrincipal?.id ?? "system"},
+          ${0}
         )
         RETURNING *
       `
@@ -106,7 +126,10 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
             source = COALESCE(
               source,
               ${input.source ? JSON.stringify(input.source) : null}::text::jsonb
-            )
+            ),
+            attempt = attempt + 1,
+            execution_token = ${input.execution?.token ?? null},
+            execution_queue_lease_expires_at = ${input.execution?.queueLeaseExpiresAt ?? null}
           WHERE project_id = ${input.projectId} AND id = ${input.id}
           RETURNING *
         `
@@ -123,7 +146,12 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
             status,
             input,
             started_at,
-            source
+            source,
+            requested_by_principal_type,
+            requested_by_principal_id,
+            attempt,
+            execution_token,
+            execution_queue_lease_expires_at
           ) VALUES (
             ${input.projectId},
             ${input.id},
@@ -131,7 +159,12 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
             ${"running"},
             ${serializeRecord(input.input)}::text::jsonb,
             ${startedAt},
-            ${input.source ? JSON.stringify(input.source) : null}::text::jsonb
+            ${input.source ? JSON.stringify(input.source) : null}::text::jsonb,
+            ${input.requestedByPrincipal?.type ?? "system"},
+            ${input.requestedByPrincipal?.id ?? "system"},
+            ${1},
+            ${input.execution?.token ?? null},
+            ${input.execution?.queueLeaseExpiresAt ?? null}
           )
           RETURNING *
         `
@@ -146,6 +179,41 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 
         throw error
       }
+    })
+  }
+
+  async reclaim(input: ReclaimWorkflowRunInput): Promise<WorkflowRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const existing = await lockWorkflowRun(tx, input.projectId, input.id, "running")
+      const [updated] = await tx<WorkflowRunDatabaseRow[]>`
+        UPDATE workflow_runs SET
+          attempt = ${Number(existing.attempt) + 1},
+          execution_token = ${input.execution.token},
+          execution_queue_lease_expires_at = ${input.execution.queueLeaseExpiresAt}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `
+      return rowToWorkflowRunRecord(updated)
+    })
+  }
+
+  async confirmExecutionOwnership(
+    input: ConfirmWorkflowRunExecutionOwnershipInput
+  ): Promise<WorkflowRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const existing = await lockWorkflowRun(tx, input.projectId, input.id, "running")
+      assertWorkflowRunExecutionOwnership(existing, input.executionToken)
+      const current = existing.execution_queue_lease_expires_at
+        ? new Date(existing.execution_queue_lease_expires_at)
+        : input.queueLeaseExpiresAt
+      const [updated] = await tx<WorkflowRunDatabaseRow[]>`
+        UPDATE workflow_runs SET execution_queue_lease_expires_at = ${new Date(
+          Math.max(current.getTime(), input.queueLeaseExpiresAt.getTime())
+        )}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `
+      return rowToWorkflowRunRecord(updated)
     })
   }
 
@@ -168,6 +236,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           `[SixbPg] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${existing.status}'.`
         )
       }
+      assertWorkflowRunExecutionOwnership(existing, input.executionToken)
 
       const [updated] =
         input.status === "succeeded"
@@ -176,7 +245,9 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
               SET
                 status = ${input.status},
                 finished_at = ${input.finishedAt ?? new Date()},
-                error = ${null}
+                error = ${null},
+                execution_token = ${null},
+                execution_queue_lease_expires_at = ${null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
             `
@@ -185,7 +256,9 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
               SET
                 status = ${input.status},
                 finished_at = ${input.finishedAt ?? new Date()},
-                error = ${input.error ?? null}
+                error = ${input.error ?? null},
+                execution_token = ${null},
+                execution_queue_lease_expires_at = ${null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
             `
@@ -213,13 +286,16 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           `[SixbPg] Workflow run '${input.id}' for project '${input.projectId}' must be running.`
         )
       }
+      assertWorkflowRunExecutionOwnership(existing, input.executionToken)
 
       const [updated] = await tx<WorkflowRunDatabaseRow[]>`
         UPDATE workflow_runs
         SET
           status = ${"waiting"},
           finished_at = ${null},
-          error = ${null}
+          error = ${null},
+          execution_token = ${null},
+          execution_queue_lease_expires_at = ${null}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
@@ -253,7 +329,10 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
         SET
           status = ${"running"},
           finished_at = ${null},
-          error = ${null}
+          error = ${null},
+          attempt = attempt + 1,
+          execution_token = ${input.execution?.token ?? null},
+          execution_queue_lease_expires_at = ${input.execution?.queueLeaseExpiresAt ?? null}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
@@ -334,6 +413,175 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
   }
 }
 
+export class PgWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorage {
+  constructor(private readonly sql: PgStoreClient) {}
+
+  async create(input: CreateWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
+    try {
+      const [row] = await this.sql<WorkflowAgentNodeRunDatabaseRow[]>`
+        INSERT INTO workflow_agent_node_runs (
+          project_id, node_run_id, agent_id, status, prompt, attempt, created_at
+        ) VALUES (
+          ${input.projectId}, ${input.nodeRunId}, ${input.agentId}, ${"queued"},
+          ${input.prompt}, ${0}, ${input.createdAt ?? new Date()}
+        ) RETURNING *
+      `
+      return rowToWorkflowAgentNodeRunRecord(row)
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new WorkflowRunError(
+          `[SixbPg] Agent execution already exists for workflow node run '${input.nodeRunId}'.`
+        )
+      }
+      throw error
+    }
+  }
+
+  async start(input: StartWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const row = await lockWorkflowAgentNodeRun(tx, input.projectId, input.nodeRunId, "queued")
+      const [updated] = await tx<WorkflowAgentNodeRunDatabaseRow[]>`
+        UPDATE workflow_agent_node_runs SET
+          status = ${"running"},
+          execution_principal_type = ${input.executionPrincipal?.type ?? null},
+          execution_principal_id = ${input.executionPrincipal?.id ?? null},
+          model_id = ${input.modelId ?? null},
+          attempt = ${1},
+          execution_token = ${input.execution.token},
+          execution_queue_lease_expires_at = ${input.execution.queueLeaseExpiresAt},
+          started_at = ${input.startedAt ?? new Date()}
+        WHERE project_id = ${row.project_id} AND node_run_id = ${row.node_run_id}
+        RETURNING *
+      `
+      return rowToWorkflowAgentNodeRunRecord(updated)
+    })
+  }
+
+  async reclaim(input: ReclaimWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const row = await lockWorkflowAgentNodeRun(tx, input.projectId, input.nodeRunId, "running")
+      const [updated] = await tx<WorkflowAgentNodeRunDatabaseRow[]>`
+        UPDATE workflow_agent_node_runs SET
+          attempt = ${Number(row.attempt) + 1},
+          execution_token = ${input.execution.token},
+          execution_queue_lease_expires_at = ${input.execution.queueLeaseExpiresAt}
+        WHERE project_id = ${input.projectId} AND node_run_id = ${input.nodeRunId}
+        RETURNING *
+      `
+      return rowToWorkflowAgentNodeRunRecord(updated)
+    })
+  }
+
+  async confirmExecutionOwnership(
+    input: ConfirmWorkflowAgentNodeRunExecutionOwnershipInput
+  ): Promise<WorkflowAgentNodeRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const row = await lockWorkflowAgentNodeRun(tx, input.projectId, input.nodeRunId, "running")
+      assertWorkflowAgentNodeOwnership(row, input.executionToken)
+      const currentLease = row.execution_queue_lease_expires_at
+        ? new Date(row.execution_queue_lease_expires_at)
+        : input.queueLeaseExpiresAt
+      const [updated] = await tx<WorkflowAgentNodeRunDatabaseRow[]>`
+        UPDATE workflow_agent_node_runs SET
+          execution_queue_lease_expires_at = ${new Date(
+            Math.max(currentLease.getTime(), input.queueLeaseExpiresAt.getTime())
+          )}
+        WHERE project_id = ${input.projectId} AND node_run_id = ${input.nodeRunId}
+        RETURNING *
+      `
+      return rowToWorkflowAgentNodeRunRecord(updated)
+    })
+  }
+
+  async finish(input: FinishWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const row = await lockWorkflowAgentNodeRun(tx, input.projectId, input.nodeRunId, "running")
+      assertWorkflowAgentNodeOwnership(row, input.executionToken)
+      const [updated] = await tx<WorkflowAgentNodeRunDatabaseRow[]>`
+        UPDATE workflow_agent_node_runs SET
+          status = ${input.status},
+          model_id = COALESCE(${input.modelId ?? null}, model_id),
+          finish_reason = ${input.finishReason ?? null},
+          usage = ${input.usage ? JSON.stringify(input.usage) : null}::text::jsonb,
+          trace = ${input.trace ? JSON.stringify(input.trace) : null}::text::jsonb,
+          diagnostics = ${input.diagnostics ? JSON.stringify(input.diagnostics) : null}::text::jsonb,
+          error = ${input.status === "succeeded" ? null : (input.error ?? null)},
+          execution_token = ${null},
+          execution_queue_lease_expires_at = ${null},
+          completed_at = ${input.completedAt ?? new Date()}
+        WHERE project_id = ${input.projectId} AND node_run_id = ${input.nodeRunId}
+        RETURNING *
+      `
+      return rowToWorkflowAgentNodeRunRecord(updated)
+    })
+  }
+
+  async cancel(input: CancelWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const [row] = await tx<WorkflowAgentNodeRunDatabaseRow[]>`
+        SELECT * FROM workflow_agent_node_runs
+        WHERE project_id = ${input.projectId} AND node_run_id = ${input.nodeRunId}
+        FOR UPDATE
+      `
+      if (!row) {
+        throw new WorkflowRunError(
+          `[SixbPg] Agent workflow node run '${input.nodeRunId}' not found.`
+        )
+      }
+      if (row.status !== "queued" && row.status !== "running") {
+        throw new WorkflowRunError(
+          `[SixbPg] Agent workflow node run '${input.nodeRunId}' cannot be cancelled from status '${row.status}'.`
+        )
+      }
+      const [updated] = await tx<WorkflowAgentNodeRunDatabaseRow[]>`
+        UPDATE workflow_agent_node_runs SET
+          status = ${"cancelled"},
+          error = ${input.error ?? null},
+          execution_token = ${null},
+          execution_queue_lease_expires_at = ${null},
+          completed_at = ${input.completedAt ?? new Date()}
+        WHERE project_id = ${input.projectId} AND node_run_id = ${input.nodeRunId}
+        RETURNING *
+      `
+      return rowToWorkflowAgentNodeRunRecord(updated)
+    })
+  }
+
+  async getByNodeRunId(params: {
+    projectId: string
+    nodeRunId: string
+  }): Promise<WorkflowAgentNodeRunRecord | null> {
+    const [row] = await this.sql<WorkflowAgentNodeRunDatabaseRow[]>`
+      SELECT * FROM workflow_agent_node_runs
+      WHERE project_id = ${params.projectId} AND node_run_id = ${params.nodeRunId}
+    `
+    return row ? rowToWorkflowAgentNodeRunRecord(row) : null
+  }
+
+  async list(input: ListWorkflowAgentNodeRunsInput): Promise<ListWorkflowAgentNodeRunsResult> {
+    if (hasEmptyStatuses(input)) return { runs: [], total: 0, hasMore: false }
+    const whereClauses = ["project_id = $1"]
+    const params: SqlParameter[] = [input.projectId]
+    let index = 2
+    if (input.agentId) {
+      whereClauses.push(`agent_id = $${index++}`)
+      params.push(input.agentId)
+    }
+    index = appendRunListFilters(whereClauses, params, index, input)
+    const result = await queryRunList<WorkflowAgentNodeRunDatabaseRow>({
+      sql: this.sql,
+      tableName: "workflow_agent_node_runs",
+      whereClauses,
+      params,
+      nextIndex: index,
+      order: input.order,
+      limit: input.limit,
+      offset: input.offset,
+    })
+    return { ...result, runs: result.rows.map(rowToWorkflowAgentNodeRunRecord) }
+  }
+}
+
 export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
   constructor(private readonly sql: PgStoreClient) {}
 
@@ -358,6 +606,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
           `[SixbPg] Workflow run '${input.workflowRunId}' for project '${input.projectId}' must be running.`
         )
       }
+      assertWorkflowRunExecutionOwnership(workflowRun, input.executionToken)
 
       if (workflowRun.workflow_id !== input.workflowId) {
         throw new WorkflowRunError(
@@ -421,6 +670,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
           `[SixbPg] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
+      await assertWorkflowNodeParentExecutionOwnership(tx, existing, input.executionToken)
 
       if (existing.status !== "running" && existing.status !== "waiting") {
         throw new WorkflowRunError(
@@ -468,6 +718,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
           `[SixbPg] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
+      await assertWorkflowNodeParentExecutionOwnership(tx, existing, input.executionToken)
 
       if (existing.status !== "running") {
         throw new WorkflowRunError(
@@ -579,6 +830,19 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     error: row.error ?? undefined,
     source: parseSource(row.source),
+    requestedByPrincipal: {
+      type: row.requested_by_principal_type,
+      id: row.requested_by_principal_id,
+    },
+    attempt: Number(row.attempt),
+    ...(row.execution_token && row.execution_queue_lease_expires_at
+      ? {
+          execution: {
+            token: row.execution_token,
+            queueLeaseExpiresAt: new Date(row.execution_queue_lease_expires_at),
+          },
+        }
+      : {}),
   }
 }
 
@@ -621,7 +885,7 @@ function canFinishWorkflowRun(
 ): boolean {
   return (
     current === "running" ||
-    (current === "waiting" && next === "cancelled") ||
+    (current === "waiting" && next !== "succeeded") ||
     (current === "queued" && next !== "succeeded")
   )
 }
@@ -637,6 +901,11 @@ interface WorkflowRunDatabaseRow {
   finished_at: Date | string | null
   error: string | null
   source: WorkflowRunSource | string | null
+  requested_by_principal_type: Principal["type"]
+  requested_by_principal_id: string
+  attempt: number | string
+  execution_token: string | null
+  execution_queue_lease_expires_at: Date | string | null
 }
 
 interface WorkflowNodeRunDatabaseRow {
@@ -654,4 +923,143 @@ interface WorkflowNodeRunDatabaseRow {
   finished_at: Date | string | null
   output: WorkflowIOSnapshot | string | null
   error: string | null
+}
+
+interface WorkflowAgentNodeRunDatabaseRow {
+  project_id: string
+  node_run_id: string
+  agent_id: string
+  status: WorkflowAgentNodeRunRecord["status"]
+  prompt: string
+  execution_principal_type: "serviceAccount" | null
+  execution_principal_id: string | null
+  model_id: string | null
+  finish_reason: WorkflowAgentNodeRunRecord["finishReason"] | null
+  usage: WorkflowAgentNodeRunRecord["usage"] | string | null
+  trace: WorkflowAgentNodeRunRecord["trace"] | string | null
+  diagnostics: WorkflowAgentNodeRunRecord["diagnostics"] | string | null
+  error: string | null
+  attempt: number | string
+  execution_token: string | null
+  execution_queue_lease_expires_at: Date | string | null
+  created_at: Date | string
+  started_at: Date | string | null
+  completed_at: Date | string | null
+}
+
+async function lockWorkflowAgentNodeRun(
+  sql: PgStoreClient,
+  projectId: string,
+  nodeRunId: string,
+  status: WorkflowAgentNodeRunRecord["status"]
+): Promise<WorkflowAgentNodeRunDatabaseRow> {
+  const [row] = await sql<WorkflowAgentNodeRunDatabaseRow[]>`
+    SELECT * FROM workflow_agent_node_runs
+    WHERE project_id = ${projectId} AND node_run_id = ${nodeRunId}
+    FOR UPDATE
+  `
+  if (!row) {
+    throw new WorkflowRunError(
+      `[SixbPg] Agent workflow node run '${nodeRunId}' not found for project '${projectId}'.`
+    )
+  }
+  if (row.status !== status) {
+    throw new WorkflowRunError(
+      `[SixbPg] Agent workflow node run '${nodeRunId}' must be ${status} (status '${row.status}').`
+    )
+  }
+  return row
+}
+
+function assertWorkflowAgentNodeOwnership(
+  row: WorkflowAgentNodeRunDatabaseRow,
+  token: string
+): void {
+  if (row.execution_token !== token) {
+    throw new WorkflowRunError(
+      `[SixbPg] Execution token is no longer current on agent workflow node run '${row.node_run_id}'.`
+    )
+  }
+}
+
+function rowToWorkflowAgentNodeRunRecord(
+  row: WorkflowAgentNodeRunDatabaseRow
+): WorkflowAgentNodeRunRecord {
+  return {
+    projectId: row.project_id,
+    nodeRunId: row.node_run_id,
+    agentId: row.agent_id,
+    status: row.status,
+    prompt: row.prompt,
+    ...(row.execution_principal_type && row.execution_principal_id
+      ? {
+          executionPrincipal: {
+            type: row.execution_principal_type,
+            id: row.execution_principal_id,
+          },
+        }
+      : {}),
+    ...(row.model_id ? { modelId: row.model_id } : {}),
+    ...(row.finish_reason ? { finishReason: row.finish_reason } : {}),
+    ...(row.usage ? { usage: parseJson(row.usage) } : {}),
+    ...(row.trace ? { trace: parseJson(row.trace) } : {}),
+    ...(row.diagnostics ? { diagnostics: parseJson(row.diagnostics) } : {}),
+    ...(row.error ? { error: row.error } : {}),
+    attempt: Number(row.attempt),
+    ...(row.execution_token && row.execution_queue_lease_expires_at
+      ? {
+          execution: {
+            token: row.execution_token,
+            queueLeaseExpiresAt: new Date(row.execution_queue_lease_expires_at),
+          },
+        }
+      : {}),
+    createdAt: new Date(row.created_at),
+    ...(row.started_at ? { startedAt: new Date(row.started_at) } : {}),
+    ...(row.completed_at ? { completedAt: new Date(row.completed_at) } : {}),
+  }
+}
+
+function parseJson<T>(value: T | string): T {
+  return typeof value === "string" ? (JSON.parse(value) as T) : value
+}
+
+async function lockWorkflowRun(
+  sql: PgStoreClient,
+  projectId: string,
+  id: string,
+  status: WorkflowRunRecord["status"]
+): Promise<WorkflowRunDatabaseRow> {
+  const [row] = await sql<WorkflowRunDatabaseRow[]>`
+    SELECT * FROM workflow_runs WHERE project_id = ${projectId} AND id = ${id} FOR UPDATE
+  `
+  if (!row) throw new WorkflowRunError(`[SixbPg] Workflow run '${id}' not found.`)
+  if (row.status !== status) {
+    throw new WorkflowRunError(
+      `[SixbPg] Workflow run '${id}' must be ${status} (status '${row.status}').`
+    )
+  }
+  return row
+}
+
+function assertWorkflowRunExecutionOwnership(row: WorkflowRunDatabaseRow, token?: string): void {
+  if (row.execution_token !== (token ?? null)) {
+    throw new WorkflowRunError(
+      `[SixbPg] Execution token is no longer current on workflow run '${row.id}'.`
+    )
+  }
+}
+
+async function assertWorkflowNodeParentExecutionOwnership(
+  sql: PgStoreClient,
+  node: WorkflowNodeRunDatabaseRow,
+  token?: string
+): Promise<void> {
+  const [run] = await sql<WorkflowRunDatabaseRow[]>`
+    SELECT * FROM workflow_runs
+    WHERE project_id = ${node.project_id} AND id = ${node.workflow_run_id}
+    FOR UPDATE
+  `
+  if (!run) throw new WorkflowRunError(`[SixbPg] Parent workflow run was not found.`)
+  assertWorkflowRunExecutionOwnership(run, token)
 }

@@ -1,5 +1,6 @@
 import { client } from "@sixb/client"
 import {
+  getWorkflowAgentNodeExecutionOptions,
   getWorkflowOptions,
   getWorkflowRunOptions,
   listWorkflowRunsOptions,
@@ -26,6 +27,7 @@ import {
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  Bot,
   Box,
   CalendarClock,
   Check,
@@ -64,6 +66,7 @@ import {
   formatRunStartedDate,
   isActiveRunStatus,
   runTimeLabel,
+  type WorkflowAgentNodeExecution,
   type WorkflowDetail,
   type WorkflowNode,
   type WorkflowNodeStatus,
@@ -379,8 +382,21 @@ interface InterventionNodeData extends BaseNodeData {
   inputCount: number
   responseCount: number
 }
+interface AgentNodeData extends BaseNodeData {
+  kind: "agent"
+  index: number
+  label: string
+  agentId: string
+  inputCount: number
+  outputCount: number
+}
 
-type WorkflowNodeData = StartNodeData | StepNodeData | ActionNodeData | InterventionNodeData
+type WorkflowNodeData =
+  | StartNodeData
+  | StepNodeData
+  | ActionNodeData
+  | InterventionNodeData
+  | AgentNodeData
 type WorkflowFlowNode = Node<WorkflowNodeData>
 
 function fieldCount(shape: Readonly<Record<string, unknown>> | undefined): number {
@@ -405,6 +421,16 @@ function toNodeData(node: WorkflowNode, index: number): WorkflowNodeData {
       label: node.key,
       inputCount: fieldCount(node.input),
       responseCount: fieldCount(node.response),
+    }
+  }
+  if (node.type === "agent") {
+    return {
+      kind: "agent",
+      index,
+      label: node.key,
+      agentId: node.agentId,
+      inputCount: fieldCount(node.input),
+      outputCount: fieldCount(node.output),
     }
   }
   return {
@@ -556,6 +582,13 @@ function NodeMetaLine({ data }: { data: WorkflowNodeData }) {
       </p>
     )
   }
+  if (data.kind === "agent") {
+    return (
+      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+        {data.agentId} · {data.inputCount} in · {data.outputCount} out
+      </p>
+    )
+  }
   return (
     <p className="mt-0.5 truncate text-[11px] tabular-nums text-muted-foreground">
       {data.inputCount} in · {data.outputCount} out
@@ -571,6 +604,7 @@ function kindLabel(kind: WorkflowNodeData["kind"]): string {
   if (kind === "start") return "Start"
   if (kind === "action") return "Action"
   if (kind === "intervention") return "Human"
+  if (kind === "agent") return "Agent"
   return "Step"
 }
 
@@ -579,6 +613,7 @@ function NodeKindIcon({ kind }: { kind: WorkflowNodeData["kind"] }) {
   if (kind === "start") return <Play className={className} />
   if (kind === "action") return <Zap className={className} />
   if (kind === "intervention") return <UserCheck className={className} />
+  if (kind === "agent") return <Bot className={className} />
   return <Workflow className={className} />
 }
 
@@ -981,6 +1016,13 @@ function nodeHeader(node: WorkflowNode): {
       description: node.description ?? "Waits for a human response.",
     }
   }
+  if (node.type === "agent") {
+    return {
+      title: node.key,
+      kind: "agent",
+      description: `Runs agent ${node.agentId} with structured output.`,
+    }
+  }
   return { title: node.key, kind: "step", description: "Transforms workflow data." }
 }
 
@@ -1050,6 +1092,31 @@ function NodePanelSections({ node }: { node: WorkflowNode }) {
           icon={<ArrowUpFromLine className={SECTION_ICON} />}
         >
           <SchemaShape fields={node.response} emptyLabel="No response fields" />
+        </PanelBlock>
+      </>
+    )
+  }
+  if (node.type === "agent") {
+    return (
+      <>
+        <PanelBlock label="Agent" icon={<Bot className={SECTION_ICON} />}>
+          <span className="rounded-md bg-muted/60 px-2 py-1 font-mono text-xs text-foreground">
+            {node.agentId}
+          </span>
+        </PanelBlock>
+        <PanelBlock
+          label="Input"
+          count={fieldCount(node.input)}
+          icon={<ArrowDownToLine className={SECTION_ICON} />}
+        >
+          <SchemaShape fields={node.input} emptyLabel="No input fields" />
+        </PanelBlock>
+        <PanelBlock
+          label="Structured output"
+          count={fieldCount(node.output)}
+          icon={<ArrowUpFromLine className={SECTION_ICON} />}
+        >
+          <SchemaShape fields={node.output} emptyLabel="No output fields" />
         </PanelBlock>
       </>
     )
@@ -1349,6 +1416,15 @@ function RunNodePanel({
       downloadUrl: workflowNodeFileContentUrl({ ...input, disposition: "attachment" }),
     }
   }
+  const agentExecutionQuery = useQuery({
+    ...getWorkflowAgentNodeExecutionOptions({
+      path: {
+        runId: runNode?.workflowRunId ?? "",
+        nodeKey: runNode?.nodeKey ?? "",
+      },
+    }),
+    enabled: runNode?.nodeType === "agent",
+  })
 
   return (
     <>
@@ -1382,6 +1458,15 @@ function RunNodePanel({
                 <span>Finished {formatRelativeTime(runNode.finishedAt)}</span>
               ) : null}
             </div>
+
+            {runNode.nodeType === "agent" ? (
+              <AgentExecutionPanel
+                summary={runNode.agentExecution}
+                execution={agentExecutionQuery.data}
+                loading={agentExecutionQuery.isLoading}
+                failed={agentExecutionQuery.isError}
+              />
+            ) : null}
 
             {runNode.nodeType === "intervention" && runNode.status === "waiting" ? (
               <WorkflowInterventionPanel node={runNode} />
@@ -1425,5 +1510,63 @@ function RunNodePanel({
         )}
       </PanelScroll>
     </>
+  )
+}
+
+function AgentExecutionPanel({
+  summary,
+  execution,
+  loading,
+  failed,
+}: {
+  summary: WorkflowRunNode["agentExecution"]
+  execution: WorkflowAgentNodeExecution | undefined
+  loading: boolean
+  failed: boolean
+}) {
+  const data = execution ?? summary
+  return (
+    <PanelBlock label="Agent execution" icon={<Bot className={SECTION_ICON} />}>
+      {data ? (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <RunStat label="Agent" value={data.agentId} />
+            <RunStat label="Attempt" value={String(data.attempt)} />
+            <RunStat label="Status" value={data.status} />
+            <RunStat label="Model" value={data.modelId ?? "—"} />
+          </div>
+          {data.usage ? (
+            <StructuredValue value={data.usage} emptyLabel="No token usage reported" />
+          ) : null}
+          {execution?.prompt ? (
+            <div>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Prompt
+              </p>
+              <pre className="whitespace-pre-wrap break-words rounded-lg bg-muted/30 p-3 font-mono text-xs text-foreground">
+                {execution.prompt}
+              </pre>
+            </div>
+          ) : null}
+          {execution?.trace ? (
+            <div>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Trace
+              </p>
+              <StructuredValue value={execution.trace} emptyLabel="No trace" />
+            </div>
+          ) : null}
+          {execution?.error ? (
+            <p className="break-words text-sm text-destructive">{execution.error}</p>
+          ) : null}
+        </div>
+      ) : loading ? (
+        <p className="text-xs text-muted-foreground">Loading agent execution...</p>
+      ) : failed ? (
+        <p className="text-xs text-destructive">Could not load agent execution.</p>
+      ) : (
+        <p className="text-xs text-muted-foreground">No agent execution record.</p>
+      )}
+    </PanelBlock>
   )
 }

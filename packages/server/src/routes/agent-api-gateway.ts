@@ -105,12 +105,23 @@ async function resolveAgentRunAuthState(
   sixb: Sixb<readonly OntologySource[]>,
   input: { readonly runId: string; readonly capability: string }
 ) {
-  const storage = sixb.storage.agents
-  if (!storage) {
+  const agentStorage = sixb.storage.agents
+  const workflowRuns = sixb.storage.workflowRuns
+  if (!agentStorage && !workflowRuns) {
     return jsonError(403, "Agent API gateway is not configured for this runtime.")
   }
 
-  const run = await storage.runs.getById({ projectId: sixb.id, id: input.runId })
+  const conversationalRun = await agentStorage?.runs.getById({
+    projectId: sixb.id,
+    id: input.runId,
+  })
+  const workflowRun = conversationalRun
+    ? null
+    : await workflowRuns?.agentNodes.getByNodeRunId({
+        projectId: sixb.id,
+        nodeRunId: input.runId,
+      })
+  const run = conversationalRun ?? workflowRun
   if (
     !run ||
     run.status !== "running" ||
@@ -118,7 +129,7 @@ async function resolveAgentRunAuthState(
     run.execution.queueLeaseExpiresAt.getTime() <= Date.now() ||
     !isValidAgentApiGatewayCapability({
       projectId: sixb.id,
-      runId: run.id,
+      runId: input.runId,
       executionToken: run.execution.token,
       capability: input.capability,
     })
@@ -127,7 +138,11 @@ async function resolveAgentRunAuthState(
   }
 
   if (!sixb.auth.isEnabled()) {
-    return { authz: null, scoped: null, agentRun: run }
+    return {
+      authz: null,
+      scoped: null,
+      ...(conversationalRun ? { agentRun: conversationalRun } : {}),
+    }
   }
 
   const auth = sixb.storage.auth
@@ -153,7 +168,11 @@ async function resolveAgentRunAuthState(
     roles: sixb.security.getResolvedRoles(),
   })
 
-  return { authz, scoped: sixb.as(authz), agentRun: run }
+  return {
+    authz,
+    scoped: sixb.as(authz),
+    ...(conversationalRun ? { agentRun: conversationalRun } : {}),
+  }
 }
 
 function gatewayUpstreamPath(pathname: string): string {

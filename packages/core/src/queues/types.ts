@@ -145,13 +145,23 @@ export interface WorkflowRunRequestedQueueJob
     }
   > {}
 
+export type WorkflowRunResumeCause =
+  | {
+      readonly kind: "intervention"
+      readonly interventionId: string
+    }
+  | {
+      readonly kind: "agentNode"
+      readonly nodeRunId: string
+    }
+
 export interface WorkflowRunResumeRequestedQueueJob
   extends QueueJob<
     "workflow.run.resume.requested",
     {
       readonly workflowId: string
       readonly runId: string
-      readonly pendingInterventionId: string
+      readonly resume: WorkflowRunResumeCause
     }
   > {}
 
@@ -182,11 +192,22 @@ export interface AgentRunRequestedQueueJob
     }
   > {}
 
+export interface AgentWorkflowNodeRequestedQueueJob
+  extends QueueJob<
+    "agent.workflow-node.requested",
+    {
+      readonly agentId: string
+      readonly nodeRunId: string
+    }
+  > {}
+
+export type AgentQueueJob = AgentRunRequestedQueueJob | AgentWorkflowNodeRequestedQueueJob
+
 export interface Queues {
   readonly syncRuns: Queue<SyncRunRequestedQueueJob>
   readonly pipelines: Queue<PipelineRunRequestedQueueJob>
   readonly projections: Queue<ProjectionRunRequestedQueueJob>
   readonly workflows: Queue<WorkflowQueueJob>
   readonly actions: Queue<ActionRunRequestedQueueJob>
-  readonly agents: Queue<AgentRunRequestedQueueJob>
+  readonly agents: Queue<AgentQueueJob>
 }

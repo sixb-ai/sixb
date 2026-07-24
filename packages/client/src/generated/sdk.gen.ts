@@ -20,6 +20,9 @@ import type {
   CancelWorkflowInterventionData,
   CancelWorkflowInterventionErrors,
   CancelWorkflowInterventionResponses,
+  CancelWorkflowRunData,
+  CancelWorkflowRunErrors,
+  CancelWorkflowRunResponses,
   CompleteFileUploadData,
   CompleteFileUploadErrors,
   CompleteFileUploadResponses,
@@ -134,6 +137,9 @@ import type {
   GetTelemetryHistoryData,
   GetTelemetryHistoryErrors,
   GetTelemetryHistoryResponses,
+  GetWorkflowAgentNodeExecutionData,
+  GetWorkflowAgentNodeExecutionErrors,
+  GetWorkflowAgentNodeExecutionResponses,
   GetWorkflowData,
   GetWorkflowErrors,
   GetWorkflowInterventionData,
@@ -1046,6 +1052,45 @@ export const getWorkflowRun = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetWorkflowRunResponses, GetWorkflowRunErrors, ThrowOnError>({
     url: "/api/workflow-runs/{runId}",
     ...options,
+  })
+
+/**
+ * Get workflow agent node execution detail
+ */
+export const getWorkflowAgentNodeExecution = <ThrowOnError extends boolean = false>(
+  options: Options<GetWorkflowAgentNodeExecutionData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetWorkflowAgentNodeExecutionResponses,
+    GetWorkflowAgentNodeExecutionErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/agent-execution",
+    ...options,
+  })
+
+/**
+ * Cancel a workflow run
+ */
+export const cancelWorkflowRun = <ThrowOnError extends boolean = false>(
+  options: Options<CancelWorkflowRunData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    CancelWorkflowRunResponses,
+    CancelWorkflowRunErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/workflow-runs/{runId}/cancel",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

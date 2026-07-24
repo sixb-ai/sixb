@@ -563,6 +563,61 @@ describe("SqliteWorkflowRunStorage", () => {
       closeSqliteStorage(bundled)
     }
   })
+
+  test("stores agent workflow node execution metadata", async () => {
+    await storage.start({
+      id: "wf-run-agent",
+      projectId: "my-app",
+      workflowId: "agent-workflow",
+      input: {},
+    })
+    await storage.nodes.start({
+      id: "wf-run-agent:node:0",
+      projectId: "my-app",
+      workflowRunId: "wf-run-agent",
+      workflowId: "agent-workflow",
+      nodeIndex: 0,
+      nodeType: "agent",
+      nodeId: "resolver",
+      nodeKey: "resolver",
+      input: { transcriptId: "tr_1" },
+    })
+    await storage.agentNodes.create({
+      projectId: "my-app",
+      nodeRunId: "wf-run-agent:node:0",
+      agentId: "resolver-agent",
+      prompt: "Resolve tr_1.",
+    })
+    const running = await storage.agentNodes.start({
+      projectId: "my-app",
+      nodeRunId: "wf-run-agent:node:0",
+      modelId: "test-model",
+      execution: {
+        token: "agent-exec-1",
+        queueLeaseExpiresAt: new Date("2026-05-08T10:15:00.000Z"),
+      },
+    })
+    expect(running).toMatchObject({ status: "running", attempt: 1, modelId: "test-model" })
+    await expect(
+      storage.agentNodes.confirmExecutionOwnership({
+        projectId: "my-app",
+        nodeRunId: running.nodeRunId,
+        executionToken: "stale-agent-exec",
+        queueLeaseExpiresAt: new Date("2026-05-08T10:20:00.000Z"),
+      })
+    ).rejects.toThrow("Execution token is no longer current")
+    const cancelled = await storage.agentNodes.cancel({
+      projectId: "my-app",
+      nodeRunId: running.nodeRunId,
+      error: "Workflow cancelled.",
+    })
+    expect(cancelled).toMatchObject({
+      status: "cancelled",
+      error: "Workflow cancelled.",
+      prompt: "Resolve tr_1.",
+    })
+    expect(cancelled.execution).toBeUndefined()
+  })
 })
 
 function closeSqliteStorage(storage: SqliteStorage): void {

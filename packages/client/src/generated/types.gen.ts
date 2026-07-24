@@ -2760,6 +2760,18 @@ export type ListWorkflowsResponses = {
           }
           description?: string
         }
+      | {
+          type: "agent"
+          id: string
+          key: string
+          agentId: string
+          input: {
+            [key: string]: unknown
+          }
+          output: {
+            [key: string]: unknown
+          }
+        }
     >
     latestRun: {
       id: string
@@ -2773,6 +2785,10 @@ export type ListWorkflowsResponses = {
       startedAt: string
       finishedAt?: string
       error?: string
+      requestedBy: {
+        principalType: "user" | "serviceAccount" | "system"
+        principalId: string
+      }
     } | null
   }>
 }
@@ -2845,6 +2861,18 @@ export type GetWorkflowResponses = {
           }
           description?: string
         }
+      | {
+          type: "agent"
+          id: string
+          key: string
+          agentId: string
+          input: {
+            [key: string]: unknown
+          }
+          output: {
+            [key: string]: unknown
+          }
+        }
     >
     latestRun: {
       id: string
@@ -2858,6 +2886,10 @@ export type GetWorkflowResponses = {
       startedAt: string
       finishedAt?: string
       error?: string
+      requestedBy: {
+        principalType: "user" | "serviceAccount" | "system"
+        principalId: string
+      }
     } | null
   }
 }
@@ -3018,10 +3050,6 @@ export type SubmitWorkflowInterventionData = {
     response: {
       [key: string]: unknown
     }
-    submittedBy?: {
-      principalType: "user" | "serviceAccount" | "system"
-      principalId: string
-    }
   }
   path: {
     interventionId: string
@@ -3096,10 +3124,7 @@ export type SubmitWorkflowInterventionResponse =
 
 export type CancelWorkflowInterventionData = {
   body: {
-    cancelledBy?: {
-      principalType: "user" | "serviceAccount" | "system"
-      principalId: string
-    }
+    [key: string]: never
   }
   path: {
     interventionId: string
@@ -3214,6 +3239,10 @@ export type ListWorkflowRunsResponses = {
       startedAt: string
       finishedAt?: string
       error?: string
+      requestedBy: {
+        principalType: "user" | "serviceAccount" | "system"
+        principalId: string
+      }
     }>
     hasMore: boolean
     total: number
@@ -3265,6 +3294,10 @@ export type GetWorkflowRunResponses = {
       startedAt: string
       finishedAt?: string
       error?: string
+      requestedBy: {
+        principalType: "user" | "serviceAccount" | "system"
+        principalId: string
+      }
     }
     nodes: Array<{
       id: string
@@ -3272,7 +3305,7 @@ export type GetWorkflowRunResponses = {
       workflowRunId: string
       workflowId: string
       nodeIndex: number
-      nodeType: "step" | "action" | "intervention"
+      nodeType: "step" | "action" | "intervention" | "agent"
       nodeId: string
       nodeKey: string
       status: "running" | "waiting" | "succeeded" | "failed" | "cancelled"
@@ -3285,11 +3318,169 @@ export type GetWorkflowRunResponses = {
         [key: string]: unknown
       }
       error?: string
+      agentExecution?: {
+        agentId: string
+        status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+        attempt: number
+        modelId?: string
+        finishReason?: string
+        usage?: {
+          [key: string]: unknown
+        }
+        startedAt?: string
+        completedAt?: string
+      }
     }>
   }
 }
 
 export type GetWorkflowRunResponse = GetWorkflowRunResponses[keyof GetWorkflowRunResponses]
+
+export type GetWorkflowAgentNodeExecutionData = {
+  body?: never
+  path: {
+    runId: string
+    nodeKey: string
+  }
+  query?: never
+  url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/agent-execution"
+}
+
+export type GetWorkflowAgentNodeExecutionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetWorkflowAgentNodeExecutionError =
+  GetWorkflowAgentNodeExecutionErrors[keyof GetWorkflowAgentNodeExecutionErrors]
+
+export type GetWorkflowAgentNodeExecutionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    agentId: string
+    status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+    attempt: number
+    modelId?: string
+    finishReason?: string
+    usage?: {
+      [key: string]: unknown
+    }
+    startedAt?: string
+    completedAt?: string
+    nodeRunId: string
+    prompt: string
+    executionPrincipal?: {
+      principalType: "user" | "serviceAccount" | "system"
+      principalId: string
+    }
+    trace?: Array<unknown>
+    diagnostics?: Array<unknown>
+    error?: string
+    createdAt: string
+  }
+}
+
+export type GetWorkflowAgentNodeExecutionResponse =
+  GetWorkflowAgentNodeExecutionResponses[keyof GetWorkflowAgentNodeExecutionResponses]
+
+export type CancelWorkflowRunData = {
+  body: {
+    [key: string]: never
+  }
+  path: {
+    runId: string
+  }
+  query?: never
+  url: "/api/workflow-runs/{runId}/cancel"
+}
+
+export type CancelWorkflowRunErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type CancelWorkflowRunError = CancelWorkflowRunErrors[keyof CancelWorkflowRunErrors]
+
+export type CancelWorkflowRunResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    run: {
+      id: string
+      projectId: string
+      workflowId: string
+      status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
+      input: {
+        [key: string]: unknown
+      }
+      queuedAt?: string
+      startedAt: string
+      finishedAt?: string
+      error?: string
+      requestedBy: {
+        principalType: "user" | "serviceAccount" | "system"
+        principalId: string
+      }
+    }
+    nodes: Array<{
+      id: string
+      projectId: string
+      workflowRunId: string
+      workflowId: string
+      nodeIndex: number
+      nodeType: "step" | "action" | "intervention" | "agent"
+      nodeId: string
+      nodeKey: string
+      status: "running" | "waiting" | "succeeded" | "failed" | "cancelled"
+      input: {
+        [key: string]: unknown
+      }
+      startedAt: string
+      finishedAt?: string
+      output?: {
+        [key: string]: unknown
+      }
+      error?: string
+      agentExecution?: {
+        agentId: string
+        status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+        attempt: number
+        modelId?: string
+        finishReason?: string
+        usage?: {
+          [key: string]: unknown
+        }
+        startedAt?: string
+        completedAt?: string
+      }
+    }>
+  }
+}
+
+export type CancelWorkflowRunResponse = CancelWorkflowRunResponses[keyof CancelWorkflowRunResponses]
 
 export type GetWorkflowRunFileContentData = {
   body?: never

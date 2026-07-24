@@ -53,7 +53,10 @@ export interface ListAgentThreadsResult {
 
 // ── agent_runs — one loop execution (the worker job; attribution + fencing) ───────────────────
 
-export type AgentRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
+/** Lifecycle shared by every durable agent execution, conversational or workflow-owned. */
+export type AgentExecutionStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
+
+export type AgentRunStatus = AgentExecutionStatus
 
 /**
  * Why a run ended — our own SDK-independent vocabulary (it mirrors the AI SDK unified finish

@@ -302,6 +302,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       workflows: options.workflows ?? [],
       registeredSchedules: this.schedulesById,
       registeredActionIds,
+      registeredAgentIds: new Set(agents.map((agent) => agent.id)),
     })
 
     const workflowIds = new Set<string>()

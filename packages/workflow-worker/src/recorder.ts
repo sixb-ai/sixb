@@ -1,8 +1,10 @@
+import { isDeepStrictEqual } from "node:util"
 import type { WorkflowDefinition, WorkflowRunSource } from "@sixb/core"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
+  WorkflowRunExecution,
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
@@ -21,6 +23,7 @@ export const noopWorkflowRunObserver: WorkflowRunObserver = {
 export class WorkflowRunRecorder {
   private readonly nodeRuns: WorkflowNodeRunRecord[]
   private activeNodeRunId: string | null = null
+  private recoveredNodeConsumed = false
   private started: boolean
   private finished = false
 
@@ -32,7 +35,9 @@ export class WorkflowRunRecorder {
       readonly workflowRuns: WorkflowRunStorage
       readonly observer: WorkflowRunObserver
       readonly initialCompletedNodes?: readonly WorkflowNodeRunRecord[]
+      readonly initialRunningNode?: WorkflowNodeRunRecord
       readonly alreadyStarted?: boolean
+      readonly execution?: WorkflowRunExecution
     }
   ) {
     this.nodeRuns = [...(dependencies.initialCompletedNodes ?? [])]
@@ -65,6 +70,7 @@ export class WorkflowRunRecorder {
       workflowId: this.dependencies.workflow.id,
       input: params.input,
       source: params.source,
+      execution: this.dependencies.execution,
     })
     this.started = true
     await this.notify(() => this.dependencies.observer.onRunStarted(run))
@@ -79,6 +85,25 @@ export class WorkflowRunRecorder {
     readonly input: WorkflowIOSnapshot
   }): Promise<WorkflowNodeRunRecord> {
     const nodeRunId = this.nodeRunIdFor(params.nodeIndex)
+    const recovered = this.dependencies.initialRunningNode
+    if (recovered && !this.recoveredNodeConsumed) {
+      assertRecoveredNodeMatches({
+        recovered,
+        expected: {
+          id: nodeRunId,
+          workflowRunId: this.dependencies.runId,
+          workflowId: this.dependencies.workflow.id,
+          nodeIndex: params.nodeIndex,
+          nodeType: params.nodeType,
+          nodeId: params.nodeId,
+          nodeKey: params.nodeKey,
+          input: params.input,
+        },
+      })
+      this.recoveredNodeConsumed = true
+      this.activeNodeRunId = recovered.id
+      return recovered
+    }
     const node = await this.dependencies.workflowRuns.nodes.start({
       projectId: this.dependencies.projectId,
       id: nodeRunId,
@@ -89,6 +114,7 @@ export class WorkflowRunRecorder {
       nodeId: params.nodeId,
       nodeKey: params.nodeKey,
       input: params.input,
+      executionToken: this.dependencies.execution?.token,
     })
     this.activeNodeRunId = node.id
     await this.notify(() => this.dependencies.observer.onNodeStarted(node, this.nodeContext()))
@@ -104,6 +130,7 @@ export class WorkflowRunRecorder {
       projectId: this.dependencies.projectId,
       id: params.nodeRunId,
       waitingAt,
+      executionToken: this.dependencies.execution?.token,
     })
     this.nodeRuns.push(node)
     if (this.activeNodeRunId === node.id) {
@@ -118,6 +145,24 @@ export class WorkflowRunRecorder {
     return node
   }
 
+  async recordParkedNode(params: {
+    readonly node: WorkflowNodeRunRecord
+    readonly run: WorkflowRunRecord
+    readonly waitingAt: Date
+  }): Promise<void> {
+    this.nodeRuns.push(params.node)
+    if (this.activeNodeRunId === params.node.id) this.activeNodeRunId = null
+    await this.notify(async () => {
+      await this.dependencies.observer.onNodeWaiting?.(params.node, {
+        ...this.nodeContext(),
+        waitingAt: params.waitingAt,
+      })
+      await this.dependencies.observer.onRunWaiting?.(params.run, {
+        waitingAt: params.waitingAt,
+      })
+    })
+  }
+
   async finishNodeSucceeded(params: {
     readonly nodeRunId: string
     readonly output?: WorkflowIOSnapshot
@@ -127,6 +172,7 @@ export class WorkflowRunRecorder {
       id: params.nodeRunId,
       status: "succeeded",
       output: params.output,
+      executionToken: this.dependencies.execution?.token,
     })
     this.nodeRuns.push(node)
     this.activeNodeRunId = null
@@ -148,6 +194,7 @@ export class WorkflowRunRecorder {
         id: this.activeNodeRunId,
         status: params.status,
         error: params.error,
+        executionToken: this.dependencies.execution?.token,
       })
       .catch(() => null)
 
@@ -165,6 +212,7 @@ export class WorkflowRunRecorder {
       projectId: this.dependencies.projectId,
       id: this.dependencies.runId,
       status: "succeeded",
+      executionToken: this.dependencies.execution?.token,
     })
     this.finished = true
     await this.notify(() => this.dependencies.observer.onRunFinished(run))
@@ -177,6 +225,7 @@ export class WorkflowRunRecorder {
       projectId: this.dependencies.projectId,
       id: this.dependencies.runId,
       waitingAt,
+      executionToken: this.dependencies.execution?.token,
     })
     await this.notify(async () => {
       await this.dependencies.observer.onRunWaiting?.(run, { waitingAt })
@@ -200,6 +249,7 @@ export class WorkflowRunRecorder {
       id: this.dependencies.runId,
       status: params.status,
       error: params.error,
+      executionToken: this.dependencies.execution?.token,
     })
     this.finished = true
     params.onTransition?.(run)
@@ -223,5 +273,37 @@ export class WorkflowRunRecorder {
     } catch (error) {
       console.error("[SixbWorkflowWorker] Failed to emit workflow lifecycle event:", error)
     }
+  }
+}
+
+function assertRecoveredNodeMatches(input: {
+  readonly recovered: WorkflowNodeRunRecord
+  readonly expected: Pick<
+    WorkflowNodeRunRecord,
+    | "id"
+    | "workflowRunId"
+    | "workflowId"
+    | "nodeIndex"
+    | "nodeType"
+    | "nodeId"
+    | "nodeKey"
+    | "input"
+  >
+}): void {
+  const { recovered, expected } = input
+  if (
+    recovered.status !== "running" ||
+    recovered.id !== expected.id ||
+    recovered.workflowRunId !== expected.workflowRunId ||
+    recovered.workflowId !== expected.workflowId ||
+    recovered.nodeIndex !== expected.nodeIndex ||
+    recovered.nodeType !== expected.nodeType ||
+    recovered.nodeId !== expected.nodeId ||
+    recovered.nodeKey !== expected.nodeKey ||
+    !isDeepStrictEqual(recovered.input, expected.input)
+  ) {
+    throw new Error(
+      `[SixbWorkflowWorker] Running workflow node '${recovered.id}' does not match its recovered definition and input.`
+    )
   }
 }

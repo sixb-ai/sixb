@@ -12,7 +12,7 @@ export interface PrepareAgentSandboxApiContextInput {
   readonly apiBaseUrl: string
   readonly projectId: string
   readonly agentId: string
-  readonly threadId: string
+  readonly threadId?: string
   readonly runId: string
   readonly attachments?: PreparedAgentAttachmentContext
   readonly skills: readonly AgentSkill[]
@@ -36,7 +36,7 @@ export async function prepareAgentSandboxApiContext(
     {
       projectId: input.projectId,
       agentId: input.agentId,
-      threadId: input.threadId,
+      ...(input.threadId ? { threadId: input.threadId } : {}),
       runId: input.runId,
       apiBaseUrl: input.apiBaseUrl,
       attachmentsManifestPath,
@@ -78,7 +78,7 @@ export async function prepareAgentSandboxApiContext(
       SIXB_OUTPUT_STAGING_DIR: outputStagingDir,
       SIXB_PROJECT_ID: input.projectId,
       SIXB_AGENT_ID: input.agentId,
-      SIXB_THREAD_ID: input.threadId,
+      ...(input.threadId ? { SIXB_THREAD_ID: input.threadId } : {}),
       SIXB_RUN_ID: input.runId,
     },
   }

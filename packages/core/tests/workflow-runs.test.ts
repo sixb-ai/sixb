@@ -649,4 +649,112 @@ describe("InMemoryWorkflowRunStorage", () => {
     const storage = new InMemoryStorage()
     expect(storage.workflowRuns).toBeInstanceOf(InMemoryWorkflowRunStorage)
   })
+
+  test("fences stale workflow deliveries after reclaim", async () => {
+    const storage = new InMemoryWorkflowRunStorage()
+    await storage.start({
+      id: "wf-run-unowned",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: {},
+    })
+    await expect(
+      storage.confirmExecutionOwnership({
+        id: "wf-run-unowned",
+        projectId: "my-app",
+        executionToken: "workflow-exec-invented",
+        queueLeaseExpiresAt: new Date("2026-05-08T10:05:00.000Z"),
+      })
+    ).rejects.toThrow("Execution token is no longer current")
+
+    await storage.start({
+      id: "wf-run-fenced",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: {},
+      execution: {
+        token: "workflow-exec-old",
+        queueLeaseExpiresAt: new Date("2026-05-08T10:05:00.000Z"),
+      },
+    })
+    await storage.nodes.start({
+      id: "wf-run-fenced:node:0",
+      projectId: "my-app",
+      workflowRunId: "wf-run-fenced",
+      workflowId: "reconcile-transaction",
+      nodeIndex: 0,
+      nodeType: "step",
+      nodeId: "resolve",
+      nodeKey: "resolve",
+      input: {},
+      executionToken: "workflow-exec-old",
+    })
+
+    const reclaimed = await storage.reclaim({
+      id: "wf-run-fenced",
+      projectId: "my-app",
+      execution: {
+        token: "workflow-exec-new",
+        queueLeaseExpiresAt: new Date("2026-05-08T10:10:00.000Z"),
+      },
+    })
+    expect(reclaimed.attempt).toBe(2)
+    await expect(
+      storage.nodes.finish({
+        id: "wf-run-fenced:node:0",
+        projectId: "my-app",
+        status: "succeeded",
+        output: {},
+        executionToken: "workflow-exec-old",
+      })
+    ).rejects.toThrow("Execution token is no longer current")
+    await storage.nodes.finish({
+      id: "wf-run-fenced:node:0",
+      projectId: "my-app",
+      status: "succeeded",
+      output: {},
+      executionToken: "workflow-exec-new",
+    })
+  })
+
+  test("persists and cancels agent node execution metadata independently from node IO", async () => {
+    const storage = new InMemoryWorkflowRunStorage()
+    await storage.start({
+      id: "wf-run-agent",
+      projectId: "my-app",
+      workflowId: "resolve-transaction",
+      input: {},
+    })
+    await storage.nodes.start({
+      id: "wf-run-agent:node:0",
+      projectId: "my-app",
+      workflowRunId: "wf-run-agent",
+      workflowId: "resolve-transaction",
+      nodeIndex: 0,
+      nodeType: "agent",
+      nodeId: "resolve-agent",
+      nodeKey: "resolveAgent",
+      input: { transactionId: "txn_1" },
+    })
+    const execution = await storage.agentNodes.create({
+      projectId: "my-app",
+      nodeRunId: "wf-run-agent:node:0",
+      agentId: "resolver",
+      prompt: "Resolve txn_1.",
+    })
+    expect(execution).toMatchObject({ status: "queued", attempt: 0 })
+    const cancelled = await storage.agentNodes.cancel({
+      projectId: "my-app",
+      nodeRunId: execution.nodeRunId,
+      error: "Workflow cancelled.",
+    })
+    expect(cancelled).toMatchObject({
+      status: "cancelled",
+      prompt: "Resolve txn_1.",
+      error: "Workflow cancelled.",
+    })
+    expect(
+      (await storage.nodes.getById({ projectId: "my-app", id: execution.nodeRunId }))?.input
+    ).toEqual({ transactionId: "txn_1" })
+  })
 })

@@ -4,11 +4,12 @@ import {
   createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
   subscribeAgentRunCancel,
+  workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
-import type { AgentRunRequestedQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
+import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
 import { AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
@@ -17,7 +18,10 @@ import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } fro
 import { finishRunOrThrow } from "./finalize"
 import { reconcileAgentExecutionIdentities, reconcileAgentExecutionIdentity } from "./identity"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
-import { type AgentRunEnvironment, createAgentRunEnvironment } from "./run-environment"
+import {
+  type AgentExecutionEnvironment,
+  createConversationAgentEnvironment,
+} from "./run-environment"
 import { createBrokerStreamSink, isolateStreamSink } from "./stream-sink"
 import type {
   AgentWorkerContext,
@@ -25,6 +29,7 @@ import type {
   AgentWorkerSixb,
   AgentWorkerStorage,
 } from "./types"
+import { enqueueWorkflowAgentNodeResume, executeWorkflowAgentNode } from "./workflow-node-execution"
 
 const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 4
@@ -61,7 +66,7 @@ type QueuedRun = {
  * for redelivery when we **cannot** record the fate (storage unavailable) — acking then would leave
  * the thread silently locked forever, since nothing else reclaims a run but a redelivered job.
  */
-export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
+export class AgentWorker extends QueueWorker<AgentQueueJob> {
   private readonly sixb: AgentWorkerSixb
   private readonly context: AgentWorkerContext | null
   private readonly idleWithoutAgents: boolean
@@ -138,16 +143,24 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
   }
 
   protected async execute(
-    claimed: ClaimedQueueJob<AgentRunRequestedQueueJob>,
+    claimed: ClaimedQueueJob<AgentQueueJob>,
     signal: AbortSignal,
-    delivery: QueueDelivery<AgentRunRequestedQueueJob>
+    delivery: QueueDelivery<AgentQueueJob>
   ): Promise<void> {
     const context = this.requireContext()
     const { job } = claimed
-    if (job.type !== "agent.run.requested") {
-      throw new AgentWorkerError(`Unsupported agent job type '${job.type}'.`)
+    if (job.type === "agent.workflow-node.requested") {
+      await executeWorkflowAgentNode({
+        context,
+        sixb: this.sixb,
+        job,
+        signal,
+        delivery,
+        watchForCancel: (runId) => this.watchForCancel(runId),
+        onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
+      })
+      return
     }
-
     const { agentId, threadId, runId, triggerMessageId } = job.payload
     const agent = this.sixb.agents.getById(agentId)
     if (!agent) {
@@ -190,7 +203,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       throw new AgentWorkerError(`Agent run '${run.id}' has no execution token.`)
     }
 
-    let environment: AgentRunEnvironment | null = null
+    let environment: AgentExecutionEnvironment | null = null
     let stopOwnershipProjection: (() => void) | undefined
     // Watch for a user cancel (an out-of-band `/cancel` publishes to the run's control stream). Its
     // signal joins the turn's abort sources, so a cancel stops the model stream just like a shutdown.
@@ -219,7 +232,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       await this.confirmExecutionOwnership(context, run.id, executionToken, delivery.leaseExpiresAt)
 
       await context.streamSink.publishStarted(run)
-      environment = await createAgentRunEnvironment({
+      environment = await createConversationAgentEnvironment({
         context,
         agent,
         run,
@@ -277,7 +290,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
   }
 
   protected override async onExecutionError(
-    claimed: ClaimedQueueJob<AgentRunRequestedQueueJob>,
+    claimed: ClaimedQueueJob<AgentQueueJob>,
     error: unknown
   ): Promise<QueueWorkerFailureDecision> {
     // We could not finalize the run (storage unavailable). Redeliver so a later delivery records the
@@ -296,6 +309,11 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     // if the dependency never recovers, record a visible pre-stream failure before dead-lettering.
     if (claimed.job.attempt < MAX_AGENT_DELIVERY_ATTEMPTS) {
       return { kind: "retry", availableAt: backoff(PRESTART_RETRY_BACKOFF_MS) }
+    }
+    if (claimed.job.type !== "agent.run.requested") {
+      return claimed.job.attempt < MAX_AGENT_DELIVERY_ATTEMPTS
+        ? { kind: "retry", availableAt: backoff(PRESTART_RETRY_BACKOFF_MS) }
+        : { kind: "fail" }
     }
     const { agentId, threadId, runId, triggerMessageId } = claimed.job.payload
     const run = await this.requireContext().storage.agents.runs.getById({
@@ -321,9 +339,12 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
   }
 
   protected override onAbortError(
-    _claimed: ClaimedQueueJob<AgentRunRequestedQueueJob>,
+    claimed: ClaimedQueueJob<AgentQueueJob>,
     error: unknown
   ): QueueWorkerFailureDecision {
+    if (claimed.job.type === "agent.workflow-node.requested") {
+      return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
+    }
     // Shutdown reached us before we could record the run's fate: redeliver so another process
     // finalizes it. Otherwise the run is already terminal, so fail (no redelivery needed).
     if (error instanceof AgentFinalizationError) {
@@ -345,6 +366,8 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
           queue: this.sixb.queues.agents,
         })
         dispatched = result.dispatched.length
+        dispatched += await this.dispatchWorkflowAgentNodes(context)
+        dispatched += await this.dispatchWorkflowResumes(context)
         if (result.failures.length === 0) {
           consecutiveFailures = 0
         } else {
@@ -370,6 +393,51 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
             : AGENT_DISPATCH_IDLE_MS
       await waitForAbort(delayMs, signal)
     }
+  }
+
+  private async dispatchWorkflowAgentNodes(context: AgentWorkerContext): Promise<number> {
+    const workflowRuns = context.storage.workflowRuns
+    if (!workflowRuns) return 0
+    const queued = await workflowRuns.agentNodes.list({
+      projectId: context.id,
+      statuses: ["queued"],
+      order: "asc",
+      limit: 100,
+    })
+    if (queued.runs.length === 0) return 0
+    await this.sixb.queues.agents.enqueue({
+      projectId: context.id,
+      jobs: queued.runs.map((run) => ({
+        id: workflowAgentNodeQueueJobId(run.nodeRunId),
+        type: "agent.workflow-node.requested" as const,
+        payload: { agentId: run.agentId, nodeRunId: run.nodeRunId },
+      })),
+    })
+    return queued.runs.length
+  }
+
+  private async dispatchWorkflowResumes(context: AgentWorkerContext): Promise<number> {
+    const workflowRuns = context.storage.workflowRuns
+    if (!workflowRuns) return 0
+    const completed = await workflowRuns.agentNodes.list({
+      projectId: context.id,
+      statuses: ["succeeded"],
+      order: "asc",
+      limit: 100,
+    })
+    let dispatched = 0
+    for (const execution of completed.runs) {
+      const node = await workflowRuns.nodes.getById({
+        projectId: context.id,
+        id: execution.nodeRunId,
+      })
+      if (!node) continue
+      const run = await workflowRuns.getById({ projectId: context.id, id: node.workflowRunId })
+      if (run?.status !== "waiting") continue
+      await enqueueWorkflowAgentNodeResume(this.sixb, node)
+      dispatched += 1
+    }
+    return dispatched
   }
 
   private requireContext(): AgentWorkerContext {

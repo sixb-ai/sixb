@@ -1,4 +1,8 @@
+import type { AgentMessagePart } from "../../agents/message"
+import type { Principal } from "../../auth"
+import type { JsonValue } from "../../json"
 import type { WorkflowIOSnapshot, WorkflowRunSource } from "../../workflows/types"
+import type { AgentExecutionStatus, AgentRunFinishReason, AgentRunUsage } from "../agents"
 
 export type { WorkflowIOSnapshot, WorkflowRunSource } from "../../workflows/types"
 
@@ -10,7 +14,106 @@ export type WorkflowRunStatus =
   | "failed"
   | "cancelled"
 export type WorkflowNodeRunStatus = Exclude<WorkflowRunStatus, "queued">
-export type WorkflowNodeRunType = "step" | "action" | "intervention"
+export type WorkflowNodeRunType = "step" | "action" | "intervention" | "agent"
+
+export interface WorkflowRunExecution {
+  readonly token: string
+  readonly queueLeaseExpiresAt: Date
+}
+
+export type WorkflowAgentNodeRunStatus = AgentExecutionStatus
+
+export interface WorkflowAgentNodeRunExecution {
+  readonly token: string
+  readonly queueLeaseExpiresAt: Date
+}
+
+/** Execution details for an agent workflow node. The generic node run owns business IO. */
+export interface WorkflowAgentNodeRunRecord {
+  readonly projectId: string
+  readonly nodeRunId: string
+  readonly agentId: string
+  readonly status: WorkflowAgentNodeRunStatus
+  readonly prompt: string
+  readonly executionPrincipal?: Extract<Principal, { readonly type: "serviceAccount" }>
+  readonly modelId?: string
+  readonly finishReason?: AgentRunFinishReason
+  readonly usage?: AgentRunUsage
+  readonly trace?: readonly AgentMessagePart[]
+  readonly diagnostics?: readonly JsonValue[]
+  readonly error?: string
+  readonly attempt: number
+  readonly execution?: WorkflowAgentNodeRunExecution
+  readonly createdAt: Date
+  readonly startedAt?: Date
+  readonly completedAt?: Date
+}
+
+export interface CreateWorkflowAgentNodeRunInput {
+  readonly projectId: string
+  readonly nodeRunId: string
+  readonly agentId: string
+  readonly prompt: string
+  readonly createdAt?: Date
+}
+
+export interface StartWorkflowAgentNodeRunInput {
+  readonly projectId: string
+  readonly nodeRunId: string
+  readonly executionPrincipal?: Extract<Principal, { readonly type: "serviceAccount" }>
+  readonly modelId?: string
+  readonly execution: WorkflowAgentNodeRunExecution
+  readonly startedAt?: Date
+}
+
+export interface ReclaimWorkflowAgentNodeRunInput {
+  readonly projectId: string
+  readonly nodeRunId: string
+  readonly execution: WorkflowAgentNodeRunExecution
+}
+
+export interface ConfirmWorkflowAgentNodeRunExecutionOwnershipInput {
+  readonly projectId: string
+  readonly nodeRunId: string
+  readonly executionToken: string
+  readonly queueLeaseExpiresAt: Date
+}
+
+export type FinishWorkflowAgentNodeRunInput = {
+  readonly projectId: string
+  readonly nodeRunId: string
+  readonly executionToken: string
+  readonly status: "succeeded" | "failed" | "cancelled"
+  readonly modelId?: string
+  readonly finishReason?: AgentRunFinishReason
+  readonly usage?: AgentRunUsage
+  readonly trace?: readonly AgentMessagePart[]
+  readonly diagnostics?: readonly JsonValue[]
+  readonly error?: string
+  readonly completedAt?: Date
+}
+
+export interface CancelWorkflowAgentNodeRunInput {
+  readonly projectId: string
+  readonly nodeRunId: string
+  readonly error?: string
+  readonly completedAt?: Date
+}
+
+export interface ListWorkflowAgentNodeRunsInput {
+  readonly projectId: string
+  readonly agentId?: string
+  readonly statuses?: readonly WorkflowAgentNodeRunStatus[]
+  readonly limit?: number
+  readonly offset?: number
+  readonly order?: "asc" | "desc"
+}
+
+export interface ListWorkflowAgentNodeRunsResult {
+  readonly runs: readonly WorkflowAgentNodeRunRecord[]
+  readonly hasMore: boolean
+  readonly total: number
+}
 
 export interface WorkflowRunRecord {
   readonly id: string
@@ -23,6 +126,9 @@ export interface WorkflowRunRecord {
   readonly finishedAt?: Date
   readonly error?: string
   readonly source?: WorkflowRunSource
+  readonly requestedByPrincipal: Principal
+  readonly attempt: number
+  readonly execution?: WorkflowRunExecution
 }
 
 export interface WorkflowNodeRunRecord {
@@ -49,6 +155,8 @@ export interface StartWorkflowRunInput {
   readonly input: WorkflowIOSnapshot
   readonly startedAt?: Date
   readonly source?: WorkflowRunSource
+  readonly requestedByPrincipal?: Principal
+  readonly execution?: WorkflowRunExecution
 }
 
 export interface QueueWorkflowRunInput {
@@ -58,18 +166,34 @@ export interface QueueWorkflowRunInput {
   readonly input: WorkflowIOSnapshot
   readonly queuedAt?: Date
   readonly source?: WorkflowRunSource
+  readonly requestedByPrincipal?: Principal
+}
+
+export interface ReclaimWorkflowRunInput {
+  readonly id: string
+  readonly projectId: string
+  readonly execution: WorkflowRunExecution
+}
+
+export interface ConfirmWorkflowRunExecutionOwnershipInput {
+  readonly id: string
+  readonly projectId: string
+  readonly executionToken: string
+  readonly queueLeaseExpiresAt: Date
 }
 
 export interface WaitWorkflowRunInput {
   readonly id: string
   readonly projectId: string
   readonly waitingAt?: Date
+  readonly executionToken?: string
 }
 
 export interface ResumeWorkflowRunInput {
   readonly id: string
   readonly projectId: string
   readonly resumedAt?: Date
+  readonly execution?: WorkflowRunExecution
 }
 
 export type FinishWorkflowRunInput =
@@ -78,6 +202,7 @@ export type FinishWorkflowRunInput =
       readonly projectId: string
       readonly status: "succeeded"
       readonly finishedAt?: Date
+      readonly executionToken?: string
     }
   | {
       readonly id: string
@@ -85,6 +210,7 @@ export type FinishWorkflowRunInput =
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
       readonly error?: string
+      readonly executionToken?: string
     }
 
 export interface StartWorkflowNodeRunInput {
@@ -98,12 +224,14 @@ export interface StartWorkflowNodeRunInput {
   readonly nodeKey: string
   readonly input: WorkflowIOSnapshot
   readonly startedAt?: Date
+  readonly executionToken?: string
 }
 
 export interface WaitWorkflowNodeRunInput {
   readonly id: string
   readonly projectId: string
   readonly waitingAt?: Date
+  readonly executionToken?: string
 }
 
 export type FinishWorkflowNodeRunInput =
@@ -113,6 +241,7 @@ export type FinishWorkflowNodeRunInput =
       readonly status: "succeeded"
       readonly finishedAt?: Date
       readonly output?: WorkflowIOSnapshot
+      readonly executionToken?: string
     }
   | {
       readonly id: string
@@ -120,6 +249,7 @@ export type FinishWorkflowNodeRunInput =
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
       readonly error?: string
+      readonly executionToken?: string
     }
 
 export interface ListWorkflowRunsInput {
@@ -172,16 +302,37 @@ export interface ListWorkflowNodeRunsResult {
 
 export interface WorkflowRunStorage {
   readonly nodes: WorkflowNodeRunStorage
+  readonly agentNodes: WorkflowAgentNodeRunStorage
 
   queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord>
   /** Atomically claims a queued run by transitioning it to running; competing claims must fail. */
   start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord>
+  reclaim(input: ReclaimWorkflowRunInput): Promise<WorkflowRunRecord>
+  confirmExecutionOwnership(
+    input: ConfirmWorkflowRunExecutionOwnershipInput
+  ): Promise<WorkflowRunRecord>
   wait(input: WaitWorkflowRunInput): Promise<WorkflowRunRecord>
   resume(input: ResumeWorkflowRunInput): Promise<WorkflowRunRecord>
   finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord>
   getById(params: { projectId: string; id: string }): Promise<WorkflowRunRecord | null>
   list(input: ListWorkflowRunsInput): Promise<ListWorkflowRunsResult>
   listLatestByWorkflowIds(input: ListLatestWorkflowRunsInput): Promise<ListLatestWorkflowRunsResult>
+}
+
+export interface WorkflowAgentNodeRunStorage {
+  create(input: CreateWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord>
+  start(input: StartWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord>
+  reclaim(input: ReclaimWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord>
+  confirmExecutionOwnership(
+    input: ConfirmWorkflowAgentNodeRunExecutionOwnershipInput
+  ): Promise<WorkflowAgentNodeRunRecord>
+  cancel(input: CancelWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord>
+  finish(input: FinishWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord>
+  getByNodeRunId(params: {
+    projectId: string
+    nodeRunId: string
+  }): Promise<WorkflowAgentNodeRunRecord | null>
+  list(input: ListWorkflowAgentNodeRunsInput): Promise<ListWorkflowAgentNodeRunsResult>
 }
 
 export interface WorkflowNodeRunStorage {
