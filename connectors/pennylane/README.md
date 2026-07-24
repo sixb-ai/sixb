@@ -1,14 +1,14 @@
 # @sixb/connector-pennylane
 
-Typed Pennylane Company API v2 connector for Sixb. It covers the Quotes, Products, and Customers API
-surfaces and is structured around independent resources so other Pennylane endpoints can be added
-without growing a monolithic client.
+Typed Pennylane Company API v2 connector for Sixb. It covers the Quotes, Products, Customers, and
+Ledger Accounts API surfaces and is structured around independent resources so other Pennylane
+endpoints can be added without growing a monolithic client.
 
 ## Register
 
-Create a Company API token with the scopes you need — `quotes`, `products`, and `customers`, each in a
-`:readonly` (reads) or `:all` (writes) variant — then define the connector in your project's
-`connectors/` directory:
+Create a Company API token with the scopes you need — `quotes`, `products`, `customers`, and
+`ledger_accounts`, each in a `:readonly` (reads) or `:all` (writes) variant — then define the
+connector in your project's `connectors/` directory:
 
 ```ts
 import { pennylane } from "@sixb/connector-pennylane"
@@ -43,8 +43,8 @@ access-token rotation without recreating the connector.
 
 The built-in scheduler also spaces concurrently initiated requests. Default retries cover network
 errors, `429`, and `5xx` responses for reads and honor `Retry-After`. Writes are not replayed by
-default: even `PUT /quotes/{id}` can create invoice lines, so treating every PUT as idempotent could
-duplicate data.
+default: even `PUT /quotes/{id}` can create invoice lines, while creating some ledger accounts can
+create related records, so treating every write as idempotent could duplicate data.
 
 ## Quotes API
 
@@ -211,12 +211,57 @@ Ledger accounts are referenced by account number when writing a customer (`ledge
 but by id on products (`ledger_account_id`), mirroring the upstream API. `categorize` replaces the
 customer's categories and returns the resulting list.
 
+## Ledger Accounts API
+
+| Client method | Pennylane endpoint |
+| --- | --- |
+| `pl.ledgerAccounts.list(options?)` | `GET /ledger_accounts` |
+| `pl.ledgerAccounts.listAll(options?)` | Cursor iterator over `GET /ledger_accounts` |
+| `pl.ledgerAccounts.get(id)` | `GET /ledger_accounts/{id}` |
+| `pl.ledgerAccounts.create(input)` | `POST /ledger_accounts` |
+| `pl.ledgerAccounts.update(id, input)` | `PUT /ledger_accounts/{id}` |
+
+The list supports pages of up to 1,000 accounts, `id`/`-id` sorting, and typed filters for `id`,
+`number`, and `enabled`. Pennylane documents `has_more` as nullable for this endpoint; `listAll()`
+treats `null` as a terminal page while retaining the normal missing/repeated-cursor safeguards.
+
+```ts
+for await (const account of pl.ledgerAccounts.listAll({
+  filter: [
+    { field: "number", operator: "start_with", value: "706" },
+    { field: "enabled", operator: "eq", value: true },
+  ],
+})) {
+  // Ledger entry lines reference account.id, not the potentially non-unique account.number.
+}
+
+await pl.ledgerAccounts.create({
+  number: "706100",
+  label: "Consulting services",
+  vat_rate: "FR_200",
+  country_alpha2: "FR",
+})
+
+await pl.ledgerAccounts.update(42, {
+  label: "Professional services",
+  letterable: true,
+})
+```
+
+Only `label` and `letterable` can be updated. Creating an account whose number begins with `401` can
+also create a supplier; a number beginning with `411` can create a company customer. Consequently,
+ledger-account writes are never retried by default. When creating ledger entries, use the account id:
+Pennylane can expose several ids for the same account number when VAT configurations differ.
+
+There is no documented delete or Ledger Accounts change-log endpoint, so the connector deliberately
+does not expose either operation.
+
 ## Change logs
 
-Every resource exposes an incremental change log at `/changelogs/{resource}`, surfaced through one
-shared resource shape. Pennylane retains change events for four weeks; `cursor` and `start_date`
-(RFC 3339) are mutually exclusive in both the TypeScript contract and runtime validation, and
-`start_date` seeds only the first page.
+Quotes, products, and customers expose incremental change logs at `/changelogs/{resource}`, surfaced
+through one shared resource shape. Pennylane retains change events for four weeks; `cursor` and
+`start_date` (RFC 3339) are mutually exclusive in both the TypeScript contract and runtime
+validation, and `start_date` seeds only the first page.
 
 | Client method | Pennylane endpoint |
 | --- | --- |
@@ -256,6 +301,8 @@ try {
 - [Quotes API reference](https://pennylane.readme.io/reference/listquotes)
 - [Products API reference](https://pennylane.readme.io/reference/getproducts)
 - [Customers API reference](https://pennylane.readme.io/reference/getcustomers)
+- [Ledger Accounts API reference](https://pennylane.readme.io/reference/getledgeraccounts)
+- [Creating a ledger account](https://pennylane.readme.io/reference/postledgeraccounts)
 - [Cursor pagination](https://pennylane.readme.io/docs/using-cursor-based-pagination)
 - [Filters](https://pennylane.readme.io/docs/setting-up-filters)
 - [Authentication](https://pennylane.readme.io/docs/generating-my-api-token)

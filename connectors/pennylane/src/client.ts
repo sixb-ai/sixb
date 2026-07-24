@@ -1,6 +1,7 @@
 import type { PennylaneHttp } from "./http"
 import { createChangesResource } from "./resources/changes"
 import { createCustomersResource } from "./resources/customers"
+import { createLedgerAccountsResource } from "./resources/ledger-accounts"
 import { createProductsResource } from "./resources/products"
 import { createQuotesResource } from "./resources/quotes"
 import type { PennylaneClient } from "./types"
@@ -13,5 +14,6 @@ export function createPennylaneClient(http: PennylaneHttp): PennylaneClient {
     productChanges: createChangesResource(http, "changelogs/products", "product changes"),
     customers: createCustomersResource(http),
     customerChanges: createChangesResource(http, "changelogs/customers", "customer changes"),
+    ledgerAccounts: createLedgerAccountsResource(http),
   }
 }

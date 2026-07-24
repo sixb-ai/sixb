@@ -1,5 +1,6 @@
 export type * from "./client"
 export type * from "./common"
 export type * from "./customers"
+export type * from "./ledger-accounts"
 export type * from "./products"
 export type * from "./quotes"
