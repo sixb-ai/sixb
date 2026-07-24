@@ -87,9 +87,12 @@ function prepareTelemetryAppend(
   raw: TelemetryAppend
 ): PreparedTelemetryAppend {
   const rawInputPointCount = raw.points.length
-  const input = normalizeTelemetryAppend(raw)
+  const input = normalizeTelemetryAppend({
+    ...raw,
+    points: raw.points.map((point) => validateTelemetryPoint(context.ontology, point)),
+  })
   const inputPointCount = telemetryInputPointCount(input, rawInputPointCount)
-  validateTelemetryBatch(context, input, inputPointCount)
+  validateTelemetryBatch(input, inputPointCount)
 
   const ontologyRevision = context.projectionRegistry.ontologyRevision
   if (input.source.kind === "runtime") {
@@ -106,11 +109,7 @@ function telemetryInputPointCount(
   return input.points.length
 }
 
-function validateTelemetryBatch(
-  context: Pick<MaterializerContext, "ontology">,
-  input: NormalizedTelemetryAppend,
-  inputPointCount: number
-): void {
+function validateTelemetryBatch(input: NormalizedTelemetryAppend, inputPointCount: number): void {
   if (input.source.kind === "projection") {
     if (input.source.sourceRowCount === 0) {
       throw new MaterializationValidationError(
@@ -123,7 +122,6 @@ function validateTelemetryBatch(
       )
     }
   }
-  for (const point of input.points) validateTelemetryPoint(context.ontology, point)
 }
 
 function prepareRuntimeTelemetry(

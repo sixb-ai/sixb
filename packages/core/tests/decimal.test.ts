@@ -2,11 +2,20 @@ import { describe, expect, test } from "bun:test"
 import {
   compareDecimalValues,
   decimal,
+  defineObjectType,
   isDecimalString,
   isDecimalValue,
+  link,
   normalizeDecimalValue,
+  OntologyRegistry,
   OntologyValidationError,
+  prop,
 } from "../src"
+import {
+  validateLinkAuthorityProperties,
+  validateObjectAuthorityProperties,
+  validateTelemetryPoint,
+} from "../src/materializer/effective/validate"
 import { normalizeSchemaValue, validateSchemaValue } from "../src/ontology/validation"
 
 const valueTypes = new Map()
@@ -54,5 +63,46 @@ describe("exact decimal values", () => {
         OntologyValidationError
       )
     }
+  })
+
+  test("canonicalizes decimal values at materializer authority boundaries", () => {
+    const Account = defineObjectType({
+      id: "Account",
+      name: "Account",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("balance", "decimal"),
+        prop("reading", "decimal", { mode: "telemetry" }),
+      ],
+      links: [
+        link.ref("transfers", "Account", {
+          properties: [prop("amount", "decimal")],
+        }),
+      ],
+    })
+    const ontology = new OntologyRegistry({ sources: [Account] })
+    const accountRef = { objectTypeId: "Account", primaryId: "account-1" }
+
+    expect(
+      validateObjectAuthorityProperties(ontology, accountRef, { balance: "+001.2300" })
+    ).toEqual({ balance: "1.23" })
+    expect(
+      validateLinkAuthorityProperties(
+        ontology,
+        {
+          source: accountRef,
+          linkId: "transfers",
+          target: { objectTypeId: "Account", primaryId: "account-2" },
+        },
+        { amount: "002.500" }
+      )
+    ).toEqual({ amount: "2.5" })
+    expect(
+      validateTelemetryPoint(ontology, {
+        series: { object: accountRef, propertyId: "reading" },
+        value: "0003.1400",
+        at: "2026-01-01T00:00:00.000Z",
+      }).value
+    ).toBe("3.14")
   })
 })

@@ -18,7 +18,7 @@ const Source = defineObjectType({
   links: [
     link("targets", Target, {
       cardinality: "many",
-      properties: [prop("role", "string")],
+      properties: [prop("role", "string"), prop("amount", "decimal")],
     }),
   ],
 })
@@ -137,6 +137,62 @@ describe("upsert no-op suppression", () => {
       })
     ).toEqual([created])
     expect(await sixb.events.read({ types: ["link.updated"] })).toHaveLength(0)
+  })
+
+  test("canonicalizes decimal link properties before no-op detection and persistence", async () => {
+    const { appendSpy, deps, sixb } = createRuntime()
+    await sixb.upsertObject("noop-source", { id: "source-1", name: "Source" })
+    await sixb.upsertObject("noop-target", { id: "target-1" })
+    await sixb.upsertObject("noop-target", { id: "target-2" })
+
+    await sixb.upsertLink("noop-source", "source-1", "targets", {
+      targetTypeId: "noop-target",
+      targetId: "target-1",
+      properties: { amount: "+001.2300" },
+    })
+
+    appendSpy.mockClear()
+    const results = await sixb.upsertLinkBatch([
+      {
+        objectTypeId: "noop-source",
+        sourceId: "source-1",
+        linkId: "targets",
+        target: {
+          targetTypeId: "noop-target",
+          targetId: "target-1",
+          properties: { amount: "1.23" },
+        },
+      },
+      {
+        objectTypeId: "noop-source",
+        sourceId: "source-1",
+        linkId: "targets",
+        target: {
+          targetTypeId: "noop-target",
+          targetId: "target-2",
+          properties: { amount: "002.500" },
+        },
+      },
+    ])
+
+    expect(results.map((result) => result.ok)).toEqual([true, true])
+    expect(appendSpy).toHaveBeenCalledTimes(1)
+    expect(appendSpy.mock.calls[0]?.[0].events).toHaveLength(1)
+
+    const links = await deps.storage.objects.listLinks({
+      projectId: sixb.id,
+      objectTypeId: "noop-source",
+      objectId: "source-1",
+      linkId: "targets",
+    })
+    expect(
+      links
+        .map((row) => [row.targetId, row.properties?.amount])
+        .sort(([left], [right]) => String(left).localeCompare(String(right)))
+    ).toEqual([
+      ["target-1", "1.23"],
+      ["target-2", "2.5"],
+    ])
   })
 
   test("a link batch emits only real changes and skips an unchanged replay", async () => {

@@ -1,6 +1,8 @@
+import type { JsonValue } from "../../json"
 import type { ObjectLink, ValueType } from ".."
 import { OntologyValidationError } from "../errors"
 import type { ObjectTypeWithPropertyTokens } from "../tokens"
+import { normalizeObjectProperties } from "./normalize"
 import { validatePropertyValue } from "./properties"
 
 /**
@@ -48,6 +50,21 @@ export function assertTargetTypeCompatible(
   const expected = types.join(" | ")
   throw new OntologyValidationError(
     `[Sixb] ${context}: target type '${actualTarget}' is not compatible with declared target '${expected}'`
+  )
+}
+
+export function normalizeLinkProperties(
+  objectType: ObjectTypeWithPropertyTokens,
+  link: ObjectLink,
+  properties: Readonly<Record<string, unknown>> | undefined,
+  valueTypesById: ReadonlyMap<string, ValueType>
+): Record<string, JsonValue> | undefined {
+  if (properties === undefined) return undefined
+  return normalizeObjectProperties(
+    link.properties ?? [],
+    properties,
+    valueTypesById,
+    `${objectType.id}.${link.id}`
   )
 }
 
