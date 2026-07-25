@@ -69,18 +69,27 @@ export class ActionReadRecorder {
   ): void {
     const snapshotsByLinkId = new Map<string, EffectiveLinkSnapshot[]>()
     for (const linkId of linkIds) snapshotsByLinkId.set(linkId, [])
+    /** Scopes holding a row that cannot be fenced, so no expectation may be recorded for them. */
+    const unfenceable = new Set<string>()
 
     for (const row of rows) {
       if (row.sourceTypeId !== source.objectTypeId || row.sourceId !== source.primaryId) continue
       const snapshots = snapshotsByLinkId.get(row.linkId)
       if (!snapshots) continue
       const snapshot = toLinkSnapshot(row)
-      if (!snapshot) continue
+      if (!snapshot) {
+        // Same rule `observeObject` applies to rows without materializer provenance: record no
+        // expectation at all. A fingerprint computed over the remaining rows would describe a scope
+        // the store can never reproduce, turning every such read into a guaranteed conflict.
+        unfenceable.add(row.linkId)
+        continue
+      }
       snapshots.push(snapshot)
       this.observeLink(snapshot.ref, snapshot)
     }
 
     for (const [linkId, snapshots] of snapshotsByLinkId) {
+      if (unfenceable.has(linkId)) continue
       const key = linkScopeKey(source, linkId)
       if (this.linkScopes.has(key)) continue
       this.linkScopes.set(key, {

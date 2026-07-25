@@ -123,6 +123,13 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
             path: `${objectType.id}.update`,
           })
           assertPrimaryPropertyNotUpdated(objectType, normalizedProperties)
+          // An empty patch resolves to a null override and commits as `unchanged`, so a handler
+          // that built its update conditionally would report a successful run that wrote nothing.
+          if (Object.keys(normalizedProperties).length === 0) {
+            throw new EditBatchError(
+              `[Sixb] EditBatch update '${objectType.id}:${ref.primaryId}' must set at least one property.`
+            )
+          }
 
           operations.push({
             kind: "object.update",

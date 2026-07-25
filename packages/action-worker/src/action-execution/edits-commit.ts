@@ -1,12 +1,8 @@
 import type { ActionReadObjectSetSource, JsonValue } from "@sixb/core"
 import { isObjectActionDefinition } from "@sixb/core"
 import { recordEdits } from "@sixb/core/actions/worker"
-import type { ActionEditCommitResult } from "@sixb/core/internal/actions"
-import {
-  ActionReadRecorder,
-  commitActionEdits,
-  createActionReadFacade,
-} from "@sixb/core/internal/actions"
+import type { ActionEditCommitResult, ActionReadRecorder } from "@sixb/core/internal/actions"
+import { commitActionEdits, createActionReadFacade } from "@sixb/core/internal/actions"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { type BasePhaseContext, requireObjectSubject } from "./context"
 import type {
@@ -19,9 +15,9 @@ import type {
 /**
  * Records the run's edits and commits them through the ontology Materializer.
  *
- * Reads performed by validation, writeback, and the edits handler are captured as exact expected
- * revisions so a commit fails when the state a decision was made against has changed. Domain events
- * are durable outbox facts written inside the commit, so this phase never appends events itself.
+ * Reads performed by the writeback and edits handlers are captured as exact expected revisions so a
+ * commit fails when the state a decision was made against has changed. Domain events are durable
+ * outbox facts written inside the commit, so this phase never appends events itself.
  */
 export async function runEditsAndCommitPhase(
   input: PhaseExecutionBase & {
@@ -30,6 +26,8 @@ export async function runEditsAndCommitPhase(
     readonly objectTarget: LoadedObjectTarget | null
     readonly writeback: JsonValue | undefined
     readonly existingCommit: ActionEditCommitResult | null
+    /** Shared with the writeback phase so both phases' reads fence the same commit. */
+    readonly reads: ActionReadRecorder
     readonly updateActiveRun: UpdateActiveRun
   }
 ): Promise<{ run: ActionRunRecord; result: ActionEditCommitResult | null }> {
@@ -49,7 +47,7 @@ export async function runEditsAndCommitPhase(
   })
   input.updateActiveRun(run)
 
-  const reads = new ActionReadRecorder()
+  const reads = input.reads
   if (input.objectTarget) {
     reads.observeObject(
       {

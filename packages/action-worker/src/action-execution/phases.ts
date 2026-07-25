@@ -1,5 +1,9 @@
 import { isObjectActionDefinition } from "@sixb/core"
-import { findActionEditCommit, runActionValidators } from "@sixb/core/internal/actions"
+import {
+  ActionReadRecorder,
+  findActionEditCommit,
+  runActionValidators,
+} from "@sixb/core/internal/actions"
 import { resolveLogsRuntime } from "@sixb/core/internal/logging"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { throwIfAborted } from "../normalize"
@@ -36,6 +40,9 @@ export async function executeActionPhases(
     signal,
     logger: logSession.withContext({ phase: "validation" }),
   })
+  // One recorder spans writeback and edits: a writeback handler that reads state, calls an external
+  // system, and then commits must fail if that state changed while the external call was in flight.
+  const reads = new ActionReadRecorder()
 
   try {
     if (!run.writeback && !existingCommit) {
@@ -65,6 +72,7 @@ export async function executeActionPhases(
         logger: logSession.withContext({ phase: "writeback" }),
       },
       objectTarget,
+      reads,
       updateActiveRun(run) {
         input.updateActiveRun(run)
       },
@@ -85,6 +93,7 @@ export async function executeActionPhases(
       objectTarget,
       writeback: writeback.value,
       existingCommit,
+      reads,
       updateActiveRun(run) {
         input.updateActiveRun(run)
       },
