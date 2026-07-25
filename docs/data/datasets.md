@@ -60,11 +60,16 @@ col("raw", "json", { nullable: true })
 | `boolean` | a boolean |
 | `int64` | an integer, or an integer string |
 | `float64` | a finite number |
-| `decimal` | a finite number, or a numeric string |
+| `decimal` | an exact numeric string |
 | `date` | a `Date`, or a `YYYY-MM-DD` string |
 | `timestamp` | a `Date`, or a parseable date string |
 | `json` | any JSON value |
 | `fileRef` | a [file reference](../infrastructure/overview.md) |
+
+Decimal columns reject JavaScript numbers because their exact source value may already have lost
+precision. Keep decimals as strings from the source, or construct typed values with `decimal("...")`
+or `decimal(anExactBigInt)`. Do not convert a `number` with `String(...)` and assume precision is
+restored.
 
 ## Use a dataset
 
