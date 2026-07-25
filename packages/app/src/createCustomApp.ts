@@ -254,6 +254,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       let htmlImportVersion = 0
       let htmlBundle = await importHtmlBundle(htmlPath, htmlImportVersion)
       const publicRoutes = (await pathExists(publicDir)) ? await createPublicRoutes(publicDir) : {}
+      let internalOrigin = ""
       const serveOptions = (bundle: Bun.HTMLBundle) =>
         ({
           port,
@@ -264,11 +265,12 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             ...reservedSixbRoutes(),
             [customAppManifestRoute]: manifestRoute(manifestPath),
             [internalAppShellRoute]: htmlBundleRoute(bundle),
-            "/": spaHtmlRoute(),
-            "/*": spaHtmlRoute(),
+            "/": spaHtmlRoute(() => internalOrigin),
+            "/*": spaHtmlRoute(() => internalOrigin),
           },
         }) as Parameters<typeof Bun.serve>[0]
       const server = Bun.serve(serveOptions(htmlBundle))
+      internalOrigin = devServerInternalOrigin(host, server.port ?? port)
 
       // .ts/.tsx edits can change Tailwind's scanned classes and .css edits
       // change the stylesheet source, so both regenerate the entry and
@@ -703,32 +705,55 @@ function manifestRoute(manifestPath: string): BunServeRoute {
   )
 }
 
-function spaHtmlRoute(): BunServeRoute {
+function devServerInternalOrigin(host: string, port: number): string {
+  if (host === "0.0.0.0") {
+    return `http://127.0.0.1:${port}`
+  }
+  if (host === "::" || host === "[::]") {
+    return `http://[::1]:${port}`
+  }
+
+  const urlHost = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host
+  return `http://${urlHost}:${port}`
+}
+
+function spaHtmlRoute(internalOrigin: () => string): BunServeRoute {
   return getHeadRoute(async (request) => {
-    const url = new URL(request.url)
-    if (url.pathname !== "/" && isAssetRequest(url.pathname)) {
+    const publicUrl = new URL(request.url)
+    if (publicUrl.pathname !== "/" && isAssetRequest(publicUrl.pathname)) {
       return notFoundResponse()
     }
 
-    url.pathname = internalAppShellRoute
+    const url = new URL(internalAppShellRoute, internalOrigin())
+    url.search = publicUrl.search
+    const requestHeaders = new Headers(request.headers)
+    for (const header of [
+      "forwarded",
+      "host",
+      "x-forwarded-host",
+      "x-forwarded-port",
+      "x-forwarded-proto",
+    ]) {
+      requestHeaders.delete(header)
+    }
     const bundleResponse = await fetch(
-      new Request(url, { method: request.method, headers: request.headers })
+      new Request(url, { method: request.method, headers: requestHeaders })
     )
-    const headers = new Headers(bundleResponse.headers)
-    headers.delete("content-length")
-    headers.delete("etag")
+    const responseHeaders = new Headers(bundleResponse.headers)
+    responseHeaders.delete("content-length")
+    responseHeaders.delete("etag")
     if (request.method === "HEAD") {
       return new Response(null, {
         status: bundleResponse.status,
         statusText: bundleResponse.statusText,
-        headers,
+        headers: responseHeaders,
       })
     }
 
     return new Response(restoreAppStaticUrls(await bundleResponse.text()), {
       status: bundleResponse.status,
       statusText: bundleResponse.statusText,
-      headers,
+      headers: responseHeaders,
     })
   })
 }

@@ -1,10 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { generateAppEntry, generateRouteManifest } from "../src/codegen"
 import { createCustomApp } from "../src/createCustomApp"
+
+async function linkDependencies(projectRoot: string, packages: readonly string[]): Promise<void> {
+  const atlasRoot = resolve(import.meta.dir, "..", "..", "atlas")
+
+  for (const name of packages) {
+    const packageDir = dirname(Bun.resolveSync(`${name}/package.json`, atlasRoot))
+    const target = join(projectRoot, "node_modules", ...name.split("/"))
+    await mkdir(dirname(target), { recursive: true })
+    await symlink(packageDir, target)
+  }
+}
 
 async function getFreePort(): Promise<number> {
   return await new Promise<number>((resolvePromise, reject) => {
@@ -260,6 +271,49 @@ describe("createCustomApp.dev", () => {
       expect((await fetch(`http://127.0.0.1:${port}/other.webmanifest`)).status).toBe(404)
     } finally {
       await server.stop()
+    }
+  })
+
+  test("serves the app shell behind a TLS-terminating reverse proxy", async () => {
+    const workspaceTempDir = resolve(import.meta.dir, "../../..", ".local", "test-tmp")
+    await mkdir(workspaceTempDir, { recursive: true })
+    const proxyRoot = await mkdtemp(join(workspaceTempDir, "sixb-app-proxy-"))
+    await mkdir(join(proxyRoot, "app"), { recursive: true })
+    await writeFile(
+      join(proxyRoot, "app", "page.tsx"),
+      "export default function Page() { return null }\n"
+    )
+    await linkDependencies(proxyRoot, [
+      "@sixb/client",
+      "@tanstack/react-query",
+      "react",
+      "react-dom",
+      "react-router-dom",
+    ])
+
+    const port = await getFreePort()
+    const app = await createCustomApp({
+      rootDir: proxyRoot,
+      authEnabled: false,
+      agentRoutes: false,
+    })
+    const server = await app.dev({ host: "127.0.0.1", port })
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/dashboard`, {
+        headers: {
+          host: "app.example.test",
+          "x-forwarded-host": "app.example.test",
+          "x-forwarded-port": "443",
+          "x-forwarded-proto": "https",
+        },
+      })
+
+      expect(response.status).toBe(200)
+      expect(await response.text()).toContain('<div id="root"></div>')
+    } finally {
+      await server.stop()
+      await rm(proxyRoot, { recursive: true, force: true })
     }
   })
 
