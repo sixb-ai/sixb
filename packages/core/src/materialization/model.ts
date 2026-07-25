@@ -161,6 +161,15 @@ export type OntologyEditCommit =
   | (BaseOntologyEditCommit & {
       readonly mode: "continue"
       readonly source: { readonly kind: "runtime"; readonly requestId: string }
+      /**
+       * Operation ids that apply as one unit, listed in application order.
+       *
+       * Continue mode isolates failures per operation, which would let one caller item commit its
+       * earlier operations after a later one failed. Grouping restores the per-item promise: a
+       * failure inside a group rolls back that group's earlier operations and reports every id in
+       * it as failed. Ungrouped operations keep per-operation isolation.
+       */
+      readonly operationGroups?: readonly (readonly string[])[]
     })
 
 export type ProjectionEntityRef =

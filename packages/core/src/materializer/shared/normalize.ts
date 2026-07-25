@@ -215,6 +215,39 @@ function normalizeExpectedLinkScope(value: ExpectedLinkScopeRevision): ExpectedL
   })
 }
 
+/**
+ * Validates that every grouped id exists exactly once across the declared groups.
+ *
+ * A group naming an unknown or repeated id would silently widen or split the unit a caller item
+ * relies on, so both are rejected before any operation applies.
+ */
+function normalizeOperationGroups(
+  groups: readonly (readonly string[])[],
+  operationIds: ReadonlySet<string>
+): readonly (readonly string[])[] {
+  const grouped = new Set<string>()
+  return Object.freeze(
+    groups.map((group) =>
+      Object.freeze(
+        group.map((id) => {
+          if (!operationIds.has(id)) {
+            throw new MaterializationValidationError(
+              `Operation group references unknown operation id '${id}'.`
+            )
+          }
+          if (grouped.has(id)) {
+            throw new MaterializationValidationError(
+              `Operation id '${id}' appears in more than one operation group.`
+            )
+          }
+          grouped.add(id)
+          return id
+        })
+      )
+    )
+  )
+}
+
 export function normalizeOntologyEditCommit(input: OntologyEditCommit): OntologyEditCommit {
   const operationIds = new Set<string>()
   const operations = input.operations.map((operation) => {
@@ -235,6 +268,9 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
       }),
       ...(input.actor !== undefined ? { actor: normalizeEventActor(input.actor) } : {}),
       operations: Object.freeze(operations),
+      ...(input.operationGroups !== undefined
+        ? { operationGroups: normalizeOperationGroups(input.operationGroups, operationIds) }
+        : {}),
     })
   }
 

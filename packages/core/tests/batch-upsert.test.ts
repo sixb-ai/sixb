@@ -37,6 +37,11 @@ const Room = defineObjectType({
   ],
   links: [
     link("inBuilding", Building, { cardinality: "one" }),
+    /** Cardinality-one with a required link property, which `setLinkBatch` cannot supply. */
+    link("primaryBuilding", Building, {
+      cardinality: "one",
+      properties: [prop("since", "string", { required: true })],
+    }),
     link.ref("hasSensors", "sensor", { cardinality: "many" }),
   ],
 })
@@ -393,6 +398,98 @@ describe("setLinkBatch", () => {
     })
     expect(links).toHaveLength(1)
     expect(links[0]?.targetId).toBe("b1")
+  })
+
+  test("keeps the current target when the assignment fails inside the commit", async () => {
+    const deps = createTestRuntimeDeps()
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
+
+    for (const id of ["b1", "b2"]) {
+      await sixb.upsertObject("building", { id, name: id })
+    }
+    await sixb.upsertObject("room", { id: "r1", name: "Room 1" })
+    await sixb.upsertLink("room", "r1", "primaryBuilding", {
+      targetTypeId: "building",
+      targetId: "b1",
+      properties: { since: "2020" },
+    })
+
+    // The endpoints exist, so planning succeeds and the item reaches the commit as an ordered
+    // `link.delete` + `link.upsert`. The upsert then fails the required-property check, which the
+    // delete must not outlive.
+    const results = await objectService.setLinkBatch(sixb, [
+      {
+        objectTypeId: "room",
+        sourceId: "r1",
+        linkId: "primaryBuilding",
+        target: { targetTypeId: "building", targetId: "b2" },
+      },
+    ])
+
+    expect(results).toHaveLength(1)
+    expect(results[0]?.ok).toBe(false)
+
+    const links = await deps.storage.objects.listLinks({
+      projectId: sixb.id,
+      objectTypeId: "room",
+      objectId: "r1",
+      linkId: "primaryBuilding",
+    })
+    expect(links.map((assigned) => assigned.targetId)).toEqual(["b1"])
+  })
+
+  test("rolls back a failed assignment without disturbing the rest of the batch", async () => {
+    const deps = createTestRuntimeDeps()
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
+
+    for (const id of ["b1", "b2"]) {
+      await sixb.upsertObject("building", { id, name: id })
+    }
+    for (const roomId of ["r1", "r2"]) {
+      await sixb.upsertObject("room", { id: roomId, name: roomId })
+    }
+    await sixb.upsertLink("room", "r1", "primaryBuilding", {
+      targetTypeId: "building",
+      targetId: "b1",
+      properties: { since: "2020" },
+    })
+    await sixb.upsertLink("room", "r2", "inBuilding", {
+      targetTypeId: "building",
+      targetId: "b1",
+    })
+
+    const results = await objectService.setLinkBatch(sixb, [
+      {
+        objectTypeId: "room",
+        sourceId: "r1",
+        linkId: "primaryBuilding",
+        target: { targetTypeId: "building", targetId: "b2" },
+      },
+      {
+        objectTypeId: "room",
+        sourceId: "r2",
+        linkId: "inBuilding",
+        target: { targetTypeId: "building", targetId: "b2" },
+      },
+    ])
+
+    expect(results[0]?.ok).toBe(false)
+    expect(results[1]).toEqual({ ok: true, value: undefined })
+
+    const [r1Links, r2Links] = await Promise.all(
+      [
+        { objectId: "r1", linkId: "primaryBuilding" },
+        { objectId: "r2", linkId: "inBuilding" },
+      ].map((scope) =>
+        deps.storage.objects.listLinks({
+          projectId: sixb.id,
+          objectTypeId: "room",
+          ...scope,
+        })
+      )
+    )
+    expect(r1Links?.map((assigned) => assigned.targetId)).toEqual(["b1"])
+    expect(r2Links?.map((assigned) => assigned.targetId)).toEqual(["b2"])
   })
 
   test("serializes concurrent assignments without cardinality violations", async () => {

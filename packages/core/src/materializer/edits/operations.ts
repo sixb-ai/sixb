@@ -50,20 +50,41 @@ export interface EditWorkingState {
   readonly scopeSnapshots: Map<string, MaterializationLinkScopeState>
 }
 
+/**
+ * Undo record for one override the current operation group replaced.
+ *
+ * Only the mutable override moves; loaded snapshots stay pinned for the whole commit, so restoring
+ * the overrides in reverse returns the working set to its pre-group state. Incident links loaded
+ * along the way are a read cache and are deliberately left in place.
+ */
+interface EditUndoEntry {
+  readonly restore: () => void
+}
+
+/** Collects undo records while a grouped item applies. */
+export type EditUndoJournal = EditUndoEntry[]
+
+export function undoEditJournal(journal: EditUndoJournal): void {
+  for (let index = journal.length - 1; index >= 0; index -= 1) {
+    journal[index]?.restore()
+  }
+}
+
 export async function applyEditOperation(
   context: MaterializerContext,
   storage: OntologyMaterializationStorage,
   session: MaterializationSession,
   state: EditWorkingState,
   operation: OntologyEditOperation,
-  identity: TimedCommitIdentity
+  identity: TimedCommitIdentity,
+  journal?: EditUndoJournal
 ): Promise<OntologyOperationOutcome> {
   validateOperationRef(context, operation)
   const cardinality = await loadOperationState(context, storage, session, state, operation)
   if (isObjectOperation(operation)) {
-    return applyObjectOperation(context, storage, session, state, operation, identity)
+    return applyObjectOperation(context, storage, session, state, operation, identity, journal)
   }
-  return applyLinkOperation(context, state, operation, cardinality)
+  return applyLinkOperation(context, state, operation, cardinality, journal)
 }
 
 function validateOperationRef(
@@ -117,7 +138,8 @@ async function applyObjectOperation(
   session: MaterializationSession,
   state: EditWorkingState,
   operation: ObjectOperation,
-  identity: TimedCommitIdentity
+  identity: TimedCommitIdentity,
+  journal?: EditUndoJournal
 ): Promise<OntologyOperationOutcome> {
   const working = requireWorkingObject(state, operation)
   const normalized = validateObjectOperation(context, operation)
@@ -138,7 +160,8 @@ async function applyObjectOperation(
     working,
     transition.next,
     currentEffective !== null,
-    operation
+    operation,
+    journal
   )
 
   return objectOperationOutcome(operation, working, transition.changed, context, identity)
@@ -191,7 +214,8 @@ async function applyObjectTransition(
   working: WorkingObject,
   next: WorkingObject["override"],
   existedBefore: boolean,
-  operation: ObjectOperation
+  operation: ObjectOperation,
+  journal?: EditUndoJournal
 ): Promise<void> {
   const previous = working.override
   working.override = next
@@ -206,6 +230,11 @@ async function applyObjectTransition(
     working.override = previous
     throw error
   }
+  journal?.push({
+    restore: () => {
+      working.override = previous
+    },
+  })
 }
 
 function objectOperationOutcome(
@@ -239,7 +268,8 @@ function applyLinkOperation(
   context: MaterializerContext,
   state: EditWorkingState,
   operation: LinkOperation,
-  cardinality: "one" | "many" | undefined
+  cardinality: "one" | "many" | undefined,
+  journal?: EditUndoJournal
 ): OntologyOperationOutcome {
   const working = requireWorkingLink(state, operation)
   validateLinkEndpoints(context, state, operation)
@@ -252,7 +282,7 @@ function applyLinkOperation(
     effectiveExists: currentEffective !== null,
   }
   const transition = applyLinkEdit({ ...transitionInput, normalizedProperties })
-  applyLinkTransition(context, state, working, transition.next, cardinality)
+  applyLinkTransition(context, state, working, transition.next, cardinality, journal)
   return { id: operation.id, ok: true, authority: authorityOutcome(transition.changed) }
 }
 
@@ -289,7 +319,8 @@ function applyLinkTransition(
   state: EditWorkingState,
   working: WorkingLink,
   next: WorkingLink["override"],
-  cardinality: "one" | "many" | undefined
+  cardinality: "one" | "many" | undefined,
+  journal?: EditUndoJournal
 ): void {
   const previous = working.override
   working.override = next
@@ -301,6 +332,11 @@ function applyLinkTransition(
     working.override = previous
     throw error
   }
+  journal?.push({
+    restore: () => {
+      working.override = previous
+    },
+  })
 }
 
 function authorityOutcome(changed: boolean): "changed" | "unchanged" {

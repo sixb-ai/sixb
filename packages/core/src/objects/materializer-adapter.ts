@@ -80,6 +80,9 @@ export async function commitRuntimeOperations(
  *
  * Successful items apply against one evolving authority state while semantic failures are recorded
  * per item. Provider, serialization, and CAS failures still roll the whole transaction back.
+ *
+ * An item that lowers to several operations is declared as one operation group so the Materializer
+ * rolls the whole item back rather than committing the operations that ran before the failure.
  */
 export async function commitRuntimeBatch(
   ctx: RuntimeMaterializerContext,
@@ -90,10 +93,15 @@ export async function commitRuntimeBatch(
     return { commit: null, outcomes: new Map() }
   }
 
+  const operationGroups = groups
+    .filter((group) => group.operations.length > 1)
+    .map((group) => group.operations.map((operation) => operation.id))
+
   const commit = await ctx.materializer.edits.commit({
     mode: "continue",
     source: { kind: "runtime", requestId: randomUUID() },
     operations,
+    ...(operationGroups.length > 0 ? { operationGroups } : {}),
   })
   await publishCommittedFacts(ctx, commit)
 

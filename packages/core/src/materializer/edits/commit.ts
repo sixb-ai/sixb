@@ -2,6 +2,7 @@ import { MaterializationValidationError } from "../../materialization/errors"
 import type {
   EditCommitResult,
   OntologyEditCommit,
+  OntologyEditOperation,
   OntologyMaterializationOrigin,
   OntologyOperationOutcome,
 } from "../../materialization/model"
@@ -22,7 +23,12 @@ import {
   type TimedCommitIdentity,
 } from "../shared/identity"
 import { normalizeOntologyEditCommit } from "../shared/normalize"
-import { applyEditOperation, type EditWorkingState } from "./operations"
+import {
+  applyEditOperation,
+  type EditUndoJournal,
+  type EditWorkingState,
+  undoEditJournal,
+} from "./operations"
 import { stageEditPlan } from "./plan"
 import type { WorkingLink, WorkingObject } from "./working-state"
 
@@ -226,21 +232,134 @@ async function applyEditOperations(
   command: PreparedEditCommit
 ): Promise<OntologyOperationOutcome[]> {
   const outcomes: OntologyOperationOutcome[] = []
-  for (const operation of command.input.operations) {
+  const groupByOperationId = operationGroupIndex(command.input)
+  const operations = command.input.operations
+  let index = 0
+
+  while (index < operations.length) {
+    const group = groupByOperationId.get(operations[index]?.id ?? "")
+    const run =
+      group === undefined ? 1 : groupRunLength(operations, index, group, groupByOperationId)
+    if (run === 1) {
+      const operation = operations[index]
+      if (operation)
+        outcomes.push(
+          await applyOneEditOperation(context, storage, session, state, operation, command)
+        )
+      index += 1
+      continue
+    }
+    outcomes.push(
+      ...(await applyEditOperationGroup(
+        context,
+        storage,
+        session,
+        state,
+        command,
+        operations.slice(index, index + run)
+      ))
+    )
+    index += run
+  }
+  return outcomes
+}
+
+async function applyOneEditOperation(
+  context: MaterializerContext,
+  storage: OntologyMaterializationStorage,
+  session: MaterializationSession,
+  state: EditWorkingState,
+  operation: OntologyEditOperation,
+  command: PreparedEditCommit
+): Promise<OntologyOperationOutcome> {
+  try {
+    return await applyEditOperation(context, storage, session, state, operation, command.identity)
+  } catch (error) {
+    if (!isRecoverableEditValidation(command.input, error)) throw error
+    return { id: operation.id, ok: false, error: { code: "validation", message: error.message } }
+  }
+}
+
+/**
+ * Applies one grouped item, rolling the whole group back if any operation in it fails.
+ *
+ * Without this, continue mode would leave an item half-applied: a cardinality-one reassignment
+ * whose `link.delete` succeeded and whose `link.upsert` failed would report an item error while the
+ * original edge stayed deleted.
+ */
+async function applyEditOperationGroup(
+  context: MaterializerContext,
+  storage: OntologyMaterializationStorage,
+  session: MaterializationSession,
+  state: EditWorkingState,
+  command: PreparedEditCommit,
+  group: readonly OntologyEditOperation[]
+): Promise<OntologyOperationOutcome[]> {
+  const journal: EditUndoJournal = []
+  const applied: OntologyOperationOutcome[] = []
+
+  for (const operation of group) {
+    let outcome: OntologyOperationOutcome
     try {
-      outcomes.push(
-        await applyEditOperation(context, storage, session, state, operation, command.identity)
+      outcome = await applyEditOperation(
+        context,
+        storage,
+        session,
+        state,
+        operation,
+        command.identity,
+        journal
       )
     } catch (error) {
       if (!isRecoverableEditValidation(command.input, error)) throw error
-      outcomes.push({
-        id: operation.id,
-        ok: false,
-        error: { code: "validation", message: error.message },
-      })
+      undoEditJournal(journal)
+      return failedEditGroup(group, error.message)
     }
+    if (!outcome.ok) {
+      undoEditJournal(journal)
+      return failedEditGroup(group, outcome.error.message)
+    }
+    applied.push(outcome)
   }
-  return outcomes
+  return applied
+}
+
+/** Reports every id in a rolled-back group as failed, so no position looks applied. */
+function failedEditGroup(
+  group: readonly OntologyEditOperation[],
+  message: string
+): OntologyOperationOutcome[] {
+  return group.map((operation) => ({
+    id: operation.id,
+    ok: false as const,
+    error: { code: "validation" as const, message },
+  }))
+}
+
+function operationGroupIndex(input: NormalizedEditCommit): ReadonlyMap<string, number> {
+  const byId = new Map<string, number>()
+  if (input.mode !== "continue" || input.operationGroups === undefined) return byId
+  for (const [group, ids] of input.operationGroups.entries()) {
+    for (const id of ids) byId.set(id, group)
+  }
+  return byId
+}
+
+/** Length of the contiguous run of operations at `start` that belong to `group`. */
+function groupRunLength(
+  operations: readonly OntologyEditOperation[],
+  start: number,
+  group: number,
+  groupByOperationId: ReadonlyMap<string, number>
+): number {
+  let length = 0
+  while (
+    start + length < operations.length &&
+    groupByOperationId.get(operations[start + length]?.id ?? "") === group
+  ) {
+    length += 1
+  }
+  return length
 }
 
 function isRecoverableEditValidation(
