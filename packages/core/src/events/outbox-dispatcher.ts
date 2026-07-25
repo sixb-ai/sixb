@@ -50,12 +50,21 @@ export class OntologyOutboxDispatcher {
   private readonly random: () => number
   private readonly createLeaseId: () => string
   private readonly onError: (error: unknown) => void
-  private inFlight: InFlightPublication | null = null
+  /**
+   * Every publication still awaiting settlement.
+   *
+   * `drain()` and the poll loop both publish, so more than one batch can be in flight at once. A
+   * single slot would let the later publication evict the earlier one, whose rows would then be
+   * neither marked published nor rescheduled — they would sit leased until expiry and be delivered
+   * a second time.
+   */
+  private readonly inFlight = new Set<InFlightPublication>()
   private controller: AbortController | null = null
   private running: Promise<void> | null = null
   private wakeVersion = 0
   private wakeWaiter: (() => void) | null = null
   private draining: Promise<void> | null = null
+  private pendingDrain: Promise<void> | null = null
 
   constructor(options: OntologyOutboxDispatcherOptions) {
     assertNonblank(options.projectId, "projectId")
@@ -126,17 +135,28 @@ export class OntologyOutboxDispatcher {
    * Mutation ingresses never wait for the broker inside their transaction: the commit inserts stable
    * event envelopes into the outbox and then calls this so its facts reach subscribers promptly.
    * Delivery is best effort — a broker outage leaves the rows pending rather than losing a committed
-   * fact. Drains run one at a time, so each caller gets a pass that starts after its own commit and
-   * concurrent commits never claim against each other.
+   * fact. Drains run one at a time so concurrent commits never claim against each other, and every
+   * caller that arrives while a pass is running shares one follow-up pass: each still gets a claim
+   * that starts after its own commit, without a burst of N commits paying for N sequential passes.
    */
   drain(): Promise<void> {
-    const previous = this.draining ?? Promise.resolve()
-    const drain = previous.then(
-      () => this.drainAvailable(),
-      () => this.drainAvailable()
-    )
-    this.draining = drain
-    return drain
+    const running = this.draining
+    if (!running) return this.startDrainPass()
+
+    this.pendingDrain ??= settled(running).then(() => {
+      this.pendingDrain = null
+      return this.startDrainPass()
+    })
+    return this.pendingDrain
+  }
+
+  private startDrainPass(): Promise<void> {
+    const pass = this.drainAvailable()
+    this.draining = pass
+    void settled(pass).then(() => {
+      if (this.draining === pass) this.draining = null
+    })
+    return pass
   }
 
   /** Hints that new rows are available. Polling remains the correctness fallback. */
@@ -160,7 +180,7 @@ export class OntologyOutboxDispatcher {
     }
 
     await settlesWithin(this.rescheduleUnsettledForShutdown(), settlementBudget)
-    this.inFlight = null
+    this.inFlight.clear()
     this.detachRun(controller, running)
   }
 
@@ -223,7 +243,7 @@ export class OntologyOutboxDispatcher {
   private async publishBatch(rows: readonly ClaimedOntologyOutboxRow[]): Promise<void> {
     if (rows.length === 0) return
     const publication: InFlightPublication = { rows, settling: false }
-    this.inFlight = publication
+    this.inFlight.add(publication)
     const ids = rows.map((row) => row.envelope.id)
     const leaseId = sharedLeaseId(rows)
 
@@ -261,14 +281,12 @@ export class OntologyOutboxDispatcher {
         this.reportError(rescheduleError)
       }
     } finally {
-      if (this.inFlight === publication && publication.settling) {
-        this.inFlight = null
-      }
+      this.inFlight.delete(publication)
     }
   }
 
   private beginSettlement(publication: InFlightPublication): boolean {
-    if (this.inFlight !== publication || publication.settling) return false
+    if (!this.inFlight.has(publication) || publication.settling) return false
     publication.settling = true
     return true
   }
@@ -302,13 +320,12 @@ export class OntologyOutboxDispatcher {
   }
 
   private async rescheduleUnsettledForShutdown(): Promise<void> {
-    const publication = this.inFlight
-    if (!publication || !this.beginSettlement(publication)) return
-    try {
-      await this.rescheduleClaimedForShutdown(publication.rows)
-    } finally {
-      if (this.inFlight === publication) {
-        this.inFlight = null
+    for (const publication of [...this.inFlight]) {
+      if (!this.beginSettlement(publication)) continue
+      try {
+        await this.rescheduleClaimedForShutdown(publication.rows)
+      } finally {
+        this.inFlight.delete(publication)
       }
     }
   }
@@ -397,6 +414,14 @@ function sharedLeaseId(rows: readonly ClaimedOntologyOutboxRow[]): string {
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
   return message.slice(0, 2_000)
+}
+
+/** Awaits a pass without adopting its failure, so one failed drain cannot reject the next. */
+function settled(promise: Promise<void>): Promise<void> {
+  return promise.then(
+    () => undefined,
+    () => undefined
+  )
 }
 
 async function settlesWithin(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
