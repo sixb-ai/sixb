@@ -154,6 +154,7 @@ async function executeEditTransaction(
     commitId: command.identity.commitId,
     created: true,
     eventCount,
+    committedAt: command.identity.committedAt,
     outcomes,
     changes,
   }

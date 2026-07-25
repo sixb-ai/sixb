@@ -20,10 +20,11 @@ import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
-import type { EventsRuntime } from "../events"
+import type { EventsRuntime, OntologyOutboxDispatcher } from "../events"
 import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
 import type { LogsRuntime } from "../logging"
+import type { OntologyMaterializer } from "../materializer"
 import type {
   ObjectQuery,
   ObjectQueryExplanation,
@@ -80,6 +81,18 @@ export interface SixbRuntimeContext {
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
   readonly events: EventsRuntime
+  /**
+   * The single semantic commit engine for object, link, and telemetry state.
+   *
+   * @internal Runtime plumbing. Application code uses `sixb.objects(...)` and Actions.
+   */
+  readonly materializer: OntologyMaterializer
+  /**
+   * Publishes committed ontology facts from the transactional outbox in this process.
+   *
+   * @internal Absent when a host runs the outbox dispatcher out of band.
+   */
+  readonly committedFacts?: OntologyOutboxDispatcher
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage

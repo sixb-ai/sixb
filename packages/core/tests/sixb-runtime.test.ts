@@ -8,6 +8,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   link,
+  MaterializationValidationError,
   ObjectNotFoundError,
   type ObjectQuery,
   ObjectQueryPlanningError,
@@ -453,7 +454,7 @@ describe("Sixb runtime", () => {
           unit: "degreeCelsius",
           at: new Date(),
         })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toBeInstanceOf(MaterializationValidationError)
     await expect(
       sixb
         .objects(Room)
@@ -476,7 +477,7 @@ describe("Sixb runtime", () => {
           unit: "millibar" as unknown as "degreeCelsius",
           at: new Date(),
         })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toBeInstanceOf(MaterializationValidationError)
     await expect(
       sixb
         .objects(Room)
@@ -544,16 +545,23 @@ describe("Sixb runtime", () => {
         })
     ).rejects.toThrow("does not define link properties")
 
+    // Latest telemetry is part of effective object state, so appending a point also updates the
+    // object it belongs to. Facts from one commit are claimed in `(createdAt, eventId)` order, so
+    // their relative order inside a commit is not asserted.
     const stream = await sixb.events.read()
-    expect(stream.map((event) => event.type)).toEqual([
-      "object.created",
-      "telemetry.appended",
-      "object.created",
+    expect([...stream].map((event) => event.type).sort()).toEqual([
       "link.created",
+      "object.created",
+      "object.created",
+      "object.updated",
+      "telemetry.appended",
     ])
-    expect(stream[0]?.topic).toBe("objects")
-    expect(stream[1]?.topic).toBe("telemetry")
-    expect(stream[3]?.topic).toBe("links")
+    expect(Object.fromEntries(stream.map((event) => [event.type, event.topic]))).toEqual({
+      "object.created": "objects",
+      "object.updated": "objects",
+      "telemetry.appended": "telemetry",
+      "link.created": "links",
+    })
 
     const latest = await runtimeDeps.storage.timeseries.getLatest({
       projectId: "project-a",
@@ -847,7 +855,7 @@ describe("Sixb runtime", () => {
           },
         },
       ])
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toBeInstanceOf(MaterializationValidationError)
     await expect(
       sixb.objects(Room).appendTelemetryBatch([
         {

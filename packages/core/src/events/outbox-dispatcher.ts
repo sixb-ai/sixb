@@ -55,6 +55,7 @@ export class OntologyOutboxDispatcher {
   private running: Promise<void> | null = null
   private wakeVersion = 0
   private wakeWaiter: (() => void) | null = null
+  private draining: Promise<void> | null = null
 
   constructor(options: OntologyOutboxDispatcherOptions) {
     assertNonblank(options.projectId, "projectId")
@@ -119,6 +120,25 @@ export class OntologyOutboxDispatcher {
       })
   }
 
+  /**
+   * Publishes the rows available to this caller, without the poll loop.
+   *
+   * Mutation ingresses never wait for the broker inside their transaction: the commit inserts stable
+   * event envelopes into the outbox and then calls this so its facts reach subscribers promptly.
+   * Delivery is best effort — a broker outage leaves the rows pending rather than losing a committed
+   * fact. Drains run one at a time, so each caller gets a pass that starts after its own commit and
+   * concurrent commits never claim against each other.
+   */
+  drain(): Promise<void> {
+    const previous = this.draining ?? Promise.resolve()
+    const drain = previous.then(
+      () => this.drainAvailable(),
+      () => this.drainAvailable()
+    )
+    this.draining = drain
+    return drain
+  }
+
   /** Hints that new rows are available. Polling remains the correctness fallback. */
   wake(): void {
     this.wakeVersion += 1
@@ -142,6 +162,23 @@ export class OntologyOutboxDispatcher {
     await settlesWithin(this.rescheduleUnsettledForShutdown(), settlementBudget)
     this.inFlight = null
     this.detachRun(controller, running)
+  }
+
+  private async drainAvailable(): Promise<void> {
+    for (;;) {
+      let rows: readonly ClaimedOntologyOutboxRow[]
+      try {
+        rows = await this.claimBatch()
+      } catch (error) {
+        this.reportError(error)
+        return
+      }
+      if (rows.length === 0) return
+      await this.publishBatch(rows)
+      // A partial batch means the outbox was drained; anything inserted since belongs to the next
+      // drain or the poll loop, and claiming again would only cost a round trip.
+      if (rows.length < this.batchSize) return
+    }
   }
 
   private async run(signal: AbortSignal): Promise<void> {

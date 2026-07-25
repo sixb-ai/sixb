@@ -1,67 +1,31 @@
 /**
- * Low-level write: append pre-built telemetry events and project them into storage.
+ * Low-level write: append normalized telemetry points through the ontology Materializer.
  *
- * Shared by both the batch operation and per-property appenders in ObjectByIdHandle.
+ * Shared by the batch operation and the per-property appenders in ObjectByIdHandle. The Materializer
+ * persists immutable point history, derives latest telemetry state, and writes the commit's outbox
+ * facts in one transaction, so this leaf never appends events or writes providers itself.
  */
+import { randomUUID } from "node:crypto"
+import type { AuthorizationContext } from "../../authorization"
 import { assertPrivileged } from "../../authorization"
-import type { EventDraft, StoredTelemetryAppendedEvent } from "../../events"
-import type { ResolvedObjectContext } from "../context"
+import type { TelemetryCommitResult, TelemetryPointWrite } from "../../materialization/model"
+import type { RuntimeMaterializerContext } from "../materializer-adapter"
+
+export type TelemetryWriteContext = RuntimeMaterializerContext & {
+  readonly authorization?: AuthorizationContext
+}
 
 export async function writeTelemetryBatch(
-  ctx: Pick<ResolvedObjectContext, "events" | "storage" | "authorization">,
-  events: readonly EventDraft[]
-): Promise<readonly StoredTelemetryAppendedEvent[]> {
+  ctx: TelemetryWriteContext,
+  points: readonly TelemetryPointWrite[]
+): Promise<TelemetryCommitResult | null> {
   assertPrivileged(ctx, "appendTelemetry")
-  const { events: eventsRuntime, storage } = ctx
-  const appended = await eventsRuntime.append({ events })
-  const telemetryEvents = appended.filter(
-    (e): e is StoredTelemetryAppendedEvent => e.type === "telemetry.appended"
-  )
-  await storage.timeseries.applyTelemetryAppendedBatch(telemetryEvents)
-  await storage.objects.applyTelemetryAppendedBatch(
-    await latestTelemetryEventsForObjectMaterialization(ctx, telemetryEvents)
-  )
-  return telemetryEvents
-}
+  if (points.length === 0) return null
 
-async function latestTelemetryEventsForObjectMaterialization(
-  ctx: Pick<ResolvedObjectContext, "storage">,
-  events: readonly StoredTelemetryAppendedEvent[]
-): Promise<readonly StoredTelemetryAppendedEvent[]> {
-  const latestEventIds = new Set<string>()
-  const groups = new Map<string, StoredTelemetryAppendedEvent>()
-
-  for (const event of events) {
-    groups.set(telemetryPropertyKey(event), event)
-  }
-
-  // The per-group lookups are independent; run them concurrently so a batch
-  // touching many (object, property) groups pays one round-trip of latency
-  // rather than one per group.
-  const latestPoints = await Promise.all(
-    [...groups.values()].map((event) =>
-      ctx.storage.timeseries.getLatest({
-        projectId: event.projectId,
-        objectTypeId: event.payload.objectTypeId,
-        objectId: event.payload.objectId,
-        propertyId: event.payload.propertyId,
-      })
-    )
-  )
-  for (const latest of latestPoints) {
-    if (latest?.sourceEventId) {
-      latestEventIds.add(latest.sourceEventId)
-    }
-  }
-
-  return events.filter((event) => latestEventIds.has(event.id))
-}
-
-function telemetryPropertyKey(event: StoredTelemetryAppendedEvent): string {
-  return [
-    event.projectId,
-    event.payload.objectTypeId,
-    event.payload.objectId,
-    event.payload.propertyId,
-  ].join("\0")
+  const commit = await ctx.materializer.telemetry.append({
+    source: { kind: "runtime", requestId: randomUUID() },
+    points,
+  })
+  if (commit.eventCount > 0) await ctx.committedFacts?.drain()
+  return commit
 }

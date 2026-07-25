@@ -265,7 +265,7 @@ const createInvoice = defineAction("createInvoice")
   })
   .effects(({ commit, writeback }) => {
     const externalId: string = writeback.externalId
-    const changedObjects = commit.diff.objects
+    const changedObjects = commit.changes.objects
     void externalId
     void changedObjects
   })

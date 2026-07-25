@@ -126,6 +126,7 @@ export async function loadObjectTarget(input: {
   return {
     subjectObjectType,
     snapshot: toActionTargetObject(targetRow, input.action.binding.objectType.id),
+    row: targetRow,
   }
 }
 

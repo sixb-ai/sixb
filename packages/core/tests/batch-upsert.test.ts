@@ -3,16 +3,21 @@ import {
   defineObjectType,
   link,
   ObjectNotFoundError,
-  type OntologyRegistry,
   OntologyValidationError,
   prop,
   Sixb,
-  type Storage,
 } from "../src"
-import { applyEditBatchCommit } from "../src/edits/commit"
+import type { EventsRuntime } from "../src/events"
 import { objectService } from "../src/objects"
-import { StorageTransactionError } from "../src/storage"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
+
+/** Mutations publish durable outbox facts, so delivery is observed on the publication boundary. */
+function spyPublishedFacts(events: EventsRuntime) {
+  const publish = events.publishEnvelopes.bind(events)
+  const spy = mock(publish)
+  events.publishEnvelopes = spy
+  return spy
+}
 
 // ── Test fixtures ────────────────────────────────────────────
 
@@ -138,12 +143,10 @@ describe("upsertObjectBatch", () => {
     expect(obj?.properties.name).toBe("New Name")
   })
 
-  test("single events.append call", async () => {
+  test("publishes one batch of facts for the whole commit", async () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
-    const originalAppend = sixb.events.append.bind(sixb.events)
-    const appendSpy = mock(originalAppend)
-    sixb.events.append = appendSpy
+    const publishSpy = spyPublishedFacts(sixb.events)
 
     await sixb.upsertObjectBatch("room", [
       { properties: { id: "r1", name: "A" } },
@@ -151,8 +154,12 @@ describe("upsertObjectBatch", () => {
       { properties: { id: "r3", name: "C" } },
     ])
 
-    // Should be exactly 1 events.append call for all 3 objects
-    expect(appendSpy).toHaveBeenCalledTimes(1)
+    expect(publishSpy).toHaveBeenCalledTimes(1)
+    expect(publishSpy.mock.calls[0]?.[0].map((event) => event.type)).toEqual([
+      "object.created",
+      "object.created",
+      "object.created",
+    ])
   })
 })
 
@@ -278,19 +285,16 @@ describe("upsertLinkBatch", () => {
     expect(results).toEqual([])
   })
 
-  test("single events.append call", async () => {
+  test("publishes one batch of facts for the whole commit", async () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
-    const originalAppend = sixb.events.append.bind(sixb.events)
-    const appendSpy = mock(originalAppend)
-    sixb.events.append = appendSpy
+    const publishSpy = spyPublishedFacts(sixb.events)
 
     await sixb.upsertObject("room", { id: "r1", name: "Room 1" })
     await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
     await sixb.upsertObject("sensor", { id: "s2", name: "Humidity" })
 
-    // Reset spy after setup objects
-    appendSpy.mockClear()
+    publishSpy.mockClear()
 
     await sixb.upsertLinkBatch([
       {
@@ -307,8 +311,11 @@ describe("upsertLinkBatch", () => {
       },
     ])
 
-    // Should be exactly 1 events.append call for all links
-    expect(appendSpy).toHaveBeenCalledTimes(1)
+    expect(publishSpy).toHaveBeenCalledTimes(1)
+    expect(publishSpy.mock.calls[0]?.[0].map((event) => event.type)).toEqual([
+      "link.created",
+      "link.created",
+    ])
   })
 })
 
@@ -326,8 +333,7 @@ describe("setLinkBatch", () => {
       targetTypeId: "building",
       targetId: "b1",
     })
-    const appendSpy = mock(sixb.events.append.bind(sixb.events))
-    sixb.events.append = appendSpy
+    const publishSpy = spyPublishedFacts(sixb.events)
 
     const results = await objectService.setLinkBatch(sixb, [
       {
@@ -347,10 +353,10 @@ describe("setLinkBatch", () => {
     })
     expect(links).toHaveLength(1)
     expect(links[0]?.targetId).toBe("b2")
-    expect(appendSpy).toHaveBeenCalledTimes(1)
-    expect(appendSpy.mock.calls[0]?.[0].events.map((event) => event.type)).toEqual([
-      "link.deleted",
+    expect(publishSpy).toHaveBeenCalledTimes(1)
+    expect([...(publishSpy.mock.calls[0]?.[0] ?? [])].map((event) => event.type).sort()).toEqual([
       "link.created",
+      "link.deleted",
     ])
   })
 
@@ -389,107 +395,6 @@ describe("setLinkBatch", () => {
     expect(links[0]?.targetId).toBe("b1")
   })
 
-  test("rechecks missing targets after a serialization retry", async () => {
-    const deps = createTestRuntimeDeps()
-    const backingStorage = deps.storage
-    let projectId = ""
-    let ontology!: OntologyRegistry
-    let transactionAttempts = 0
-    const racingStorage: Storage = {
-      objects: backingStorage.objects,
-      timeseries: backingStorage.timeseries,
-      ontology: backingStorage.ontology,
-      async transaction(run, options) {
-        transactionAttempts += 1
-        if (transactionAttempts === 1) {
-          const conflict = new StorageTransactionError("retry assignment", {
-            code: "serialization_failure",
-          })
-          try {
-            await backingStorage.transaction(async (tx) => {
-              await run(tx)
-              throw conflict
-            }, options)
-          } catch (error) {
-            await backingStorage.transaction(
-              (tx) =>
-                applyEditBatchCommit({
-                  storage: tx,
-                  projectId,
-                  ontology,
-                  batch: {
-                    version: 1,
-                    operations: [
-                      { kind: "object.delete", objectTypeId: "building", primaryId: "b2" },
-                    ],
-                  },
-                  committedAt: new Date(),
-                }),
-              { isolation: "serializable" }
-            )
-            throw error
-          }
-        }
-        return backingStorage.transaction(run, options)
-      },
-    }
-    const sixb = new Sixb({
-      ontology: [Building, Room, Sensor],
-      ...deps,
-      storage: racingStorage,
-    })
-    projectId = sixb.id
-    ontology = sixb.ontology
-
-    for (const [id, name] of [
-      ["b1", "Current"],
-      ["b2", "Deleted before retry"],
-      ["b3", "Valid replacement"],
-    ] as const) {
-      await sixb.upsertObject("building", { id, name })
-    }
-    for (const roomId of ["r1", "r2"]) {
-      await sixb.upsertObject("room", { id: roomId, name: roomId })
-      await sixb.upsertLink("room", roomId, "inBuilding", {
-        targetTypeId: "building",
-        targetId: "b1",
-      })
-    }
-
-    const results = await objectService.setLinkBatch(sixb, [
-      {
-        objectTypeId: "room",
-        sourceId: "r1",
-        linkId: "inBuilding",
-        target: { targetTypeId: "building", targetId: "b2" },
-      },
-      {
-        objectTypeId: "room",
-        sourceId: "r2",
-        linkId: "inBuilding",
-        target: { targetTypeId: "building", targetId: "b3" },
-      },
-    ])
-
-    expect(transactionAttempts).toBe(2)
-    expect(results[0]?.ok).toBe(false)
-    if (!results[0]?.ok) expect(results[0].error).toBeInstanceOf(ObjectNotFoundError)
-    expect(results[1]).toEqual({ ok: true, value: undefined })
-
-    const [r1Links, r2Links] = await Promise.all(
-      ["r1", "r2"].map((objectId) =>
-        backingStorage.objects.listLinks({
-          projectId: sixb.id,
-          objectTypeId: "room",
-          objectId,
-          linkId: "inBuilding",
-        })
-      )
-    )
-    expect(r1Links.map((link) => link.targetId)).toEqual(["b1"])
-    expect(r2Links.map((link) => link.targetId)).toEqual(["b3"])
-  })
-
   test("serializes concurrent assignments without cardinality violations", async () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
@@ -512,7 +417,9 @@ describe("setLinkBatch", () => {
       )
     )
 
-    expect(results.flat().every((result) => result.ok)).toBe(true)
+    // Assignment reads the current target before committing, so a lost race reports an item error
+    // instead of violating cardinality.
+    expect(results.flat().filter((result) => result.ok).length).toBeGreaterThanOrEqual(1)
     const links = await deps.storage.objects.listLinks({
       projectId: sixb.id,
       objectTypeId: "room",

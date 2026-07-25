@@ -356,6 +356,8 @@ export interface BaseCommitResult {
   readonly commitId: string
   readonly created: boolean
   readonly eventCount: number
+  /** Canonical UTC ISO commit time, fixed when the commit was assigned its identity. */
+  readonly committedAt: string
 }
 
 export interface EditCommitResult extends BaseCommitResult {

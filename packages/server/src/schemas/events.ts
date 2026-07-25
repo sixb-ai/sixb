@@ -17,11 +17,31 @@ export const EVENT_TYPES = CORE_EVENT_TYPES as readonly [
 
 export const EventTopicSchema = z.enum(EVENT_TOPICS)
 export const EventTypeSchema = z.enum(EVENT_TYPES)
-export const EventOriginSchema = z.object({
-  kind: z.literal("action"),
-  actionId: z.string(),
-  runId: z.string(),
+const ProjectionEventOriginSchema = z.object({
+  kind: z.literal("projection"),
+  projectionId: z.string(),
+  projectionRunId: z.string(),
+  datasetId: z.string(),
+  datasetVersionId: z.string(),
 })
+
+/** Mirrors the Materializer's commit origin: which ingress produced the fact. */
+export const EventOriginSchema = z.union([
+  z.object({
+    kind: z.literal("action"),
+    actionId: z.string(),
+    runId: z.string(),
+  }),
+  z.object({ kind: z.literal("runtime"), requestId: z.string() }),
+  ProjectionEventOriginSchema,
+  z.object({
+    kind: z.literal("telemetry"),
+    source: z.union([
+      z.object({ kind: z.literal("runtime"), requestId: z.string() }),
+      ProjectionEventOriginSchema.extend({ batchOrdinal: z.number() }),
+    ]),
+  }),
+])
 
 export const EventsQuerySchema = z.object({
   topic: EventTopicSchema.optional(),
@@ -47,6 +67,9 @@ export const EventSchema = z.object({
     .optional(),
   origin: EventOriginSchema.optional(),
   metadata: z.record(z.unknown()).optional(),
+  /** Present on materializer facts: the authoritative commit and its stable fact ordinal. */
+  commitId: z.string().optional(),
+  commitOrdinal: z.number().optional(),
   type: EventTypeSchema,
   topic: EventTopicSchema,
   partitionKey: z.string(),

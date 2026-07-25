@@ -33,7 +33,7 @@ export function contractEditHeader(id: string): MaterializationPlanHeader {
       origin: { kind: "runtime", requestId: id },
       ontologyRevision: "ontology-contract-revision",
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },
-      committedAt: "2026-01-02T00:00:00.000Z",
+      committedAt: CONTRACT_COMMITTED_AT,
     },
     expected: {
       sources: [],
@@ -45,12 +45,15 @@ export function contractEditHeader(id: string): MaterializationPlanHeader {
   }
 }
 
+export const CONTRACT_COMMITTED_AT = "2026-01-02T00:00:00.000Z"
+
 export function contractEditResult(commitId: string, eventCount = 0) {
   return {
     kind: "edit" as const,
     commitId,
     created: true,
     eventCount,
+    committedAt: CONTRACT_COMMITTED_AT,
     outcomes: [],
     changes: { objects: [], links: [] },
   }

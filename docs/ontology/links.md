@@ -173,6 +173,9 @@ await projects.byId("proj-001").unlink(Project.l.members, {
 })
 ```
 
+Each `link(...)` call writes the complete property set for that relationship: properties you leave out
+are cleared, and required link properties must be present every time.
+
 The target is an `ObjectRef` (`{ objectTypeId, primaryId }`). TypeScript checks it against the
 link's declared target, so linking `members` to a `Customer` is a compile error.
 
@@ -199,9 +202,10 @@ await projects.byId("proj-001").link(Project.l.lead, {
 `unlink(...)` removes one exact relationship row. Even for `cardinality: "one"` links, pass the
 current target; when you only know the `linkId`, read it first with `listLinks(Project.l.lead)`.
 
-Inside an action's staged `.edits(...)` facade, `setLink(...)` and `clearLink(...)` provide
-assignment semantics for cardinality-one links. They resolve the current target inside the atomic
-action commit; the immediate runtime API shown above intentionally retains `link`/`unlink`.
+Inside an action's staged `.edits(...)` facade the same `link(...)` and `unlink(...)` shapes apply,
+plus `resetLink(...)` to forget a relationship the action added so a projected one shows again. An
+action reassigns a cardinality-one link the same way — unlink the current target and link the new one
+— and both edits land together. See [Actions](../actions/overview.md).
 
 Writing a new link emits `link.created`; changing an existing link emits `link.updated`.
 Removing one emits `link.deleted`. See [Events](../events/overview.md).

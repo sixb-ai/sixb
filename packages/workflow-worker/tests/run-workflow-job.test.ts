@@ -240,6 +240,8 @@ function createRuntime(sixb: {
   readonly lakeStorage: WorkflowWorkerContext["lakeStorage"]
   readonly blobStorage: WorkflowWorkerContext["blobStorage"]
   readonly queues: WorkflowWorkerContext["queues"]
+  readonly materializer: WorkflowWorkerContext["materializer"]
+  readonly committedFacts: WorkflowWorkerContext["committedFacts"]
   readonly rules?: WorkflowWorkerContext["rules"]
   readonly workflows: { getById(workflowId: string): WorkflowDefinition | null }
 }) {
@@ -248,6 +250,8 @@ function createRuntime(sixb: {
     ontology: sixb.ontology,
     actionRegistry: sixb.actionRegistry,
     events: sixb.events,
+    materializer: sixb.materializer,
+    committedFacts: sixb.committedFacts,
     storage: sixb.storage,
     lakeStorage: sixb.lakeStorage,
     blobStorage: sixb.blobStorage,

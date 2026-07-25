@@ -37,36 +37,6 @@ describe("PgActionRunStorage", () => {
       completedAt: new Date("2026-04-29T10:00:01.000Z"),
     })
 
-    await storage.actionRuns.enterPhase({
-      id: "act_1",
-      projectId: "my-app",
-      phase: "edits",
-    })
-
-    await storage.actionRuns.recordCommit({
-      id: "act_1",
-      projectId: "my-app",
-      committedAt: new Date("2026-04-29T10:00:02.000Z"),
-      diff: {
-        objects: [
-          {
-            objectTypeId: "Invoice",
-            primaryId: "inv_1",
-            operation: "update",
-            changedProperties: ["status", "paidAt", "status"],
-          },
-        ],
-        links: [
-          {
-            operation: "update",
-            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
-            linkId: "customer",
-            target: { objectTypeId: "Customer", primaryId: "cus_1" },
-          },
-        ],
-      },
-    })
-
     await storage.actionRuns.recordEffects({
       id: "act_1",
       projectId: "my-app",
@@ -106,31 +76,11 @@ describe("PgActionRunStorage", () => {
         },
       },
     })
-    expect(run?.commit?.diff).toEqual({
-      objects: [
-        {
-          objectTypeId: "Invoice",
-          primaryId: "inv_1",
-          operation: "update",
-          changedProperties: ["paidAt", "status"],
-        },
-      ],
-      links: [
-        {
-          operation: "update",
-          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
-          linkId: "customer",
-          target: { objectTypeId: "Customer", primaryId: "cus_1" },
-        },
-      ],
-    })
-
     const page = await storage.actionRuns.list({
       projectId: "my-app",
       actionId: "createInvoice",
       limit: 10,
     })
     expect(page.runs).toHaveLength(1)
-    expect(page.runs[0]?.commit?.diff).toEqual(run?.commit?.diff)
   })
 })

@@ -92,13 +92,17 @@ const roomProjectionWithFk = roomProjection.withLinks({
   }),
 })
 
-const roomProjectionWithManyFk = roomProjection.withLinks({
-  hasSensors: fromForeignKey({
-    link: Room.l.hasSensors,
-    sourceField: "building_ref",
-    target: Sensor,
-  }),
-})
+// One dataset row per edge, so the object properties repeat identically while the link target varies.
+const roomProjectionWithManyFk = defineProjection("room-proj", Room)
+  .fromDataset(roomsDataset)
+  .properties({ id: "room_id", name: "room_name" })
+  .withLinks({
+    hasSensors: fromForeignKey({
+      link: Room.l.hasSensors,
+      sourceField: "building_ref",
+      target: Sensor,
+    }),
+  })
 
 const roomProjectionWithDatasetFieldFk = defineProjection("room-dataset-field-fk-proj", Room)
   .fromDataset(roomsDataset)
@@ -212,6 +216,8 @@ interface ProjectionRuntimeSource {
   readonly ontology: ProjectionWorkerContext["ontology"]
   readonly actionRegistry: ProjectionWorkerContext["actionRegistry"]
   readonly events: ProjectionWorkerContext["events"]
+  readonly materializer: ProjectionWorkerContext["materializer"]
+  readonly committedFacts: ProjectionWorkerContext["committedFacts"]
   readonly storage: ProjectionWorkerContext["storage"]
   readonly lakeStorage: ProjectionWorkerContext["lakeStorage"]
   readonly blobStorage: ProjectionWorkerContext["blobStorage"]
@@ -262,6 +268,8 @@ function createRuntime(sixb: ProjectionRuntimeSource) {
     ontology: sixb.ontology,
     actionRegistry: sixb.actionRegistry,
     events: sixb.events,
+    materializer: sixb.materializer,
+    committedFacts: sixb.committedFacts,
     storage: sixb.storage,
     lakeStorage: sixb.lakeStorage,
     blobStorage: sixb.blobStorage,
@@ -1072,7 +1080,7 @@ describe("runProjectionJob", () => {
     expect(links.map((link) => link.targetId).sort()).toEqual(["s1", "s2"])
   })
 
-  test("uses flush-scoped idempotency keys for repeated FK edges", async () => {
+  test("converges repeated FK edges onto one link with distinct committed facts", async () => {
     const deps = createDeps()
     const sixb = createSixb(
       {
@@ -1085,23 +1093,15 @@ describe("runProjectionJob", () => {
       await sixb.upsertObject("Building", { id: buildingId, name: buildingId })
     }
 
-    const originalAppend = sixb.events.append.bind(sixb.events)
-    const seenKeys = new Set<string>()
+    const publish = sixb.events.publishEnvelopes.bind(sixb.events)
     const publishedB1Creates: string[] = []
-    sixb.events.append = async (params) => {
-      const uniqueEvents = params.events.filter((event) => {
-        const key = event.idempotencyKey
-        if (key === undefined) return true
-        if (seenKeys.has(key)) return false
-        seenKeys.add(key)
-        return true
-      })
-      for (const event of uniqueEvents) {
-        if (event.type === "link.created" && event.payload.targetId === "b1") {
-          publishedB1Creates.push(event.idempotencyKey ?? "")
+    sixb.events.publishEnvelopes = async (envelopes) => {
+      for (const envelope of envelopes) {
+        if (envelope.type === "link.created" && envelope.payload.targetId === "b1") {
+          publishedB1Creates.push(envelope.id)
         }
       }
-      return originalAppend({ events: uniqueEvents })
+      return publish(envelopes)
     }
 
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
@@ -1123,6 +1123,7 @@ describe("runProjectionJob", () => {
 
     expect(result.run.status).toBe("succeeded")
     expect(result.linksUpserted).toBe(3)
+    // Each assignment commit is its own fact; stable event ids keep them distinguishable.
     expect(publishedB1Creates).toHaveLength(2)
     expect(new Set(publishedB1Creates).size).toBe(2)
 
@@ -1810,20 +1811,20 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    const originalAppend = sixb.events.append.bind(sixb.events)
+    const publish = sixb.events.publishEnvelopes.bind(sixb.events)
     let aborted = false
-    sixb.events.append = async (params) => {
-      const events = await originalAppend(params)
+    sixb.events.publishEnvelopes = async (envelopes) => {
+      const published = await publish(envelopes)
       if (
         !aborted &&
-        params.events.some(
-          (event) => event.type === "object.created" || event.type === "object.updated"
+        envelopes.some(
+          (envelope) => envelope.type === "object.created" || envelope.type === "object.updated"
         )
       ) {
         aborted = true
         abortController.abort()
       }
-      return events
+      return published
     }
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: null },

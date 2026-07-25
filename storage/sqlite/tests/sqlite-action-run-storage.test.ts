@@ -261,36 +261,6 @@ describe("SqliteActionRunStorage", () => {
       completedAt: new Date("2026-04-29T10:00:01.000Z"),
     })
 
-    await storage.enterPhase({
-      id: "act_1",
-      projectId: "my-app",
-      phase: "edits",
-    })
-
-    await storage.recordCommit({
-      id: "act_1",
-      projectId: "my-app",
-      committedAt: new Date("2026-04-29T10:00:02.000Z"),
-      diff: {
-        objects: [
-          {
-            objectTypeId: "Invoice",
-            primaryId: "inv_1",
-            operation: "update",
-            changedProperties: ["status", "paidAt", "status"],
-          },
-        ],
-        links: [
-          {
-            operation: "update",
-            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
-            linkId: "customer",
-            target: { objectTypeId: "Customer", primaryId: "cus_1" },
-          },
-        ],
-      },
-    })
-
     await storage.recordEffects({
       id: "act_1",
       projectId: "my-app",
@@ -329,24 +299,6 @@ describe("SqliteActionRunStorage", () => {
           phase: "effects",
         },
       },
-    })
-    expect(run?.commit?.diff).toEqual({
-      objects: [
-        {
-          objectTypeId: "Invoice",
-          primaryId: "inv_1",
-          operation: "update",
-          changedProperties: ["paidAt", "status"],
-        },
-      ],
-      links: [
-        {
-          operation: "update",
-          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
-          linkId: "customer",
-          target: { objectTypeId: "Customer", primaryId: "cus_1" },
-        },
-      ],
     })
   })
 })

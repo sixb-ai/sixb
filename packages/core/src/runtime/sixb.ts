@@ -27,11 +27,12 @@ import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
 import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
 import type { SixbErrorHandler } from "../error-reporting/types"
-import { EventsRuntime } from "../events"
+import { EventsRuntime, OntologyOutboxDispatcher } from "../events"
 import { FunctionRuntime } from "../functions/runtime"
 import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
 import { type LoggerProvider, LogsRuntime, type ObservabilityOptions } from "../logging"
+import { createOntologyMaterializer, type OntologyMaterializer } from "../materializer"
 import { createObjectSet, objectService } from "../objects"
 import {
   assertObjectTypeRegistered,
@@ -139,6 +140,16 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   readonly broker: Broker
   readonly events: EventsRuntime
   readonly logs: LogsRuntime
+  /**
+   * The single semantic commit engine behind every object, link, and telemetry write.
+   *
+   * @internal Runtime plumbing so workers can reach the same engine; not part of the authoring API.
+   */
+  readonly materializer: OntologyMaterializer
+  /**
+   * @internal Publishes committed ontology facts from the transactional outbox in this process.
+   */
+  readonly committedFacts: OntologyOutboxDispatcher
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
@@ -319,11 +330,25 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       datasetsById: this.datasetsById,
     })
 
+    this.materializer = createOntologyMaterializer({
+      projectId: this.projectId,
+      ontology: this.ontology,
+      projections: this.projectionRegistry,
+      storage: this.storage,
+    })
+    this.committedFacts = new OntologyOutboxDispatcher({
+      projectId: this.projectId,
+      storage: this.storage,
+      events: this.events,
+    })
+
     this.runtimeContext = {
       projectId: this.projectId,
       ontology: this.ontology,
       actionRegistry: this.actionRegistry,
       events: this.events,
+      materializer: this.materializer,
+      committedFacts: this.committedFacts,
       storage: this.storage,
       lakeStorage: this.lakeStorage,
       blobStorage: this.blobStorage,

@@ -1,4 +1,3 @@
-import type { EditCommitPlan } from "../edits"
 import { clearedPropertyChanges, diffPropertyChanges } from "./property-changes"
 import type { EventDraft, EventOrigin, PropertyChangeMap } from "./types"
 
@@ -45,86 +44,6 @@ export interface LinkDeletedEventInput {
   readonly previousProperties?: Record<string, unknown>
   readonly idempotencyKeyPrefix?: string
   readonly origin?: EventOrigin
-}
-
-export interface EditCommitPlanEventsInput {
-  readonly plan: EditCommitPlan
-  readonly idempotencyKeyPrefix?: string
-  readonly origin?: EventOrigin
-}
-
-export function buildEditCommitPlanEvents(input: EditCommitPlanEventsInput): readonly EventDraft[] {
-  const events: EventDraft[] = []
-
-  for (const objectDelete of input.plan.objects.deletes) {
-    events.push(
-      buildObjectDeletedEvent({
-        objectTypeId: objectDelete.objectTypeId,
-        primaryId: objectDelete.primaryId,
-        previousProperties: objectDelete.previousProperties
-          ? { ...objectDelete.previousProperties }
-          : undefined,
-        idempotencyKeyPrefix: input.idempotencyKeyPrefix,
-        origin: input.origin,
-      })
-    )
-  }
-
-  for (const objectUpsert of input.plan.objects.upserts) {
-    events.push(
-      buildObjectUpsertEvent({
-        objectTypeId: objectUpsert.objectTypeId,
-        primaryId: objectUpsert.primaryId,
-        operation: objectUpsert.operation,
-        properties: { ...objectUpsert.properties },
-        previousProperties: objectUpsert.previousProperties
-          ? { ...objectUpsert.previousProperties }
-          : undefined,
-        idempotencyKeyPrefix: input.idempotencyKeyPrefix,
-        origin: input.origin,
-      })
-    )
-  }
-
-  for (const linkDelete of input.plan.links.deletes) {
-    events.push(
-      buildLinkDeletedEvent({
-        sourceTypeId: linkDelete.source.objectTypeId,
-        sourceId: linkDelete.source.primaryId,
-        linkId: linkDelete.linkId,
-        targetTypeId: linkDelete.target.objectTypeId,
-        targetId: linkDelete.target.primaryId,
-        previousProperties: linkDelete.previousProperties
-          ? { ...linkDelete.previousProperties }
-          : undefined,
-        idempotencyKeyPrefix: input.idempotencyKeyPrefix,
-        origin: input.origin,
-      })
-    )
-  }
-
-  for (const linkUpsert of input.plan.links.upserts) {
-    events.push(
-      buildLinkUpsertEvent({
-        sourceTypeId: linkUpsert.source.objectTypeId,
-        sourceId: linkUpsert.source.primaryId,
-        linkId: linkUpsert.linkId,
-        targetTypeId: linkUpsert.target.objectTypeId,
-        targetId: linkUpsert.target.primaryId,
-        operation: linkUpsert.operation,
-        ...(linkUpsert.properties !== undefined
-          ? { properties: { ...linkUpsert.properties } }
-          : {}),
-        previousProperties: linkUpsert.previousProperties
-          ? { ...linkUpsert.previousProperties }
-          : undefined,
-        idempotencyKeyPrefix: input.idempotencyKeyPrefix,
-        origin: input.origin,
-      })
-    )
-  }
-
-  return events
 }
 
 export function buildObjectUpsertEvent(

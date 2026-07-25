@@ -418,6 +418,7 @@ describe("materializer canonical contracts", () => {
       commitId: "commit-1",
       created: true,
       eventCount: 0,
+      committedAt: write.committedAt,
       outcomes: [],
       changes: { objects: [], links: [] },
     } as const
@@ -436,6 +437,7 @@ describe("materializer canonical contracts", () => {
         commitId: "commit-1",
         created: true,
         eventCount: 0,
+        committedAt: write.committedAt,
         pointsCreated: 0,
         pointsUpdated: 0,
         pointsUnchanged: 0,

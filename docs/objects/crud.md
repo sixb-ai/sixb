@@ -56,9 +56,10 @@ await invoices.upsert({ properties: { id: "inv-001", status: "paid" } })
 Required properties are checked against the merged result, not just the incoming fields, so a
 later partial update of an existing object need not repeat required values.
 
-Inside an action's `.edits(...)` phase, the staged facade uses the flat
-`objects(Invoice).upsert({ id: "inv-001", status: "paid" })` form. It has the same merge behavior,
-but the create-or-update decision is made when the action's full edit batch commits atomically.
+Inside an action's `.edits(...)` phase, use `objects(Invoice).byId("inv-001").update({ status: "paid" })`
+for the same partial-write behavior, or `objects(Invoice).create({ ... })` for a new object. Every edit
+an action stages lands in one atomic write when the handler returns. See
+[Actions](../actions/overview.md).
 
 ### Dates are normalized
 
@@ -72,7 +73,10 @@ await invoices.upsert({ properties: { id: "inv-001", issuedAt: "2026-06-23T00:00
 
 ### Events
 
-Each successful upsert appends either an `object.created` or `object.updated` [event](../events/overview.md), including the full resulting properties and their changes. The object record is projected from that event, and [rules](../rules/overview.md) and [workflows](../workflows/overview.md) can react to it.
+Each upsert that changes something emits either an `object.created` or `object.updated`
+[event](../events/overview.md), including the resulting properties and what changed. An upsert that
+writes the same values it already had emits nothing. [Rules](../rules/overview.md) and
+[workflows](../workflows/overview.md) react to those events.
 
 ## get
 

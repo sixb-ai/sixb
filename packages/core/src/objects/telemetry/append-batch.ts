@@ -2,14 +2,10 @@
  * Leaf operation: batch telemetry append for multiple objects of a single type.
  */
 import { assertPrivileged } from "../../authorization"
-import type { EventDraft } from "../../events"
+import type { TelemetryPointWrite } from "../../materialization/model"
+import { telemetryPointKey } from "../../materialization/refs"
 import { OntologyValidationError } from "../../ontology/errors"
-import {
-  assertTelemetryProperty,
-  normalizeSchemaValue,
-  validatePropertyValue,
-  validateTelemetryUnit,
-} from "../../ontology/validation"
+import { assertTelemetryProperty } from "../../ontology/validation"
 import type { ResolvedObjectContext } from "../context"
 import { requireObject } from "../helpers"
 import { writeTelemetryBatch } from "./write-batch"
@@ -40,9 +36,11 @@ export async function appendTelemetryBatch(
   }[]
 ): Promise<void> {
   assertPrivileged(ctx, "appendTelemetry")
-  const { storage, projectId, objectType, ontology } = ctx
+  const { storage, projectId, objectType } = ctx
   const checkedIds = new Set<string>()
-  const events: EventDraft[] = []
+  // Telemetry identity is `(series, at)`, so a repeated instant inside one call is an upsert: the
+  // last value wins rather than failing the whole batch.
+  const points = new Map<string, TelemetryPointWrite>()
 
   for (const item of items) {
     const at = (item.at ?? new Date()).toISOString()
@@ -66,46 +64,21 @@ export async function appendTelemetryBatch(
 
       assertTelemetryProperty(propertyToken.property)
 
-      const value = isUnitBearingValue(rawValue) ? rawValue.value : rawValue
-      const unit = isUnitBearingValue(rawValue) ? rawValue.unit : undefined
-
-      const propertyPath = `${objectType.id}.${propertyToken.id}`
-
-      validatePropertyValue(
-        propertyToken.property,
-        value,
-        propertyPath,
-        ontology.getValueTypesById()
-      )
-      validateTelemetryUnit(
-        propertyToken.property,
-        propertyPath,
-        unit,
-        ontology.getValueTypesById()
-      )
-
-      const normalizedValue = normalizeSchemaValue(
-        propertyToken.property.schema,
-        value,
-        propertyPath,
-        ontology.getValueTypesById()
-      )
-
-      events.push({
-        type: "telemetry.appended",
-        payload: {
-          objectTypeId: objectType.id,
-          objectId: item.id,
-          propertyId: propertyToken.id,
-          value: normalizedValue,
-          ...(unit !== undefined ? { unit } : {}),
-          at,
-        },
+      // Value and unit validation, plus schema normalization, happen inside the Materializer.
+      const series = {
+        object: { objectTypeId: objectType.id, primaryId: item.id },
+        propertyId: propertyToken.id,
+      }
+      points.set(telemetryPointKey(series, at), {
+        series,
+        value: isUnitBearingValue(rawValue)
+          ? (rawValue.value as TelemetryPointWrite["value"])
+          : (rawValue as TelemetryPointWrite["value"]),
+        ...(isUnitBearingValue(rawValue) ? { unit: rawValue.unit } : {}),
+        at,
       })
     }
   }
 
-  if (events.length > 0) {
-    await writeTelemetryBatch(ctx, events)
-  }
+  await writeTelemetryBatch(ctx, [...points.values()])
 }

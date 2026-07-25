@@ -2,14 +2,8 @@ import type { Database } from "bun:sqlite"
 import type { ActionSubject, JsonValue } from "@sixb/core"
 import type {
   ActionMaterializationRunStorage,
-  ActionRunCommitDiff,
-  ActionRunCommitRecord,
-  ActionRunCommitSourceRow,
   ActionRunEffectsRecord,
   ActionRunFailure,
-  ActionRunLinkDiffSourceRow,
-  ActionRunObjectDiffPropertySourceRow,
-  ActionRunObjectDiffSourceRow,
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
@@ -20,22 +14,17 @@ import type {
   ListActionRunsInput,
   ListActionRunsResult,
   QueueActionRunInput,
-  RecordActionCommitInput,
   RecordActionEffectsInput,
   RecordActionWritebackInput,
   StartActionRunInput,
 } from "@sixb/core/storage"
 import {
   ActionRunError,
-  actionRunCommitDiffsEqual,
   actionRunPhaseRecordsEqual,
-  buildActionRunCommitRecords,
   canRequeueActionRunAfterEnqueueFailure,
   finishActionRunPhase,
   isTerminalActionRun,
-  normalizeActionRunCommitDiff,
 } from "@sixb/core/storage"
-import { insertActionRunCommitDiff } from "./action-run-commit-diff"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   closeSqliteStoreConnection,
@@ -208,13 +197,11 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
         )
         .run("queued", "request", queuedAt.toISOString(), input.projectId, input.id)
 
-      this.deleteCommitRows(input.projectId, input.id)
-
       const updated = this.db
         .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
         .get(input.projectId, input.id) as DatabaseRow
 
-      return rowToActionRunRecord(updated, this.loadCommitRecord(input.projectId, input.id))
+      return rowToActionRunRecord(updated)
     })()
   }
 
@@ -262,7 +249,7 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
         .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
         .get(input.projectId, input.id) as DatabaseRow
 
-      return rowToActionRunRecord(updated, this.loadCommitRecord(input.projectId, input.id))
+      return rowToActionRunRecord(updated)
     })()
   }
 
@@ -284,7 +271,7 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
         .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
         .get(input.projectId, input.id) as DatabaseRow
 
-      return rowToActionRunRecord(updated, this.loadCommitRecord(input.projectId, input.id))
+      return rowToActionRunRecord(updated)
     })()
   }
 
@@ -296,7 +283,7 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
 
       if (currentWriteback) {
         if (actionRunPhaseRecordsEqual(currentWriteback, nextWriteback)) {
-          return rowToActionRunRecord(existing, this.loadCommitRecord(input.projectId, input.id))
+          return rowToActionRunRecord(existing)
         }
 
         throw new ActionRunError(
@@ -335,55 +322,7 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
         .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
         .get(input.projectId, input.id) as DatabaseRow
 
-      return rowToActionRunRecord(updated, this.loadCommitRecord(input.projectId, input.id))
-    })()
-  }
-
-  async recordCommit(input: RecordActionCommitInput): Promise<ActionRunRecord> {
-    return this.db.transaction(() => {
-      const existing = this.requireRunningRun(input.projectId, input.id, "record commit")
-      const existingCommit = this.loadCommitRecord(input.projectId, input.id)
-      const commit: ActionRunCommitRecord = {
-        committedAt: new Date(input.committedAt ?? new Date()),
-        diff: normalizeActionRunCommitDiff(input.diff),
-      }
-
-      if (existingCommit) {
-        if (actionRunCommitDiffsEqual(existingCommit.diff, commit.diff)) {
-          return rowToActionRunRecord(existing, existingCommit)
-        }
-
-        throw new ActionRunError(
-          `[SixbSqlite] Action run '${input.id}' already has a different commit diff.`
-        )
-      }
-
-      this.db
-        .query(
-          `
-          INSERT INTO action_run_commits (project_id, run_id, committed_at)
-          VALUES (?, ?, ?)
-        `
-        )
-        .run(input.projectId, input.id, commit.committedAt.toISOString())
-
-      insertActionRunCommitDiff(this.db, input.projectId, input.id, commit.diff)
-
-      this.db
-        .query(
-          `
-          UPDATE action_runs
-          SET phase = ?
-          WHERE project_id = ? AND id = ?
-        `
-        )
-        .run("commit", input.projectId, input.id)
-
-      const updated = this.db
-        .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
-        .get(input.projectId, input.id) as DatabaseRow
-
-      return rowToActionRunRecord(updated, commit)
+      return rowToActionRunRecord(updated)
     })()
   }
 
@@ -395,7 +334,7 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
 
       if (currentEffects) {
         if (actionRunPhaseRecordsEqual(currentEffects, nextEffects)) {
-          return rowToActionRunRecord(existing, this.loadCommitRecord(input.projectId, input.id))
+          return rowToActionRunRecord(existing)
         }
 
         throw new ActionRunError(
@@ -432,7 +371,7 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
         .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
         .get(input.projectId, input.id) as DatabaseRow
 
-      return rowToActionRunRecord(updated, this.loadCommitRecord(input.projectId, input.id))
+      return rowToActionRunRecord(updated)
     })()
   }
 
@@ -485,7 +424,7 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
         .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
         .get(input.projectId, input.id) as DatabaseRow
 
-      return rowToActionRunRecord(updated, this.loadCommitRecord(input.projectId, input.id))
+      return rowToActionRunRecord(updated)
     })()
   }
 
@@ -494,9 +433,7 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
       .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
       .get(params.projectId, params.id) as DatabaseRow | null
 
-    return row
-      ? rowToActionRunRecord(row, this.loadCommitRecord(params.projectId, params.id))
-      : null
+    return row ? rowToActionRunRecord(row) : null
   }
 
   async list(input: ListActionRunsInput): Promise<ListActionRunsResult> {
@@ -600,11 +537,7 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
     }
 
     const rows = this.db.query(query).all(...queryArgs) as DatabaseRow[]
-    const commits = this.loadCommitRecords(
-      input.projectId,
-      rows.map((row) => row.id)
-    )
-    const runs = rows.map((row) => rowToActionRunRecord(row, commits.get(row.id)))
+    const runs = rows.map((row) => rowToActionRunRecord(row))
 
     return {
       runs,
@@ -635,93 +568,6 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
     }
 
     return existing
-  }
-
-  private deleteCommitRows(projectId: string, runId: string): void {
-    this.db
-      .query("DELETE FROM action_run_link_diffs WHERE project_id = ? AND run_id = ?")
-      .run(projectId, runId)
-    this.db
-      .query("DELETE FROM action_run_object_diff_properties WHERE project_id = ? AND run_id = ?")
-      .run(projectId, runId)
-    this.db
-      .query("DELETE FROM action_run_object_diffs WHERE project_id = ? AND run_id = ?")
-      .run(projectId, runId)
-    this.db
-      .query("DELETE FROM action_run_commits WHERE project_id = ? AND run_id = ?")
-      .run(projectId, runId)
-  }
-
-  private loadCommitRecord(projectId: string, runId: string): ActionRunCommitRecord | undefined {
-    return this.loadCommitRecords(projectId, [runId]).get(runId)
-  }
-
-  private loadCommitRecords(
-    projectId: string,
-    runIds: readonly string[]
-  ): Map<string, ActionRunCommitRecord> {
-    if (runIds.length === 0) {
-      return new Map()
-    }
-
-    const placeholders = runIds.map(() => "?").join(", ")
-    const args = [projectId, ...runIds]
-    const commitRows = this.db
-      .query(
-        `
-        SELECT * FROM action_run_commits
-        WHERE project_id = ? AND run_id IN (${placeholders})
-      `
-      )
-      .all(...args) as CommitRow[]
-
-    if (commitRows.length === 0) {
-      return new Map()
-    }
-
-    const objectRows = this.db
-      .query(
-        `
-        SELECT * FROM action_run_object_diffs
-        WHERE project_id = ? AND run_id IN (${placeholders})
-        ORDER BY run_id, object_type_id, primary_id, operation
-      `
-      )
-      .all(...args) as ObjectDiffRow[]
-
-    const propertyRows = this.db
-      .query(
-        `
-        SELECT * FROM action_run_object_diff_properties
-        WHERE project_id = ? AND run_id IN (${placeholders})
-        ORDER BY run_id, object_type_id, primary_id, property_id
-      `
-      )
-      .all(...args) as ObjectDiffPropertyRow[]
-
-    const linkRows = this.db
-      .query(
-        `
-        SELECT * FROM action_run_link_diffs
-        WHERE project_id = ? AND run_id IN (${placeholders})
-        ORDER BY
-          run_id,
-          source_object_type_id,
-          source_primary_id,
-          link_id,
-          target_object_type_id,
-          target_primary_id,
-          operation
-      `
-      )
-      .all(...args) as LinkDiffRow[]
-
-    return buildActionRunCommitRecords(
-      commitRows.map(toCommitSourceRow),
-      objectRows.map(toObjectDiffSourceRow),
-      propertyRows.map(toObjectDiffPropertySourceRow),
-      linkRows.map(toLinkDiffSourceRow)
-    )
   }
 }
 
@@ -838,7 +684,7 @@ function toEffectsRecord(
   }
 }
 
-function rowToActionRunRecord(row: DatabaseRow, commit?: ActionRunCommitRecord): ActionRunRecord {
+function rowToActionRunRecord(row: DatabaseRow): ActionRunRecord {
   return {
     id: row.id,
     projectId: row.project_id,
@@ -852,48 +698,8 @@ function rowToActionRunRecord(row: DatabaseRow, commit?: ActionRunCommitRecord):
     params: JSON.parse(row.params) as ActionRunParams,
     idempotencyKey: row.idempotency_key,
     writeback: toActionRunWritebackRecord(row),
-    commit,
     effects: toActionRunEffectsRecord(row),
     error: toActionRunFailure(row),
-  }
-}
-
-function toCommitSourceRow(row: CommitRow): ActionRunCommitSourceRow {
-  return {
-    runId: row.run_id,
-    committedAt: row.committed_at,
-  }
-}
-
-function toObjectDiffSourceRow(row: ObjectDiffRow): ActionRunObjectDiffSourceRow {
-  return {
-    runId: row.run_id,
-    objectTypeId: row.object_type_id,
-    primaryId: row.primary_id,
-    operation: row.operation,
-  }
-}
-
-function toObjectDiffPropertySourceRow(
-  row: ObjectDiffPropertyRow
-): ActionRunObjectDiffPropertySourceRow {
-  return {
-    runId: row.run_id,
-    objectTypeId: row.object_type_id,
-    primaryId: row.primary_id,
-    propertyId: row.property_id,
-  }
-}
-
-function toLinkDiffSourceRow(row: LinkDiffRow): ActionRunLinkDiffSourceRow {
-  return {
-    runId: row.run_id,
-    operation: row.operation,
-    sourceObjectTypeId: row.source_object_type_id,
-    sourcePrimaryId: row.source_primary_id,
-    linkId: row.link_id,
-    targetObjectTypeId: row.target_object_type_id,
-    targetPrimaryId: row.target_primary_id,
   }
 }
 
@@ -945,37 +751,4 @@ interface DatabaseRow {
   error_name: string | null
   error_message: string | null
   error_phase: ActionRunPhase | null
-}
-
-interface CommitRow {
-  project_id: string
-  run_id: string
-  committed_at: string
-}
-
-interface ObjectDiffRow {
-  project_id: string
-  run_id: string
-  object_type_id: string
-  primary_id: string
-  operation: ActionRunCommitDiff["objects"][number]["operation"]
-}
-
-interface ObjectDiffPropertyRow {
-  project_id: string
-  run_id: string
-  object_type_id: string
-  primary_id: string
-  property_id: string
-}
-
-interface LinkDiffRow {
-  project_id: string
-  run_id: string
-  operation: ActionRunCommitDiff["links"][number]["operation"]
-  source_object_type_id: string
-  source_primary_id: string
-  link_id: string
-  target_object_type_id: string
-  target_primary_id: string
 }

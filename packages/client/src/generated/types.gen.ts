@@ -5260,29 +5260,6 @@ export type GetActionRunResponses = {
           | "cancelled"
       }
     }
-    commit?: {
-      committedAt: string
-      diff: {
-        objects: Array<{
-          objectTypeId: string
-          primaryId: string
-          operation: "create" | "update" | "delete"
-          changedProperties: Array<string>
-        }>
-        links: Array<{
-          operation: "create" | "update" | "delete"
-          source: {
-            objectTypeId: string
-            primaryId: string
-          }
-          linkId: string
-          target: {
-            objectTypeId: string
-            primaryId: string
-          }
-        }>
-      }
-    }
     effects?: {
       status: "succeeded" | "failed"
       completedAt: string
@@ -6897,14 +6874,44 @@ export type ListEventsResponses = {
         type: "user" | "service" | "system"
         id: string
       }
-      origin?: {
-        kind: "action"
-        actionId: string
-        runId: string
-      }
+      origin?:
+        | {
+            kind: "action"
+            actionId: string
+            runId: string
+          }
+        | {
+            kind: "runtime"
+            requestId: string
+          }
+        | {
+            kind: "projection"
+            projectionId: string
+            projectionRunId: string
+            datasetId: string
+            datasetVersionId: string
+          }
+        | {
+            kind: "telemetry"
+            source:
+              | {
+                  kind: "runtime"
+                  requestId: string
+                }
+              | {
+                  kind: "projection"
+                  projectionId: string
+                  projectionRunId: string
+                  datasetId: string
+                  datasetVersionId: string
+                  batchOrdinal: number
+                }
+          }
       metadata?: {
         [key: string]: unknown
       }
+      commitId?: string
+      commitOrdinal?: number
       type:
         | "object.created"
         | "object.updated"

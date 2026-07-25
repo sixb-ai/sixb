@@ -1,11 +1,14 @@
 /**
- * Leaf operation: remove a single link.
+ * Leaf operation: remove a single link through the ontology Materializer.
  */
 import { assertPrivileged } from "../../authorization"
-import { buildLinkDeletedEvent } from "../../events"
 import { assertLinkTargetType } from "../../ontology/validation"
 import type { ResolvedLinkContext } from "../context"
-import { ObjectError } from "../errors"
+import {
+  commitRuntimeOperations,
+  linkDeleteOperation,
+  runtimeOperationId,
+} from "../materializer-adapter"
 
 export async function removeLink(
   ctx: ResolvedLinkContext,
@@ -17,29 +20,23 @@ export async function removeLink(
   }
 ): Promise<void> {
   assertPrivileged(ctx, "removeLink")
-  const { events, storage, objectType, linkDefinition, ontology } = ctx
+  const { objectType, linkDefinition, ontology } = ctx
   const { sourceId, linkId, targetTypeId, targetId } = params
 
   assertLinkTargetType(objectType.id, linkId, linkDefinition, targetTypeId, (expected, actual) =>
     ontology.isValidLinkTarget(expected, actual)
   )
 
-  const appended = await events.append({
-    events: [
-      buildLinkDeletedEvent({
-        sourceTypeId: objectType.id,
-        sourceId,
+  // A missing link is a no-op: the delete records managed authority only when an effective edge
+  // exists, so the commit reports `unchanged` instead of failing.
+  await commitRuntimeOperations(ctx, [
+    linkDeleteOperation({
+      id: runtimeOperationId(0),
+      ref: {
+        source: { objectTypeId: objectType.id, primaryId: sourceId },
         linkId,
-        targetTypeId,
-        targetId,
-      }),
-    ],
-  })
-
-  const [event] = appended
-  if (!event || event.type !== "link.deleted") {
-    throw new ObjectError("Failed to append link deletion event")
-  }
-
-  await storage.objects.applyLinkDelete(event)
+        target: { objectTypeId: targetTypeId, primaryId: targetId },
+      },
+    }),
+  ])
 }

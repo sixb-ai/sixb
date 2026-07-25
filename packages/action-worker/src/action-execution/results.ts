@@ -1,3 +1,4 @@
+import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { ActionRunFailure, ActionRunRecord } from "@sixb/core/storage"
 import { isTerminalActionRun } from "@sixb/core/storage"
@@ -12,8 +13,23 @@ export function requireFinishedAt(runId: string, finishedAt: Date | undefined): 
   throw new ActionWorkerError(`Action run '${runId}' finished without a finishedAt timestamp.`)
 }
 
-export function canResumeRunningRun(run: ActionRunRecord): boolean {
-  return run.writeback?.status === "succeeded" || run.commit !== undefined
+/**
+ * Decides whether a redelivered `running` run reached a resumable boundary.
+ *
+ * A succeeded writeback or an authoritative ontology commit for this run means the previous attempt
+ * got far enough that resuming is safe; anything earlier is treated as a lost lease.
+ */
+export async function canResumeRunningRun(
+  input: RunActionJobInput,
+  run: ActionRunRecord
+): Promise<boolean> {
+  if (run.writeback?.status === "succeeded") return true
+  const commit = await findActionEditCommit({
+    storage: input.runtime.storage,
+    projectId: input.runtime.id,
+    runId: run.id,
+  })
+  return commit !== null
 }
 
 export function failedResult(

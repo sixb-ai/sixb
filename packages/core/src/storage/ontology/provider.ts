@@ -304,6 +304,7 @@ export function assertMaterializationFinalizationCorrelation(
   if (
     result.commitId !== commit.id ||
     result.kind !== commit.intent.kind ||
+    result.committedAt !== commit.committedAt ||
     result.created !== true ||
     !Number.isSafeInteger(result.eventCount) ||
     result.eventCount < 0 ||

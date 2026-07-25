@@ -19,14 +19,12 @@ export {
 } from "./definitions"
 export { EventsError } from "./errors"
 export type {
-  EditCommitPlanEventsInput,
   LinkDeletedEventInput,
   LinkUpsertEventInput,
   ObjectDeletedEventInput,
   ObjectUpsertEventInput,
 } from "./mutation-events"
 export {
-  buildEditCommitPlanEvents,
   buildLinkDeletedEvent,
   buildLinkUpsertEvent,
   buildObjectDeletedEvent,

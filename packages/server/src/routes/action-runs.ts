@@ -60,12 +60,6 @@ function serializeActionRunDetail(
           error: run.writeback.error,
         }
       : undefined,
-    commit: run.commit
-      ? {
-          committedAt: toIsoString(run.commit.committedAt),
-          diff: run.commit.diff,
-        }
-      : undefined,
     effects: run.effects
       ? {
           status: run.effects.status,

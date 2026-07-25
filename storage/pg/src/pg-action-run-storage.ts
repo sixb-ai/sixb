@@ -1,14 +1,8 @@
 import type { ActionSubject, JsonValue } from "@sixb/core"
 import type {
   ActionMaterializationRunStorage,
-  ActionRunCommitDiff,
-  ActionRunCommitRecord,
-  ActionRunCommitSourceRow,
   ActionRunEffectsRecord,
   ActionRunFailure,
-  ActionRunLinkDiffSourceRow,
-  ActionRunObjectDiffPropertySourceRow,
-  ActionRunObjectDiffSourceRow,
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
@@ -19,22 +13,17 @@ import type {
   ListActionRunsInput,
   ListActionRunsResult,
   QueueActionRunInput,
-  RecordActionCommitInput,
   RecordActionEffectsInput,
   RecordActionWritebackInput,
   StartActionRunInput,
 } from "@sixb/core/storage"
 import {
   ActionRunError,
-  actionRunCommitDiffsEqual,
   actionRunPhaseRecordsEqual,
-  buildActionRunCommitRecords,
   canRequeueActionRunAfterEnqueueFailure,
   finishActionRunPhase,
   isTerminalActionRun,
-  normalizeActionRunCommitDiff,
 } from "@sixb/core/storage"
-import { insertActionRunCommitDiff } from "./action-run-commit-diff"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
@@ -181,8 +170,6 @@ export class PgActionRunStorage implements ActionMaterializationRunStorage {
         RETURNING *
       `
 
-      await this.deleteCommitRows(tx, input.projectId, input.id)
-
       return rowToActionRunRecord(updated)
     })
   }
@@ -230,10 +217,7 @@ export class PgActionRunStorage implements ActionMaterializationRunStorage {
         RETURNING *
       `
 
-      return rowToActionRunRecord(
-        updated,
-        await this.loadCommitRecord(tx, input.projectId, input.id)
-      )
+      return rowToActionRunRecord(updated)
     })
   }
 
@@ -250,10 +234,7 @@ export class PgActionRunStorage implements ActionMaterializationRunStorage {
 
       if (currentWriteback) {
         if (actionRunPhaseRecordsEqual(currentWriteback, nextWriteback)) {
-          return rowToActionRunRecord(
-            existing,
-            await this.loadCommitRecord(tx, input.projectId, input.id)
-          )
+          return rowToActionRunRecord(existing)
         }
 
         throw new ActionRunError(
@@ -275,47 +256,7 @@ export class PgActionRunStorage implements ActionMaterializationRunStorage {
         RETURNING *
       `
 
-      return rowToActionRunRecord(
-        updated,
-        await this.loadCommitRecord(tx, input.projectId, input.id)
-      )
-    })
-  }
-
-  async recordCommit(input: RecordActionCommitInput): Promise<ActionRunRecord> {
-    return runPgTransaction(this.sql, async (tx) => {
-      const existing = await this.requireRunningRun(tx, input.projectId, input.id, "record commit")
-      const existingCommit = await this.loadCommitRecord(tx, input.projectId, input.id)
-      const commit: ActionRunCommitRecord = {
-        committedAt: new Date(input.committedAt ?? new Date()),
-        diff: normalizeActionRunCommitDiff(input.diff),
-      }
-
-      if (existingCommit) {
-        if (actionRunCommitDiffsEqual(existingCommit.diff, commit.diff)) {
-          return rowToActionRunRecord(existing, existingCommit)
-        }
-
-        throw new ActionRunError(
-          `[SixbPg] Action run '${input.id}' already has a different commit diff.`
-        )
-      }
-
-      await tx`
-        INSERT INTO action_run_commits (project_id, run_id, committed_at)
-        VALUES (${input.projectId}, ${input.id}, ${commit.committedAt})
-      `
-
-      await insertActionRunCommitDiff(tx, input.projectId, input.id, commit.diff)
-
-      const [updated] = await tx<DatabaseRow[]>`
-        UPDATE action_runs
-        SET phase = ${"commit"}
-        WHERE project_id = ${input.projectId} AND id = ${input.id}
-        RETURNING *
-      `
-
-      return rowToActionRunRecord(updated, commit)
+      return rowToActionRunRecord(updated)
     })
   }
 
@@ -327,10 +268,7 @@ export class PgActionRunStorage implements ActionMaterializationRunStorage {
 
       if (currentEffects) {
         if (actionRunPhaseRecordsEqual(currentEffects, nextEffects)) {
-          return rowToActionRunRecord(
-            existing,
-            await this.loadCommitRecord(tx, input.projectId, input.id)
-          )
+          return rowToActionRunRecord(existing)
         }
 
         throw new ActionRunError(
@@ -351,10 +289,7 @@ export class PgActionRunStorage implements ActionMaterializationRunStorage {
         RETURNING *
       `
 
-      return rowToActionRunRecord(
-        updated,
-        await this.loadCommitRecord(tx, input.projectId, input.id)
-      )
+      return rowToActionRunRecord(updated)
     })
   }
 
@@ -393,10 +328,7 @@ export class PgActionRunStorage implements ActionMaterializationRunStorage {
         RETURNING *
       `
 
-      return rowToActionRunRecord(
-        updated,
-        await this.loadCommitRecord(tx, input.projectId, input.id)
-      )
+      return rowToActionRunRecord(updated)
     })
   }
 
@@ -406,12 +338,7 @@ export class PgActionRunStorage implements ActionMaterializationRunStorage {
       WHERE project_id = ${params.projectId} AND id = ${params.id}
     `
 
-    return row
-      ? rowToActionRunRecord(
-          row,
-          await this.loadCommitRecord(this.sql, params.projectId, params.id)
-        )
-      : null
+    return row ? rowToActionRunRecord(row) : null
   }
 
   async list(input: ListActionRunsInput): Promise<ListActionRunsResult> {
@@ -519,12 +446,7 @@ export class PgActionRunStorage implements ActionMaterializationRunStorage {
 
     const rows = await this.sql.unsafe<DatabaseRow[]>(query, queryParams)
     const total = Number(totalRow?.count ?? 0)
-    const commits = await this.loadCommitRecords(
-      this.sql,
-      input.projectId,
-      rows.map((row) => row.id)
-    )
-    const runs = rows.map((row) => rowToActionRunRecord(row, commits.get(row.id)))
+    const runs = rows.map((row) => rowToActionRunRecord(row))
 
     return {
       runs,
@@ -556,102 +478,6 @@ export class PgActionRunStorage implements ActionMaterializationRunStorage {
     }
 
     return existing
-  }
-
-  private async deleteCommitRows(
-    runner: SQLClient,
-    projectId: string,
-    runId: string
-  ): Promise<void> {
-    await runner`
-      DELETE FROM action_run_link_diffs
-      WHERE project_id = ${projectId} AND run_id = ${runId}
-    `
-    await runner`
-      DELETE FROM action_run_object_diff_properties
-      WHERE project_id = ${projectId} AND run_id = ${runId}
-    `
-    await runner`
-      DELETE FROM action_run_object_diffs
-      WHERE project_id = ${projectId} AND run_id = ${runId}
-    `
-    await runner`
-      DELETE FROM action_run_commits
-      WHERE project_id = ${projectId} AND run_id = ${runId}
-    `
-  }
-
-  private async loadCommitRecord(
-    runner: SQLClient,
-    projectId: string,
-    runId: string
-  ): Promise<ActionRunCommitRecord | undefined> {
-    return (await this.loadCommitRecords(runner, projectId, [runId])).get(runId)
-  }
-
-  private async loadCommitRecords(
-    runner: SQLClient,
-    projectId: string,
-    runIds: readonly string[]
-  ): Promise<Map<string, ActionRunCommitRecord>> {
-    if (runIds.length === 0) {
-      return new Map()
-    }
-
-    const placeholders = runIds.map((_, index) => `$${index + 2}`).join(", ")
-    const params: SqlParameter[] = [projectId, ...runIds]
-    const commitRows = await runner.unsafe<CommitRow[]>(
-      `
-        SELECT * FROM action_run_commits
-        WHERE project_id = $1 AND run_id IN (${placeholders})
-      `,
-      params
-    )
-
-    if (commitRows.length === 0) {
-      return new Map()
-    }
-
-    const objectRows = await runner.unsafe<ObjectDiffRow[]>(
-      `
-        SELECT * FROM action_run_object_diffs
-        WHERE project_id = $1 AND run_id IN (${placeholders})
-        ORDER BY run_id, object_type_id, primary_id, operation
-      `,
-      params
-    )
-
-    const propertyRows = await runner.unsafe<ObjectDiffPropertyRow[]>(
-      `
-        SELECT * FROM action_run_object_diff_properties
-        WHERE project_id = $1 AND run_id IN (${placeholders})
-        ORDER BY run_id, object_type_id, primary_id, property_id
-      `,
-      params
-    )
-
-    const linkRows = await runner.unsafe<LinkDiffRow[]>(
-      `
-        SELECT * FROM action_run_link_diffs
-        WHERE project_id = $1 AND run_id IN (${placeholders})
-        ORDER BY
-          run_id,
-          source_object_type_id,
-          source_primary_id,
-          link_id,
-          target_object_type_id,
-          target_primary_id,
-          operation
-      `,
-      params
-    )
-
-    return buildActionRunCommitRecords(
-      commitRows.map(toCommitSourceRow),
-      objectRows.map(toObjectDiffSourceRow),
-      propertyRows.map(toObjectDiffPropertySourceRow),
-      linkRows.map(toLinkDiffSourceRow)
-    )
   }
 }
 
@@ -763,7 +589,7 @@ function toEffectsRecord(
   }
 }
 
-function rowToActionRunRecord(row: DatabaseRow, commit?: ActionRunCommitRecord): ActionRunRecord {
+function rowToActionRunRecord(row: DatabaseRow): ActionRunRecord {
   return {
     id: row.id,
     projectId: row.project_id,
@@ -777,48 +603,8 @@ function rowToActionRunRecord(row: DatabaseRow, commit?: ActionRunCommitRecord):
     params: row.params,
     idempotencyKey: row.idempotency_key,
     writeback: toActionRunWritebackRecord(row),
-    commit,
     effects: toActionRunEffectsRecord(row),
     error: toActionRunFailure(row),
-  }
-}
-
-function toCommitSourceRow(row: CommitRow): ActionRunCommitSourceRow {
-  return {
-    runId: row.run_id,
-    committedAt: row.committed_at,
-  }
-}
-
-function toObjectDiffSourceRow(row: ObjectDiffRow): ActionRunObjectDiffSourceRow {
-  return {
-    runId: row.run_id,
-    objectTypeId: row.object_type_id,
-    primaryId: row.primary_id,
-    operation: row.operation,
-  }
-}
-
-function toObjectDiffPropertySourceRow(
-  row: ObjectDiffPropertyRow
-): ActionRunObjectDiffPropertySourceRow {
-  return {
-    runId: row.run_id,
-    objectTypeId: row.object_type_id,
-    primaryId: row.primary_id,
-    propertyId: row.property_id,
-  }
-}
-
-function toLinkDiffSourceRow(row: LinkDiffRow): ActionRunLinkDiffSourceRow {
-  return {
-    runId: row.run_id,
-    operation: row.operation,
-    sourceObjectTypeId: row.source_object_type_id,
-    sourcePrimaryId: row.source_primary_id,
-    linkId: row.link_id,
-    targetObjectTypeId: row.target_object_type_id,
-    targetPrimaryId: row.target_primary_id,
   }
 }
 
@@ -866,37 +652,4 @@ interface DatabaseRow {
   error_name: string | null
   error_message: string | null
   error_phase: ActionRunPhase | null
-}
-
-interface CommitRow {
-  project_id: string
-  run_id: string
-  committed_at: Date | string
-}
-
-interface ObjectDiffRow {
-  project_id: string
-  run_id: string
-  object_type_id: string
-  primary_id: string
-  operation: ActionRunCommitDiff["objects"][number]["operation"]
-}
-
-interface ObjectDiffPropertyRow {
-  project_id: string
-  run_id: string
-  object_type_id: string
-  primary_id: string
-  property_id: string
-}
-
-interface LinkDiffRow {
-  project_id: string
-  run_id: string
-  operation: ActionRunCommitDiff["links"][number]["operation"]
-  source_object_type_id: string
-  source_primary_id: string
-  link_id: string
-  target_object_type_id: string
-  target_primary_id: string
 }

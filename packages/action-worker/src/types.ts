@@ -12,12 +12,14 @@ export interface ActionWorkerSixbFacade
   extends Pick<
     Sixb<readonly OntologySource[]>,
     | "blobStorage"
+    | "committedFacts"
     | "connector"
     | "appendTelemetry"
     | "getActionsForType"
     | "getPrimaryPropertyId"
     | "getValueTypesById"
     | "isValidLinkTarget"
+    | "materializer"
     | "objects"
     | "resolveObjectType"
   > {}

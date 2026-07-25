@@ -1,8 +1,4 @@
-import type {
-  GetActionRunResponse,
-  ListActionRunsResponse,
-  ListActionsResponse,
-} from "@sixb/client"
+import type { ListActionRunsResponse, ListActionsResponse } from "@sixb/client"
 import {
   listActionRunsOptions,
   listActionsOptions,
@@ -48,7 +44,7 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
-import { AlertCircle, ArrowRight, CheckCircle2, Loader2, Play, SquareActivity } from "lucide-react"
+import { AlertCircle, CheckCircle2, Loader2, Play, SquareActivity } from "lucide-react"
 import { type SyntheticEvent, useCallback, useMemo, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ActionParamNullControl } from "../components/ActionParamNullControl"
@@ -71,7 +67,6 @@ import {
 type ActionCatalogItem = ListActionsResponse[number]
 type ActionRunSummary = ListActionRunsResponse["runs"][number]
 type ActionRunStatus = ActionRunSummary["status"]
-type ActionCommitDiff = NonNullable<GetActionRunResponse["commit"]>["diff"]
 
 type ActionsPageTab = "actions" | "runs"
 
@@ -679,122 +674,6 @@ function ObjectRefField({
         void objectsQuery.fetchNextPage()
       }}
     />
-  )
-}
-
-type DiffOperation = ActionCommitDiff["objects"][number]["operation"]
-
-const diffOperationClasses: Record<DiffOperation, string> = {
-  create:
-    "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
-  update:
-    "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
-  delete:
-    "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300",
-}
-
-function DiffOperationBadge({ operation }: { operation: DiffOperation }) {
-  return (
-    <Badge
-      variant="outline"
-      className={cn("rounded-md font-mono text-[10px]", diffOperationClasses[operation])}
-    >
-      {operation}
-    </Badge>
-  )
-}
-
-function DiffGroup({
-  label,
-  count,
-  children,
-}: {
-  label: string
-  count: number
-  children: React.ReactNode
-}) {
-  return (
-    <section className="space-y-2.5">
-      <div className="flex items-baseline gap-2">
-        <h4 className="text-sm font-medium text-foreground">{label}</h4>
-        <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
-      </div>
-      <div className="space-y-3">{children}</div>
-    </section>
-  )
-}
-
-function ObjectRef({ objectTypeId, primaryId }: { objectTypeId: string; primaryId: string }) {
-  return (
-    <span className="font-mono text-sm">
-      <span className="text-muted-foreground">{objectTypeId}:</span>
-      <span className="text-foreground">{primaryId}</span>
-    </span>
-  )
-}
-
-export function ActionRunDiffSummary({ diff }: { diff: ActionCommitDiff }) {
-  const objectCount = diff.objects.length
-  const linkCount = diff.links.length
-
-  if (objectCount === 0 && linkCount === 0) {
-    return <p className="text-sm text-muted-foreground">No changes recorded.</p>
-  }
-
-  return (
-    <div className="space-y-5">
-      {objectCount > 0 ? (
-        <DiffGroup label="Objects" count={objectCount}>
-          {diff.objects.map((object) => (
-            <div
-              key={`${object.objectTypeId}:${object.primaryId}:${object.operation}`}
-              className="space-y-2"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <DiffOperationBadge operation={object.operation} />
-                <ObjectRef objectTypeId={object.objectTypeId} primaryId={object.primaryId} />
-              </div>
-              {object.changedProperties.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {object.changedProperties.map((prop) => (
-                    <span
-                      key={prop}
-                      className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
-                    >
-                      {prop}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </DiffGroup>
-      ) : null}
-
-      {linkCount > 0 ? (
-        <DiffGroup label="Links" count={linkCount}>
-          {diff.links.map((link) => (
-            <div
-              key={`${link.source.objectTypeId}:${link.source.primaryId}:${link.linkId}:${link.target.objectTypeId}:${link.target.primaryId}:${link.operation}`}
-              className="flex flex-wrap items-center gap-2"
-            >
-              <DiffOperationBadge operation={link.operation} />
-              <span className="font-mono text-sm">
-                <span className="text-foreground">
-                  {link.source.objectTypeId}:{link.source.primaryId}
-                </span>
-                <span className="text-muted-foreground">.{link.linkId}</span>
-              </span>
-              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <ObjectRef
-                objectTypeId={link.target.objectTypeId}
-                primaryId={link.target.primaryId}
-              />
-            </div>
-          ))}
-        </DiffGroup>
-      ) : null}
-    </div>
   )
 }
 

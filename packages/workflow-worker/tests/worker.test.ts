@@ -145,6 +145,8 @@ describe("WorkflowWorker", () => {
       ontology: sixb.ontology,
       actionRegistry: sixb.actionRegistry,
       events: sixb.events,
+      materializer: sixb.materializer,
+      committedFacts: sixb.committedFacts,
       storage: {
         ...sixb.storage,
         workflowRuns: undefined,
@@ -170,6 +172,8 @@ describe("WorkflowWorker", () => {
       ontology: sixbWithIntervention.ontology,
       actionRegistry: sixbWithIntervention.actionRegistry,
       events: sixbWithIntervention.events,
+      materializer: sixbWithIntervention.materializer,
+      committedFacts: sixbWithIntervention.committedFacts,
       storage: {
         ...sixbWithIntervention.storage,
         workflowInterventions: undefined,

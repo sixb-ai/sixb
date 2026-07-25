@@ -1,8 +1,9 @@
 import type { JsonValue } from "../json"
-import type { ObjectLink, ObjectRef, ObjectType, Property, ValueType } from "../ontology"
+import type { ObjectRef, ObjectType, Property, ValueType } from "../ontology"
 import type { InferPropertyValue } from "../ontology/inference"
 import type { LinkToken, ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 
+/** Identifies the one final EditBatch wire shape. There is no parallel legacy version. */
 export type EditBatchVersion = 1
 
 export interface EditObjectRef<TObjectTypeId extends string = string>
@@ -11,96 +12,85 @@ export interface EditObjectRef<TObjectTypeId extends string = string>
 export interface TypedEditObjectRef<TObjectType extends ObjectType = ObjectType>
   extends EditObjectRef<TObjectType["id"]> {}
 
+/** Authored property values, already normalized to JSON by the recorder. */
 export type EditObjectProperties = Readonly<Record<string, JsonValue>>
 
-export interface EditObjectCreateOperation {
+export interface ObjectCreateEdit {
   readonly kind: "object.create"
   readonly objectTypeId: string
   readonly primaryId: string
   readonly properties: EditObjectProperties
 }
 
-export interface EditObjectUpdateOperation {
+export interface ObjectUpdateEdit {
   readonly kind: "object.update"
   readonly objectTypeId: string
   readonly primaryId: string
   readonly properties: EditObjectProperties
 }
 
-export interface EditObjectUpsertOperation {
-  readonly kind: "object.upsert"
+export interface ObjectUnsetEdit {
+  readonly kind: "object.unset"
   readonly objectTypeId: string
   readonly primaryId: string
-  readonly properties: EditObjectProperties
+  readonly propertyIds: readonly string[]
 }
 
-export interface EditObjectDeleteOperation {
+export interface ObjectResetEdit {
+  readonly kind: "object.reset"
+  readonly objectTypeId: string
+  readonly primaryId: string
+  readonly propertyIds: readonly string[]
+}
+
+export interface ObjectDeleteEdit {
   readonly kind: "object.delete"
   readonly objectTypeId: string
   readonly primaryId: string
 }
 
-export interface EditLinkCreateOperation {
-  readonly kind: "link.create"
+export interface ObjectRestoreEdit {
+  readonly kind: "object.restore"
+  readonly objectTypeId: string
+  readonly primaryId: string
+}
+
+export interface LinkUpsertEdit {
+  readonly kind: "link.upsert"
   readonly source: EditObjectRef
   readonly linkId: string
   readonly target: EditObjectRef
   readonly properties?: EditObjectProperties
 }
 
-export interface EditLinkDeleteOperation {
+export interface LinkDeleteEdit {
   readonly kind: "link.delete"
   readonly source: EditObjectRef
   readonly linkId: string
   readonly target: EditObjectRef
 }
 
-export interface EditLinkSetOperation {
-  readonly kind: "link.set"
+export interface LinkResetEdit {
+  readonly kind: "link.reset"
   readonly source: EditObjectRef
   readonly linkId: string
   readonly target: EditObjectRef
-  readonly properties?: EditObjectProperties
-}
-
-export interface EditLinkClearOperation {
-  readonly kind: "link.clear"
-  readonly source: EditObjectRef
-  readonly linkId: string
 }
 
 export type EditOperation =
-  | EditObjectCreateOperation
-  | EditObjectUpdateOperation
-  | EditObjectUpsertOperation
-  | EditObjectDeleteOperation
-  | EditLinkCreateOperation
-  | EditLinkDeleteOperation
-  | EditLinkSetOperation
-  | EditLinkClearOperation
+  | ObjectCreateEdit
+  | ObjectUpdateEdit
+  | ObjectUnsetEdit
+  | ObjectResetEdit
+  | ObjectDeleteEdit
+  | ObjectRestoreEdit
+  | LinkUpsertEdit
+  | LinkDeleteEdit
+  | LinkResetEdit
 
 export interface EditBatch {
   readonly version: EditBatchVersion
   readonly operations: readonly EditOperation[]
-}
-
-export interface EditObjectDiff {
-  readonly objectTypeId: string
-  readonly primaryId: string
-  readonly operation: "create" | "update" | "delete"
-  readonly changedProperties: readonly string[]
-}
-
-export interface EditLinkDiff {
-  readonly operation: "create" | "update" | "delete"
-  readonly source: EditObjectRef
-  readonly linkId: string
-  readonly target: EditObjectRef
-}
-
-export interface EditCommitDiff {
-  readonly objects: readonly EditObjectDiff[]
-  readonly links: readonly EditLinkDiff[]
 }
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
@@ -109,15 +99,22 @@ type NonTelemetryProperty<TProperty extends Property> = TProperty extends { mode
   ? never
   : TProperty
 
-type SettableProperty<TProperty extends Property> = TProperty extends { primary: true }
+// Distributes over the property union directly: probing a derived type instead would collapse the
+// union and hand every id back, including primary and telemetry ones.
+type SettablePropertyId<TProperty extends Property> = TProperty extends { primary: true }
   ? never
-  : NonTelemetryProperty<TProperty>
-
-type EditablePropertyId<TProperty extends Property> =
-  SettableProperty<TProperty> extends never ? never : TProperty["id"]
+  : TProperty extends { mode: "telemetry" }
+    ? never
+    : TProperty["id"]
 
 type CreatablePropertyId<TProperty extends Property> =
   NonTelemetryProperty<TProperty> extends never ? never : TProperty["id"]
+
+/** Property ids an Action may set, unset, or reset — everything except primary and telemetry. */
+export type EditablePropertyId<TObjectType extends ObjectType> =
+  string extends TObjectType["properties"][number]["id"]
+    ? string
+    : SettablePropertyId<TObjectType["properties"][number]>
 
 type StaticPropertyMap<
   TProperties extends readonly Property[],
@@ -128,7 +125,7 @@ type StaticPropertyMap<
   : Simplify<{
       [TProp in TProperties[number] as TMode extends "create"
         ? CreatablePropertyId<TProp>
-        : EditablePropertyId<TProp>]?: InferPropertyValue<TProp, TValueTypes>
+        : SettablePropertyId<TProp>]?: InferPropertyValue<TProp, TValueTypes>
     }>
 
 export type EditCreateProperties<
@@ -140,28 +137,6 @@ export type EditUpdateProperties<
   TObjectType extends ObjectType,
   TValueTypes extends readonly ValueType[] = [],
 > = StaticPropertyMap<TObjectType["properties"], TValueTypes, "update">
-
-type UpsertPropertyMap<
-  TProperties extends readonly Property[],
-  TValueTypes extends readonly ValueType[],
-> = string extends TProperties[number]["id"]
-  ? Record<string, unknown>
-  : Simplify<
-      {
-        [TProp in TProperties[number] as TProp extends { primary: true }
-          ? CreatablePropertyId<TProp>
-          : never]: InferPropertyValue<TProp, TValueTypes>
-      } & {
-        [TProp in TProperties[number] as TProp extends { primary: true }
-          ? never
-          : CreatablePropertyId<TProp>]?: InferPropertyValue<TProp, TValueTypes>
-      }
-    >
-
-export type EditUpsertProperties<
-  TObjectType extends ObjectType,
-  TValueTypes extends readonly ValueType[] = [],
-> = UpsertPropertyMap<TObjectType["properties"], TValueTypes>
 
 type LinkProperties<TLink extends { properties?: readonly Property[] }> = TLink extends {
   properties: infer TProperties extends readonly Property[]
@@ -215,13 +190,6 @@ type ResolveTargetObjectTypeId<TTargetObjectTypeId> =
       ? TTargetObjectTypeId
       : never
 
-type CardinalityOneLinkToken<TObjectTypeId extends string> = LinkToken<
-  TObjectTypeId,
-  string,
-  string | readonly string[],
-  ObjectLink & { cardinality: "one" }
->
-
 type EditLinkTargetRef<TLinkToken extends LinkToken<string, string, string | readonly string[]>> =
   string extends TLinkToken["id"]
     ? EditObjectRef<string>
@@ -272,10 +240,6 @@ export interface EditObjectSetRecorder<
 > {
   byId(primaryId: string): EditObjectHandle<TObjectType, TValueTypes>
 
-  upsert(
-    properties: EditUpsertProperties<TObjectType, TValueTypes>
-  ): EditObjectHandle<TObjectType, TValueTypes>
-
   create(
     properties: EditCreateProperties<TObjectType, TValueTypes>
   ): EditObjectHandle<TObjectType, TValueTypes>
@@ -287,7 +251,15 @@ export interface EditObjectHandle<
 > extends TypedEditObjectRef<TObjectType> {
   update(properties: EditUpdateProperties<TObjectType, TValueTypes>): void
 
+  /** Clears managed values, leaving the property absent from managed authority. */
+  unset(...propertyIds: readonly EditablePropertyId<TObjectType>[]): void
+
+  /** Drops managed authority so source authority becomes visible again. */
+  reset(...propertyIds: readonly EditablePropertyId<TObjectType>[]): void
+
   delete(): void
+
+  restore(): void
 
   link<const TLinkToken extends LinkToken<TObjectType["id"], string, string | readonly string[]>>(
     link: TLinkToken,
@@ -300,27 +272,8 @@ export interface EditObjectHandle<
     target: EditLinkTargetRef<TLinkToken>
   ): void
 
-  setLink<const TLinkToken extends CardinalityOneLinkToken<TObjectType["id"]>>(
-    link: TLinkToken,
-    target: EditLinkTargetRef<TLinkToken>,
-    ...options: EditLinkOptionsArg<TLinkToken, TValueTypes>
-  ): void
-
-  clearLink<const TLinkToken extends CardinalityOneLinkToken<TObjectType["id"]>>(
-    link: TLinkToken
-  ): void
-}
-
-export interface EditBatchProducer {
-  toEditBatch(): EditBatch
-}
-
-export type EditBatchInput =
-  | EditBatch
-  | EditOperation
-  | EditBatchProducer
-  | readonly EditOperation[]
-
-export interface NormalizedEditBatchResult {
-  readonly batch: EditBatch
+  /** Drops managed link authority so source link authority becomes visible again. */
+  resetLink<
+    const TLinkToken extends LinkToken<TObjectType["id"], string, string | readonly string[]>,
+  >(link: TLinkToken, target: EditLinkTargetRef<TLinkToken>): void
 }

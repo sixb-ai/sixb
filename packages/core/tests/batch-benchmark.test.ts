@@ -8,9 +8,14 @@ const Item = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true }), prop("label", "string")],
 })
 
+// Every write is one Materializer commit, and the in-memory provider snapshots its whole store per
+// transaction. The individual path therefore pays that snapshot once per object, which is exactly the
+// cost this comparison exists to show — kept small enough to stay a fast, informative signal.
+const ITEM_COUNT = 200
+
 describe("batch-benchmark (informative)", () => {
-  test("1000 objects — individual vs batch", async () => {
-    const items = Array.from({ length: 1000 }, (_, i) => ({
+  test(`${ITEM_COUNT} objects — individual vs batch`, async () => {
+    const items = Array.from({ length: ITEM_COUNT }, (_, i) => ({
       properties: { id: `item-${i}`, label: `Label ${i}` },
     }))
 

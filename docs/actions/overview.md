@@ -171,7 +171,20 @@ Each handler receives a context object. Every phase gets `params` (validated), `
 | `validate` | `target` (object actions) |
 | `writeback` | `target` (object actions), `sixb` (connectors + telemetry + immutable blobs) |
 | `edits` | `objects` (edit facade), `read` (read facade), `writeback` (writeback's return value) |
-| `effects` | `sixb`, `commit` (the committed diff), `writeback` |
+| `effects` | `sixb`, `commit` (what the edits changed), `writeback` |
+
+`commit` tells the `effects` handler exactly what the run wrote:
+
+| Field | Notes |
+| --- | --- |
+| `changes` | The objects and links that actually changed, each with `before`, `after`, and the changed properties |
+| `committedAt` | When the changes were saved |
+| `commitId` | Id for this run's write; useful for logging and correlating with events |
+| `created` | `false` when a retried run reused the write it had already made |
+| `outcomes` | One result per edit you recorded, in the order you recorded them |
+
+Sixb emits the domain events for those changes itself, so drive notifications and fan-out from
+`changes` instead of appending mutation events by hand.
 
 `writeback` runs an external call before the local commit, and its return value flows into `edits`
 and `effects` as `writeback` (see the `markPaid` example above, which carries the ERP receipt id
@@ -221,54 +234,62 @@ export const sendReminder = defineAction("sendReminder", {
 
 The runtime commits every staged edit in a single atomic batch once the handler returns.
 
-### Staged object upsert
+### Editing objects
 
-Use `objects(Type).upsert(properties)` when an action synchronizes an object that may or may not
-exist. The primary property is required; other properties are merged over an existing object or
-validated as a complete create when the object is absent:
+`objects(Type)` gives you an object to edit: `byId(id)` for one that exists, or `create(properties)`
+for a new one. Both return a handle with the rest of the edits:
+
+| Call | What it does |
+| --- | --- |
+| `objects(Type).create(properties)` | Creates a new object; fails if that object already exists |
+| `handle.update(properties)` | Writes the properties you pass and leaves the rest alone |
+| `handle.unset(...propertyIds)` | Clears properties this action set, so they read as absent |
+| `handle.reset(...propertyIds)` | Forgets what this action set, so a projected value shows again |
+| `handle.delete()` / `handle.restore()` | Removes the object, or brings back one an action deleted |
 
 ```ts
-.edits(({ objects, params }) => {
-  objects(Contact).upsert({
-    id: params.id,
-    name: params.name,
-    category: params.category,
-  })
+.edits(({ objects, params, subject }) => {
+  const invoice = objects(Invoice).byId(subject.primaryId)
+  invoice.update({ status: "sent", reminderReviewerNote: params.note })
+  invoice.unset("reminderReviewedAt")
 })
 ```
 
-The create/update decision is made inside the serializable commit transaction, so no handler-side
-read is needed. Omitted properties are preserved on update. If the object is absent and a required
-property was omitted, the entire action commit fails. Multiple staged edits collapse to one net
-change; an unchanged upsert emits no mutation event.
+When a [projection](../data/projections.md) also writes an object, values your actions set win
+over the projected ones. `reset(...)` drops the action's value for those properties so the projected
+value becomes visible again — use it to hand a field back to the projection.
 
-### Cardinality-one link assignment
+Repeated edits on one object stay in order, and a later `update(...)` sees what an earlier one wrote.
+An edit that ends up changing nothing emits no mutation event.
 
-For a `cardinality: "one"` link, use `setLink(...)` to assign a target without reading and unlinking
-the current edge yourself:
+`create(...)` derives its primary id from the action run when you omit one, so a retried run creates
+the same object instead of a duplicate.
+
+### Reassigning a cardinality-one link
+
+`link(...)` adds a relationship, `unlink(...)` removes one exact relationship, and `resetLink(...)`
+forgets a relationship this action added so a projected one shows again. There is no setter: to
+repoint a `cardinality: "one"` link, read the current target and replace it in the same handler.
 
 ```ts
-.edits(({ objects, subject, params }) => {
-  objects(Transcript)
+.edits(async ({ objects, read, params, subject }) => {
+  const transcript = objects(Transcript).byId(subject.primaryId)
+  for (const current of await read
+    .objects(Transcript)
     .byId(subject.primaryId)
-    .setLink(Transcript.l.project, params.project)
+    .listLinks(Transcript.l.project)) {
+    transcript.unlink(Transcript.l.project, {
+      objectTypeId: "Project",
+      primaryId: current.targetId,
+    })
+  }
+  transcript.link(Transcript.l.project, params.project)
 })
 ```
 
-`setLink(...)` creates the edge when absent, keeps or updates the same target, and atomically
-replaces a different target. Supplied properties merge into a same-target edge; a replacement edge
-starts with only the supplied properties. Link properties use the same options shape as `link(...)`:
-
-```ts
-invoice.setLink(Invoice.l.customer, params.customer, {
-  properties: { role: "billTo" },
-})
-```
-
-Use `clearLink(token)` to remove whichever target is currently assigned. Both methods accept only
-explicit `cardinality: "one"` tokens. `link(...)` remains additive and `unlink(...)` continues to
-remove one exact target. Replacing a target emits the existing `link.deleted` and `link.created`
-events from the same atomic commit; no new replacement event type is introduced.
+Both edits land together, and Sixb remembers what the handler read through `read`: if that state
+changed before the run committed, the whole commit fails instead of overwriting someone else's write.
+Reassigning emits `link.deleted` and `link.created`.
 
 ## Requesting actions
 
@@ -339,8 +360,9 @@ Every request creates an `ActionRunRecord` with a `status` and the current `phas
 | `cancelled` | Run was cancelled. |
 
 `phase` tracks progress through `request -> enqueue -> validation -> writeback -> edits -> commit
--> effects`. The record carries `writeback`, `commit` (the object diff), and `effects` sub-records
-as each phase lands, so runs stay inspectable.
+-> effects`. The record carries `writeback` and `effects` sub-records as each phase lands, so runs
+stay inspectable. What the run changed in the graph arrives as `commit` in the `effects` phase and as
+[domain events](../events/overview.md).
 
 The runtime also appends [domain events](../events/overview.md) you can subscribe to:
 

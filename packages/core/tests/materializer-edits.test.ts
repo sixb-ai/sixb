@@ -23,7 +23,6 @@ describe("ontology materializer edits", () => {
         start: runs.start.bind(runs),
         enterPhase: runs.enterPhase.bind(runs),
         recordWriteback: runs.recordWriteback.bind(runs),
-        recordCommit: runs.recordCommit.bind(runs),
         recordEffects: runs.recordEffects.bind(runs),
         finish: runs.finish.bind(runs),
         getById: runs.getById.bind(runs),

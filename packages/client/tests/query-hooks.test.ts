@@ -361,21 +361,8 @@ describe("actionRunMutationOptions", () => {
     const query = activeProjects()
     const run = createActionRun({
       status: "succeeded",
+      phase: "effects",
       finishedAt: "2026-06-29T12:00:02.000Z",
-      commit: {
-        committedAt: "2026-06-29T12:00:01.500Z",
-        diff: {
-          objects: [
-            {
-              objectTypeId: "Project",
-              primaryId: "p_1",
-              operation: "update",
-              changedProperties: ["status"],
-            },
-          ],
-          links: [],
-        },
-      },
     })
     const actionRunKey = getActionRunQueryKey({ path: { runId: "act_1" } })
     const actionRunsKey = listActionRunsQueryKey()

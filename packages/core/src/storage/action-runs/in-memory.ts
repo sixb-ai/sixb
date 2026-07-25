@@ -1,15 +1,12 @@
 import { ActionRunError } from "./errors"
 import {
-  actionRunCommitDiffsEqual,
   actionRunPhaseRecordsEqual,
   actionSubjectsEqual,
   canRequeueActionRunAfterEnqueueFailure,
   isTerminalActionRun,
-  normalizeActionRunCommitDiff,
 } from "./idempotency"
 import type {
   ActionMaterializationRunStorage,
-  ActionRunCommitRecord,
   ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunParams,
@@ -21,7 +18,6 @@ import type {
   ListActionRunsInput,
   ListActionRunsResult,
   QueueActionRunInput,
-  RecordActionCommitInput,
   RecordActionEffectsInput,
   RecordActionWritebackInput,
   StartActionRunInput,
@@ -73,13 +69,6 @@ function normalizeWriteback(
     status: "failed",
     completedAt,
     error: normalizeError(input.error),
-  }
-}
-
-function normalizeCommit(input: RecordActionCommitInput, committedAt: Date): ActionRunCommitRecord {
-  return {
-    committedAt,
-    diff: normalizeActionRunCommitDiff(input.diff),
   }
 }
 
@@ -173,7 +162,6 @@ export class InMemoryActionRunStorage implements ActionMaterializationRunStorage
           finishedAt: undefined,
           error: undefined,
           writeback: undefined,
-          commit: undefined,
           effects: undefined,
         }
         this.rows.set(key, structuredClone(next))
@@ -249,33 +237,6 @@ export class InMemoryActionRunStorage implements ActionMaterializationRunStorage
         ...existing,
         phase: "writeback",
         writeback,
-      }
-
-      this.rows.set(key, structuredClone(next))
-      return cloneActionRunRecord(next)
-    })
-  }
-
-  async recordCommit(input: RecordActionCommitInput): Promise<ActionRunRecord> {
-    return this.runRootOperation(() => {
-      const key = actionRunKey(input.projectId, input.id)
-      const existing = this.requireRunningRun(key, input.projectId, input.id, "record commit")
-      const commit = normalizeCommit(input, new Date(input.committedAt ?? new Date()))
-
-      if (existing.commit) {
-        if (actionRunCommitDiffsEqual(existing.commit.diff, commit.diff)) {
-          return cloneActionRunRecord(existing)
-        }
-
-        throw new ActionRunError(
-          `[Sixb] Action run '${input.id}' already has a different commit diff.`
-        )
-      }
-
-      const next: ActionRunRecord = {
-        ...existing,
-        phase: "commit",
-        commit,
       }
 
       this.rows.set(key, structuredClone(next))

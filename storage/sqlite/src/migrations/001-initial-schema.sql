@@ -778,59 +778,6 @@ CREATE INDEX idx_action_runs_project_object_started
 CREATE INDEX idx_action_runs_project_status_started
   ON action_runs(project_id, status, COALESCE(started_at, queued_at) DESC);
 
-CREATE TABLE action_run_commits (
-  project_id TEXT NOT NULL,
-  run_id TEXT NOT NULL,
-  committed_at TEXT NOT NULL,
-  PRIMARY KEY (project_id, run_id)
-);
-
-CREATE TABLE action_run_object_diffs (
-  project_id TEXT NOT NULL,
-  run_id TEXT NOT NULL,
-  object_type_id TEXT NOT NULL,
-  primary_id TEXT NOT NULL,
-  operation TEXT NOT NULL CHECK (operation IN ('create', 'update', 'delete')),
-  PRIMARY KEY (project_id, run_id, object_type_id, primary_id)
-);
-
-CREATE TABLE action_run_object_diff_properties (
-  project_id TEXT NOT NULL,
-  run_id TEXT NOT NULL,
-  object_type_id TEXT NOT NULL,
-  primary_id TEXT NOT NULL,
-  property_id TEXT NOT NULL,
-  PRIMARY KEY (project_id, run_id, object_type_id, primary_id, property_id)
-);
-
-CREATE TABLE action_run_link_diffs (
-  project_id TEXT NOT NULL,
-  run_id TEXT NOT NULL,
-  operation TEXT NOT NULL CHECK (operation IN ('create', 'update', 'delete')),
-  source_object_type_id TEXT NOT NULL,
-  source_primary_id TEXT NOT NULL,
-  link_id TEXT NOT NULL,
-  target_object_type_id TEXT NOT NULL,
-  target_primary_id TEXT NOT NULL,
-  PRIMARY KEY (
-    project_id,
-    run_id,
-    operation,
-    source_object_type_id,
-    source_primary_id,
-    link_id,
-    target_object_type_id,
-    target_primary_id
-  )
-);
-
-CREATE INDEX idx_action_run_object_diffs_object
-  ON action_run_object_diffs(project_id, object_type_id, primary_id);
-CREATE INDEX idx_action_run_link_diffs_source
-  ON action_run_link_diffs(project_id, source_object_type_id, source_primary_id, link_id);
-CREATE INDEX idx_action_run_link_diffs_target
-  ON action_run_link_diffs(project_id, target_object_type_id, target_primary_id);
-
 CREATE TABLE auth_users (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,

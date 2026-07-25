@@ -91,6 +91,52 @@ export function assertPrimaryPropertyNotUpdated(
   }
 }
 
+/** Validates `unset`/`reset` targets: known, non-primary, and not telemetry-backed. */
+export function normalizeEditablePropertyIds(params: {
+  readonly objectType: ObjectTypeWithPropertyTokens
+  readonly propertyIds: readonly unknown[]
+  readonly operation: "unset" | "reset"
+}): readonly string[] {
+  const { objectType, propertyIds, operation } = params
+  const primaryProperty = getPrimaryProperty(objectType)
+  const normalized: string[] = []
+  const seen = new Set<string>()
+
+  for (const propertyId of propertyIds) {
+    if (typeof propertyId !== "string" || !propertyId.trim()) {
+      throw new EditBatchError(
+        `[Sixb] EditBatch ${objectType.id}.${operation} property id must be a non-empty string.`
+      )
+    }
+    const property = objectType.properties.find((candidate) => candidate.id === propertyId)
+    if (!property) {
+      throw new EditBatchError(
+        `[Sixb] EditBatch ${operation} references unknown property '${objectType.id}.${propertyId}'.`
+      )
+    }
+    if (property.id === primaryProperty.id) {
+      throw new EditBatchError(
+        `[Sixb] EditBatch cannot ${operation} primary property '${objectType.id}.${propertyId}'.`
+      )
+    }
+    if (property.mode === "telemetry") {
+      throw new EditBatchError(
+        `[Sixb] EditBatch cannot ${operation} telemetry property '${objectType.id}.${propertyId}'.`
+      )
+    }
+    if (seen.has(propertyId)) continue
+    seen.add(propertyId)
+    normalized.push(propertyId)
+  }
+
+  if (normalized.length === 0) {
+    throw new EditBatchError(
+      `[Sixb] EditBatch ${objectType.id}.${operation} requires at least one property id.`
+    )
+  }
+  return normalized
+}
+
 function assertNoTelemetryProperties(
   definitions: readonly Property[],
   properties: Readonly<Record<string, unknown>>,

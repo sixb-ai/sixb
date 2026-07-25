@@ -84,30 +84,6 @@ export const ActionRunFailureSchema = z.object({
   phase: ActionRunPhaseSchema.optional(),
 })
 
-const ActionRunObjectDiffSchema = z.object({
-  objectTypeId: z.string(),
-  primaryId: z.string(),
-  operation: z.enum(["create", "update", "delete"]),
-  changedProperties: z.array(z.string()),
-})
-
-const ActionRunObjectRefSchema = z.object({
-  objectTypeId: z.string(),
-  primaryId: z.string(),
-})
-
-const ActionRunLinkDiffSchema = z.object({
-  operation: z.enum(["create", "update", "delete"]),
-  source: ActionRunObjectRefSchema,
-  linkId: z.string(),
-  target: ActionRunObjectRefSchema,
-})
-
-export const ActionRunCommitDiffSchema = z.object({
-  objects: z.array(ActionRunObjectDiffSchema),
-  links: z.array(ActionRunLinkDiffSchema),
-})
-
 export const ActionRunSummarySchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -128,11 +104,6 @@ const ActionRunWritebackRecordSchema = z.object({
   error: ActionRunFailureSchema.optional(),
 })
 
-const ActionRunCommitRecordSchema = z.object({
-  committedAt: z.string(),
-  diff: ActionRunCommitDiffSchema,
-})
-
 const ActionRunEffectsRecordSchema = z.object({
   status: z.enum(["succeeded", "failed"]),
   completedAt: z.string(),
@@ -142,7 +113,6 @@ const ActionRunEffectsRecordSchema = z.object({
 export const ActionRunDetailSchema = ActionRunSummarySchema.extend({
   params: z.record(z.unknown()),
   writeback: ActionRunWritebackRecordSchema.optional(),
-  commit: ActionRunCommitRecordSchema.optional(),
   effects: ActionRunEffectsRecordSchema.optional(),
 })
 

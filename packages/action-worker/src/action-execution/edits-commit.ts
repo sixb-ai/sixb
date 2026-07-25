@@ -2,9 +2,12 @@ import type { ActionReadObjectSetSource, JsonValue } from "@sixb/core"
 import { isObjectActionDefinition } from "@sixb/core"
 import { recordEdits } from "@sixb/core/actions/worker"
 import type { ActionEditCommitResult } from "@sixb/core/internal/actions"
-import { commitActionEditBatch, createActionReadFacade } from "@sixb/core/internal/actions"
+import {
+  ActionReadRecorder,
+  commitActionEdits,
+  createActionReadFacade,
+} from "@sixb/core/internal/actions"
 import type { ActionRunRecord } from "@sixb/core/storage"
-import { emitLocalCommitEvents } from "./commit-events"
 import { type BasePhaseContext, requireObjectSubject } from "./context"
 import type {
   LoadedObjectTarget,
@@ -13,12 +16,20 @@ import type {
   UpdateActiveRun,
 } from "./types"
 
+/**
+ * Records the run's edits and commits them through the ontology Materializer.
+ *
+ * Reads performed by validation, writeback, and the edits handler are captured as exact expected
+ * revisions so a commit fails when the state a decision was made against has changed. Domain events
+ * are durable outbox facts written inside the commit, so this phase never appends events itself.
+ */
 export async function runEditsAndCommitPhase(
   input: PhaseExecutionBase & {
     readonly run: ActionRunRecord
     readonly baseContext: BasePhaseContext
     readonly objectTarget: LoadedObjectTarget | null
     readonly writeback: JsonValue | undefined
+    readonly existingCommit: ActionEditCommitResult | null
     readonly updateActiveRun: UpdateActiveRun
   }
 ): Promise<{ run: ActionRunRecord; result: ActionEditCommitResult | null }> {
@@ -27,16 +38,8 @@ export async function runEditsAndCommitPhase(
     return { run: input.run, result: null }
   }
 
-  if (input.run.commit) {
-    return {
-      run: input.run,
-      result: {
-        diff: input.run.commit.diff,
-        events: [],
-        committedAt: input.run.commit.committedAt,
-        created: false,
-      },
-    }
+  if (input.existingCommit) {
+    return { run: input.run, result: input.existingCommit }
   }
 
   let run = await input.runtime.actionRunsStorage.enterPhase({
@@ -45,6 +48,17 @@ export async function runEditsAndCommitPhase(
     phase: "edits",
   })
   input.updateActiveRun(run)
+
+  const reads = new ActionReadRecorder()
+  if (input.objectTarget) {
+    reads.observeObject(
+      {
+        objectTypeId: input.objectTarget.row.objectTypeId,
+        primaryId: input.objectTarget.row.primaryId,
+      },
+      input.objectTarget.row
+    )
+  }
 
   const batch = await recordEdits(
     {
@@ -56,7 +70,14 @@ export async function runEditsAndCommitPhase(
         ...input.baseContext,
         objects,
         read: createActionReadFacade(
-          (objectType) => input.runtime.sixb.objects(objectType) as ActionReadObjectSetSource
+          (objectType) => input.runtime.sixb.objects(objectType) as ActionReadObjectSetSource,
+          {
+            recorder: reads,
+            resolveLinkIds: (objectTypeId) =>
+              input.runtime.sixb
+                .resolveObjectType(objectTypeId)
+                .links.map((definition) => definition.id),
+          }
         ),
         writeback: input.writeback,
       }
@@ -80,19 +101,17 @@ export async function runEditsAndCommitPhase(
   })
   input.updateActiveRun(run)
 
-  const committed = await commitActionEditBatch({
-    storage: input.runtime.storage,
+  const commit = await commitActionEdits({
+    materializer: input.runtime.sixb.materializer,
     projectId: input.runtime.id,
     runId: run.id,
     actionId: input.action.id,
-    subject: run.subject,
-    ontology: input.runtime.sixb,
     batch,
-    idempotencyKey: run.idempotencyKey,
+    dependencies: reads.dependencies(),
   })
 
-  await emitLocalCommitEvents(input.runtime, committed.commit)
+  // Committed state is readable; publication of its durable facts is best effort.
+  await input.runtime.sixb.committedFacts?.drain()
 
-  input.updateActiveRun(committed.run)
-  return { run: committed.run, result: committed.commit }
+  return { run, result: commit }
 }

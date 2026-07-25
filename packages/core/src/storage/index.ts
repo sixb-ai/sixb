@@ -4,17 +4,8 @@ export type {
 } from "../materialization/model"
 export type {
   ActionMaterializationRunStorage,
-  ActionRunCommitDiff,
-  ActionRunCommitRecord,
-  ActionRunCommitSourceRow,
   ActionRunEffectsRecord,
   ActionRunFailure,
-  ActionRunLinkDiffSourceRow,
-  ActionRunLinkEditDiff,
-  ActionRunObjectDiffPropertySourceRow,
-  ActionRunObjectDiffSourceRow,
-  ActionRunObjectEditDiff,
-  ActionRunObjectRef,
   ActionRunParams,
   ActionRunPhase,
   ActionRunPhaseRecord,
@@ -29,24 +20,20 @@ export type {
   ListActionRunsInput,
   ListActionRunsResult,
   QueueActionRunInput,
-  RecordActionCommitInput,
   RecordActionEffectsInput,
   RecordActionWritebackInput,
   StartActionRunInput,
 } from "./action-runs"
 export {
   ActionRunError,
-  actionRunCommitDiffsEqual,
   actionRunParamsEqual,
   actionRunPhaseRecordsEqual,
   actionSubjectsEqual,
-  buildActionRunCommitRecords,
   canRequeueActionRunAfterEnqueueFailure,
   finishActionRunPhase,
   InMemoryActionRunStorage,
   isActionMaterializationRunStorage,
   isTerminalActionRun,
-  normalizeActionRunCommitDiff,
 } from "./action-runs"
 export type {
   AgentExecutionStatus,
@@ -147,16 +134,10 @@ export type {
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
 export type {
-  EditCommitLinkRef,
-  EditCommitObjectRef,
   StorageTransactionErrorCode,
   StorageTransactionErrorOptions,
 } from "./errors"
 export {
-  editCommitLinkCreateConflict,
-  editCommitLinkUpdateMissing,
-  editCommitObjectCreateConflict,
-  editCommitObjectUpdateMissing,
   isStorageSerializationFailure,
   ObjectNotFoundError,
   ObjectStorageError,

@@ -57,6 +57,8 @@ export function createObjectSet<
     storage,
     queues,
     authorization,
+    materializer,
+    committedFacts,
   } = params
   const queryExecutor = createRuntimeQueryExecutor({ projectId, ontology, storage, authorization })
 
@@ -70,6 +72,8 @@ export function createObjectSet<
     storage,
     queues,
     authorization,
+    materializer,
+    committedFacts,
     objectType,
     primaryPropertyId,
   }
@@ -87,13 +91,7 @@ export function createObjectSet<
     },
 
     upsert: async (input: { properties: Record<string, unknown> }) => {
-      const primaryId = input.properties[primaryPropertyId]
-      if (primaryId === undefined || primaryId === null) {
-        throw new OntologyValidationError(
-          `Missing primary property '${primaryPropertyId}' in upsert for '${objectType.id}'`
-        )
-      }
-      const row = await upsertObjectLeaf(resolvedCtx, String(primaryId), input.properties)
+      const row = await upsertObjectLeaf(resolvedCtx, input.properties)
       return row as unknown as TwinObject<TObjectType, TValueTypes>
     },
 

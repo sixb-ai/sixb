@@ -14810,97 +14810,6 @@
                       "required": ["status", "completedAt"],
                       "additionalProperties": false
                     },
-                    "commit": {
-                      "type": "object",
-                      "properties": {
-                        "committedAt": {
-                          "type": "string"
-                        },
-                        "diff": {
-                          "type": "object",
-                          "properties": {
-                            "objects": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "objectTypeId": {
-                                    "type": "string"
-                                  },
-                                  "primaryId": {
-                                    "type": "string"
-                                  },
-                                  "operation": {
-                                    "type": "string",
-                                    "enum": ["create", "update", "delete"]
-                                  },
-                                  "changedProperties": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string"
-                                    }
-                                  }
-                                },
-                                "required": [
-                                  "objectTypeId",
-                                  "primaryId",
-                                  "operation",
-                                  "changedProperties"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "links": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "operation": {
-                                    "type": "string",
-                                    "enum": ["create", "update", "delete"]
-                                  },
-                                  "source": {
-                                    "type": "object",
-                                    "properties": {
-                                      "objectTypeId": {
-                                        "type": "string"
-                                      },
-                                      "primaryId": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["objectTypeId", "primaryId"],
-                                    "additionalProperties": false
-                                  },
-                                  "linkId": {
-                                    "type": "string"
-                                  },
-                                  "target": {
-                                    "type": "object",
-                                    "properties": {
-                                      "objectTypeId": {
-                                        "type": "string"
-                                      },
-                                      "primaryId": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["objectTypeId", "primaryId"],
-                                    "additionalProperties": false
-                                  }
-                                },
-                                "required": ["operation", "source", "linkId", "target"],
-                                "additionalProperties": false
-                              }
-                            }
-                          },
-                          "required": ["objects", "links"],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": ["committedAt", "diff"],
-                      "additionalProperties": false
-                    },
                     "effects": {
                       "type": "object",
                       "properties": {
@@ -19578,25 +19487,140 @@
                             "additionalProperties": false
                           },
                           "origin": {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": ["action"]
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["action"]
+                                  },
+                                  "actionId": {
+                                    "type": "string"
+                                  },
+                                  "runId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind", "actionId", "runId"],
+                                "additionalProperties": false
                               },
-                              "actionId": {
-                                "type": "string"
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["runtime"]
+                                  },
+                                  "requestId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind", "requestId"],
+                                "additionalProperties": false
                               },
-                              "runId": {
-                                "type": "string"
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["projection"]
+                                  },
+                                  "projectionId": {
+                                    "type": "string"
+                                  },
+                                  "projectionRunId": {
+                                    "type": "string"
+                                  },
+                                  "datasetId": {
+                                    "type": "string"
+                                  },
+                                  "datasetVersionId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "projectionId",
+                                  "projectionRunId",
+                                  "datasetId",
+                                  "datasetVersionId"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["telemetry"]
+                                  },
+                                  "source": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["runtime"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["projection"]
+                                          },
+                                          "projectionId": {
+                                            "type": "string"
+                                          },
+                                          "projectionRunId": {
+                                            "type": "string"
+                                          },
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "datasetVersionId": {
+                                            "type": "string"
+                                          },
+                                          "batchOrdinal": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "projectionId",
+                                          "projectionRunId",
+                                          "datasetId",
+                                          "datasetVersionId",
+                                          "batchOrdinal"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": ["kind", "source"],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": ["kind", "actionId", "runId"],
-                            "additionalProperties": false
+                            ]
                           },
                           "metadata": {
                             "type": "object",
                             "additionalProperties": {}
+                          },
+                          "commitId": {
+                            "type": "string"
+                          },
+                          "commitOrdinal": {
+                            "type": "number"
                           },
                           "type": {
                             "type": "string",

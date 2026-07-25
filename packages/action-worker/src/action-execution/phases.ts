@@ -1,5 +1,5 @@
 import { isObjectActionDefinition } from "@sixb/core"
-import { runActionValidators } from "@sixb/core/internal/actions"
+import { findActionEditCommit, runActionValidators } from "@sixb/core/internal/actions"
 import { resolveLogsRuntime } from "@sixb/core/internal/logging"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { throwIfAborted } from "../normalize"
@@ -22,6 +22,13 @@ export async function executeActionPhases(
     id: input.run.id,
   })
   const objectTarget = await loadObjectTarget({ runtime, action, run })
+  // Resolving the authoritative commit once decides both whether validation reruns and whether the
+  // edits phase replays instead of re-recording a batch.
+  const existingCommit = await findActionEditCommit({
+    storage: runtime.storage,
+    projectId: runtime.id,
+    runId: run.id,
+  })
   const phaseContext = createBasePhaseContext({
     runtime,
     action,
@@ -31,7 +38,7 @@ export async function executeActionPhases(
   })
 
   try {
-    if (!run.writeback && !run.commit) {
+    if (!run.writeback && !existingCommit) {
       run = await runtime.actionRunsStorage.enterPhase({
         projectId: runtime.id,
         id: run.id,
@@ -77,6 +84,7 @@ export async function executeActionPhases(
       },
       objectTarget,
       writeback: writeback.value,
+      existingCommit,
       updateActiveRun(run) {
         input.updateActiveRun(run)
       },

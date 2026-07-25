@@ -1,4 +1,3 @@
-import type { EditCommitPlan } from "../../edits"
 import type {
   StoredLinkDeletedEvent,
   StoredLinkMutationEvent,
@@ -194,16 +193,6 @@ export interface ObjectStorage {
   applyLinkUpsert(event: StoredLinkMutationEvent): Promise<void>
   applyLinkUpsertBatch(events: readonly StoredLinkMutationEvent[]): Promise<void>
   applyLinkDelete(event: StoredLinkDeletedEvent): Promise<void>
-
-  /**
-   * Apply the local object/link writes for a planned EditBatch commit.
-   * Cross-store atomicity is provided by the caller's `storage.transaction(...)`.
-   */
-  applyEditCommitPlan(input: {
-    projectId: string
-    plan: EditCommitPlan
-    committedAt: Date
-  }): Promise<void>
 
   getByPrimaryId(params: {
     projectId: string

@@ -295,6 +295,16 @@ export {
   isDomainEventType,
 } from "./events"
 
+// ── Ontology materialization ────────────────────────────────
+
+export type { MaterializationConflictKind } from "./materialization/errors"
+export {
+  isMaterializationConflictError,
+  MaterializationCancellationError,
+  MaterializationConflictError,
+  MaterializationValidationError,
+} from "./materialization/errors"
+
 // ── Logging ─────────────────────────────────────────────────
 
 export type {
