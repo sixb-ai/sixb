@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test"
 import { col, type DatasetColumnType } from "@sixb/core"
 import { LakeStorageError } from "@sixb/core/lake-storage"
+import { DUCKDB_COLUMN_TYPES } from "../src/internal/duckdb-column-types"
 import {
   datasetColumnToDuckDbSql,
   datasetColumnTypeToDuckDbSql,
   datasetSchemaToDuckDbColumnsSql,
   duckDbColumnsToDatasetSchema,
   duckDbTypeToDatasetColumnType,
-  FILE_REF_STRUCT_SQL,
 } from "../src/internal/schema"
+
+const fileRefSql = DUCKDB_COLUMN_TYPES.fileRef.sql
 
 describe("DuckLake schema mapping", () => {
   test("maps Sixb column types to DuckDB SQL types", () => {
@@ -21,7 +23,7 @@ describe("DuckLake schema mapping", () => {
       date: "DATE",
       timestamp: "TIMESTAMPTZ",
       json: "JSON",
-      fileRef: FILE_REF_STRUCT_SQL,
+      fileRef: fileRefSql,
     }
 
     for (const [type, sql] of Object.entries(expected)) {
@@ -32,7 +34,7 @@ describe("DuckLake schema mapping", () => {
   test("creates nullable and not-null column definitions", () => {
     expect(datasetColumnToDuckDbSql(col("orderId", "string"))).toBe('"orderId" VARCHAR NOT NULL')
     expect(datasetColumnToDuckDbSql(col("attachment", "fileRef", { nullable: true }))).toBe(
-      `"attachment" ${FILE_REF_STRUCT_SQL}`
+      `"attachment" ${fileRefSql}`
     )
   })
 
@@ -59,7 +61,7 @@ describe("DuckLake schema mapping", () => {
         { name: "orderDate", type: "DATE", nullable: false },
         { name: "createdAt", type: "TIMESTAMP WITH TIME ZONE", nullable: false },
         { name: "metadata", type: "JSON", nullable: true },
-        { name: "attachment", type: FILE_REF_STRUCT_SQL, nullable: true },
+        { name: "attachment", type: fileRefSql, nullable: true },
       ])
     ).toEqual({
       columns: [

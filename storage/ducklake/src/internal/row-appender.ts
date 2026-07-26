@@ -1,5 +1,6 @@
 import type { DuckDBValue } from "@duckdb/node-api"
 import type { DatasetColumnDefinition, DatasetRow, DatasetSchema, FileRef } from "@sixb/core"
+import { normalizeDuckDbDecimalValue } from "./duckdb-decimal"
 import type { DuckDbAppender } from "./duckdb-runtime"
 
 /**
@@ -41,7 +42,7 @@ function appendColumnValue(
       appender.appendDouble(value as number)
       return
     case "decimal":
-      appender.appendVarchar(String(value))
+      appender.appendVarchar(normalizeDuckDbDecimalValue(value, column.name))
       return
     case "date":
       appender.appendVarchar(

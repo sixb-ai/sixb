@@ -144,6 +144,8 @@ Export the definition from `datasets/` or pass it to
 `createSixb({ datasets: [rawOrdersDataset], ... })` so the runtime and worker
 use the same schema that DuckLake materializes.
 
+DuckLake stores Sixb `decimal` columns as `DECIMAL(38, 9)` and returns them as exact strings, including from SQL previews. Writes that need more than 29 integer digits or 9 fractional digits are rejected before DuckDB can round or overflow them.
+
 ## DuckLake SQL Transforms
 
 DuckLake SQL transforms let the provider run dataset-to-dataset transforms in
