@@ -1,3 +1,5 @@
+import { OntologyValidationError } from "../ontology/errors"
+
 export type MaterializationConflictKind =
   | "idempotency"
   | "projection-fence"
@@ -12,7 +14,14 @@ function prefixMessage(message: string): string {
   return message.startsWith("[Sixb]") ? message : `[Sixb] ${message}`
 }
 
-export class MaterializationValidationError extends Error {
+/**
+ * A validation failure raised inside the Materializer.
+ *
+ * Extends `OntologyValidationError` because it is the same class of failure a caller already
+ * handles: batch writes surface it rewrapped as one, so a single write must not require a second
+ * `instanceof` branch to catch the identical error.
+ */
+export class MaterializationValidationError extends OntologyValidationError {
   readonly name: string = "MaterializationValidationError"
 
   constructor(message: string) {

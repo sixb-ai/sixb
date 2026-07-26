@@ -171,6 +171,22 @@ describe("runtime object writes", () => {
       MaterializationValidationError
     )
   })
+
+  test("single and batch writes report the same validation failure catchably", async () => {
+    // The batch path rewraps materializer item errors as OntologyValidationError. A caller that
+    // branches on `instanceof OntologyValidationError` must catch the single-write error too, or
+    // the same invalid input is skippable through one API and fatal through the other.
+    const { sixb } = createRuntime()
+
+    const single = await sixb.upsertObject("room", { id: "r1" }).catch((error: unknown) => error)
+    const [batch] = await sixb.upsertObjectBatch("room", [{ properties: { id: "r1" } }])
+
+    expect(single).toBeInstanceOf(OntologyValidationError)
+    expect(batch?.ok === false && batch.error).toBeInstanceOf(OntologyValidationError)
+    expect((single as Error).message).toBe(
+      batch?.ok === false ? batch.error.message : "<no batch error>"
+    )
+  })
 })
 
 describe("runtime object batches", () => {
