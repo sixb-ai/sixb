@@ -1,3 +1,5 @@
+import { type DecimalValue, decimal } from "@sixb/core"
+
 export interface ErpDepartmentRow {
   readonly dept_id: string
   readonly dept_name: string
@@ -31,7 +33,7 @@ export interface ErpProjectRow {
   readonly status: string
   readonly start_date: string
   readonly deadline: string
-  readonly budget_amount: number
+  readonly budget_amount: DecimalValue
   readonly customer_id: string
   readonly lead_emp_id: string
 }
@@ -60,7 +62,7 @@ export interface ErpDocumentRow {
 export interface ErpInvoiceRow {
   readonly id: string
   readonly number: string
-  readonly amount: number
+  readonly amount: DecimalValue
   readonly currency: string
   readonly status: string
   readonly issuedAt: string
@@ -203,7 +205,7 @@ const projects = [
     status: "active",
     start_date: "2024-01-15",
     deadline: "2024-12-31",
-    budget_amount: 250000,
+    budget_amount: decimal("250000"),
     customer_id: "cust-techstart",
     lead_emp_id: "emp-alice",
   },
@@ -214,7 +216,7 @@ const projects = [
     status: "active",
     start_date: "2024-03-01",
     deadline: "2024-09-30",
-    budget_amount: 180000,
+    budget_amount: decimal("180000"),
     customer_id: "cust-greenenergy",
     lead_emp_id: "emp-bob",
   },
@@ -225,7 +227,7 @@ const projects = [
     status: "draft",
     start_date: "2024-06-01",
     deadline: "2025-03-31",
-    budget_amount: 120000,
+    budget_amount: decimal("120000"),
     customer_id: "cust-eduplatform",
     lead_emp_id: "emp-emma",
   },
@@ -236,7 +238,7 @@ const projects = [
     status: "completed",
     start_date: "2023-06-01",
     deadline: "2024-01-31",
-    budget_amount: 320000,
+    budget_amount: decimal("320000"),
     customer_id: "cust-healthfirst",
     lead_emp_id: "emp-alice",
   },
@@ -397,7 +399,7 @@ const invoices = [
   {
     id: "inv-001",
     number: "INV-2024-001",
-    amount: 62500,
+    amount: decimal("62500"),
     currency: "EUR",
     status: "paid",
     issuedAt: "2024-04-01T00:00:00Z",
@@ -408,7 +410,7 @@ const invoices = [
   {
     id: "inv-002",
     number: "INV-2024-002",
-    amount: 45000,
+    amount: decimal("45000"),
     currency: "EUR",
     status: "sent",
     issuedAt: "2024-07-01T00:00:00Z",
@@ -419,7 +421,7 @@ const invoices = [
   {
     id: "inv-003",
     number: "INV-2024-003",
-    amount: 62500,
+    amount: decimal("62500"),
     currency: "EUR",
     status: "paid",
     issuedAt: "2024-07-01T00:00:00Z",
@@ -430,7 +432,7 @@ const invoices = [
   {
     id: "inv-004",
     number: "INV-2024-004",
-    amount: 30000,
+    amount: decimal("30000"),
     currency: "GBP",
     status: "overdue",
     issuedAt: "2024-05-01T00:00:00Z",
@@ -441,7 +443,7 @@ const invoices = [
   {
     id: "inv-005",
     number: "INV-2024-005",
-    amount: 40000,
+    amount: decimal("40000"),
     currency: "USD",
     status: "draft",
     issuedAt: "2024-08-01T00:00:00Z",
