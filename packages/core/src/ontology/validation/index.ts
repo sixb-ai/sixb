@@ -1,5 +1,3 @@
-export type { BatchValidationResult } from "./batch"
-export { validateLinkBatch, validateObjectBatch } from "./batch"
 export {
   assertLinkTargetType,
   assertTargetTypeCompatible,

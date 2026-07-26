@@ -66,11 +66,3 @@ function stripPhaseRecordCompletedAt(
   const { completedAt: _completedAt, ...stableRecord } = record
   return stableRecord
 }
-
-function _commitObjectDiffKey(row: {
-  readonly runId: string
-  readonly objectTypeId: string
-  readonly primaryId: string
-}): string {
-  return `${row.runId}:${row.objectTypeId}:${row.primaryId}`
-}

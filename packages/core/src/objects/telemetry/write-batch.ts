@@ -10,6 +10,7 @@ import type { AuthorizationContext } from "../../authorization"
 import { assertPrivileged } from "../../authorization"
 import type { TelemetryCommitResult, TelemetryPointWrite } from "../../materialization/model"
 import type { RuntimeMaterializerContext } from "../materializer-adapter"
+import { publishCommittedFacts } from "../materializer-adapter"
 
 export type TelemetryWriteContext = RuntimeMaterializerContext & {
   readonly authorization?: AuthorizationContext
@@ -26,6 +27,6 @@ export async function writeTelemetryBatch(
     source: { kind: "runtime", requestId: randomUUID() },
     points,
   })
-  if (commit.eventCount > 0) await ctx.committedFacts?.drain()
+  await publishCommittedFacts(ctx, commit)
   return commit
 }

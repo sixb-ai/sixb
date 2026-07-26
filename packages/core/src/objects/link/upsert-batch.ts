@@ -52,7 +52,9 @@ export async function upsertLinkBatch(
       const edge = linkRefKey(ref)
       return {
         key: edge,
-        label: `link '${edge}'`,
+        // The key is a JSON array, which is unreadable in the error an operator sees on a failed
+        // link projection. Name the edge the way the object path names an object.
+        label: `link '${item.objectType.id}:${item.sourceId}.${item.linkId} -> ${item.targetTypeId}:${item.targetId}'`,
         fingerprint: stableJsonStringify(properties ?? null),
         operations: [
           linkUpsertOperation({

@@ -26,6 +26,12 @@ export async function upsertLink(
   const { sourceId, linkId, targetTypeId, targetId, properties } = params
   const endpoints = { objectType, sourceId, targetTypeId, targetId }
 
+  // Endpoint reads keep the public `ObjectNotFoundError` contract; the Materializer independently
+  // refuses a link whose endpoints are not effective when it commits. This runs before property
+  // normalization so the same input reports the same error class here and through the batch APIs,
+  // which check endpoints first inside `plan`.
+  requireEndpoints(endpoints, await loadEndpointExistence(ctx, collectEndpointLookups([endpoints])))
+
   const normalizedProperties = normalizeRuntimeLink({
     objectType,
     linkDefinition,
@@ -35,10 +41,6 @@ export async function upsertLink(
     valueTypesById: ontology.getValueTypesById(),
     isValidLinkTarget: (expected, actual) => ontology.isValidLinkTarget(expected, actual),
   })
-
-  // Endpoint reads keep the public `ObjectNotFoundError` contract; the Materializer independently
-  // refuses a link whose endpoints are not effective when it commits.
-  requireEndpoints(endpoints, await loadEndpointExistence(ctx, collectEndpointLookups([endpoints])))
 
   await commitRuntimeOperations(ctx, [
     linkUpsertOperation({

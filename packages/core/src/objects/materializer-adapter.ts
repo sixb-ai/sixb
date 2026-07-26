@@ -279,9 +279,9 @@ function requireOutcome(
  * The commit is already durable, so a delivery failure is reported by the publisher rather than
  * failing the caller's write.
  */
-async function publishCommittedFacts(
-  ctx: RuntimeMaterializerContext,
-  commit: EditCommitResult
+export async function publishCommittedFacts(
+  ctx: Pick<RuntimeMaterializerContext, "committedFacts">,
+  commit: Pick<EditCommitResult, "eventCount">
 ): Promise<void> {
   if (commit.eventCount === 0 || !ctx.committedFacts) return
   await ctx.committedFacts.drain()
