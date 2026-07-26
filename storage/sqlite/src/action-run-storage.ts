@@ -8,11 +8,11 @@ import type {
   ActionRunPhase,
   ActionRunRecord,
   ActionRunWritebackRecord,
-  AssertActionMaterializationRunInput,
   EnterActionRunPhaseInput,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
+  LockActionMaterializationRunInput,
   QueueActionRunInput,
   RecordActionEffectsInput,
   RecordActionWritebackInput,
@@ -52,7 +52,7 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
     }
   }
 
-  async assertMaterializationRun(input: AssertActionMaterializationRunInput): Promise<void> {
+  async lockForMaterialization(input: LockActionMaterializationRunInput): Promise<ActionRunRecord> {
     const row = this.db
       .query(`SELECT action_id, status FROM action_runs WHERE project_id = ? AND id = ?`)
       .get(input.projectId, input.runId) as {
@@ -74,6 +74,13 @@ export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
         `[SixbSqlite] Action run '${input.runId}' cannot materialize from status '${row.status}'.`
       )
     }
+    const record = await this.getById({ projectId: input.projectId, id: input.runId })
+    if (!record) {
+      throw new ActionRunError(
+        `[SixbSqlite] Action run '${input.runId}' disappeared while locking materialization.`
+      )
+    }
+    return record
   }
 
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {

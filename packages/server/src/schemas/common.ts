@@ -24,6 +24,9 @@ export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   ])
 )
 
+/** A JSON null with an explicit runtime and generated-client type. */
+export const JsonNullSchema = JsonValueSchema.refine((value): value is null => value === null)
+
 const JsonValueOpenApiSchema = {
   description: "Any JSON-compatible value.",
   nullable: true,
@@ -37,6 +40,7 @@ const JsonValueOpenApiSchema = {
 } as JsonSchema7Type
 
 const jsonValueSchemaDef = JsonValueSchema._def
+const jsonNullSchemaDef = JsonNullSchema._def
 
 /**
  * Runtime validation needs the recursive JSON-value Zod schema above. OpenAPI
@@ -47,6 +51,9 @@ const jsonValueSchemaDef = JsonValueSchema._def
 export const jsonValueOpenApiOverride: OverrideCallback = (def) => {
   if (def === jsonValueSchemaDef) {
     return JsonValueOpenApiSchema
+  }
+  if (def === jsonNullSchemaDef) {
+    return { nullable: true, enum: [null] } as JsonSchema7Type
   }
 
   return ignoreOverride

@@ -480,6 +480,8 @@ export const reviewHighValueTransaction = defineWorkflow("review-high-value-tran
       jest.advanceTimersByTime(60 * 60_000)
       await sixb.stopScheduler()
 
+      // Runtime shutdown tracks the non-blocking outbox notifications before closing the broker.
+      await sixb.closeBroker()
       const eventTypes = (await sixb.events.read()).map((event) => event.type)
       expect(eventTypes).toEqual(
         expect.arrayContaining(["object.created", "telemetry.appended", "schedule.triggered"])

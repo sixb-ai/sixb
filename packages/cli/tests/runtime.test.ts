@@ -659,24 +659,7 @@ describe("startSixbRuntime", () => {
 
     expect(runtime.rulesWorker).not.toBeNull()
 
-    await sixb.events.append({
-      events: [
-        {
-          type: "object.created",
-          payload: {
-            objectTypeId: "Transaction",
-            primaryId: "tx-1",
-            properties: { status: "posted" },
-            propertyChanges: {
-              status: {
-                operation: "created",
-                after: "posted",
-              },
-            },
-          },
-        },
-      ],
-    })
+    await sixb.upsertObject("Transaction", { id: "tx-1", status: "posted" })
 
     const events = await waitFor(
       () => sixb.events.read({ topics: ["rules"] }),
@@ -748,11 +731,11 @@ describe("startSixbRuntime", () => {
     expect(calls).toEqual([
       "connectors:stop",
       "queues:stop",
+      "broker:stop",
       "storage:stop",
       "lake-storage:stop",
       "blob-storage:stop",
       "logger:stop",
-      "broker:stop",
     ])
   })
 })

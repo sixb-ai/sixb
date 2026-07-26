@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test"
 import {
   defineObjectType,
+  InMemoryBroker,
   type InMemoryStorage,
   link,
   MaterializationValidationError,
@@ -11,6 +12,8 @@ import {
 } from "../src"
 import { type EventsRuntime, OntologyOutboxDispatcher } from "../src/events"
 import { objectService } from "../src/objects"
+import { getOntologyMutationRuntime } from "../src/runtime/internal"
+import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Sensor = defineObjectType({
@@ -108,7 +111,7 @@ describe("runtime object writes", () => {
     const { sixb } = createRuntime()
     const created = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
 
-    await sixb.materializer.edits.commit({
+    await getOntologyMutationRuntime(sixb).commitEdits({
       mode: "atomic",
       source: { kind: "runtime", requestId: "delete-room" },
       operations: [
@@ -137,6 +140,7 @@ describe("runtime object writes", () => {
   test("keeps a same-value upsert an effective no-op", async () => {
     const { sixb } = createRuntime()
     const created = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    await waitForDeliveredEvents(sixb, 1)
     const publishSpy = spyPublishedFacts(sixb.events)
 
     const replayed = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
@@ -151,6 +155,7 @@ describe("runtime object writes", () => {
     const { sixb } = createRuntime()
     await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
     await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
+    await waitForDeliveredEvents(sixb, 2)
     const publishSpy = spyPublishedFacts(sixb.events)
 
     await sixb.removeLink("room", "r1", "sensors", { targetTypeId: "sensor", targetId: "s1" })
@@ -296,7 +301,8 @@ describe("runtime object batches", () => {
 
   test("propagates a commit failure instead of turning it into item errors", async () => {
     const { deps, sixb } = createRuntime()
-    sixb.materializer.edits.commit = () => Promise.reject(new Error("provider exploded"))
+    getOntologyMutationRuntime(sixb).commitEdits = () =>
+      Promise.reject(new Error("provider exploded"))
 
     await expect(
       sixb.upsertObjectBatch("room", [
@@ -401,6 +407,34 @@ describe("runtime link batches", () => {
 })
 
 describe("committed fact delivery", () => {
+  test("returns after the durable commit even when broker publication never settles", async () => {
+    const deps = createTestRuntimeDeps()
+    const broker = new NeverSettlingBroker()
+    const sixb = new Sixb({
+      id: "nonblocking-publication",
+      ontology: ONTOLOGY,
+      ...deps,
+      broker,
+    })
+
+    const created = await Promise.race([
+      sixb.upsertObject("room", { id: "r1", name: "Kitchen" }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("mutation waited for broker publication")), 100)
+      ),
+    ])
+
+    expect(created.properties.name).toBe("Kitchen")
+    await broker.started
+    expect(
+      await sixb.storage.objects.getByPrimaryId({
+        projectId: sixb.id,
+        objectTypeId: "room",
+        primaryId: "r1",
+      })
+    ).not.toBeNull()
+  })
+
   test("keeps committed facts durable through a broker outage and delivers them later", async () => {
     const { deps, sixb } = createRuntime()
     let outage = true
@@ -413,6 +447,7 @@ describe("committed fact delivery", () => {
     const created = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
     expect(created.properties.name).toBe("Kitchen")
     expect(await sixb.events.read({ types: ["object.created"] })).toHaveLength(0)
+    await waitForOutboxRetry(deps.storage)
 
     outage = false
     // A failed publication backs the row off before retrying, so recovery runs past that window.
@@ -455,6 +490,39 @@ function spyPublishedFacts(events: EventsRuntime) {
   const spy = mock(publish)
   events.publishEnvelopes = spy
   return spy
+}
+
+class NeverSettlingBroker extends InMemoryBroker {
+  private resolveStarted!: () => void
+  readonly started = new Promise<void>((resolve) => {
+    this.resolveStarted = resolve
+  })
+
+  override append(): ReturnType<InMemoryBroker["append"]> {
+    this.resolveStarted()
+    return new Promise(() => undefined)
+  }
+}
+
+async function waitForDeliveredEvents(sixb: AdapterRuntime, count: number): Promise<void> {
+  await waitFor(() => sixb.events.read().then((events) => events.length >= count))
+}
+
+async function waitForOutboxRetry(storage: InMemoryStorage): Promise<void> {
+  await waitFor(() => {
+    const rows = [
+      ...getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot().outbox.values(),
+    ]
+    return rows.length > 0 && rows.every((row) => row.attempts > 0 && row.leaseId === null)
+  })
+}
+
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 1_000) {
+  const deadline = Date.now() + timeoutMs
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for asynchronous delivery.")
+    await Bun.sleep(1)
+  }
 }
 
 /** Watches the event-command provider methods the Materializer replaced. */

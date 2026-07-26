@@ -29,6 +29,18 @@ export class MaterializationValidationError extends OntologyValidationError {
   }
 }
 
+/** Structured missing-object failure raised by Materializer telemetry validation. */
+export class MaterializationObjectNotFoundError extends MaterializationValidationError {
+  override readonly name = "MaterializationObjectNotFoundError"
+
+  constructor(
+    readonly objectTypeId: string,
+    readonly primaryId: string
+  ) {
+    super(`Cannot append telemetry to missing object '${objectTypeId}:${primaryId}'.`)
+  }
+}
+
 /**
  * Abort reason for an explicit, terminal cancellation of a materialization.
  *

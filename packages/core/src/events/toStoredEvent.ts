@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { resolveEventStorage } from "./definitions"
-import type { EventActor, EventDraft, StoredDomainEvent } from "./types/index"
+import type { EventActor, EventDraft, StoredAuthorableEvent } from "./types/index"
 
 export function toStoredEvent(params: {
   projectId: string
@@ -9,7 +9,7 @@ export function toStoredEvent(params: {
   causationId?: string
   event: EventDraft
   cursor: string
-}): StoredDomainEvent {
+}): StoredAuthorableEvent {
   const base = {
     id: randomUUID(),
     schemaVersion: 1 as const,
@@ -31,5 +31,5 @@ export function toStoredEvent(params: {
     topic: storage.topic,
     partitionKey: storage.partitionKey,
     payload: params.event.payload,
-  } as StoredDomainEvent
+  } as StoredAuthorableEvent
 }

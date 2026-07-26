@@ -227,8 +227,6 @@ function buildWorkflowContext(
     ontology: sixb.ontology,
     actionRegistry: sixb.actionRegistry,
     events: sixb.events,
-    materializer: sixb.materializer,
-    committedFacts: sixb.committedFacts,
     storage: sixb.storage,
     lakeStorage: sixb.lakeStorage,
     blobStorage: sixb.blobStorage,

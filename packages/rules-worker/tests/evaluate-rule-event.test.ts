@@ -1,11 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import type { RuleDefinition, Storage } from "@sixb/core"
+import type { JsonValue, RuleDefinition, Storage } from "@sixb/core"
 import { InMemoryBroker, InMemoryStorage } from "@sixb/core"
 import type {
   StoredLinkCreatedEvent,
   StoredLinkDeletedEvent,
-  StoredObjectCreatedEvent,
-  StoredObjectDeletedEvent,
   StoredObjectUpdatedEvent,
 } from "@sixb/core/internal/events"
 import { EventsRuntime } from "@sixb/core/internal/events"
@@ -168,21 +166,18 @@ describe("rule event matching", () => {
       objectTypeId: "transaction",
       primaryId: "tx-1",
     })
-    expect(candidates[0]?.sourceEvents.map((event) => event.cursor)).toEqual(["1", "2", "3"])
   })
 })
 
 describe("rule subject evaluation", () => {
   test("new matching object emits rule.triggered", async () => {
     const runtime = createRuntime()
-    const event = objectCreatedEvent("transaction", "tx-1", "1", { status: "posted" })
     await seedObject(runtime, "tx-1", { status: "posted" })
 
     const result = await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
       subject: subject("tx-1"),
-      sourceEvents: [event],
       evaluatedAt,
     })
 
@@ -204,24 +199,20 @@ describe("rule subject evaluation", () => {
 
   test("still-matching active object emits no duplicate event", async () => {
     const runtime = createRuntime()
-    const event = objectCreatedEvent("transaction", "tx-1", "1", { status: "posted" })
     await seedObject(runtime, "tx-1", { status: "posted" })
 
     await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
       subject: subject("tx-1"),
-      sourceEvents: [event],
       evaluatedAt,
     })
 
-    const repeatEvent = objectUpdatedEvent("transaction", "tx-1", "2", { status: "posted" })
     await seedObject(runtime, "tx-1", { status: "posted" }, "2")
     const result = await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
       subject: subject("tx-1"),
-      sourceEvents: [repeatEvent],
       evaluatedAt: "2026-05-07T10:31:00.000Z",
     })
 
@@ -231,22 +222,19 @@ describe("rule subject evaluation", () => {
 
   test("previously active object that no longer matches emits rule.resolved", async () => {
     const runtime = createRuntime()
-    const event = objectCreatedEvent("transaction", "tx-1", "1", { status: "posted" })
     await seedObject(runtime, "tx-1", { status: "posted" })
     await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
       subject: subject("tx-1"),
-      sourceEvents: [event],
       evaluatedAt,
     })
 
-    const resolvingEvent = objectUpdatedEvent("transaction", "tx-1", "2", { status: "draft" })
+    await seedObject(runtime, "tx-1", { status: "draft" }, "2")
     const result = await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
       subject: subject("tx-1"),
-      sourceEvents: [resolvingEvent],
       evaluatedAt: "2026-05-07T10:32:00.000Z",
     })
 
@@ -268,22 +256,22 @@ describe("rule subject evaluation", () => {
 
   test("previously active deleted object emits rule.resolved", async () => {
     const runtime = createRuntime()
-    const event = objectCreatedEvent("transaction", "tx-1", "1", { status: "posted" })
     await seedObject(runtime, "tx-1", { status: "posted" })
     await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
       subject: subject("tx-1"),
-      sourceEvents: [event],
       evaluatedAt,
     })
 
-    const deletedEvent = objectDeletedEvent("transaction", "tx-1", "2")
+    const withoutObject = {
+      ...runtime,
+      storage: Object.assign(new InMemoryStorage(), { rules: runtime.storage.rules }),
+    }
     const result = await evaluateRuleForSubject({
-      runtime,
+      runtime: withoutObject,
       rule: postedRule,
       subject: subject("tx-1"),
-      sourceEvents: [deletedEvent],
       evaluatedAt: "2026-05-07T10:32:00.000Z",
     })
 
@@ -298,31 +286,27 @@ describe("rule subject evaluation", () => {
 
   test("violating again after resolution emits rule.triggered again", async () => {
     const runtime = createRuntime()
-    const triggerEvent = objectCreatedEvent("transaction", "tx-1", "1", { status: "posted" })
     await seedObject(runtime, "tx-1", { status: "posted" })
     await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
       subject: subject("tx-1"),
-      sourceEvents: [triggerEvent],
       evaluatedAt,
     })
 
-    const resolveEvent = objectUpdatedEvent("transaction", "tx-1", "2", { status: "draft" })
+    await seedObject(runtime, "tx-1", { status: "draft" }, "2")
     await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
       subject: subject("tx-1"),
-      sourceEvents: [resolveEvent],
       evaluatedAt: "2026-05-07T10:31:00.000Z",
     })
 
-    const retriggerEvent = objectUpdatedEvent("transaction", "tx-1", "3", { status: "posted" })
+    await seedObject(runtime, "tx-1", { status: "posted" }, "3")
     const result = await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
       subject: subject("tx-1"),
-      sourceEvents: [retriggerEvent],
       evaluatedAt: "2026-05-07T10:32:00.000Z",
     })
 
@@ -334,69 +318,30 @@ describe("rule subject evaluation", () => {
     ])
   })
 
-  test("object-update overlay evaluates new properties before storage projects the event", async () => {
+  test("a delayed object event evaluates the latest committed object state", async () => {
     const runtime = createRuntime()
-    const event = objectUpdatedEvent("transaction", "tx-1", "1", { status: "posted" })
+    await seedObject(runtime, "tx-1", { status: "draft" }, "newer")
 
     const result = await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
       subject: subject("tx-1"),
-      sourceEvents: [event],
       evaluatedAt,
     })
 
-    expect(result.matched).toBe(true)
-    expect(result.emitted).toBe("triggered")
+    expect(result.matched).toBe(false)
+    expect(result.emitted).toBeNull()
   })
 
-  test("link-create overlay evaluates the new link before storage projects the event", async () => {
+  test("a delayed link-delete event evaluates the latest committed link state", async () => {
     const runtime = createRuntime()
     await seedObject(runtime, "tx-1")
-    const linkEvent = linkCreatedEvent("transaction", "tx-1", "receipt")
+    await seedLink(runtime, "tx-1", "document", "newer")
 
-    const result = await evaluateRuleForSubject({
-      runtime,
-      rule: requiresReceiptRule,
-      subject: subject("tx-1"),
-      sourceEvents: [linkEvent],
-      evaluatedAt,
-    })
-
-    expect(result.matched).toBe(true)
-    expect(result.emitted).toBe("triggered")
-  })
-
-  test("link-deleted overlay removes the link before storage projects the event", async () => {
-    const runtime = createRuntime()
-    await seedObject(runtime, "tx-1")
-    await seedLink(runtime, "tx-1", "document")
-
-    const removeEvent = linkDeletedEvent("transaction", "tx-1", "document")
-    const result = await evaluateRuleForSubject({
-      runtime,
-      rule: requiresDocumentRule,
-      subject: subject("tx-1"),
-      sourceEvents: [removeEvent],
-      evaluatedAt,
-    })
-
-    expect(result.matched).toBe(true)
-    expect(result.emitted).toBe("triggered")
-  })
-
-  test("link-deleted overlay leaves other targets for the same link id visible", async () => {
-    const runtime = createRuntime()
-    await seedObject(runtime, "tx-1")
-    await seedLink(runtime, "tx-1", "document", "1", "doc-1")
-    await seedLink(runtime, "tx-1", "document", "2", "doc-2")
-
-    const removeEvent = linkDeletedEvent("transaction", "tx-1", "document", "3", "doc-1")
     const result = await evaluateRuleForSubject({
       runtime,
       rule: hasDocumentRule,
       subject: subject("tx-1"),
-      sourceEvents: [removeEvent],
       evaluatedAt,
     })
 
@@ -406,14 +351,12 @@ describe("rule subject evaluation", () => {
 
   test("link-missing rule works for transaction without a document", async () => {
     const runtime = createRuntime()
-    const event = objectCreatedEvent("transaction", "tx-1")
     await seedObject(runtime, "tx-1")
 
     const result = await evaluateRuleForSubject({
       runtime,
       rule: requiresDocumentRule,
       subject: subject("tx-1"),
-      sourceEvents: [event],
       evaluatedAt,
     })
 
@@ -421,80 +364,10 @@ describe("rule subject evaluation", () => {
     expect(result.emitted).toBe("triggered")
   })
 
-  test("same-batch object overlays use the final property value", async () => {
-    const postedRuntime = createRuntime()
-    const postedIndex = buildRuleDependencyIndex([postedRule])
-    const postedResult = await evaluateRuleEvents({
-      runtime: postedRuntime,
-      rules: [postedRule],
-      index: postedIndex,
-      events: [
-        objectUpdatedEvent("transaction", "tx-1", "1", { status: "draft" }),
-        objectUpdatedEvent("transaction", "tx-1", "2", { status: "posted" }),
-      ],
-      evaluatedAt,
-    })
-
-    expect(postedResult.evaluations).toHaveLength(1)
-    expect(postedResult.evaluations[0]?.matched).toBe(true)
-    expect(postedResult.evaluations[0]?.emitted).toBe("triggered")
-
-    const draftRuntime = createRuntime()
-    const draftResult = await evaluateRuleEvents({
-      runtime: draftRuntime,
-      rules: [postedRule],
-      index: postedIndex,
-      events: [
-        objectUpdatedEvent("transaction", "tx-1", "1", { status: "posted" }),
-        objectUpdatedEvent("transaction", "tx-1", "2", { status: "draft" }),
-      ],
-      evaluatedAt,
-    })
-
-    expect(draftResult.evaluations).toHaveLength(1)
-    expect(draftResult.evaluations[0]?.matched).toBe(false)
-    expect(draftResult.evaluations[0]?.emitted).toBeNull()
-  })
-
-  test("same-batch link overlays use the final edge state", async () => {
-    const missingRuntime = createRuntime()
-    await seedObject(missingRuntime, "tx-1")
-    const index = buildRuleDependencyIndex([hasDocumentRule])
-    const missingResult = await evaluateRuleEvents({
-      runtime: missingRuntime,
-      rules: [hasDocumentRule],
-      index,
-      events: [
-        linkCreatedEvent("transaction", "tx-1", "document", "1", "doc-1"),
-        linkDeletedEvent("transaction", "tx-1", "document", "2", "doc-1"),
-      ],
-      evaluatedAt,
-    })
-
-    expect(missingResult.evaluations).toHaveLength(1)
-    expect(missingResult.evaluations[0]?.matched).toBe(false)
-    expect(missingResult.evaluations[0]?.emitted).toBeNull()
-
-    const existsRuntime = createRuntime()
-    await seedObject(existsRuntime, "tx-1")
-    const existsResult = await evaluateRuleEvents({
-      runtime: existsRuntime,
-      rules: [hasDocumentRule],
-      index,
-      events: [
-        linkDeletedEvent("transaction", "tx-1", "document", "1", "doc-1"),
-        linkCreatedEvent("transaction", "tx-1", "document", "2", "doc-1"),
-      ],
-      evaluatedAt,
-    })
-
-    expect(existsResult.evaluations).toHaveLength(1)
-    expect(existsResult.evaluations[0]?.matched).toBe(true)
-    expect(existsResult.evaluations[0]?.emitted).toBe("triggered")
-  })
-
-  test("composite rule evaluation handles nested property and link predicates with overlays", async () => {
+  test("event batches dedupe wake-ups while evaluating current composite state", async () => {
     const runtime = createRuntime()
+    await seedObject(runtime, "tx-1", { status: "posted", amount: 100 })
+    await seedLink(runtime, "tx-1", "receipt")
     const index = buildRuleDependencyIndex([compositeRule])
     const result = await evaluateRuleEvents({
       runtime,
@@ -520,6 +393,7 @@ describe("rule subject evaluation", () => {
 
   test("evaluateRuleEvents dedupes and evaluates one rule subject once per batch", async () => {
     const runtime = createRuntime()
+    await seedObject(runtime, "tx-1")
     const index = buildRuleDependencyIndex([requiresDocumentRule])
     const result = await evaluateRuleEvents({
       runtime,
@@ -554,7 +428,7 @@ function objectUpdatedEvent(
   objectTypeId: string,
   primaryId: string,
   cursor = "1",
-  properties: Record<string, unknown> = {}
+  properties: Record<string, JsonValue> = {}
 ): StoredObjectUpdatedEvent {
   return {
     id: `event-${cursor}`,
@@ -571,40 +445,7 @@ function objectUpdatedEvent(
       propertyChanges: {},
     },
     occurredAt: "2026-05-07T10:00:00.000Z",
-  }
-}
-
-function objectCreatedEvent(
-  objectTypeId: string,
-  primaryId: string,
-  cursor = "1",
-  properties: Record<string, unknown> = {}
-): StoredObjectCreatedEvent {
-  return {
-    ...objectUpdatedEvent(objectTypeId, primaryId, cursor, properties),
-    type: "object.created",
-  }
-}
-
-function objectDeletedEvent(
-  objectTypeId: string,
-  primaryId: string,
-  cursor = "1"
-): StoredObjectDeletedEvent {
-  return {
-    id: `event-${cursor}`,
-    cursor,
-    schemaVersion: 1,
-    projectId: "project-a",
-    type: "object.deleted",
-    topic: "objects",
-    partitionKey: `${objectTypeId}:${primaryId}`,
-    payload: {
-      objectTypeId,
-      primaryId,
-      propertyChanges: {},
-    },
-    occurredAt: "2026-05-07T10:00:00.000Z",
+    ...materializationCorrelation(cursor),
   }
 }
 
@@ -662,6 +503,7 @@ function linkCreatedEvent(
       propertyChanges: {},
     },
     occurredAt: "2026-05-07T10:00:00.000Z",
+    ...materializationCorrelation(cursor),
   }
 }
 
@@ -689,13 +531,14 @@ function linkDeletedEvent(
       propertyChanges: {},
     },
     occurredAt: "2026-05-07T10:00:00.000Z",
+    ...materializationCorrelation(cursor),
   }
 }
 
 async function seedObject(
   runtime: ReturnType<typeof createRuntime>,
   primaryId: string,
-  properties: Record<string, unknown> = {},
+  properties: Record<string, JsonValue> = {},
   cursor = "1"
 ): Promise<void> {
   await runtime.storage.objects.applyObjectUpsert({
@@ -713,6 +556,7 @@ async function seedObject(
       propertyChanges: {},
     },
     occurredAt: "2026-05-07T10:00:00.000Z",
+    ...materializationCorrelation(cursor),
   })
 }
 
@@ -740,5 +584,14 @@ async function seedLink(
       propertyChanges: {},
     },
     occurredAt: "2026-05-07T10:00:00.000Z",
+    ...materializationCorrelation(cursor),
   })
+}
+
+function materializationCorrelation(cursor: string) {
+  return {
+    origin: { kind: "runtime" as const, requestId: `request-${cursor}` },
+    commitId: `commit-${cursor}`,
+    commitOrdinal: 0,
+  }
 }

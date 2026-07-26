@@ -12,7 +12,6 @@ import {
   assertTelemetryProperty,
 } from "../../ontology/validation"
 import type { TelemetryAppender, TelemetryPropertyToken } from "../../runtime/types"
-import { ObjectNotFoundError } from "../../storage/errors"
 import type { ResolvedObjectContext } from "../context"
 import { writeTelemetryBatch } from "../telemetry"
 
@@ -23,26 +22,12 @@ export function createTelemetryAppender<
   return <TToken extends TelemetryPropertyToken<TObjectType>>(
     property: TToken
   ): TelemetryAppender<TToken, TValueTypes> => {
-    const { objectType, storage, projectId } = ctx
+    const { objectType } = ctx
     assertPropertyTokenBelongsToObjectType(objectType, property)
     assertTelemetryProperty(property.property)
 
     const appender = {
       append: async (input: { value: unknown; unit?: string; at: Date }) => {
-        const object = await storage.objects.getByPrimaryId({
-          projectId: projectId,
-          objectTypeId: objectType.id,
-          primaryId,
-        })
-
-        if (!object) {
-          throw new ObjectNotFoundError(
-            objectType.id,
-            primaryId,
-            "Object not found for telemetry append"
-          )
-        }
-
         // Value and unit validation, plus schema normalization, happen inside the Materializer.
         await writeTelemetryBatch(ctx, [
           {

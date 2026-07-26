@@ -62,7 +62,7 @@ event's `type`, `topic`, `partitionKey`, `payload`, and a broker `cursor`.
 | `metadata` | `Record<string, JsonValue>?` | Free-form context |
 | `origin` | `{ kind, ... }?` | What produced the event: an `action`, a `runtime` write, a `projection`, or a `telemetry` append |
 | `commitId` | `string?` | Groups every object, link, and telemetry event that came from the same write |
-| `commitOrdinal` | `number?` | This event's position within that write |
+| `commitOrdinal` | `number?` | Correlates this event's position within that write; it does not guarantee delivery order |
 | `cursor` | `string` | Broker position; pass as `afterCursor` to page forward |
 
 Object, link, and telemetry events are recorded as part of the write that changed the data, so a

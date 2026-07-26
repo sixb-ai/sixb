@@ -17,6 +17,7 @@ import {
 import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import type { EventsRuntime } from "@sixb/core/internal/events"
+import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { ActionRunParams, ObjectRow } from "@sixb/core/storage"
 import { ActionWorkerError } from "../src/errors"
 import { runActionJob } from "../src/run-action-job"
@@ -86,6 +87,7 @@ function createContext(sixb: TestSixb): ActionWorkerContext {
     events: sixb.events,
     storage: sixb.storage,
     actionRunsStorage: sixb.storage.actionRuns!,
+    ontologyMutations: getOntologyMutationRuntime(sixb),
     sixb: sixb as unknown as ActionWorkerContext["sixb"],
     getActionById(actionId) {
       return sixb.getActionById(actionId)
@@ -860,6 +862,47 @@ describe("runActionJob", () => {
     expect(writebackCalls).toBe(0)
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("persisted")
+  })
+
+  test("resumes after its committed edits deleted the Action subject", async () => {
+    const deleteDevice = defineAction("deleteDevice")
+      .on(Device)
+      .params({})
+      .edits(({ objects, subject }) => {
+        objects(Device).byId(subject.primaryId).delete()
+      })
+    const sixb = createSixb([deleteDevice])
+    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
+    await queueActionRun(sixb, {
+      id: "act_delete",
+      actionId: "deleteDevice",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+    await sixb.storage.actionRuns!.start({ projectId: sixb.id, id: "act_delete" })
+    await getOntologyMutationRuntime(sixb).commitEdits({
+      mode: "atomic",
+      source: { kind: "action", actionId: "deleteDevice", runId: "act_delete" },
+      operations: [
+        {
+          id: "delete-subject",
+          kind: "object.delete",
+          ref: { objectTypeId: "Device", primaryId: "device-1" },
+        },
+      ],
+      expectedObjects: [],
+      expectedLinks: [],
+      expectedLinkScopes: [],
+    })
+
+    const resumed = await runActionJob({
+      runtime: createContext(sixb),
+      job: { id: "act_delete", actionId: "deleteDevice" },
+      attempt: 2,
+    })
+
+    expect(resumed.status).toBe("succeeded")
+    expect(await deviceObjects(sixb).get("device-1")).toBeNull()
   })
 
   test("records effects errors without failing committed actions", async () => {

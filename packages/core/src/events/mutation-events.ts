@@ -1,5 +1,5 @@
 import { clearedPropertyChanges, diffPropertyChanges } from "./property-changes"
-import type { EventDraft, EventOrigin, PropertyChangeMap } from "./types"
+import type { DomainEventDraft, EventOrigin, PropertyChangeMap } from "./types"
 
 type ObjectUpsertOperation = "create" | "update"
 type LinkUpsertOperation = "create" | "update"
@@ -48,7 +48,7 @@ export interface LinkDeletedEventInput {
 
 export function buildObjectUpsertEvent(
   input: ObjectUpsertEventInput
-): Extract<EventDraft, { type: "object.created" | "object.updated" }> {
+): Extract<DomainEventDraft, { type: "object.created" | "object.updated" }> {
   const payload = {
     objectTypeId: input.objectTypeId,
     primaryId: input.primaryId,
@@ -67,7 +67,7 @@ export function buildObjectUpsertEvent(
 
 export function buildObjectDeletedEvent(
   input: ObjectDeletedEventInput
-): Extract<EventDraft, { type: "object.deleted" }> {
+): Extract<DomainEventDraft, { type: "object.deleted" }> {
   const payload = {
     objectTypeId: input.objectTypeId,
     primaryId: input.primaryId,
@@ -84,7 +84,7 @@ export function buildObjectDeletedEvent(
 
 export function buildLinkUpsertEvent(
   input: LinkUpsertEventInput
-): Extract<EventDraft, { type: "link.created" | "link.updated" }> {
+): Extract<DomainEventDraft, { type: "link.created" | "link.updated" }> {
   const payload = {
     sourceTypeId: input.sourceTypeId,
     sourceId: input.sourceId,
@@ -108,7 +108,7 @@ export function buildLinkUpsertEvent(
 
 export function buildLinkDeletedEvent(
   input: LinkDeletedEventInput
-): Extract<EventDraft, { type: "link.deleted" }> {
+): Extract<DomainEventDraft, { type: "link.deleted" }> {
   const payload = {
     sourceTypeId: input.sourceTypeId,
     sourceId: input.sourceId,
@@ -131,7 +131,7 @@ export function buildLinkDeletedEvent(
 function eventOptions(
   input: { readonly idempotencyKeyPrefix?: string; readonly origin?: EventOrigin },
   fallbackKey: string
-): Pick<EventDraft, "idempotencyKey" | "origin"> {
+): Pick<DomainEventDraft, "idempotencyKey" | "origin"> {
   return {
     ...(input.idempotencyKeyPrefix !== undefined
       ? { idempotencyKey: `${input.idempotencyKeyPrefix}:${fallbackKey}` }

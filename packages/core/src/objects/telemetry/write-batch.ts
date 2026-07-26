@@ -8,7 +8,10 @@
 import { randomUUID } from "node:crypto"
 import type { AuthorizationContext } from "../../authorization"
 import { assertPrivileged } from "../../authorization"
+import { MaterializationObjectNotFoundError } from "../../materialization/errors"
 import type { TelemetryCommitResult, TelemetryPointWrite } from "../../materialization/model"
+import { getOntologyMutationRuntime } from "../../runtime/ontology-mutations"
+import { ObjectNotFoundError } from "../../storage/errors"
 import type { RuntimeMaterializerContext } from "../materializer-adapter"
 import { publishCommittedFacts } from "../materializer-adapter"
 
@@ -23,10 +26,22 @@ export async function writeTelemetryBatch(
   assertPrivileged(ctx, "appendTelemetry")
   if (points.length === 0) return null
 
-  const commit = await ctx.materializer.telemetry.append({
-    source: { kind: "runtime", requestId: randomUUID() },
-    points,
-  })
-  await publishCommittedFacts(ctx, commit)
+  let commit: TelemetryCommitResult
+  try {
+    commit = await getOntologyMutationRuntime(ctx).appendTelemetry({
+      source: { kind: "runtime", requestId: randomUUID() },
+      points,
+    })
+  } catch (error) {
+    if (error instanceof MaterializationObjectNotFoundError) {
+      throw new ObjectNotFoundError(
+        error.objectTypeId,
+        error.primaryId,
+        "Object not found for telemetry append"
+      )
+    }
+    throw error
+  }
+  publishCommittedFacts(ctx, commit)
   return commit
 }

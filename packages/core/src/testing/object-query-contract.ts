@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "../events"
+import type { JsonValue } from "../json"
 import {
   collectObjectQueryValidationIssues,
   countObjects,
@@ -1146,7 +1147,7 @@ function objectEvent(
   cursor: string,
   objectTypeId: string,
   primaryId: string,
-  properties: Record<string, unknown>
+  properties: Record<string, JsonValue>
 ): StoredObjectMutationEvent {
   return {
     id: `object-query-contract-object-${cursor}`,
@@ -1158,6 +1159,9 @@ function objectEvent(
     partitionKey: `${objectTypeId}:${primaryId}`,
     payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
     occurredAt: `2026-01-01T00:00:${cursor.slice(-2)}.000Z`,
+    origin: { kind: "runtime", requestId: `object-${cursor}` },
+    commitId: `object-query-contract-object-commit-${cursor}`,
+    commitOrdinal: 0,
   }
 }
 
@@ -1179,6 +1183,9 @@ function linkEvent(
     partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
     payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
     occurredAt: `2026-01-01T00:00:${cursor.slice(-2)}.000Z`,
+    origin: { kind: "runtime", requestId: `link-${cursor}` },
+    commitId: `object-query-contract-link-commit-${cursor}`,
+    commitOrdinal: 0,
   }
 }
 

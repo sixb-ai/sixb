@@ -7,7 +7,6 @@ import { telemetryPointKey } from "../../materialization/refs"
 import { OntologyValidationError } from "../../ontology/errors"
 import { assertTelemetryProperty } from "../../ontology/validation"
 import type { ResolvedObjectContext } from "../context"
-import { requireObject } from "../helpers"
 import { writeTelemetryBatch } from "./write-batch"
 
 /**
@@ -36,25 +35,13 @@ export async function appendTelemetryBatch(
   }[]
 ): Promise<void> {
   assertPrivileged(ctx, "appendTelemetry")
-  const { storage, projectId, objectType } = ctx
-  const checkedIds = new Set<string>()
+  const { objectType } = ctx
   // Telemetry identity is `(series, at)`, so a repeated instant inside one call is an upsert: the
   // last value wins rather than failing the whole batch.
   const points = new Map<string, TelemetryPointWrite>()
 
   for (const item of items) {
     const at = (item.at ?? new Date()).toISOString()
-
-    if (!checkedIds.has(item.id)) {
-      await requireObject(
-        storage,
-        projectId,
-        objectType.id,
-        item.id,
-        "Object not found for telemetry append"
-      )
-      checkedIds.add(item.id)
-    }
 
     for (const [propertyId, rawValue] of Object.entries(item.properties)) {
       const propertyToken = objectType.p[propertyId]

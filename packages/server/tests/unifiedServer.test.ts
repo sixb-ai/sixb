@@ -113,21 +113,27 @@ describe("SixbServer API serving", () => {
       queues: new InMemoryQueues(),
     })
 
-    await sixb.events.append({
-      events: [
-        {
-          type: "telemetry.appended",
-          occurredAt: "2026-02-18T10:00:10.000Z",
-          payload: {
-            objectTypeId: "device",
-            objectId: "fan-1",
-            propertyId: "rpm",
-            value: 1200,
-            at: "2026-02-18T10:00:10.000Z",
-          },
+    await sixb.events.publishEnvelopes([
+      {
+        id: "telemetry-fan-1-rpm",
+        schemaVersion: 1,
+        projectId: sixb.id,
+        origin: { kind: "runtime", requestId: "seed-fan-1-rpm" },
+        commitId: "commit-fan-1-rpm",
+        commitOrdinal: 0,
+        type: "telemetry.appended",
+        topic: "telemetry",
+        partitionKey: "device:fan-1:rpm",
+        occurredAt: "2026-02-18T10:00:10.000Z",
+        payload: {
+          objectTypeId: "device",
+          objectId: "fan-1",
+          propertyId: "rpm",
+          value: 1200,
+          at: "2026-02-18T10:00:10.000Z",
         },
-      ],
-    })
+      },
+    ])
 
     const server = new SixbServer({
       sixb,

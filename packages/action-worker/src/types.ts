@@ -1,6 +1,7 @@
 import type { ActionDefinition, ActionSubject, OntologySource, Sixb, Storage } from "@sixb/core"
 import type { EventsRuntime } from "@sixb/core/internal/events"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { OntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type {
   ActionRunFailure,
   ActionRunRecord,
@@ -12,14 +13,12 @@ export interface ActionWorkerSixbFacade
   extends Pick<
     Sixb<readonly OntologySource[]>,
     | "blobStorage"
-    | "committedFacts"
     | "connector"
     | "appendTelemetry"
     | "getActionsForType"
     | "getPrimaryPropertyId"
     | "getValueTypesById"
     | "isValidLinkTarget"
-    | "materializer"
     | "objects"
     | "resolveObjectType"
   > {}
@@ -30,6 +29,7 @@ export interface ActionWorkerContext {
   readonly logs?: LogsRuntime
   readonly storage: Storage
   readonly actionRunsStorage: ActionRunStorage
+  readonly ontologyMutations: OntologyMutationRuntime
   readonly sixb: ActionWorkerSixbFacade
   getActionById(actionId: string): ActionDefinition | null
 }

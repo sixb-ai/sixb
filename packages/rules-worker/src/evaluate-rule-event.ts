@@ -5,7 +5,7 @@ import type {
   StoredRuleResolvedEvent,
   StoredRuleTriggeredEvent,
 } from "@sixb/core/internal/events"
-import type { ObjectLinkRow, ObjectRow, RulesStorage } from "@sixb/core/storage"
+import type { ObjectLinkRow, RulesStorage } from "@sixb/core/storage"
 import { evaluateRulePredicate } from "./evaluate-predicate"
 import type {
   EvaluateRuleEventInput,
@@ -67,40 +67,24 @@ export function matchRuleEvent(input: {
   return rules.map((rule) => ({
     rule,
     subject,
-    sourceEvents: [input.event],
   }))
 }
 
 /**
  * Match an event batch to rule/subject evaluations.
  *
- * Duplicate candidates are merged, not dropped entirely: later evaluation still
- * needs every accepted source event so object/link overlays can reflect the
- * whole batch.
+ * Duplicate candidates are evaluated once against current committed state.
  */
 export function matchRuleEvents(input: {
   readonly index: RuleDependencyIndex
   readonly events: readonly OntologyRuleEvent[]
 }): readonly RuleEventEvaluationCandidate[] {
-  const candidates = new Map<
-    string,
-    RuleEventEvaluationCandidate & { sourceEvents: OntologyRuleEvent[] }
-  >()
+  const candidates = new Map<string, RuleEventEvaluationCandidate>()
 
   for (const event of input.events) {
     for (const candidate of matchRuleEvent({ index: input.index, event })) {
       const key = evaluationCandidateKey(candidate.rule.id, candidate.subject)
-      const existing = candidates.get(key)
-      if (existing) {
-        // Keep all accepted source events for the later overlay step while
-        // still evaluating a given rule/subject only once per event batch.
-        existing.sourceEvents.push(event)
-      } else {
-        candidates.set(key, {
-          ...candidate,
-          sourceEvents: [event],
-        })
-      }
+      if (!candidates.has(key)) candidates.set(key, candidate)
     }
   }
 
@@ -132,7 +116,6 @@ export async function evaluateRuleEvents(
         runtime: input.runtime,
         rule: candidate.rule,
         subject: candidate.subject,
-        sourceEvents: candidate.sourceEvents,
         evaluatedAt,
       })
     )
@@ -150,10 +133,13 @@ export async function evaluateRuleForSubject(
 ): Promise<EvaluateRuleForSubjectResult> {
   const rulesStorage = requireRulesStorage(input.runtime.storage)
 
-  // Object/link projection can lag behind event append. Each evaluation starts
-  // from projected storage, then overlays the accepted source events so the
-  // predicate sees the same state regardless of projection timing.
-  const object = await loadSubjectObjectWithOverlay(input)
+  // Materializer facts are emitted after the effective state commits. The event wakes the rule;
+  // it does not reconstruct historical state. Delayed delivery therefore evaluates current state.
+  const object = await input.runtime.storage.objects.getByPrimaryId({
+    projectId: input.runtime.projectId,
+    objectTypeId: input.subject.objectTypeId,
+    primaryId: input.subject.primaryId,
+  })
   if (!object) {
     const active = await rulesStorage.getActive({
       projectId: input.runtime.projectId,
@@ -179,7 +165,7 @@ export async function evaluateRuleForSubject(
     }
   }
 
-  const links = await loadLinksWithOverlay(input)
+  const links = await loadCurrentLinks(input)
   const matched = evaluateRulePredicate({
     predicate: input.rule.predicate,
     object,
@@ -292,53 +278,7 @@ function rulesForEvent(
   }
 }
 
-async function loadSubjectObjectWithOverlay(
-  input: EvaluateRuleForSubjectInput
-): Promise<ObjectRow | null> {
-  let object = await input.runtime.storage.objects.getByPrimaryId({
-    projectId: input.runtime.projectId,
-    objectTypeId: input.subject.objectTypeId,
-    primaryId: input.subject.primaryId,
-  })
-
-  for (const event of input.sourceEvents) {
-    if (
-      (event.type !== "object.created" &&
-        event.type !== "object.updated" &&
-        event.type !== "object.deleted") ||
-      event.payload.objectTypeId !== input.subject.objectTypeId ||
-      event.payload.primaryId !== input.subject.primaryId
-    ) {
-      continue
-    }
-
-    if (event.type === "object.deleted") {
-      object = null
-      continue
-    }
-
-    // An object mutation can either amend the projected row or synthesize it
-    // when the evaluator observes the append before object storage projects it.
-    const occurredAt = new Date(event.occurredAt)
-    object = {
-      projectId: input.runtime.projectId,
-      objectTypeId: input.subject.objectTypeId,
-      primaryId: input.subject.primaryId,
-      properties: {
-        ...(object?.properties ?? {}),
-        ...event.payload.properties,
-      },
-      createdAt: object?.createdAt ?? occurredAt,
-      updatedAt: occurredAt,
-      version: (object?.version ?? 0) + 1,
-      sourceEventId: event.id,
-    }
-  }
-
-  return object
-}
-
-async function loadLinksWithOverlay(
+async function loadCurrentLinks(
   input: EvaluateRuleForSubjectInput
 ): Promise<ReadonlyMap<string, readonly ObjectLinkRow[]>> {
   const linkIds = referencedLinkIds(input.rule)
@@ -355,62 +295,6 @@ async function loadLinksWithOverlay(
       links.set(linkId, [...rows])
     })
   )
-
-  for (const event of input.sourceEvents) {
-    if (
-      (event.type !== "link.created" &&
-        event.type !== "link.updated" &&
-        event.type !== "link.deleted") ||
-      event.payload.sourceTypeId !== input.subject.objectTypeId ||
-      event.payload.sourceId !== input.subject.primaryId ||
-      !linkIds.includes(event.payload.linkId)
-    ) {
-      continue
-    }
-
-    const rows = links.get(event.payload.linkId) ?? []
-    const rowKey = linkRowKey(
-      event.payload.linkId,
-      event.payload.targetTypeId,
-      event.payload.targetId
-    )
-
-    if (event.type === "link.deleted") {
-      // Remove only the target edge named by the source event; other outgoing
-      // links for the same link id must remain visible to `exists` predicates.
-      links.set(
-        event.payload.linkId,
-        rows.filter((row) => linkRowKey(row.linkId, row.targetTypeId, row.targetId) !== rowKey)
-      )
-      continue
-    }
-
-    // Link mutations replace the matching target edge if it was already
-    // projected, otherwise they add the pending edge to the overlaid view.
-    const occurredAt = new Date(event.occurredAt)
-    const existing = rows.find(
-      (row) => linkRowKey(row.linkId, row.targetTypeId, row.targetId) === rowKey
-    )
-    const next: ObjectLinkRow = {
-      projectId: input.runtime.projectId,
-      sourceTypeId: event.payload.sourceTypeId,
-      sourceId: event.payload.sourceId,
-      linkId: event.payload.linkId,
-      targetTypeId: event.payload.targetTypeId,
-      targetId: event.payload.targetId,
-      properties: event.payload.properties,
-      createdAt: existing?.createdAt ?? occurredAt,
-      updatedAt: occurredAt,
-      sourceEventId: event.id,
-    }
-
-    links.set(
-      event.payload.linkId,
-      rows
-        .filter((row) => linkRowKey(row.linkId, row.targetTypeId, row.targetId) !== rowKey)
-        .concat(next)
-    )
-  }
 
   return links
 }
@@ -462,10 +346,6 @@ function linkDependencyKey(sourceTypeId: string, linkId: string): string {
 
 function evaluationCandidateKey(ruleId: string, subject: RuleEventSubject): string {
   return JSON.stringify([ruleId, subject.kind, subject.objectTypeId, subject.primaryId])
-}
-
-function linkRowKey(linkId: string, targetTypeId: string, targetId: string): string {
-  return JSON.stringify([linkId, targetTypeId, targetId])
 }
 
 function requireRulesStorage(

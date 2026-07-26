@@ -26,10 +26,10 @@ export type {
   ActionRunRecord,
   ActionRunStatus,
   ActionRunStorage,
-  AssertActionMaterializationRunInput,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
+  LockActionMaterializationRunInput,
   QueueActionRunInput,
   StartActionRunInput,
 } from "./action-runs"

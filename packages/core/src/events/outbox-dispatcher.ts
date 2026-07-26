@@ -65,6 +65,7 @@ export class OntologyOutboxDispatcher {
   private wakeWaiter: (() => void) | null = null
   private draining: Promise<void> | null = null
   private pendingDrain: Promise<void> | null = null
+  private stopRequested = false
 
   constructor(options: OntologyOutboxDispatcherOptions) {
     assertNonblank(options.projectId, "projectId")
@@ -115,6 +116,7 @@ export class OntologyOutboxDispatcher {
   async start(): Promise<void> {
     if (this.controller !== null) return
 
+    this.stopRequested = false
     const controller = new AbortController()
     this.controller = controller
     const running = this.run(controller.signal)
@@ -140,14 +142,22 @@ export class OntologyOutboxDispatcher {
    * that starts after its own commit, without a burst of N commits paying for N sequential passes.
    */
   drain(): Promise<void> {
+    if (this.stopRequested) return Promise.resolve()
     const running = this.draining
     if (!running) return this.startDrainPass()
 
     this.pendingDrain ??= settled(running).then(() => {
       this.pendingDrain = null
+      if (this.stopRequested) return
       return this.startDrainPass()
     })
     return this.pendingDrain
+  }
+
+  /** Starts a tracked best-effort drain without extending the caller's mutation latency. */
+  notify(): void {
+    if (this.stopRequested) return
+    void this.drain().catch((error) => this.reportError(error))
   }
 
   private startDrainPass(): Promise<void> {
@@ -168,24 +178,37 @@ export class OntologyOutboxDispatcher {
   async stop(): Promise<void> {
     const controller = this.controller
     const running = this.running
-    if (controller === null || running === null) return
-
-    controller.abort()
+    this.stopRequested = true
+    controller?.abort()
     this.wake()
     const settlementBudget = Math.min(1_000, Math.ceil(this.shutdownTimeoutMs / 2))
     const drainBudget = this.shutdownTimeoutMs - settlementBudget
-    if (await settlesWithin(running, drainBudget)) {
-      this.detachRun(controller, running)
+    const active = [running, this.draining, this.pendingDrain].filter(
+      (promise): promise is Promise<void> => promise !== null
+    )
+    if (active.length === 0) return
+    if (
+      await settlesWithin(
+        Promise.all(active).then(() => undefined),
+        drainBudget
+      )
+    ) {
+      if (controller && running) this.detachRun(controller, running)
       return
     }
 
     await settlesWithin(this.rescheduleUnsettledForShutdown(), settlementBudget)
     this.inFlight.clear()
-    this.detachRun(controller, running)
+    // A broker promise may never settle. Detach the drain generation so `start()` can create a
+    // fresh publisher instead of chaining forever behind the abandoned promise.
+    this.draining = null
+    this.pendingDrain = null
+    if (controller && running) this.detachRun(controller, running)
   }
 
   private async drainAvailable(): Promise<void> {
     for (;;) {
+      if (this.stopRequested) return
       let rows: readonly ClaimedOntologyOutboxRow[]
       try {
         rows = await this.claimBatch()
@@ -195,6 +218,7 @@ export class OntologyOutboxDispatcher {
       }
       if (rows.length === 0) return
       await this.publishBatch(rows)
+      if (this.stopRequested) return
       // A partial batch means the outbox was drained; anything inserted since belongs to the next
       // drain or the poll loop, and claiming again would only cost a round trip.
       if (rows.length < this.batchSize) return

@@ -1,4 +1,5 @@
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { shareOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
 import type { ProjectionRunStorage } from "@sixb/core/storage"
@@ -70,13 +71,11 @@ function buildProjectionContext(
   sixb: ProjectionWorkerSixb,
   projectionRunsStorage: ProjectionRunStorage
 ): ProjectionWorkerContext {
-  return {
+  const context: ProjectionWorkerContext = {
     projectId: sixb.projectId,
     ontology: sixb.ontology,
     actionRegistry: sixb.actionRegistry,
     events: sixb.events,
-    materializer: sixb.materializer,
-    committedFacts: sixb.committedFacts,
     storage: sixb.storage,
     lakeStorage: sixb.lakeStorage,
     blobStorage: sixb.blobStorage,
@@ -89,4 +88,6 @@ function buildProjectionContext(
       return sixb.getProjectionById(projectionId)
     },
   }
+  shareOntologyMutationRuntime(sixb, context)
+  return context
 }

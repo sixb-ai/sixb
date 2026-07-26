@@ -14,6 +14,7 @@ export {
   isMaterializationConflictError,
   MaterializationCancellationError,
   MaterializationConflictError,
+  MaterializationObjectNotFoundError,
   MaterializationValidationError,
 } from "./errors"
 export type { OntologyMaterializationEvent, OntologyMaterializationEventDraft } from "./events"

@@ -1,4 +1,4 @@
-import type { EventActor } from "../events/envelope"
+import type { EventActor, EventOrigin } from "../events/envelope"
 import type { PropertyChange, PropertyChangeMap } from "../events/property-changes"
 import type { JsonValue } from "../json"
 
@@ -50,36 +50,7 @@ export type ProjectionMaterializationIdentity = ProjectionMaterializationIdentit
       }
   )
 
-export type OntologyMaterializationOrigin =
-  | {
-      readonly kind: "action"
-      readonly actionId: string
-      readonly runId: string
-    }
-  | {
-      readonly kind: "runtime"
-      readonly requestId: string
-    }
-  | {
-      readonly kind: "projection"
-      readonly projectionId: string
-      readonly projectionRunId: string
-      readonly datasetId: string
-      readonly datasetVersionId: string
-    }
-  | {
-      readonly kind: "telemetry"
-      readonly source:
-        | { readonly kind: "runtime"; readonly requestId: string }
-        | {
-            readonly kind: "projection"
-            readonly projectionId: string
-            readonly projectionRunId: string
-            readonly datasetId: string
-            readonly datasetVersionId: string
-            readonly batchOrdinal: number
-          }
-    }
+export type OntologyMaterializationOrigin = EventOrigin
 
 export type ExpectedObjectRevision =
   | {

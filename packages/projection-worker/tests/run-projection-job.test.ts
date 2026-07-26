@@ -24,6 +24,7 @@ import {
   stringEnum,
   valueTypeRef,
 } from "@sixb/core"
+import { shareOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { BeginDatasetWriteInput, ReadDatasetRowsInput } from "@sixb/core/lake-storage"
 import type { ProjectionRunStorage } from "@sixb/core/storage"
 import { ProjectionWorkerError } from "../src/errors"
@@ -216,8 +217,6 @@ interface ProjectionRuntimeSource {
   readonly ontology: ProjectionWorkerContext["ontology"]
   readonly actionRegistry: ProjectionWorkerContext["actionRegistry"]
   readonly events: ProjectionWorkerContext["events"]
-  readonly materializer: ProjectionWorkerContext["materializer"]
-  readonly committedFacts: ProjectionWorkerContext["committedFacts"]
   readonly storage: ProjectionWorkerContext["storage"]
   readonly lakeStorage: ProjectionWorkerContext["lakeStorage"]
   readonly blobStorage: ProjectionWorkerContext["blobStorage"]
@@ -263,13 +262,11 @@ function createFinishFailingProjectionRunStorage(
 }
 
 function createRuntime(sixb: ProjectionRuntimeSource) {
-  return {
+  const runtime = {
     projectId: sixb.projectId,
     ontology: sixb.ontology,
     actionRegistry: sixb.actionRegistry,
     events: sixb.events,
-    materializer: sixb.materializer,
-    committedFacts: sixb.committedFacts,
     storage: sixb.storage,
     lakeStorage: sixb.lakeStorage,
     blobStorage: sixb.blobStorage,
@@ -282,6 +279,8 @@ function createRuntime(sixb: ProjectionRuntimeSource) {
       return sixb.getProjectionById(projectionId)
     },
   } satisfies ProjectionWorkerContext
+  shareOntologyMutationRuntime(sixb, runtime)
+  return runtime
 }
 
 function createSixb(

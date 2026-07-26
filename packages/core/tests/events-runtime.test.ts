@@ -2,27 +2,26 @@ import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "../src"
 import { EVENTS_STREAM, EventsRuntime, type StoredDomainEvent } from "../src/events"
 
-function objectCreated(primaryId: string) {
+function actionRequested(runId: string) {
   return {
-    type: "object.created" as const,
+    type: "action.requested" as const,
     payload: {
-      objectTypeId: "Room",
-      primaryId,
-      properties: { name: primaryId },
-      propertyChanges: { name: { operation: "created" as const, after: primaryId } },
+      actionId: "test-action",
+      runId,
+      subject: { kind: "none" as const },
+      params: {},
     },
   }
 }
 
-function telemetryAppended(objectId: string) {
+function scheduleTriggered(scheduleId: string) {
   return {
-    type: "telemetry.appended" as const,
+    type: "schedule.triggered" as const,
     payload: {
-      objectTypeId: "Room",
-      objectId,
-      propertyId: "temperature",
-      value: 72,
-      at: "2026-05-20T10:00:00.000Z",
+      scheduleId,
+      occurrenceAt: "2026-05-20T10:00:00.000Z",
+      triggeredAt: "2026-05-20T10:00:00.000Z",
+      occurrenceKey: scheduleId,
     },
   }
 }
@@ -38,9 +37,9 @@ describe("EventsRuntime", () => {
       causationId: "cause-1",
       events: [
         {
-          ...objectCreated("room-1"),
+          ...actionRequested("run-1"),
           metadata: { source: "unit-test" },
-          idempotencyKey: "object.created:room-1",
+          idempotencyKey: "action.requested:run-1",
         },
       ],
     })
@@ -48,43 +47,43 @@ describe("EventsRuntime", () => {
     expect(event).toMatchObject({
       cursor: "1",
       projectId: "project-a",
-      type: "object.created",
-      topic: "objects",
-      partitionKey: "Room:room-1",
+      type: "action.requested",
+      topic: "actions",
+      partitionKey: "test-action",
       actor: { type: "system", id: "tests" },
       correlationId: "corr-1",
       causationId: "cause-1",
       metadata: { source: "unit-test" },
-      idempotencyKey: "object.created:room-1",
+      idempotencyKey: "action.requested:run-1",
     })
     expect(broker.appended[0]?.projectId).toBe("project-a")
-    expect(broker.appended[0]?.records[0]?.idempotencyKey).toBe("object.created:room-1")
+    expect(broker.appended[0]?.records[0]?.idempotencyKey).toBe("action.requested:run-1")
   })
 
   test("reads with Events cursor and filter semantics without a projectId input", async () => {
     const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
     await events.append({
-      events: [objectCreated("room-1"), telemetryAppended("room-1"), objectCreated("room-2")],
+      events: [actionRequested("run-1"), scheduleTriggered("daily"), actionRequested("run-2")],
     })
 
     const first = (await events.read({ limit: 1 }))[0]
     const afterFirst = await events.read({ afterCursor: first?.cursor })
     expect(afterFirst.map((event) => event.cursor)).toEqual(["2", "3"])
 
-    const objects = await events.read({ topics: ["objects"] })
-    expect(objects.map((event) => event.type)).toEqual(["object.created", "object.created"])
+    const actions = await events.read({ topics: ["actions"] })
+    expect(actions.map((event) => event.type)).toEqual(["action.requested", "action.requested"])
 
-    const telemetry = await events.read({ types: ["telemetry.appended"] })
-    expect(telemetry.map((event) => event.type)).toEqual(["telemetry.appended"])
+    const schedules = await events.read({ types: ["schedule.triggered"] })
+    expect(schedules.map((event) => event.type)).toEqual(["schedule.triggered"])
 
     const impossible = await events.read({
-      topics: ["telemetry"],
-      types: ["object.created"],
+      topics: ["schedules"],
+      types: ["action.requested"],
     })
     expect(impossible).toEqual([])
 
-    const limited = await events.read({ topics: ["objects"], limit: 1 })
-    expect(limited.map(primaryIds)).toEqual(["room-1"])
+    const limited = await events.read({ topics: ["actions"], limit: 1 })
+    expect(limited.map(runIds)).toEqual(["run-1"])
   })
 
   test("returns the latest event cursor without reading retained events", async () => {
@@ -93,7 +92,7 @@ describe("EventsRuntime", () => {
 
     expect(await events.latestCursor()).toBeUndefined()
     const appended = await events.append({
-      events: [objectCreated("room-1"), objectCreated("room-2")],
+      events: [actionRequested("run-1"), actionRequested("run-2")],
     })
 
     expect(await events.latestCursor()).toBe(appended.at(-1)?.cursor)
@@ -106,38 +105,38 @@ describe("EventsRuntime", () => {
     const projectAEvents = new EventsRuntime({ projectId: "project-a", broker })
     const projectBEvents = new EventsRuntime({ projectId: "project-b", broker })
 
-    await projectAEvents.append({ events: [objectCreated("a")] })
-    await projectBEvents.append({ events: [objectCreated("b")] })
+    await projectAEvents.append({ events: [actionRequested("a")] })
+    await projectBEvents.append({ events: [actionRequested("b")] })
 
-    expect((await projectAEvents.read()).map(primaryIds)).toEqual(["a"])
-    expect((await projectBEvents.read()).map(primaryIds)).toEqual(["b"])
+    expect((await projectAEvents.read()).map(runIds)).toEqual(["a"])
+    expect((await projectBEvents.read()).map(runIds)).toEqual(["b"])
   })
 
   test("subscribes to live events with type filters", async () => {
     const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
     const received: string[] = []
 
-    await events.subscribe({ types: ["telemetry.appended"] }, (batch) => {
+    await events.subscribe({ types: ["schedule.triggered"] }, (batch) => {
       received.push(...batch.map((event) => event.type))
     })
 
     await events.append({
-      events: [objectCreated("room-1"), telemetryAppended("room-1")],
+      events: [actionRequested("run-1"), scheduleTriggered("daily")],
     })
 
-    expect(received).toEqual(["telemetry.appended"])
+    expect(received).toEqual(["schedule.triggered"])
   })
 
   test("can subscribe from the earliest retained event", async () => {
     const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
-    await events.append({ events: [objectCreated("room-1")] })
+    await events.append({ events: [actionRequested("run-1")] })
 
     const received: string[] = []
     const unsubscribe = await events.subscribe({ from: "earliest" }, (batch) => {
-      received.push(...batch.map(primaryIds).filter((id): id is string => id !== undefined))
+      received.push(...batch.map(runIds).filter((id): id is string => id !== undefined))
     })
 
-    expect(received).toEqual(["room-1"])
+    expect(received).toEqual(["run-1"])
     unsubscribe()
   })
 
@@ -153,8 +152,8 @@ describe("EventsRuntime", () => {
   })
 })
 
-function primaryIds(event: StoredDomainEvent): string | undefined {
-  return event.type === "object.created" ? event.payload.primaryId : undefined
+function runIds(event: StoredDomainEvent): string | undefined {
+  return event.type === "action.requested" ? event.payload.runId : undefined
 }
 
 class LatestCursorRecordingBroker extends InMemoryBroker {

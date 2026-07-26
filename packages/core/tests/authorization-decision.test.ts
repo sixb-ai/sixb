@@ -170,6 +170,9 @@ const envelope = {
   projectId: "p1",
   occurredAt: "2026-01-01T00:00:00.000Z",
   cursor: "c1",
+  origin: { kind: "runtime" as const, requestId: "request-1" },
+  commitId: "commit-1",
+  commitOrdinal: 0,
 }
 
 const objectEvent: StoredObjectMutationEvent = {

@@ -223,39 +223,53 @@ function normalizeExpectedLinkScope(value: ExpectedLinkScopeRevision): ExpectedL
  */
 function normalizeOperationGroups(
   groups: readonly (readonly string[])[],
-  operationIds: ReadonlySet<string>
+  operationIds: ReadonlyMap<string, number>
 ): readonly (readonly string[])[] {
   const grouped = new Set<string>()
-  return Object.freeze(
-    groups.map((group) =>
-      Object.freeze(
-        group.map((id) => {
-          if (!operationIds.has(id)) {
-            throw new MaterializationValidationError(
-              `Operation group references unknown operation id '${id}'.`
-            )
-          }
-          if (grouped.has(id)) {
-            throw new MaterializationValidationError(
-              `Operation id '${id}' appears in more than one operation group.`
-            )
-          }
-          grouped.add(id)
-          return id
-        })
+  const normalized = groups.map((group) => {
+    if (group.length < 2) {
+      throw new MaterializationValidationError(
+        "Operation groups must contain at least two operations."
       )
-    )
-  )
+    }
+
+    const positions = group.map((id) => {
+      const position = operationIds.get(id)
+      if (position === undefined) {
+        throw new MaterializationValidationError(
+          `Operation group references unknown operation id '${id}'.`
+        )
+      }
+      if (grouped.has(id)) {
+        throw new MaterializationValidationError(
+          `Operation id '${id}' appears in more than one operation group.`
+        )
+      }
+      grouped.add(id)
+      return position
+    })
+
+    const first = positions[0]!
+    if (positions.some((position, index) => position !== first + index)) {
+      throw new MaterializationValidationError(
+        "Operation groups must list a contiguous run in operation order."
+      )
+    }
+    return { first, ids: Object.freeze([...group]) }
+  })
+
+  normalized.sort((left, right) => left.first - right.first)
+  return Object.freeze(normalized.map(({ ids }) => ids))
 }
 
 export function normalizeOntologyEditCommit(input: OntologyEditCommit): OntologyEditCommit {
-  const operationIds = new Set<string>()
-  const operations = input.operations.map((operation) => {
+  const operationIds = new Map<string, number>()
+  const operations = input.operations.map((operation, index) => {
     const normalized = normalizeOperation(operation)
     if (operationIds.has(normalized.id)) {
       throw new MaterializationValidationError(`Duplicate operation id '${normalized.id}'.`)
     }
-    operationIds.add(normalized.id)
+    operationIds.set(normalized.id, index)
     return normalized
   })
 

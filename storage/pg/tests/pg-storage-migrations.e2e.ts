@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { migrateStorage } from "@sixb/core"
+import {
+  createStoredObjectMutationEvent,
+  createStoredTelemetryAppendedEvent,
+} from "@sixb/core/testing"
 import { SQL } from "bun"
 import { PostgresStorage, type PostgresStorage as PostgresStorageType } from "../src"
 import { POSTGRES_STORAGE_ADAPTER_ID, quoteIdent } from "../src/migrations"
@@ -227,39 +231,30 @@ async function withStorage(
 }
 
 async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
-  await storage.objects.applyObjectUpsert({
-    id: "object-event",
-    cursor: "1",
-    schemaVersion: 1,
-    projectId: "project-a",
-    type: "object.created",
-    topic: "objects",
-    partitionKey: "Room:room:101",
-    payload: {
+  await storage.objects.applyObjectUpsert(
+    createStoredObjectMutationEvent({
+      id: "object-event",
+      cursor: "1",
+      projectId: "project-a",
+      occurredAt: "2026-04-19T12:00:00.000Z",
       objectTypeId: "Room",
       primaryId: "room:101",
       properties: { name: "Legacy Room" },
-      propertyChanges: {},
-    },
-    occurredAt: "2026-04-19T12:00:00.000Z",
-  })
-  await storage.timeseries.applyTelemetryAppended({
-    id: "telemetry-event",
-    cursor: "2",
-    schemaVersion: 1,
-    projectId: "project-a",
-    type: "telemetry.appended",
-    topic: "telemetry",
-    partitionKey: "Room:room:101:temperature",
-    payload: {
+    })
+  )
+  await storage.timeseries.applyTelemetryAppended(
+    createStoredTelemetryAppendedEvent({
+      id: "telemetry-event",
+      cursor: "2",
+      projectId: "project-a",
+      occurredAt: "2026-04-19T12:00:01.000Z",
       objectTypeId: "Room",
       objectId: "room:101",
       propertyId: "temperature",
       value: 21.5,
       at: "2026-04-19T12:00:01.000Z",
-    },
-    occurredAt: "2026-04-19T12:00:01.000Z",
-  })
+    })
+  )
   await storage.syncRuns.start({
     id: "run-1",
     projectId: "project-a",

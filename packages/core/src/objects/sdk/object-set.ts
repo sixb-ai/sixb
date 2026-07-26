@@ -11,6 +11,7 @@ import { shareSixbErrorReporter } from "../../error-reporting/capability"
 import type { ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
+import { shareOntologyMutationRuntime } from "../../runtime/ontology-mutations"
 import type {
   ObjectSet,
   ObjectSetListInput,
@@ -57,8 +58,6 @@ export function createObjectSet<
     storage,
     queues,
     authorization,
-    materializer,
-    committedFacts,
   } = params
   const queryExecutor = createRuntimeQueryExecutor({ projectId, ontology, storage, authorization })
 
@@ -72,11 +71,10 @@ export function createObjectSet<
     storage,
     queues,
     authorization,
-    materializer,
-    committedFacts,
     objectType,
     primaryPropertyId,
   }
+  shareOntologyMutationRuntime(params, resolvedCtx)
   shareSixbErrorReporter(params, resolvedCtx)
 
   const objectSet = {

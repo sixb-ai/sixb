@@ -164,6 +164,12 @@
       "import": "./dist/ontology/internal.js",
       "default": "./dist/ontology/internal.js"
     },
+    "./internal/runtime": {
+      "types": "./dist/runtime/internal.d.ts",
+      "bun": "./src/runtime/internal.ts",
+      "import": "./dist/runtime/internal.js",
+      "default": "./dist/runtime/internal.js"
+    },
     "./internal/query": {
       "types": "./dist/objects/query/index.d.ts",
       "bun": "./src/objects/query/index.ts",

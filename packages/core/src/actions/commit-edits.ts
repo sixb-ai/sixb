@@ -8,9 +8,9 @@ import type {
   ExpectedLinkRevision,
   ExpectedLinkScopeRevision,
   ExpectedObjectRevision,
-  OntologyMaterializer,
   OntologyOperationOutcome,
 } from "../materializer"
+import type { OntologyMutationRuntime } from "../runtime/ontology-mutations"
 import type { Storage } from "../storage/types"
 import { ActionEditCommitError } from "./errors"
 
@@ -24,7 +24,7 @@ export interface ActionReadDependencies {
 const NO_READ_DEPENDENCIES: ActionReadDependencies = { objects: [], links: [], linkScopes: [] }
 
 export interface CommitActionEditsInput {
-  readonly materializer: OntologyMaterializer
+  readonly mutations: Pick<OntologyMutationRuntime, "commitEdits">
   readonly projectId: string
   readonly runId: string
   readonly actionId: string
@@ -37,6 +37,7 @@ export interface CommitActionEditsInput {
 export interface ActionEditCommitResult {
   readonly commitId: string
   readonly created: boolean
+  readonly eventCount: number
   readonly outcomes: readonly OntologyOperationOutcome[]
   readonly changes: {
     readonly objects: readonly EffectiveObjectChange[]
@@ -63,7 +64,7 @@ export async function commitActionEdits(
   input: CommitActionEditsInput
 ): Promise<ActionEditCommitResult> {
   const dependencies = input.dependencies ?? NO_READ_DEPENDENCIES
-  const commit = await input.materializer.edits.commit({
+  const commit = await input.mutations.commitEdits({
     mode: "atomic",
     source: { kind: "action", actionId: input.actionId, runId: input.runId },
     operations: lowerEditBatch(input.batch),
@@ -101,6 +102,7 @@ function toActionEditCommitResult(commit: EditCommitResult): ActionEditCommitRes
   return {
     commitId: commit.commitId,
     created: commit.created,
+    eventCount: commit.eventCount,
     outcomes: commit.outcomes,
     changes: commit.changes,
     committedAt: new Date(commit.committedAt),

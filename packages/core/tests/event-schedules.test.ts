@@ -13,6 +13,7 @@ import {
   ScheduleValidationError,
 } from "../src"
 import { EventsRuntime } from "../src/events"
+import type { OntologyMaterializationEvent } from "../src/materialization/events"
 import { evaluateEventSchedule, validateSchedulesAtStartup } from "../src/schedules"
 
 const Payment = defineObjectType({
@@ -48,36 +49,26 @@ describe("evaluateEventSchedule", () => {
       .on(events.object(Invoice).updated())
       .where((event) => event.object.p.amount.gt(500))
     const runtime = new EventsRuntime({ projectId: "test", broker: new InMemoryBroker() })
-    const [crossed] = await runtime.append({
-      events: [
-        {
-          type: "object.updated",
-          payload: {
-            objectTypeId: Invoice.id,
-            primaryId: "inv-1",
-            properties: { id: "inv-1", amount: 700 },
-            propertyChanges: {
-              amount: { operation: "updated", before: 400, after: 700 },
-            },
-          },
+    const [crossed] = await runtime.publishEnvelopes([
+      objectUpdatedFact("event-crossed", {
+        objectTypeId: Invoice.id,
+        primaryId: "inv-1",
+        properties: { id: "inv-1", amount: 700 },
+        propertyChanges: {
+          amount: { operation: "updated", before: 400, after: 700 },
         },
-      ],
-    })
-    const [remainedTrue] = await runtime.append({
-      events: [
-        {
-          type: "object.updated",
-          payload: {
-            objectTypeId: Invoice.id,
-            primaryId: "inv-1",
-            properties: { id: "inv-1", amount: 800 },
-            propertyChanges: {
-              amount: { operation: "updated", before: 700, after: 800 },
-            },
-          },
+      }),
+    ])
+    const [remainedTrue] = await runtime.publishEnvelopes([
+      objectUpdatedFact("event-remained", {
+        objectTypeId: Invoice.id,
+        primaryId: "inv-1",
+        properties: { id: "inv-1", amount: 800 },
+        propertyChanges: {
+          amount: { operation: "updated", before: 700, after: 800 },
         },
-      ],
-    })
+      }),
+    ])
 
     expect(evaluateEventSchedule(schedule, crossed!)).toMatchObject({
       event: { object: { primaryId: "inv-1", p: { id: "inv-1", amount: 700 } } },
@@ -109,6 +100,25 @@ describe("evaluateEventSchedule", () => {
     })
   })
 })
+
+function objectUpdatedFact(
+  id: string,
+  payload: (OntologyMaterializationEvent & { readonly type: "object.updated" })["payload"]
+): OntologyMaterializationEvent {
+  return {
+    id,
+    schemaVersion: 1,
+    projectId: "test",
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    origin: { kind: "runtime", requestId: id },
+    commitId: `commit-${id}`,
+    commitOrdinal: 0,
+    type: "object.updated",
+    topic: "objects",
+    partitionKey: `${payload.objectTypeId}:${payload.primaryId}`,
+    payload,
+  }
+}
 
 describe("event schedules", () => {
   test("builds an inert link event schedule with an edge condition", () => {

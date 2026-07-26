@@ -1,11 +1,16 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage, type Storage } from "../src"
+import { InMemoryStorage, type JsonValue, type Storage } from "../src"
 import type {
   StoredLinkMutationEvent,
   StoredObjectMutationEvent,
   StoredTelemetryAppendedEvent,
 } from "../src/events"
 import { type ActionRunStorage, StorageTransactionError } from "../src/storage"
+import {
+  createStoredLinkMutationEvent,
+  createStoredObjectMutationEvent,
+  createStoredTelemetryAppendedEvent,
+} from "../src/testing"
 
 describe("InMemoryStorage.transaction", () => {
   test("commits writes atomically", async () => {
@@ -446,24 +451,17 @@ describe("InMemoryStorage.transaction", () => {
 function objectEvent(
   id: string,
   primaryId: string,
-  properties: Record<string, unknown>
+  properties: Record<string, JsonValue>
 ): StoredObjectMutationEvent {
-  return {
+  return createStoredObjectMutationEvent({
     id,
     cursor: id,
-    schemaVersion: 1,
     projectId: "my-app",
-    type: "object.created",
-    topic: "objects",
-    partitionKey: `Room:${primaryId}`,
-    payload: {
-      objectTypeId: "Room",
-      primaryId,
-      properties,
-      propertyChanges: {},
-    },
     occurredAt: "2026-06-17T10:00:00.000Z",
-  }
+    objectTypeId: "Room",
+    primaryId,
+    properties,
+  })
 }
 
 function requireActionRuns(tx: Storage): ActionRunStorage {
@@ -474,44 +472,31 @@ function requireActionRuns(tx: Storage): ActionRunStorage {
 }
 
 function linkEvent(id: string, sourceId: string, targetId: string): StoredLinkMutationEvent {
-  return {
+  return createStoredLinkMutationEvent({
     id,
     cursor: id,
-    schemaVersion: 1,
     projectId: "my-app",
-    type: "link.created",
-    topic: "links",
-    partitionKey: `Room:${sourceId}:neighbour`,
-    payload: {
-      sourceTypeId: "Room",
-      sourceId,
-      linkId: "neighbour",
-      targetTypeId: "Room",
-      targetId,
-      propertyChanges: {},
-    },
     occurredAt: "2026-06-17T10:00:00.000Z",
-  }
+    sourceTypeId: "Room",
+    sourceId,
+    linkId: "neighbour",
+    targetTypeId: "Room",
+    targetId,
+  })
 }
 
 function telemetryEvent(id: string, value: number, at: string): StoredTelemetryAppendedEvent {
-  return {
+  return createStoredTelemetryAppendedEvent({
     id,
     cursor: id,
-    schemaVersion: 1,
     projectId: "my-app",
-    type: "telemetry.appended",
-    topic: "telemetry",
-    partitionKey: "Room:room_1:temperature",
-    payload: {
-      objectTypeId: "Room",
-      objectId: "room_1",
-      propertyId: "temperature",
-      value,
-      at,
-    },
     occurredAt: at,
-  }
+    objectTypeId: "Room",
+    objectId: "room_1",
+    propertyId: "temperature",
+    value,
+    at,
+  })
 }
 
 function agentThreadInput(id: string) {

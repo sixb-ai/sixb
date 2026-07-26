@@ -214,6 +214,36 @@ describe("materializer canonical contracts", () => {
     ).toThrow("contradictory")
   })
 
+  test("accepts only explicit contiguous operation groups", () => {
+    const operations = [
+      { id: "first", kind: "object.delete" as const, ref: leftObject },
+      { id: "second", kind: "object.restore" as const, ref: leftObject },
+      { id: "third", kind: "object.delete" as const, ref: rightObject },
+    ]
+    const normalize = (operationGroups: readonly (readonly string[])[]) =>
+      normalizeOntologyEditCommit({
+        mode: "continue",
+        source: { kind: "runtime", requestId: "group-contract" },
+        operations,
+        operationGroups,
+      })
+
+    const valid = normalize([["first", "second"]])
+    expect(valid.mode === "continue" ? valid.operationGroups : undefined).toEqual([
+      ["first", "second"],
+    ])
+    expect(() => normalize([["first"]])).toThrow("at least two")
+    expect(() => normalize([["first", "missing"]])).toThrow("unknown operation id 'missing'")
+    expect(() => normalize([["first", "third"]])).toThrow("contiguous run in operation order")
+    expect(() => normalize([["second", "first"]])).toThrow("contiguous run in operation order")
+    expect(() =>
+      normalize([
+        ["first", "second"],
+        ["second", "third"],
+      ])
+    ).toThrow("appears in more than one operation group")
+  })
+
   test("requires matching projection root assertions", () => {
     expect(() =>
       normalizeProjectionSourceEntry({

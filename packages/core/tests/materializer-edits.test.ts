@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createEventId, MaterializationConflictError } from "../src/materializer"
-import { InMemoryStorage } from "../src/storage"
+import { InMemoryStorage, type Storage } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import {
@@ -15,20 +15,30 @@ const ref = (primaryId: string) => ({ objectTypeId: "Device", primaryId })
 
 describe("ontology materializer edits", () => {
   test("rejects an Action commit before mutation when strict run capabilities are absent", async () => {
-    const storage = new InMemoryStorage()
-    const runs = storage.actionRuns
-    Object.defineProperty(storage, "actionRuns", {
-      value: {
-        queue: runs.queue.bind(runs),
-        start: runs.start.bind(runs),
-        enterPhase: runs.enterPhase.bind(runs),
-        recordWriteback: runs.recordWriteback.bind(runs),
-        recordEffects: runs.recordEffects.bind(runs),
-        finish: runs.finish.bind(runs),
-        getById: runs.getById.bind(runs),
-        list: runs.list.bind(runs),
-      },
-    })
+    class StorageWithoutActionFence extends InMemoryStorage {
+      private readonly unfencedActionRuns: NonNullable<Storage["actionRuns"]>
+
+      constructor() {
+        super()
+        const runs = this.actionRuns
+        this.unfencedActionRuns = {
+          queue: runs.queue.bind(runs),
+          start: runs.start.bind(runs),
+          enterPhase: runs.enterPhase.bind(runs),
+          recordWriteback: runs.recordWriteback.bind(runs),
+          recordEffects: runs.recordEffects.bind(runs),
+          finish: runs.finish.bind(runs),
+          getById: runs.getById.bind(runs),
+          list: runs.list.bind(runs),
+        }
+        Object.defineProperty(this, "actionRuns", { value: this.unfencedActionRuns })
+      }
+
+      override transaction<T>(run: (tx: Storage) => Promise<T> | T): Promise<T> {
+        return super.transaction((tx) => run({ ...tx, actionRuns: this.unfencedActionRuns }))
+      }
+    }
+    const storage = new StorageWithoutActionFence()
     const { materializer } = createMaterializerFixture({ storage })
 
     await expect(
@@ -156,6 +166,53 @@ describe("ontology materializer edits", () => {
     })
   })
 
+  test("replays an exact Action commit after the run becomes terminal", async () => {
+    const storage = new InMemoryStorage()
+    await storage.actionRuns.queue({
+      id: "run-replay",
+      projectId: "project",
+      actionId: "approve",
+      subject: { kind: "none" },
+      params: {},
+      idempotencyKey: "action:run-replay",
+    })
+    await storage.actionRuns.start({ id: "run-replay", projectId: "project" })
+    const { materializer } = createMaterializerFixture({ storage })
+    const input = {
+      mode: "atomic" as const,
+      source: { kind: "action" as const, actionId: "approve", runId: "run-replay" },
+      operations: [
+        {
+          id: "create",
+          kind: "object.create" as const,
+          ref: ref("action-replayed"),
+          properties: { name: "created" },
+        },
+      ],
+      expectedObjects: [],
+      expectedLinks: [],
+      expectedLinkScopes: [],
+    }
+
+    const first = await materializer.edits.commit(input)
+    await storage.actionRuns.finish({
+      projectId: "project",
+      id: "run-replay",
+      status: "succeeded",
+    })
+
+    await expect(materializer.edits.commit(input)).resolves.toMatchObject({
+      commitId: first.commitId,
+      created: false,
+    })
+    await expect(
+      materializer.edits.commit({
+        ...input,
+        operations: [{ id: "different", kind: "object.delete", ref: ref("action-replayed") }],
+      })
+    ).rejects.toMatchObject({ kind: "idempotency" })
+  })
+
   test("rechecks the Action run inside the transaction before ontology work", async () => {
     const storage = new InMemoryStorage()
     await storage.actionRuns.queue({
@@ -167,14 +224,13 @@ describe("ontology materializer edits", () => {
       idempotencyKey: "action:run-recheck",
     })
     await storage.actionRuns.start({ id: "run-recheck", projectId: "project" })
-    let assertions = 0
+    let locks = 0
     decorateOperationScopedMethodForTesting(
       storage.actionRuns,
-      "assertMaterializationRun",
-      (assertMaterializationRun) => async (input) => {
-        assertions += 1
-        if (assertions === 2) throw new Error("injected transactional Action recheck failure")
-        return assertMaterializationRun(input)
+      "lockForMaterialization",
+      () => async () => {
+        locks += 1
+        throw new Error("injected transactional Action lock failure")
       }
     )
     const { materializer } = createMaterializerFixture({ storage })
@@ -209,9 +265,9 @@ describe("ontology materializer edits", () => {
         expectedLinks: [],
         expectedLinkScopes: [],
       })
-    ).rejects.toThrow("injected transactional Action recheck failure")
+    ).rejects.toThrow("injected transactional Action lock failure")
 
-    expect(assertions).toBe(2)
+    expect(locks).toBe(1)
     expect(ontologyActivity).toEqual([])
     expect(adapter.snapshot()).toEqual(before)
   })
@@ -725,6 +781,48 @@ describe("ontology materializer edits", () => {
     ).toEqual([])
   })
 
+  test("rolls back every operation in a failed continue-mode group", async () => {
+    const { materializer, storage } = createMaterializerFixture()
+    await materializer.edits.commit(
+      atomic("seed-group-rollback", [
+        { id: "one", kind: "object.create", ref: ref("one"), properties: { name: "one" } },
+        { id: "two", kind: "object.create", ref: ref("two"), properties: { name: "two" } },
+        {
+          id: "link",
+          kind: "link.upsert",
+          ref: { source: ref("one"), linkId: "parent", target: ref("two") },
+        },
+      ])
+    )
+
+    const result = await materializer.edits.commit({
+      mode: "continue",
+      source: { kind: "runtime", requestId: "group-rollback" },
+      operations: [
+        {
+          id: "delete-link",
+          kind: "link.delete",
+          ref: { source: ref("one"), linkId: "parent", target: ref("two") },
+        },
+        { id: "invalid-object", kind: "object.create", ref: ref("invalid"), properties: {} },
+      ],
+      operationGroups: [["delete-link", "invalid-object"]],
+    })
+
+    expect(result.outcomes).toEqual([
+      expect.objectContaining({ id: "delete-link", ok: false }),
+      expect.objectContaining({ id: "invalid-object", ok: false }),
+    ])
+    expect(
+      await storage.objects.listLinks({
+        projectId: "project",
+        objectTypeId: "Device",
+        objectId: "one",
+        linkId: "parent",
+      })
+    ).toHaveLength(1)
+  })
+
   test("checks expected object revisions and divergent idempotency", async () => {
     const { materializer } = createMaterializerFixture()
     await materializer.edits.commit(
@@ -756,11 +854,9 @@ describe("ontology materializer edits", () => {
 
   test("continue mode rethrows provider failures and rolls back prior successes", async () => {
     const { materializer, storage } = createMaterializerFixture()
-    let reads = 0
     getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
-      beforeRead() {
-        reads += 1
-        if (reads === 2) throw new Error("injected provider read failure")
+      beforeWrite() {
+        throw new Error("injected provider write failure")
       },
     })
 
@@ -773,7 +869,7 @@ describe("ontology materializer edits", () => {
           { id: "second", kind: "object.create", ref: ref("second"), properties: { name: "two" } },
         ],
       })
-    ).rejects.toThrow("injected provider read failure")
+    ).rejects.toThrow("injected provider write failure")
     expect(
       await storage.objects.getByPrimaryId({
         projectId: "project",
@@ -923,6 +1019,38 @@ describe("ontology materializer edits", () => {
           primaryId: "dormant",
         })
       ).toBeNull()
+    }
+  })
+
+  test("preloads edit state with a constant number of reads across batch boundaries", async () => {
+    for (const operationCount of [1, 1_000, 1_001]) {
+      const { materializer, storage } = createMaterializerFixture()
+      await materializer.projections.replace(
+        replacement(`edit-read-scale-source-${operationCount}`, "2026-01-01T00:00:00Z", [
+          sourceEntry("one", "one"),
+        ])
+      )
+      let stateReads = 0
+      getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
+        beforeRead(boundary) {
+          if (boundary === "state.read") stateReads += 1
+        },
+      })
+
+      const operations = Array.from({ length: operationCount }, (_, index) => ({
+        id: `patch-${index}`,
+        kind: "object.patch" as const,
+        ref: ref("one"),
+        set: { note: String(index) },
+        unset: [],
+        reset: [],
+      }))
+      const result = await materializer.edits.commit(
+        atomic(`edit-read-scale-${operationCount}`, operations)
+      )
+
+      expect(result.outcomes).toHaveLength(operationCount)
+      expect(stateReads).toBe(1)
     }
   })
 

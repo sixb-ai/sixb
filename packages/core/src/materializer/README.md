@@ -20,9 +20,9 @@ outcomes back to caller positions. No ingress appends domain events or writes ob
 timeseries providers directly.
 
 Committed facts are published from the transactional outbox after the commit resolves.
-`OntologyOutboxDispatcher` owns that protocol: ingresses call `drain()` for prompt in-process
-delivery, and `start()` runs the durable poll loop. Publication is best effort — delivery may lag, but
-a committed fact is never lost.
+`OntologyOutboxDispatcher` owns that protocol: ingresses call `notify()` for prompt, non-blocking
+in-process delivery, and a process may call `start()` to host the durable poll loop. Publication is
+best effort — delivery may lag, but a committed fact is never lost.
 
 ## Common commit pipeline
 
@@ -35,7 +35,7 @@ normalize + validate intent
   -> diff against committed state
   -> stage deterministic work
   -> apply work in dependency order
-  -> write ordered outbox events
+  -> write outbox events with stable commit ordinals
   -> finalize ontology commit atomically
   -> advance a run resume checkpoint when required
 ```

@@ -100,7 +100,7 @@ export async function runEditsAndCommitPhase(
   input.updateActiveRun(run)
 
   const commit = await commitActionEdits({
-    materializer: input.runtime.sixb.materializer,
+    mutations: input.runtime.ontologyMutations,
     projectId: input.runtime.id,
     runId: run.id,
     actionId: input.action.id,
@@ -109,7 +109,7 @@ export async function runEditsAndCommitPhase(
   })
 
   // Committed state is readable; publication of its durable facts is best effort.
-  await input.runtime.sixb.committedFacts?.drain()
+  input.runtime.ontologyMutations.notifyCommittedFacts(commit.eventCount)
 
   return { run, result: commit }
 }

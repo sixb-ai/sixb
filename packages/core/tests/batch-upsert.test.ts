@@ -9,7 +9,7 @@ import {
 } from "../src"
 import type { EventsRuntime } from "../src/events"
 import { objectService } from "../src/objects"
-import { createTestRuntimeDeps } from "./test-runtime-deps"
+import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
 /** Mutations publish durable outbox facts, so delivery is observed on the publication boundary. */
 function spyPublishedFacts(events: EventsRuntime) {
@@ -159,6 +159,10 @@ describe("upsertObjectBatch", () => {
       { properties: { id: "r3", name: "C" } },
     ])
 
+    await waitFor(
+      () => publishSpy.mock.calls.length,
+      (callCount) => callCount === 1
+    )
     expect(publishSpy).toHaveBeenCalledTimes(1)
     expect(publishSpy.mock.calls[0]?.[0].map((event) => event.type)).toEqual([
       "object.created",
@@ -299,6 +303,10 @@ describe("upsertLinkBatch", () => {
     await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
     await sixb.upsertObject("sensor", { id: "s2", name: "Humidity" })
 
+    await waitFor(
+      () => sixb.events.read(),
+      (published) => published.length === 3
+    )
     publishSpy.mockClear()
 
     await sixb.upsertLinkBatch([
@@ -316,6 +324,10 @@ describe("upsertLinkBatch", () => {
       },
     ])
 
+    await waitFor(
+      () => publishSpy.mock.calls.length,
+      (callCount) => callCount === 1
+    )
     expect(publishSpy).toHaveBeenCalledTimes(1)
     expect(publishSpy.mock.calls[0]?.[0].map((event) => event.type)).toEqual([
       "link.created",
@@ -338,6 +350,10 @@ describe("setLinkBatch", () => {
       targetTypeId: "building",
       targetId: "b1",
     })
+    await waitFor(
+      () => sixb.events.read(),
+      (published) => published.length === 4
+    )
     const publishSpy = spyPublishedFacts(sixb.events)
 
     const results = await objectService.setLinkBatch(sixb, [
@@ -358,6 +374,10 @@ describe("setLinkBatch", () => {
     })
     expect(links).toHaveLength(1)
     expect(links[0]?.targetId).toBe("b2")
+    await waitFor(
+      () => publishSpy.mock.calls.length,
+      (callCount) => callCount === 1
+    )
     expect(publishSpy).toHaveBeenCalledTimes(1)
     // Facts of one commit publish in commit-ordinal order, which is kind-major, so the order is
     // deterministic rather than falling out of the envelope hash.

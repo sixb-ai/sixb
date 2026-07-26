@@ -95,9 +95,8 @@ describe("OntologyOutboxDispatcher", () => {
     await dispatcher.stop()
 
     expect(broker.appended).toHaveLength(1)
-    // Both rows ride one claimed lease. They come from two commits seeded in the same millisecond,
-    // so their relative order is a cross-commit tie the comparator breaks by commit id — only
-    // ordering *within* a commit is guaranteed. What this test pins is the batch's contents.
+    // Both rows ride one claimed lease. Delivery is at-least-once and commitOrdinal only correlates
+    // facts within a commit; this assertion deliberately pins contents, not broker delivery order.
     expect(
       [...(broker.appended[0]?.records ?? [])].map((record) => record.idempotencyKey).sort()
     ).toEqual([...expectedIds].sort())

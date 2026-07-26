@@ -2,8 +2,12 @@ import type { DomainEvent } from "@sixb/core"
 import {
   EVENT_TOPICS as CORE_EVENT_TOPICS,
   EVENT_TYPES as CORE_EVENT_TYPES,
+  EVENT_DEFINITIONS,
+  isOntologyFactType,
 } from "@sixb/core/internal/events"
 import { z } from "zod"
+import { JsonValueSchema } from "./common"
+import { ONTOLOGY_EVENT_PAYLOAD_SCHEMAS } from "./event-payloads"
 
 // z.enum expects a non-empty tuple; the core registry exposes readonly arrays.
 export const EVENT_TOPICS = CORE_EVENT_TOPICS as readonly [
@@ -50,31 +54,62 @@ export const EventsQuerySchema = z.object({
   limit: z.string().optional(),
 })
 
-export const EventSchema = z.object({
+const StoredEventBaseSchema = z.object({
   id: z.string(),
   cursor: z.string(),
-  schemaVersion: z.number(),
+  schemaVersion: z.literal(1),
   projectId: z.string(),
   occurredAt: z.string(),
-  correlationId: z.string().optional(),
-  causationId: z.string().optional(),
-  idempotencyKey: z.string().optional(),
   actor: z
     .object({
       type: z.enum(["user", "service", "system"]),
       id: z.string(),
     })
     .optional(),
-  origin: EventOriginSchema.optional(),
-  metadata: z.record(z.unknown()).optional(),
-  /** Present on materializer facts: the authoritative commit and its stable fact ordinal. */
-  commitId: z.string().optional(),
-  commitOrdinal: z.number().optional(),
-  type: EventTypeSchema,
-  topic: EventTopicSchema,
   partitionKey: z.string(),
-  payload: z.unknown(),
 })
+
+const StoredAuthorableEventBaseSchema = StoredEventBaseSchema.extend({
+  correlationId: z.string().optional(),
+  causationId: z.string().optional(),
+  idempotencyKey: z.string().optional(),
+  origin: EventOriginSchema.optional(),
+  metadata: z.record(JsonValueSchema).optional(),
+})
+
+const StoredOntologyEventBaseSchema = StoredEventBaseSchema.extend({
+  origin: EventOriginSchema,
+  commitId: z.string(),
+  commitOrdinal: z.number().int().nonnegative(),
+})
+
+const ontologyEventTypes = EVENT_TYPES.filter(isOntologyFactType)
+const ontologyEventSchemas = ontologyEventTypes.map((type) =>
+  StoredOntologyEventBaseSchema.extend({
+    type: z.literal(type),
+    topic: z.literal(EVENT_DEFINITIONS[type].topic),
+    payload: ONTOLOGY_EVENT_PAYLOAD_SCHEMAS[type],
+  })
+)
+const authorableEventTypes = EVENT_TYPES.filter(
+  (type) => !isOntologyFactType(type)
+) as unknown as readonly [
+  Exclude<DomainEvent["type"], (typeof ontologyEventTypes)[number]>,
+  ...Exclude<DomainEvent["type"], (typeof ontologyEventTypes)[number]>[],
+]
+
+const StoredAuthorableEventSchema = StoredAuthorableEventBaseSchema.extend({
+  type: z.enum(authorableEventTypes),
+  topic: EventTopicSchema,
+  payload: z.record(z.unknown()),
+})
+
+type EventSchemaOption = z.ZodDiscriminatedUnionOption<"type">
+const StoredOntologyEventSchema = z.discriminatedUnion(
+  "type",
+  ontologyEventSchemas as unknown as [EventSchemaOption, EventSchemaOption, ...EventSchemaOption[]]
+)
+export const EventSchema = z.union([StoredOntologyEventSchema, StoredAuthorableEventSchema])
 
 export const EventsResponseSchema = z.object({
   count: z.number(),

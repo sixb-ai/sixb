@@ -149,15 +149,15 @@ export interface ListActionRunsResult {
   readonly total: number
 }
 
-export interface AssertActionMaterializationRunInput {
+export interface LockActionMaterializationRunInput {
   readonly projectId: string
   readonly actionId: string
   readonly runId: string
 }
 
 export interface ActionRunStorage {
-  /** Read-only preflight for Action materialization business identity and running state. */
-  assertMaterializationRun?(input: AssertActionMaterializationRunInput): Promise<void>
+  /** Transactional fence for Action identity and running state before a new ontology commit. */
+  lockForMaterialization?(input: LockActionMaterializationRunInput): Promise<ActionRunRecord>
   queue(input: QueueActionRunInput): Promise<ActionRunRecord>
   start(input: StartActionRunInput): Promise<ActionRunRecord>
   enterPhase(input: EnterActionRunPhaseInput): Promise<ActionRunRecord>
@@ -175,11 +175,11 @@ export interface ActionRunStorage {
  * contract and delete this interface and its type guard.
  */
 export interface ActionMaterializationRunStorage extends ActionRunStorage {
-  assertMaterializationRun(input: AssertActionMaterializationRunInput): Promise<void>
+  lockForMaterialization(input: LockActionMaterializationRunInput): Promise<ActionRunRecord>
 }
 
 export function isActionMaterializationRunStorage(
   storage: ActionRunStorage | null | undefined
 ): storage is ActionMaterializationRunStorage {
-  return storage != null && typeof storage.assertMaterializationRun === "function"
+  return storage != null && typeof storage.lockForMaterialization === "function"
 }

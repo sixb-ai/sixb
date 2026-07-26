@@ -7,11 +7,11 @@ import type {
   ActionRunPhase,
   ActionRunRecord,
   ActionRunWritebackRecord,
-  AssertActionMaterializationRunInput,
   EnterActionRunPhaseInput,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
+  LockActionMaterializationRunInput,
   QueueActionRunInput,
   RecordActionEffectsInput,
   RecordActionWritebackInput,
@@ -31,11 +31,12 @@ import { type PgStoreClient, runPgTransaction } from "./transactions"
 export class PgActionRunStorage implements ActionMaterializationRunStorage {
   constructor(private readonly sql: PgStoreClient) {}
 
-  async assertMaterializationRun(input: AssertActionMaterializationRunInput): Promise<void> {
-    const [row] = await this.sql<{ readonly action_id: string; readonly status: string }[]>`
-      SELECT action_id, status
+  async lockForMaterialization(input: LockActionMaterializationRunInput): Promise<ActionRunRecord> {
+    const [row] = await this.sql<DatabaseRow[]>`
+      SELECT *
       FROM action_runs
       WHERE project_id = ${input.projectId} AND id = ${input.runId}
+      FOR UPDATE
     `
     if (!row) {
       throw new ActionRunError(
@@ -52,6 +53,7 @@ export class PgActionRunStorage implements ActionMaterializationRunStorage {
         `[SixbPg] Action run '${input.runId}' cannot materialize from status '${row.status}'.`
       )
     }
+    return rowToActionRunRecord(row)
   }
 
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {

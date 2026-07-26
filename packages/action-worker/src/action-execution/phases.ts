@@ -25,14 +25,15 @@ export async function executeActionPhases(
     kind: "action",
     id: input.run.id,
   })
-  const objectTarget = await loadObjectTarget({ runtime, action, run })
   // Resolving the authoritative commit once decides both whether validation reruns and whether the
-  // edits phase replays instead of re-recording a batch.
+  // subject must still be loaded. A committed Action may have deleted its own subject, so resume
+  // must not depend on that object remaining effective.
   const existingCommit = await findActionEditCommit({
     storage: runtime.storage,
     projectId: runtime.id,
     runId: run.id,
   })
+  const objectTarget = existingCommit ? null : await loadObjectTarget({ runtime, action, run })
   const phaseContext = createBasePhaseContext({
     runtime,
     action,
@@ -45,64 +46,21 @@ export async function executeActionPhases(
   const reads = new ActionReadRecorder()
 
   try {
-    if (!run.writeback && !existingCommit) {
-      run = await runtime.actionRunsStorage.enterPhase({
-        projectId: runtime.id,
-        id: run.id,
-        phase: "validation",
-      })
-      input.updateActiveRun(run)
-      await runActionValidators({
-        action,
-        subject: run.subject,
-        baseContext: phaseContext,
-        target: isObjectActionDefinition(action) ? objectTarget?.snapshot : undefined,
-      })
-    }
+    const resumed = existingCommit
+      ? { run, writeback: run.writeback?.result, commit: existingCommit }
+      : await executePreCommitPhases({
+          ...input,
+          run,
+          objectTarget,
+          phaseContext,
+          reads,
+          logSession,
+        })
+    run = resumed.run
 
     throwIfAborted(signal)
 
-    const writeback = await runWritebackPhase({
-      runtime,
-      action,
-      run,
-      signal,
-      baseContext: {
-        ...phaseContext,
-        logger: logSession.withContext({ phase: "writeback" }),
-      },
-      objectTarget,
-      reads,
-      updateActiveRun(run) {
-        input.updateActiveRun(run)
-      },
-    })
-    run = writeback.run
-
-    throwIfAborted(signal)
-
-    const commit = await runEditsAndCommitPhase({
-      runtime,
-      action,
-      run,
-      signal,
-      baseContext: {
-        ...phaseContext,
-        logger: logSession.withContext({ phase: "edits" }),
-      },
-      objectTarget,
-      writeback: writeback.value,
-      existingCommit,
-      reads,
-      updateActiveRun(run) {
-        input.updateActiveRun(run)
-      },
-    })
-    run = commit.run
-
-    throwIfAborted(signal)
-
-    if (commit.result && action.phases.effects && !run.effects) {
+    if (resumed.commit && action.phases.effects && !run.effects) {
       run = await runEffectsPhase({
         runtime,
         action,
@@ -113,8 +71,8 @@ export async function executeActionPhases(
           logger: logSession.withContext({ phase: "effects" }),
         },
         objectTarget,
-        writeback: writeback.value,
-        commit: commit.result,
+        writeback: resumed.writeback,
+        commit: resumed.commit,
         updateActiveRun(run) {
           input.updateActiveRun(run)
         },
@@ -129,4 +87,65 @@ export async function executeActionPhases(
   } finally {
     await logSession.flush()
   }
+}
+
+async function executePreCommitPhases(
+  input: PhaseExecutionBase & {
+    readonly run: ActionRunRecord
+    readonly updateActiveRun: UpdateActiveRun
+    readonly objectTarget: Awaited<ReturnType<typeof loadObjectTarget>>
+    readonly phaseContext: ReturnType<typeof createBasePhaseContext>
+    readonly reads: ActionReadRecorder
+    readonly logSession: ReturnType<ReturnType<typeof resolveLogsRuntime>["startExecution"]>
+  }
+) {
+  const { runtime, action, signal, objectTarget, phaseContext, reads, logSession } = input
+  let run = input.run
+  if (!run.writeback) {
+    run = await runtime.actionRunsStorage.enterPhase({
+      projectId: runtime.id,
+      id: run.id,
+      phase: "validation",
+    })
+    input.updateActiveRun(run)
+    await runActionValidators({
+      action,
+      subject: run.subject,
+      baseContext: phaseContext,
+      target: isObjectActionDefinition(action) ? objectTarget?.snapshot : undefined,
+    })
+  }
+
+  throwIfAborted(signal)
+  const writeback = await runWritebackPhase({
+    runtime,
+    action,
+    run,
+    signal,
+    baseContext: {
+      ...phaseContext,
+      logger: logSession.withContext({ phase: "writeback" }),
+    },
+    objectTarget,
+    reads,
+    updateActiveRun: input.updateActiveRun,
+  })
+
+  throwIfAborted(signal)
+  const committed = await runEditsAndCommitPhase({
+    runtime,
+    action,
+    run: writeback.run,
+    signal,
+    baseContext: {
+      ...phaseContext,
+      logger: logSession.withContext({ phase: "edits" }),
+    },
+    objectTarget,
+    writeback: writeback.value,
+    existingCommit: null,
+    reads,
+    updateActiveRun: input.updateActiveRun,
+  })
+  return { run: committed.run, writeback: writeback.value, commit: committed.result }
 }

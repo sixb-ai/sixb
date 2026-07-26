@@ -32,7 +32,7 @@ import { FunctionRuntime } from "../functions/runtime"
 import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
 import { type LoggerProvider, LogsRuntime, type ObservabilityOptions } from "../logging"
-import { createOntologyMaterializer, type OntologyMaterializer } from "../materializer"
+import { createOntologyMaterializer } from "../materializer"
 import { createObjectSet, objectService } from "../objects"
 import {
   assertObjectTypeRegistered,
@@ -70,6 +70,10 @@ import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webho
 import type { WorkflowDefinition } from "../workflows"
 import { validateWorkflowsAtStartup, WorkflowsRuntime } from "../workflows"
 import { RuntimeError } from "./errors"
+import {
+  createOntologyMutationRuntime,
+  registerOntologyMutationRuntime,
+} from "./ontology-mutations"
 import { createScopedSixb, type ScopedSixb } from "./scoped"
 import type {
   BatchItemResult,
@@ -131,6 +135,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   private readonly webhooksByRoute = new Map<string, RegisteredWebhook>()
   private readonly webhooks: readonly RegisteredWebhook[]
   private readonly runtimeContext: SixbRuntimeContext
+  private readonly committedFacts: OntologyOutboxDispatcher
   private readonly projectionRegistry: ProjectionRegistry
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
@@ -140,16 +145,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   readonly broker: Broker
   readonly events: EventsRuntime
   readonly logs: LogsRuntime
-  /**
-   * The single semantic commit engine behind every object, link, and telemetry write.
-   *
-   * @internal Runtime plumbing so workers can reach the same engine; not part of the authoring API.
-   */
-  readonly materializer: OntologyMaterializer
-  /**
-   * @internal Publishes committed ontology facts from the transactional outbox in this process.
-   */
-  readonly committedFacts: OntologyOutboxDispatcher
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
@@ -330,7 +325,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       datasetsById: this.datasetsById,
     })
 
-    this.materializer = createOntologyMaterializer({
+    const materializer = createOntologyMaterializer({
       projectId: this.projectId,
       ontology: this.ontology,
       projections: this.projectionRegistry,
@@ -347,8 +342,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       ontology: this.ontology,
       actionRegistry: this.actionRegistry,
       events: this.events,
-      materializer: this.materializer,
-      committedFacts: this.committedFacts,
       storage: this.storage,
       lakeStorage: this.lakeStorage,
       blobStorage: this.blobStorage,
@@ -356,6 +349,12 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       sandboxes: this.sandboxes,
       rules: this.rules,
     }
+    const ontologyMutations = createOntologyMutationRuntime({
+      materializer,
+      notifyCommittedFacts: () => this.committedFacts.notify(),
+    })
+    registerOntologyMutationRuntime(this, ontologyMutations)
+    registerOntologyMutationRuntime(this.runtimeContext, ontologyMutations)
     shareSixbErrorReporter(this, this.runtimeContext)
     this.actions = new ActionsRuntime(this.runtimeContext)
     this.workflows = new WorkflowsRuntime(this.runtimeContext, workflows)
@@ -542,6 +541,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
   /** Close the runtime broker provider if it owns external resources. */
   async closeBroker(): Promise<void> {
+    await this.committedFacts.stop()
     await this.broker.close?.()
   }
 

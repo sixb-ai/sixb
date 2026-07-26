@@ -7,12 +7,7 @@ import type {
   OntologyOperationOutcome,
 } from "../../materialization/model"
 import { isActionMaterializationRunStorage, type Storage } from "../../storage"
-import type {
-  MaterializationLinkScopeState,
-  MaterializationSession,
-  OntologyCommitWrite,
-  OntologyMaterializationStorage,
-} from "../../storage/ontology"
+import type { MaterializationSession, OntologyCommitWrite } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { replayCommit, withSerializationRetry } from "../execution/commit-lifecycle"
 import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
@@ -23,6 +18,8 @@ import {
   type TimedCommitIdentity,
 } from "../shared/identity"
 import { normalizeOntologyEditCommit } from "../shared/normalize"
+import { compileEditExecutionUnits, type EditExecutionUnit } from "./execution-units"
+import { loadEditWorkingState } from "./load-state"
 import {
   applyEditOperation,
   type EditUndoJournal,
@@ -30,7 +27,6 @@ import {
   undoEditJournal,
 } from "./operations"
 import { stageEditPlan } from "./plan"
-import type { WorkingLink, WorkingObject } from "./working-state"
 
 type NormalizedEditCommit = ReturnType<typeof normalizeOntologyEditCommit>
 
@@ -45,8 +41,6 @@ export async function commitEdits(
   raw: OntologyEditCommit
 ): Promise<EditCommitResult> {
   const command = prepareEditCommit(context, raw)
-  await assertActionRun(context.storage, context.projectId, command.input)
-
   const replay = await replayEditCommit(context, command)
   if (replay) return replay
 
@@ -75,7 +69,7 @@ function editIdempotencyKey(input: NormalizedEditCommit): string {
   return createRuntimeIdempotencyKey(input.source.requestId)
 }
 
-async function assertActionRun(
+async function lockActionRunForMaterialization(
   storage: Storage,
   projectId: string,
   input: NormalizedEditCommit
@@ -86,28 +80,18 @@ async function assertActionRun(
       "Storage does not provide Action run capabilities required by this commit."
     )
   }
-  await storage.actionRuns.assertMaterializationRun({
+  await storage.actionRuns.lockForMaterialization({
     projectId,
     actionId: input.source.actionId,
     runId: input.source.runId,
   })
 }
 
-async function replayEditCommit(
+function replayEditCommit(
   context: MaterializerContext,
   command: PreparedEditCommit
 ): Promise<EditCommitResult | null> {
-  const replay = await replayCommit<EditCommitResult>(context, command.identity)
-  if (!replay || command.input.source.kind !== "action") return replay
-  return withSerializationRetry(context, () =>
-    context.storage.transaction(
-      async (storage) => {
-        await assertActionRun(storage, context.projectId, command.input)
-        return replayCommit<EditCommitResult>(context, command.identity, storage)
-      },
-      { isolation: "serializable" }
-    )
-  )
+  return replayCommit<EditCommitResult>(context, command.identity)
 }
 
 async function executeEditCommit(
@@ -126,20 +110,19 @@ async function executeEditTransaction(
   storage: MaterializerStorage,
   command: PreparedEditCommit
 ): Promise<EditCommitResult> {
-  await assertActionRun(storage, context.projectId, command.input)
+  await lockActionRunForMaterialization(storage, context.projectId, command.input)
 
   const replay = await replayCommit<EditCommitResult>(context, command.identity, storage)
   if (replay) return replay
 
   const session = await beginEditMaterialization(context, storage, command)
-  const workingState = createEditWorkingState()
-  const outcomes = await applyEditOperations(
+  const workingState = await loadEditWorkingState(
     context,
     storage.ontology.materializations,
     session,
-    workingState,
-    command
+    command.input.operations
   )
+  const outcomes = applyEditOperations(context, workingState, command)
   const changes = await stageEditPlan(
     context,
     storage.ontology.materializations,
@@ -216,64 +199,39 @@ function editExpectations(input: NormalizedEditCommit) {
   return { objects: [], links: [], linkScopes: [] }
 }
 
-function createEditWorkingState(): EditWorkingState {
-  return {
-    objects: new Map<string, WorkingObject>(),
-    links: new Map<string, WorkingLink>(),
-    scopeSnapshots: new Map<string, MaterializationLinkScopeState>(),
-  }
-}
-
-async function applyEditOperations(
+function applyEditOperations(
   context: MaterializerContext,
-  storage: OntologyMaterializationStorage,
-  session: MaterializationSession,
   state: EditWorkingState,
   command: PreparedEditCommit
-): Promise<OntologyOperationOutcome[]> {
+): OntologyOperationOutcome[] {
   const outcomes: OntologyOperationOutcome[] = []
-  const groupByOperationId = operationGroupIndex(command.input)
-  const operations = command.input.operations
-  let index = 0
-
-  while (index < operations.length) {
-    const group = groupByOperationId.get(operations[index]?.id ?? "")
-    const run =
-      group === undefined ? 1 : groupRunLength(operations, index, group, groupByOperationId)
-    if (run === 1) {
-      const operation = operations[index]
-      if (operation)
-        outcomes.push(
-          await applyOneEditOperation(context, storage, session, state, operation, command)
-        )
-      index += 1
-      continue
-    }
-    outcomes.push(
-      ...(await applyEditOperationGroup(
-        context,
-        storage,
-        session,
-        state,
-        command,
-        operations.slice(index, index + run)
-      ))
-    )
-    index += run
+  const units = compileEditExecutionUnits(command.input)
+  for (const unit of units) {
+    outcomes.push(...applyEditExecutionUnit(context, state, command, unit))
   }
   return outcomes
 }
 
-async function applyOneEditOperation(
+function applyEditExecutionUnit(
   context: MaterializerContext,
-  storage: OntologyMaterializationStorage,
-  session: MaterializationSession,
+  state: EditWorkingState,
+  command: PreparedEditCommit,
+  unit: EditExecutionUnit
+): OntologyOperationOutcome[] {
+  if (unit.kind === "atomic-group") {
+    return applyEditOperationGroup(context, state, command, unit.operations)
+  }
+  return [applyOneEditOperation(context, state, unit.operation, command)]
+}
+
+function applyOneEditOperation(
+  context: MaterializerContext,
   state: EditWorkingState,
   operation: OntologyEditOperation,
   command: PreparedEditCommit
-): Promise<OntologyOperationOutcome> {
+): OntologyOperationOutcome {
   try {
-    return await applyEditOperation(context, storage, session, state, operation, command.identity)
+    return applyEditOperation(context, state, operation, command.identity)
   } catch (error) {
     if (!isRecoverableEditValidation(command.input, error)) throw error
     return { id: operation.id, ok: false, error: { code: "validation", message: error.message } }
@@ -287,29 +245,19 @@ async function applyOneEditOperation(
  * whose `link.delete` succeeded and whose `link.upsert` failed would report an item error while the
  * original edge stayed deleted.
  */
-async function applyEditOperationGroup(
+function applyEditOperationGroup(
   context: MaterializerContext,
-  storage: OntologyMaterializationStorage,
-  session: MaterializationSession,
   state: EditWorkingState,
   command: PreparedEditCommit,
   group: readonly OntologyEditOperation[]
-): Promise<OntologyOperationOutcome[]> {
+): OntologyOperationOutcome[] {
   const journal: EditUndoJournal = []
   const applied: OntologyOperationOutcome[] = []
 
   for (const operation of group) {
     let outcome: OntologyOperationOutcome
     try {
-      outcome = await applyEditOperation(
-        context,
-        storage,
-        session,
-        state,
-        operation,
-        command.identity,
-        journal
-      )
+      outcome = applyEditOperation(context, state, operation, command.identity, journal)
     } catch (error) {
       if (!isRecoverableEditValidation(command.input, error)) throw error
       undoEditJournal(journal)
@@ -334,32 +282,6 @@ function failedEditGroup(
     ok: false as const,
     error: { code: "validation" as const, message },
   }))
-}
-
-function operationGroupIndex(input: NormalizedEditCommit): ReadonlyMap<string, number> {
-  const byId = new Map<string, number>()
-  if (input.mode !== "continue" || input.operationGroups === undefined) return byId
-  for (const [group, ids] of input.operationGroups.entries()) {
-    for (const id of ids) byId.set(id, group)
-  }
-  return byId
-}
-
-/** Length of the contiguous run of operations at `start` that belong to `group`. */
-function groupRunLength(
-  operations: readonly OntologyEditOperation[],
-  start: number,
-  group: number,
-  groupByOperationId: ReadonlyMap<string, number>
-): number {
-  let length = 0
-  while (
-    start + length < operations.length &&
-    groupByOperationId.get(operations[start + length]?.id ?? "") === group
-  ) {
-    length += 1
-  }
-  return length
 }
 
 function isRecoverableEditValidation(

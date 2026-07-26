@@ -11,6 +11,7 @@ import { recordEdits } from "../src/actions/worker"
 import type { EditBatch } from "../src/edits"
 import { lowerEditBatch } from "../src/edits"
 import { createLinkScopeFingerprint } from "../src/materializer"
+import { getOntologyMutationRuntime } from "../src/runtime/internal"
 import type { ObjectRow, Storage } from "../src/storage"
 import { StorageTransactionError } from "../src/storage"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -83,7 +84,7 @@ function commit(
   }
 ) {
   return commitActionEdits({
-    materializer: sixb.materializer,
+    mutations: getOntologyMutationRuntime(sixb),
     projectId: sixb.id,
     runId: input.runId,
     actionId: input.actionId ?? "markPaid",

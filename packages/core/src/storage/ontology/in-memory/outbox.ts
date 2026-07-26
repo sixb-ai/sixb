@@ -157,12 +157,11 @@ export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
 }
 
 /**
- * Claim order, which is also delivery order.
+ * Deterministic claim order.
  *
- * Every row of one commit shares `createdAt`, so the tiebreak decides the order subscribers see
- * within a commit. `commitOrdinal` is the kind-major ordinal the plan already assigned, which keeps
- * an object's creation ahead of the links that reference it; the envelope id is a hash and would
- * scramble them.
+ * Every row of one commit shares `createdAt`, so `commitOrdinal` gives providers a stable batch
+ * order. It correlates facts but does not promise broker delivery order: concurrent leases and
+ * retries may publish later rows first.
  */
 function compareClaimRows(
   left: import("../outbox").OntologyOutboxRecord,

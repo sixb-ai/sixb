@@ -26,7 +26,7 @@ import {
   Sixb,
   type WorkflowDefinition,
 } from "../src"
-import { createTestRuntimeDeps } from "./test-runtime-deps"
+import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
 const Contract = defineObjectType({
   id: "contract",
@@ -338,7 +338,11 @@ describe("sixb.as() operational access", () => {
 
     // The operator can view Contract, so it sees the object's event.
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
-    expect((await operator.readEvents()).map((event) => event.type)).toContain("object.created")
+    const visibleEvents = await waitFor(
+      () => operator.readEvents(),
+      (published) => published.some((event) => event.type === "object.created")
+    )
+    expect(visibleEvents.map((event) => event.type)).toContain("object.created")
 
     // The runner can run workflows but cannot view Contract, so the contract
     // event is filtered out (no workflow has run, so it sees nothing here).

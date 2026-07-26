@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test"
 import { defineObjectType, link, prop, Sixb } from "../src"
-import { createTestRuntimeDeps } from "./test-runtime-deps"
+import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
 const Target = defineObjectType({
   id: "noop-target",
@@ -38,6 +38,10 @@ describe("upsert no-op suppression", () => {
     const { publishSpy, deps, sixb } = createRuntime()
     const created = await sixb.upsertObject("noop-source", { id: "source-1", name: "Source" })
 
+    await waitFor(
+      () => sixb.events.read(),
+      (published) => published.length === 1
+    )
     publishSpy.mockClear()
     const replayed = await sixb.upsertObject("noop-source", {
       id: "source-1",
@@ -61,6 +65,10 @@ describe("upsert no-op suppression", () => {
     const source1 = await sixb.upsertObject("noop-source", { id: "source-1", name: "One" })
     await sixb.upsertObject("noop-source", { id: "source-2", name: "Before" })
 
+    await waitFor(
+      () => sixb.events.read(),
+      (published) => published.length === 2
+    )
     publishSpy.mockClear()
     const results = await sixb.upsertObjectBatch("noop-source", [
       { properties: { id: "source-1", name: "One" } },
@@ -68,6 +76,10 @@ describe("upsert no-op suppression", () => {
       { properties: { id: "source-3", name: "Three" } },
     ])
 
+    await waitFor(
+      () => sixb.events.read(),
+      (published) => published.length === 4
+    )
     expect(publishSpy).toHaveBeenCalledTimes(1)
     expect(publishSpy.mock.calls[0]?.[0]).toHaveLength(2)
     expect(results.every((result) => result.ok)).toBe(true)
@@ -121,6 +133,10 @@ describe("upsert no-op suppression", () => {
       linkId: "targets",
     })
 
+    await waitFor(
+      () => sixb.events.read(),
+      (published) => published.length === 3
+    )
     publishSpy.mockClear()
     await sixb.upsertLink("noop-source", "source-1", "targets", {
       targetTypeId: "noop-target",
@@ -152,6 +168,10 @@ describe("upsert no-op suppression", () => {
       properties: { amount: "+001.2300" },
     })
 
+    await waitFor(
+      () => sixb.events.read(),
+      (published) => published.length === 4
+    )
     publishSpy.mockClear()
     const results = await sixb.upsertLinkBatch([
       {
@@ -176,6 +196,10 @@ describe("upsert no-op suppression", () => {
       },
     ])
 
+    await waitFor(
+      () => sixb.events.read(),
+      (published) => published.length === 5
+    )
     expect(results.map((result) => result.ok)).toEqual([true, true])
     expect(publishSpy).toHaveBeenCalledTimes(1)
     expect(publishSpy.mock.calls[0]?.[0]).toHaveLength(1)
@@ -221,9 +245,17 @@ describe("upsert no-op suppression", () => {
       },
     ] as const
 
+    await waitFor(
+      () => sixb.events.read(),
+      (published) => published.length === 4
+    )
     publishSpy.mockClear()
     const results = await sixb.upsertLinkBatch(batch)
 
+    await waitFor(
+      () => sixb.events.read(),
+      (published) => published.length === 5
+    )
     expect(results.map((result) => result.ok)).toEqual([true, true])
     expect(publishSpy).toHaveBeenCalledTimes(1)
     expect(publishSpy.mock.calls[0]?.[0]).toHaveLength(1)

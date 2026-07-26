@@ -30,15 +30,13 @@ import {
   validateLinkProperties,
   validateObjectProperties,
 } from "../ontology/validation"
+import { getOntologyMutationRuntime } from "../runtime/ontology-mutations"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { ObjectRow } from "../storage"
 import { ObjectError } from "./errors"
 
 /** The runtime pieces one commit needs: Materializer plus post-commit fact publication. */
-export type RuntimeMaterializerContext = Pick<
-  SixbRuntimeContext,
-  "projectId" | "materializer" | "committedFacts"
->
+export type RuntimeMaterializerContext = Pick<SixbRuntimeContext, "projectId" | "storage">
 
 /** One caller-supplied batch item, lowered to the operations it contributes. */
 export interface RuntimeBatchGroup {
@@ -63,7 +61,8 @@ export async function commitRuntimeOperations(
   ctx: RuntimeMaterializerContext,
   operations: readonly OntologyEditOperation[]
 ): Promise<EditCommitResult> {
-  const commit = await ctx.materializer.edits.commit({
+  const mutations = getOntologyMutationRuntime(ctx)
+  const commit = await mutations.commitEdits({
     mode: "atomic",
     source: { kind: "runtime", requestId: randomUUID() },
     operations,
@@ -71,7 +70,7 @@ export async function commitRuntimeOperations(
     expectedLinks: [],
     expectedLinkScopes: [],
   })
-  await publishCommittedFacts(ctx, commit)
+  publishCommittedFacts(ctx, commit)
   return commit
 }
 
@@ -97,13 +96,14 @@ export async function commitRuntimeBatch(
     .filter((group) => group.operations.length > 1)
     .map((group) => group.operations.map((operation) => operation.id))
 
-  const commit = await ctx.materializer.edits.commit({
+  const mutations = getOntologyMutationRuntime(ctx)
+  const commit = await mutations.commitEdits({
     mode: "continue",
     source: { kind: "runtime", requestId: randomUUID() },
     operations,
     ...(operationGroups.length > 0 ? { operationGroups } : {}),
   })
-  await publishCommittedFacts(ctx, commit)
+  publishCommittedFacts(ctx, commit)
 
   const byId = new Map(commit.outcomes.map((outcome) => [outcome.id, outcome]))
   const outcomes = new Map<number, readonly OntologyOperationOutcome[]>()
@@ -279,10 +279,9 @@ function requireOutcome(
  * The commit is already durable, so a delivery failure is reported by the publisher rather than
  * failing the caller's write.
  */
-export async function publishCommittedFacts(
-  ctx: Pick<RuntimeMaterializerContext, "committedFacts">,
+export function publishCommittedFacts(
+  ctx: RuntimeMaterializerContext,
   commit: Pick<EditCommitResult, "eventCount">
-): Promise<void> {
-  if (commit.eventCount === 0 || !ctx.committedFacts) return
-  await ctx.committedFacts.drain()
+): void {
+  getOntologyMutationRuntime(ctx).notifyCommittedFacts(commit.eventCount)
 }

@@ -12,11 +12,11 @@ import type {
   ActionRunParams,
   ActionRunRecord,
   ActionRunWritebackRecord,
-  AssertActionMaterializationRunInput,
   EnterActionRunPhaseInput,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
+  LockActionMaterializationRunInput,
   QueueActionRunInput,
   RecordActionEffectsInput,
   RecordActionWritebackInput,
@@ -124,10 +124,8 @@ export class InMemoryActionRunStorage implements ActionMaterializationRunStorage
     }
   }
 
-  async assertMaterializationRun(input: AssertActionMaterializationRunInput): Promise<void> {
-    await this.runRootOperation(() => {
-      this.requireMaterializationRun(input)
-    })
+  async lockForMaterialization(input: LockActionMaterializationRunInput): Promise<ActionRunRecord> {
+    return this.runRootOperation(() => cloneActionRunRecord(this.requireMaterializationRun(input)))
   }
 
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
@@ -394,7 +392,7 @@ export class InMemoryActionRunStorage implements ActionMaterializationRunStorage
     })
   }
 
-  private requireMaterializationRun(input: AssertActionMaterializationRunInput): ActionRunRecord {
+  private requireMaterializationRun(input: LockActionMaterializationRunInput): ActionRunRecord {
     assertNonBlank(input.projectId, "projectId")
     assertNonBlank(input.runId, "runId")
     assertNonBlank(input.actionId, "actionId")
