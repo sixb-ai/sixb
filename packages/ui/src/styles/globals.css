@@ -236,6 +236,32 @@
   }
 }
 
+/* Pulses a microphone icon while audio is reaching it (DictationButton). */
+@keyframes dictation-mic-receiving {
+  0%,
+  100% {
+    opacity: 0.75;
+    transform: scale(0.92);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+.dictation-mic-receiving {
+  animation: dictation-mic-receiving 720ms ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dictation-mic-receiving {
+    animation: none;
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
 @custom-variant data-autoscrolling {
   &:where([data-autoscrolling]) {
     @slot;

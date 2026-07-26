@@ -19,8 +19,13 @@ visual language that works for dense operational tools.
   - message scrollers, bubbles, markers, attachments, and streaming status utilities
 - **Sixb components** in `src/components`
   - collection headers, card grids, empty states, theme switching, and small charts
+  - address entry in `src/components/address`
 - **Hooks and utilities** in `src/hooks` and `src/lib`
-  - `ThemeProvider`, `useTheme`, `useIsMobile`, and `cn`
+  - `ThemeProvider`, `useTheme`, `useIsMobile`, `useDebouncedValue`, and `cn`
+- **Address lookup** in `src/lib/address`
+  - the provider contract, the Photon provider, and address formatters
+- **Speech dictation** in `src/lib/speech` and `src/components/speech`
+  - the recognizer contract, the Web Speech recognizer, and microphone components
 
 ## Usage
 
@@ -178,6 +183,173 @@ apps can theme them after importing the stylesheet:
 }
 ```
 
+## Address Lookup
+
+Most Sixb apps need address entry, so the lookup lives here in three layers. Apps normally
+touch only the components.
+
+| Layer | Import | Purpose |
+| --- | --- | --- |
+| Components | `@sixb/ui/components` | `AddressAutocomplete` (one text value), `AddressFields` (structured draft) |
+| Hooks | `@sixb/ui/hooks` | `useAddressLookup`, `AddressLookupProvider`, `useAddressProvider` |
+| Providers | `@sixb/ui/lib/address` | `AddressProvider` contract, `createPhotonProvider`, formatters |
+
+It works with no configuration — lookups fall back to a shared
+[Photon](https://photon.komoot.io) provider, which is free and needs no API key:
+
+```tsx
+import { AddressFields } from "@sixb/ui/components"
+import { type AddressDraft, EMPTY_ADDRESS_DRAFT } from "@sixb/ui/lib/address"
+import { useState } from "react"
+
+export function BillingAddressForm() {
+  const [address, setAddress] = useState<AddressDraft>(EMPTY_ADDRESS_DRAFT)
+  return <AddressFields value={address} onChange={setAddress} />
+}
+```
+
+When the app stores a single formatted string instead of components, use the autocomplete
+directly:
+
+```tsx
+<AddressAutocomplete
+  value={site.address}
+  onValueChange={(next) => setSite({ ...site, address: next })}
+  onSelect={(suggestion) => setSite({ ...site, county: suggestion.county })}
+  countries={["US"]}
+/>
+```
+
+Configure the provider once at the app boundary — for example to point at a self-hosted
+Photon instance, since the public one is best-effort with no SLA:
+
+```tsx
+import { AddressLookupProvider } from "@sixb/ui/hooks"
+import { createPhotonProvider } from "@sixb/ui/lib/address"
+
+const addresses = createPhotonProvider({
+  endpoint: "https://photon.internal.example",
+  countries: ["US"],
+  proximity: { latitude: 40.7128, longitude: -74.006 },
+})
+
+export function AppRoot({ children }: { children: React.ReactNode }) {
+  return <AddressLookupProvider provider={addresses}>{children}</AddressLookupProvider>
+}
+```
+
+### Suggestions
+
+`AddressSuggestion` is a superset of what the providers return, so no app has to give up a
+field it stores. `region` keeps the provider's spelling (`"New York"`) while `regionCode`
+carries the short form (`"NY"`); `raw` is the untouched provider payload for app-specific
+enrichment. `formatAddress`, `formatAddressLine`, and `addressDraftFromSuggestion` project a
+suggestion onto whatever shape the app persists.
+
+### Adding a Provider
+
+Implement `AddressProvider`. Only `id` and `search` are required; the optional members exist
+so richer backends drop in without touching call sites:
+
+- `retrieve` — for providers whose search returns predictions rather than addresses. Google
+  Places and Mapbox both need a second details request to get components and coordinates;
+  mark those results `partial` and `useAddressLookup`'s `select` will resolve them on choice.
+- `createSession` — for providers that bill per lookup session. The hook mints one token for
+  a run of keystrokes and discards it after the details call.
+- `reverse` — coordinates to an address, for "use my location" and map-pin flows.
+
+Providers must stay free of React imports so they can also run server-side.
+
+Data licenses that require credit expose an `attribution` string, which the components
+render under the suggestion list. Photon serves OpenStreetMap data, so leave that in place
+unless the replacement provider's terms differ.
+
+## Speech Dictation
+
+Microphone-to-text for fields that are faster to speak than to type, layered the same
+way as address lookup.
+
+| Layer | Import | Purpose |
+| --- | --- | --- |
+| Components | `@sixb/ui/components` | `DictationTextarea`, `DictationButton` |
+| Hooks | `@sixb/ui/hooks` | `useDictation`, `useSpeechRecognition`, `SpeechRecognitionProvider` |
+| Recognizers | `@sixb/ui/lib/speech` | `SpeechRecognizer` contract, `createWebSpeechRecognizer` |
+
+The default recognizer is the browser's own Web Speech API — no key and no server:
+
+```tsx
+import { DictationTextarea } from "@sixb/ui/components"
+import { useState } from "react"
+
+export function ScopeOfWorkField() {
+  const [scope, setScope] = useState("")
+  return (
+    <DictationTextarea
+      label="Scope of work"
+      onChange={setScope}
+      placeholder="Describe the work, or press the microphone and say it."
+      value={scope}
+    />
+  )
+}
+```
+
+Dictation appends to whatever the field already holds, and the field goes read-only while
+listening so typed and spoken text cannot interleave.
+
+### Owning the hook
+
+Pass `dictation` when the app needs the state outside the component — most often to stop two
+microphones from running at once:
+
+```tsx
+const scope = useDictation({ value: scopeText, onChange: setScopeText })
+const notes = useDictation({ value: notesText, onChange: setNotesText })
+
+<DictationTextarea
+  busyReason={notes.isActive ? "Stop the other dictation first" : undefined}
+  dictation={scope}
+  label="Scope of work"
+  onChange={setScopeText}
+  value={scopeText}
+/>
+```
+
+For anything that is not a text field — voice commands, a transcript panel, an agent composer
+— use `useSpeechRecognition` directly and read `transcript` and `interimTranscript` yourself.
+`DictationButton` renders the microphone toggle for either hook.
+
+### Browser support
+
+The Web Speech API works in Chrome, Edge, and Safari but **not Firefox**, so `supported` is
+part of the contract: it is `null` until probed on the client, then `true` or `false`.
+`DictationButton` disables itself and `DictationTextarea` shows a "type instead" message when
+it is `false` — dictation is always an accelerator, never the only way to enter text.
+
+Two behaviors worth knowing:
+
+- Chrome stops listening after a short silence even with `continuous`, so the hook restarts
+  the session automatically (`autoRestart`, on by default) and accumulates the transcript
+  across restarts. It gives up after a few silent restarts rather than reconnecting forever.
+- Chrome streams microphone audio to Google's servers for recognition. If that is
+  unacceptable for a project, supply a different recognizer.
+
+### Adding a Recognizer
+
+Implement `SpeechRecognizer` — `id`, `isSupported()`, and `start(options, handlers)` returning
+a session with `stop()` and `abort()`. The contract is event-driven, so a
+record-then-transcribe backend (MediaRecorder plus a server call) fits by emitting one final
+result when the recording stops and never emitting interim ones. Configure it once at the app
+boundary:
+
+```tsx
+import { SpeechRecognitionProvider } from "@sixb/ui/hooks"
+
+<SpeechRecognitionProvider recognizer={whisperRecognizer}>{children}</SpeechRecognitionProvider>
+```
+
+Recognizers must stay free of React imports.
+
 ## Theming
 
 Every color, font, radius, and shadow in this package resolves through CSS variables, and
@@ -293,17 +465,33 @@ that happens, prefer copying the upstream registry component source, adapting im
 
 ```ts
 import {
+  AddressAutocomplete,
+  AddressFields,
   Attachment,
   Bubble,
   Button,
   Card,
+  DictationButton,
+  DictationTextarea,
   EmptyState,
   Marker,
   MessageScroller,
   MiniSparkline,
   ThemeSwitcher,
 } from "@sixb/ui/components"
-import { ThemeProvider, useTheme, useIsMobile } from "@sixb/ui/hooks"
+import {
+  AddressLookupProvider,
+  SpeechRecognitionProvider,
+  ThemeProvider,
+  useAddressLookup,
+  useDebouncedValue,
+  useDictation,
+  useIsMobile,
+  useSpeechRecognition,
+  useTheme,
+} from "@sixb/ui/hooks"
+import { type AddressProvider, createPhotonProvider, formatAddress } from "@sixb/ui/lib/address"
+import { createWebSpeechRecognizer, type SpeechRecognizer } from "@sixb/ui/lib/speech"
 import { cn } from "@sixb/ui/lib/utils"
 ```
 

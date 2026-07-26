@@ -58,6 +58,8 @@ import {
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
+  AddressAutocomplete,
+  AddressFields,
   Alert,
   AlertDescription,
   AlertDialog,
@@ -150,6 +152,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DictationButton,
+  DictationTextarea,
   DirectionProvider,
   Drawer,
   DrawerClose,
@@ -306,7 +310,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../src/components"
+import { useDictation } from "../src/hooks/use-dictation"
 import { ThemeProvider } from "../src/hooks/useTheme"
+import type { AddressDraft } from "../src/lib/address"
+import { EMPTY_ADDRESS_DRAFT } from "../src/lib/address"
 
 interface SwatchProps {
   label: string
@@ -518,6 +525,12 @@ function Showcase() {
   const [airplane, setAirplane] = useState(false)
   const [agreed, setAgreed] = useState<boolean | "indeterminate">("indeterminate")
   const [calendarDate, setCalendarDate] = useState<Date | undefined>(new Date(2026, 5, 19))
+  const [addressQuery, setAddressQuery] = useState("")
+  const [addressDraft, setAddressDraft] = useState<AddressDraft>(EMPTY_ADDRESS_DRAFT)
+  const [scopeOfWork, setScopeOfWork] = useState("")
+  const [dictationNotes, setDictationNotes] = useState("")
+  const scopeDictation = useDictation({ value: scopeOfWork, onChange: setScopeOfWork })
+  const notesDictation = useDictation({ value: dictationNotes, onChange: setDictationNotes })
   const form = useForm({
     defaultValues: {
       email: "ops@sixb.dev",
@@ -1059,6 +1072,77 @@ function Showcase() {
               </div>
             </CardContent>
           </Card>
+        </Section>
+
+        <Section
+          title="Address Lookup"
+          description="Provider-backed address entry. Defaults to Photon (free, keyless) and hits the live API — type at least three characters, then use ↑ ↓ and Enter."
+        >
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Block label="Autocomplete (single string value)">
+              <div className="space-y-3">
+                <AddressAutocomplete
+                  value={addressQuery}
+                  onValueChange={setAddressQuery}
+                  aria-label="Site address"
+                />
+                <pre className="overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs text-muted-foreground">
+                  {addressQuery || "—"}
+                </pre>
+              </div>
+            </Block>
+
+            <Block label="Fields (structured draft)">
+              <div className="space-y-3">
+                <AddressFields value={addressDraft} onChange={setAddressDraft} />
+                <pre className="overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs text-muted-foreground">
+                  {JSON.stringify(addressDraft, null, 2)}
+                </pre>
+              </div>
+            </Block>
+          </div>
+        </Section>
+
+        <Section
+          title="Speech Dictation"
+          description="Microphone input via the browser's Web Speech API — no key, no server. Chrome, Edge, and Safari only; the button disables itself in Firefox. Two fields share the page to show that only one microphone runs at a time."
+        >
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Block label="Dictation textarea">
+              <DictationTextarea
+                busyReason={notesDictation.isActive ? "Stop the other dictation first" : undefined}
+                dictation={scopeDictation}
+                label="Scope of work"
+                onChange={setScopeOfWork}
+                placeholder="Describe the work being completed, or press the microphone and say it."
+                value={scopeOfWork}
+              />
+            </Block>
+
+            <Block label="Second field + standalone button">
+              <div className="space-y-3">
+                <DictationTextarea
+                  busyReason={
+                    scopeDictation.isActive ? "Stop the other dictation first" : undefined
+                  }
+                  dictation={notesDictation}
+                  label="Internal notes"
+                  onChange={setDictationNotes}
+                  placeholder="Anything the crew should know."
+                  value={dictationNotes}
+                />
+                <div className="flex items-center gap-3">
+                  <DictationButton dictation={notesDictation} label="internal notes" />
+                  <p className="text-xs text-muted-foreground">
+                    {notesDictation.status === "idle"
+                      ? `Idle${notesDictation.supported === false ? " — unsupported browser" : ""}`
+                      : notesDictation.status}
+                    {notesDictation.isReceivingAudio ? " • audio detected" : ""}
+                  </p>
+                </div>
+              </div>
+            </Block>
+          </div>
         </Section>
 
         <Section
