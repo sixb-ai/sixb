@@ -29,6 +29,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { createPortal } from "react-dom"
 import type { AgentFileRef } from "../types"
 import { agentContextLabel, mergeAgentContext } from "../utils/contextDisplay"
 import {
@@ -487,17 +488,25 @@ export function Composer({
     submit()
   }
 
-  const statusHint = draggingFiles
-    ? "Drop files to add them to your message."
-    : uploading
-      ? "Uploading attachment…"
-      : failedCount > 0
-        ? `${failedCount} attachment ${failedCount === 1 ? "failed" : "failed"} to upload.`
-        : hint
+  const compactOverlayHost = compact
+    ? rootRef.current?.closest<HTMLElement>("[data-agent-panel]")
+    : null
+
+  const statusHint = uploading
+    ? "Uploading attachment…"
+    : failedCount > 0
+      ? `${failedCount} attachment ${failedCount === 1 ? "failed" : "failed"} to upload.`
+      : hint
 
   return (
     <div ref={rootRef} className={cn("relative bg-background px-4 pt-2 pb-3", className)}>
-      {draggingFiles ? <DropFilesOverlay compact={compact} /> : null}
+      {draggingFiles ? (
+        compactOverlayHost ? (
+          createPortal(<DropFilesOverlay compact />, compactOverlayHost)
+        ) : (
+          <DropFilesOverlay compact={compact} />
+        )
+      ) : null}
       <div className="mx-auto w-full max-w-2xl">
         <div
           className={cn(

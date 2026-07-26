@@ -60,10 +60,7 @@ export function AgentPanel({
       onNavigateHome={() => changeThread(null)}
       onNavigateDraft={() => changeThread(null)}
       onNavigateThread={changeThread}
-      className={cn(
-        "min-h-0 overflow-hidden rounded-2xl border border-border bg-background",
-        className
-      )}
+      className={cn("min-h-0 overflow-hidden bg-background", className)}
     />
   )
 }
