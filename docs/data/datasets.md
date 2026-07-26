@@ -60,7 +60,7 @@ col("raw", "json", { nullable: true })
 | `boolean` | a boolean |
 | `int64` | an integer, or an integer string |
 | `float64` | a finite number |
-| `decimal` | an exact numeric string |
+| `decimal` | an exact decimal string |
 | `date` | a `Date`, or a `YYYY-MM-DD` string |
 | `timestamp` | a `Date`, or a parseable date string |
 | `json` | any JSON value |

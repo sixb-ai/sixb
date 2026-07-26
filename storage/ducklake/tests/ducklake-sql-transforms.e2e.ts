@@ -95,6 +95,24 @@ describe("DuckLake SQL transforms", () => {
     ])
   })
 
+  test("previews decimal expressions without converting through a JavaScript number", async () => {
+    await commitRows(storage, ordersDataset, [
+      { orderId: "ord_1", customerId: "cust_1", amount: 1 },
+    ])
+
+    await expect(
+      collectRows(
+        storage.sql.preview({
+          sources: { orders: { dataset: ordersDataset } },
+          sql: ({ orders }) => `
+            SELECT 9007199254740993.123456789::DECIMAL(38, 9) AS amount
+            FROM ${orders}
+          `,
+        })
+      )
+    ).resolves.toEqual([{ amount: "9007199254740993.123456789" }])
+  })
+
   test("pins provided source versions and resolves omitted versions to latest", async () => {
     const version1 = await commitRows(storage, ordersDataset, [
       { orderId: "ord_1", customerId: "cust_1", amount: 10 },

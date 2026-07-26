@@ -42,6 +42,10 @@ const nullableWriteDataset = defineDataset("contract.writes.nullable_orders", {
   schema: [col("orderId", "string"), col("note", "string", { nullable: true })],
 })
 
+const decimalWriteDataset = defineDataset("contract.writes.decimals", {
+  schema: [col("id", "string"), col("amount", "decimal", { nullable: true })],
+})
+
 const fileRefDataset = defineDataset("contract.files.documents", {
   schema: [col("id", "string"), col("attachment", "fileRef", { nullable: true })],
 })
@@ -602,6 +606,36 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
             write.writeRows([{ orderId: "ord_1", customerName: "Ada", unexpected: true } as never])
           ).rejects.toThrow("unknown column")
           await write.abort()
+        })
+      })
+
+      test("round-trips exact decimal strings in eager and streaming reads", async () => {
+        await withStorage(async (storage) => {
+          const exact = "9007199254740993.123456789"
+          await storage.createDataset(decimalWriteDataset)
+
+          const write = await storage.beginWrite({ dataset: decimalWriteDataset, mode: "snapshot" })
+          await write.writeRows([
+            { id: "amount_1", amount: exact },
+            { id: "amount_2", amount: null },
+          ])
+          await write.commit()
+
+          await expect(
+            collectRows(storage.readRows({ datasetId: decimalWriteDataset.id }))
+          ).resolves.toEqual([
+            { id: "amount_1", amount: exact },
+            { id: "amount_2", amount: null },
+          ])
+          await expect(
+            collectRows(
+              storage.readRows({
+                datasetId: decimalWriteDataset.id,
+                columns: ["amount"],
+                limit: 1,
+              })
+            )
+          ).resolves.toEqual([{ amount: exact }])
         })
       })
 

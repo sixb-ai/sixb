@@ -6,6 +6,33 @@ import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runti
 import { localDuckLakeOptions } from "./test-utils"
 
 describe("DuckLake driver e2e", () => {
+  test("preserves exact decimals across eager, exclusive, and streaming reads", async () => {
+    const runtime = await createDuckDbRuntime()
+    const sql = `
+      SELECT
+        9007199254740993.123456789::DECIMAL(38, 9) AS amount,
+        NULL::DECIMAL(38, 9) AS nullable_amount
+    `
+
+    try {
+      const expected = {
+        amount: "9007199254740993.123456789",
+        nullable_amount: null,
+      }
+
+      expect(await runtime.query(sql)).toEqual([expected])
+      expect(await runtime.withExclusive((exclusive) => exclusive.query(sql))).toEqual([expected])
+
+      const streamed = []
+      for await (const row of runtime.streamRows(sql)) {
+        streamed.push(row)
+      }
+      expect(streamed).toEqual([expected])
+    } finally {
+      await runtime.close()
+    }
+  })
+
   test("loads ducklake and attaches a local catalog", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-e2e-"))
     const runtime = await createDuckDbRuntime()

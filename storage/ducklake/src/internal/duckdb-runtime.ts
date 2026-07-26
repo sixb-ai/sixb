@@ -6,6 +6,7 @@ import {
 } from "@duckdb/node-api"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckDbRuntimeOptions, DuckLakeStorageOptions } from "../types"
+import { sixbDuckDbValueConverter } from "./duckdb-value-converter"
 import {
   buildAttachSql,
   buildConfigurePostgresMetadataPoolSql,
@@ -102,7 +103,7 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
         sql,
         values === undefined ? undefined : [...values]
       )
-      return reader.getRowObjectsJS()
+      return reader.convertRowObjects(sixbDuckDbValueConverter)
     })
   }
 
@@ -135,7 +136,7 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
         sql,
         values === undefined ? undefined : [...values]
       )
-      for await (const batch of result.yieldRowObjectJs()) {
+      for await (const batch of result.yieldConvertedRowObjects(sixbDuckDbValueConverter)) {
         for (const row of batch) {
           yield row as Record<string, unknown>
         }
@@ -231,7 +232,7 @@ class NodeDuckDbExclusiveRuntime implements DuckDbExclusiveRuntime {
       sql,
       values === undefined ? undefined : [...values]
     )
-    return reader.getRowObjectsJS()
+    return reader.convertRowObjects(sixbDuckDbValueConverter)
   }
 
   async withAppender<T>(

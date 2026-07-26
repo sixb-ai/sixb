@@ -1,5 +1,7 @@
 import type { DatasetColumnDefinition, DatasetColumnType, DatasetSchema, FileRef } from "@sixb/core"
 import { LakeStorageError } from "@sixb/core/lake-storage"
+import { DUCKDB_COLUMN_TYPES, findDatasetColumnTypeForDuckDbSql } from "./duckdb-column-types"
+import { normalizeDuckDbDecimalValue } from "./duckdb-decimal"
 import { quoteIdentifier } from "./sql"
 
 /**
@@ -12,80 +14,24 @@ export interface DuckDbColumnMetadata {
 }
 
 /**
- * Exact DuckDB struct shape used for Sixb `fileRef` columns.
- *
- * The reverse mapper intentionally recognizes only this shape so arbitrary
- * STRUCT or JSON columns are not reconstructed as `fileRef`.
- */
-export const FILE_REF_STRUCT_SQL =
-  "STRUCT(blobId VARCHAR, digest VARCHAR, sizeBytes BIGINT, fileName VARCHAR, mediaType VARCHAR, logicalPath VARCHAR)"
-
-const DUCKDB_TYPE_BY_SIXB_TYPE: Readonly<Record<DatasetColumnType, string>> = {
-  string: "VARCHAR",
-  boolean: "BOOLEAN",
-  int64: "BIGINT",
-  float64: "DOUBLE",
-  decimal: "DECIMAL(38, 9)",
-  date: "DATE",
-  timestamp: "TIMESTAMPTZ",
-  json: "JSON",
-  fileRef: FILE_REF_STRUCT_SQL,
-}
-
-function normalizeWhitespace(typeSql: string): string {
-  return typeSql.trim().replace(/\s+/g, " ")
-}
-
-function normalizeSimpleType(typeSql: string): string {
-  const normalized = normalizeWhitespace(typeSql).toUpperCase()
-  const decimalMatch = /^DECIMAL\(\s*(\d+)\s*,\s*(\d+)\s*\)$/.exec(normalized)
-  if (decimalMatch) {
-    return `DECIMAL(${decimalMatch[1]}, ${decimalMatch[2]})`
-  }
-
-  return normalized
-}
-
-/**
  * Map a Sixb dataset column type to the DuckDB type used in CREATE TABLE.
  */
 export function datasetColumnTypeToDuckDbSql(type: DatasetColumnType): string {
-  return DUCKDB_TYPE_BY_SIXB_TYPE[type]
+  return DUCKDB_COLUMN_TYPES[type].sql
 }
 
 /**
  * Reconstruct a Sixb dataset column type from DuckDB column metadata.
  */
 export function duckDbTypeToDatasetColumnType(typeSql: string): DatasetColumnType {
-  if (normalizeWhitespace(typeSql) === FILE_REF_STRUCT_SQL) {
-    return "fileRef"
+  const type = findDatasetColumnTypeForDuckDbSql(typeSql)
+  if (type) {
+    return type
   }
 
-  switch (normalizeSimpleType(typeSql)) {
-    case "VARCHAR":
-      return "string"
-    case "BOOLEAN":
-      return "boolean"
-    case "BIGINT":
-    case "INT64":
-      return "int64"
-    case "DOUBLE":
-    case "FLOAT64":
-      return "float64"
-    case "DECIMAL(38, 9)":
-      return "decimal"
-    case "DATE":
-      return "date"
-    case "TIMESTAMPTZ":
-    case "TIMESTAMP WITH TIME ZONE":
-      return "timestamp"
-    case "JSON":
-      return "json"
-    default:
-      throw new LakeStorageError(
-        `[SixbDuckLake] DuckDB column type '${typeSql}' cannot be mapped to a Sixb dataset column type.`
-      )
-  }
+  throw new LakeStorageError(
+    `[SixbDuckLake] DuckDB column type '${typeSql}' cannot be mapped to a Sixb dataset column type.`
+  )
 }
 
 /**
@@ -134,7 +80,7 @@ export function normalizeReadValue(value: unknown, column: DatasetColumnDefiniti
     case "int64":
       return typeof value === "bigint" ? value.toString() : value
     case "decimal":
-      return typeof value === "object" && "toString" in value ? String(value) : value
+      return normalizeDuckDbDecimalValue(value, column.name)
     case "date":
       return value instanceof Date ? value.toISOString().slice(0, 10) : String(value)
     case "timestamp":

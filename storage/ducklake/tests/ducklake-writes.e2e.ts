@@ -494,6 +494,36 @@ describe("DuckLakeStorage writes and latest reads", () => {
     await expect(write.writeRows([])).rejects.toThrow("already closed")
   })
 
+  test("rejects decimal writes that DuckDB cannot represent exactly", async () => {
+    const amountsDataset = defineDataset("raw.erp.amounts", {
+      schema: [col("id", "string"), col("amount", "decimal")],
+    })
+    await storage.createDataset(amountsDataset)
+
+    const exactWrite = await storage.beginWrite({ dataset: amountsDataset, mode: "snapshot" })
+    await exactWrite.writeRows([
+      { id: "amount_1", amount: "9007199254740993.123456789" },
+      { id: "amount_2", amount: "+0001.2300000000" },
+    ])
+    await exactWrite.commit()
+    await expect(collectRows(storage.readRows({ datasetId: amountsDataset.id }))).resolves.toEqual([
+      { id: "amount_1", amount: "9007199254740993.123456789" },
+      { id: "amount_2", amount: "1.23" },
+    ])
+
+    const roundedWrite = await storage.beginWrite({ dataset: amountsDataset, mode: "append" })
+    await expect(
+      roundedWrite.writeRows([{ id: "amount_3", amount: "0.1234567891" }])
+    ).rejects.toThrow("cannot be represented exactly as DECIMAL(38, 9)")
+    await roundedWrite.abort()
+
+    const overflowWrite = await storage.beginWrite({ dataset: amountsDataset, mode: "append" })
+    await expect(
+      overflowWrite.writeRows([{ id: "amount_4", amount: "999999999999999999999999999999" }])
+    ).rejects.toThrow("cannot be represented exactly as DECIMAL(38, 9)")
+    await overflowWrite.abort()
+  })
+
   test("abort closes the session without committing rows", async () => {
     const write = await storage.beginWrite({
       dataset: ordersDataset,
