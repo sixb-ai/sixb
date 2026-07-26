@@ -34,7 +34,11 @@ const Room = defineObjectType({
     link("primarySensor", Sensor, { cardinality: "one" }),
     link("sensors", Sensor, {
       cardinality: "many",
-      properties: [prop("role", "string")],
+      properties: [prop("role", "string"), prop("note", "string")],
+    }),
+    link("certifiedSensors", Sensor, {
+      cardinality: "many",
+      properties: [prop("role", "string", { required: true })],
     }),
   ],
 })
@@ -162,6 +166,57 @@ describe("runtime object writes", () => {
     await expect(
       sixb.upsertLink("room", "r1", "sensors", { targetTypeId: "sensor", targetId: "missing" })
     ).rejects.toBeInstanceOf(ObjectNotFoundError)
+  })
+
+  test("replaces the whole link property set on upsert", async () => {
+    // Managed link authority carries the complete property set, so a link upsert is a replace, not
+    // a merge: properties left out are cleared. Documented in docs/ontology/links.md.
+    const { sixb } = createRuntime()
+    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
+
+    await sixb.upsertLink("room", "r1", "sensors", {
+      targetTypeId: "sensor",
+      targetId: "s1",
+      properties: { role: "primary", note: "installed 2026" },
+    })
+    expect((await listSensorLinks(sixb, "sensors"))[0]?.properties).toEqual({
+      role: "primary",
+      note: "installed 2026",
+    })
+
+    await sixb.upsertLink("room", "r1", "sensors", {
+      targetTypeId: "sensor",
+      targetId: "s1",
+      properties: { note: "recalibrated" },
+    })
+    expect((await listSensorLinks(sixb, "sensors"))[0]?.properties).toEqual({
+      note: "recalibrated",
+    })
+  })
+
+  test("requires link properties in the request rather than inheriting the stored edge", async () => {
+    // The same replace rule means a required link property must be present on every write; it is
+    // not carried over from the edge already stored.
+    const { sixb } = createRuntime()
+    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
+    await sixb.upsertLink("room", "r1", "certifiedSensors", {
+      targetTypeId: "sensor",
+      targetId: "s1",
+      properties: { role: "primary" },
+    })
+
+    await expect(
+      sixb.upsertLink("room", "r1", "certifiedSensors", {
+        targetTypeId: "sensor",
+        targetId: "s1",
+        properties: {},
+      })
+    ).rejects.toBeInstanceOf(OntologyValidationError)
+    expect((await listSensorLinks(sixb, "certifiedSensors"))[0]?.properties).toEqual({
+      role: "primary",
+    })
   })
 
   test("surfaces effective validation from the materializer", async () => {

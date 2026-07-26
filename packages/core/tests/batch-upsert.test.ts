@@ -516,9 +516,17 @@ describe("setLinkBatch", () => {
       )
     )
 
-    // Assignment reads the current target before committing, so a lost race reports an item error
-    // instead of violating cardinality.
-    expect(results.flat().filter((result) => result.ok).length).toBeGreaterThanOrEqual(1)
+    // Assignment reads the current target outside the commit and #234 requires no CAS for runtime
+    // batches, so a lost race reports an item error rather than serializing. Which one wins is not
+    // the contract; leaving the scope consistent is. Exactly one edge survives, and it belongs to
+    // an assignment that reported ok — a failed item leaves behind neither its delete nor its
+    // upsert.
+    const outcomes = ["b1", "b2"].map((targetId, index) => ({
+      targetId,
+      ok: results[index]?.[0]?.ok === true,
+    }))
+    expect(outcomes.some((outcome) => outcome.ok)).toBe(true)
+
     const links = await deps.storage.objects.listLinks({
       projectId: sixb.id,
       objectTypeId: "room",
@@ -526,7 +534,9 @@ describe("setLinkBatch", () => {
       linkId: "inBuilding",
     })
     expect(links).toHaveLength(1)
-    expect(["b1", "b2"]).toContain(links[0]?.targetId)
+    expect(outcomes.filter((outcome) => outcome.ok).map((outcome) => outcome.targetId)).toContain(
+      links[0]?.targetId
+    )
   })
 
   test("rejects assignment semantics for cardinality-many links", async () => {

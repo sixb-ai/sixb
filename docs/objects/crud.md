@@ -61,6 +61,30 @@ for the same partial-write behavior, or `objects(Invoice).create({ ... })` for a
 an action stages lands in one atomic write when the handler returns. See
 [Actions](../actions/overview.md).
 
+### Batch writes
+
+`upsertObjectBatch`, `upsertLinkBatch`, and `setLinkBatch` apply many items in one transaction and
+return one result per input position, so a bad item fails on its own without aborting the rest.
+
+```ts
+const results = await sixb.upsertObjectBatch("invoice", [
+  { properties: { id: "inv-001", status: "paid" } },
+  { properties: { id: "inv-002", status: "sent" } },
+])
+
+for (const result of results) {
+  if (!result.ok) console.error(result.error.message)
+}
+```
+
+One batch may not claim the same identity twice with different content. An exact repeat collapses
+onto the first item and shares its result; a repeat that differs is rejected at its own position
+with a `Conflicting duplicate ...` error, and the first item still applies. Merge the rows yourself
+before calling if a source can produce several versions of one object in a single batch.
+
+A whole-transaction failure — a provider error, a serialization conflict — rolls the batch back
+rather than reporting per-item errors.
+
 ### Dates are normalized
 
 The typed surface accepts `Date | string` for `date` and `timestamp` properties. Before storage,
