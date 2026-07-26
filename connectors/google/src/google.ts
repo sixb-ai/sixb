@@ -29,7 +29,9 @@ export function google(options: GoogleConnectorOptions): GoogleConnector {
   const token = createTokenSource(options.auth)
 
   const common = {
-    headers: async () => ({ Authorization: `Bearer ${await token.get()}` }),
+    headers: () =>
+      token.getRequestHeaders?.() ??
+      token.get().then((accessToken) => new Headers({ Authorization: `Bearer ${accessToken}` })),
     // The REST adapter fires this on a 401 only, so a stale token is dropped and
     // the request is retried once with a fresh one. 403 (scope) does not churn it.
     onUnauthorized: () => token.invalidate(),

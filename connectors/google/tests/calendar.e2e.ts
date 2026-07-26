@@ -1,23 +1,28 @@
 /**
  * End-to-end smoke test against the real Google Calendar API.
  *
- * Not part of `bun test` (it needs live credentials). Two ways to authenticate:
+ * Not part of `bun test` (it needs live credentials). Three ways to authenticate:
  *
- * A) Keyless (recommended) — mint a short-lived token via SA impersonation, no
- *    key, no org-policy change. Read-only scope is enough for the default run:
+ * A) Application Default Credentials (recommended). For local Calendar scopes, first run
+ *    `gcloud auth application-default login` with a custom OAuth client and `--scopes`:
+ *
+ *      GOOGLE_ADC=1 bun connectors/google/tests/calendar.e2e.ts
+ *
+ * B) Pre-minted short-lived token via SA impersonation. Read-only scope is enough for the
+ *    default run:
  *
  *      GOOGLE_ACCESS_TOKEN="$(gcloud auth print-access-token \
  *        --impersonate-service-account=SA@PROJECT.iam.gserviceaccount.com \
  *        --scopes=https://www.googleapis.com/auth/calendar.readonly)" \
  *      bun connectors/google/tests/calendar.e2e.ts
  *
- * B) Service-account key (if key creation is allowed):
+ * C) Service-account key (if key creation is allowed):
  *
  *      GOOGLE_SA_KEY="$(cat service-account.json)" \
  *      GOOGLE_SCOPE="https://www.googleapis.com/auth/calendar.readonly" \
  *      bun connectors/google/tests/calendar.e2e.ts
  *
- *    Optional (mode B): GOOGLE_SUBJECT="user@customer.com" to impersonate one user (DWD).
+ *    Optional (mode C): GOOGLE_SUBJECT="user@customer.com" to impersonate one user (DWD).
  *
  * Optional env for either mode:
  *   - GOOGLE_CALENDAR_ID   a calendar to read events / free-busy from (default: "primary")
@@ -35,26 +40,30 @@ import type { GoogleAuthOptions } from "../src/index"
 
 const accessToken = process.env.GOOGLE_ACCESS_TOKEN
 const key = process.env.GOOGLE_SA_KEY
+const useApplicationDefault = process.env.GOOGLE_ADC === "1"
 const scope = process.env.GOOGLE_SCOPE ?? "https://www.googleapis.com/auth/calendar.readonly"
 const subject = process.env.GOOGLE_SUBJECT
 const calendarId = process.env.GOOGLE_CALENDAR_ID ?? "primary"
 const runWrite = process.env.GOOGLE_CALENDAR_WRITE === "1"
 
-if (!accessToken && !key) {
+if (!useApplicationDefault && !accessToken && !key) {
   console.error(
     "Missing env. Set one of:\n" +
-      "  - GOOGLE_ACCESS_TOKEN  (keyless, recommended)\n" +
+      "  - GOOGLE_ADC=1         (Application Default Credentials, recommended)\n" +
+      "  - GOOGLE_ACCESS_TOKEN  (pre-minted short-lived token)\n" +
       "  - GOOGLE_SA_KEY        (service-account JSON)\n" +
       "See the header of this file for full commands."
   )
   process.exit(1)
 }
 
-const auth: GoogleAuthOptions = accessToken
-  ? { token: () => accessToken }
-  : subject
-    ? { serviceAccountKey: key as string, scopes: [scope], subject }
-    : { serviceAccountKey: key as string, scopes: [scope] }
+const auth: GoogleAuthOptions = useApplicationDefault
+  ? { applicationDefault: true, scopes: [scope] }
+  : accessToken
+    ? { token: () => accessToken }
+    : subject
+      ? { serviceAccountKey: key as string, scopes: [scope], subject }
+      : { serviceAccountKey: key as string, scopes: [scope] }
 
 const client = await google({ auth }).connect({
   projectId: "e2e",

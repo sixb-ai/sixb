@@ -1,10 +1,16 @@
 /**
  * End-to-end smoke test against the real Google Drive API.
  *
- * Not part of `bun test` (it needs live credentials). Two ways to authenticate:
+ * Not part of `bun test` (it needs live credentials). Three ways to authenticate:
  *
- * A) Keyless (recommended) — mint a short-lived token via SA impersonation, no
- *    key, no org-policy change:
+ * A) Application Default Credentials (recommended). For local Drive scopes, first run
+ *    `gcloud auth application-default login` with a custom OAuth client and `--scopes`:
+ *
+ *      GOOGLE_ADC=1 \
+ *      GOOGLE_TEST_FOLDER_ID="1AbC...xyz" \
+ *      bun connectors/google/tests/drive.e2e.ts
+ *
+ * B) Pre-minted short-lived token via SA impersonation:
  *
  *      GOOGLE_ACCESS_TOKEN="$(gcloud auth print-access-token \
  *        --impersonate-service-account=SA@PROJECT.iam.gserviceaccount.com \
@@ -12,14 +18,14 @@
  *      GOOGLE_TEST_FOLDER_ID="1AbC...xyz" \
  *      bun connectors/google/tests/drive.e2e.ts
  *
- * B) Service-account key (if key creation is allowed):
+ * C) Service-account key (if key creation is allowed):
  *
  *      GOOGLE_SA_KEY="$(cat service-account.json)" \
  *      GOOGLE_TEST_FOLDER_ID="1AbC...xyz" \
  *      GOOGLE_SCOPE="https://www.googleapis.com/auth/drive.readonly" \
  *      bun connectors/google/tests/drive.e2e.ts
  *
- *    Optional (mode B): GOOGLE_SUBJECT="user@customer.com" to impersonate one user (DWD).
+ *    Optional (mode C): GOOGLE_SUBJECT="user@customer.com" to impersonate one user (DWD).
  *
  * Write pass (opt-in): set GOOGLE_E2E_WRITE=1 and a write-capable scope
  * (GOOGLE_SCOPE="https://www.googleapis.com/auth/drive.file" is enough — the
@@ -31,25 +37,29 @@ import type { GoogleAuthOptions } from "../src/index"
 
 const accessToken = process.env.GOOGLE_ACCESS_TOKEN
 const key = process.env.GOOGLE_SA_KEY
+const useApplicationDefault = process.env.GOOGLE_ADC === "1"
 const folderId = process.env.GOOGLE_TEST_FOLDER_ID
 const scope = process.env.GOOGLE_SCOPE ?? "https://www.googleapis.com/auth/drive.readonly"
 const subject = process.env.GOOGLE_SUBJECT
 
-if (!folderId || (!accessToken && !key)) {
+if (!folderId || (!useApplicationDefault && !accessToken && !key)) {
   console.error(
     "Missing env. Set GOOGLE_TEST_FOLDER_ID plus one of:\n" +
-      "  - GOOGLE_ACCESS_TOKEN  (keyless, recommended)\n" +
+      "  - GOOGLE_ADC=1         (Application Default Credentials, recommended)\n" +
+      "  - GOOGLE_ACCESS_TOKEN  (pre-minted short-lived token)\n" +
       "  - GOOGLE_SA_KEY        (service-account JSON)\n" +
       "See the header of this file for full commands."
   )
   process.exit(1)
 }
 
-const auth: GoogleAuthOptions = accessToken
-  ? { token: () => accessToken }
-  : subject
-    ? { serviceAccountKey: key as string, scopes: [scope], subject }
-    : { serviceAccountKey: key as string, scopes: [scope] }
+const auth: GoogleAuthOptions = useApplicationDefault
+  ? { applicationDefault: true, scopes: [scope] }
+  : accessToken
+    ? { token: () => accessToken }
+    : subject
+      ? { serviceAccountKey: key as string, scopes: [scope], subject }
+      : { serviceAccountKey: key as string, scopes: [scope] }
 
 const connector = google({ auth })
 

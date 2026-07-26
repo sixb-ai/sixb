@@ -20,7 +20,7 @@ export const googleConnector = defineConnector(
   "google",
   google({
     auth: {
-      serviceAccountKey: process.env.GOOGLE_SA_KEY!, // parsed object or its JSON string
+      applicationDefault: true,
       scopes: ["https://www.googleapis.com/auth/drive.readonly"],
     },
   })
@@ -133,7 +133,15 @@ resource shapes — the connector relays them without interpretation.
 
 ## Auth
 
-Two modes (a discriminated union):
+Three explicit modes (a discriminated union):
+
+- **Application Default Credentials (recommended)** — `{ applicationDefault: true, scopes }`.
+  The official `google-auth-library` discovers credentials from the environment and owns token
+  refresh. This supports local ADC created by `gcloud`, `GOOGLE_APPLICATION_CREDENTIALS`
+  (including Workload Identity Federation configurations), and service accounts attached to
+  Google Cloud workloads. Discovery is lazy: constructing the connector does not read credentials
+  or contact a metadata server. Credential-specific request metadata, such as a quota project
+  header, is preserved.
 
 - **Service account** — `{ serviceAccountKey, scopes, subject? }`. The connector mints and
   refreshes OAuth tokens (JWT-bearer, signed with the SA key via Web Crypto). Tokens are cached,
@@ -144,7 +152,32 @@ Two modes (a discriminated union):
   OAuth, a vault, another service) and own scopes + refresh; the connector just calls it.
 
 A missing scope surfaces as Google's `403` (`GoogleApiError`); it does not churn the token. A
-`401` invalidates the cached token and retries once with a fresh one.
+`401` invalidates the cached token and retries once with a fresh one. ADC is never selected
+implicitly, so a process cannot silently pick up a developer's ambient Google identity.
+
+### Application Default Credentials
+
+For local development, create user ADC with the scopes your connector needs:
+
+```bash
+gcloud auth application-default login \
+  --client-id-file=/path/to/oauth-client.json \
+  --scopes=https://www.googleapis.com/auth/drive.readonly
+```
+
+Google APIs outside Google Cloud, including Drive and Calendar, require a custom OAuth client ID
+when adding their scopes to local ADC. The resulting credential contains a refresh token; do not
+copy a short-lived access token into project configuration.
+
+In production on Google Cloud, attach a least-privileged user-managed service account to the
+workload. Outside Google Cloud, point `GOOGLE_APPLICATION_CREDENTIALS` at a Workload Identity
+Federation credential configuration that impersonates the service account used for Workspace
+access. Downloadable service-account keys are supported for compatibility, but should be a last
+resort.
+
+ADC authenticates an identity; it does not grant that identity access to Workspace data. Share the
+target Drive resources with the resolved identity and request the required OAuth scopes. Domain-wide
+delegation through `subject` remains available only in service-account-key mode.
 
 ## Reading Google Meet transcripts via Drive
 
