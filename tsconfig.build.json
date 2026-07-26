@@ -26,6 +26,9 @@
       "path": "connectors/imap/tsconfig.build.json"
     },
     {
+      "path": "connectors/mercury/tsconfig.build.json"
+    },
+    {
       "path": "connectors/meta/tsconfig.build.json"
     },
     {

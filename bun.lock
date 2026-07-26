@@ -128,6 +128,18 @@
         "typescript": "^5.7.0",
       },
     },
+    "connectors/mercury": {
+      "name": "@sixb/connector-mercury",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:*",
+        "@sixb/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
     "connectors/meta": {
       "name": "@sixb/connector-meta",
       "version": "0.1.0",
@@ -1221,6 +1233,8 @@
     "@sixb/connector-google": ["@sixb/connector-google@workspace:connectors/google"],
 
     "@sixb/connector-imap": ["@sixb/connector-imap@workspace:connectors/imap"],
+
+    "@sixb/connector-mercury": ["@sixb/connector-mercury@workspace:connectors/mercury"],
 
     "@sixb/connector-meta": ["@sixb/connector-meta@workspace:connectors/meta"],
 

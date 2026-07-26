@@ -200,6 +200,8 @@ to `defineConnector`, and most ship a matching webhook helper for the [Webhooks]
 | `@sixb/connector-teamleader` | `teamleader(...)` | Teamleader CRM, invoicing, quotations | `defineTeamleaderWebhook` |
 | `@sixb/connector-pandadoc` | `pandadoc(...)` | PandaDoc documents and e-signatures | `pandaDocEventsWebhook` |
 | `@sixb/connector-companycam` | `companycam(...)` | CompanyCam jobsite photos | `companyCamEventsWebhook` |
+| `@sixb/connector-pennylane` | `pennylane(...)` | Pennylane quotes, products, customers | — |
+| `@sixb/connector-mercury` | `mercury(...)` | Mercury banking, transactions, invoicing | `mercuryEventsWebhook` |
 
 The pattern is the same as any adapter — `defineConnector(id, factory(options))`, then resolve it by
 name in syncs and app code:
