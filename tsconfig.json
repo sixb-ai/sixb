@@ -94,7 +94,9 @@
       "@sixb/ui/hooks/*": ["./packages/ui/src/hooks/*.ts", "./packages/ui/src/hooks/*.tsx"],
       "@sixb/ui/hooks/*.ts": ["./packages/ui/src/hooks/*.ts"],
       "@sixb/ui/hooks/*.tsx": ["./packages/ui/src/hooks/*.tsx"],
+      "@sixb/ui/lib/address": ["./packages/ui/src/lib/address/index.ts"],
       "@sixb/ui/lib/shiki": ["./packages/ui/src/lib/shiki.ts"],
+      "@sixb/ui/lib/speech": ["./packages/ui/src/lib/speech/index.ts"],
       "@sixb/ui/lib/utils": ["./packages/ui/src/lib/utils.ts"],
       "@sixb/workflow-worker": ["./packages/workflow-worker/src/index.ts"]
     }

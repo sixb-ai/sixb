@@ -1,6 +1,12 @@
 // shadcn primitives
 
 export { toast } from "sonner"
+// Sixb address lookup
+export {
+  AddressAutocomplete,
+  type AddressAutocompleteProps,
+} from "./address/address-autocomplete"
+export { AddressFields, type AddressFieldsProps } from "./address/address-fields"
 // Sixb data-viz primitives
 export { MiniSparkline } from "./charts/MiniSparkline"
 export {
@@ -16,6 +22,9 @@ export {
   type SidebarUser,
   SidebarUserMenu,
 } from "./sidebar-user-menu"
+// Sixb speech dictation
+export { DictationButton, type DictationButtonProps } from "./speech/dictation-button"
+export { DictationTextarea, type DictationTextareaProps } from "./speech/dictation-textarea"
 export { ThemeSwitcher } from "./theme-switcher"
 export { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./ui/accordion"
 export { Alert, AlertDescription, AlertTitle } from "./ui/alert"

@@ -45,6 +45,18 @@
       "import": "./dist/hooks/*.js",
       "default": "./dist/hooks/*.js"
     },
+    "./lib/address": {
+      "types": "./dist/lib/address/index.d.ts",
+      "bun": "./src/lib/address/index.ts",
+      "import": "./dist/lib/address/index.js",
+      "default": "./dist/lib/address/index.js"
+    },
+    "./lib/speech": {
+      "types": "./dist/lib/speech/index.d.ts",
+      "bun": "./src/lib/speech/index.ts",
+      "import": "./dist/lib/speech/index.js",
+      "default": "./dist/lib/speech/index.js"
+    },
     "./lib/shiki": {
       "types": "./dist/lib/shiki.d.ts",
       "bun": "./src/lib/shiki.ts",
