@@ -359,7 +359,9 @@ describe("setLinkBatch", () => {
     expect(links).toHaveLength(1)
     expect(links[0]?.targetId).toBe("b2")
     expect(publishSpy).toHaveBeenCalledTimes(1)
-    expect([...(publishSpy.mock.calls[0]?.[0] ?? [])].map((event) => event.type).sort()).toEqual([
+    // Facts of one commit publish in commit-ordinal order, which is kind-major, so the order is
+    // deterministic rather than falling out of the envelope hash.
+    expect([...(publishSpy.mock.calls[0]?.[0] ?? [])].map((event) => event.type)).toEqual([
       "link.created",
       "link.deleted",
     ])

@@ -49,7 +49,7 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
               FROM ontology_outbox
               WHERE project_id = ? AND published_at IS NULL AND available_at <= ?
                 AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-              ORDER BY created_at, id
+              ORDER BY created_at, commit_id, commit_ordinal
               LIMIT ?
             )
             RETURNING envelope, available_at, attempts, lease_id, lease_expires_at,

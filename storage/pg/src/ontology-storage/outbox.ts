@@ -43,7 +43,7 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
             AND published_at IS NULL
             AND available_at <= ${input.now}
             AND (lease_expires_at IS NULL OR lease_expires_at <= ${input.now})
-          ORDER BY created_at, id
+          ORDER BY created_at, commit_id, commit_ordinal
           LIMIT ${input.limit}
           FOR UPDATE SKIP LOCKED
         ), claimed AS (
@@ -55,9 +55,10 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
           WHERE outbox.project_id = candidates.project_id AND outbox.id = candidates.id
           RETURNING outbox.id AS row_id, outbox.envelope, outbox.available_at,
             outbox.attempts, outbox.lease_id, outbox.lease_expires_at,
-            outbox.published_at, outbox.last_error, outbox.created_at
+            outbox.published_at, outbox.last_error, outbox.created_at,
+            outbox.commit_id, outbox.commit_ordinal
         )
-        SELECT * FROM claimed ORDER BY created_at, row_id
+        SELECT * FROM claimed ORDER BY created_at, commit_id, commit_ordinal
       `
       return rows.map((row) => {
         const record = outboxRecord(row)

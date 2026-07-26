@@ -546,15 +546,15 @@ describe("Sixb runtime", () => {
     ).rejects.toThrow("does not define link properties")
 
     // Latest telemetry is part of effective object state, so appending a point also updates the
-    // object it belongs to. Facts from one commit are claimed in `(createdAt, eventId)` order, so
-    // their relative order inside a commit is not asserted.
+    // object it belongs to. Facts of one commit are claimed in commit-ordinal order, so a link
+    // never arrives before the object it references.
     const stream = await sixb.events.read()
-    expect([...stream].map((event) => event.type).sort()).toEqual([
-      "link.created",
-      "object.created",
+    expect([...stream].map((event) => event.type)).toEqual([
       "object.created",
       "object.updated",
       "telemetry.appended",
+      "object.created",
+      "link.created",
     ])
     expect(Object.fromEntries(stream.map((event) => [event.type, event.topic]))).toEqual({
       "object.created": "objects",

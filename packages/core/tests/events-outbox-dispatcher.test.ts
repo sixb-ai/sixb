@@ -95,7 +95,12 @@ describe("OntologyOutboxDispatcher", () => {
     await dispatcher.stop()
 
     expect(broker.appended).toHaveLength(1)
-    expect(broker.appended[0]?.records.map((record) => record.idempotencyKey)).toEqual(expectedIds)
+    // Both rows ride one claimed lease. They come from two commits seeded in the same millisecond,
+    // so their relative order is a cross-commit tie the comparator breaks by commit id — only
+    // ordering *within* a commit is guaranteed. What this test pins is the batch's contents.
+    expect(
+      [...(broker.appended[0]?.records ?? [])].map((record) => record.idempotencyKey).sort()
+    ).toEqual([...expectedIds].sort())
     expect(outboxRows(storage).every((row) => row.leaseId === null)).toBe(true)
   })
 

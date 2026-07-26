@@ -426,7 +426,7 @@ CREATE TABLE ontology_outbox (
 );
 
 CREATE INDEX idx_ontology_outbox_claim
-  ON ontology_outbox(project_id, available_at, lease_expires_at, created_at, id)
+  ON ontology_outbox(project_id, available_at, lease_expires_at, created_at, commit_id, commit_ordinal)
   WHERE published_at IS NULL;
 CREATE INDEX idx_ontology_outbox_published
   ON ontology_outbox(project_id, published_at, id)

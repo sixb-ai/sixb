@@ -519,12 +519,10 @@ describe("runActionJob", () => {
     const assignmentEvents = await sixb.events.read({
       types: ["link.created", "link.deleted"],
     })
-    expect(
-      assignmentEvents
-        .slice(-2)
-        .map((event) => event.type)
-        .sort()
-    ).toEqual(["link.created", "link.deleted"])
+    expect(assignmentEvents.slice(-2).map((event) => event.type)).toEqual([
+      "link.created",
+      "link.deleted",
+    ])
 
     await queueActionRun(sixb, {
       id: "act_clear_sensor",

@@ -156,13 +156,22 @@ export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
   }
 }
 
+/**
+ * Claim order, which is also delivery order.
+ *
+ * Every row of one commit shares `createdAt`, so the tiebreak decides the order subscribers see
+ * within a commit. `commitOrdinal` is the kind-major ordinal the plan already assigned, which keeps
+ * an object's creation ahead of the links that reference it; the envelope id is a hash and would
+ * scramble them.
+ */
 function compareClaimRows(
   left: import("../outbox").OntologyOutboxRecord,
   right: import("../outbox").OntologyOutboxRecord
 ): number {
   return (
     left.createdAt.localeCompare(right.createdAt) ||
-    left.envelope.id.localeCompare(right.envelope.id)
+    left.envelope.commitId.localeCompare(right.envelope.commitId) ||
+    left.envelope.commitOrdinal - right.envelope.commitOrdinal
   )
 }
 
