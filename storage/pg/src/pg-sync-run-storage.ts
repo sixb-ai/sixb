@@ -72,10 +72,17 @@ export class PgSyncRunStorage implements SyncRunStorage {
         )
       }
 
-      if (input.status === "succeeded" && input.output.datasetId !== existing.dataset_id) {
-        throw new SyncRunError(
-          `[SixbPg] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
-        )
+      if (input.status === "succeeded") {
+        if (input.output && input.output.datasetId !== existing.dataset_id) {
+          throw new SyncRunError(
+            `[SixbPg] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
+          )
+        }
+        if (!input.output && (existing.mode !== "append" || input.rowsRead !== 0)) {
+          throw new SyncRunError(
+            `[SixbPg] Sync run '${input.id}' may omit its output only for an empty append.`
+          )
+        }
       }
 
       const [updated] =
@@ -86,7 +93,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
                 status = ${input.status},
                 finished_at = ${input.finishedAt ?? new Date()},
                 rows_read = ${input.rowsRead},
-                output_version_id = ${input.output.versionId},
+                output_version_id = ${input.output?.versionId ?? null},
                 error_name = ${null},
                 error_message = ${null},
                 checkpoint = ${serializeCheckpoint(input.checkpoint)}::text::jsonb
