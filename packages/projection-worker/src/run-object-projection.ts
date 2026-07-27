@@ -41,7 +41,7 @@ interface ForeignKeyLinkItem {
 export async function runObjectProjection(
   input: RunObjectProjectionInput
 ): Promise<ProjectionExecutionResult> {
-  const { runtime, projection, dataset, runId, versionId, signal, batchSize, onProgress } = input
+  const { runtime, projection, dataset, versionId, signal, batchSize, onProgress } = input
   const primaryPropertyId = runtime.ontology.getPrimaryPropertyId(projection.objectTypeId)
   const projectionPlan = buildObjectProjectionPlan({
     ontology: runtime.ontology,
@@ -49,7 +49,6 @@ export async function runObjectProjection(
     dataset,
     primaryPropertyId,
   })
-  let flushIndex = 0
 
   return runStreamingProjection<ProjectedObjectRow>({
     runtime,
@@ -71,15 +70,7 @@ export async function runObjectProjection(
         return { status: "item", item: projected.row }
       },
       flushBatch(rows, ctx) {
-        const currentFlushIndex = flushIndex
-        flushIndex += 1
-        return flushObjectBatch({
-          runtime,
-          projection,
-          eventIdempotencyKeyPrefix: `projection.commit:${runId}:batch:${currentFlushIndex}`,
-          rows,
-          ctx,
-        })
+        return flushObjectBatch({ runtime, projection, rows, ctx })
       },
     },
   })
@@ -88,11 +79,10 @@ export async function runObjectProjection(
 async function flushObjectBatch(input: {
   readonly runtime: ProjectionWorkerContext
   readonly projection: ObjectProjectionDefinition
-  readonly eventIdempotencyKeyPrefix: string
   readonly rows: readonly ProjectedObjectRow[]
   readonly ctx: FlushContext
 }): Promise<void> {
-  const { runtime, projection, eventIdempotencyKeyPrefix, rows, ctx } = input
+  const { runtime, projection, rows, ctx } = input
   const { counters, rememberError } = ctx
 
   const batchResults = await objectService.upsertObjectBatch(
@@ -120,7 +110,6 @@ async function flushObjectBatch(input: {
   await materializeForeignKeyLinks({
     runtime,
     projection,
-    eventIdempotencyKeyPrefix,
     rows: succeededRows,
     counters,
     rememberError,
@@ -137,14 +126,13 @@ function objectProjectionReadColumns(projection: ObjectProjectionDefinition): re
 async function materializeForeignKeyLinks(input: {
   readonly runtime: ProjectionWorkerContext
   readonly projection: ObjectProjectionDefinition
-  readonly eventIdempotencyKeyPrefix: string
   readonly rows: readonly ProjectedObjectRow[]
   readonly counters: {
     linksUpserted: number
   }
   readonly rememberError: (message: string) => void
 }): Promise<void> {
-  const { runtime, projection, eventIdempotencyKeyPrefix, rows, counters, rememberError } = input
+  const { runtime, projection, rows, counters, rememberError } = input
   const descriptors = Object.values(projection.links)
   if (descriptors.length === 0 || rows.length === 0) {
     return
@@ -186,9 +174,7 @@ async function materializeForeignKeyLinks(input: {
     }
   }
 
-  const assignmentResults = await objectService.setLinkBatch(runtime, assignmentItems, {
-    idempotencyKeyPrefix: eventIdempotencyKeyPrefix,
-  })
+  const assignmentResults = await objectService.setLinkBatch(runtime, assignmentItems)
   recordLinkResults(assignmentResults, counters, rememberError)
 
   const additiveResults = await objectService.upsertLinkBatch(runtime, additiveItems)

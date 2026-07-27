@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { JsonValue } from "../src"
 import {
   decimal,
   defineObjectType,
@@ -37,6 +38,7 @@ import type {
   QueryObjectsInput,
   QueryObjectsResult,
 } from "../src/storage"
+import { createStoredLinkMutationEvent, createStoredObjectMutationEvent } from "../src/testing"
 
 const Order = defineObjectType({
   id: "Order",
@@ -148,19 +150,16 @@ function makeObjectMutationEvent(
   projectId: string,
   objectTypeId: string,
   primaryId: string,
-  properties: Record<string, unknown>
+  properties: Record<string, JsonValue>
 ): StoredObjectMutationEvent {
-  return {
-    id: `evt-${crypto.randomUUID()}`,
-    schemaVersion: 1,
+  return createStoredObjectMutationEvent({
     projectId,
-    type: "object.created",
-    topic: "objects",
-    partitionKey: `${objectTypeId}:${primaryId}`,
     occurredAt: new Date().toISOString(),
     cursor: crypto.randomUUID(),
-    payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
-  }
+    objectTypeId,
+    primaryId,
+    properties,
+  })
 }
 
 function makeLinkMutationEvent(
@@ -171,17 +170,16 @@ function makeLinkMutationEvent(
   targetTypeId: string,
   targetId: string
 ): StoredLinkMutationEvent {
-  return {
-    id: `evt-${crypto.randomUUID()}`,
-    schemaVersion: 1,
+  return createStoredLinkMutationEvent({
     projectId,
-    type: "link.created",
-    topic: "links",
-    partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
     occurredAt: new Date().toISOString(),
     cursor: crypto.randomUUID(),
-    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
-  }
+    sourceTypeId,
+    sourceId,
+    linkId,
+    targetTypeId,
+    targetId,
+  })
 }
 
 class CountingQueryStorage extends InMemoryObjectStorage {

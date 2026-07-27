@@ -39,7 +39,6 @@ import {
 } from "./actions"
 import { type SixbFileUploadError, type UploadFileInput, uploadFile } from "./file"
 import {
-  getObjectQueryKey as generatedGetObjectQueryKey,
   getActionRunQueryKey,
   listActionRunsInfiniteQueryKey,
   listActionRunsQueryKey,
@@ -551,18 +550,14 @@ async function invalidateActionRunMutationCaches(
     queryClient.invalidateQueries({ queryKey: listActionRunsInfiniteQueryKey() }),
   ]
 
-  if (run.commit) {
-    invalidations.push(invalidateObjectQueries(queryClient))
-    for (const object of run.commit.diff.objects) {
-      invalidations.push(
-        queryClient.invalidateQueries({
-          queryKey: generatedGetObjectQueryKey({
-            path: { objectTypeId: object.objectTypeId, objectId: object.primaryId },
-          }),
-          exact: true,
-        })
-      )
-    }
+  // A run that reached the commit phase may have changed any object the action touched. The run
+  // record no longer carries a per-object diff — object changes live in the authoritative ontology
+  // commit — so object reads are invalidated wholesale.
+  if (run.phase === "commit" || run.phase === "effects") {
+    invalidations.push(
+      invalidateObjectQueries(queryClient),
+      queryClient.invalidateQueries({ predicate: isGeneratedObjectRead })
+    )
   }
 
   await Promise.all(invalidations)
@@ -570,6 +565,12 @@ async function invalidateActionRunMutationCaches(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
+}
+
+/** Matches every generated single-object read, regardless of object type or id. */
+function isGeneratedObjectRead(query: { readonly queryKey: readonly unknown[] }): boolean {
+  const [descriptor] = query.queryKey
+  return isRecord(descriptor) && descriptor._id === "getObject"
 }
 
 // Hooks accept any built query — anything carrying a normalized `.ir` — and

@@ -55,17 +55,10 @@ export interface RuleDependencyIndex {
   readonly linkDeletes: ReadonlyMap<string, readonly RuleDefinition[]>
 }
 
-/**
- * One deduped evaluation unit for a rule and object subject.
- *
- * `sourceEvents` may contain multiple events from the same event batch.
- * Keeping the full group lets the overlay step evaluate the latest in-batch
- * state while still running the rule only once for the subject.
- */
+/** One deduped evaluation unit for a rule and object subject. */
 export interface RuleEventEvaluationCandidate {
   readonly rule: RuleDefinition
   readonly subject: RuleEventSubject
-  readonly sourceEvents: readonly OntologyRuleEvent[]
 }
 
 export interface EvaluateRulePredicateInput {
@@ -98,11 +91,6 @@ export interface EvaluateRuleForSubjectInput {
   readonly runtime: RulesWorkerContext
   readonly rule: RuleDefinition
   readonly subject: RuleEventSubject
-  /**
-   * Accepted ontology events for this rule/subject. The evaluator overlays
-   * these onto projected storage to handle event append before projection.
-   */
-  readonly sourceEvents: readonly OntologyRuleEvent[]
   readonly evaluatedAt: string
 }
 

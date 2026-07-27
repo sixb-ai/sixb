@@ -293,7 +293,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
 }
 
 function requireContractStorage(storage: Storage): ContractStorage {
-  if (!storage.actionRuns || !("assertMaterializationRun" in storage.actionRuns)) {
+  if (!storage.actionRuns || !("lockForMaterialization" in storage.actionRuns)) {
     throw new Error("[Sixb] Materializer storage contract requires Action materialization runs.")
   }
   if (!storage.projectionRuns || !("startOrReclaimMaterialization" in storage.projectionRuns)) {

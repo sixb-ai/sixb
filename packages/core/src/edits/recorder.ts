@@ -4,23 +4,18 @@ import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import { assertRequiredProperties } from "../ontology/validation"
 import { EditBatchError } from "./errors"
-import { normalizeEditBatch } from "./normalize"
 import {
   assertPrimaryPropertyNotUpdated,
   getPrimaryProperty,
+  normalizeEditablePropertyIds,
   normalizeLinkEditProperties,
   normalizeObjectEditProperties,
 } from "./properties"
 import type {
   EditBatch,
-  EditLinkClearOperation,
-  EditLinkSetOperation,
-  EditObjectCreateOperation,
-  EditObjectDeleteOperation,
   EditObjectHandle,
+  EditObjectProperties,
   EditObjectRef,
-  EditObjectUpdateOperation,
-  EditObjectUpsertOperation,
   EditOperation,
   RecordEditsContext,
   RecordEditsHandler,
@@ -59,37 +54,6 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
         return createObjectHandle(objectType, createRef(objectType.id, primaryId))
       },
 
-      upsert(properties: unknown) {
-        const primaryProperty = getPrimaryProperty(objectType)
-        const rawProperties = assertRecord(properties, `${objectType.id}.upsert.properties`)
-        const primaryValue = rawProperties[primaryProperty.id]
-
-        if (typeof primaryValue !== "string" || !primaryValue.trim()) {
-          throw new EditBatchError(
-            `[Sixb] EditBatch upsert '${objectType.id}' primary property '${primaryProperty.id}' must be a non-empty string.`
-          )
-        }
-
-        const normalizedProperties = normalizeObjectEditProperties({
-          objectType,
-          properties: rawProperties,
-          valueTypesById,
-          path: `${objectType.id}.upsert`,
-        })
-
-        const operation: EditObjectUpsertOperation = {
-          kind: "object.upsert",
-          objectTypeId: objectType.id,
-          primaryId: primaryValue,
-          properties: normalizedProperties,
-        }
-        operations.push(operation)
-        return createObjectHandle(objectType, {
-          objectTypeId: objectType.id,
-          primaryId: primaryValue,
-        })
-      },
-
       create(properties: unknown) {
         const operationPath = String(operations.length)
         const primaryProperty = getPrimaryProperty(objectType)
@@ -119,13 +83,12 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
         })
         assertRequiredProperties(objectType, normalizedProperties)
 
-        const operation: EditObjectCreateOperation = {
+        operations.push({
           kind: "object.create",
           objectTypeId: objectType.id,
           primaryId: primaryValue,
-          properties: normalizedProperties,
-        }
-        operations.push(operation)
+          properties: withoutPrimaryProperty(normalizedProperties, primaryProperty.id),
+        })
         return createObjectHandle(objectType, {
           objectTypeId: objectType.id,
           primaryId: primaryValue,
@@ -135,10 +98,7 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
   }
 
   function toEditBatch(): EditBatch {
-    return normalizeEditBatch({
-      version: 1,
-      operations,
-    })
+    return { version: 1, operations: [...operations] }
   }
 
   function createObjectHandle(
@@ -163,24 +123,66 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
             path: `${objectType.id}.update`,
           })
           assertPrimaryPropertyNotUpdated(objectType, normalizedProperties)
+          // An empty patch resolves to a null override and commits as `unchanged`, so a handler
+          // that built its update conditionally would report a successful run that wrote nothing.
+          if (Object.keys(normalizedProperties).length === 0) {
+            throw new EditBatchError(
+              `[Sixb] EditBatch update '${objectType.id}:${ref.primaryId}' must set at least one property.`
+            )
+          }
 
-          const operation: EditObjectUpdateOperation = {
+          operations.push({
             kind: "object.update",
-            objectTypeId: objectType.id,
+            objectTypeId: ref.objectTypeId,
             primaryId: ref.primaryId,
             properties: normalizedProperties,
-          }
-          operations.push(operation)
+          })
+        },
+      },
+      unset: {
+        value(...propertyIds: readonly unknown[]) {
+          operations.push({
+            kind: "object.unset",
+            objectTypeId: ref.objectTypeId,
+            primaryId: ref.primaryId,
+            propertyIds: normalizeEditablePropertyIds({
+              objectType,
+              propertyIds,
+              operation: "unset",
+            }),
+          })
+        },
+      },
+      reset: {
+        value(...propertyIds: readonly unknown[]) {
+          operations.push({
+            kind: "object.reset",
+            objectTypeId: ref.objectTypeId,
+            primaryId: ref.primaryId,
+            propertyIds: normalizeEditablePropertyIds({
+              objectType,
+              propertyIds,
+              operation: "reset",
+            }),
+          })
         },
       },
       delete: {
         value() {
-          const operation: EditObjectDeleteOperation = {
+          operations.push({
             kind: "object.delete",
             objectTypeId: ref.objectTypeId,
             primaryId: ref.primaryId,
-          }
-          operations.push(operation)
+          })
+        },
+      },
+      restore: {
+        value() {
+          operations.push({
+            kind: "object.restore",
+            objectTypeId: ref.objectTypeId,
+            primaryId: ref.primaryId,
+          })
         },
       },
       link: {
@@ -203,7 +205,7 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
                 })
 
           operations.push({
-            kind: "link.create",
+            kind: "link.upsert",
             source: toPlainRef(ref),
             linkId: link.id,
             target: toPlainRef(target),
@@ -223,43 +225,16 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
           })
         },
       },
-      setLink: {
-        value(
-          link: { objectTypeId: string; id: string; link: ObjectLink },
-          target: EditObjectRef,
-          linkOptions?: { readonly properties?: Readonly<Record<string, unknown>> }
-        ) {
-          assertCardinalityOneLinkToken(ref, link, "setLink")
-          const properties =
-            linkOptions?.properties === undefined
-              ? undefined
-              : normalizeLinkEditProperties({
-                  sourceObjectTypeId: ref.objectTypeId,
-                  linkId: link.id,
-                  linkDefinition: link.link,
-                  properties: linkOptions.properties,
-                  valueTypesById,
-                })
+      resetLink: {
+        value(link: { objectTypeId: string; id: string; link: ObjectLink }, target: EditObjectRef) {
+          assertLinkTokenSource(ref, link)
 
-          const operation: EditLinkSetOperation = {
-            kind: "link.set",
+          operations.push({
+            kind: "link.reset",
             source: toPlainRef(ref),
             linkId: link.id,
             target: toPlainRef(target),
-            ...(properties !== undefined ? { properties } : {}),
-          }
-          operations.push(operation)
-        },
-      },
-      clearLink: {
-        value(link: { objectTypeId: string; id: string; link: ObjectLink }) {
-          assertCardinalityOneLinkToken(ref, link, "clearLink")
-          const operation: EditLinkClearOperation = {
-            kind: "link.clear",
-            source: toPlainRef(ref),
-            linkId: link.id,
-          }
-          operations.push(operation)
+          })
         },
       },
     })
@@ -284,19 +259,6 @@ function assertLinkTokenSource(
   }
 }
 
-function assertCardinalityOneLinkToken(
-  source: EditObjectRef,
-  link: { readonly objectTypeId: string; readonly id: string; readonly link: ObjectLink },
-  operation: "setLink" | "clearLink"
-): void {
-  assertLinkTokenSource(source, link)
-  if (link.link.cardinality !== "one") {
-    throw new OntologyValidationError(
-      `[Sixb] ${operation} requires cardinality 'one' link '${link.objectTypeId}.${link.id}'`
-    )
-  }
-}
-
 function createRef<TObjectTypeId extends string>(
   objectTypeId: TObjectTypeId,
   primaryId: string
@@ -317,6 +279,15 @@ function generatePrimaryId(params: {
     .digest("hex")
     .slice(0, 24)
   return `edit_${hash}`
+}
+
+/** Primary identity lives in the object ref; managed authority never stores it as a property. */
+function withoutPrimaryProperty(
+  properties: EditObjectProperties,
+  primaryPropertyId: string
+): EditObjectProperties {
+  const { [primaryPropertyId]: _primary, ...rest } = properties
+  return rest
 }
 
 function assertRecord(value: unknown, label: string): Record<string, unknown> {

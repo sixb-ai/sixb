@@ -1,4 +1,3 @@
-import type { EditCommitPlan } from "../../edits"
 import type {
   StoredLinkDeletedEvent,
   StoredLinkMutationEvent,
@@ -8,12 +7,6 @@ import type {
 import type { EffectiveLinkSnapshot, EffectiveObjectSnapshot } from "../../materialization/model"
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "../../objects/query"
 import { compareQueryScalarValues, queryScalarValuesEqual } from "../../objects/query/scalar-values"
-import {
-  editCommitLinkCreateConflict,
-  editCommitLinkUpdateMissing,
-  editCommitObjectCreateConflict,
-  editCommitObjectUpdateMissing,
-} from "../errors"
 import type {
   CountObjectsInput,
   CountObjectsResult,
@@ -317,37 +310,6 @@ export class InMemoryObjectStorage implements ObjectStorage {
       row.targetTypeId,
       row.targetId
     )
-  }
-
-  async applyEditCommitPlan(input: {
-    projectId: string
-    plan: EditCommitPlan
-    committedAt: Date
-  }): Promise<void> {
-    const { projectId, plan, committedAt } = input
-
-    for (const linkDelete of plan.links.deletes) {
-      this.deleteLinkRow(
-        projectId,
-        linkDelete.source.objectTypeId,
-        linkDelete.source.primaryId,
-        linkDelete.linkId,
-        linkDelete.target.objectTypeId,
-        linkDelete.target.primaryId
-      )
-    }
-
-    for (const objectDelete of plan.objects.deletes) {
-      this.deleteObjectRow(projectId, objectDelete.objectTypeId, objectDelete.primaryId)
-    }
-
-    for (const objectUpsert of plan.objects.upserts) {
-      this.upsertObjectRowFromPlan(projectId, objectUpsert, committedAt)
-    }
-
-    for (const linkUpsert of plan.links.upserts) {
-      this.upsertLinkRowFromPlan(projectId, linkUpsert, committedAt)
-    }
   }
 
   queryCapabilities(): ObjectQueryCapabilities {
@@ -930,76 +892,9 @@ export class InMemoryObjectStorage implements ObjectStorage {
     return { objects, hasMore, total }
   }
 
-  private upsertObjectRowFromPlan(
-    projectId: string,
-    upsert: EditCommitPlan["objects"]["upserts"][number],
-    committedAt: Date
-  ): void {
-    const bucketId = objectRowKey(projectId, upsert.objectTypeId)
-    const bucket = this.rows.get(bucketId) ?? new Map<string, ObjectRow>()
-    this.rows.set(bucketId, bucket)
-
-    const existing = bucket.get(upsert.primaryId)
-    if (upsert.operation === "create" && existing) {
-      throw editCommitObjectCreateConflict(upsert)
-    }
-    if (upsert.operation === "update" && !existing) {
-      throw editCommitObjectUpdateMissing(upsert)
-    }
-
-    bucket.set(upsert.primaryId, {
-      projectId,
-      objectTypeId: upsert.objectTypeId,
-      primaryId: upsert.primaryId,
-      properties: structuredClone(upsert.properties) as Record<string, unknown>,
-      createdAt: existing?.createdAt ?? committedAt,
-      updatedAt: committedAt,
-      version: (existing?.version ?? 0) + 1,
-      sourceEventId: undefined,
-    })
-  }
-
   private deleteObjectRow(projectId: string, objectTypeId: string, primaryId: string): void {
     const bucket = this.rows.get(objectRowKey(projectId, objectTypeId))
     bucket?.delete(primaryId)
-  }
-
-  private upsertLinkRowFromPlan(
-    projectId: string,
-    upsert: EditCommitPlan["links"]["upserts"][number],
-    committedAt: Date
-  ): void {
-    const bucketKey = sourceLinkBucketKey(
-      projectId,
-      upsert.source.objectTypeId,
-      upsert.source.primaryId
-    )
-    const bucket = this.links.get(bucketKey) ?? new Map<string, ObjectLinkRow>()
-    this.links.set(bucketKey, bucket)
-
-    const key = linkRowKey(upsert.linkId, upsert.target.objectTypeId, upsert.target.primaryId)
-    const existing = bucket.get(key)
-    if (upsert.operation === "create" && existing) {
-      throw editCommitLinkCreateConflict(upsert)
-    }
-    if (upsert.operation === "update" && !existing) {
-      throw editCommitLinkUpdateMissing(upsert)
-    }
-
-    bucket.set(key, {
-      projectId,
-      sourceTypeId: upsert.source.objectTypeId,
-      sourceId: upsert.source.primaryId,
-      linkId: upsert.linkId,
-      targetTypeId: upsert.target.objectTypeId,
-      targetId: upsert.target.primaryId,
-      // Keep the row shape uniform with the event path and the SQL providers: a propertyless link
-      // carries `properties: undefined`, never an omitted key.
-      properties: upsert.properties ? structuredClone(upsert.properties) : undefined,
-      createdAt: existing?.createdAt ?? committedAt,
-      updatedAt: committedAt,
-      sourceEventId: undefined,
-    })
   }
 
   private deleteLinkRow(

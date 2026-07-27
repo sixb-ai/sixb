@@ -1,4 +1,5 @@
 import type { JsonValue } from "../../json"
+import type { OntologyMaterializationEvent } from "../../materialization/events"
 import type { EventOrigin } from "../envelope"
 import type { ActionEvent } from "./actions"
 import type { DatasetEvent } from "./datasets"
@@ -11,7 +12,17 @@ import type { SyncEvent } from "./syncs"
 import type { TelemetryEvent } from "./telemetry"
 import type { WorkflowEvent } from "./workflows"
 
-export type { EventActor, EventEnvelope, EventOrigin } from "../envelope"
+export type {
+  ActionEventOrigin,
+  EventActor,
+  EventEnvelope,
+  EventOrigin,
+  ProjectionEventOrigin,
+  ProjectionTelemetryEventSource,
+  RuntimeMutationEventOrigin,
+  TelemetryEventOrigin,
+  TelemetryEventSource,
+} from "../envelope"
 export type {
   PropertyChange,
   PropertyChangeMap,
@@ -79,11 +90,16 @@ export type DomainEvent =
   | WorkflowEvent
   | DatasetEvent
 
-export type StoredDomainEvent = DomainEvent & {
-  cursor: string
-}
+export type OntologyDomainEvent = ObjectEvent | LinkEvent | TelemetryEvent
+export type AuthorableDomainEvent = Exclude<DomainEvent, OntologyDomainEvent>
 
-export type EventDraft = {
+export type StoredAuthorableEvent = AuthorableDomainEvent & { readonly cursor: string }
+export type StoredOntologyMaterializationEvent = OntologyMaterializationEvent & {
+  readonly cursor: string
+}
+export type StoredDomainEvent = StoredAuthorableEvent | StoredOntologyMaterializationEvent
+
+export type DomainEventDraft = {
   [K in DomainEvent["type"]]: {
     type: K
     payload: Extract<DomainEvent, { type: K }>["payload"]
@@ -94,18 +110,25 @@ export type EventDraft = {
   }
 }[DomainEvent["type"]]
 
-export type StoredObjectCreatedEvent = Extract<StoredDomainEvent, { type: "object.created" }>
-export type StoredObjectUpdatedEvent = Extract<StoredDomainEvent, { type: "object.updated" }>
-export type StoredObjectMutationEvent = StoredObjectCreatedEvent | StoredObjectUpdatedEvent
-export type StoredObjectDeletedEvent = Extract<StoredDomainEvent, { type: "object.deleted" }>
-export type StoredTelemetryAppendedEvent = Extract<
-  StoredDomainEvent,
-  { type: "telemetry.appended" }
+/** Events callers may author directly. Ontology facts are reserved for the Materializer outbox. */
+export type AuthorableEventDraft = Extract<
+  DomainEventDraft,
+  { readonly type: AuthorableDomainEvent["type"] }
 >
-export type StoredLinkCreatedEvent = Extract<StoredDomainEvent, { type: "link.created" }>
-export type StoredLinkUpdatedEvent = Extract<StoredDomainEvent, { type: "link.updated" }>
+export type EventDraft = AuthorableEventDraft
+
+type StoredOntologyEventOf<TType extends OntologyMaterializationEvent["type"]> =
+  StoredOntologyMaterializationEvent & { readonly type: TType }
+
+export type StoredObjectCreatedEvent = StoredOntologyEventOf<"object.created">
+export type StoredObjectUpdatedEvent = StoredOntologyEventOf<"object.updated">
+export type StoredObjectMutationEvent = StoredObjectCreatedEvent | StoredObjectUpdatedEvent
+export type StoredObjectDeletedEvent = StoredOntologyEventOf<"object.deleted">
+export type StoredTelemetryAppendedEvent = StoredOntologyEventOf<"telemetry.appended">
+export type StoredLinkCreatedEvent = StoredOntologyEventOf<"link.created">
+export type StoredLinkUpdatedEvent = StoredOntologyEventOf<"link.updated">
 export type StoredLinkMutationEvent = StoredLinkCreatedEvent | StoredLinkUpdatedEvent
-export type StoredLinkDeletedEvent = Extract<StoredDomainEvent, { type: "link.deleted" }>
+export type StoredLinkDeletedEvent = StoredOntologyEventOf<"link.deleted">
 export type StoredActionRequestedEvent = Extract<StoredDomainEvent, { type: "action.requested" }>
 export type StoredActionCompletedEvent = Extract<StoredDomainEvent, { type: "action.completed" }>
 export type StoredActionFailedEvent = Extract<StoredDomainEvent, { type: "action.failed" }>

@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { defineObjectType, link, OntologyRegistry, prop } from "@sixb/core"
+import { defineObjectType, type JsonValue, link, OntologyRegistry, prop } from "@sixb/core"
 import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "@sixb/core/internal/events"
 import { executeObjectQuery } from "@sixb/core/internal/query"
 import type { ExpandedObjectRow } from "@sixb/core/storage"
+import { createStoredLinkMutationEvent, createStoredObjectMutationEvent } from "@sixb/core/testing"
 import { SqliteObjectStorage } from "../src/object-storage"
 
 // Self-contained ontology exercising the runtime shapes the in-memory contract
@@ -254,21 +255,19 @@ function postRow(
 function objectEvent(
   objectTypeId: string,
   primaryId: string,
-  properties: Record<string, unknown>
+  properties: Record<string, JsonValue>
 ): StoredObjectMutationEvent {
   cursor += 1
   const tag = String(cursor).padStart(3, "0")
-  return {
+  return createStoredObjectMutationEvent({
     id: `expand-e2e-object-${tag}`,
     cursor: tag,
-    schemaVersion: 1,
     projectId,
-    type: "object.created",
-    topic: "objects",
-    partitionKey: `${objectTypeId}:${primaryId}`,
-    payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
     occurredAt: `2026-01-01T00:00:${tag.slice(-2)}.000Z`,
-  }
+    objectTypeId,
+    primaryId,
+    properties,
+  })
 }
 
 function linkEvent(
@@ -277,27 +276,20 @@ function linkEvent(
   linkId: string,
   targetTypeId: string,
   targetId: string,
-  properties?: Record<string, unknown>
+  properties?: Record<string, JsonValue>
 ): StoredLinkMutationEvent {
   cursor += 1
   const tag = String(cursor).padStart(3, "0")
-  return {
+  return createStoredLinkMutationEvent({
     id: `expand-e2e-link-${tag}`,
     cursor: tag,
-    schemaVersion: 1,
     projectId,
-    type: "link.created",
-    topic: "links",
-    partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
-    payload: {
-      sourceTypeId,
-      sourceId,
-      linkId,
-      targetTypeId,
-      targetId,
-      ...(properties === undefined ? {} : { properties }),
-      propertyChanges: {},
-    },
     occurredAt: `2026-01-01T00:00:${tag.slice(-2)}.000Z`,
-  }
+    sourceTypeId,
+    sourceId,
+    linkId,
+    targetTypeId,
+    targetId,
+    ...(properties === undefined ? {} : { properties }),
+  })
 }

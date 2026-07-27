@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import type { JsonValue } from "@sixb/core"
 import type { StoredTelemetryAppendedEvent } from "@sixb/core/internal/events"
+import { createStoredTelemetryAppendedEvent } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -20,22 +22,23 @@ describe("PgTimeseriesStorage", () => {
     objectTypeId: string,
     objectId: string,
     propertyId: string,
-    value: unknown,
+    value: JsonValue,
     at: string,
     cursor: string,
     unit?: string
   ): StoredTelemetryAppendedEvent {
-    return {
+    return createStoredTelemetryAppendedEvent({
       id: `event-${cursor}`,
       cursor,
-      schemaVersion: 1,
       projectId,
-      type: "telemetry.appended",
-      topic: "telemetry",
-      partitionKey: `${objectTypeId}:${objectId}:${propertyId}`,
-      payload: { objectTypeId, objectId, propertyId, value, at, unit },
       occurredAt: at,
-    }
+      objectTypeId,
+      objectId,
+      propertyId,
+      value,
+      at,
+      ...(unit === undefined ? {} : { unit }),
+    })
   }
 
   test("applyTelemetryAppended stores data point", async () => {

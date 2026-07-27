@@ -1,17 +1,15 @@
 /**
- * Leaf operation: upsert a single link.
+ * Leaf operation: upsert a single link through the ontology Materializer.
  */
 import { assertPrivileged } from "../../authorization"
-import { buildLinkUpsertEvent, hasPropertyChanges } from "../../events"
-import { OntologyValidationError } from "../../ontology/errors"
-import {
-  assertLinkTargetType,
-  normalizeLinkProperties,
-  validateLinkProperties,
-} from "../../ontology/validation"
 import type { ResolvedLinkContext } from "../context"
-import { ObjectError } from "../errors"
-import { requireObject } from "../helpers"
+import {
+  commitRuntimeOperations,
+  linkUpsertOperation,
+  normalizeRuntimeLink,
+  runtimeOperationId,
+} from "../materializer-adapter"
+import { collectEndpointLookups, loadEndpointExistence, requireEndpoints } from "./endpoints"
 
 export async function upsertLink(
   ctx: ResolvedLinkContext,
@@ -24,84 +22,35 @@ export async function upsertLink(
   }
 ): Promise<void> {
   assertPrivileged(ctx, "upsertLink")
-  const { events, storage, projectId, objectType, linkDefinition, ontology } = ctx
+  const { objectType, linkDefinition, ontology } = ctx
   const { sourceId, linkId, targetTypeId, targetId, properties } = params
+  const endpoints = { objectType, sourceId, targetTypeId, targetId }
 
-  assertLinkTargetType(objectType.id, linkId, linkDefinition, targetTypeId, (expected, actual) =>
-    ontology.isValidLinkTarget(expected, actual)
-  )
+  // Endpoint reads keep the public `ObjectNotFoundError` contract; the Materializer independently
+  // refuses a link whose endpoints are not effective when it commits. This runs before property
+  // normalization so the same input reports the same error class here and through the batch APIs,
+  // which check endpoints first inside `plan`.
+  requireEndpoints(endpoints, await loadEndpointExistence(ctx, collectEndpointLookups([endpoints])))
 
-  await requireObject(storage, projectId, objectType.id, sourceId, "Source object not found")
-  await requireObject(storage, projectId, targetTypeId, targetId, "Target object not found")
-
-  const existingLinks = await storage.objects.listLinks({
-    projectId,
-    objectTypeId: objectType.id,
-    objectId: sourceId,
-    linkId,
-  })
-
-  const sameLink = existingLinks.find(
-    (existing) => existing.targetTypeId === targetTypeId && existing.targetId === targetId
-  )
-
-  const valueTypesById = ontology.getValueTypesById()
-  validateLinkProperties(
+  const normalizedProperties = normalizeRuntimeLink({
     objectType,
     linkDefinition,
-    properties,
-    sameLink?.properties,
-    valueTypesById
-  )
-  const normalizedProperties = normalizeLinkProperties(
-    objectType,
-    linkDefinition,
-    properties,
-    valueTypesById
-  )
-
-  const mergedProperties =
-    normalizedProperties !== undefined || sameLink?.properties !== undefined
-      ? {
-          ...(sameLink?.properties ?? {}),
-          ...(normalizedProperties ?? {}),
-        }
-      : undefined
-
-  if (linkDefinition.cardinality === "one") {
-    const conflicting = existingLinks.find(
-      (existing) => existing.targetTypeId !== targetTypeId || existing.targetId !== targetId
-    )
-
-    if (conflicting) {
-      throw new OntologyValidationError(
-        `Link ${objectType.id}.${linkId} has cardinality 'one'` +
-          ` and already points to ${conflicting.targetTypeId}:${conflicting.targetId}`
-      )
-    }
-  }
-
-  const mutationEvent = buildLinkUpsertEvent({
-    sourceTypeId: objectType.id,
-    sourceId,
     linkId,
     targetTypeId,
-    targetId,
-    operation: sameLink ? "update" : "create",
-    previousProperties: sameLink?.properties,
-    ...(mergedProperties !== undefined ? { properties: mergedProperties } : {}),
+    properties,
+    valueTypesById: ontology.getValueTypesById(),
+    isValidLinkTarget: (expected, actual) => ontology.isValidLinkTarget(expected, actual),
   })
 
-  if (sameLink && !hasPropertyChanges(mutationEvent.payload.propertyChanges)) {
-    return
-  }
-
-  const appended = await events.append({ events: [mutationEvent] })
-
-  const [event] = appended
-  if (!event || (event.type !== "link.created" && event.type !== "link.updated")) {
-    throw new ObjectError("Failed to append link mutation event")
-  }
-
-  await storage.objects.applyLinkUpsert(event)
+  await commitRuntimeOperations(ctx, [
+    linkUpsertOperation({
+      id: runtimeOperationId(0),
+      ref: {
+        source: { objectTypeId: objectType.id, primaryId: sourceId },
+        linkId,
+        target: { objectTypeId: targetTypeId, primaryId: targetId },
+      },
+      ...(normalizedProperties !== undefined ? { properties: normalizedProperties } : {}),
+    }),
+  ])
 }

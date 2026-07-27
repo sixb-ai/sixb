@@ -1,8 +1,12 @@
 import type { BlobStorage } from "../../blob-storage"
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../../connectors"
-import type { EditCommitDiff, RecordEditsContext } from "../../edits"
-import type { EventDraft } from "../../events"
+import type { RecordEditsContext } from "../../edits"
 import type { Logger } from "../../logging"
+import type {
+  EffectiveLinkChange,
+  EffectiveObjectChange,
+  OntologyOperationOutcome,
+} from "../../materializer"
 import type { ObjectType, ValueType } from "../../ontology"
 import type { LinkToken, ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type {
@@ -133,11 +137,21 @@ export interface ActionRuntimeFacade<
   ): Promise<ConnectorClient<TAdapter>>
 }
 
+/**
+ * The authoritative ontology commit the run's edits produced.
+ *
+ * Domain events are already durable outbox facts, so effects consume this persisted result rather
+ * than reconstructed event drafts.
+ */
 export interface ActionPhaseCommit {
-  readonly diff: EditCommitDiff
-  readonly events: readonly EventDraft[]
-  readonly committedAt: Date
+  readonly commitId: string
   readonly created: boolean
+  readonly outcomes: readonly OntologyOperationOutcome[]
+  readonly changes: {
+    readonly objects: readonly EffectiveObjectChange[]
+    readonly links: readonly EffectiveLinkChange[]
+  }
+  readonly committedAt: Date
 }
 
 export interface BaseActionPhaseContext<TParams extends Record<string, unknown>> {

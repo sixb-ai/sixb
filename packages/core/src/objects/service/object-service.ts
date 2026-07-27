@@ -3,7 +3,6 @@
  *
  * Resolves objectTypeId to a typed context and delegates to leaf functions.
  */
-import { OntologyValidationError } from "../../ontology/errors"
 import type { BatchItemResult, SixbRuntimeContext } from "../../runtime/types"
 import type { ObjectRow } from "../../storage"
 import { resolveObjectContext } from "../context"
@@ -17,14 +16,7 @@ export async function upsertObject(
   objectTypeId: string,
   properties: Record<string, unknown>
 ): Promise<ObjectRow> {
-  const ctx = resolveObjectContext(runtime, objectTypeId)
-  const primaryId = properties[ctx.primaryPropertyId]
-  if (primaryId === undefined || primaryId === null) {
-    throw new OntologyValidationError(
-      `Missing primary property '${ctx.primaryPropertyId}' in upsert for '${objectTypeId}'`
-    )
-  }
-  return upsertObjectLeaf(ctx, String(primaryId), properties)
+  return upsertObjectLeaf(resolveObjectContext(runtime, objectTypeId), properties)
 }
 
 export async function upsertObjectBatch(
@@ -32,6 +24,5 @@ export async function upsertObjectBatch(
   objectTypeId: string,
   items: readonly { properties: Record<string, unknown> }[]
 ): Promise<readonly BatchItemResult<ObjectRow>[]> {
-  const ctx = resolveObjectContext(runtime, objectTypeId)
-  return upsertObjectBatchLeaf(ctx, items)
+  return upsertObjectBatchLeaf(resolveObjectContext(runtime, objectTypeId), items)
 }

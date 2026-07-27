@@ -695,6 +695,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
                   commitId: header.commit.id,
                   created: true,
                   eventCount: 0,
+                  committedAt: header.commit.committedAt,
                   pointsCreated: 0,
                   pointsUpdated: 0,
                   pointsUnchanged: 0,
@@ -844,6 +845,7 @@ async function activateEmptyCandidate(
       commitId,
       created: true,
       eventCount: 0,
+      committedAt,
       counts: emptyProjectionCounts,
     },
   }

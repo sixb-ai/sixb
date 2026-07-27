@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
 import {
   defineObjectType,
+  type JsonValue,
   link,
   type ObjectQuery,
   ObjectQueryExecutionError,
@@ -15,6 +16,12 @@ import type {
   StoredTelemetryAppendedEvent,
 } from "@sixb/core/internal/events"
 import { executeObjectQuery } from "@sixb/core/internal/query"
+import {
+  createStoredLinkDeletedEvent,
+  createStoredLinkMutationEvent,
+  createStoredObjectMutationEvent,
+  createStoredTelemetryAppendedEvent,
+} from "@sixb/core/testing"
 import { migrateSqliteDatabase } from "../src/migrations"
 import { SqliteObjectStorage } from "../src/object-storage"
 
@@ -96,20 +103,18 @@ describe("SqliteObjectStorage", () => {
     projectId: string,
     objectTypeId: string,
     primaryId: string,
-    properties: Record<string, unknown>,
+    properties: Record<string, JsonValue>,
     cursor: string
   ): StoredObjectMutationEvent {
-    return {
+    return createStoredObjectMutationEvent({
       id: `event-${cursor}`,
       cursor,
-      schemaVersion: 1,
       projectId,
-      type: "object.created",
-      topic: "objects",
-      partitionKey: `${objectTypeId}:${primaryId}`,
-      payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
       occurredAt: new Date().toISOString(),
-    }
+      objectTypeId,
+      primaryId,
+      properties,
+    })
   }
 
   function createTelemetryEvent(
@@ -117,20 +122,21 @@ describe("SqliteObjectStorage", () => {
     objectTypeId: string,
     objectId: string,
     propertyId: string,
-    value: unknown,
+    value: JsonValue,
     cursor: string
   ): StoredTelemetryAppendedEvent {
-    return {
+    const at = new Date().toISOString()
+    return createStoredTelemetryAppendedEvent({
       id: `event-${cursor}`,
       cursor,
-      schemaVersion: 1,
       projectId,
-      type: "telemetry.appended",
-      topic: "telemetry",
-      partitionKey: `${objectTypeId}:${objectId}:${propertyId}`,
-      payload: { objectTypeId, objectId, propertyId, value, at: new Date().toISOString() },
-      occurredAt: new Date().toISOString(),
-    }
+      occurredAt: at,
+      objectTypeId,
+      objectId,
+      propertyId,
+      value,
+      at,
+    })
   }
 
   function createLinkMutationEvent(
@@ -142,17 +148,17 @@ describe("SqliteObjectStorage", () => {
     targetId: string,
     cursor: string
   ): StoredLinkMutationEvent {
-    return {
+    return createStoredLinkMutationEvent({
       id: `event-${cursor}`,
       cursor,
-      schemaVersion: 1,
       projectId,
-      type: "link.created",
-      topic: "links",
-      partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
-      payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
       occurredAt: new Date().toISOString(),
-    }
+      sourceTypeId,
+      sourceId,
+      linkId,
+      targetTypeId,
+      targetId,
+    })
   }
 
   function createLinkDeletedEvent(
@@ -164,17 +170,17 @@ describe("SqliteObjectStorage", () => {
     targetId: string,
     cursor: string
   ): StoredLinkDeletedEvent {
-    return {
+    return createStoredLinkDeletedEvent({
       id: `event-${cursor}`,
       cursor,
-      schemaVersion: 1,
       projectId,
-      type: "link.deleted",
-      topic: "links",
-      partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
-      payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
       occurredAt: new Date().toISOString(),
-    }
+      sourceTypeId,
+      sourceId,
+      linkId,
+      targetTypeId,
+      targetId,
+    })
   }
 
   test("queryCapabilities enables SQLite's native scalar query subset", () => {

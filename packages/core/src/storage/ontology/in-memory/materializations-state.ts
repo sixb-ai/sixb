@@ -181,34 +181,3 @@ export function addReplacementLink(
   })
   if (diffRequired) replacement.affectedScopes.add(linkScopeSortKey(ref.source, ref.linkId))
 }
-
-export function selectBoundedUnique<T>(
-  values: readonly T[],
-  cursor: string | null,
-  limit: number,
-  sortKeyOf: (value: T) => string,
-  identityOf: (value: T) => string
-): T[] {
-  const selected = new Map<string, T>()
-  for (const value of values) {
-    const sortKey = sortKeyOf(value)
-    if (cursor !== null && sortKey <= cursor) continue
-    const identity = identityOf(value)
-    let duplicate = false
-    for (const candidate of selected.values()) {
-      if (identityOf(candidate) === identity) {
-        duplicate = true
-        break
-      }
-    }
-    if (duplicate) continue
-    selected.set(sortKey, value)
-    if (selected.size <= limit) continue
-    let largest: string | null = null
-    for (const key of selected.keys()) if (largest === null || key > largest) largest = key
-    if (largest !== null) selected.delete(largest)
-  }
-  return [...selected.entries()]
-    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-    .map(([, value]) => value)
-}

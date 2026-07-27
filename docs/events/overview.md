@@ -60,7 +60,14 @@ event's `type`, `topic`, `partitionKey`, `payload`, and a broker `cursor`.
 | `idempotencyKey` | `string?` | De-duplicates appends |
 | `actor` | `{ type, id }?` | `user`, `service`, or `system` |
 | `metadata` | `Record<string, JsonValue>?` | Free-form context |
+| `origin` | `{ kind, ... }?` | What produced the event: an `action`, a `runtime` write, a `projection`, or a `telemetry` append |
+| `commitId` | `string?` | Groups every object, link, and telemetry event that came from the same write |
+| `commitOrdinal` | `number?` | Correlates this event's position within that write; it does not guarantee delivery order |
 | `cursor` | `string` | Broker position; pass as `afterCursor` to page forward |
+
+Object, link, and telemetry events are recorded as part of the write that changed the data, so a
+broker outage delays delivery but never drops them. Their `id` is stable across redelivery, so a
+consumer that may see an event twice can de-duplicate on it.
 
 By default events are kept as a short recent log (the built-in stream retains the last two
 days), not a permanent history. A custom broker stream can change the retention window.
@@ -117,8 +124,8 @@ predicates. See [Client events](../client/events.md). For action buttons, prefer
 
 ### Appending events
 
-`sixb.events.append(input)` writes one or more events. The runtime emits domain events for
-you — append manually only when you model your own domain activity.
+`sixb.events.append(input)` writes one or more events. Object, link, and telemetry events are emitted
+for you whenever data changes — append manually only when you model your own domain activity.
 
 ```ts
 await sixb.events.append({

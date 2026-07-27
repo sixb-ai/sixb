@@ -260,13 +260,7 @@ const STATUS_DOT: Record<string, string> = {
   cancelled: "bg-muted-foreground/40",
 }
 
-const CHANGE_VERB: Record<string, string> = {
-  create: "Created",
-  update: "Updated",
-  delete: "Deleted",
-}
-
-/** `GET /api/action-runs/:runId` — the run's status, timing, what changed, and any error. */
+/** `GET /api/action-runs/:runId` — the run's status, timing, and any error. */
 export function ActionRunView({ parsed }: ApiViewProps) {
   const run = isRecord(parsed.json) ? parsed.json : null
   if (!run) return <ApiDataView parsed={parsed} />
@@ -274,9 +268,6 @@ export function ActionRunView({ parsed }: ApiViewProps) {
   const status = stringField(run, "status") ?? "queued"
   const subject = subjectLabel(run.subject)
   const error = isRecord(run.error) ? run.error : null
-  const diff = isRecord(run.commit) && isRecord(run.commit.diff) ? run.commit.diff : null
-  const objectChanges = diff && Array.isArray(diff.objects) ? diff.objects.filter(isRecord) : []
-  const linkChanges = diff && Array.isArray(diff.links) ? diff.links.filter(isRecord) : []
   const params = isRecord(run.params) ? Object.entries(run.params) : []
 
   return (
@@ -294,36 +285,6 @@ export function ActionRunView({ parsed }: ApiViewProps) {
         <p className="border-l-2 border-destructive/30 pl-3 text-destructive whitespace-pre-wrap">
           {stringField(error, "message") ?? "The action failed."}
         </p>
-      ) : null}
-
-      {objectChanges.length > 0 || linkChanges.length > 0 ? (
-        <div>
-          <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
-            Changes
-          </p>
-          <div className="flex flex-col gap-0.5">
-            {objectChanges.map((change, index) => (
-              <div key={`o-${index}`} className="flex items-baseline gap-2">
-                <span className="text-foreground">
-                  {CHANGE_VERB[stringField(change, "operation") ?? ""] ?? "Changed"}{" "}
-                  {humanize(stringField(change, "objectTypeId")) || "object"}{" "}
-                  {stringField(change, "primaryId")}
-                </span>
-                {Array.isArray(change.changedProperties) && change.changedProperties.length > 0 ? (
-                  <span className="text-muted-foreground/60">
-                    {change.changedProperties.map((key) => humanize(String(key))).join(", ")}
-                  </span>
-                ) : null}
-              </div>
-            ))}
-            {linkChanges.map((change, index) => (
-              <div key={`l-${index}`} className="text-foreground">
-                {CHANGE_VERB[stringField(change, "operation") ?? ""] ?? "Changed"} link{" "}
-                {humanize(stringField(change, "linkId")) || stringField(change, "linkId")}
-              </div>
-            ))}
-          </div>
-        </div>
       ) : null}
 
       {params.length > 0 ? (

@@ -10,6 +10,7 @@ import {
   Sixb,
   type SixbOptions,
 } from "@sixb/core"
+import type { StableEventEnvelope } from "@sixb/core/internal/events"
 import { parseSubscriptionMessage } from "../src/routes/ws/events"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -189,20 +190,9 @@ describe("/ws/events subscriptions", () => {
       try {
         expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
 
-        const [stored] = await sixb.events.append({
-          events: [
-            {
-              type: "telemetry.appended",
-              payload: {
-                objectTypeId: "device",
-                objectId: "fan-1",
-                propertyId: "rpm",
-                value: 1200,
-                at: "2026-02-18T10:00:10.000Z",
-              },
-            },
-          ],
-        })
+        const [stored] = await sixb.events.publishEnvelopes([
+          telemetryEnvelope(sixb.id, "fan-1", 1200, "2026-02-18T10:00:10.000Z"),
+        ])
 
         await expectNoWsMessage(ws)
 
@@ -260,34 +250,12 @@ describe("/ws/events subscriptions", () => {
       try {
         expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
 
-        const [matching] = await sixb.events.append({
-          events: [
-            {
-              type: "telemetry.appended",
-              payload: {
-                objectTypeId: "device",
-                objectId: "fan-1",
-                propertyId: "rpm",
-                value: 1200,
-                at: "2026-02-18T10:00:10.000Z",
-              },
-            },
-          ],
-        })
-        await sixb.events.append({
-          events: [
-            {
-              type: "telemetry.appended",
-              payload: {
-                objectTypeId: "device",
-                objectId: "fan-2",
-                propertyId: "rpm",
-                value: 800,
-                at: "2026-02-18T10:00:11.000Z",
-              },
-            },
-          ],
-        })
+        const [matching] = await sixb.events.publishEnvelopes([
+          telemetryEnvelope(sixb.id, "fan-1", 1200, "2026-02-18T10:00:10.000Z"),
+        ])
+        await sixb.events.publishEnvelopes([
+          telemetryEnvelope(sixb.id, "fan-2", 800, "2026-02-18T10:00:11.000Z"),
+        ])
 
         ws.send(
           JSON.stringify({
@@ -533,4 +501,31 @@ function decodeWsData(value: unknown): string {
   }
 
   return String(value)
+}
+
+function telemetryEnvelope(
+  projectId: string,
+  objectId: string,
+  value: number,
+  at: string
+): StableEventEnvelope {
+  return {
+    id: `telemetry-${objectId}-${at}`,
+    schemaVersion: 1,
+    projectId,
+    occurredAt: at,
+    origin: { kind: "runtime", requestId: `seed-${objectId}-${at}` },
+    commitId: `commit-${objectId}-${at}`,
+    commitOrdinal: 0,
+    type: "telemetry.appended",
+    topic: "telemetry",
+    partitionKey: `device:${objectId}:rpm`,
+    payload: {
+      objectTypeId: "device",
+      objectId,
+      propertyId: "rpm",
+      value,
+      at,
+    },
+  }
 }

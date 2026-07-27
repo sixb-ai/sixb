@@ -22,6 +22,7 @@ import {
   resolveEffectiveLink,
   resolveEffectiveObject,
 } from "../effective/resolve"
+import { isKnownLinkRef } from "./read-set"
 export interface WorkingObject {
   ref: OntologyObjectRef
   source: MaterializationObjectState["source"]
@@ -148,6 +149,7 @@ export function validateWorkingCardinality(
     })
   }
   for (const working of links.values()) {
+    if (!isKnownLinkRef(ontology, working.ref)) continue
     const scope = linkScopeKey(working.ref.source, working.ref.linkId)
     const state = effectiveByScope.get(scope)
     if (!state) continue

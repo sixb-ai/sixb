@@ -122,20 +122,6 @@ describe("action wait helpers", () => {
       phase: "effects",
       startedAt: "2026-06-29T12:00:01.000Z",
       finishedAt: "2026-06-29T12:00:02.000Z",
-      commit: {
-        committedAt: "2026-06-29T12:00:01.500Z",
-        diff: {
-          objects: [
-            {
-              objectTypeId: "Quote",
-              primaryId: "q_123",
-              operation: "update",
-              changedProperties: ["status"],
-            },
-          ],
-          links: [],
-        },
-      },
     })
     const { client, requests } = createTestClient(async (request) => {
       const url = new URL(request.url)

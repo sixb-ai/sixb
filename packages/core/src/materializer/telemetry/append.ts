@@ -374,6 +374,7 @@ async function executeTelemetryTransaction(
     commitId: command.identity.commitId,
     created: true,
     eventCount,
+    committedAt: command.identity.committedAt,
     ...counts,
   }
   return finalizeTelemetryMaterialization(

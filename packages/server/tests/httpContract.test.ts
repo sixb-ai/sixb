@@ -517,22 +517,6 @@ describe("SixbServer HTTP contract", () => {
       completedAt: new Date("2026-02-18T09:12:02.000Z"),
       result: { externalId: "ext_123" },
     })
-    await sixb.storage.actionRuns!.recordCommit({
-      id: "act_audit_previous",
-      projectId: "contract-project",
-      committedAt: new Date("2026-02-18T09:12:03.000Z"),
-      diff: {
-        objects: [
-          {
-            objectTypeId: "device",
-            primaryId: "fan-1",
-            operation: "update",
-            changedProperties: ["label"],
-          },
-        ],
-        links: [],
-      },
-    })
     await sixb.storage.actionRuns!.recordEffects({
       id: "act_audit_previous",
       projectId: "contract-project",
@@ -2077,20 +2061,6 @@ describe("SixbServer HTTP contract", () => {
           status: "succeeded",
           completedAt: "2026-02-18T09:12:02.000Z",
           result: { externalId: "ext_123" },
-        },
-        commit: {
-          committedAt: "2026-02-18T09:12:03.000Z",
-          diff: {
-            objects: [
-              {
-                objectTypeId: "device",
-                primaryId: "fan-1",
-                operation: "update",
-                changedProperties: ["label"],
-              },
-            ],
-            links: [],
-          },
         },
         effects: {
           status: "failed",

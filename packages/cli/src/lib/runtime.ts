@@ -87,11 +87,12 @@ export async function stopSixbProviders(sixb: LoadedSixb): Promise<void> {
   await stopQuietly(() => flushSixbErrors(sixb))
   await stopQuietly(() => sixb.disconnectConnectors())
   await stopQuietly(() => closeProvider(sixb.queues))
+  // Stop tracked outbox publication before closing the storage it claims from.
+  await stopQuietly(() => sixb.closeBroker())
   await stopQuietly(() => closeProvider(sixb.storage))
   await stopQuietly(() => closeProvider(sixb.lakeStorage))
   await stopQuietly(() => closeProvider(sixb.blobStorage))
   await stopQuietly(() => sixb.closeLogger())
-  await stopQuietly(() => sixb.closeBroker())
 }
 
 export async function startRulesRuntime(sixb: LoadedSixb): Promise<RunningRulesRuntime> {

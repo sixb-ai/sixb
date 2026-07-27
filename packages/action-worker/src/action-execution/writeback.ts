@@ -1,5 +1,6 @@
 import type { ActionReadObjectSetSource, JsonValue } from "@sixb/core"
 import { assertJsonValue, cloneJsonValue, isObjectActionDefinition } from "@sixb/core"
+import type { ActionReadRecorder } from "@sixb/core/internal/actions"
 import { createActionReadFacade } from "@sixb/core/internal/actions"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { toActionRunFailure } from "../normalize"
@@ -16,6 +17,7 @@ export async function runWritebackPhase(
     readonly run: ActionRunRecord
     readonly baseContext: BasePhaseContext
     readonly objectTarget: LoadedObjectTarget | null
+    readonly reads: ActionReadRecorder
     readonly updateActiveRun: UpdateActiveRun
   }
 ): Promise<{ run: ActionRunRecord; value: JsonValue | undefined }> {
@@ -38,9 +40,17 @@ export async function runWritebackPhase(
   try {
     // Reads are side-effect-free, so the writeback phase can safely enrich its
     // external payload from related objects (links, traversals) before the edit
-    // batch exists. This mirrors the read facade the edits phase receives.
+    // batch exists. They share the edits phase's recorder, so a decision made here
+    // against state that changed before the commit is caught by the same CAS.
     const read = createActionReadFacade(
-      (objectType) => input.runtime.sixb.objects(objectType) as ActionReadObjectSetSource
+      (objectType) => input.runtime.sixb.objects(objectType) as ActionReadObjectSetSource,
+      {
+        recorder: input.reads,
+        resolveLinkIds: (objectTypeId) =>
+          input.runtime.sixb
+            .resolveObjectType(objectTypeId)
+            .links.map((definition) => definition.id),
+      }
     )
     const rawResult = isObjectActionDefinition(input.action)
       ? await handler({

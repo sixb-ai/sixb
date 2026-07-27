@@ -4,6 +4,26 @@ The Materializer turns source assertions, managed edits, and telemetry points in
 Ontology state. It owns semantic planning and commit orchestration; storage providers own durable
 state and atomic application.
 
+## Ingresses
+
+```text
+projection replacement  -> projections.replace
+Action edits            -> edits.commit  (mode: "atomic",   origin: action)
+runtime object/link     -> edits.commit  (mode: "atomic" | "continue", origin: runtime)
+runtime telemetry       -> telemetry.append (origin: telemetry/runtime)
+```
+
+`Sixb` constructs one Materializer and threads it through its internal runtime context, so the typed
+`objects(...)` SDK, the dynamic `Sixb` methods, and the Action worker all commit through the same
+engine. Runtime single calls are atomic; runtime batches use `continue` mode and map per-item
+outcomes back to caller positions. No ingress appends domain events or writes object, link, or
+timeseries providers directly.
+
+Committed facts are published from the transactional outbox after the commit resolves.
+`OntologyOutboxDispatcher` owns that protocol: ingresses call `notify()` for prompt, non-blocking
+in-process delivery, and a process may call `start()` to host the durable poll loop. Publication is
+best effort — delivery may lag, but a committed fact is never lost.
+
 ## Common commit pipeline
 
 ```text
@@ -15,7 +35,7 @@ normalize + validate intent
   -> diff against committed state
   -> stage deterministic work
   -> apply work in dependency order
-  -> write ordered outbox events
+  -> write outbox events with stable commit ordinals
   -> finalize ontology commit atomically
   -> advance a run resume checkpoint when required
 ```

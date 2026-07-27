@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { Storage } from "@sixb/core"
+import type { JsonValue, Storage } from "@sixb/core"
 import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "@sixb/core/internal/events"
 import { type ActionRunStorage, StorageTransactionError } from "@sixb/core/storage"
+import { createStoredLinkMutationEvent, createStoredObjectMutationEvent } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -116,24 +117,17 @@ describe("PostgresStorage.transaction", () => {
 function objectEvent(
   id: string,
   primaryId: string,
-  properties: Record<string, unknown>
+  properties: Record<string, JsonValue>
 ): StoredObjectMutationEvent {
-  return {
+  return createStoredObjectMutationEvent({
     id,
     cursor: id,
-    schemaVersion: 1,
     projectId: "my-app",
-    type: "object.created",
-    topic: "objects",
-    partitionKey: `Room:${primaryId}`,
-    payload: {
-      objectTypeId: "Room",
-      primaryId,
-      properties,
-      propertyChanges: {},
-    },
     occurredAt: "2026-06-17T10:00:00.000Z",
-  }
+    objectTypeId: "Room",
+    primaryId,
+    properties,
+  })
 }
 
 function requireActionRuns(tx: Storage): ActionRunStorage {
@@ -144,22 +138,15 @@ function requireActionRuns(tx: Storage): ActionRunStorage {
 }
 
 function linkEvent(id: string, sourceId: string, targetId: string): StoredLinkMutationEvent {
-  return {
+  return createStoredLinkMutationEvent({
     id,
     cursor: id,
-    schemaVersion: 1,
     projectId: "my-app",
-    type: "link.created",
-    topic: "links",
-    partitionKey: `Room:${sourceId}:neighbour`,
-    payload: {
-      sourceTypeId: "Room",
-      sourceId,
-      linkId: "neighbour",
-      targetTypeId: "Room",
-      targetId,
-      propertyChanges: {},
-    },
     occurredAt: "2026-06-17T10:00:00.000Z",
-  }
+    sourceTypeId: "Room",
+    sourceId,
+    linkId: "neighbour",
+    targetTypeId: "Room",
+    targetId,
+  })
 }

@@ -6,12 +6,7 @@ import { Navigate, useParams } from "react-router-dom"
 import { DataPanel, ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import { useActionLiveUpdates } from "../features/actions/hooks/useActionLiveUpdates"
 import { actionRunFileContentUrl } from "../lib/files"
-import {
-  ActionRunDiffSummary,
-  ActionRunMetaGrid,
-  ActionRunStatusBadge,
-  formatSubject,
-} from "./ActionsPage"
+import { ActionRunMetaGrid, ActionRunStatusBadge, formatSubject } from "./ActionsPage"
 
 export function ActionRunDetailPage() {
   const { runId = "" } = useParams()
@@ -90,19 +85,6 @@ export function ActionRunDetailPage() {
           </CardContent>
         </Card>
       </div>
-
-      <Card className="p-0">
-        <CardContent className="space-y-3 p-5">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Local commit
-          </p>
-          {run.commit ? (
-            <ActionRunDiffSummary diff={run.commit.diff} />
-          ) : (
-            <p className="text-sm text-muted-foreground">No local commit recorded.</p>
-          )}
-        </CardContent>
-      </Card>
 
       <Card className="p-0">
         <CardContent className="p-5">

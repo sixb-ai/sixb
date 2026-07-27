@@ -3,10 +3,9 @@ import type { ActionRunRecord } from "@sixb/core/storage"
 import { isTerminalActionRun } from "@sixb/core/storage"
 import { executeActionPhases } from "./action-execution/phases"
 import {
-  canResumeRunningRun,
   failedResult,
-  failRedeliveredRunningRun,
   requireFinishedAt,
+  resolveRedeliveredRunningRun,
 } from "./action-execution/results"
 import { ActionWorkerError } from "./errors"
 import { throwIfAborted, toActionRunFailure } from "./normalize"
@@ -18,7 +17,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
 
   throwIfAborted(signal)
 
-  const existingRun = await runtime.actionRunsStorage.getById({
+  let existingRun = await runtime.actionRunsStorage.getById({
     projectId: runtime.id,
     id: job.id,
   })
@@ -56,8 +55,10 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     return failedResult(job.id, job.actionId, finishedRun, failure)
   }
 
-  if (existingRun.status === "running" && !canResumeRunningRun(existingRun)) {
-    return failRedeliveredRunningRun(input, existingRun)
+  if (existingRun.status === "running") {
+    const resolution = await resolveRedeliveredRunningRun(input, existingRun)
+    if (resolution.kind === "finished") return resolution.result
+    existingRun = resolution.run
   }
   if (existingRun.status !== "queued" && existingRun.status !== "running") {
     throw new ActionWorkerError(

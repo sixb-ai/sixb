@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import type { ObjectType } from "../src"
-import { defineObjectType, link, OntologyValidationError, prop, Sixb } from "../src"
+import {
+  defineObjectType,
+  link,
+  MaterializationValidationError,
+  OntologyValidationError,
+  prop,
+  Sixb,
+} from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 // ── Fixtures ────────────────────────────────────────────────
@@ -685,7 +692,7 @@ describe("upsert with inherited properties", () => {
         // @ts-expect-error intentionally missing required 'name' property
         properties: { id: "hvac-1", capacity: 100 },
       })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toBeInstanceOf(MaterializationValidationError)
     await expect(
       sixb.objects(HVACEquipment).upsert({
         // @ts-expect-error intentionally missing required 'name' property

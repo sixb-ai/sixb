@@ -3,7 +3,9 @@
  * (unknown property, missing required, invalid value, invalid target type, etc.).
  */
 export class OntologyValidationError extends Error {
-  readonly name = "OntologyValidationError"
+  // Widened from the literal so subclasses (notably MaterializationValidationError) can name
+  // themselves while still being caught by `instanceof OntologyValidationError`.
+  readonly name: string = "OntologyValidationError"
 }
 
 export function formatUnknownObjectTypeMessage(objectTypeId: string): string {

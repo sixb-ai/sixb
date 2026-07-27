@@ -7,6 +7,7 @@ export {
   isMaterializationConflictError,
   MaterializationCancellationError,
   MaterializationConflictError,
+  MaterializationObjectNotFoundError,
   MaterializationValidationError,
 } from "../materialization/errors"
 export type {

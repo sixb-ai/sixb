@@ -55,8 +55,7 @@ const batch: Promise<EditBatch> = recordEdits({ runId: "act_1" }, ({ objects }) 
     status: "draft",
   })
   const existingInvoice = objects(Invoice).byId("inv_1")
-  const upsertedInvoice = objects(Invoice).upsert({ id: "inv_upsert" })
-  const upsertedContact = objects(Contact).upsert({ externalId: "contact_1" })
+  const existingContact = objects(Contact).byId("contact_1")
   const customer = objects(Customer).byId("cus_1")
   const payment = objects(Payment).byId("pay_1")
 
@@ -68,32 +67,21 @@ const batch: Promise<EditBatch> = recordEdits({ runId: "act_1" }, ({ objects }) 
   existingInvoice.update({
     status: "sent",
   })
-  upsertedInvoice.update({ status: "sent" })
-  upsertedContact.update({ name: "Ada" })
+  existingContact.update({ name: "Ada" })
 
-  // @ts-expect-error staged upsert requires the actual primary property
-  objects(Invoice).upsert({ status: "draft" })
+  existingInvoice.unset("paidAt")
+  existingInvoice.reset("status", "amount")
+  existingInvoice.restore()
 
-  objects(Invoice).upsert({
-    id: "inv_bad_amount",
-    // @ts-expect-error amount expects a number
-    amount: "120",
-  })
+  // @ts-expect-error primary properties cannot be unset
+  existingInvoice.unset("id")
 
-  objects(Invoice).upsert({
-    id: "inv_bad_telemetry",
-    // @ts-expect-error telemetry properties cannot be upserted
-    temperature: 22,
-  })
+  // @ts-expect-error telemetry properties are not managed authority
+  existingInvoice.reset("temperature")
 
-  objects(Invoice).upsert({
-    id: "inv_bad_property",
-    // @ts-expect-error Invoice has no bogus property
-    bogus: true,
-  })
+  // @ts-expect-error Invoice has no bogus property
+  existingInvoice.unset("bogus")
 
-  // @ts-expect-error Contact uses externalId as its primary property
-  objects(Contact).upsert({ id: "contact_2" })
   invoice.link(Invoice.l.customer, customer, {
     properties: {
       role: "billTo",
@@ -101,27 +89,12 @@ const batch: Promise<EditBatch> = recordEdits({ runId: "act_1" }, ({ objects }) 
     },
   })
   invoice.unlink(Invoice.l.customer, customer)
-  invoice.setLink(Invoice.l.customer, customer, {
-    properties: {
-      role: "shipTo",
-      since: new Date("2026-06-02T10:00:00.000Z"),
-    },
-  })
-  invoice.clearLink(Invoice.l.customer)
-  payment.setLink(Payment.l.invoice, invoice)
-  payment.clearLink(Payment.l.invoice)
-
-  // @ts-expect-error setLink only accepts cardinality-one links
-  invoice.setLink(Invoice.l.reviewers, customer)
-
-  // @ts-expect-error clearLink only accepts cardinality-one links
-  invoice.clearLink(Invoice.l.reviewers)
+  invoice.resetLink(Invoice.l.customer, customer)
+  payment.resetLink(Payment.l.invoice, invoice)
+  invoice.unlink(Invoice.l.reviewers, customer)
 
   // @ts-expect-error Invoice.customer must target Customer refs
-  invoice.setLink(Invoice.l.customer, payment, { properties: { role: "billTo" } })
-
-  // @ts-expect-error Invoice.customer requires link properties when assigning
-  invoice.setLink(Invoice.l.customer, customer)
+  invoice.resetLink(Invoice.l.customer, payment)
 
   payment.delete()
 

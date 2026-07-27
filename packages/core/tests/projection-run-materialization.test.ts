@@ -242,7 +242,7 @@ describe("action run materialization correlation", () => {
     const storage = new InMemoryActionRunStorage()
 
     await expect(
-      storage.assertMaterializationRun({
+      storage.lockForMaterialization({
         projectId: "project",
         actionId: "sendQuote",
         runId: "action-run",
@@ -257,7 +257,7 @@ describe("action run materialization correlation", () => {
       idempotencyKey: "action:action-run",
     })
     await expect(
-      storage.assertMaterializationRun({
+      storage.lockForMaterialization({
         projectId: "project",
         actionId: "sendQuote",
         runId: "action-run",
@@ -266,23 +266,23 @@ describe("action run materialization correlation", () => {
     await storage.start({ id: "action-run", projectId: "project" })
 
     await expect(
-      storage.assertMaterializationRun({
+      storage.lockForMaterialization({
         projectId: "project",
         actionId: "different-action",
         runId: "action-run",
       })
     ).rejects.toThrow("does not belong")
     await expect(
-      storage.assertMaterializationRun({
+      storage.lockForMaterialization({
         projectId: "project",
         actionId: "sendQuote",
         runId: "action-run",
       })
-    ).resolves.toBeUndefined()
+    ).resolves.toMatchObject({ id: "action-run", status: "running" })
 
     await storage.finish({ id: "action-run", projectId: "project", status: "succeeded" })
     await expect(
-      storage.assertMaterializationRun({
+      storage.lockForMaterialization({
         projectId: "project",
         actionId: "sendQuote",
         runId: "action-run",

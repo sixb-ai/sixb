@@ -11,6 +11,7 @@ import { shareSixbErrorReporter } from "../../error-reporting/capability"
 import type { ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
+import { shareOntologyMutationRuntime } from "../../runtime/ontology-mutations"
 import type {
   ObjectSet,
   ObjectSetListInput,
@@ -73,6 +74,7 @@ export function createObjectSet<
     objectType,
     primaryPropertyId,
   }
+  shareOntologyMutationRuntime(params, resolvedCtx)
   shareSixbErrorReporter(params, resolvedCtx)
 
   const objectSet = {
@@ -87,13 +89,7 @@ export function createObjectSet<
     },
 
     upsert: async (input: { properties: Record<string, unknown> }) => {
-      const primaryId = input.properties[primaryPropertyId]
-      if (primaryId === undefined || primaryId === null) {
-        throw new OntologyValidationError(
-          `Missing primary property '${primaryPropertyId}' in upsert for '${objectType.id}'`
-        )
-      }
-      const row = await upsertObjectLeaf(resolvedCtx, String(primaryId), input.properties)
+      const row = await upsertObjectLeaf(resolvedCtx, input.properties)
       return row as unknown as TwinObject<TObjectType, TValueTypes>
     },
 

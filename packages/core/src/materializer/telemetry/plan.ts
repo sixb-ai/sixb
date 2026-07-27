@@ -1,5 +1,5 @@
 import { stableJsonStringify } from "../../json"
-import { MaterializationValidationError } from "../../materialization/errors"
+import { MaterializationObjectNotFoundError } from "../../materialization/errors"
 import type {
   OntologyMaterializationOrigin,
   OntologyObjectRef,
@@ -13,6 +13,7 @@ import {
   telemetryPointSortKey,
 } from "../../materialization/refs"
 import type {
+  MaterializationObjectState,
   MaterializationPlanWorkItem,
   MaterializationSession,
   MaterializationWorkRecord,
@@ -73,8 +74,26 @@ export async function planTelemetryAppend(
 ): Promise<TelemetryPlanCounts> {
   const counts = emptyTelemetryCounts()
   const planContext = { input, identity, origin }
+  const objects = await loadTelemetryObjects(context, storage, session, input.points)
+  const existingPoints = await loadExistingPoints(context, storage, session, input.points)
   for (const group of telemetryObjectGroups(input.points)) {
-    await planTelemetryObject(context, storage, session, planContext, group, counts)
+    const storedObject = objects.get(objectRefKey(group.objectRef))
+    if (!storedObject?.effective) {
+      throw new MaterializationObjectNotFoundError(
+        group.objectRef.objectTypeId,
+        group.objectRef.primaryId
+      )
+    }
+    await planTelemetryObject(
+      context,
+      storage,
+      session,
+      planContext,
+      group,
+      workingObjectFromState(storedObject),
+      existingPoints,
+      counts
+    )
   }
   return counts
 }
@@ -101,23 +120,16 @@ async function planTelemetryObject(
   session: MaterializationSession,
   planContext: TelemetryPlanContext,
   group: TelemetryObjectGroup,
+  working: WorkingObject,
+  existingPoints: ReadonlyMap<string, StoredTelemetryPoint>,
   counts: MutableTelemetryPlanCounts
 ): Promise<void> {
-  const working = await loadTelemetryObject(context, storage, session, group.objectRef)
   const latest = new Map(working.latestTelemetry.map((point) => [point.series.propertyId, point]))
 
   for (let start = group.start; start < group.end; start += context.batching.statePageRows) {
     const end = Math.min(group.end, start + context.batching.statePageRows)
     const points = planContext.input.points.slice(start, end)
-    const work = await planTelemetryChunk(
-      context,
-      storage,
-      session,
-      planContext,
-      points,
-      latest,
-      counts
-    )
+    const work = planTelemetryChunk(context, planContext, points, existingPoints, latest, counts)
     await stageWorkBounded(context, storage, session, work)
   }
 
@@ -125,41 +137,32 @@ async function planTelemetryObject(
   await stageTelemetryObjectPlan(context, storage, session, planContext, working, counts)
 }
 
-async function loadTelemetryObject(
+async function loadTelemetryObjects(
   context: MaterializerContext,
   storage: OntologyMaterializationStorage,
   session: MaterializationSession,
-  objectRef: OntologyObjectRef
-): Promise<WorkingObject> {
+  points: readonly TelemetryPointWrite[]
+): Promise<ReadonlyMap<string, MaterializationObjectState>> {
+  const refs = new Map<string, OntologyObjectRef>()
+  for (const point of points) refs.set(objectRefKey(point.series.object), point.series.object)
   const objectState = await loadState(context, storage, session, {
-    objects: [objectRef],
+    objects: [...refs.values()],
     links: [],
     linkScopes: [],
     incidentObjects: [],
     points: [],
   })
-  const storedObject = objectState.objects[0]
-  if (!storedObject) {
-    throw new MaterializationValidationError("Telemetry object state was not loaded.")
-  }
-  if (!storedObject.effective) {
-    throw new MaterializationValidationError(
-      `Cannot append telemetry to missing object '${objectRef.objectTypeId}:${objectRef.primaryId}'.`
-    )
-  }
-  return workingObjectFromState(storedObject)
+  return new Map(objectState.objects.map((object) => [objectRefKey(object.ref), object]))
 }
 
-async function planTelemetryChunk(
-  context: MaterializerContext,
-  storage: OntologyMaterializationStorage,
-  session: MaterializationSession,
+function planTelemetryChunk(
+  context: Pick<MaterializerContext, "projectId">,
   planContext: TelemetryPlanContext,
   points: readonly TelemetryPointWrite[],
+  existingPoints: ReadonlyMap<string, StoredTelemetryPoint>,
   latest: Map<string, StoredTelemetryPoint>,
   counts: MutableTelemetryPlanCounts
-): Promise<MaterializationWorkRecord[]> {
-  const existingPoints = await loadExistingPoints(context, storage, session, points)
+): MaterializationWorkRecord[] {
   const work: MaterializationWorkRecord[] = []
   for (const point of points) {
     work.push(...planTelemetryPoint(context, planContext, point, existingPoints, latest, counts))

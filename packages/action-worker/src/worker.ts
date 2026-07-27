@@ -1,6 +1,7 @@
 import type { ActionDefinition, Queues, Storage } from "@sixb/core"
 import type { EventsRuntime } from "@sixb/core/internal/events"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
+import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ActionRunRequestedQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
@@ -174,6 +175,7 @@ function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
     logs: sixb.logs,
     storage: sixb.storage,
     actionRunsStorage,
+    ontologyMutations: getOntologyMutationRuntime(sixb),
     sixb,
     getActionById(actionId) {
       return sixb.getActionById(actionId)

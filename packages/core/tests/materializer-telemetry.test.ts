@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage, InMemoryTimeseriesStorage } from "../src"
+import { InMemoryStorage, InMemoryTimeseriesStorage, type JsonValue } from "../src"
 import type { StoredTelemetryAppendedEvent } from "../src/events"
 import type { Storage, StorageTransactionOptions } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
+import { createStoredTelemetryAppendedEvent } from "../src/testing"
 import {
   claimProjectionExecution,
   createMaterializerFixture,
@@ -223,6 +224,36 @@ describe("ontology materializer telemetry", () => {
     expect(buffers.get("work.stage")).toBeLessThanOrEqual(5)
     expect(buffers.get("apply.chunk")).toBeLessThanOrEqual(5)
     expect(maxCoreExistingPoints).toBeLessThanOrEqual(3)
+  })
+
+  test("preloads telemetry state with constant reads across batch boundaries", async () => {
+    for (const pointCount of [1, 1_000, 1_001]) {
+      const { materializer, storage } = createMaterializerFixture()
+      await materializer.projections.replace(
+        replacement(`telemetry-read-scale-source-${pointCount}`, "2026-01-01T00:00:00Z", [
+          sourceEntry("one", "one"),
+        ])
+      )
+      let stateReads = 0
+      getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
+        beforeRead(boundary) {
+          if (boundary === "state.read") stateReads += 1
+        },
+      })
+
+      const points = Array.from({ length: pointCount }, (_, index) => ({
+        series,
+        value: index,
+        at: new Date(Date.UTC(2026, 0, 2, 0, 0, index)).toISOString(),
+      }))
+      const result = await materializer.telemetry.append({
+        source: { kind: "runtime", requestId: `telemetry-read-scale-${pointCount}` },
+        points,
+      })
+
+      expect(result.pointsCreated).toBe(pointCount)
+      expect(stateReads).toBe(2)
+    }
   })
 
   test("classifies canonical point create/update/no-op and only derives the latest value", async () => {
@@ -721,24 +752,19 @@ describe("ontology materializer telemetry", () => {
       id: string,
       projectId: string,
       objectTypeId: string,
-      value: unknown
-    ): StoredTelemetryAppendedEvent => ({
-      id,
-      schemaVersion: 1,
-      projectId,
-      type: "telemetry.appended",
-      topic: "telemetry",
-      partitionKey: `${objectTypeId}:c:d`,
-      occurredAt: "2026-01-01T00:00:00.000Z",
-      cursor: id,
-      payload: {
+      value: JsonValue
+    ): StoredTelemetryAppendedEvent =>
+      createStoredTelemetryAppendedEvent({
+        id,
+        cursor: id,
+        projectId,
+        occurredAt: "2026-01-01T00:00:00.000Z",
         objectTypeId,
         objectId: "c",
         propertyId: "d",
         value,
         at: "2026-01-01T00:00:00.000Z",
-      },
-    })
+      })
     await storage.applyTelemetryAppended(event("one", "p:a", "b", { nested: 1 }))
     await storage.applyTelemetryAppended(event("two", "p", "a:b", { nested: 2 }))
 

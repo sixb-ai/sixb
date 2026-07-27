@@ -95,7 +95,11 @@ describe("OntologyOutboxDispatcher", () => {
     await dispatcher.stop()
 
     expect(broker.appended).toHaveLength(1)
-    expect(broker.appended[0]?.records.map((record) => record.idempotencyKey)).toEqual(expectedIds)
+    // Both rows ride one claimed lease. Delivery is at-least-once and commitOrdinal only correlates
+    // facts within a commit; this assertion deliberately pins contents, not broker delivery order.
+    expect(
+      [...(broker.appended[0]?.records ?? [])].map((record) => record.idempotencyKey).sort()
+    ).toEqual([...expectedIds].sort())
     expect(outboxRows(storage).every((row) => row.leaseId === null)).toBe(true)
   })
 
@@ -247,6 +251,52 @@ describe("OntologyOutboxDispatcher", () => {
     await dispatcher.stop()
 
     expect((await events.read()).map(objectPrimaryId)).toEqual(["wake", "poll"])
+  })
+
+  test("settles a poll-loop publication that overlaps a concurrent drain", async () => {
+    // Both ingresses publish, so two batches can be in flight at once. Neither may evict the
+    // other's settlement, or its rows stay leased and are delivered again after lease expiry.
+    const storage = new InMemoryStorage()
+    const broker = new FirstHeldBroker()
+    const events = new EventsRuntime({ projectId: "project", broker })
+    const { materializer } = createMaterializerFixture({ storage })
+    await seedObjectCreated(materializer, "request-poll", "poll")
+
+    const dispatcher = new OntologyOutboxDispatcher({
+      projectId: "project",
+      storage,
+      events,
+      pollIntervalMs: 10,
+      shutdownTimeoutMs: 1_000,
+    })
+    await dispatcher.start()
+    await broker.firstStarted.promise
+
+    // A second commit drains while the poll loop's publication is still awaiting the broker.
+    await seedObjectCreated(materializer, "request-drain", "drain")
+    await dispatcher.drain()
+
+    broker.releaseFirst.resolve()
+    await waitFor(() => outboxRows(storage).every((row) => row.publishedAt !== null))
+    await dispatcher.stop()
+
+    expect(outboxRows(storage).map((row) => row.publishedAt !== null)).toEqual([true, true])
+  })
+
+  test("coalesces drains that arrive while a pass is running", async () => {
+    // A burst of concurrent commits must not each pay for its own sequential claim pass.
+    const storage = new TransactionTrackingStorage()
+    const events = new EventsRuntime({ projectId: "project", broker: new RecordingBroker() })
+    const { materializer } = createMaterializerFixture({ storage })
+    await seedObjectCreated(materializer, "request-burst", "burst")
+
+    const dispatcher = new OntologyOutboxDispatcher({ projectId: "project", storage, events })
+    const before = storage.transactionCount
+    await Promise.all(Array.from({ length: 20 }, () => dispatcher.drain()))
+
+    // One pass for the first caller plus one shared follow-up for everyone who arrived during it.
+    expect(storage.transactionCount - before).toBeLessThanOrEqual(4)
+    expect(outboxRows(storage)[0]?.publishedAt).not.toBeNull()
   })
 
   test("waits for bounded in-flight publication during graceful stop", async () => {
@@ -461,6 +511,24 @@ class FirstHungBroker extends RecordingBroker {
     if (this.calls === 1) {
       this.firstStarted.resolve()
       return new Promise(() => undefined)
+    }
+    return super.append(input)
+  }
+}
+
+/** Holds the first publication open so a second can overlap it. */
+class FirstHeldBroker extends RecordingBroker {
+  readonly firstStarted = deferred<void>()
+  readonly releaseFirst = deferred<void>()
+  private calls = 0
+
+  override async append(
+    input: Parameters<InMemoryBroker["append"]>[0]
+  ): ReturnType<InMemoryBroker["append"]> {
+    this.calls += 1
+    if (this.calls === 1) {
+      this.firstStarted.resolve()
+      await this.releaseFirst.promise
     }
     return super.append(input)
   }

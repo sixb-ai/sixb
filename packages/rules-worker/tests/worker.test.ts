@@ -6,7 +6,7 @@ import {
   InMemoryRulesStorage,
   InMemoryStorage,
 } from "@sixb/core"
-import type { EventDraft, StoredDomainEvent } from "@sixb/core/internal/events"
+import type { StoredDomainEvent, StoredObjectUpdatedEvent } from "@sixb/core/internal/events"
 import { EventsRuntime } from "@sixb/core/internal/events"
 import type { ObjectStorage, RulesStorage, TimeseriesStorage } from "@sixb/core/storage"
 import type { RulesWorkerSixb } from "../src"
@@ -79,19 +79,19 @@ describe("RulesWorker", () => {
   test("worker drains pending evaluations on stop", async () => {
     const rules = new DelayedRulesStorage()
     const events = createEventsRuntime()
+    const storage = createStorage({ rules })
+    await seedCurrentObject(storage, "posted")
     const worker = track(
       new RulesWorker(
         createRuntime({
           events,
-          storage: createStorage({ rules }),
+          storage,
         })
       )
     )
     await worker.start()
 
-    await events.append({
-      events: [objectUpdatedEvent("posted")],
-    })
+    await events.publishEnvelopes([objectUpdatedEvent("posted")])
     await rules.waitForGetActive()
 
     let stopped = false
@@ -114,9 +114,7 @@ describe("RulesWorker", () => {
     await worker.start()
     await worker.stop()
 
-    await events.append({
-      events: [objectUpdatedEvent("posted")],
-    })
+    await events.publishEnvelopes([objectUpdatedEvent("posted")])
     await Bun.sleep(20)
 
     expect(await ruleEventTypes(events)).toEqual([])
@@ -131,24 +129,24 @@ describe("RulesWorker", () => {
 
     try {
       const events = createEventsRuntime()
+      const objects = new ThrowOnceObjectStorage()
+      const storage = createStorage({ objects })
+      await seedCurrentObject(storage, "posted")
+      await seedCurrentObject(storage, "posted", "tx-2")
       const worker = track(
         new RulesWorker(
           createRuntime({
             events,
-            storage: createStorage({ objects: new ThrowOnceObjectStorage() }),
+            storage,
           })
         )
       )
       await worker.start()
 
-      await events.append({
-        events: [objectUpdatedEvent("posted")],
-      })
+      await events.publishEnvelopes([objectUpdatedEvent("posted")])
       await waitFor(() => errors.length === 1)
 
-      await events.append({
-        events: [objectUpdatedEvent("posted", "tx-2")],
-      })
+      await events.publishEnvelopes([objectUpdatedEvent("posted", "tx-2")])
       await worker.stop()
 
       expect(String(errors[0]?.[0])).toContain("[SixbRulesWorker] Evaluation failed:")
@@ -253,9 +251,21 @@ function createStorageWithoutRules(): Storage {
   })
 }
 
-function objectUpdatedEvent(status: string, primaryId = "tx-1"): EventDraft {
+function objectUpdatedEvent(
+  status: string,
+  primaryId = "tx-1"
+): Omit<StoredObjectUpdatedEvent, "cursor"> {
   return {
+    id: `event-${primaryId}-${status}`,
+    schemaVersion: 1,
+    projectId,
+    occurredAt: "2026-05-07T10:00:00.000Z",
+    origin: { kind: "runtime", requestId: `request-${primaryId}-${status}` },
+    commitId: `commit-${primaryId}-${status}`,
+    commitOrdinal: 0,
     type: "object.updated",
+    topic: "objects",
+    partitionKey: `transaction:${primaryId}`,
     payload: {
       objectTypeId: "transaction",
       primaryId,
@@ -263,6 +273,17 @@ function objectUpdatedEvent(status: string, primaryId = "tx-1"): EventDraft {
       propertyChanges: {},
     },
   }
+}
+
+async function seedCurrentObject(
+  storage: Storage,
+  status: string,
+  primaryId = "tx-1"
+): Promise<void> {
+  await storage.objects.applyObjectUpsert({
+    ...objectUpdatedEvent(status, primaryId),
+    cursor: `seed-${primaryId}`,
+  })
 }
 
 async function ruleEventTypes(events: EventsRuntime): Promise<readonly string[]> {

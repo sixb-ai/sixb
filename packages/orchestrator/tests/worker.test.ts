@@ -17,7 +17,11 @@ import {
   prop,
   SYSTEM_PRINCIPAL,
 } from "@sixb/core"
-import { type EventDraft, EventsRuntime } from "@sixb/core/internal/events"
+import {
+  type EventDraft,
+  EventsRuntime,
+  type StableEventEnvelope,
+} from "@sixb/core/internal/events"
 import { compileRoutes } from "../src/compile-routes"
 import type { OrchestratorRoutes } from "../src/types"
 import { OrchestratorWorker } from "../src/worker"
@@ -80,9 +84,22 @@ function makeScheduleTriggeredEvent(
   }
 }
 
-function makeInvoiceUpdatedEvent(amountBefore: number, amountAfter: number): EventDraft {
+function makeInvoiceUpdatedEvent(
+  amountBefore: number,
+  amountAfter: number,
+  projectId = PROJECT_ID
+): StableEventEnvelope {
   return {
+    id: `invoice-updated-${projectId}-${amountBefore}-${amountAfter}`,
+    schemaVersion: 1,
+    projectId,
+    occurredAt: "2026-04-18T02:00:00.000Z",
+    origin: { kind: "runtime", requestId: `request-${amountBefore}-${amountAfter}` },
+    commitId: `commit-${amountBefore}-${amountAfter}`,
+    commitOrdinal: 0,
     type: "object.updated",
+    topic: "objects",
+    partitionKey: "Invoice:inv-1",
     payload: {
       objectTypeId: "Invoice",
       primaryId: "inv-1",
@@ -196,15 +213,13 @@ describe("OrchestratorWorker", () => {
     const queues = new InMemoryQueues()
     await startWorker(eventRuntime, queues, eventWorkflowRoutes())
 
-    await eventRuntime.append({ events: [makeInvoiceUpdatedEvent(600, 700)] })
+    await eventRuntime.publishEnvelopes([makeInvoiceUpdatedEvent(600, 700)])
     await Bun.sleep(50)
     expect(
       await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "no-edge" })
     ).toHaveLength(0)
 
-    const [sourceEvent] = await eventRuntime.append({
-      events: [makeInvoiceUpdatedEvent(400, 700)],
-    })
+    const [sourceEvent] = await eventRuntime.publishEnvelopes([makeInvoiceUpdatedEvent(400, 700)])
 
     await waitFor(async () => {
       const claimed = await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "edge" })
@@ -227,9 +242,7 @@ describe("OrchestratorWorker", () => {
   test("retained event schedules catch up when the orchestrator starts", async () => {
     const eventRuntime = createEvents()
     const queues = new InMemoryQueues()
-    const [sourceEvent] = await eventRuntime.append({
-      events: [makeInvoiceUpdatedEvent(400, 700)],
-    })
+    const [sourceEvent] = await eventRuntime.publishEnvelopes([makeInvoiceUpdatedEvent(400, 700)])
 
     await startWorker(eventRuntime, queues, eventWorkflowRoutes())
 
@@ -246,7 +259,7 @@ describe("OrchestratorWorker", () => {
   test("a transient event-schedule enqueue failure is replayed", async () => {
     const eventRuntime = createEvents()
     const queues = new InMemoryQueues()
-    await eventRuntime.append({ events: [makeInvoiceUpdatedEvent(400, 700)] })
+    await eventRuntime.publishEnvelopes([makeInvoiceUpdatedEvent(400, 700)])
 
     let enqueueAttempts = 0
     const enqueue = queues.workflows.enqueue.bind(queues.workflows)
@@ -458,7 +471,7 @@ describe("OrchestratorWorker", () => {
     const queues = new InMemoryQueues()
     await startWorker(eventRuntime, queues, eventWorkflowRoutes())
 
-    await otherEvents.append({ events: [makeInvoiceUpdatedEvent(400, 700)] })
+    await otherEvents.publishEnvelopes([makeInvoiceUpdatedEvent(400, 700, "other-project")])
     await Bun.sleep(50)
 
     expect(

@@ -14,8 +14,10 @@ import {
   prop,
   Sixb,
 } from "@sixb/core"
+import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import type { EventsRuntime } from "@sixb/core/internal/events"
+import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { ActionRunParams, ObjectRow } from "@sixb/core/storage"
 import { ActionWorkerError } from "../src/errors"
 import { runActionJob } from "../src/run-action-job"
@@ -85,6 +87,7 @@ function createContext(sixb: TestSixb): ActionWorkerContext {
     events: sixb.events,
     storage: sixb.storage,
     actionRunsStorage: sixb.storage.actionRuns!,
+    ontologyMutations: getOntologyMutationRuntime(sixb),
     sixb: sixb as unknown as ActionWorkerContext["sixb"],
     getActionById(actionId) {
       return sixb.getActionById(actionId)
@@ -186,14 +189,15 @@ describe("runActionJob", () => {
     const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
     expect(run?.status).toBe("succeeded")
     expect(run?.phase).toBe("commit")
-    expect(run?.commit?.diff.objects).toEqual([
-      {
-        objectTypeId: "Device",
-        primaryId: "device-1",
-        operation: "update",
-        changedProperties: ["status"],
-      },
+    const commit = await findActionEditCommit({
+      storage: sixb.storage,
+      projectId: sixb.id,
+      runId: "act_1",
+    })
+    expect(commit?.changes.objects.map((change) => [change.kind, change.ref.primaryId])).toEqual([
+      ["updated", "device-1"],
     ])
+    expect(Object.keys(commit?.changes.objects[0]?.propertyChanges ?? {})).toEqual(["status"])
 
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("ready")
@@ -242,7 +246,9 @@ describe("runActionJob", () => {
 
     const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
     expect(run?.writeback?.status).toBe("failed")
-    expect(run?.commit).toBeUndefined()
+    expect(
+      await findActionEditCommit({ storage: sixb.storage, projectId: sixb.id, runId: "act_1" })
+    ).toBeNull()
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("old")
   })
@@ -375,52 +381,52 @@ describe("runActionJob", () => {
     expect(created?.properties.status).toBe("created")
   })
 
-  test("resolves staged upserts inside the action commit", async () => {
-    const syncDevice = defineAction("syncDevice")
-      .params({ id: param("string"), name: param("string"), status: param("string") })
+  test("separates an independent create from a later managed patch", async () => {
+    const createDevice = defineAction("createDevice")
+      .params({ id: param("string"), name: param("string") })
       .edits(({ objects, params }) => {
-        objects(Device).upsert({
-          id: params.id,
-          name: params.name,
-          status: params.status,
-        })
+        objects(Device).create({ id: params.id, name: params.name, status: "created" })
       })
-    const sixb = createSixb([syncDevice])
+    const renameDevice = defineAction("renameDevice")
+      .params({ id: param("string"), name: param("string") })
+      .edits(({ objects, params }) => {
+        objects(Device).byId(params.id).update({ name: params.name, status: "updated" })
+      })
+    const sixb = createSixb([createDevice as ActionDefinition, renameDevice as ActionDefinition])
 
     await queueActionRun(sixb, {
-      id: "act_upsert_create",
-      actionId: "syncDevice",
+      id: "act_create",
+      actionId: "createDevice",
       subject: { kind: "none" },
-      params: { id: "device-1", name: "Device 1", status: "created" },
+      params: { id: "device-1", name: "Device 1" },
     })
     const created = await runActionJob({
       runtime: createContext(sixb),
-      job: { id: "act_upsert_create", actionId: "syncDevice" },
+      job: { id: "act_create", actionId: "createDevice" },
     })
 
     await queueActionRun(sixb, {
-      id: "act_upsert_update",
-      actionId: "syncDevice",
+      id: "act_rename",
+      actionId: "renameDevice",
       subject: { kind: "none" },
-      params: { id: "device-1", name: "Renamed Device", status: "updated" },
+      params: { id: "device-1", name: "Renamed Device" },
     })
     const updated = await runActionJob({
       runtime: createContext(sixb),
-      job: { id: "act_upsert_update", actionId: "syncDevice" },
+      job: { id: "act_rename", actionId: "renameDevice" },
     })
 
     expect(created.status).toBe("succeeded")
     expect(updated.status).toBe("succeeded")
-    const createdRun = await sixb.storage.actionRuns!.getById({
-      projectId: sixb.id,
-      id: "act_upsert_create",
-    })
-    const updatedRun = await sixb.storage.actionRuns!.getById({
-      projectId: sixb.id,
-      id: "act_upsert_update",
-    })
-    expect(createdRun?.commit?.diff.objects[0]?.operation).toBe("create")
-    expect(updatedRun?.commit?.diff.objects[0]?.operation).toBe("update")
+    const commits = await Promise.all(
+      ["act_create", "act_rename"].map((runId) =>
+        findActionEditCommit({ storage: sixb.storage, projectId: sixb.id, runId })
+      )
+    )
+    expect(commits.map((commit) => commit?.changes.objects[0]?.kind)).toEqual([
+      "created",
+      "updated",
+    ])
     expect((await deviceObjects(sixb).get("device-1"))?.properties).toMatchObject({
       id: "device-1",
       name: "Renamed Device",
@@ -433,20 +439,38 @@ describe("runActionJob", () => {
     expect(mutationEvents.map((event) => event.type)).toEqual(["object.created", "object.updated"])
   })
 
-  test("assigns and clears cardinality-one links without handler-side reads", async () => {
+  test("reassigns and clears a cardinality-one link from observed state", async () => {
     const assignSensor = defineAction("assignSensor")
       .on(Device)
       .params({ sensorId: param("string") })
-      .edits(({ objects, params, subject }) => {
-        objects(Device)
+      .edits(async ({ objects, read, params, subject }) => {
+        const device = objects(Device).byId(subject.primaryId)
+        const current = await read
+          .objects(Device)
           .byId(subject.primaryId)
-          .setLink(Device.l.sensor, objects(Sensor).byId(params.sensorId))
+          .listLinks(Device.l.sensor)
+        for (const linkRow of current) {
+          device.unlink(Device.l.sensor, {
+            objectTypeId: Sensor.id,
+            primaryId: linkRow.targetId,
+          })
+        }
+        device.link(Device.l.sensor, { objectTypeId: Sensor.id, primaryId: params.sensorId })
       })
     const clearSensor = defineAction("clearSensor")
       .on(Device)
       .params({})
-      .edits(({ objects, subject }) => {
-        objects(Device).byId(subject.primaryId).clearLink(Device.l.sensor)
+      .edits(async ({ objects, read, subject }) => {
+        const device = objects(Device).byId(subject.primaryId)
+        for (const linkRow of await read
+          .objects(Device)
+          .byId(subject.primaryId)
+          .listLinks(Device.l.sensor)) {
+          device.unlink(Device.l.sensor, {
+            objectTypeId: Sensor.id,
+            primaryId: linkRow.targetId,
+          })
+        }
       })
     const sixb = createSixb(
       [assignSensor as ActionDefinition, clearSensor as ActionDefinition],
@@ -498,8 +522,8 @@ describe("runActionJob", () => {
       types: ["link.created", "link.deleted"],
     })
     expect(assignmentEvents.slice(-2).map((event) => event.type)).toEqual([
-      "link.deleted",
       "link.created",
+      "link.deleted",
     ])
 
     await queueActionRun(sixb, {
@@ -655,6 +679,64 @@ describe("runActionJob", () => {
     expect(updated?.properties.status).toBe("Sensor 1")
   })
 
+  test("fences a writeback read against a change made before the commit", async () => {
+    // A writeback handler that reads state, calls an external system, and then commits must not
+    // succeed against state that changed while the external call was in flight. The read is of a
+    // non-subject object, so only the writeback recorder can catch it.
+    let duringExternalCall: (() => Promise<void>) | null = null
+    const captureSensorName = defineAction("captureSensorName")
+      .on(Device)
+      .params({})
+      .writeback(async ({ read, target }) => {
+        const links = await read.objects(Device).byId(target.primaryId).listLinks(Device.l.sensor)
+        const sensor = await read.objects(Sensor).byId(links[0].targetId).get()
+        await duringExternalCall?.()
+        return { sensorName: String(sensor?.properties.name ?? "unknown") }
+      })
+      .edits(({ objects, subject, writeback }) => {
+        objects(Device).byId(subject.primaryId).update({ status: writeback.sensorName })
+      })
+
+    const sixb = createSixb([captureSensorName], [Device, Sensor])
+    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
+    await sixb.upsertObject("Sensor", { id: "sensor-1", name: "Sensor 1" })
+    await (
+      sixb as unknown as {
+        objects(objectType: typeof Device): {
+          byId(id: string): {
+            link(
+              linkToken: typeof Device.l.sensor,
+              target: { objectTypeId: "Sensor"; primaryId: string }
+            ): Promise<void>
+          }
+        }
+      }
+    )
+      .objects(Device)
+      .byId("device-1")
+      .link(Device.l.sensor, { objectTypeId: "Sensor", primaryId: "sensor-1" })
+
+    duringExternalCall = async () => {
+      await sixb.upsertObject("Sensor", { id: "sensor-1", name: "Renamed mid-run" })
+    }
+
+    await queueActionRun(sixb, {
+      id: "act_1",
+      actionId: "captureSensorName",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+
+    const result = await runActionJob({
+      runtime: createContext(sixb),
+      job: { id: "act_1", actionId: "captureSensorName" },
+    })
+
+    expect(result.status).toBe("failed")
+    const updated = await deviceObjects(sixb).get("device-1")
+    expect(updated?.properties.status).toBeUndefined()
+  })
+
   test("marks queued runs failed when the action definition is missing", async () => {
     const sixb = createSixb([])
     await queueActionRun(sixb, {
@@ -780,6 +862,47 @@ describe("runActionJob", () => {
     expect(writebackCalls).toBe(0)
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("persisted")
+  })
+
+  test("resumes after its committed edits deleted the Action subject", async () => {
+    const deleteDevice = defineAction("deleteDevice")
+      .on(Device)
+      .params({})
+      .edits(({ objects, subject }) => {
+        objects(Device).byId(subject.primaryId).delete()
+      })
+    const sixb = createSixb([deleteDevice])
+    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
+    await queueActionRun(sixb, {
+      id: "act_delete",
+      actionId: "deleteDevice",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+    await sixb.storage.actionRuns!.start({ projectId: sixb.id, id: "act_delete" })
+    await getOntologyMutationRuntime(sixb).commitEdits({
+      mode: "atomic",
+      source: { kind: "action", actionId: "deleteDevice", runId: "act_delete" },
+      operations: [
+        {
+          id: "delete-subject",
+          kind: "object.delete",
+          ref: { objectTypeId: "Device", primaryId: "device-1" },
+        },
+      ],
+      expectedObjects: [],
+      expectedLinks: [],
+      expectedLinkScopes: [],
+    })
+
+    const resumed = await runActionJob({
+      runtime: createContext(sixb),
+      job: { id: "act_delete", actionId: "deleteDevice" },
+      attempt: 2,
+    })
+
+    expect(resumed.status).toBe("succeeded")
+    expect(await deviceObjects(sixb).get("device-1")).toBeNull()
   })
 
   test("records effects errors without failing committed actions", async () => {

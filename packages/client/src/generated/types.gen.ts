@@ -5260,29 +5260,6 @@ export type GetActionRunResponses = {
           | "cancelled"
       }
     }
-    commit?: {
-      committedAt: string
-      diff: {
-        objects: Array<{
-          objectTypeId: string
-          primaryId: string
-          operation: "create" | "update" | "delete"
-          changedProperties: Array<string>
-        }>
-        links: Array<{
-          operation: "create" | "update" | "delete"
-          source: {
-            objectTypeId: string
-            primaryId: string
-          }
-          linkId: string
-          target: {
-            objectTypeId: string
-            primaryId: string
-          }
-        }>
-      }
-    }
     effects?: {
       status: "succeeded" | "failed"
       completedAt: string
@@ -6884,73 +6861,911 @@ export type ListEventsResponses = {
    */
   200: {
     count: number
-    events: Array<{
-      id: string
-      cursor: string
-      schemaVersion: number
-      projectId: string
-      occurredAt: string
-      correlationId?: string
-      causationId?: string
-      idempotencyKey?: string
-      actor?: {
-        type: "user" | "service" | "system"
-        id: string
-      }
-      origin?: {
-        kind: "action"
-        actionId: string
-        runId: string
-      }
-      metadata?: {
-        [key: string]: unknown
-      }
-      type:
-        | "object.created"
-        | "object.updated"
-        | "object.deleted"
-        | "telemetry.appended"
-        | "link.created"
-        | "link.updated"
-        | "link.deleted"
-        | "action.requested"
-        | "action.completed"
-        | "action.failed"
-        | "schedule.triggered"
-        | "sync.run.started"
-        | "sync.run.finished"
-        | "pipeline.run.started"
-        | "pipeline.run.step.started"
-        | "pipeline.run.step.finished"
-        | "pipeline.run.finished"
-        | "workflow.run.queued"
-        | "workflow.run.started"
-        | "workflow.run.node.started"
-        | "workflow.run.waiting"
-        | "workflow.run.node.waiting"
-        | "workflow.run.node.finished"
-        | "workflow.run.finished"
-        | "workflow.intervention.requested"
-        | "workflow.intervention.submitted"
-        | "workflow.intervention.cancelled"
-        | "workflow.intervention.expired"
-        | "dataset.version.committed"
-        | "rule.triggered"
-        | "rule.resolved"
-      topic:
-        | "objects"
-        | "telemetry"
-        | "links"
-        | "actions"
-        | "schedules"
-        | "syncs"
-        | "pipelines"
-        | "workflows"
-        | "datasets"
-        | "rules"
-      partitionKey: string
-      payload?: unknown
-    }>
+    events: Array<
+      | {
+          id: string
+          cursor: string
+          schemaVersion: 1
+          projectId: string
+          occurredAt: string
+          actor?: {
+            type: "user" | "service" | "system"
+            id: string
+          }
+          partitionKey: string
+          origin:
+            | {
+                kind: "action"
+                actionId: string
+                runId: string
+              }
+            | {
+                kind: "runtime"
+                requestId: string
+              }
+            | {
+                kind: "projection"
+                projectionId: string
+                projectionRunId: string
+                datasetId: string
+                datasetVersionId: string
+              }
+            | {
+                kind: "telemetry"
+                source:
+                  | {
+                      kind: "runtime"
+                      requestId: string
+                    }
+                  | {
+                      kind: "projection"
+                      projectionId: string
+                      projectionRunId: string
+                      datasetId: string
+                      datasetVersionId: string
+                      batchOrdinal: number
+                    }
+              }
+          commitId: string
+          commitOrdinal: number
+          type: "object.created"
+          topic: "objects"
+          payload: {
+            objectTypeId: string
+            primaryId: string
+            properties: {
+              [key: string]:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+            }
+            propertyChanges: {
+              [key: string]:
+                | {
+                    operation: "created"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    after:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                  }
+                | {
+                    operation: "updated"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    before:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    after:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                  }
+                | {
+                    operation: "cleared"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    before:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    after: null
+                  }
+            }
+          }
+        }
+      | {
+          id: string
+          cursor: string
+          schemaVersion: 1
+          projectId: string
+          occurredAt: string
+          actor?: {
+            type: "user" | "service" | "system"
+            id: string
+          }
+          partitionKey: string
+          origin:
+            | {
+                kind: "action"
+                actionId: string
+                runId: string
+              }
+            | {
+                kind: "runtime"
+                requestId: string
+              }
+            | {
+                kind: "projection"
+                projectionId: string
+                projectionRunId: string
+                datasetId: string
+                datasetVersionId: string
+              }
+            | {
+                kind: "telemetry"
+                source:
+                  | {
+                      kind: "runtime"
+                      requestId: string
+                    }
+                  | {
+                      kind: "projection"
+                      projectionId: string
+                      projectionRunId: string
+                      datasetId: string
+                      datasetVersionId: string
+                      batchOrdinal: number
+                    }
+              }
+          commitId: string
+          commitOrdinal: number
+          type: "object.updated"
+          topic: "objects"
+          payload: {
+            objectTypeId: string
+            primaryId: string
+            properties: {
+              [key: string]:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+            }
+            propertyChanges: {
+              [key: string]:
+                | {
+                    operation: "created"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    after:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                  }
+                | {
+                    operation: "updated"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    before:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    after:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                  }
+                | {
+                    operation: "cleared"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    before:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    after: null
+                  }
+            }
+          }
+        }
+      | {
+          id: string
+          cursor: string
+          schemaVersion: 1
+          projectId: string
+          occurredAt: string
+          actor?: {
+            type: "user" | "service" | "system"
+            id: string
+          }
+          partitionKey: string
+          origin:
+            | {
+                kind: "action"
+                actionId: string
+                runId: string
+              }
+            | {
+                kind: "runtime"
+                requestId: string
+              }
+            | {
+                kind: "projection"
+                projectionId: string
+                projectionRunId: string
+                datasetId: string
+                datasetVersionId: string
+              }
+            | {
+                kind: "telemetry"
+                source:
+                  | {
+                      kind: "runtime"
+                      requestId: string
+                    }
+                  | {
+                      kind: "projection"
+                      projectionId: string
+                      projectionRunId: string
+                      datasetId: string
+                      datasetVersionId: string
+                      batchOrdinal: number
+                    }
+              }
+          commitId: string
+          commitOrdinal: number
+          type: "object.deleted"
+          topic: "objects"
+          payload: {
+            objectTypeId: string
+            primaryId: string
+            propertyChanges: {
+              [key: string]:
+                | {
+                    operation: "created"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    after:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                  }
+                | {
+                    operation: "updated"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    before:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    after:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                  }
+                | {
+                    operation: "cleared"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    before:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    after: null
+                  }
+            }
+          }
+        }
+      | {
+          id: string
+          cursor: string
+          schemaVersion: 1
+          projectId: string
+          occurredAt: string
+          actor?: {
+            type: "user" | "service" | "system"
+            id: string
+          }
+          partitionKey: string
+          origin:
+            | {
+                kind: "action"
+                actionId: string
+                runId: string
+              }
+            | {
+                kind: "runtime"
+                requestId: string
+              }
+            | {
+                kind: "projection"
+                projectionId: string
+                projectionRunId: string
+                datasetId: string
+                datasetVersionId: string
+              }
+            | {
+                kind: "telemetry"
+                source:
+                  | {
+                      kind: "runtime"
+                      requestId: string
+                    }
+                  | {
+                      kind: "projection"
+                      projectionId: string
+                      projectionRunId: string
+                      datasetId: string
+                      datasetVersionId: string
+                      batchOrdinal: number
+                    }
+              }
+          commitId: string
+          commitOrdinal: number
+          type: "telemetry.appended"
+          topic: "telemetry"
+          payload: {
+            objectTypeId: string
+            objectId: string
+            propertyId: string
+            /**
+             * Any JSON-compatible value.
+             */
+            value:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            unit?: string
+            at: string
+          }
+        }
+      | {
+          id: string
+          cursor: string
+          schemaVersion: 1
+          projectId: string
+          occurredAt: string
+          actor?: {
+            type: "user" | "service" | "system"
+            id: string
+          }
+          partitionKey: string
+          origin:
+            | {
+                kind: "action"
+                actionId: string
+                runId: string
+              }
+            | {
+                kind: "runtime"
+                requestId: string
+              }
+            | {
+                kind: "projection"
+                projectionId: string
+                projectionRunId: string
+                datasetId: string
+                datasetVersionId: string
+              }
+            | {
+                kind: "telemetry"
+                source:
+                  | {
+                      kind: "runtime"
+                      requestId: string
+                    }
+                  | {
+                      kind: "projection"
+                      projectionId: string
+                      projectionRunId: string
+                      datasetId: string
+                      datasetVersionId: string
+                      batchOrdinal: number
+                    }
+              }
+          commitId: string
+          commitOrdinal: number
+          type: "link.created"
+          topic: "links"
+          payload: {
+            sourceTypeId: string
+            sourceId: string
+            linkId: string
+            targetTypeId: string
+            targetId: string
+            properties?: {
+              [key: string]:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+            }
+            propertyChanges: {
+              [key: string]:
+                | {
+                    operation: "created"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    after:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                  }
+                | {
+                    operation: "updated"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    before:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    after:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                  }
+                | {
+                    operation: "cleared"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    before:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    after: null
+                  }
+            }
+          }
+        }
+      | {
+          id: string
+          cursor: string
+          schemaVersion: 1
+          projectId: string
+          occurredAt: string
+          actor?: {
+            type: "user" | "service" | "system"
+            id: string
+          }
+          partitionKey: string
+          origin:
+            | {
+                kind: "action"
+                actionId: string
+                runId: string
+              }
+            | {
+                kind: "runtime"
+                requestId: string
+              }
+            | {
+                kind: "projection"
+                projectionId: string
+                projectionRunId: string
+                datasetId: string
+                datasetVersionId: string
+              }
+            | {
+                kind: "telemetry"
+                source:
+                  | {
+                      kind: "runtime"
+                      requestId: string
+                    }
+                  | {
+                      kind: "projection"
+                      projectionId: string
+                      projectionRunId: string
+                      datasetId: string
+                      datasetVersionId: string
+                      batchOrdinal: number
+                    }
+              }
+          commitId: string
+          commitOrdinal: number
+          type: "link.updated"
+          topic: "links"
+          payload: {
+            sourceTypeId: string
+            sourceId: string
+            linkId: string
+            targetTypeId: string
+            targetId: string
+            properties?: {
+              [key: string]:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+            }
+            propertyChanges: {
+              [key: string]:
+                | {
+                    operation: "created"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    after:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                  }
+                | {
+                    operation: "updated"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    before:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    after:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                  }
+                | {
+                    operation: "cleared"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    before:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    after: null
+                  }
+            }
+          }
+        }
+      | {
+          id: string
+          cursor: string
+          schemaVersion: 1
+          projectId: string
+          occurredAt: string
+          actor?: {
+            type: "user" | "service" | "system"
+            id: string
+          }
+          partitionKey: string
+          origin:
+            | {
+                kind: "action"
+                actionId: string
+                runId: string
+              }
+            | {
+                kind: "runtime"
+                requestId: string
+              }
+            | {
+                kind: "projection"
+                projectionId: string
+                projectionRunId: string
+                datasetId: string
+                datasetVersionId: string
+              }
+            | {
+                kind: "telemetry"
+                source:
+                  | {
+                      kind: "runtime"
+                      requestId: string
+                    }
+                  | {
+                      kind: "projection"
+                      projectionId: string
+                      projectionRunId: string
+                      datasetId: string
+                      datasetVersionId: string
+                      batchOrdinal: number
+                    }
+              }
+          commitId: string
+          commitOrdinal: number
+          type: "link.deleted"
+          topic: "links"
+          payload: {
+            sourceTypeId: string
+            sourceId: string
+            linkId: string
+            targetTypeId: string
+            targetId: string
+            propertyChanges: {
+              [key: string]:
+                | {
+                    operation: "created"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    after:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                  }
+                | {
+                    operation: "updated"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    before:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    after:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                  }
+                | {
+                    operation: "cleared"
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    before:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    after: null
+                  }
+            }
+          }
+        }
+      | {
+          id: string
+          cursor: string
+          schemaVersion: 1
+          projectId: string
+          occurredAt: string
+          actor?: {
+            type: "user" | "service" | "system"
+            id: string
+          }
+          partitionKey: string
+          correlationId?: string
+          causationId?: string
+          idempotencyKey?: string
+          origin?:
+            | {
+                kind: "action"
+                actionId: string
+                runId: string
+              }
+            | {
+                kind: "runtime"
+                requestId: string
+              }
+            | {
+                kind: "projection"
+                projectionId: string
+                projectionRunId: string
+                datasetId: string
+                datasetVersionId: string
+              }
+            | {
+                kind: "telemetry"
+                source:
+                  | {
+                      kind: "runtime"
+                      requestId: string
+                    }
+                  | {
+                      kind: "projection"
+                      projectionId: string
+                      projectionRunId: string
+                      datasetId: string
+                      datasetVersionId: string
+                      batchOrdinal: number
+                    }
+              }
+          metadata?: {
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+          type:
+            | "action.requested"
+            | "action.completed"
+            | "action.failed"
+            | "schedule.triggered"
+            | "sync.run.started"
+            | "sync.run.finished"
+            | "pipeline.run.started"
+            | "pipeline.run.step.started"
+            | "pipeline.run.step.finished"
+            | "pipeline.run.finished"
+            | "workflow.run.queued"
+            | "workflow.run.started"
+            | "workflow.run.node.started"
+            | "workflow.run.waiting"
+            | "workflow.run.node.waiting"
+            | "workflow.run.node.finished"
+            | "workflow.run.finished"
+            | "workflow.intervention.requested"
+            | "workflow.intervention.submitted"
+            | "workflow.intervention.cancelled"
+            | "workflow.intervention.expired"
+            | "dataset.version.committed"
+            | "rule.triggered"
+            | "rule.resolved"
+          topic:
+            | "objects"
+            | "telemetry"
+            | "links"
+            | "actions"
+            | "schedules"
+            | "syncs"
+            | "pipelines"
+            | "workflows"
+            | "datasets"
+            | "rules"
+          payload: {
+            [key: string]: unknown
+          }
+        }
+    >
   }
 }
 

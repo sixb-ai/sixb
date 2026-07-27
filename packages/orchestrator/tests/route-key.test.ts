@@ -8,6 +8,7 @@ function makeScheduleTriggeredEvent(scheduleId: string): StoredDomainEvent {
     schemaVersion: 1,
     projectId: "test-project",
     occurredAt: "2026-04-18T02:00:00.000Z",
+    ...materializationCorrelation("evt-2"),
     type: "schedule.triggered",
     topic: "schedules",
     partitionKey: scheduleId,
@@ -27,6 +28,7 @@ function makeObjectCreatedEvent(): StoredDomainEvent {
     schemaVersion: 1,
     projectId: "test-project",
     occurredAt: "2026-04-18T02:00:00.000Z",
+    ...materializationCorrelation("evt-2"),
     type: "object.created",
     topic: "objects",
     partitionKey: "obj-1",
@@ -83,6 +85,7 @@ describe("routeKeysForEvent", () => {
       schemaVersion: 1,
       projectId: "test-project",
       occurredAt: "2026-04-18T02:00:00.000Z",
+      ...materializationCorrelation("evt-object"),
       type: "object.updated",
       topic: "objects",
       partitionKey: "Invoice:inv-1",
@@ -109,6 +112,7 @@ describe("routeKeysForEvent", () => {
     const linkEvent: StoredDomainEvent = {
       ...base,
       id: "evt-link",
+      ...materializationCorrelation("evt-link"),
       type: "link.created",
       topic: "links",
       partitionKey: "Invoice:inv-1:payments",
@@ -158,3 +162,11 @@ describe("routeKeysForEvent", () => {
     ])
   })
 })
+
+function materializationCorrelation(id: string) {
+  return {
+    origin: { kind: "runtime" as const, requestId: `request-${id}` },
+    commitId: `commit-${id}`,
+    commitOrdinal: 0,
+  }
+}

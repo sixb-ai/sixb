@@ -1,4 +1,4 @@
-import type { EventActor } from "../events/envelope"
+import type { EventActor, EventOrigin } from "../events/envelope"
 import type { PropertyChange, PropertyChangeMap } from "../events/property-changes"
 import type { JsonValue } from "../json"
 
@@ -50,36 +50,7 @@ export type ProjectionMaterializationIdentity = ProjectionMaterializationIdentit
       }
   )
 
-export type OntologyMaterializationOrigin =
-  | {
-      readonly kind: "action"
-      readonly actionId: string
-      readonly runId: string
-    }
-  | {
-      readonly kind: "runtime"
-      readonly requestId: string
-    }
-  | {
-      readonly kind: "projection"
-      readonly projectionId: string
-      readonly projectionRunId: string
-      readonly datasetId: string
-      readonly datasetVersionId: string
-    }
-  | {
-      readonly kind: "telemetry"
-      readonly source:
-        | { readonly kind: "runtime"; readonly requestId: string }
-        | {
-            readonly kind: "projection"
-            readonly projectionId: string
-            readonly projectionRunId: string
-            readonly datasetId: string
-            readonly datasetVersionId: string
-            readonly batchOrdinal: number
-          }
-    }
+export type OntologyMaterializationOrigin = EventOrigin
 
 export type ExpectedObjectRevision =
   | {
@@ -161,6 +132,15 @@ export type OntologyEditCommit =
   | (BaseOntologyEditCommit & {
       readonly mode: "continue"
       readonly source: { readonly kind: "runtime"; readonly requestId: string }
+      /**
+       * Operation ids that apply as one unit, listed in application order.
+       *
+       * Continue mode isolates failures per operation, which would let one caller item commit its
+       * earlier operations after a later one failed. Grouping restores the per-item promise: a
+       * failure inside a group rolls back that group's earlier operations and reports every id in
+       * it as failed. Ungrouped operations keep per-operation isolation.
+       */
+      readonly operationGroups?: readonly (readonly string[])[]
     })
 
 export type ProjectionEntityRef =
@@ -356,6 +336,8 @@ export interface BaseCommitResult {
   readonly commitId: string
   readonly created: boolean
   readonly eventCount: number
+  /** Canonical UTC ISO commit time, fixed when the commit was assigned its identity. */
+  readonly committedAt: string
 }
 
 export interface EditCommitResult extends BaseCommitResult {

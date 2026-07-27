@@ -1,14 +1,14 @@
 export { defineAction, optional, param } from "./builders"
 export type {
   ActionEditCommitResult,
-  CommitActionEditBatchInput,
-  CommitActionEditBatchResult,
-  SerializationRetryOptions,
-} from "./commit-edit-batch"
-export { commitActionEditBatch } from "./commit-edit-batch"
+  ActionReadDependencies,
+  CommitActionEditsInput,
+  FindActionEditCommitInput,
+} from "./commit-edits"
+export { commitActionEdits, findActionEditCommit } from "./commit-edits"
 export { ActionDefinitionError, ActionEditCommitError } from "./errors"
-export type { ActionReadObjectSetSource } from "./read-facade"
-export { createActionReadFacade } from "./read-facade"
+export type { ActionReadFacadeOptions, ActionReadObjectSetSource } from "./read-facade"
+export { ActionReadRecorder, createActionReadFacade } from "./read-facade"
 export { ActionRegistry } from "./registry"
 export type {
   RequestActionAndWaitInput,

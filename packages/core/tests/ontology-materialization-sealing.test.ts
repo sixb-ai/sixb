@@ -184,6 +184,7 @@ function replacementFinalization(
       commitId: header.commit.id,
       created: true,
       eventCount: 0,
+      committedAt: header.commit.committedAt,
       counts,
     },
   }
@@ -232,14 +233,15 @@ function emptyEditHeader(commitId: string): MaterializationPlanHeader {
   }
 }
 
-function emptyEditFinalization(commitId: string): MaterializationPlanFinalization {
+function emptyEditFinalization(header: MaterializationPlanHeader): MaterializationPlanFinalization {
   return {
     sourceActivations: [],
     result: {
       kind: "edit",
-      commitId,
+      commitId: header.commit.id,
       created: true,
       eventCount: 0,
+      committedAt: header.commit.committedAt,
       outcomes: [],
       changes: { objects: [], links: [] },
     },
@@ -481,6 +483,7 @@ describe("in-memory ontology materialization finalization", () => {
               commitId: telemetryHeader.commit.id,
               created: true,
               eventCount: 0,
+              committedAt: telemetryHeader.commit.committedAt,
               pointsCreated: 0,
               pointsUpdated: 0,
               pointsUnchanged: 1,
@@ -536,7 +539,7 @@ describe("in-memory ontology materialization finalization", () => {
         }
         await tx.ontology.materializations.finalize({
           session,
-          finalization: emptyEditFinalization(planHeader.commit.id),
+          finalization: emptyEditFinalization(planHeader),
         })
       })
     ).rejects.toThrow("not applied exactly once")
@@ -582,7 +585,7 @@ describe("in-memory ontology materialization finalization", () => {
         }
         await tx.ontology.materializations.finalize({
           session,
-          finalization: emptyEditFinalization(eventHeader.commit.id),
+          finalization: emptyEditFinalization(eventHeader),
         })
       })
     ).rejects.toThrow("not fully written to the outbox")
@@ -675,7 +678,7 @@ describe("in-memory ontology materialization finalization", () => {
         }
         await tx.ontology.materializations.finalize({
           session,
-          finalization: emptyEditFinalization(header.commit.id),
+          finalization: emptyEditFinalization(header),
         })
       })
     ).rejects.toThrow("violates cardinality-one")
@@ -694,6 +697,9 @@ describe("in-memory ontology materialization finalization", () => {
       cursor: "existing-link",
       schemaVersion: 1,
       projectId,
+      origin: { kind: "runtime", requestId: "existing-link" },
+      commitId: "commit-existing-link",
+      commitOrdinal: 0,
       type: "link.created",
       topic: "links",
       partitionKey: "Device:one:parent",
@@ -734,7 +740,7 @@ describe("in-memory ontology materialization finalization", () => {
         }
         await tx.ontology.materializations.finalize({
           session,
-          finalization: emptyEditFinalization(header.commit.id),
+          finalization: emptyEditFinalization(header),
         })
       })
     ).rejects.toThrow("does not match the final effective link scope")

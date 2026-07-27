@@ -1,5 +1,4 @@
 import type { ActionSubject } from "../../actions"
-import type { EditCommitDiff, EditLinkDiff, EditObjectDiff, EditObjectRef } from "../../edits/types"
 import type { JsonValue } from "../../json"
 
 export type ActionRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -31,20 +30,6 @@ export interface ActionRunWritebackRecord {
   readonly error?: ActionRunFailure
 }
 
-export type ActionRunObjectEditDiff = EditObjectDiff
-export type ActionRunObjectRef = EditObjectRef
-export type ActionRunLinkEditDiff = EditLinkDiff
-export type ActionRunCommitDiff = EditCommitDiff
-
-/**
- * Legacy local edit result retained until the Action worker uses the ontology Materializer.
- * TODO(ontology-materializer/phase-6): Remove after the worker reads authoritative ontology commits.
- */
-export interface ActionRunCommitRecord {
-  readonly committedAt: Date
-  readonly diff: ActionRunCommitDiff
-}
-
 export interface ActionRunEffectsRecord {
   readonly status: ActionRunPhaseStatus
   readonly completedAt: Date
@@ -64,8 +49,6 @@ export interface ActionRunRecord {
   readonly params: ActionRunParams
   readonly idempotencyKey: string
   readonly writeback?: ActionRunWritebackRecord
-  /** @deprecated Legacy local edit result; authoritative materializer commits live in ontology storage. */
-  readonly commit?: ActionRunCommitRecord
   readonly effects?: ActionRunEffectsRecord
   readonly error?: ActionRunFailure
 }
@@ -111,17 +94,6 @@ export type RecordActionWritebackInput =
       readonly completedAt?: Date
       readonly error: ActionRunFailure
     }
-
-/**
- * Legacy local edit result retained until the Action worker uses the ontology Materializer.
- * TODO(ontology-materializer/phase-6): Remove with ActionRunCommitRecord.
- */
-export interface RecordActionCommitInput {
-  readonly id: string
-  readonly projectId: string
-  readonly committedAt?: Date
-  readonly diff: ActionRunCommitDiff
-}
 
 export type RecordActionEffectsInput =
   | {
@@ -177,21 +149,19 @@ export interface ListActionRunsResult {
   readonly total: number
 }
 
-export interface AssertActionMaterializationRunInput {
+export interface LockActionMaterializationRunInput {
   readonly projectId: string
   readonly actionId: string
   readonly runId: string
 }
 
 export interface ActionRunStorage {
-  /** Read-only preflight for Action materialization business identity and running state. */
-  assertMaterializationRun?(input: AssertActionMaterializationRunInput): Promise<void>
+  /** Transactional fence for Action identity and running state before a new ontology commit. */
+  lockForMaterialization?(input: LockActionMaterializationRunInput): Promise<ActionRunRecord>
   queue(input: QueueActionRunInput): Promise<ActionRunRecord>
   start(input: StartActionRunInput): Promise<ActionRunRecord>
   enterPhase(input: EnterActionRunPhaseInput): Promise<ActionRunRecord>
   recordWriteback(input: RecordActionWritebackInput): Promise<ActionRunRecord>
-  /** @deprecated Legacy Action worker commit path; see RecordActionCommitInput. */
-  recordCommit(input: RecordActionCommitInput): Promise<ActionRunRecord>
   recordEffects(input: RecordActionEffectsInput): Promise<ActionRunRecord>
   finish(input: FinishActionRunInput): Promise<ActionRunRecord>
   getById(params: { projectId: string; id: string }): Promise<ActionRunRecord | null>
@@ -205,11 +175,11 @@ export interface ActionRunStorage {
  * contract and delete this interface and its type guard.
  */
 export interface ActionMaterializationRunStorage extends ActionRunStorage {
-  assertMaterializationRun(input: AssertActionMaterializationRunInput): Promise<void>
+  lockForMaterialization(input: LockActionMaterializationRunInput): Promise<ActionRunRecord>
 }
 
 export function isActionMaterializationRunStorage(
   storage: ActionRunStorage | null | undefined
 ): storage is ActionMaterializationRunStorage {
-  return storage != null && typeof storage.assertMaterializationRun === "function"
+  return storage != null && typeof storage.lockForMaterialization === "function"
 }

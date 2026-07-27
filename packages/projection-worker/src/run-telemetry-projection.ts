@@ -2,6 +2,7 @@ import {
   type DatasetColumnDefinition,
   type DatasetDefinition,
   getDatasetRowValidationError,
+  MaterializationValidationError,
   ObjectNotFoundError,
   OntologyValidationError,
   type Schema,
@@ -348,5 +349,9 @@ function wallClockMatchesComponents(wallClock: number, components: TimestampComp
 }
 
 function isRecoverableTelemetryRowError(error: unknown): boolean {
-  return error instanceof ObjectNotFoundError || error instanceof OntologyValidationError
+  return (
+    error instanceof ObjectNotFoundError ||
+    error instanceof OntologyValidationError ||
+    error instanceof MaterializationValidationError
+  )
 }

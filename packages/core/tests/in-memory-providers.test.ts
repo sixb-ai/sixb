@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { JsonValue } from "../src"
 import type {
   StoredLinkDeletedEvent,
   StoredLinkMutationEvent,
@@ -7,25 +8,28 @@ import type {
 } from "../src/events"
 import type { ObjectStorage } from "../src/storage"
 import { InMemoryObjectStorage, InMemoryTimeseriesStorage } from "../src/storage"
+import {
+  createStoredLinkDeletedEvent,
+  createStoredLinkMutationEvent,
+  createStoredObjectMutationEvent,
+  createStoredTelemetryAppendedEvent,
+} from "../src/testing"
 
 function makeObjectMutationEvent(
   projectId: string,
   objectTypeId: string,
   primaryId: string,
-  properties: Record<string, unknown>,
+  properties: Record<string, JsonValue>,
   cursor = "1"
 ): StoredObjectMutationEvent {
-  return {
-    id: `evt-${crypto.randomUUID()}`,
-    schemaVersion: 1,
+  return createStoredObjectMutationEvent({
     projectId,
-    type: "object.created",
-    topic: "objects",
-    partitionKey: `${objectTypeId}:${primaryId}`,
-    occurredAt: new Date().toISOString(),
     cursor,
-    payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
-  }
+    occurredAt: new Date().toISOString(),
+    objectTypeId,
+    primaryId,
+    properties,
+  })
 }
 
 function makeTelemetryEvent(
@@ -33,22 +37,22 @@ function makeTelemetryEvent(
   objectTypeId: string,
   objectId: string,
   propertyId: string,
-  value: unknown,
+  value: JsonValue,
   at: Date,
   cursor = "1",
   unit?: string
 ): StoredTelemetryAppendedEvent {
-  return {
-    id: `evt-${crypto.randomUUID()}`,
-    schemaVersion: 1,
+  return createStoredTelemetryAppendedEvent({
     projectId,
-    type: "telemetry.appended",
-    topic: "telemetry",
-    partitionKey: `${objectTypeId}:${objectId}:${propertyId}`,
     occurredAt: at.toISOString(),
     cursor,
-    payload: { objectTypeId, objectId, propertyId, value, unit, at: at.toISOString() },
-  }
+    objectTypeId,
+    objectId,
+    propertyId,
+    value,
+    at: at.toISOString(),
+    ...(unit === undefined ? {} : { unit }),
+  })
 }
 
 function makeLinkMutationEvent(
@@ -59,27 +63,19 @@ function makeLinkMutationEvent(
   targetTypeId: string,
   targetId: string,
   cursor = "1",
-  properties?: Record<string, unknown>
+  properties?: Record<string, JsonValue>
 ): StoredLinkMutationEvent {
-  return {
-    id: `evt-${crypto.randomUUID()}`,
-    schemaVersion: 1,
+  return createStoredLinkMutationEvent({
     projectId,
-    type: "link.created",
-    topic: "links",
-    partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
     occurredAt: new Date().toISOString(),
     cursor,
-    payload: {
-      sourceTypeId,
-      sourceId,
-      linkId,
-      targetTypeId,
-      targetId,
-      properties,
-      propertyChanges: {},
-    },
-  }
+    sourceTypeId,
+    sourceId,
+    linkId,
+    targetTypeId,
+    targetId,
+    ...(properties === undefined ? {} : { properties }),
+  })
 }
 
 function makeLinkDeletedEvent(
@@ -91,17 +87,16 @@ function makeLinkDeletedEvent(
   targetId: string,
   cursor = "1"
 ): StoredLinkDeletedEvent {
-  return {
-    id: `evt-${crypto.randomUUID()}`,
-    schemaVersion: 1,
+  return createStoredLinkDeletedEvent({
     projectId,
-    type: "link.deleted",
-    topic: "links",
-    partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
     occurredAt: new Date().toISOString(),
     cursor,
-    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
-  }
+    sourceTypeId,
+    sourceId,
+    linkId,
+    targetTypeId,
+    targetId,
+  })
 }
 
 describe("InMemoryObjectStorage", () => {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test"
 import {
   defineObjectType,
   InMemoryObjectStorage,
+  type JsonValue,
   link,
   type ObjectExpansion,
   type ObjectQuery,
@@ -11,6 +12,7 @@ import {
 import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "../src/events"
 import { countObjects, executeObjectQuery } from "../src/objects/query"
 import type { ExpandedLinkValue, ExpandedObjectRow } from "../src/storage"
+import { createStoredLinkMutationEvent, createStoredObjectMutationEvent } from "../src/testing"
 
 // Execution-side tests for `.expand()`: the planner routes expand through the
 // bounded fallback, and the executor hydrates links over the batch storage
@@ -72,19 +74,16 @@ const PROJECT = "p1"
 function objectEvent(
   objectTypeId: string,
   primaryId: string,
-  properties: Record<string, unknown>
+  properties: Record<string, JsonValue>
 ): StoredObjectMutationEvent {
-  return {
-    id: `evt-${crypto.randomUUID()}`,
-    schemaVersion: 1,
+  return createStoredObjectMutationEvent({
     projectId: PROJECT,
-    type: "object.created",
-    topic: "objects",
-    partitionKey: `${objectTypeId}:${primaryId}`,
     occurredAt: "2026-01-01T00:00:00.000Z",
     cursor: crypto.randomUUID(),
-    payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
-  }
+    objectTypeId,
+    primaryId,
+    properties,
+  })
 }
 
 function linkEvent(
@@ -93,27 +92,19 @@ function linkEvent(
   linkId: string,
   targetTypeId: string,
   targetId: string,
-  properties?: Record<string, unknown>
+  properties?: Record<string, JsonValue>
 ): StoredLinkMutationEvent {
-  return {
-    id: `evt-${crypto.randomUUID()}`,
-    schemaVersion: 1,
+  return createStoredLinkMutationEvent({
     projectId: PROJECT,
-    type: "link.created",
-    topic: "links",
-    partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
     occurredAt: "2026-01-01T00:00:00.000Z",
     cursor: crypto.randomUUID(),
-    payload: {
-      sourceTypeId,
-      sourceId,
-      linkId,
-      targetTypeId,
-      targetId,
-      properties,
-      propertyChanges: {},
-    },
-  }
+    sourceTypeId,
+    sourceId,
+    linkId,
+    targetTypeId,
+    targetId,
+    ...(properties === undefined ? {} : { properties }),
+  })
 }
 
 // Records every (objectTypeId:primaryId) the executor batch-fetches, so dedup

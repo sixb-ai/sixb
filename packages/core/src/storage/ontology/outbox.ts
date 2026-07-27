@@ -58,7 +58,7 @@ export interface PurgePublishedOntologyOutboxInput {
 }
 
 export interface OntologyOutboxStorage {
-  /** Claims in the parent-spec `(createdAt, eventId)` order. */
+  /** Selects each claimed batch deterministically; concurrent publishers may complete out of order. */
   claim(input: ClaimOntologyOutboxInput): Promise<readonly ClaimedOntologyOutboxRow[]>
   markPublished(input: CompleteOntologyOutboxLeaseInput): Promise<void>
   reschedule(input: RescheduleOntologyOutboxLeaseInput): Promise<void>

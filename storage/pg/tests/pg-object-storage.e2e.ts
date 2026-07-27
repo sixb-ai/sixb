@@ -1,10 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import type { JsonValue } from "@sixb/core"
 import type {
   StoredLinkDeletedEvent,
   StoredLinkMutationEvent,
   StoredObjectMutationEvent,
   StoredTelemetryAppendedEvent,
 } from "@sixb/core/internal/events"
+import {
+  createStoredLinkDeletedEvent,
+  createStoredLinkMutationEvent,
+  createStoredObjectMutationEvent,
+  createStoredTelemetryAppendedEvent,
+} from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -24,20 +31,18 @@ describe("PgObjectStorage", () => {
     projectId: string,
     objectTypeId: string,
     primaryId: string,
-    properties: Record<string, unknown>,
+    properties: Record<string, JsonValue>,
     cursor: string
   ): StoredObjectMutationEvent {
-    return {
+    return createStoredObjectMutationEvent({
       id: `event-${cursor}`,
       cursor,
-      schemaVersion: 1,
       projectId,
-      type: "object.created",
-      topic: "objects",
-      partitionKey: `${objectTypeId}:${primaryId}`,
-      payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
       occurredAt: new Date().toISOString(),
-    }
+      objectTypeId,
+      primaryId,
+      properties,
+    })
   }
 
   function createTelemetryEvent(
@@ -45,20 +50,21 @@ describe("PgObjectStorage", () => {
     objectTypeId: string,
     objectId: string,
     propertyId: string,
-    value: unknown,
+    value: JsonValue,
     cursor: string
   ): StoredTelemetryAppendedEvent {
-    return {
+    const at = new Date().toISOString()
+    return createStoredTelemetryAppendedEvent({
       id: `event-${cursor}`,
       cursor,
-      schemaVersion: 1,
       projectId,
-      type: "telemetry.appended",
-      topic: "telemetry",
-      partitionKey: `${objectTypeId}:${objectId}:${propertyId}`,
-      payload: { objectTypeId, objectId, propertyId, value, at: new Date().toISOString() },
-      occurredAt: new Date().toISOString(),
-    }
+      occurredAt: at,
+      objectTypeId,
+      objectId,
+      propertyId,
+      value,
+      at,
+    })
   }
 
   function createLinkMutationEvent(
@@ -70,17 +76,17 @@ describe("PgObjectStorage", () => {
     targetId: string,
     cursor: string
   ): StoredLinkMutationEvent {
-    return {
+    return createStoredLinkMutationEvent({
       id: `event-${cursor}`,
       cursor,
-      schemaVersion: 1,
       projectId,
-      type: "link.created",
-      topic: "links",
-      partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
-      payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
       occurredAt: new Date().toISOString(),
-    }
+      sourceTypeId,
+      sourceId,
+      linkId,
+      targetTypeId,
+      targetId,
+    })
   }
 
   function createLinkDeletedEvent(
@@ -92,17 +98,17 @@ describe("PgObjectStorage", () => {
     targetId: string,
     cursor: string
   ): StoredLinkDeletedEvent {
-    return {
+    return createStoredLinkDeletedEvent({
       id: `event-${cursor}`,
       cursor,
-      schemaVersion: 1,
       projectId,
-      type: "link.deleted",
-      topic: "links",
-      partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
-      payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
       occurredAt: new Date().toISOString(),
-    }
+      sourceTypeId,
+      sourceId,
+      linkId,
+      targetTypeId,
+      targetId,
+    })
   }
 
   test("applyObjectUpsert creates new object", async () => {
@@ -547,25 +553,18 @@ describe("PgObjectStorage", () => {
   })
 
   test("applyLinkUpsert stores link properties", async () => {
-    const event: StoredLinkMutationEvent = {
+    const event: StoredLinkMutationEvent = createStoredLinkMutationEvent({
       id: "event-link-props",
       cursor: "1",
-      schemaVersion: 1,
       projectId: "project-a",
-      type: "link.created",
-      topic: "links",
-      partitionKey: "Room:room:101:hasThermostat",
-      payload: {
-        sourceTypeId: "Room",
-        sourceId: "room:101",
-        linkId: "hasThermostat",
-        targetTypeId: "Thermostat",
-        targetId: "tstat:abc",
-        properties: { isPrimary: true, priority: 1 },
-        propertyChanges: {},
-      },
       occurredAt: new Date().toISOString(),
-    }
+      sourceTypeId: "Room",
+      sourceId: "room:101",
+      linkId: "hasThermostat",
+      targetTypeId: "Thermostat",
+      targetId: "tstat:abc",
+      properties: { isPrimary: true, priority: 1 },
+    })
 
     await storage.objects.applyLinkUpsert(event)
 
@@ -581,39 +580,25 @@ describe("PgObjectStorage", () => {
   })
 
   test("concurrent applyObjectUpsert on same primaryId produces correct state", async () => {
-    const event1: StoredObjectMutationEvent = {
+    const event1: StoredObjectMutationEvent = createStoredObjectMutationEvent({
       id: "concurrent-event-1",
       cursor: "1",
-      schemaVersion: 1,
       projectId: "project-a",
-      type: "object.created",
-      topic: "objects",
-      partitionKey: "Room:room:race",
-      payload: {
-        objectTypeId: "Room",
-        primaryId: "room:race",
-        properties: { name: "Race Room", floor: "1" },
-        propertyChanges: {},
-      },
       occurredAt: new Date().toISOString(),
-    }
+      objectTypeId: "Room",
+      primaryId: "room:race",
+      properties: { name: "Race Room", floor: "1" },
+    })
 
-    const event2: StoredObjectMutationEvent = {
+    const event2: StoredObjectMutationEvent = createStoredObjectMutationEvent({
       id: "concurrent-event-2",
       cursor: "2",
-      schemaVersion: 1,
       projectId: "project-a",
-      type: "object.created",
-      topic: "objects",
-      partitionKey: "Room:room:race",
-      payload: {
-        objectTypeId: "Room",
-        primaryId: "room:race",
-        properties: { capacity: 20, zone: "B" },
-        propertyChanges: {},
-      },
       occurredAt: new Date().toISOString(),
-    }
+      objectTypeId: "Room",
+      primaryId: "room:race",
+      properties: { capacity: 20, zone: "B" },
+    })
 
     // Fire both concurrently
     await Promise.all([

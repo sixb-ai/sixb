@@ -1,7 +1,7 @@
 import { EventsError } from "./errors"
 import type { ActionEvent } from "./types/actions"
 import type { DatasetEvent } from "./types/datasets"
-import type { DomainEvent, EventDraft } from "./types/index"
+import type { DomainEvent, DomainEventDraft } from "./types/index"
 import type { LinkEvent } from "./types/links"
 import type { ObjectEvent } from "./types/objects"
 import type { PipelineEvent } from "./types/pipelines"
@@ -210,11 +210,21 @@ export function isDomainEventType(value: string): value is DomainEvent["type"] {
   return Object.hasOwn(EVENT_DEFINITIONS, value)
 }
 
+export function isOntologyFactType(
+  value: string
+): value is ObjectEvent["type"] | LinkEvent["type"] | TelemetryEvent["type"] {
+  return (
+    Object.hasOwn(OBJECT_EVENT_DEFINITIONS, value) ||
+    Object.hasOwn(LINK_EVENT_DEFINITIONS, value) ||
+    Object.hasOwn(TELEMETRY_EVENT_DEFINITIONS, value)
+  )
+}
+
 export function getEventTopic(type: DomainEvent["type"]): DomainEvent["topic"] {
   return EVENT_DEFINITIONS[type].topic
 }
 
-export function resolveEventStorage(event: EventDraft): {
+export function resolveEventStorage(event: DomainEventDraft): {
   readonly topic: DomainEvent["topic"]
   readonly partitionKey: string
 } {

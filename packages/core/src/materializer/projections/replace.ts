@@ -318,6 +318,7 @@ async function executeProjectionTransaction(
     commitId: ready.identity.commitId,
     created: true,
     eventCount,
+    committedAt: ready.identity.committedAt,
     counts,
   }
   throwIfAborted(command.signal)

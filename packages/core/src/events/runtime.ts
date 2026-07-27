@@ -6,10 +6,17 @@ import {
   EVENT_DEFINITIONS,
   EVENT_TYPES,
   isDomainEventType,
+  isOntologyFactType,
   resolveEventStorage,
 } from "./definitions"
 import { EventsError } from "./errors"
-import type { DomainEvent, EventActor, EventDraft, StoredDomainEvent } from "./types"
+import type {
+  DomainEvent,
+  EventActor,
+  EventDraft,
+  StoredAuthorableEvent,
+  StoredDomainEvent,
+} from "./types"
 
 // Keep domain events as a short recent log. This is 2 days in milliseconds.
 export const DEFAULT_EVENTS_RETENTION_MS = 2 * 24 * 60 * 60 * 1000
@@ -65,6 +72,13 @@ export class EventsRuntime {
   async append(input: EventsAppendInput): Promise<readonly StoredDomainEvent[]> {
     if (input.events.length === 0) {
       return []
+    }
+    for (const event of input.events) {
+      if (isOntologyFactType(event.type)) {
+        throw new EventsError(
+          `Event type '${event.type}' is an authoritative ontology fact and cannot be appended directly.`
+        )
+      }
     }
 
     const payloads = input.events.map((event) =>
@@ -222,7 +236,7 @@ export class EventsRuntime {
   }
 }
 
-type StoredEventPayload = Omit<StoredDomainEvent, "cursor">
+type StoredEventPayload = Omit<StoredAuthorableEvent, "cursor">
 
 function toStoredEventPayload(params: {
   projectId: string

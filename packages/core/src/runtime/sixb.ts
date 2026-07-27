@@ -27,11 +27,12 @@ import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
 import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
 import type { SixbErrorHandler } from "../error-reporting/types"
-import { EventsRuntime } from "../events"
+import { EventsRuntime, OntologyOutboxDispatcher } from "../events"
 import { FunctionRuntime } from "../functions/runtime"
 import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
 import { type LoggerProvider, LogsRuntime, type ObservabilityOptions } from "../logging"
+import { createOntologyMaterializer } from "../materializer"
 import { createObjectSet, objectService } from "../objects"
 import {
   assertObjectTypeRegistered,
@@ -69,6 +70,10 @@ import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webho
 import type { WorkflowDefinition } from "../workflows"
 import { validateWorkflowsAtStartup, WorkflowsRuntime } from "../workflows"
 import { RuntimeError } from "./errors"
+import {
+  createOntologyMutationRuntime,
+  registerOntologyMutationRuntime,
+} from "./ontology-mutations"
 import { createScopedSixb, type ScopedSixb } from "./scoped"
 import type {
   BatchItemResult,
@@ -130,6 +135,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   private readonly webhooksByRoute = new Map<string, RegisteredWebhook>()
   private readonly webhooks: readonly RegisteredWebhook[]
   private readonly runtimeContext: SixbRuntimeContext
+  private readonly committedFacts: OntologyOutboxDispatcher
   private readonly projectionRegistry: ProjectionRegistry
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
@@ -319,6 +325,18 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       datasetsById: this.datasetsById,
     })
 
+    const materializer = createOntologyMaterializer({
+      projectId: this.projectId,
+      ontology: this.ontology,
+      projections: this.projectionRegistry,
+      storage: this.storage,
+    })
+    this.committedFacts = new OntologyOutboxDispatcher({
+      projectId: this.projectId,
+      storage: this.storage,
+      events: this.events,
+    })
+
     this.runtimeContext = {
       projectId: this.projectId,
       ontology: this.ontology,
@@ -331,6 +349,12 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       sandboxes: this.sandboxes,
       rules: this.rules,
     }
+    const ontologyMutations = createOntologyMutationRuntime({
+      materializer,
+      notifyCommittedFacts: () => this.committedFacts.notify(),
+    })
+    registerOntologyMutationRuntime(this, ontologyMutations)
+    registerOntologyMutationRuntime(this.runtimeContext, ontologyMutations)
     shareSixbErrorReporter(this, this.runtimeContext)
     this.actions = new ActionsRuntime(this.runtimeContext)
     this.workflows = new WorkflowsRuntime(this.runtimeContext, workflows)
@@ -517,6 +541,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
   /** Close the runtime broker provider if it owns external resources. */
   async closeBroker(): Promise<void> {
+    await this.committedFacts.stop()
     await this.broker.close?.()
   }
 

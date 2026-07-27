@@ -1,27 +1,23 @@
 import { ActionRunError } from "./errors"
 import {
-  actionRunCommitDiffsEqual,
   actionRunPhaseRecordsEqual,
   actionSubjectsEqual,
   canRequeueActionRunAfterEnqueueFailure,
   isTerminalActionRun,
-  normalizeActionRunCommitDiff,
 } from "./idempotency"
 import type {
   ActionMaterializationRunStorage,
-  ActionRunCommitRecord,
   ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunParams,
   ActionRunRecord,
   ActionRunWritebackRecord,
-  AssertActionMaterializationRunInput,
   EnterActionRunPhaseInput,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
+  LockActionMaterializationRunInput,
   QueueActionRunInput,
-  RecordActionCommitInput,
   RecordActionEffectsInput,
   RecordActionWritebackInput,
   StartActionRunInput,
@@ -73,13 +69,6 @@ function normalizeWriteback(
     status: "failed",
     completedAt,
     error: normalizeError(input.error),
-  }
-}
-
-function normalizeCommit(input: RecordActionCommitInput, committedAt: Date): ActionRunCommitRecord {
-  return {
-    committedAt,
-    diff: normalizeActionRunCommitDiff(input.diff),
   }
 }
 
@@ -135,10 +124,8 @@ export class InMemoryActionRunStorage implements ActionMaterializationRunStorage
     }
   }
 
-  async assertMaterializationRun(input: AssertActionMaterializationRunInput): Promise<void> {
-    await this.runRootOperation(() => {
-      this.requireMaterializationRun(input)
-    })
+  async lockForMaterialization(input: LockActionMaterializationRunInput): Promise<ActionRunRecord> {
+    return this.runRootOperation(() => cloneActionRunRecord(this.requireMaterializationRun(input)))
   }
 
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
@@ -173,7 +160,6 @@ export class InMemoryActionRunStorage implements ActionMaterializationRunStorage
           finishedAt: undefined,
           error: undefined,
           writeback: undefined,
-          commit: undefined,
           effects: undefined,
         }
         this.rows.set(key, structuredClone(next))
@@ -249,33 +235,6 @@ export class InMemoryActionRunStorage implements ActionMaterializationRunStorage
         ...existing,
         phase: "writeback",
         writeback,
-      }
-
-      this.rows.set(key, structuredClone(next))
-      return cloneActionRunRecord(next)
-    })
-  }
-
-  async recordCommit(input: RecordActionCommitInput): Promise<ActionRunRecord> {
-    return this.runRootOperation(() => {
-      const key = actionRunKey(input.projectId, input.id)
-      const existing = this.requireRunningRun(key, input.projectId, input.id, "record commit")
-      const commit = normalizeCommit(input, new Date(input.committedAt ?? new Date()))
-
-      if (existing.commit) {
-        if (actionRunCommitDiffsEqual(existing.commit.diff, commit.diff)) {
-          return cloneActionRunRecord(existing)
-        }
-
-        throw new ActionRunError(
-          `[Sixb] Action run '${input.id}' already has a different commit diff.`
-        )
-      }
-
-      const next: ActionRunRecord = {
-        ...existing,
-        phase: "commit",
-        commit,
       }
 
       this.rows.set(key, structuredClone(next))
@@ -433,7 +392,7 @@ export class InMemoryActionRunStorage implements ActionMaterializationRunStorage
     })
   }
 
-  private requireMaterializationRun(input: AssertActionMaterializationRunInput): ActionRunRecord {
+  private requireMaterializationRun(input: LockActionMaterializationRunInput): ActionRunRecord {
     assertNonBlank(input.projectId, "projectId")
     assertNonBlank(input.runId, "runId")
     assertNonBlank(input.actionId, "actionId")

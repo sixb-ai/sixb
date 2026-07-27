@@ -14810,97 +14810,6 @@
                       "required": ["status", "completedAt"],
                       "additionalProperties": false
                     },
-                    "commit": {
-                      "type": "object",
-                      "properties": {
-                        "committedAt": {
-                          "type": "string"
-                        },
-                        "diff": {
-                          "type": "object",
-                          "properties": {
-                            "objects": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "objectTypeId": {
-                                    "type": "string"
-                                  },
-                                  "primaryId": {
-                                    "type": "string"
-                                  },
-                                  "operation": {
-                                    "type": "string",
-                                    "enum": ["create", "update", "delete"]
-                                  },
-                                  "changedProperties": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string"
-                                    }
-                                  }
-                                },
-                                "required": [
-                                  "objectTypeId",
-                                  "primaryId",
-                                  "operation",
-                                  "changedProperties"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "links": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "operation": {
-                                    "type": "string",
-                                    "enum": ["create", "update", "delete"]
-                                  },
-                                  "source": {
-                                    "type": "object",
-                                    "properties": {
-                                      "objectTypeId": {
-                                        "type": "string"
-                                      },
-                                      "primaryId": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["objectTypeId", "primaryId"],
-                                    "additionalProperties": false
-                                  },
-                                  "linkId": {
-                                    "type": "string"
-                                  },
-                                  "target": {
-                                    "type": "object",
-                                    "properties": {
-                                      "objectTypeId": {
-                                        "type": "string"
-                                      },
-                                      "primaryId": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["objectTypeId", "primaryId"],
-                                    "additionalProperties": false
-                                  }
-                                },
-                                "required": ["operation", "source", "linkId", "target"],
-                                "additionalProperties": false
-                              }
-                            }
-                          },
-                          "required": ["objects", "links"],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": ["committedAt", "diff"],
-                      "additionalProperties": false
-                    },
                     "effects": {
                       "type": "object",
                       "properties": {
@@ -19537,134 +19446,2736 @@
                     "events": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
+                        "anyOf": [
+                          {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "cursor": {
+                                    "type": "string"
+                                  },
+                                  "schemaVersion": {
+                                    "type": "number",
+                                    "enum": [1]
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "occurredAt": {
+                                    "type": "string"
+                                  },
+                                  "actor": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "service", "system"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false
+                                  },
+                                  "partitionKey": {
+                                    "type": "string"
+                                  },
+                                  "origin": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["action"]
+                                          },
+                                          "actionId": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "actionId", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["runtime"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["projection"]
+                                          },
+                                          "projectionId": {
+                                            "type": "string"
+                                          },
+                                          "projectionRunId": {
+                                            "type": "string"
+                                          },
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "datasetVersionId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "projectionId",
+                                          "projectionRunId",
+                                          "datasetId",
+                                          "datasetVersionId"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["telemetry"]
+                                          },
+                                          "source": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["runtime"]
+                                                  },
+                                                  "requestId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["kind", "requestId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["projection"]
+                                                  },
+                                                  "projectionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "projectionRunId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetVersionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "batchOrdinal": {
+                                                    "type": "number"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "projectionId",
+                                                  "projectionRunId",
+                                                  "datasetId",
+                                                  "datasetVersionId",
+                                                  "batchOrdinal"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "commitId": {
+                                    "type": "string"
+                                  },
+                                  "commitOrdinal": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["object.created"]
+                                  },
+                                  "topic": {
+                                    "type": "string",
+                                    "enum": ["objects"]
+                                  },
+                                  "payload": {
+                                    "type": "object",
+                                    "properties": {
+                                      "objectTypeId": {
+                                        "type": "string"
+                                      },
+                                      "primaryId": {
+                                        "type": "string"
+                                      },
+                                      "properties": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "description": "Any JSON-compatible value.",
+                                          "nullable": true,
+                                          "anyOf": [
+                                            {
+                                              "type": "string"
+                                            },
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "type": "array",
+                                              "items": {}
+                                            },
+                                            {
+                                              "type": "object",
+                                              "additionalProperties": true
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      "propertyChanges": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "anyOf": [
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["created"]
+                                                },
+                                                "after": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                }
+                                              },
+                                              "required": ["operation", "after"],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["updated"]
+                                                },
+                                                "before": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                },
+                                                "after": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                }
+                                              },
+                                              "required": ["operation", "before", "after"],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["cleared"]
+                                                },
+                                                "before": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                },
+                                                "after": {
+                                                  "nullable": true,
+                                                  "enum": [null]
+                                                }
+                                              },
+                                              "required": ["operation", "before", "after"],
+                                              "additionalProperties": false
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "objectTypeId",
+                                      "primaryId",
+                                      "properties",
+                                      "propertyChanges"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "cursor",
+                                  "schemaVersion",
+                                  "projectId",
+                                  "occurredAt",
+                                  "partitionKey",
+                                  "origin",
+                                  "commitId",
+                                  "commitOrdinal",
+                                  "type",
+                                  "topic",
+                                  "payload"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "cursor": {
+                                    "type": "string"
+                                  },
+                                  "schemaVersion": {
+                                    "type": "number",
+                                    "enum": [1]
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "occurredAt": {
+                                    "type": "string"
+                                  },
+                                  "actor": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "service", "system"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false
+                                  },
+                                  "partitionKey": {
+                                    "type": "string"
+                                  },
+                                  "origin": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["action"]
+                                          },
+                                          "actionId": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "actionId", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["runtime"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["projection"]
+                                          },
+                                          "projectionId": {
+                                            "type": "string"
+                                          },
+                                          "projectionRunId": {
+                                            "type": "string"
+                                          },
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "datasetVersionId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "projectionId",
+                                          "projectionRunId",
+                                          "datasetId",
+                                          "datasetVersionId"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["telemetry"]
+                                          },
+                                          "source": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["runtime"]
+                                                  },
+                                                  "requestId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["kind", "requestId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["projection"]
+                                                  },
+                                                  "projectionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "projectionRunId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetVersionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "batchOrdinal": {
+                                                    "type": "number"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "projectionId",
+                                                  "projectionRunId",
+                                                  "datasetId",
+                                                  "datasetVersionId",
+                                                  "batchOrdinal"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "commitId": {
+                                    "type": "string"
+                                  },
+                                  "commitOrdinal": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["object.updated"]
+                                  },
+                                  "topic": {
+                                    "type": "string",
+                                    "enum": ["objects"]
+                                  },
+                                  "payload": {
+                                    "type": "object",
+                                    "properties": {
+                                      "objectTypeId": {
+                                        "type": "string"
+                                      },
+                                      "primaryId": {
+                                        "type": "string"
+                                      },
+                                      "properties": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "description": "Any JSON-compatible value.",
+                                          "nullable": true,
+                                          "anyOf": [
+                                            {
+                                              "type": "string"
+                                            },
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "type": "array",
+                                              "items": {}
+                                            },
+                                            {
+                                              "type": "object",
+                                              "additionalProperties": true
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      "propertyChanges": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "anyOf": [
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["created"]
+                                                },
+                                                "after": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                }
+                                              },
+                                              "required": ["operation", "after"],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["updated"]
+                                                },
+                                                "before": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                },
+                                                "after": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                }
+                                              },
+                                              "required": ["operation", "before", "after"],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["cleared"]
+                                                },
+                                                "before": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                },
+                                                "after": {
+                                                  "nullable": true,
+                                                  "enum": [null]
+                                                }
+                                              },
+                                              "required": ["operation", "before", "after"],
+                                              "additionalProperties": false
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "objectTypeId",
+                                      "primaryId",
+                                      "properties",
+                                      "propertyChanges"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "cursor",
+                                  "schemaVersion",
+                                  "projectId",
+                                  "occurredAt",
+                                  "partitionKey",
+                                  "origin",
+                                  "commitId",
+                                  "commitOrdinal",
+                                  "type",
+                                  "topic",
+                                  "payload"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "cursor": {
+                                    "type": "string"
+                                  },
+                                  "schemaVersion": {
+                                    "type": "number",
+                                    "enum": [1]
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "occurredAt": {
+                                    "type": "string"
+                                  },
+                                  "actor": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "service", "system"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false
+                                  },
+                                  "partitionKey": {
+                                    "type": "string"
+                                  },
+                                  "origin": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["action"]
+                                          },
+                                          "actionId": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "actionId", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["runtime"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["projection"]
+                                          },
+                                          "projectionId": {
+                                            "type": "string"
+                                          },
+                                          "projectionRunId": {
+                                            "type": "string"
+                                          },
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "datasetVersionId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "projectionId",
+                                          "projectionRunId",
+                                          "datasetId",
+                                          "datasetVersionId"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["telemetry"]
+                                          },
+                                          "source": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["runtime"]
+                                                  },
+                                                  "requestId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["kind", "requestId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["projection"]
+                                                  },
+                                                  "projectionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "projectionRunId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetVersionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "batchOrdinal": {
+                                                    "type": "number"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "projectionId",
+                                                  "projectionRunId",
+                                                  "datasetId",
+                                                  "datasetVersionId",
+                                                  "batchOrdinal"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "commitId": {
+                                    "type": "string"
+                                  },
+                                  "commitOrdinal": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["object.deleted"]
+                                  },
+                                  "topic": {
+                                    "type": "string",
+                                    "enum": ["objects"]
+                                  },
+                                  "payload": {
+                                    "type": "object",
+                                    "properties": {
+                                      "objectTypeId": {
+                                        "type": "string"
+                                      },
+                                      "primaryId": {
+                                        "type": "string"
+                                      },
+                                      "propertyChanges": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "anyOf": [
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["created"]
+                                                },
+                                                "after": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                }
+                                              },
+                                              "required": ["operation", "after"],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["updated"]
+                                                },
+                                                "before": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                },
+                                                "after": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                }
+                                              },
+                                              "required": ["operation", "before", "after"],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["cleared"]
+                                                },
+                                                "before": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                },
+                                                "after": {
+                                                  "nullable": true,
+                                                  "enum": [null]
+                                                }
+                                              },
+                                              "required": ["operation", "before", "after"],
+                                              "additionalProperties": false
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "required": ["objectTypeId", "primaryId", "propertyChanges"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "cursor",
+                                  "schemaVersion",
+                                  "projectId",
+                                  "occurredAt",
+                                  "partitionKey",
+                                  "origin",
+                                  "commitId",
+                                  "commitOrdinal",
+                                  "type",
+                                  "topic",
+                                  "payload"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "cursor": {
+                                    "type": "string"
+                                  },
+                                  "schemaVersion": {
+                                    "type": "number",
+                                    "enum": [1]
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "occurredAt": {
+                                    "type": "string"
+                                  },
+                                  "actor": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "service", "system"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false
+                                  },
+                                  "partitionKey": {
+                                    "type": "string"
+                                  },
+                                  "origin": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["action"]
+                                          },
+                                          "actionId": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "actionId", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["runtime"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["projection"]
+                                          },
+                                          "projectionId": {
+                                            "type": "string"
+                                          },
+                                          "projectionRunId": {
+                                            "type": "string"
+                                          },
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "datasetVersionId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "projectionId",
+                                          "projectionRunId",
+                                          "datasetId",
+                                          "datasetVersionId"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["telemetry"]
+                                          },
+                                          "source": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["runtime"]
+                                                  },
+                                                  "requestId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["kind", "requestId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["projection"]
+                                                  },
+                                                  "projectionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "projectionRunId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetVersionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "batchOrdinal": {
+                                                    "type": "number"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "projectionId",
+                                                  "projectionRunId",
+                                                  "datasetId",
+                                                  "datasetVersionId",
+                                                  "batchOrdinal"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "commitId": {
+                                    "type": "string"
+                                  },
+                                  "commitOrdinal": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["telemetry.appended"]
+                                  },
+                                  "topic": {
+                                    "type": "string",
+                                    "enum": ["telemetry"]
+                                  },
+                                  "payload": {
+                                    "type": "object",
+                                    "properties": {
+                                      "objectTypeId": {
+                                        "type": "string"
+                                      },
+                                      "objectId": {
+                                        "type": "string"
+                                      },
+                                      "propertyId": {
+                                        "type": "string"
+                                      },
+                                      "value": {
+                                        "description": "Any JSON-compatible value.",
+                                        "nullable": true,
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {}
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                          }
+                                        ]
+                                      },
+                                      "unit": {
+                                        "type": "string"
+                                      },
+                                      "at": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "objectTypeId",
+                                      "objectId",
+                                      "propertyId",
+                                      "value",
+                                      "at"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "cursor",
+                                  "schemaVersion",
+                                  "projectId",
+                                  "occurredAt",
+                                  "partitionKey",
+                                  "origin",
+                                  "commitId",
+                                  "commitOrdinal",
+                                  "type",
+                                  "topic",
+                                  "payload"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "cursor": {
+                                    "type": "string"
+                                  },
+                                  "schemaVersion": {
+                                    "type": "number",
+                                    "enum": [1]
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "occurredAt": {
+                                    "type": "string"
+                                  },
+                                  "actor": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "service", "system"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false
+                                  },
+                                  "partitionKey": {
+                                    "type": "string"
+                                  },
+                                  "origin": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["action"]
+                                          },
+                                          "actionId": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "actionId", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["runtime"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["projection"]
+                                          },
+                                          "projectionId": {
+                                            "type": "string"
+                                          },
+                                          "projectionRunId": {
+                                            "type": "string"
+                                          },
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "datasetVersionId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "projectionId",
+                                          "projectionRunId",
+                                          "datasetId",
+                                          "datasetVersionId"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["telemetry"]
+                                          },
+                                          "source": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["runtime"]
+                                                  },
+                                                  "requestId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["kind", "requestId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["projection"]
+                                                  },
+                                                  "projectionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "projectionRunId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetVersionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "batchOrdinal": {
+                                                    "type": "number"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "projectionId",
+                                                  "projectionRunId",
+                                                  "datasetId",
+                                                  "datasetVersionId",
+                                                  "batchOrdinal"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "commitId": {
+                                    "type": "string"
+                                  },
+                                  "commitOrdinal": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["link.created"]
+                                  },
+                                  "topic": {
+                                    "type": "string",
+                                    "enum": ["links"]
+                                  },
+                                  "payload": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceTypeId": {
+                                        "type": "string"
+                                      },
+                                      "sourceId": {
+                                        "type": "string"
+                                      },
+                                      "linkId": {
+                                        "type": "string"
+                                      },
+                                      "targetTypeId": {
+                                        "type": "string"
+                                      },
+                                      "targetId": {
+                                        "type": "string"
+                                      },
+                                      "properties": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "description": "Any JSON-compatible value.",
+                                          "nullable": true,
+                                          "anyOf": [
+                                            {
+                                              "type": "string"
+                                            },
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "type": "array",
+                                              "items": {}
+                                            },
+                                            {
+                                              "type": "object",
+                                              "additionalProperties": true
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      "propertyChanges": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "anyOf": [
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["created"]
+                                                },
+                                                "after": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                }
+                                              },
+                                              "required": ["operation", "after"],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["updated"]
+                                                },
+                                                "before": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                },
+                                                "after": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                }
+                                              },
+                                              "required": ["operation", "before", "after"],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["cleared"]
+                                                },
+                                                "before": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                },
+                                                "after": {
+                                                  "nullable": true,
+                                                  "enum": [null]
+                                                }
+                                              },
+                                              "required": ["operation", "before", "after"],
+                                              "additionalProperties": false
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "sourceTypeId",
+                                      "sourceId",
+                                      "linkId",
+                                      "targetTypeId",
+                                      "targetId",
+                                      "propertyChanges"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "cursor",
+                                  "schemaVersion",
+                                  "projectId",
+                                  "occurredAt",
+                                  "partitionKey",
+                                  "origin",
+                                  "commitId",
+                                  "commitOrdinal",
+                                  "type",
+                                  "topic",
+                                  "payload"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "cursor": {
+                                    "type": "string"
+                                  },
+                                  "schemaVersion": {
+                                    "type": "number",
+                                    "enum": [1]
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "occurredAt": {
+                                    "type": "string"
+                                  },
+                                  "actor": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "service", "system"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false
+                                  },
+                                  "partitionKey": {
+                                    "type": "string"
+                                  },
+                                  "origin": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["action"]
+                                          },
+                                          "actionId": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "actionId", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["runtime"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["projection"]
+                                          },
+                                          "projectionId": {
+                                            "type": "string"
+                                          },
+                                          "projectionRunId": {
+                                            "type": "string"
+                                          },
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "datasetVersionId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "projectionId",
+                                          "projectionRunId",
+                                          "datasetId",
+                                          "datasetVersionId"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["telemetry"]
+                                          },
+                                          "source": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["runtime"]
+                                                  },
+                                                  "requestId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["kind", "requestId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["projection"]
+                                                  },
+                                                  "projectionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "projectionRunId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetVersionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "batchOrdinal": {
+                                                    "type": "number"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "projectionId",
+                                                  "projectionRunId",
+                                                  "datasetId",
+                                                  "datasetVersionId",
+                                                  "batchOrdinal"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "commitId": {
+                                    "type": "string"
+                                  },
+                                  "commitOrdinal": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["link.updated"]
+                                  },
+                                  "topic": {
+                                    "type": "string",
+                                    "enum": ["links"]
+                                  },
+                                  "payload": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceTypeId": {
+                                        "type": "string"
+                                      },
+                                      "sourceId": {
+                                        "type": "string"
+                                      },
+                                      "linkId": {
+                                        "type": "string"
+                                      },
+                                      "targetTypeId": {
+                                        "type": "string"
+                                      },
+                                      "targetId": {
+                                        "type": "string"
+                                      },
+                                      "properties": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "description": "Any JSON-compatible value.",
+                                          "nullable": true,
+                                          "anyOf": [
+                                            {
+                                              "type": "string"
+                                            },
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "type": "array",
+                                              "items": {}
+                                            },
+                                            {
+                                              "type": "object",
+                                              "additionalProperties": true
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      "propertyChanges": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "anyOf": [
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["created"]
+                                                },
+                                                "after": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                }
+                                              },
+                                              "required": ["operation", "after"],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["updated"]
+                                                },
+                                                "before": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                },
+                                                "after": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                }
+                                              },
+                                              "required": ["operation", "before", "after"],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["cleared"]
+                                                },
+                                                "before": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                },
+                                                "after": {
+                                                  "nullable": true,
+                                                  "enum": [null]
+                                                }
+                                              },
+                                              "required": ["operation", "before", "after"],
+                                              "additionalProperties": false
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "sourceTypeId",
+                                      "sourceId",
+                                      "linkId",
+                                      "targetTypeId",
+                                      "targetId",
+                                      "propertyChanges"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "cursor",
+                                  "schemaVersion",
+                                  "projectId",
+                                  "occurredAt",
+                                  "partitionKey",
+                                  "origin",
+                                  "commitId",
+                                  "commitOrdinal",
+                                  "type",
+                                  "topic",
+                                  "payload"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "cursor": {
+                                    "type": "string"
+                                  },
+                                  "schemaVersion": {
+                                    "type": "number",
+                                    "enum": [1]
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "occurredAt": {
+                                    "type": "string"
+                                  },
+                                  "actor": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "service", "system"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false
+                                  },
+                                  "partitionKey": {
+                                    "type": "string"
+                                  },
+                                  "origin": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["action"]
+                                          },
+                                          "actionId": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "actionId", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["runtime"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["kind", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["projection"]
+                                          },
+                                          "projectionId": {
+                                            "type": "string"
+                                          },
+                                          "projectionRunId": {
+                                            "type": "string"
+                                          },
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "datasetVersionId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "projectionId",
+                                          "projectionRunId",
+                                          "datasetId",
+                                          "datasetVersionId"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": ["telemetry"]
+                                          },
+                                          "source": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["runtime"]
+                                                  },
+                                                  "requestId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["kind", "requestId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": ["projection"]
+                                                  },
+                                                  "projectionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "projectionRunId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetId": {
+                                                    "type": "string"
+                                                  },
+                                                  "datasetVersionId": {
+                                                    "type": "string"
+                                                  },
+                                                  "batchOrdinal": {
+                                                    "type": "number"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "projectionId",
+                                                  "projectionRunId",
+                                                  "datasetId",
+                                                  "datasetVersionId",
+                                                  "batchOrdinal"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "commitId": {
+                                    "type": "string"
+                                  },
+                                  "commitOrdinal": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["link.deleted"]
+                                  },
+                                  "topic": {
+                                    "type": "string",
+                                    "enum": ["links"]
+                                  },
+                                  "payload": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceTypeId": {
+                                        "type": "string"
+                                      },
+                                      "sourceId": {
+                                        "type": "string"
+                                      },
+                                      "linkId": {
+                                        "type": "string"
+                                      },
+                                      "targetTypeId": {
+                                        "type": "string"
+                                      },
+                                      "targetId": {
+                                        "type": "string"
+                                      },
+                                      "propertyChanges": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "anyOf": [
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["created"]
+                                                },
+                                                "after": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                }
+                                              },
+                                              "required": ["operation", "after"],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["updated"]
+                                                },
+                                                "before": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                },
+                                                "after": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                }
+                                              },
+                                              "required": ["operation", "before", "after"],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "operation": {
+                                                  "type": "string",
+                                                  "enum": ["cleared"]
+                                                },
+                                                "before": {
+                                                  "description": "Any JSON-compatible value.",
+                                                  "nullable": true,
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "string"
+                                                    },
+                                                    {
+                                                      "type": "number"
+                                                    },
+                                                    {
+                                                      "type": "boolean"
+                                                    },
+                                                    {
+                                                      "type": "array",
+                                                      "items": {}
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "additionalProperties": true
+                                                    }
+                                                  ]
+                                                },
+                                                "after": {
+                                                  "nullable": true,
+                                                  "enum": [null]
+                                                }
+                                              },
+                                              "required": ["operation", "before", "after"],
+                                              "additionalProperties": false
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "sourceTypeId",
+                                      "sourceId",
+                                      "linkId",
+                                      "targetTypeId",
+                                      "targetId",
+                                      "propertyChanges"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "cursor",
+                                  "schemaVersion",
+                                  "projectId",
+                                  "occurredAt",
+                                  "partitionKey",
+                                  "origin",
+                                  "commitId",
+                                  "commitOrdinal",
+                                  "type",
+                                  "topic",
+                                  "payload"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
                           },
-                          "cursor": {
-                            "type": "string"
-                          },
-                          "schemaVersion": {
-                            "type": "number"
-                          },
-                          "projectId": {
-                            "type": "string"
-                          },
-                          "occurredAt": {
-                            "type": "string"
-                          },
-                          "correlationId": {
-                            "type": "string"
-                          },
-                          "causationId": {
-                            "type": "string"
-                          },
-                          "idempotencyKey": {
-                            "type": "string"
-                          },
-                          "actor": {
+                          {
                             "type": "object",
                             "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["user", "service", "system"]
-                              },
                               "id": {
                                 "type": "string"
-                              }
-                            },
-                            "required": ["type", "id"],
-                            "additionalProperties": false
-                          },
-                          "origin": {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
+                              },
+                              "cursor": {
+                                "type": "string"
+                              },
+                              "schemaVersion": {
+                                "type": "number",
+                                "enum": [1]
+                              },
+                              "projectId": {
+                                "type": "string"
+                              },
+                              "occurredAt": {
+                                "type": "string"
+                              },
+                              "actor": {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user", "service", "system"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
+                              },
+                              "partitionKey": {
+                                "type": "string"
+                              },
+                              "correlationId": {
+                                "type": "string"
+                              },
+                              "causationId": {
+                                "type": "string"
+                              },
+                              "idempotencyKey": {
+                                "type": "string"
+                              },
+                              "origin": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": ["action"]
+                                      },
+                                      "actionId": {
+                                        "type": "string"
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["kind", "actionId", "runId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": ["runtime"]
+                                      },
+                                      "requestId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["kind", "requestId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": ["projection"]
+                                      },
+                                      "projectionId": {
+                                        "type": "string"
+                                      },
+                                      "projectionRunId": {
+                                        "type": "string"
+                                      },
+                                      "datasetId": {
+                                        "type": "string"
+                                      },
+                                      "datasetVersionId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "projectionId",
+                                      "projectionRunId",
+                                      "datasetId",
+                                      "datasetVersionId"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": ["telemetry"]
+                                      },
+                                      "source": {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "enum": ["runtime"]
+                                              },
+                                              "requestId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["kind", "requestId"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "enum": ["projection"]
+                                              },
+                                              "projectionId": {
+                                                "type": "string"
+                                              },
+                                              "projectionRunId": {
+                                                "type": "string"
+                                              },
+                                              "datasetId": {
+                                                "type": "string"
+                                              },
+                                              "datasetVersionId": {
+                                                "type": "string"
+                                              },
+                                              "batchOrdinal": {
+                                                "type": "number"
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "projectionId",
+                                              "projectionRunId",
+                                              "datasetId",
+                                              "datasetVersionId",
+                                              "batchOrdinal"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "required": ["kind", "source"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "metadata": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
+                                }
+                              },
+                              "type": {
                                 "type": "string",
-                                "enum": ["action"]
+                                "enum": [
+                                  "action.requested",
+                                  "action.completed",
+                                  "action.failed",
+                                  "schedule.triggered",
+                                  "sync.run.started",
+                                  "sync.run.finished",
+                                  "pipeline.run.started",
+                                  "pipeline.run.step.started",
+                                  "pipeline.run.step.finished",
+                                  "pipeline.run.finished",
+                                  "workflow.run.queued",
+                                  "workflow.run.started",
+                                  "workflow.run.node.started",
+                                  "workflow.run.waiting",
+                                  "workflow.run.node.waiting",
+                                  "workflow.run.node.finished",
+                                  "workflow.run.finished",
+                                  "workflow.intervention.requested",
+                                  "workflow.intervention.submitted",
+                                  "workflow.intervention.cancelled",
+                                  "workflow.intervention.expired",
+                                  "dataset.version.committed",
+                                  "rule.triggered",
+                                  "rule.resolved"
+                                ]
                               },
-                              "actionId": {
-                                "type": "string"
+                              "topic": {
+                                "type": "string",
+                                "enum": [
+                                  "objects",
+                                  "telemetry",
+                                  "links",
+                                  "actions",
+                                  "schedules",
+                                  "syncs",
+                                  "pipelines",
+                                  "workflows",
+                                  "datasets",
+                                  "rules"
+                                ]
                               },
-                              "runId": {
-                                "type": "string"
+                              "payload": {
+                                "type": "object",
+                                "additionalProperties": {}
                               }
                             },
-                            "required": ["kind", "actionId", "runId"],
+                            "required": [
+                              "id",
+                              "cursor",
+                              "schemaVersion",
+                              "projectId",
+                              "occurredAt",
+                              "partitionKey",
+                              "type",
+                              "topic",
+                              "payload"
+                            ],
                             "additionalProperties": false
-                          },
-                          "metadata": {
-                            "type": "object",
-                            "additionalProperties": {}
-                          },
-                          "type": {
-                            "type": "string",
-                            "enum": [
-                              "object.created",
-                              "object.updated",
-                              "object.deleted",
-                              "telemetry.appended",
-                              "link.created",
-                              "link.updated",
-                              "link.deleted",
-                              "action.requested",
-                              "action.completed",
-                              "action.failed",
-                              "schedule.triggered",
-                              "sync.run.started",
-                              "sync.run.finished",
-                              "pipeline.run.started",
-                              "pipeline.run.step.started",
-                              "pipeline.run.step.finished",
-                              "pipeline.run.finished",
-                              "workflow.run.queued",
-                              "workflow.run.started",
-                              "workflow.run.node.started",
-                              "workflow.run.waiting",
-                              "workflow.run.node.waiting",
-                              "workflow.run.node.finished",
-                              "workflow.run.finished",
-                              "workflow.intervention.requested",
-                              "workflow.intervention.submitted",
-                              "workflow.intervention.cancelled",
-                              "workflow.intervention.expired",
-                              "dataset.version.committed",
-                              "rule.triggered",
-                              "rule.resolved"
-                            ]
-                          },
-                          "topic": {
-                            "type": "string",
-                            "enum": [
-                              "objects",
-                              "telemetry",
-                              "links",
-                              "actions",
-                              "schedules",
-                              "syncs",
-                              "pipelines",
-                              "workflows",
-                              "datasets",
-                              "rules"
-                            ]
-                          },
-                          "partitionKey": {
-                            "type": "string"
-                          },
-                          "payload": {}
-                        },
-                        "required": [
-                          "id",
-                          "cursor",
-                          "schemaVersion",
-                          "projectId",
-                          "occurredAt",
-                          "type",
-                          "topic",
-                          "partitionKey"
-                        ],
-                        "additionalProperties": false
+                          }
+                        ]
                       }
                     }
                   },

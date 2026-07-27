@@ -19,3 +19,20 @@ export function createTestRuntimeDeps() {
     queues: new InMemoryQueues(),
   }
 }
+
+/** Waits for an eventually consistent runtime boundary without relying on arbitrary sleeps. */
+export async function waitFor<T>(
+  read: () => T | Promise<T>,
+  predicate: (value: T) => boolean,
+  timeoutMs = 2_000
+): Promise<T> {
+  const startedAt = Date.now()
+  for (;;) {
+    const value = await read()
+    if (predicate(value)) return value
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error("Timed out waiting for condition.")
+    }
+    await Bun.sleep(10)
+  }
+}

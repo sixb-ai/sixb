@@ -65,6 +65,7 @@ import {
   finishScopeAccumulator,
   type ProviderMaterializationTransactionLifecycle,
   startScopeAccumulator,
+  uniqueSorted,
 } from "../provider"
 import type {
   StoredSourceAssertion,
@@ -80,7 +81,6 @@ import {
   objectSnapshot,
   publicLinkOverride,
   publicObjectOverride,
-  selectBoundedUnique,
   storedPoint,
   storedSource,
   storedSourceLink,
@@ -282,42 +282,28 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     for await (const request of input.requests) {
       this.requireSession(input.session)
       this.hooks.beforeRead?.("state.read")
-      let objectCursor: string | null = null
-      while (true) {
+      const objectRefs = uniqueSorted(request.objects, objectRefKey, objectRefSortKey)
+      for (let offset = 0; offset < objectRefs.length; offset += input.pageRows) {
         this.requireSession(input.session)
-        const refs = selectBoundedUnique(
-          request.objects,
-          objectCursor,
-          input.pageRows,
-          objectRefSortKey,
-          objectRefKey
-        )
-        if (refs.length === 0) break
         const objects: MaterializationObjectState[] = []
-        for (const ref of refs) objects.push(await this.objectState(session, ref))
+        for (const ref of objectRefs.slice(offset, offset + input.pageRows)) {
+          objects.push(await this.objectState(session, ref))
+        }
         this.requireSession(input.session)
         this.hooks.observeBuffer?.("state.object.page", objects.length)
         yield { objects, links: [], linkScopes: [], points: [] }
-        objectCursor = objectRefSortKey(refs[refs.length - 1])
       }
 
-      let linkCursor: string | null = null
-      while (true) {
+      const linkRefs = uniqueSorted(request.links, linkRefKey, linkRefSortKey)
+      for (let offset = 0; offset < linkRefs.length; offset += input.pageRows) {
         this.requireSession(input.session)
-        const refs = selectBoundedUnique(
-          request.links,
-          linkCursor,
-          input.pageRows,
-          linkRefSortKey,
-          linkRefKey
-        )
-        if (refs.length === 0) break
         const links: MaterializationLinkState[] = []
-        for (const ref of refs) links.push(await this.linkState(session, ref))
+        for (const ref of linkRefs.slice(offset, offset + input.pageRows)) {
+          links.push(await this.linkState(session, ref))
+        }
         this.requireSession(input.session)
         this.hooks.observeBuffer?.("state.link.page", links.length)
         yield { objects: [], links, linkScopes: [], points: [] }
-        linkCursor = linkRefSortKey(refs[refs.length - 1])
       }
 
       const incidentRefs = this.incidentLinkRefs(session, request.incidentObjects)
@@ -342,19 +328,15 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         yield { objects: [], links: [], linkScopes: [value], points: [] }
       }
 
-      let pointCursor: string | null = null
-      while (true) {
+      const requestedPoints = uniqueSorted(
+        request.points,
+        (point) => telemetryPointKey(point.series, point.at),
+        (point) => telemetryPointSortKey(point.series, point.at)
+      )
+      for (let offset = 0; offset < requestedPoints.length; offset += input.pageRows) {
         this.requireSession(input.session)
-        const selected = selectBoundedUnique(
-          request.points,
-          pointCursor,
-          input.pageRows,
-          (point) => telemetryPointSortKey(point.series, point.at),
-          (point) => telemetryPointKey(point.series, point.at)
-        )
-        if (selected.length === 0) break
         const points: StoredTelemetryPoint[] = []
-        for (const point of selected) {
+        for (const point of requestedPoints.slice(offset, offset + input.pageRows)) {
           const stored = getInMemoryTimeseriesMaterializerAdapter(this.timeseries).getExactPoint(
             session.header.commit.projectId,
             point.series,
@@ -365,10 +347,6 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         this.requireSession(input.session)
         this.hooks.observeBuffer?.("state.point.page", points.length)
         if (points.length > 0) yield { objects: [], links: [], linkScopes: [], points }
-        pointCursor = telemetryPointSortKey(
-          selected[selected.length - 1].series,
-          selected[selected.length - 1].at
-        )
       }
     }
   }

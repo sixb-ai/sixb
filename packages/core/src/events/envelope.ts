@@ -5,11 +5,47 @@ export interface EventActor {
   id: string
 }
 
-export type EventOrigin = {
-  kind: "action"
-  actionId: string
-  runId: string
+export interface ActionEventOrigin {
+  readonly kind: "action"
+  readonly actionId: string
+  readonly runId: string
 }
+
+/** A direct SDK/runtime mutation, outside an Action or Projection. */
+export interface RuntimeMutationEventOrigin {
+  readonly kind: "runtime"
+  readonly requestId: string
+}
+
+interface ProjectionEventOriginDetails {
+  readonly projectionId: string
+  readonly projectionRunId: string
+  readonly datasetId: string
+  readonly datasetVersionId: string
+}
+
+export interface ProjectionEventOrigin extends ProjectionEventOriginDetails {
+  readonly kind: "projection"
+}
+
+export interface ProjectionTelemetryEventSource extends ProjectionEventOriginDetails {
+  readonly kind: "projection"
+  readonly batchOrdinal: number
+}
+
+export type TelemetryEventSource = RuntimeMutationEventOrigin | ProjectionTelemetryEventSource
+
+export interface TelemetryEventOrigin {
+  readonly kind: "telemetry"
+  readonly source: TelemetryEventSource
+}
+
+/** Public provenance carried by stored events. Ontology facts use the full union. */
+export type EventOrigin =
+  | ActionEventOrigin
+  | RuntimeMutationEventOrigin
+  | ProjectionEventOrigin
+  | TelemetryEventOrigin
 
 export interface EventEnvelope {
   id: string
