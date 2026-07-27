@@ -16,9 +16,181 @@ describe("createTokenSource — resolver mode", () => {
   test("delegates to the caller's token function", async () => {
     const source = createTokenSource({ token: () => "caller-token" })
     expect(await source.get()).toBe("caller-token")
+    expect((await source.getRequestHeaders?.())?.get("authorization")).toBe("Bearer caller-token")
     // invalidate is a no-op for resolver mode
     source.invalidate()
     expect(await source.get()).toBe("caller-token")
+  })
+})
+
+describe("createTokenSource — Application Default Credentials mode", () => {
+  test("validates scopes before attempting credential discovery", () => {
+    expect(() => createTokenSource({ applicationDefault: true, scopes: [] })).toThrow(
+      /non-empty scope/
+    )
+    expect(() => createTokenSource({ applicationDefault: true, scopes: ["   "] })).toThrow(
+      /non-empty scope/
+    )
+  })
+
+  test("discovers credentials lazily and single-flights concurrent token requests", async () => {
+    let loads = 0
+    let headerRequests = 0
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const credentials = { access_token: "adc-token", expiry_date: Date.now() + 3600_000 }
+    const source = createTokenSource(
+      { applicationDefault: true, scopes: ["scope-a", "scope-b"] },
+      {
+        loadApplicationDefaultClient: async (scopes) => {
+          loads++
+          expect(scopes).toEqual(["scope-a", "scope-b"])
+          await gate
+          return {
+            credentials,
+            async getRequestHeaders() {
+              headerRequests++
+              return new Headers({
+                Authorization: `Bearer ${credentials.access_token}`,
+                "x-goog-user-project": "quota-project",
+              })
+            },
+          }
+        },
+      }
+    )
+
+    expect(loads).toBe(0)
+    const tokens = Promise.all([source.get(), source.get(), source.get()])
+    await Promise.resolve()
+    expect(loads).toBe(1)
+    release()
+
+    expect(await tokens).toEqual(["adc-token", "adc-token", "adc-token"])
+    expect(loads).toBe(1)
+    expect(headerRequests).toBe(1)
+
+    const headers = await source.getRequestHeaders?.()
+    expect(headers?.get("authorization")).toBe("Bearer adc-token")
+    expect(headers?.get("x-goog-user-project")).toBe("quota-project")
+    expect(loads).toBe(1)
+    expect(headerRequests).toBe(2)
+  })
+
+  test("invalidates only the access token and refreshes it on the next request", async () => {
+    let refreshes = 0
+    const credentials = {
+      access_token: null as string | null,
+      expiry_date: null as number | null,
+      refresh_token: "preserve-me",
+    }
+    const source = createTokenSource(
+      { applicationDefault: true, scopes: ["scope"] },
+      {
+        loadApplicationDefaultClient: async () => ({
+          credentials,
+          async getRequestHeaders() {
+            if (!credentials.access_token) {
+              refreshes++
+              credentials.access_token = `adc-token-${refreshes}`
+              credentials.expiry_date = Date.now() + 3600_000
+            }
+            return new Headers({ Authorization: `Bearer ${credentials.access_token}` })
+          },
+        }),
+      }
+    )
+
+    expect(await source.get()).toBe("adc-token-1")
+    expect(await source.get()).toBe("adc-token-1")
+    expect(refreshes).toBe(1)
+
+    source.invalidate()
+    expect(await source.get()).toBe("adc-token-2")
+    expect(refreshes).toBe(2)
+    expect(credentials.refresh_token).toBe("preserve-me")
+  })
+
+  test("retries discovery after a failure and preserves the original cause", async () => {
+    const discoveryError = new Error("ADC is not configured")
+    let attempts = 0
+    const source = createTokenSource(
+      { applicationDefault: true, scopes: ["scope"] },
+      {
+        loadApplicationDefaultClient: () => {
+          attempts++
+          if (attempts === 1) {
+            throw discoveryError
+          }
+          return Promise.resolve({
+            credentials: {},
+            getRequestHeaders: async () => new Headers({ Authorization: "Bearer recovered" }),
+          })
+        },
+      }
+    )
+
+    try {
+      await source.get()
+      throw new Error("expected ADC discovery to fail")
+    } catch (error) {
+      expect(error).toBeInstanceOf(GoogleAuthError)
+      expect((error as GoogleAuthError).message).toContain(
+        "could not load Application Default Credentials"
+      )
+      expect((error as GoogleAuthError).cause).toBe(discoveryError)
+    }
+
+    expect(await source.get()).toBe("recovered")
+    expect(attempts).toBe(2)
+  })
+
+  test("wraps token refresh failures and allows the next request to retry", async () => {
+    const refreshError = new Error("refresh unavailable")
+    let refreshes = 0
+    const source = createTokenSource(
+      { applicationDefault: true, scopes: ["scope"] },
+      {
+        loadApplicationDefaultClient: async () => ({
+          credentials: {},
+          async getRequestHeaders() {
+            refreshes++
+            if (refreshes === 1) {
+              throw refreshError
+            }
+            return new Headers({ Authorization: "Bearer refreshed" })
+          },
+        }),
+      }
+    )
+
+    try {
+      await source.get()
+      throw new Error("expected ADC token refresh to fail")
+    } catch (error) {
+      expect(error).toBeInstanceOf(GoogleAuthError)
+      expect((error as GoogleAuthError).message).toContain("could not obtain ADC request headers")
+      expect((error as GoogleAuthError).cause).toBe(refreshError)
+    }
+
+    expect(await source.get()).toBe("refreshed")
+    expect(refreshes).toBe(2)
+  })
+
+  test("rejects missing bearer authorization headers", async () => {
+    const source = createTokenSource(
+      { applicationDefault: true, scopes: ["scope"] },
+      {
+        loadApplicationDefaultClient: async () => ({
+          credentials: {},
+          getRequestHeaders: async () => new Headers(),
+        }),
+      }
+    )
+
+    await expect(source.get()).rejects.toThrow(/bearer Authorization header/)
   })
 })
 

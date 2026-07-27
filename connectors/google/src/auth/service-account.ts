@@ -1,4 +1,5 @@
-import { GoogleAuthError, isRecord } from "./errors"
+import { GoogleAuthError, isRecord } from "../errors"
+import type { ServiceAccountKey, TokenSource } from "./types"
 
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 const JWT_BEARER_GRANT = "urn:ietf:params:oauth:grant-type:jwt-bearer"
@@ -8,70 +9,39 @@ const EXPIRY_MARGIN_MS = 60_000
 /** Attempts for the token exchange itself (network / 429 / 5xx), independent of API retries. */
 const EXCHANGE_MAX_ATTEMPTS = 3
 
-/** A Google service-account key, as found in the JSON key file. */
-export interface ServiceAccountKey {
-  readonly client_email: string
-  /** PEM-encoded PKCS#8 private key (`-----BEGIN PRIVATE KEY-----`). */
-  readonly private_key: string
-  /** Token endpoint override; defaults to Google's global endpoint. */
-  readonly token_uri?: string
-}
-
-export type GoogleAuthOptions =
-  | {
-      /** Service-account key (parsed object or its JSON string). Connector mints tokens. */
-      readonly serviceAccountKey: string | ServiceAccountKey
-      /** OAuth scopes to request; the union across every surface you call. */
-      readonly scopes: readonly string[]
-      /** Impersonate ONE fixed user (domain-wide delegation). See the package README. */
-      readonly subject?: string
-    }
-  | {
-      /** Caller mints tokens elsewhere and owns scopes + refresh. */
-      readonly token: () => string | Promise<string>
-    }
-
-export interface TokenSource {
-  /** Cached, single-flight, refreshed on an expiry margin. */
-  get(): Promise<string>
-  /** Drop the cached token; called by the REST adapter's `onUnauthorized` on a 401. */
-  invalidate(): void
-}
-
-/** Test seams: injectable clock and token-exchange. Not part of the public surface. */
-export interface TokenSourceDeps {
-  readonly now?: () => number
-  readonly exchange?: (nowMs: number) => Promise<TokenExchangeResult>
-}
-
 interface TokenExchangeResult {
   readonly accessToken: string
   readonly expiresInSec: number
 }
 
-export function createTokenSource(
-  auth: GoogleAuthOptions,
-  deps: TokenSourceDeps = {}
+export interface ServiceAccountTokenSourceDeps {
+  readonly now?: () => number
+  readonly exchange?: (nowMs: number) => Promise<TokenExchangeResult>
+}
+
+export function createServiceAccountTokenSource(
+  keyInput: string | ServiceAccountKey,
+  scopes: readonly string[],
+  subject: string | undefined,
+  deps: ServiceAccountTokenSourceDeps = {}
 ): TokenSource {
-  if ("token" in auth) {
-    return {
-      get: () => Promise.resolve(auth.token()),
-      invalidate() {},
-    }
-  }
-
-  const key = normalizeKey(auth.serviceAccountKey)
-  const scopes = auth.scopes
-  if (scopes.length === 0) {
-    throw new GoogleAuthError("at least one scope is required for service-account auth.")
-  }
-
+  const key = normalizeKey(keyInput)
   const now = deps.now ?? (() => Date.now())
-  const exchange =
-    deps.exchange ?? ((nowMs: number) => exchangeToken(key, scopes, auth.subject, nowMs))
+  const exchange = deps.exchange ?? ((nowMs: number) => exchangeToken(key, scopes, subject, nowMs))
 
   let cached: { token: string; expEpochMs: number } | null = null
   let inflight: Promise<string> | null = null
+
+  const get = (): Promise<string> => {
+    if (cached && cached.expEpochMs - EXPIRY_MARGIN_MS > now()) {
+      return Promise.resolve(cached.token)
+    }
+    // Coalesce concurrent refreshes: N callers with an expired token trigger ONE exchange.
+    inflight ??= refresh().finally(() => {
+      inflight = null
+    })
+    return inflight
+  }
 
   const refresh = async (): Promise<string> => {
     const { accessToken, expiresInSec } = await exchange(now())
@@ -80,15 +50,9 @@ export function createTokenSource(
   }
 
   return {
-    get() {
-      if (cached && cached.expEpochMs - EXPIRY_MARGIN_MS > now()) {
-        return Promise.resolve(cached.token)
-      }
-      // Coalesce concurrent refreshes: N callers with an expired token trigger ONE exchange.
-      inflight ??= refresh().finally(() => {
-        inflight = null
-      })
-      return inflight
+    get,
+    async getRequestHeaders() {
+      return new Headers({ Authorization: `Bearer ${await get()}` })
     },
     invalidate() {
       cached = null

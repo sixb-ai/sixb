@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "@sixb/connector-rest": "workspace:*",
-    "@sixb/core": "workspace:*"
+    "@sixb/core": "workspace:*",
+    "google-auth-library": "^10.9.1"
   },
   "devDependencies": {
     "@types/bun": "latest",

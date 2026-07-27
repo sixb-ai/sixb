@@ -14,12 +14,12 @@ export class GoogleApiError extends Error {
   }
 }
 
-/** Raised when minting or exchanging a service-account token fails. */
+/** Raised when resolving or refreshing Google authentication credentials fails. */
 export class GoogleAuthError extends Error {
   readonly name = "GoogleAuthError"
 
-  constructor(message: string) {
-    super(`[SixbGoogle] ${message}`)
+  constructor(message: string, options?: ErrorOptions) {
+    super(`[SixbGoogle] ${message}`, options)
   }
 }
 
