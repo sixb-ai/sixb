@@ -63,7 +63,7 @@ export interface WorkflowRunNodeWaitingEvent extends EventEnvelope {
     nodeRunId: string
     nodeIndex: number
     totalNodes: number
-    nodeType: "intervention"
+    nodeType: "intervention" | "agent"
     nodeId: string
     nodeKey: string
     waitingAt: string
