@@ -45,7 +45,7 @@ export type SyncRunStartedHandler = (run: SyncRunRecord) => Promise<void> | void
 
 export type SyncRunFailedHandler = (error: unknown, run: SyncRunRecord) => void
 
-export interface SyncRunResult {
+interface SyncRunResultBase {
   readonly id: string
   readonly syncId: string
   readonly datasetId: string
@@ -53,7 +53,18 @@ export interface SyncRunResult {
   readonly startedAt: Date
   readonly finishedAt: Date
   readonly rowsRead: number
-  readonly version: DatasetVersion
-  /** True only when this run created the returned dataset version. */
-  readonly versionCreated: boolean
 }
+
+export type SyncRunResult = SyncRunResultBase &
+  (
+    | {
+        readonly version: DatasetVersion
+        /** True only when this run created the returned dataset version. */
+        readonly versionCreated: boolean
+      }
+    | {
+        /** A first empty append has no dataset version yet. */
+        readonly version?: undefined
+        readonly versionCreated: false
+      }
+  )

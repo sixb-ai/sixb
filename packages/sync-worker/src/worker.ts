@@ -163,7 +163,7 @@ async function emitSyncSucceededEvents(
             runId: job.id,
             status: "succeeded",
             datasetId: result.datasetId,
-            versionId: result.version.versionId,
+            ...(result.version ? { versionId: result.version.versionId } : {}),
           },
         },
       ],

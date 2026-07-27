@@ -109,10 +109,17 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
         )
       }
 
-      if (input.status === "succeeded" && input.output.datasetId !== existing.dataset_id) {
-        throw new SyncRunError(
-          `[SixbSqlite] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
-        )
+      if (input.status === "succeeded") {
+        if (input.output && input.output.datasetId !== existing.dataset_id) {
+          throw new SyncRunError(
+            `[SixbSqlite] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
+          )
+        }
+        if (!input.output && (existing.mode !== "append" || input.rowsRead !== 0)) {
+          throw new SyncRunError(
+            `[SixbSqlite] Sync run '${input.id}' may omit its output only for an empty append.`
+          )
+        }
       }
 
       this.db
@@ -136,7 +143,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
           input.status === "succeeded"
             ? input.rowsRead
             : (input.rowsRead ?? existing.rows_read ?? null),
-          input.status === "succeeded" ? input.output.versionId : null,
+          input.status === "succeeded" ? (input.output?.versionId ?? null) : null,
           input.status === "succeeded" ? null : (input.error?.name ?? null),
           input.status === "succeeded" ? null : (input.error?.message ?? null),
           input.status === "succeeded" ? serializeCheckpoint(input.checkpoint) : null,
