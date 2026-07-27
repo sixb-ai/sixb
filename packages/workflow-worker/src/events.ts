@@ -77,9 +77,9 @@ export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
     node: WorkflowNodeRunRecord,
     context: WorkflowNodeLifecycleContext & WorkflowWaitingLifecycleContext
   ): Promise<void> {
-    if (node.nodeType !== "intervention") {
+    if (node.nodeType !== "intervention" && node.nodeType !== "agent") {
       throw new Error(
-        `[SixbWorkflowWorker] Workflow node run '${node.id}' is waiting, but is not an intervention node.`
+        `[SixbWorkflowWorker] Workflow node run '${node.id}' is waiting, but is not a waitable node.`
       )
     }
 
