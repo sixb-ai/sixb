@@ -3,6 +3,7 @@ import {
   linkRefKey,
   MaterializationConflictError,
   objectRefKey,
+  storedMaterializerCommitId,
   telemetryPointKey,
 } from "@sixb/core/internal/materialization"
 import {
@@ -138,7 +139,7 @@ export class SqliteMaterializationWriter {
             `
               DELETE FROM links
               WHERE project_id = ? AND source_type_id = ? AND source_id = ? AND link_id = ?
-                AND target_type_id = ? AND target_id = ? AND last_commit_id = ?
+                AND target_type_id = ? AND target_id = ? AND last_commit_id IS ?
             `
           )
           .run(
@@ -148,7 +149,7 @@ export class SqliteMaterializationWriter {
             item.ref.linkId,
             item.ref.target.objectTypeId,
             item.ref.target.primaryId,
-            item.expected.lastCommitId
+            storedMaterializerCommitId(item.expected.lastCommitId)
           ).changes,
         "effective-state",
         `Expected link ${linkRefKey(item.ref)} changed.`
@@ -160,14 +161,14 @@ export class SqliteMaterializationWriter {
           .query(
             `DELETE FROM objects
              WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
-               AND version = ? AND last_commit_id = ?`
+               AND version = ? AND last_commit_id IS ?`
           )
           .run(
             projectId,
             item.ref.objectTypeId,
             item.ref.primaryId,
             item.expected.version,
-            item.expected.lastCommitId
+            storedMaterializerCommitId(item.expected.lastCommitId)
           ).changes,
         "effective-state",
         `Expected object ${objectRefKey(item.ref)} changed.`
@@ -216,7 +217,7 @@ export class SqliteMaterializationWriter {
             SET properties = json(?), created_at = ?, updated_at = ?, version = ?,
               source_event_id = NULL, last_commit_id = ?
             WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
-              AND version = ? AND last_commit_id = ?
+              AND version = ? AND last_commit_id IS ?
           `
         )
         .run(
@@ -229,7 +230,7 @@ export class SqliteMaterializationWriter {
           row.ref.objectTypeId,
           row.ref.primaryId,
           expected.version,
-          expected.lastCommitId
+          storedMaterializerCommitId(expected.lastCommitId)
         ).changes,
       "effective-state",
       `Expected object ${objectRefKey(row.ref)} changed.`
@@ -277,7 +278,7 @@ export class SqliteMaterializationWriter {
             SET properties = json(?), created_at = ?, updated_at = ?,
               source_event_id = NULL, last_commit_id = ?
             WHERE project_id = ? AND source_type_id = ? AND source_id = ? AND link_id = ?
-              AND target_type_id = ? AND target_id = ? AND last_commit_id = ?
+              AND target_type_id = ? AND target_id = ? AND last_commit_id IS ?
           `
         )
         .run(
@@ -291,7 +292,7 @@ export class SqliteMaterializationWriter {
           row.ref.linkId,
           row.ref.target.objectTypeId,
           row.ref.target.primaryId,
-          expected.lastCommitId
+          storedMaterializerCommitId(expected.lastCommitId)
         ).changes,
       "effective-state",
       `Expected link ${linkRefKey(row.ref)} changed.`
@@ -339,7 +340,7 @@ export class SqliteMaterializationWriter {
                 UPDATE timeseries
                 SET value = json(?), unit = ?, source_event_id = NULL, last_commit_id = ?
                 WHERE project_id = ? AND object_type_id = ? AND object_id = ?
-                  AND property_id = ? AND at = ? AND last_commit_id = ?
+                  AND property_id = ? AND at = ? AND last_commit_id IS ?
               `
             )
             .run(
@@ -351,7 +352,7 @@ export class SqliteMaterializationWriter {
               point.series.object.primaryId,
               point.series.propertyId,
               point.at,
-              expected.lastCommitId
+              storedMaterializerCommitId(expected.lastCommitId)
             ).changes,
           "timeseries-point",
           `Telemetry point ${telemetryPointKey(point.series, point.at)} changed.`

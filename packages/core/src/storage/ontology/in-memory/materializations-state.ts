@@ -1,4 +1,5 @@
 import { MaterializationConflictError } from "../../../materialization/errors"
+import { effectiveMaterializerCommitId } from "../../../materialization/legacy"
 import type {
   EffectiveLinkSnapshot,
   EffectiveObjectSnapshot,
@@ -47,27 +48,17 @@ export function uniqueBy<T>(values: readonly T[], keyOf: (value: T) => string): 
 }
 
 export function objectSnapshot(row: ObjectRow): EffectiveObjectSnapshot {
-  if (!row.lastCommitId)
-    throw new MaterializationConflictError(
-      "effective-state",
-      `Effective object ${row.objectTypeId}:${row.primaryId} lacks materializer provenance.`
-    )
   return {
     ref: { objectTypeId: row.objectTypeId, primaryId: row.primaryId },
     properties: structuredClone(row.properties) as EffectiveObjectSnapshot["properties"],
     version: row.version,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    lastCommitId: row.lastCommitId,
+    lastCommitId: effectiveMaterializerCommitId(row.lastCommitId),
   }
 }
 
 export function linkSnapshot(row: ObjectLinkRow): EffectiveLinkSnapshot {
-  if (!row.lastCommitId)
-    throw new MaterializationConflictError(
-      "effective-state",
-      `Effective link lacks materializer provenance.`
-    )
   return {
     ref: linkRef(row),
     ...(row.properties
@@ -75,7 +66,7 @@ export function linkSnapshot(row: ObjectLinkRow): EffectiveLinkSnapshot {
       : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    lastCommitId: row.lastCommitId,
+    lastCommitId: effectiveMaterializerCommitId(row.lastCommitId),
   }
 }
 
@@ -88,11 +79,6 @@ export function linkRef(row: ObjectLinkRow): OntologyLinkRef {
 }
 
 export function storedPoint(point: TimeseriesPoint): StoredTelemetryPoint {
-  if (!point.lastCommitId)
-    throw new MaterializationConflictError(
-      "timeseries-point",
-      "Telemetry point lacks materializer provenance."
-    )
   return {
     series: {
       object: { objectTypeId: point.objectTypeId, primaryId: point.objectId },
@@ -101,7 +87,7 @@ export function storedPoint(point: TimeseriesPoint): StoredTelemetryPoint {
     value: structuredClone(point.value) as StoredTelemetryPoint["value"],
     ...(point.unit !== undefined ? { unit: point.unit } : {}),
     at: point.at.toISOString(),
-    lastCommitId: point.lastCommitId,
+    lastCommitId: effectiveMaterializerCommitId(point.lastCommitId),
   }
 }
 

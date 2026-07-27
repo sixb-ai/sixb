@@ -18,6 +18,11 @@ export {
   MaterializationValidationError,
 } from "./errors"
 export type { OntologyMaterializationEvent, OntologyMaterializationEventDraft } from "./events"
+export {
+  effectiveMaterializerCommitId,
+  LEGACY_MATERIALIZER_COMMIT_ID,
+  storedMaterializerCommitId,
+} from "./legacy"
 export type {
   BaseCommitResult,
   EditCommitResult,

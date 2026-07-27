@@ -2,6 +2,7 @@ import {
   linkRefKey,
   MaterializationConflictError,
   objectRefKey,
+  storedMaterializerCommitId,
   telemetryPointKey,
 } from "@sixb/core/internal/materialization"
 import {
@@ -111,7 +112,7 @@ export class PgMaterializationWriter {
       linkId: item.ref.linkId,
       targetTypeId: item.ref.target.objectTypeId,
       targetId: item.ref.target.primaryId,
-      expectedLastCommitId: item.expected.lastCommitId,
+      expectedLastCommitId: storedMaterializerCommitId(item.expected.lastCommitId),
     }))
     if (linkDeletes.length > 0) {
       const rows = await this.sql<{ readonly source_type_id: string }[]>`
@@ -125,7 +126,7 @@ export class PgMaterializationWriter {
           AND effective.link_id = staged.value->>'linkId'
           AND effective.target_type_id = staged.value->>'targetTypeId'
           AND effective.target_id = staged.value->>'targetId'
-          AND effective.last_commit_id = staged.value->>'expectedLastCommitId'
+          AND effective.last_commit_id IS NOT DISTINCT FROM staged.value->>'expectedLastCommitId'
         RETURNING effective.source_type_id
       `
       if (rows.length !== linkDeletes.length) throw effectiveLinkConflict(linkDeletes[0]!)
@@ -135,7 +136,7 @@ export class PgMaterializationWriter {
       objectTypeId: item.ref.objectTypeId,
       primaryId: item.ref.primaryId,
       expectedVersion: item.expected.version,
-      expectedLastCommitId: item.expected.lastCommitId,
+      expectedLastCommitId: storedMaterializerCommitId(item.expected.lastCommitId),
     }))
     if (objectDeletes.length > 0) {
       const rows = await this.sql<{ readonly object_type_id: string }[]>`
@@ -147,7 +148,7 @@ export class PgMaterializationWriter {
           AND effective.object_type_id = staged.value->>'objectTypeId'
           AND effective.primary_id = staged.value->>'primaryId'
           AND effective.version = (staged.value->>'expectedVersion')::integer
-          AND effective.last_commit_id = staged.value->>'expectedLastCommitId'
+          AND effective.last_commit_id IS NOT DISTINCT FROM staged.value->>'expectedLastCommitId'
         RETURNING effective.object_type_id
       `
       if (rows.length !== objectDeletes.length) throw effectiveObjectConflict(objectDeletes[0]!)
@@ -171,7 +172,9 @@ export class PgMaterializationWriter {
       lastCommitId: row.lastCommitId,
       expectedExists: expected.exists,
       expectedVersion: expected.exists ? expected.version : null,
-      expectedLastCommitId: expected.exists ? expected.lastCommitId : null,
+      expectedLastCommitId: expected.exists
+        ? storedMaterializerCommitId(expected.lastCommitId)
+        : null,
     }))
     const inserts = payload.filter((item) => !item.expectedExists)
     if (inserts.length > 0) {
@@ -213,7 +216,7 @@ export class PgMaterializationWriter {
           AND effective.object_type_id = staged.value->>'objectTypeId'
           AND effective.primary_id = staged.value->>'primaryId'
           AND effective.version = (staged.value->>'expectedVersion')::integer
-          AND effective.last_commit_id = staged.value->>'expectedLastCommitId'
+          AND effective.last_commit_id IS NOT DISTINCT FROM staged.value->>'expectedLastCommitId'
         RETURNING effective.object_type_id
       `
       if (rows.length !== updates.length) throw effectiveObjectConflict(updates[0]!)
@@ -235,7 +238,9 @@ export class PgMaterializationWriter {
       updatedAt: row.updatedAt,
       lastCommitId: row.lastCommitId,
       expectedExists: expected.exists,
-      expectedLastCommitId: expected.exists ? expected.lastCommitId : null,
+      expectedLastCommitId: expected.exists
+        ? storedMaterializerCommitId(expected.lastCommitId)
+        : null,
     }))
     const inserts = payload.filter((item) => !item.expectedExists)
     if (inserts.length > 0) {
@@ -282,7 +287,7 @@ export class PgMaterializationWriter {
           AND effective.link_id = staged.value->>'linkId'
           AND effective.target_type_id = staged.value->>'targetTypeId'
           AND effective.target_id = staged.value->>'targetId'
-          AND effective.last_commit_id = staged.value->>'expectedLastCommitId'
+          AND effective.last_commit_id IS NOT DISTINCT FROM staged.value->>'expectedLastCommitId'
         RETURNING effective.source_type_id
       `
       if (rows.length !== updates.length) throw effectiveLinkConflict(updates[0]!)
@@ -298,9 +303,11 @@ export class PgMaterializationWriter {
       unit: point.unit ?? null,
       at: point.at,
       lastCommitId: point.lastCommitId,
-      expectedLastCommitId: expected.lastCommitId,
+      expectedExists: expected.lastCommitId !== null,
+      expectedLastCommitId:
+        expected.lastCommitId === null ? null : storedMaterializerCommitId(expected.lastCommitId),
     }))
-    const inserts = payload.filter((item) => item.expectedLastCommitId === null)
+    const inserts = payload.filter((item) => !item.expectedExists)
     if (inserts.length > 0) {
       const rows = await this.sql<{ readonly object_type_id: string }[]>`
         WITH staged AS (
@@ -336,7 +343,7 @@ export class PgMaterializationWriter {
       if (rows.length !== inserts.length) throw pointConflict(inserts[0]!)
     }
 
-    const updates = payload.filter((item) => item.expectedLastCommitId !== null)
+    const updates = payload.filter((item) => item.expectedExists)
     if (updates.length > 0) {
       const rows = await this.sql<{ readonly object_type_id: string }[]>`
         WITH staged AS (
@@ -351,7 +358,7 @@ export class PgMaterializationWriter {
             AND points.object_id = staged.value->>'objectId'
             AND points.property_id = staged.value->>'propertyId'
             AND points.at = (staged.value->>'at')::timestamptz
-            AND points.last_commit_id = staged.value->>'expectedLastCommitId'
+            AND points.last_commit_id IS NOT DISTINCT FROM staged.value->>'expectedLastCommitId'
           RETURNING points.*
         ), latest AS (
           INSERT INTO timeseries_latest (

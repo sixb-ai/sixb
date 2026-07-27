@@ -1,3 +1,4 @@
+import { LEGACY_MATERIALIZER_COMMIT_ID } from "../../materialization/legacy"
 import type { OntologyObjectRef } from "../../materialization/model"
 import { linkRefKey, objectRefKey } from "../../materialization/refs"
 import type {
@@ -51,6 +52,8 @@ export async function loadEditWorkingState(
     }
   }
 
+  adoptLegacyEditAuthority(context, state)
+
   await mergeIncidentState(
     context,
     storage,
@@ -59,7 +62,42 @@ export async function loadEditWorkingState(
     [...incidentLinks.values()],
     revivingObjects
   )
+  adoptLegacyEditAuthority(context, state)
   return state
+}
+
+function adoptLegacyEditAuthority(context: MaterializerContext, state: EditWorkingState): void {
+  for (const working of state.objects.values()) {
+    if (
+      working.before?.lastCommitId !== LEGACY_MATERIALIZER_COMMIT_ID ||
+      working.source ||
+      working.originalOverride
+    ) {
+      continue
+    }
+
+    const primaryPropertyId = context.ontology.getPrimaryPropertyId(working.ref.objectTypeId)
+    const properties = { ...working.before.properties }
+    delete properties[primaryPropertyId]
+    working.override = { kind: "create", properties }
+  }
+
+  for (const working of state.links.values()) {
+    if (
+      working.before?.lastCommitId !== LEGACY_MATERIALIZER_COMMIT_ID ||
+      working.source ||
+      working.originalOverride
+    ) {
+      continue
+    }
+
+    working.override = {
+      kind: "upsert",
+      ...(working.before.properties === undefined
+        ? {}
+        : { properties: { ...working.before.properties } }),
+    }
+  }
 }
 
 function isRevivingObjectOperation(

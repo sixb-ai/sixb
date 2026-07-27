@@ -3,6 +3,7 @@ import {
   defineObjectType,
   InMemoryBroker,
   type InMemoryStorage,
+  type JsonValue,
   link,
   MaterializationValidationError,
   ObjectNotFoundError,
@@ -10,10 +11,15 @@ import {
   prop,
   Sixb,
 } from "../src"
-import { type EventsRuntime, OntologyOutboxDispatcher } from "../src/events"
+import {
+  type EventsRuntime,
+  OntologyOutboxDispatcher,
+  type StoredObjectMutationEvent,
+} from "../src/events"
 import { objectService } from "../src/objects"
 import { getOntologyMutationRuntime } from "../src/runtime/internal"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
+import { createStoredLinkMutationEvent, createStoredObjectMutationEvent } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Sensor = defineObjectType({
@@ -71,6 +77,75 @@ async function listSensorLinks(sixb: AdapterRuntime, linkId: string) {
 }
 
 describe("runtime object writes", () => {
+  test("adopts a legacy effective object before applying a partial update", async () => {
+    const { sixb } = createRuntime()
+    const legacy = await sixb.storage.objects.applyObjectUpsert(
+      legacyObjectEvent("room", "r1", { id: "r1", name: "Kitchen" })
+    )
+    expect(legacy.lastCommitId).toBeUndefined()
+
+    await getOntologyMutationRuntime(sixb).commitEdits({
+      mode: "atomic",
+      source: { kind: "runtime", requestId: "patch-legacy-room" },
+      operations: [
+        {
+          id: "patch",
+          kind: "object.patch",
+          ref: { objectTypeId: Room.id, primaryId: "r1" },
+          set: { note: "Warm" },
+          unset: [],
+          reset: [],
+        },
+      ],
+      expectedObjects: [],
+      expectedLinks: [],
+      expectedLinkScopes: [],
+    })
+    const patched = await sixb.storage.objects.getByPrimaryId({
+      projectId: sixb.id,
+      objectTypeId: Room.id,
+      primaryId: "r1",
+    })
+
+    expect(patched?.properties).toEqual({ id: "r1", name: "Kitchen", note: "Warm" })
+    expect(patched?.version).toBe(2)
+    expect(patched?.lastCommitId).toBeString()
+  })
+
+  test("preserves legacy incident links when adopting an object", async () => {
+    const { sixb } = createRuntime()
+    await sixb.storage.objects.applyObjectUpsert(
+      legacyObjectEvent("room", "r1", { id: "r1", name: "Kitchen" })
+    )
+    await sixb.storage.objects.applyObjectUpsert(
+      legacyObjectEvent("sensor", "s1", { id: "s1", name: "Temp" })
+    )
+    await sixb.storage.objects.applyLinkUpsert(
+      createStoredLinkMutationEvent({
+        id: "legacy:room:r1:sensors:s1",
+        cursor: "2",
+        projectId: sixb.id,
+        occurredAt: "2026-07-27T08:01:00.000Z",
+        sourceTypeId: Room.id,
+        sourceId: "r1",
+        linkId: Room.l.sensors.id,
+        targetTypeId: Sensor.id,
+        targetId: "s1",
+        properties: { role: "primary" },
+      })
+    )
+
+    await sixb.upsertObject("room", { id: "r1", note: "Warm" })
+
+    const links = await listSensorLinks(sixb, Room.l.sensors.id)
+    expect(links).toHaveLength(1)
+    expect(links[0]).toMatchObject({
+      sourceId: "r1",
+      targetId: "s1",
+      properties: { role: "primary" },
+    })
+  })
+
   test("typed and dynamic mutations all commit through the materializer as runtime origins", async () => {
     const { sixb } = createRuntime()
 
@@ -248,6 +323,22 @@ describe("runtime object writes", () => {
     )
   })
 })
+
+function legacyObjectEvent(
+  objectTypeId: string,
+  primaryId: string,
+  properties: Record<string, JsonValue>
+): StoredObjectMutationEvent {
+  return createStoredObjectMutationEvent({
+    id: `legacy:${objectTypeId}:${primaryId}`,
+    cursor: "1",
+    projectId: "runtime-adapter-tests",
+    occurredAt: "2026-07-27T08:00:00.000Z",
+    objectTypeId,
+    primaryId,
+    properties,
+  })
+}
 
 describe("runtime object batches", () => {
   test("keeps local errors, item errors, and successes at their input positions", async () => {

@@ -7,6 +7,7 @@ import type {
   TelemetrySeriesRef,
 } from "@sixb/core/internal/materialization"
 import {
+  effectiveMaterializerCommitId,
   linkRefKey,
   linkScopeSortKey,
   MaterializationConflictError,
@@ -988,29 +989,17 @@ function storedSource(row: PgOntologySourceAssertionRow): StoredSourceAssertion 
 }
 
 function effectiveObjectSnapshot(row: EffectiveObjectRow): EffectiveObjectSnapshot {
-  if (!row.last_commit_id) {
-    throw new MaterializationConflictError(
-      "effective-state",
-      `Effective object ${row.object_type_id}:${row.primary_id} lacks materializer provenance.`
-    )
-  }
   return {
     ref: objectRefFromColumns(row),
     properties: structuredClone(row.properties) as EffectiveObjectSnapshot["properties"],
     version: row.version,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
-    lastCommitId: row.last_commit_id,
+    lastCommitId: effectiveMaterializerCommitId(row.last_commit_id),
   }
 }
 
 function effectiveLinkSnapshot(row: EffectiveLinkRow): EffectiveLinkSnapshot {
-  if (!row.last_commit_id) {
-    throw new MaterializationConflictError(
-      "effective-state",
-      `Effective link ${linkRefKey(linkRefFromColumns(row))} lacks materializer provenance.`
-    )
-  }
   return {
     ref: linkRefFromColumns(row),
     ...(row.properties === null
@@ -1022,24 +1011,12 @@ function effectiveLinkSnapshot(row: EffectiveLinkRow): EffectiveLinkSnapshot {
         }),
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
-    lastCommitId: row.last_commit_id,
+    lastCommitId: effectiveMaterializerCommitId(row.last_commit_id),
   }
 }
 
 function storedPoint(row: TelemetryRow): StoredTelemetryPoint {
   const at = toIsoString(row.at)
-  if (!row.last_commit_id) {
-    throw new MaterializationConflictError(
-      "timeseries-point",
-      `Telemetry point ${telemetryPointSortKey(
-        {
-          object: { objectTypeId: row.object_type_id, primaryId: row.object_id },
-          propertyId: row.property_id,
-        },
-        at
-      )} lacks materializer provenance.`
-    )
-  }
   return {
     series: {
       object: { objectTypeId: row.object_type_id, primaryId: row.object_id },
@@ -1048,7 +1025,7 @@ function storedPoint(row: TelemetryRow): StoredTelemetryPoint {
     value: structuredClone(row.value) as StoredTelemetryPoint["value"],
     ...(row.unit === null ? {} : { unit: row.unit }),
     at,
-    lastCommitId: row.last_commit_id,
+    lastCommitId: effectiveMaterializerCommitId(row.last_commit_id),
   }
 }
 

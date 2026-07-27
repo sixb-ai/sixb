@@ -5,6 +5,7 @@ import type {
 } from "@sixb/core/internal/materialization"
 import {
   assertPinnedDatasetWatermark,
+  effectiveMaterializerCommitId,
   linkRefKey,
   linkRefSortKey,
   linkScopeSortKey,
@@ -501,7 +502,11 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       }
       return
     }
-    if (!row || row.version !== expected.version || row.lastCommitId !== expected.lastCommitId) {
+    if (
+      !row ||
+      row.version !== expected.version ||
+      effectiveMaterializerCommitId(row.lastCommitId) !== expected.lastCommitId
+    ) {
       throw new MaterializationConflictError(
         "effective-state",
         `Expected object ${objectRefKey(expected.ref)} changed.`
@@ -522,7 +527,10 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       }
       return
     }
-    if (lastCommitId === undefined || lastCommitId !== expected.lastCommitId) {
+    if (
+      lastCommitId === undefined ||
+      effectiveMaterializerCommitId(lastCommitId) !== expected.lastCommitId
+    ) {
       throw new MaterializationConflictError(
         "effective-state",
         `Expected link ${linkRefKey(expected.ref)} changed.`

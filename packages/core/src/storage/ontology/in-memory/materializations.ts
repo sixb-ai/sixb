@@ -3,6 +3,7 @@ import {
   MaterializationConflictError,
   MaterializationValidationError,
 } from "../../../materialization/errors"
+import { effectiveMaterializerCommitId } from "../../../materialization/legacy"
 import type {
   ExpectedLinkRevision,
   ExpectedObjectRevision,
@@ -966,7 +967,11 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         )
       return
     }
-    if (!row || row.version !== expected.version || row.lastCommitId !== expected.lastCommitId) {
+    if (
+      !row ||
+      row.version !== expected.version ||
+      effectiveMaterializerCommitId(row.lastCommitId) !== expected.lastCommitId
+    ) {
       throw new MaterializationConflictError(
         "effective-state",
         `Expected object ${objectRefKey(expected.ref)} changed.`
@@ -994,7 +999,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         )
       return
     }
-    if (!row || row.lastCommitId !== expected.lastCommitId) {
+    if (!row || effectiveMaterializerCommitId(row.lastCommitId) !== expected.lastCommitId) {
       throw new MaterializationConflictError(
         "effective-state",
         `Expected link ${linkRefKey(expected.ref)} changed.`
@@ -1008,7 +1013,9 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       expected.series,
       expected.at
     )
-    if ((point?.lastCommitId ?? null) !== expected.lastCommitId) {
+    if (
+      (point ? effectiveMaterializerCommitId(point.lastCommitId) : null) !== expected.lastCommitId
+    ) {
       throw new MaterializationConflictError(
         "timeseries-point",
         `Telemetry point ${telemetryPointKey(expected.series, expected.at)} changed.`
