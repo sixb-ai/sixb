@@ -228,6 +228,6 @@ export const API_CONSTANTS = {
   SCOPE: "openid offline_access comfortcloud.control a2w.control",
   /** Comfort Cloud API base URL */
   API_BASE: "https://accsmart.panasonic.com",
-  /** App version header value (update when Panasonic releases new app versions) */
-  APP_VERSION: "4.1.0",
+  /** Fallback app version if the App Store lookup is unavailable. */
+  APP_VERSION: "4.3.0",
 } as const

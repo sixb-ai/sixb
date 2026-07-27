@@ -22,8 +22,6 @@ bun add @sixb/core
 
 **Events** -- All mutations are emitted to a bounded, retained event stream for live coordination and short replay. The runtime emits object/link mutation events such as `object.created`, `object.updated`, `object.deleted`, `link.created`, `link.updated`, and `link.deleted`, plus topic events like `telemetry.appended` and `action.requested`.
 
-**Functions** -- Scheduled and reactive logic that runs against the twin graph. Triggered by cron expressions or intervals.
-
 **Actions** -- Typed audited commands. Actions can run external writeback, declare local object/link edits, and run post-commit effects.
 
 **Connectors** -- Typed external system clients that you register with the runtime and resolve lazily with `sixb.connector(...)`.
@@ -134,36 +132,6 @@ const found = await sixb
   .where((r) => r.p.externalId.eq("RM-101"))
   .first()
 ```
-
-## Functions
-
-Functions define scheduled and reactive logic that operates on the twin graph.
-
-```ts
-const pollWeather = defineFunction("poll-weather")
-  .cron("*/5 * * * *")
-  .run(async ({ sixb }) => {
-    const res = await fetch("https://api.weather.example/current")
-    const data = (await res.json()) as { tempF: number }
-    await sixb.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
-      value: data.tempF,
-      unit: "degreeFahrenheit",
-      at: new Date(),
-    })
-  })
-
-const sixb = new Sixb({
-  ontology: [Room],
-  broker: myBroker,
-  storage: myStorage,
-  queues: myQueues,
-  functions: [pollWeather],
-})
-
-await sixb.startFunctions()
-```
-
-Trigger types: `cron(expression)`, `interval(ms)`.
 
 ## Actions
 
@@ -327,7 +295,7 @@ latest successful run and stores the next checkpoint only after the dataset comm
 
 ## Convention-based Setup
 
-`createSixb` auto-discovers ontology from `./ontology/`, datasets from `./datasets/`, functions from `./functions/`, syncs from `./syncs/`, and connectors from `./connectors/` in your project directory. Webhooks are discovered through their connector definitions.
+`createSixb` auto-discovers ontology from `./ontology/`, datasets from `./datasets/`, syncs from `./syncs/`, workflows from `./workflows/`, and connectors from `./connectors/` in your project directory. Webhooks are discovered through their connector definitions.
 
 ```ts
 import { createSixb } from "@sixb/core"
@@ -382,7 +350,6 @@ src/
   syncs/            -- defineSync and sync types
   sixb/            -- Sixb runtime, ObjectSet, ObjectByIdHandle, createSixb
   actions/          -- defineAction, param, optional, ActionRegistry
-  functions/        -- defineFunction, FunctionRuntime, cron matcher
 ```
 
 ## API Overview
@@ -421,7 +388,6 @@ src/
 | `InMemoryQueues` | In-memory `Queues` provider with typed sync and pipeline lanes |
 | `InMemoryBlobStorage` | In-memory `BlobStorage` provider for `fileRef` payloads |
 | `migrateStorage(storage)` | Run configured storage migrations when supported |
-| `defineFunction(id)` | Define a function with trigger and handler |
 | `defineConnector(id, adapter)` | Define a connector for an external system |
 | `defineWebhook(id)` | Define an inbound connector webhook |
 | `webhookConnector(options)` | Define an inbound-only connector adapter |

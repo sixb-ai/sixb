@@ -10,10 +10,10 @@ they exercise, not in how they are wired.
 
 | Example | What it shows | Storage / broker |
 | --- | --- | --- |
-| `acme-corp` | The canonical business-operations app: ontology, connectors, syncs, pipelines, projections, file attachments, actions, agents, rules, workflows, scheduled functions, a custom React app, and a typed client | SQLite + in-memory broker |
+| `acme-corp` | The canonical business-operations app: ontology, connectors, syncs, pipelines, projections, file attachments, actions, agents, rules, scheduled workflows, a custom React app, and a typed client | SQLite + in-memory broker |
 | `auth` | Authentication strategies, groups, membership policies, and scoped roles | SQLite + in-memory broker |
-| `panasonic-ac` | Real-device integration: discovers Panasonic AC units, polls their live state as telemetry, and exposes control actions (power, mode, temperature, fan, eco) | Postgres + NATS |
-| `roku-tv` | Device control: discovers Roku TVs, polls device state, and drives them with remote actions (launch app, press button) | SQLite + in-memory broker |
+| `panasonic-ac` | Real-device integration: a typed connector and scheduled sync snapshot Panasonic AC units into a dataset, projections materialize devices and telemetry, and actions control power, mode, temperature, fan, and eco | Postgres + NATS |
+| `roku-tv` | Device control: a connector discovers Roku TVs, a scheduled sync snapshots device state, projections materialize twins and telemetry, and remote actions launch apps or press buttons | SQLite + in-memory broker |
 
 Run any example from its own folder:
 
@@ -39,9 +39,8 @@ example and touches nearly every concept in Sixb, so it is the one to read first
 | `pipelines/` | `project-reporting` transforms dataset rows — see [Pipelines](../data/pipelines.md) |
 | `projections/` | Mapping dataset and pipeline rows into ontology objects — see [Projections](../data/projections.md) |
 | `actions/` | `createDraftInvoice`, `markPaid`, `sendReminder`, `deleteInvoice`, `attachInvoiceSourceFile` — see [Actions](../actions/overview.md) |
-| `functions/` | `check-overdue-invoices` runs on a cron schedule — see [Schedules](../schedules/overview.md) |
 | `rules/` | Business-health rules like `invoice.collection-risk` and `project.large-active-engagement` — see [Rules](../rules/overview.md) |
-| `workflows/` | `invoice-reminder` (a human approval step) and `document-intake` — see [Workflows](../workflows/overview.md) |
+| `workflows/` | `check-overdue-invoices` (scheduled), `invoice-reminder` (a human approval step), and `document-intake` — see [Workflows](../workflows/overview.md) |
 | `agents/` | `business-analyst` and `invoice-assistant` conversational agents — see [Agents](../agents/overview.md) |
 | `app/` | A custom React app with project, review, and intervention pages — see [Apps](../apps/overview.md) |
 

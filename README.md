@@ -29,7 +29,7 @@ Sixb gives operational systems a shared backbone:
 - **Ontology** — typed objects, links, properties, telemetry, and value types.
 - **Actions** — commands that people, apps, and agents can request.
 - **Data** — connectors, datasets, syncs, pipelines, and projections.
-- **Runtime** — functions, schedules, workflows, rules, events, and authorization.
+- **Runtime** — schedules, workflows, rules, events, and authorization.
 - **Interfaces** — HTTP/WebSocket API, generated client, Atlas UI, and custom React apps.
 
 Everything starts with `createSixb()`. It discovers your project folders and gives you a
@@ -76,7 +76,7 @@ Bun is the only package manager and runtime used by this repository.
 
 ## Repo map
 
-- `packages/core` — runtime, ontology builders, providers, validation, and functions
+- `packages/core` — runtime, ontology builders, providers, and validation
 - `packages/server` — HTTP/WebSocket API and OpenAPI generation
 - `packages/atlas` — built-in React UI
 - `packages/client` — generated typed client

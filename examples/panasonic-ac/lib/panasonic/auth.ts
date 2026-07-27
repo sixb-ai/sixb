@@ -28,6 +28,8 @@ interface AuthFlowContext {
 export class PanasonicAuth {
   private tokens: AuthTokens | null = null
 
+  constructor(private readonly appVersion: string = API_CONSTANTS.APP_VERSION) {}
+
   /**
    * Authenticate with email and password using OAuth2 PKCE flow.
    *
@@ -340,7 +342,7 @@ export class PanasonicAuth {
         "Content-Type": "application/json;charset=utf-8",
         "User-Agent": "G-RAC",
         "x-app-type": "1",
-        "x-app-version": API_CONSTANTS.APP_VERSION,
+        "x-app-version": this.appVersion,
         "x-app-name": "Comfort Cloud",
         "x-app-timestamp": appTimestamp,
         "x-cfc-api-key": apiKey,

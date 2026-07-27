@@ -6,7 +6,6 @@ export type {
 } from "../connectors"
 export { ConnectorError, ConnectorNotFoundError } from "../connectors"
 export { EventsError } from "../events"
-export { FunctionError, FunctionValidationError } from "../functions"
 export { ObjectError } from "../objects"
 export type { ObjectRef } from "../ontology"
 export { OntologyValidationError } from "../ontology"

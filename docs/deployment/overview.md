@@ -15,7 +15,7 @@ dispatched is documented under [schedules](../schedules/overview.md),
 
 `sixb dev` boots one process that hosts the API, the [Atlas](#atlas-admin-ui)
 admin UI, the custom app (if present), and every background runtime —
-orchestrator, scheduler, functions, rules, and all queue workers. It runs in
+orchestrator, scheduler, rules, and all queue workers. It runs in
 `NODE_ENV=development` against in-memory providers, so a single process owns all
 state:
 
@@ -90,7 +90,6 @@ Each role is a `sixb` subcommand that runs in `NODE_ENV=production`. All accept
 | `sixb app`                     | Custom app server                                    |
 | `sixb orchestrator`            | Event-to-queue dispatcher                            |
 | `sixb scheduler`               | Schedule producer (emits `schedule.triggered`)       |
-| `sixb functions`               | Runs registered functions                            |
 | `sixb rules`                   | Evaluates [rules](../rules/overview.md)              |
 | `sixb worker <type>`           | Runs one queue worker                                 |
 | `sixb worker-group [types...]` | Runs several queue workers in one process            |
@@ -195,13 +194,13 @@ guarantees that by the time anything emits an event or enqueues a job, the role
 that handles it is already listening. The co-hosted dev runtime applies this
 automatically; when bringing up separate processes, follow the same order:
 
-1. **Consumers first** — rules, functions, then the action, agent, projection,
+1. **Consumers first** — rules, then the action, agent, projection,
    pipeline, workflow, and sync workers.
 2. **Producers last** — the orchestrator (subscribes and enqueues), then the
    scheduler (emits triggers).
 
 On shutdown the order reverses: the scheduler stops producing first, the
-orchestrator drains pending dispatches, then workers, functions, and rules drain
+orchestrator drains pending dispatches, then workers and rules drain
 in turn.
 
 ## Atlas admin UI
@@ -228,9 +227,8 @@ config against shared durable providers:
 sixb api            # HTTP/WS API
 sixb atlas          # admin UI
 sixb orchestrator   # event -> queue dispatch
-sixb scheduler      # cron/interval triggers
+sixb scheduler      # cron schedule triggers
 sixb rules          # rule evaluation
-sixb functions      # registered functions
 sixb worker-group   # all registered queue workers
 ```
 
@@ -242,6 +240,6 @@ queue and increase throughput, since each job is claimed by exactly one worker.
 - [Runtime](../runtime/overview.md) — how `createSixb()` discovers and wires a project
 - [Infrastructure](../infrastructure/overview.md) — provider choices for storage, queues, and the broker
 - [Events](../events/overview.md) — the domain events that drive the execution model
-- [Schedules](../schedules/overview.md) — cron and interval triggers
+- [Schedules](../schedules/overview.md) — cron and event triggers
 - [Data](../data/overview.md) — syncs, pipelines, and projections
 - [Workflows](../workflows/overview.md) — workflow runs and interventions

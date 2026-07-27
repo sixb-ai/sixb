@@ -7,6 +7,8 @@ import { PostgresStorage } from "@sixb/pg"
 // Required environment variables:
 //   PANASONIC_EMAIL    — Panasonic ID email
 //   PANASONIC_PASSWORD — Panasonic ID password
+// Optional environment variables:
+//   PANASONIC_APP_VERSION — overrides automatic App Store version detection
 //   DATABASE_URL       — PostgreSQL connection string
 //   NATS_URL           — NATS server URL (defaults to nats://localhost:4222)
 

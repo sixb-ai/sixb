@@ -15,8 +15,7 @@ Lines flow to two independent destinations:
 
 ## Logging from a handler
 
-Action, sync, pipeline, and workflow handlers receive a `logger` on their context. (Plain
-`functions/` are not runs and do not get one — log from a sync or action instead.)
+Action, sync, pipeline, and workflow handlers receive a `logger` on their context.
 
 ```ts
 import { defineAction } from "@sixb/core"

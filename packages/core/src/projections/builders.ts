@@ -1,7 +1,7 @@
 /**
  * Projection DSL builders, helpers, and type guards.
  *
- * Follows the fluent builder pattern established in `defineFunction()`.
+ * Uses the same fluent builder style as the other definition APIs.
  */
 
 import type {

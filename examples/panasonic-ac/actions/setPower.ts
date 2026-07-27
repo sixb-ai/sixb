@@ -1,5 +1,5 @@
 import { defineAction, param } from "@sixb/core"
-import { getPanasonicApi } from "../lib/panasonicApi"
+import { panasonicConnector } from "../connectors/panasonic"
 import { PanasonicAcUnit } from "../ontology/acUnit"
 
 export const setPower = defineAction("setPower", {
@@ -8,7 +8,7 @@ export const setPower = defineAction("setPower", {
   .on(PanasonicAcUnit)
   .params({ on: param("boolean") })
   .writeback(async ({ params, target, sixb }) => {
-    const api = await getPanasonicApi(sixb)
+    const api = await sixb.connector(panasonicConnector)
     if (params.on) {
       await api.powerOn(target.properties.guid)
     } else {

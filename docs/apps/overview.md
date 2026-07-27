@@ -27,7 +27,7 @@ query builder from `@sixb/client/query`, run action buttons with
 [querying data](querying-data.md) and [running actions](actions.md).
 
 > `app/` is not discovered by `createSixb()` — it is built and served separately
-> by the CLI. Your ontology, datasets, functions, and the rest stay in their own
+> by the CLI. Your ontology, datasets, workflows, and the rest stay in their own
 > top-level directories.
 
 ## File-based routing

@@ -1,7 +1,7 @@
 /**
  * Filesystem auto-discovery for convention-based module loading.
  *
- * Scans well-known directories (`ontology/`, `functions/`, etc.)
+ * Scans well-known definition directories (`ontology/`, `actions/`, etc.)
  * relative to a project root and returns typed definition arrays ready
  * for the `Sixb` constructor.
  */
@@ -17,7 +17,6 @@ import { isConnectorDefinition } from "../connectors"
 import type { ConnectorDefinition } from "../connectors/types"
 import { isDatasetDefinition } from "../datasets"
 import type { DatasetDefinition } from "../datasets/types"
-import type { FunctionDefinition } from "../functions/types"
 import type { OntologyDocumentInput, OntologySource } from "../ontology/registry"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { ValueType } from "../ontology/types"
@@ -81,27 +80,6 @@ export async function discoverOntologySources(
   }
 
   return discoveredSources
-}
-
-export async function discoverFunctions(
-  projectRoot: string
-): Promise<readonly FunctionDefinition[]> {
-  const functionsDir = join(projectRoot, "functions")
-  const modulePaths = await listModuleFiles(functionsDir)
-  const exportedCandidates = await loadModuleExports({
-    modulePaths,
-    projectRoot,
-    kind: "function",
-  })
-
-  const functions: FunctionDefinition[] = []
-  for (const candidate of exportedCandidates) {
-    if (isFunctionDefinition(candidate)) {
-      functions.push(candidate)
-    }
-  }
-
-  return functions
 }
 
 export async function discoverActions(projectRoot: string): Promise<readonly ActionDefinition[]> {
@@ -246,7 +224,7 @@ export async function discoverPipelines(
 }
 
 export async function discoverRules(projectRoot: string): Promise<readonly RuleDefinition[]> {
-  // Rules follow the same convention-based discovery model as syncs/functions:
+  // Rules follow the same convention-based discovery model as syncs and workflows:
   // any exported rule definition, or arrays containing them, is collected.
   const rulesDir = join(projectRoot, "rules")
   const modulePaths = await listModuleFiles(rulesDir)
@@ -525,17 +503,5 @@ function isValueType(value: unknown): value is ValueType {
     "schema" in value &&
     !Array.isArray(value.properties) &&
     !Array.isArray(value.objectTypes)
-  )
-}
-
-function isFunctionDefinition(value: unknown): value is FunctionDefinition {
-  if (!isRecord(value)) {
-    return false
-  }
-
-  return (
-    typeof value.id === "string" &&
-    isRecord(value.trigger) &&
-    typeof value.trigger.type === "string"
   )
 }

@@ -21,7 +21,6 @@ import type { Broker } from "../broker"
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { EventsRuntime } from "../events"
-import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
 import type { LogsRuntime } from "../logging"
 import type {
@@ -1055,9 +1054,6 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   /** Value types registered in the runtime ontology, keyed by id. */
   getValueTypesById(): ReadonlyMap<string, ValueType>
 
-  /** All registered function definitions. */
-  getFunctionDefinitions(): readonly FunctionDefinition[]
-
   /** All registered action definitions. */
   getActionDefinitions(): readonly ActionDefinition[]
 
@@ -1120,12 +1116,6 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   connector<TAdapter extends ConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>
   ): Promise<ConnectorClient<TAdapter>>
-
-  /** Start all registered function runtimes. */
-  startFunctions(): Promise<void>
-
-  /** Stop all running function runtimes. */
-  stopFunctions(): Promise<void>
 
   /** Start the scheduler runtime for all registered schedules. */
   startScheduler(): Promise<void>

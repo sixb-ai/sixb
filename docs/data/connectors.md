@@ -1,7 +1,7 @@
 # Connectors
 
 A connector is Sixb's reusable connection to an external system. You give it config once, and
-[syncs](./syncs.md), functions, and app code resolve the same connected client by name.
+[syncs](./syncs.md), workflow steps, and app code resolve the same connected client by name.
 
 Reach for a connector when your project needs to read from an external system, call a third-party
 API, or share one database/API client across several places — while keeping credentials and
@@ -69,7 +69,7 @@ See [Syncs](./syncs.md) for scheduling and chaining. To map the raw rows into `I
 
 ## Use a connector directly
 
-You can also resolve a connector straight from the runtime — useful in functions or scripts.
+You can also resolve a connector straight from the runtime — useful in workflow steps or scripts.
 
 ```ts
 import { acmeErpConnector } from "../connectors/acme-erp"

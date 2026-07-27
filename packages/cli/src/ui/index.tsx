@@ -319,7 +319,6 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           },
           { label: "scheduler", value: "Start production scheduler event producer" },
           { label: "orchestrator", value: "Start production event-to-queue dispatcher" },
-          { label: "functions", value: "Start production functions runtime" },
           { label: "rules", value: "Start production rules runtime" },
           {
             label: "worker <type>",
@@ -386,7 +385,6 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           "sixb app",
           "sixb scheduler",
           "sixb orchestrator",
-          "sixb functions",
           "sixb rules",
           "sixb worker pipeline",
           "sixb worker workflow",

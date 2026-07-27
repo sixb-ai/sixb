@@ -52,6 +52,8 @@ describe("sixb init", () => {
     await stat(join(targetDir, "app", "page.tsx"))
     await stat(join(targetDir, "app", "globals.css"))
     await stat(join(targetDir, "app", "public", "favicon.svg"))
+    await stat(join(targetDir, "actions", "increment.ts"))
+    await stat(join(targetDir, "ontology", "counter.ts"))
     await stat(join(targetDir, "tsconfig.json"))
 
     const configSource = await readFile(join(targetDir, "sixb.config.ts"), "utf-8")

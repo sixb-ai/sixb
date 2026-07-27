@@ -264,12 +264,6 @@ async function main(): Promise<void> {
       break
     }
 
-    case "functions": {
-      const { runFunctions } = await import("./commands/functions")
-      await runFunctions({ entry: getFlag("entry") })
-      break
-    }
-
     case "rules": {
       const { runRules } = await import("./commands/rules")
       await runRules({ entry: getFlag("entry") })

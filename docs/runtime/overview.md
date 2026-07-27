@@ -6,7 +6,7 @@ gives you.
 
 `createSixb()` reads your project's conventions, validates everything against the ontology, and
 returns one typed `Sixb` instance. That instance is your entry point for objects, telemetry, links,
-actions, events, and the lifecycle of background functions and schedules.
+actions, events, and the scheduler lifecycle.
 
 ## Bootstrap
 
@@ -57,7 +57,7 @@ root, defaults to `process.cwd()`). Logging options are covered in
 
 ## The Sixb instance
 
-The instance is the API you use everywhere — in functions, syncs, server routes, and tests.
+The instance is the API you use everywhere — in workflow steps, syncs, server routes, and tests.
 
 ### Typed objects
 
@@ -97,8 +97,8 @@ const recent = await sixb.events.read({
 })
 ```
 
-Domain events do **not** trigger functions — functions run on `cron`/`interval` schedules. See
-[Events](../events/overview.md).
+Schedules can react to typed domain events and drive syncs, pipelines, or workflows. See
+[Events](../events/overview.md) and [Schedules](../schedules/overview.md).
 
 ### Logs
 
@@ -113,22 +113,18 @@ builder. See [Logging](../logging/overview.md).
 
 ### Lifecycle
 
-Background functions and the scheduler are started explicitly — constructing the runtime does not
-start them. Each pair is idempotent and a no-op when there is nothing to run.
+The scheduler is started explicitly — constructing the runtime does not start it. Its lifecycle
+methods are idempotent and no-op when there is nothing to run.
 
 | Method | Effect |
 | --- | --- |
-| `sixb.startFunctions()` | Start the functions runtime (interval/cron triggers) |
-| `sixb.stopFunctions()` | Stop the functions runtime |
 | `sixb.startScheduler()` | Start the scheduler for discovered `schedules/` |
 | `sixb.stopScheduler()` | Stop the scheduler |
 
 ```ts
-await sixb.startFunctions()
 await sixb.startScheduler()
 // ... on shutdown
 await sixb.stopScheduler()
-await sixb.stopFunctions()
 ```
 
 Release connector, broker, and logger resources with `sixb.disconnectConnectors()`,
@@ -159,7 +155,6 @@ type is required.
 | --- | --- |
 | `ontology/` | Object types and value types |
 | `actions/` | Action definitions |
-| `functions/` | Scheduled functions |
 | `schedules/` | Scheduler entries |
 | `datasets/`, `connectors/`, `syncs/`, `pipelines/`, `projections/` | Data integration |
 | `rules/`, `workflows/` | Business logic |
@@ -183,7 +178,8 @@ export const sixb = await createSixb({
   blobStorage: new LocalBlobStorage({ basePath: ".sixb" }),
   queues: new InMemoryQueues(),
   ontologies: [Customer, Invoice, Project],
-  functions: [checkOverdueInvoices],
+  schedules: [dailyInvoices],
+  workflows: [checkOverdueInvoices],
 })
 ```
 

@@ -1616,7 +1616,6 @@ export type GetStatusResponses = {
   200: {
     status: "ok"
     objectTypes: number
-    functions: number
   }
 }
 

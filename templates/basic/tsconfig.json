@@ -16,7 +16,6 @@
     "app/**/*.ts",
     "app/**/*.tsx",
     "ontology/**/*.ts",
-    "functions/**/*.ts",
     "sixb.config.ts",
     ".sixb/types/**/*.d.ts"
   ]

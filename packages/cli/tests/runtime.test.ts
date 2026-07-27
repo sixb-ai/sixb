@@ -30,7 +30,6 @@ import type { EventsRuntime } from "@sixb/core/internal/events"
 import {
   checkRuntimeLakeDefinitions,
   migrateRuntimeStorage,
-  startFunctionsRuntime,
   startOrchestratorRuntime,
   startRulesRuntime,
   startSchedulerRuntime,
@@ -671,7 +670,7 @@ describe("startSixbRuntime", () => {
     await runtime.stop()
   })
 
-  test("stops the rules worker after functions and closes runtime providers", async () => {
+  test("stops the rules worker before closing runtime providers", async () => {
     const calls: string[] = []
     const broker = new LifecycleBroker(calls)
     const sixb = new Sixb({
@@ -684,30 +683,17 @@ describe("startSixbRuntime", () => {
       queues: new InMemoryQueues(),
       rules: [postedRule],
     })
-    sixb.startFunctions = async () => {
-      calls.push("functions:start")
-    }
-    sixb.stopFunctions = async () => {
-      calls.push("functions:stop")
-    }
     sixb.disconnectConnectors = async () => {
       calls.push("connectors:stop")
     }
 
     const runtime = await startSixbRuntime(sixb)
 
-    expect(calls).toEqual(["rules:start", "functions:start"])
+    expect(calls).toEqual(["rules:start"])
 
     await runtime.stop()
 
-    expect(calls).toEqual([
-      "rules:start",
-      "functions:start",
-      "functions:stop",
-      "rules:stop",
-      "connectors:stop",
-      "broker:stop",
-    ])
+    expect(calls).toEqual(["rules:start", "rules:stop", "connectors:stop", "broker:stop"])
   })
 
   test("closes optional provider handles during runtime cleanup", async () => {
@@ -741,37 +727,6 @@ describe("startSixbRuntime", () => {
 })
 
 describe("split production runtime roles", () => {
-  test("starts only registered functions for the functions role", async () => {
-    const calls: string[] = []
-    const sixb = new Sixb({
-      id: "cli-functions-role",
-      ontology: [Transaction],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage: createLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      rules: [postedRule],
-    })
-    sixb.startFunctions = async () => {
-      calls.push("functions:start")
-    }
-    sixb.stopFunctions = async () => {
-      calls.push("functions:stop")
-    }
-    sixb.startScheduler = async () => {
-      calls.push("scheduler:start")
-    }
-
-    const runtime = await startFunctionsRuntime(sixb)
-
-    expect(calls).toEqual(["functions:start"])
-
-    await runtime.stop()
-
-    expect(calls).toEqual(["functions:start", "functions:stop"])
-  })
-
   test("starts only the scheduler for the scheduler role", async () => {
     const calls: string[] = []
     const sixb = new Sixb({
@@ -790,10 +745,6 @@ describe("split production runtime roles", () => {
     sixb.stopScheduler = async () => {
       calls.push("scheduler:stop")
     }
-    sixb.startFunctions = async () => {
-      calls.push("functions:start")
-    }
-
     const runtime = await startSchedulerRuntime(sixb)
 
     expect(calls).toEqual(["scheduler:start"])
@@ -815,9 +766,6 @@ describe("split production runtime roles", () => {
       queues: new InMemoryQueues(),
       rules: [postedRule],
     })
-    sixb.startFunctions = async () => {
-      calls.push("functions:start")
-    }
     sixb.startScheduler = async () => {
       calls.push("scheduler:start")
     }
@@ -850,9 +798,6 @@ describe("split production runtime roles", () => {
       schedules: [daily],
       workflows: [workflow],
     })
-    sixb.startFunctions = async () => {
-      calls.push("functions:start")
-    }
     sixb.startScheduler = async () => {
       calls.push("scheduler:start")
     }
@@ -966,7 +911,6 @@ describe("split runtime preparation", () => {
     })
 
     const rules = await startRulesRuntime(sixb)
-    const functions = await startFunctionsRuntime(sixb)
     const scheduler = await startSchedulerRuntime(sixb)
     const orchestrator = await startOrchestratorRuntime(sixb)
 
@@ -974,7 +918,6 @@ describe("split runtime preparation", () => {
 
     await orchestrator.stop()
     await scheduler.stop()
-    await functions.stop()
     await rules.stop()
   })
 })

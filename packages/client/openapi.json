@@ -4617,12 +4617,9 @@
                     },
                     "objectTypes": {
                       "type": "number"
-                    },
-                    "functions": {
-                      "type": "number"
                     }
                   },
-                  "required": ["status", "objectTypes", "functions"],
+                  "required": ["status", "objectTypes"],
                   "additionalProperties": false
                 }
               }

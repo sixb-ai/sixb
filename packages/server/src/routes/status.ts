@@ -8,7 +8,6 @@ export function registerStatusRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
     async () => ({
       status: "ok" as const,
       objectTypes: sixb.listObjectTypes().length,
-      functions: sixb.getFunctionDefinitions().length,
     }),
     {
       response: { 200: StatusResponseSchema },

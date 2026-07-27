@@ -7,8 +7,8 @@ Sixb is Bun-only. Install [Bun](https://bun.sh) first.
 
 ## Scaffold a project
 
-`create-sixb` writes a starter project from the basic template: an ontology, a function, an
-action, and a custom app.
+`create-sixb` writes a starter project from the basic template: an ontology, an action, and a
+custom app.
 
 ```bash
 bun create-sixb my-app
@@ -22,8 +22,7 @@ The template gives you:
 | --- | --- |
 | `sixb.config.ts` | Runtime entry — calls `createSixb()` with local providers |
 | `ontology/counter.ts` | A `Counter` object type |
-| `functions/tick.ts` | A function that increments the counter every second |
-| `actions/reset.ts` | An action that resets the counter |
+| `actions/increment.ts` | An action that creates and increments the counter |
 | `app/page.tsx` | A custom app page that reads the counter live |
 
 ## Start the dev server
@@ -32,7 +31,7 @@ The template gives you:
 bun sixb dev
 ```
 
-`sixb dev` loads `sixb.config.ts`, starts the runtime (functions, syncs, and workers co-hosted),
+`sixb dev` loads `sixb.config.ts`, starts the runtime (syncs and workers co-hosted),
 and serves three things:
 
 | Service | URL | Purpose |
@@ -41,8 +40,8 @@ and serves three things:
 | Custom app | `http://localhost:3001` | Your `app/` pages (served only when `app/` has routes) |
 | API | `http://localhost:3002` | HTTP/WebSocket API and OpenAPI docs |
 
-Open `http://localhost:3000` and you will see the `Counter` object. The `tick` function writes
-telemetry to it once per second, so its value climbs live.
+Open `http://localhost:3001` and use the increment button. The action creates the `Counter` object
+on its first run, then advances the shared value on every click.
 
 ## Define an object type
 
@@ -74,33 +73,31 @@ options.
 
 ## Write some data
 
-`sixb.objects(Type)` is the typed API for all object reads, writes, telemetry, links, and
-actions. Seed a `Customer` from a function and the runtime writes it on the next tick. The
-primary id goes inside `properties` — there is no separate key field.
+Actions are the audited write boundary for commands from people, apps, and agents. A global action
+can create a `Customer` without requiring an existing object subject.
 
-File: `functions/seed.ts`
+File: `actions/create-customer.ts`
 
 ```ts
-import { defineFunction } from "@sixb/core"
+import { defineAction, param } from "@sixb/core"
 import { Customer } from "../ontology/customer"
 
-export const seedCustomer = defineFunction("seed-customer")
-  .interval(5000)
-  .run(async ({ sixb }) => {
-    await sixb.objects(Customer).upsert({
-      properties: {
-        id: "cust-001",
-        name: "Dana Smith",
-        email: "dana@globex.test",
-        company: "Globex",
-        tier: "gold",
-      },
+export const createCustomer = defineAction("create-customer")
+  .params({
+    id: param("string"),
+    name: param("string"),
+  })
+  .edits(({ objects, params }) => {
+    objects(Customer).create({
+      id: params.id,
+      name: params.name,
+      tier: "bronze",
     })
   })
 ```
 
-Save it under `functions/` and refresh Atlas to see `cust-001`. From here you can query it, link
-it to an `Employee`, append telemetry, or render it in your app.
+Request the action from your app, the runtime API, or Atlas. The resulting object is available to
+typed queries, links, subsequent actions, and custom app pages.
 
 ## Next steps
 

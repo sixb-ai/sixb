@@ -31,8 +31,8 @@ const sixb = createSixb({
 })
 ```
 
-The CLI starts the rules worker before functions, the orchestrator, sync worker,
-and scheduler so it is already subscribed before local producers emit ontology
+The CLI starts the rules worker before the orchestrator, sync worker, and scheduler
+so it is already subscribed before local producers emit ontology
 events.
 
 For tests or custom hosts:

@@ -568,7 +568,6 @@ describe("SixbServer HTTP contract", () => {
       expect(await statusResponse.json()).toEqual({
         status: "ok",
         objectTypes: 2,
-        functions: 0,
       })
 
       const connectorsResponse = await fetch(`${baseUrl}/api/connectors`)

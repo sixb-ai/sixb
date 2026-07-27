@@ -100,7 +100,7 @@ export default function DevicePicker() {
           <div className="panel-glass empty-state reveal reveal-1">
             <p className="empty-title">No AC units discovered yet</p>
             <p className="empty-subtitle">
-              Units are discovered by pipelines. Wait for the next scan cycle.
+              A scheduled sync refreshes devices and telemetry every minute.
             </p>
           </div>
         ) : (

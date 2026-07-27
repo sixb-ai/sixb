@@ -6,7 +6,6 @@ import type {
   ConnectorClient,
   ConnectorDefinition,
   DatasetDefinition,
-  FunctionDefinition,
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   PipelineDefinition,
@@ -27,7 +26,6 @@ export interface LoadedSixb extends SixbRuntimeContext {
   readonly broker: Broker
   readonly auth: AuthRuntime
   listObjectTypes(): readonly unknown[]
-  getFunctionDefinitions(): readonly FunctionDefinition[]
   getActionDefinitions(): readonly ActionDefinition[]
   getActionById(actionId: string): ActionDefinition | null
   getSyncDefinitions(): readonly SyncDefinition[]
@@ -49,8 +47,6 @@ export interface LoadedSixb extends SixbRuntimeContext {
   connector<TAdapter extends ConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>
   ): Promise<ConnectorClient<TAdapter>>
-  startFunctions(): Promise<void>
-  stopFunctions(): Promise<void>
   startScheduler(): Promise<void>
   stopScheduler(): Promise<void>
   disconnectConnectors(): Promise<void>
@@ -84,7 +80,6 @@ function isSixbInstance(value: unknown): value is LoadedSixb {
     "auth" in value &&
     typeof (value as { listObjectTypes?: unknown }).listObjectTypes === "function" &&
     typeof (value as { getSubTypes?: unknown }).getSubTypes === "function" &&
-    typeof (value as { getFunctionDefinitions?: unknown }).getFunctionDefinitions === "function" &&
     typeof (value as { getActionDefinitions?: unknown }).getActionDefinitions === "function" &&
     typeof (value as { getActionById?: unknown }).getActionById === "function" &&
     typeof (value as { getSyncDefinitions?: unknown }).getSyncDefinitions === "function" &&
@@ -104,8 +99,6 @@ function isSixbInstance(value: unknown): value is LoadedSixb {
     typeof (value as { getSyncById?: unknown }).getSyncById === "function" &&
     typeof (value as { getRuleById?: unknown }).getRuleById === "function" &&
     typeof (value as { getPipelineById?: unknown }).getPipelineById === "function" &&
-    typeof (value as { startFunctions?: unknown }).startFunctions === "function" &&
-    typeof (value as { stopFunctions?: unknown }).stopFunctions === "function" &&
     typeof (value as { startScheduler?: unknown }).startScheduler === "function" &&
     typeof (value as { stopScheduler?: unknown }).stopScheduler === "function" &&
     typeof (value as { disconnectConnectors?: unknown }).disconnectConnectors === "function" &&

@@ -8,7 +8,6 @@ import {
   discoverAgents,
   discoverConnectors,
   discoverDatasets,
-  discoverFunctions,
   discoverGroups,
   discoverMembershipPolicies,
   discoverOntologySources,
@@ -24,7 +23,6 @@ import type { Broker } from "../broker"
 import type { ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets"
 import type { SixbErrorHandler } from "../error-reporting/types"
-import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
 import type { LoggerProvider, ObservabilityOptions } from "../logging"
 import type { PipelineDefinition } from "../pipelines/types"
@@ -62,7 +60,6 @@ export interface CreateSixbOptions {
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions to register in addition to auto-discovered `connectors/` exports. */
   connectors?: readonly ConnectorDefinition[]
-  functions?: readonly FunctionDefinition[]
   schedules?: readonly ScheduleDefinition[]
   syncs?: readonly SyncDefinition[]
   pipelines?: readonly PipelineDefinition[]
@@ -79,8 +76,8 @@ export interface CreateSixbOptions {
 /**
  * Create a Sixb runtime using convention-based discovery.
  *
- * Sixb auto-discovers exported definitions from `ontology/`, `actions/`, `functions/`,
- * `datasets/`, `connectors/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`,
+ * Sixb auto-discovers exported definitions from `ontology/`, `actions/`, `datasets/`,
+ * `connectors/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`,
  * `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,policies}/`
  * relative to `projectRoot`.
  */
@@ -100,7 +97,6 @@ export async function createSixb(
 
   const [
     actions,
-    functions,
     projections,
     schedules,
     syncs,
@@ -115,7 +111,6 @@ export async function createSixb(
     agents,
   ] = await Promise.all([
     options.actions ?? discoverActions(projectRoot),
-    options.functions ?? discoverFunctions(projectRoot),
     options.projections ?? discoverProjections(projectRoot),
     discoverSchedules(projectRoot),
     discoverSyncs(projectRoot),
@@ -148,7 +143,6 @@ export async function createSixb(
     actions,
     datasets: [...(options.datasets ?? []), ...datasets],
     connectors: [...(options.connectors ?? []), ...connectors],
-    functions,
     schedules: [...(options.schedules ?? []), ...schedules],
     syncs: [...(options.syncs ?? []), ...syncs],
     pipelines: [...(options.pipelines ?? []), ...pipelines],

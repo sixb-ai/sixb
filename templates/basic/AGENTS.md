@@ -22,7 +22,6 @@ a typed API, client, and app from one runtime. **Bun only** — do not use npm, 
 ```
 ontology/      object types + value types
 actions/       typed commands against objects
-functions/     code that runs on an interval or cron
 datasets/      table-shaped data
 syncs/         pull external data into datasets
 projections/   map dataset rows into objects + telemetry
@@ -57,9 +56,6 @@ definitions.
 ## Gotchas
 
 - `createSixb()` is **async** — `await` it (or export the promise and await it where consumed).
-- Functions run on a clock only: `defineFunction(id).cron(expr).run(fn)` or `.interval(ms).run(fn)`.
-  There is no `.broker()` or `.onAction()`. Domain events do **not** trigger functions — react with
-  rules or workflows instead.
 - `upsert` takes `{ properties }` with the primary id **inside** `properties` (there is no separate
   `key` field).
 - Telemetry `semanticType` must be a real quantitative type (e.g. `Temperature`); there is no

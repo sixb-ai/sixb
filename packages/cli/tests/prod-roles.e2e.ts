@@ -99,7 +99,6 @@ const backgroundRoles: Array<{
 }> = [
   { name: "orchestrator", command: ["orchestrator"] },
   { name: "scheduler", command: ["scheduler"] },
-  { name: "functions", command: ["functions"] },
   { name: "rules", command: ["rules"] },
   { name: "worker sync", command: ["worker", "sync"], expectProviderClose: true },
 ]

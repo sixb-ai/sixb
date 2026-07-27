@@ -1,6 +1,6 @@
 import { defineAction, param } from "@sixb/core"
+import { panasonicConnector } from "../connectors/panasonic"
 import type { OperationMode } from "../lib/panasonic/types"
-import { getPanasonicApi } from "../lib/panasonicApi"
 import { PanasonicAcUnit } from "../ontology/acUnit"
 
 export const setMode = defineAction("setMode", {
@@ -9,7 +9,7 @@ export const setMode = defineAction("setMode", {
   .on(PanasonicAcUnit)
   .params({ mode: param("integer") })
   .writeback(async ({ params, target, sixb }) => {
-    const api = await getPanasonicApi(sixb)
+    const api = await sixb.connector(panasonicConnector)
     await api.setOperationMode(target.properties.guid, params.mode as OperationMode)
 
     // TODO(actions-v2): move local telemetry writes out of writeback once EditBatch supports them.

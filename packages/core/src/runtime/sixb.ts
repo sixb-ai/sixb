@@ -28,8 +28,6 @@ import { assertDatasetDefinition } from "../datasets/validation"
 import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
 import type { SixbErrorHandler } from "../error-reporting/types"
 import { EventsRuntime, OntologyOutboxDispatcher } from "../events"
-import { FunctionRuntime } from "../functions/runtime"
-import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
 import { type LoggerProvider, LogsRuntime, type ObservabilityOptions } from "../logging"
 import { createOntologyMaterializer } from "../materializer"
@@ -106,7 +104,6 @@ export interface SixbOptions<TOntologySources extends readonly OntologySource[]>
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions registered with this runtime. */
   connectors?: readonly ConnectorDefinition[]
-  functions?: readonly FunctionDefinition[]
   schedules?: readonly ScheduleDefinition[]
   syncs?: readonly SyncDefinition[]
   pipelines?: readonly PipelineDefinition[]
@@ -125,7 +122,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 {
   readonly projectId: string
   private readonly ontologySources: TOntologySources
-  private readonly functions: readonly FunctionDefinition[]
   private readonly datasetsById = new Map<string, DatasetDefinition>()
   private readonly schedulesById = new Map<string, ScheduleDefinition>()
   private readonly syncsById = new Map<string, SyncDefinition>()
@@ -154,14 +150,12 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   readonly rules: readonly RuleDefinition[]
   readonly security: SecurityRegistry
   readonly auth: AuthRuntime
-  private functionRuntime: FunctionRuntime | null = null
   private schedulerRuntime: SchedulerRuntime | null = null
 
   constructor(options: SixbOptions<TOntologySources>) {
     attachSixbErrorReporter(this, options.onError)
     this.projectId = options.id ?? "default"
     this.ontologySources = options.ontology
-    this.functions = options.functions ?? []
     this.broker = options.broker
     this.events = new EventsRuntime({ projectId: this.projectId, broker: this.broker })
     this.logs = new LogsRuntime({
@@ -390,10 +384,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.ontology.getValueTypesById()
   }
 
-  getFunctionDefinitions(): readonly FunctionDefinition[] {
-    return this.functions
-  }
-
   getActionDefinitions(): readonly ActionDefinition[] {
     return this.actionRegistry.list()
   }
@@ -480,33 +470,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     definition: ConnectorDefinition<string, TAdapter>
   ): Promise<ConnectorClient<TAdapter>> {
     return this.connectorRuntime.connect(definition)
-  }
-
-  async startFunctions(): Promise<void> {
-    if (this.functionRuntime || this.functions.length === 0) {
-      return
-    }
-
-    const runtime = new FunctionRuntime({
-      // Boundary cast: TS class generic invariance — `Sixb<TOntologySources>` is not
-      // assignable to `Sixb<readonly OntologySource[]>`, even though the runtime is
-      // structurally compatible.
-      sixb: this as unknown as Sixb<readonly OntologySource[]>,
-      functions: this.functions,
-    })
-
-    await runtime.start()
-    this.functionRuntime = runtime
-  }
-
-  async stopFunctions(): Promise<void> {
-    if (!this.functionRuntime) {
-      return
-    }
-
-    const runtime = this.functionRuntime
-    this.functionRuntime = null
-    await runtime.stop()
   }
 
   async startScheduler(): Promise<void> {

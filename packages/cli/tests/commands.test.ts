@@ -61,16 +61,7 @@ describe("sixb command dispatch", () => {
     const result = runCli(["help"])
 
     expect(result.exitCode).toBe(0)
-    for (const command of [
-      "api",
-      "atlas",
-      "app",
-      "scheduler",
-      "orchestrator",
-      "functions",
-      "rules",
-      "worker",
-    ]) {
+    for (const command of ["api", "atlas", "app", "scheduler", "orchestrator", "rules", "worker"]) {
       expect(result.stdout).toContain(command)
     }
     expect(result.stdout).toContain("sixb worker pipeline")

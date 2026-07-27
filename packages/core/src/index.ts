@@ -816,8 +816,6 @@ export {
   ConnectorError,
   ConnectorNotFoundError,
   createSixb,
-  FunctionError,
-  FunctionValidationError,
   ObjectError,
   ObjectNotFoundError,
   OntologyValidationError,
@@ -826,23 +824,6 @@ export {
   Sixb,
   SyncValidationError,
 } from "./runtime"
-
-// ── Functions ───────────────────────────────────────────────
-
-export type {
-  CronFunctionBuilder,
-  CronHandler,
-  CronTriggerDefinition,
-  FunctionBuilder,
-  FunctionContext,
-  FunctionDefinition,
-  FunctionMetadata,
-  IntervalFunctionBuilder,
-  IntervalHandler,
-  IntervalTriggerDefinition,
-  TriggerDefinition,
-} from "./functions"
-export { defineFunction } from "./functions"
 
 // ── Agents ──────────────────────────────────────────────────
 

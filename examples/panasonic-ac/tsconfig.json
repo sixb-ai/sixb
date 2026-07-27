@@ -11,9 +11,12 @@
     "app/**/*.ts",
     "app/**/*.tsx",
     "ontology/**/*.ts",
-    "functions/**/*.ts",
     "lib/**/*.ts",
     "connectors/**/*.ts",
+    "datasets/**/*.ts",
+    "projections/**/*.ts",
+    "schedules/**/*.ts",
+    "syncs/**/*.ts",
     "sixb.config.ts",
     ".sixb/types/**/*.d.ts"
   ]

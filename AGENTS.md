@@ -9,7 +9,7 @@ Repo-wide agent instructions for `sixb`.
 
 ## Repo Map
 
-- `packages/core`: runtime, ontology builders, providers, validation, and functions
+- `packages/core`: runtime, ontology builders, providers, and validation
 - `packages/server`: Elysia HTTP/WebSocket API and OpenAPI generation
 - `packages/atlas`: built-in React UI (the Atlas app); pages live in `src/pages/`
 - `packages/ui`: shared React component library used by Atlas
@@ -72,9 +72,8 @@ shared source (notably `@sixb/core`) once per dependent, which made the step the
 
 - Define ontology types with `defineObjectType`, `prop`, `link`, `action`, and `defineValueType`.
 - Most runtimes start with `createSixb()`.
-- `createSixb()` auto-discovers `ontology/`, `actions/`, `functions/`, `datasets/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`, `connectors/`, `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,policies}/`. The `app/` directory is served separately and is not part of `createSixb()` discovery.
+- `createSixb()` auto-discovers `ontology/`, `actions/`, `datasets/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`, `connectors/`, `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,policies}/`. The `app/` directory is served separately and is not part of `createSixb()` discovery.
 - `sixb.objects(MyType)` is the typed API for object CRUD, telemetry, links, and actions.
-- Functions are defined with `defineFunction(id)` and scheduled with `.interval(ms)` or `.cron(expr)`, then given a handler with `.run(...)`. There is no `.broker(...)` or `.onAction(...)`; domain events are not function triggers.
 - Important domain events include `object.created`, `object.updated`, `object.deleted`, `link.created`, `link.updated`, `link.deleted`, `telemetry.appended`, and `action.requested`.
 - Convention-based discovery is the normal registration model.
 - Generated client files live in `packages/client/src/generated/`.
@@ -139,7 +138,6 @@ shared source (notably `@sixb/core`) once per dependent, which made the step the
 
 - `packages/core/src/runtime/`: runtime entrypoints
 - `packages/core/src/ontology/`: ontology builders and types
-- `packages/core/src/functions/`: functions runtime
 - `packages/server/src/routes/`: server routes
 - `packages/client/src/generated/`: generated client output
 - `packages/atlas/src/`: built-in UI (pages in `pages/`, shared components in `packages/ui/src/`)

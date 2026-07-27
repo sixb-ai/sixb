@@ -511,7 +511,7 @@ export const reviewHighValueTransaction = defineWorkflow("review-high-value-tran
     ).rejects.toThrow("No ontology found")
   })
 
-  test("treats missing actions, functions, and syncs folders as empty", async () => {
+  test("treats missing actions and syncs folders as empty", async () => {
     const projectRoot = await createTempProjectRoot()
 
     await writeProjectFile(
@@ -539,8 +539,6 @@ export const Room = defineObjectType({
     expect(sixb.getActionDefinitions()).toEqual([])
     expect(sixb.getSyncDefinitions()).toEqual([])
     expect(sixb.listConnectors()).toEqual([])
-    await expect(sixb.startFunctions()).resolves.toBeUndefined()
-    await expect(sixb.stopFunctions()).resolves.toBeUndefined()
   })
 
   test("merges explicit connectors with auto-discovery", async () => {

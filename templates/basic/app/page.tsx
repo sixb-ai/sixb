@@ -1,6 +1,5 @@
-import { executeAction } from "@sixb/client"
-import { events, listObjectsOptions, useInvalidateOnEvent } from "@sixb/client/hooks"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { listObjectsOptions, useActionRunMutation } from "@sixb/client/hooks"
+import { useQuery } from "@tanstack/react-query"
 
 const counterQueryOptions = listObjectsOptions({
   query: {
@@ -22,31 +21,14 @@ function formatCounterValue(value: unknown): string {
 }
 
 export default function HomePage() {
-  const queryClient = useQueryClient()
   const { data: counters = [], isLoading } = useQuery(counterQueryOptions)
   const counter = counters[0]
-  const currentValue = counter?.telemetry.value?.currentValue ?? counter?.properties.value ?? 0
+  const currentValue = counter?.properties.value ?? 0
   const counterValue = formatCounterValue(currentValue)
 
-  useInvalidateOnEvent(events.telemetry(), () => [counterQueryOptions.queryKey])
-
-  const resetCounter = useMutation({
-    mutationFn: async () => {
-      if (!counter) {
-        throw new Error("Counter is not ready yet.")
-      }
-
-      return await executeAction({
-        path: {
-          objectId: counter.id,
-          actionId: "reset",
-        },
-        body: {},
-      })
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: counterQueryOptions.queryKey })
-    },
+  const incrementCounter = useActionRunMutation({
+    actionId: "increment",
+    invalidateOnCommit: true,
   })
 
   return (
@@ -55,8 +37,8 @@ export default function HomePage() {
         <p className="eyebrow">Sixb starter</p>
         <h1>Counter</h1>
         <p className="lede">
-          The runtime is ticking in the background. This custom app reads from the Sixb API and can
-          send actions back to the server.
+          This custom app reads from the Sixb API and sends an action back to the server to advance
+          shared state.
         </p>
       </section>
 
@@ -69,7 +51,7 @@ export default function HomePage() {
 
           <div className="status">
             <span className={`status-dot ${counter ? "online" : "idle"}`} />
-            <span>{counter ? "Connected" : "Waiting for first tick"}</span>
+            <span>{counter ? "Connected" : "Ready to create"}</span>
           </div>
         </div>
 
@@ -81,25 +63,25 @@ export default function HomePage() {
 
           <div>
             <p className="detail-label">Action</p>
-            <p className="detail-value">reset</p>
+            <p className="detail-value">increment</p>
           </div>
         </div>
 
         <button
           className="button"
-          onClick={() => resetCounter.mutate()}
-          disabled={!counter || resetCounter.isPending}
+          onClick={() => incrementCounter.mutate(undefined)}
+          disabled={incrementCounter.isPending}
           type="button"
         >
-          {resetCounter.isPending ? "Resetting..." : "Reset Counter"}
+          {incrementCounter.isPending ? "Incrementing..." : "Increment Counter"}
         </button>
 
-        {resetCounter.error ? <p className="notice error">{resetCounter.error.message}</p> : null}
+        {incrementCounter.error ? (
+          <p className="notice error">{incrementCounter.error.message}</p>
+        ) : null}
 
         {!counter && !isLoading ? (
-          <p className="notice">
-            The template&apos;s <code>tick</code> function will create the counter automatically.
-          </p>
+          <p className="notice">Run the increment action to create your first counter object.</p>
         ) : null}
       </section>
     </main>

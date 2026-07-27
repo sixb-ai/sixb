@@ -16,8 +16,6 @@ acme-corp/
 │   └── invoice.ts
 ├── actions/
 │   └── markPaid.ts
-├── functions/
-│   └── check-overdue-invoices.ts
 ├── datasets/
 │   └── erp.ts
 ├── connectors/
@@ -67,7 +65,6 @@ agent sandboxes.
 | --- | --- | --- |
 | `ontology/` | Object types and value types | [Ontology](../ontology/overview.md) |
 | `actions/` | Action definitions | [Actions](../actions/overview.md) |
-| `functions/` | Code that runs on an interval or cron | — |
 | `datasets/` | Dataset definitions | [Datasets](../data/datasets.md) |
 | `connectors/` | Connector definitions | [Connectors](../data/connectors.md) |
 | `syncs/` | Sync definitions | [Syncs](../data/syncs.md) |

@@ -28,7 +28,6 @@ bun add @sixb/cli
 | `sixb service-account token revoke <service-account-id> <token-id>` | Revoke a service-account token |
 | `sixb scheduler` | Start the production scheduler event producer |
 | `sixb orchestrator` | Start the production event-to-queue dispatcher |
-| `sixb functions` | Start registered functions |
 | `sixb rules` | Start rules evaluation |
 | `sixb worker <type>` | Start a production queue worker (one queue type per process) |
 | `sixb worker-group [types...]` | Co-host several queue workers in one process (constrained resources) |
@@ -85,7 +84,6 @@ sixb atlas
 sixb app
 sixb scheduler
 sixb orchestrator
-sixb functions
 sixb rules
 sixb worker sync
 sixb worker pipeline
@@ -169,7 +167,7 @@ sixb service-account token create svc_sandbox --name "CI token" --expires-in 30d
 Service-account tokens are runtime credentials. They can authenticate API requests that accept
 bearer tokens, but they cannot manage personal tokens, service accounts, or mint more credentials.
 
-`sixb dev` remains the local all-in-one command. Production deployments should prefer one long-running command per process so API, browser UIs, scheduler, orchestrator, functions, rules, and queue workers can scale and fail independently.
+`sixb dev` remains the local all-in-one command. Production deployments should prefer one long-running command per process so API, browser UIs, scheduler, orchestrator, rules, and queue workers can scale and fail independently.
 
 ### Release order
 
@@ -185,8 +183,8 @@ pm2 start ecosystem.config.cjs
 ```
 
 `sixb lake check` is the single place that attaches the lake and validates every dataset
-definition during deploy. Service commands (`api`, `scheduler`, `orchestrator`, `functions`,
-`rules`, `worker`, `worker-group`) no longer run lake checks or storage migrations at startup, so
+definition during deploy. Service commands (`api`, `scheduler`, `orchestrator`, `rules`, `worker`,
+`worker-group`) no longer run lake checks or storage migrations at startup, so
 starting them together does not stampede shared infrastructure. Run `sixb db migrate` as a
 required release step before starting roles — `sixb dev` still migrates in-process for local use.
 

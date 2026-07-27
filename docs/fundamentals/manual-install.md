@@ -29,7 +29,7 @@ so you can mix in-memory, local-disk, and hosted backends freely.
 | `lakeStorage` | yes | Dataset and pipeline lake tables | `InMemoryLakeStorage` |
 | `blobStorage` | yes | Binary blob storage | `InMemoryBlobStorage` |
 | `queues` | yes | Background work queues | `InMemoryQueues` |
-| `sandboxes` | no | Sandboxed execution for functions and pipelines | — |
+| `sandboxes` | no | Sandboxed execution for agents | — |
 | `auth` | no | Authentication and authorization | — |
 
 For the durable provider packages (`@sixb/sqlite`, `@sixb/pg`,
@@ -101,7 +101,7 @@ from the convention folders.
 | --- | --- | --- |
 | `id` | `string` | Runtime identifier (a name, not a provider) |
 | `ontologies` | `OntologySource[]` | Added to discovered `ontology/` sources |
-| `actions`, `functions`, `projections` | arrays | Override discovery when provided |
+| `actions`, `projections` | arrays | Override discovery when provided |
 | `datasets`, `connectors`, `schedules`, `syncs`, `pipelines`, `rules`, `workflows`, `agents` | arrays | Merged with discovered definitions |
 | `groups`, `roles`, `membershipPolicies` | arrays | Merged with discovered security definitions |
 | `auth` | `SixbAuthConfig` | See [Authentication](../auth/authentication.md) |

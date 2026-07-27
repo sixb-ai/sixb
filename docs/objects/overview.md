@@ -128,29 +128,6 @@ Traverse links in reads with the [query builder](./querying.md), and read raw
 link rows with `byId(id).listLinks(...)`. Links are also exposed over HTTP — see
 the [HTTP reference](./http-reference.md).
 
-## End to end
-
-A scheduled function that flags sent invoices past their due date — read,
-inspect properties, write back:
-
-```ts
-export const checkOverdueInvoices = defineFunction("check-overdue-invoices")
-  .cron("0 8 * * *")
-  .run(async ({ sixb }) => {
-    const { objects } = await sixb.objects(Invoice).list({ limit: 500 })
-    const today = new Date().toISOString().slice(0, 10)
-
-    for (const invoice of objects) {
-      const { number, amount, status, dueDate } = invoice.properties
-      if (status !== "sent" || !dueDate || dueDate >= today) continue
-
-      await sixb.objects(Invoice).upsert({
-        properties: { id: invoice.primaryId, number, amount, status: "overdue" },
-      })
-    }
-  })
-```
-
 ## Footgun: runtime `objects()` vs action `objects()`
 
 Two `objects(Type)` APIs look almost identical. Picking the wrong one is the
@@ -158,7 +135,7 @@ most common mistake.
 
 | | `sixb.objects(Type)` (runtime) | `objects(Type)` (action `.edits()`) |
 | --- | --- | --- |
-| Where | functions, syncs, schedules, app code | inside an action's `.edits(...)` handler |
+| Where | workflow steps, syncs, scripts, app code | inside an action's `.edits(...)` handler |
 | Timing | **async, immediate** — writes apply now | **sync, staged** — applied atomically on commit |
 | `await` | every method returns a promise | edit calls are synchronous |
 | Create | `upsert({ properties })` | `create(properties)` |

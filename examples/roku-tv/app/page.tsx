@@ -63,9 +63,7 @@ export default function DevicePicker() {
         {sortedObjects.length === 0 ? (
           <div className="panel-glass empty-state fade-slide stagger-1">
             <p className="empty-title">No televisions found.</p>
-            <p className="empty-subtitle">
-              Devices are discovered by pipelines. Wait for the next scan minute.
-            </p>
+            <p className="empty-subtitle">A scheduled sync scans for devices every minute.</p>
           </div>
         ) : (
           <div className="device-grid">

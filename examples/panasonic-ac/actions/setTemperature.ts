@@ -1,5 +1,5 @@
 import { defineAction, param } from "@sixb/core"
-import { getPanasonicApi } from "../lib/panasonicApi"
+import { panasonicConnector } from "../connectors/panasonic"
 import { PanasonicAcUnit } from "../ontology/acUnit"
 
 export const setTemperature = defineAction("setTemperature", {
@@ -8,7 +8,7 @@ export const setTemperature = defineAction("setTemperature", {
   .on(PanasonicAcUnit)
   .params({ value: param("double") })
   .writeback(async ({ params, target, sixb }) => {
-    const api = await getPanasonicApi(sixb)
+    const api = await sixb.connector(panasonicConnector)
     await api.setTemperature(target.properties.guid, params.value)
 
     // TODO(actions-v2): move local telemetry writes out of writeback once EditBatch supports them.

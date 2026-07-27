@@ -3,7 +3,6 @@ export {
   discoverAgents,
   discoverConnectors,
   discoverDatasets,
-  discoverFunctions,
   discoverGroups,
   discoverMembershipPolicies,
   discoverOntologySources,

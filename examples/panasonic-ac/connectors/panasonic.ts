@@ -1,8 +1,10 @@
 import { rest } from "@sixb/connector-rest"
 import { defineConnector } from "@sixb/core"
+import { PanasonicApiService } from "../lib/panasonic/api"
 import { PanasonicAuth } from "../lib/panasonic/auth"
 import { buildPanasonicHeaders } from "../lib/panasonic/headers"
 import { API_CONSTANTS } from "../lib/panasonic/types"
+import { resolvePanasonicAppVersion } from "../lib/panasonic/version"
 
 function getCredentials(): { email: string; password: string } {
   const email = process.env.PANASONIC_EMAIL
@@ -33,18 +35,25 @@ function getCredentials(): { email: string; password: string } {
  * Required environment variables:
  * - `PANASONIC_EMAIL` — Panasonic ID email
  * - `PANASONIC_PASSWORD` — Panasonic ID password
+ *
+ * Optional environment variables:
+ * - `PANASONIC_APP_VERSION` — overrides automatic App Store version detection
  */
 export const panasonicConnector = defineConnector("panasonic", {
-  type: "rest",
+  type: "panasonic",
 
   async connect(context) {
     const { email, password } = getCredentials()
-    const auth = new PanasonicAuth()
+    const appVersion = await resolvePanasonicAppVersion({
+      override: process.env.PANASONIC_APP_VERSION,
+      signal: context.signal,
+    })
+    const auth = new PanasonicAuth(appVersion)
     await auth.authenticate(email, password)
 
     const adapter = rest({
       baseUrl: API_CONSTANTS.API_BASE,
-      headers: () => buildPanasonicHeaders(auth),
+      headers: () => buildPanasonicHeaders(auth, appVersion),
       minDelayMs: 1000,
       timeoutMs: 30_000,
       onUnauthorized: async () => {
@@ -58,6 +67,7 @@ export const panasonicConnector = defineConnector("panasonic", {
       retry: { maxRetries: 3 },
     })
 
-    return adapter.connect(context)
+    const client = await adapter.connect(context)
+    return new PanasonicApiService(client)
   },
 })

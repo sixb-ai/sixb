@@ -13,7 +13,6 @@
     "app/**/*.tsx",
     "connectors/**/*.ts",
     "datasets/**/*.ts",
-    "functions/**/*.ts",
     "lib/**/*.ts",
     "ontology/**/*.ts",
     "pipelines/**/*.ts",
