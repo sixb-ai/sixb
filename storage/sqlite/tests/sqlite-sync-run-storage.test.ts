@@ -70,6 +70,23 @@ describe("SqliteSyncRunStorage", () => {
     const storedNull = await storage.getById({ projectId: "my-app", id: "run-null" })
     expect(nullFinished.checkpoint).toBeNull()
     expect(storedNull?.checkpoint).toBeNull()
+
+    await storage.start({
+      id: "run-empty",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "append",
+    })
+    const emptyFinished = await storage.finish({
+      id: "run-empty",
+      projectId: "my-app",
+      status: "succeeded",
+      rowsRead: 0,
+      checkpoint: { cursor: "cursor-empty" },
+    })
+    expect(emptyFinished.output).toBeUndefined()
+    expect(emptyFinished.checkpoint).toEqual({ cursor: "cursor-empty" })
   })
 
   test("stores failures and supports filtered paging", async () => {

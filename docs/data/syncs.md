@@ -136,6 +136,11 @@ export const syncErpInvoiceEvents = defineSync("sync-erp-invoice-events", { mode
 
 Without `.checkpoint<T>()`, `context.checkpoint` is `undefined` and there is no `setCheckpoint`.
 
+An append run that returns no rows still succeeds and stores its next checkpoint. If the dataset has
+never received a row, that run does not create a dataset version, so dataset-updated schedules do
+not fire. This lets incremental readers advance an initial cursor without inventing placeholder
+rows.
+
 ## Read context
 
 The read handler signature is `(client, context)`.

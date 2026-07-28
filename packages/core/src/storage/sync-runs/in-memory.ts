@@ -84,10 +84,17 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
       )
     }
 
-    if (input.status === "succeeded" && input.output.datasetId !== existing.datasetId) {
-      throw new SyncRunError(
-        `[Sixb] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.datasetId}'.`
-      )
+    if (input.status === "succeeded") {
+      if (input.output && input.output.datasetId !== existing.datasetId) {
+        throw new SyncRunError(
+          `[Sixb] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.datasetId}'.`
+        )
+      }
+      if (!input.output && (existing.mode !== "append" || input.rowsRead !== 0)) {
+        throw new SyncRunError(
+          `[Sixb] Sync run '${input.id}' may omit its output only for an empty append.`
+        )
+      }
     }
 
     const base: SyncRunRecord = {
@@ -101,7 +108,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
         ? {
             ...base,
             rowsRead: input.rowsRead,
-            output: structuredClone(input.output),
+            output: input.output ? structuredClone(input.output) : undefined,
             error: undefined,
             checkpoint: normalizeCheckpoint(input.checkpoint),
           }

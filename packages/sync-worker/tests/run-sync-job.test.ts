@@ -192,7 +192,7 @@ describe("runSyncJob", () => {
     expect(seenContext?.syncId).toBe("sync-orders")
     expect(seenContext?.signal).toBeInstanceOf(AbortSignal)
     expect(result.rowsRead).toBe(2)
-    expect(result.version.producer).toEqual({
+    expect(result.version!.producer).toEqual({
       kind: "sync",
       id: "sync-orders",
       runId: "run_1",
@@ -212,7 +212,7 @@ describe("runSyncJob", () => {
       rowsRead: 2,
       output: {
         datasetId: "raw.erp.orders",
-        versionId: result.version.versionId,
+        versionId: result.version!.versionId,
       },
     })
 
@@ -329,6 +329,38 @@ describe("runSyncJob", () => {
     })
     expect(seenCheckpoint).toEqual({ cursor: "cursor-1" })
     expect(run?.checkpoint).toEqual({ cursor: "cursor-2" })
+  })
+
+  test("succeeds and advances the checkpoint for a first empty append", async () => {
+    const syncRunsStorage = new InMemorySyncRunStorage()
+    const sync = defineSync("sync-orders", { mode: "append" })
+      .checkpoint<{ cursor: string }>()
+      .from(erpDb)
+      .read((_client, context) => {
+        context.setCheckpoint({ cursor: "cursor-1" })
+        return []
+      })
+      .intoDataset(rawOrdersDataset)
+    const runtime = createRuntime({ sync, syncRunsStorage })
+
+    const result = await runSyncJob({
+      runtime,
+      job: { id: "run_empty", syncId: "sync-orders" },
+    })
+
+    expect(result).toMatchObject({
+      rowsRead: 0,
+      versionCreated: false,
+    })
+    expect(result.version).toBeUndefined()
+    expect(await runtime.lakeStorage.getLatestVersion(rawOrdersDataset.id)).toBeNull()
+    expect(
+      await syncRunsStorage.getById({ projectId: "project-1", id: "run_empty" })
+    ).toMatchObject({
+      status: "succeeded",
+      rowsRead: 0,
+      checkpoint: { cursor: "cursor-1" },
+    })
   })
 
   test("does not advance checkpoints from failed runs", async () => {
@@ -732,7 +764,7 @@ describe("runSyncJob", () => {
       rowsRead: 1,
       output: {
         datasetId: "raw.docs",
-        versionId: result.version.versionId,
+        versionId: result.version!.versionId,
       },
     })
   })
@@ -806,8 +838,8 @@ describe("runSyncJob", () => {
     })
 
     expect(result.rowsRead).toBe(2)
-    expect(result.version.rowCount).toBe(3)
-    expect(result.version.parentVersionId).toBe(initialVersion.versionId)
+    expect(result.version!.rowCount).toBe(3)
+    expect(result.version!.parentVersionId).toBe(initialVersion.versionId)
   })
 
   test("surfaces bookkeeping failures after the lake commit clearly", async () => {
@@ -895,7 +927,7 @@ describe("runSyncJob", () => {
     })
 
     const rows = await collectRows(lakeStorage.readRows({ datasetId: "raw.erp.orders" }))
-    expect(result.version.rowCount).toBe(2)
+    expect(result.version!.rowCount).toBe(2)
     expect(rows).toEqual([
       { orderId: "ord_1", customerName: "Ada" },
       { orderId: "ord_2", customerName: "Grace" },
@@ -949,7 +981,7 @@ describe("runSyncJob", () => {
     const rows = await collectRows(lakeStorage.readRows({ datasetId: "raw.erp.orders" }))
 
     expect(result.rowsRead).toBe(3)
-    expect(result.version.rowCount).toBe(3)
+    expect(result.version!.rowCount).toBe(3)
     expect(rows).toEqual(expectedRows)
   })
 })

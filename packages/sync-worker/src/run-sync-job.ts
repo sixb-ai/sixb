@@ -242,6 +242,34 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
 
     throwIfAborted(signal)
 
+    if (sync.config.mode === "append" && rowsRead === 0) {
+      await write.abort()
+      write = undefined
+      const version = await lakeStorage.getLatestVersion(dataset.id)
+      const finishedRun = await syncRunsStorage.finish({
+        projectId: runtime.id,
+        id: job.id,
+        status: "succeeded",
+        rowsRead,
+        ...(version
+          ? { output: { datasetId: version.datasetId, versionId: version.versionId } }
+          : {}),
+        checkpoint: nextCheckpoint,
+      })
+
+      return {
+        id: job.id,
+        syncId: sync.id,
+        datasetId: dataset.id,
+        mode: sync.config.mode,
+        startedAt: startedRun.startedAt,
+        finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
+        rowsRead,
+        ...(version ? { version } : {}),
+        versionCreated: false,
+      }
+    }
+
     const commit = await write.commit({
       expectedLatestVersionId: job.expectedLatestVersionId,
       commitMessage: job.commitMessage ?? `sync ${sync.id} run ${job.id}`,
