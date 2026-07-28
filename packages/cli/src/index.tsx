@@ -5,7 +5,46 @@ import { ErrorView, HelpView, renderStatic, VersionView } from "./ui"
 
 const args = process.argv.slice(2)
 
+/**
+ * Lowest Bun we test against, kept in step with `engines.bun` in every published manifest.
+ * `bun install` only warns about `engines`, so without this check an older Bun fails later on
+ * whichever API it happens to be missing, far from the cause.
+ */
+const MINIMUM_BUN_VERSION = "1.3.0"
+
+assertSupportedBunVersion()
+
 const VERSION = `sixb v${await readPackageVersion()}`
+
+function assertSupportedBunVersion(): void {
+  const current = typeof Bun === "undefined" ? undefined : Bun.version
+  if (!current) {
+    console.error("[Sixb] The sixb CLI requires Bun. See https://bun.sh to install it.")
+    process.exit(1)
+  }
+
+  if (compareVersions(current, MINIMUM_BUN_VERSION) >= 0) return
+
+  console.error(
+    `[Sixb] Bun ${MINIMUM_BUN_VERSION} or newer is required; this is Bun ${current}. ` +
+      "Run `bun upgrade` and try again."
+  )
+  process.exit(1)
+}
+
+/** Numeric compare of the leading `major.minor.patch`, ignoring any prerelease suffix. */
+function compareVersions(left: string, right: string): number {
+  const parse = (value: string) =>
+    (value.split("-")[0] ?? "").split(".").map((part) => Number.parseInt(part, 10) || 0)
+  const a = parse(left)
+  const b = parse(right)
+
+  for (let index = 0; index < 3; index++) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0)
+    if (difference !== 0) return difference
+  }
+  return 0
+}
 
 async function readPackageVersion(): Promise<string> {
   const fallbackVersion = "0.1.0"
@@ -306,27 +345,6 @@ async function main(): Promise<void> {
         expireOlderThan: getFlag("expire-older-than"),
         deleteOlderThan: getFlag("delete-older-than"),
       })
-      break
-    }
-
-    case "panasonic:login": {
-      try {
-        // Resolve from cwd so the user's project dependencies are used, not the CLI's
-        const pkg = "@sixb/connector-panasonic"
-        const resolved = Bun.resolveSync(pkg, process.cwd())
-        const mod = (await import(resolved)) as {
-          panasonicLogin: (opts: { dir?: string }) => Promise<void>
-        }
-        await mod.panasonicLogin({ dir: getFlag("dir") })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        if (message.includes("Cannot find module") || message.includes("Cannot find package")) {
-          throw new Error(
-            "@sixb/connector-panasonic is not installed. Add it to your project dependencies."
-          )
-        }
-        throw error
-      }
       break
     }
 
