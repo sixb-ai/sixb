@@ -64,8 +64,11 @@ describe("sixb build", () => {
     await stat(join(outdir, "app", "index.html"))
     const atlasAssets = await readdir(join(outdir, "atlas"))
 
-    expect(atlasAssets.some((file) => /^main-[^.]+\.js$/.test(file))).toBe(true)
-    expect(atlasAssets.some((file) => /^main-[^.]+\.css$/.test(file))).toBe(true)
+    // Exactly one entry: the Atlas build splits, and chunks are named `chunk-*` so they can never
+    // be mistaken for it.
+    expect(atlasAssets.filter((file) => /^atlas-[^.]+\.js$/.test(file))).toHaveLength(1)
+    expect(atlasAssets.filter((file) => /^atlas-[^.]+\.css$/.test(file))).toHaveLength(1)
+    expect(atlasAssets.some((file) => /^chunk-.+\.js$/.test(file))).toBe(true)
 
     const html = await readFile(join(outdir, "app", "index.html"), "utf-8")
     expect(html).toContain('<div id="root"></div>')
