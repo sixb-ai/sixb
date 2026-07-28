@@ -174,8 +174,10 @@ async function assertScaffold(projectDir: string, name: string): Promise<void> {
   const configSource = await readFile(join(projectDir, "sixb.config.ts"), "utf8")
   expect(configSource).toContain(`const projectId = "${name}"`)
   expect(configSource).toContain('new SqliteStorage({ path: ".sixb" })')
-  expect(configSource).toContain('new LocalLakeStorage({ path: ".sixb/lake" })')
-  expect(configSource).not.toContain("DuckLakeStorage")
+  expect(configSource).toContain("new DuckLakeStorage({")
+  expect(configSource).toContain('path: ".sixb/lake/metadata.ducklake"')
+  expect(configSource).toContain('dataPath: ".sixb/lake/data"')
+  expect(configSource).not.toContain("LocalLakeStorage")
   expect(configSource).not.toContain("isProduction")
 
   const incrementAction = await readFile(join(projectDir, "actions", "increment.ts"), "utf8")
@@ -188,6 +190,6 @@ async function assertScaffold(projectDir: string, name: string): Promise<void> {
   }
   expect(packageJson.name).toBe(name)
   expect(packageJson.dependencies?.["@sixb/cli"]).toBe("^0.1.0")
-  expect(packageJson.dependencies?.["@sixb/lake-local"]).toBe("^0.1.0")
-  expect(packageJson.dependencies?.["@sixb/ducklake"]).toBeUndefined()
+  expect(packageJson.dependencies?.["@sixb/ducklake"]).toBe("^0.1.0")
+  expect(packageJson.dependencies?.["@sixb/lake-local"]).toBeUndefined()
 }
