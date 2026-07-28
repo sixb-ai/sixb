@@ -2,6 +2,23 @@
   "name": "@sixb/connector-pandadoc",
   "version": "0.1.0",
   "description": "PandaDoc connector for Sixb built on @sixb/connector-rest",
+  "keywords": [
+    "sixb",
+    "bun",
+    "connector",
+    "integration",
+    "pandadoc"
+  ],
+  "homepage": "https://sixb.ai",
+  "bugs": {
+    "url": "https://github.com/sixb-ai/sixb/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sixb-ai/sixb.git",
+    "directory": "connectors/pandadoc"
+  },
+  "author": "Sixb contributors",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -28,12 +45,16 @@
     "typescript": "^5.7.0"
   },
   "license": "MIT",
+  "engines": {
+    "bun": ">=1.3.0"
+  },
   "publishConfig": {
     "access": "public"
   },
   "files": [
     "dist",
     "src",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ]
 }

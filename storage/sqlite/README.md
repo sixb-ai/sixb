@@ -1,0 +1,56 @@
+# @sixb/sqlite
+
+SQLite storage provider for Sixb, built on `bun:sqlite`.
+
+Backs every Sixb store — objects, ontology commits, auth, agents, timeseries, and the run history for
+actions, syncs, pipelines, projections, workflows, and webhooks — from a single local database file.
+This is what `bun create sixb` scaffolds, and what makes a fresh project run with no infrastructure.
+
+## Install
+
+```bash
+bun add @sixb/sqlite
+```
+
+## Usage
+
+```ts
+import { SqliteStorage } from "@sixb/sqlite"
+import { createSixb, InMemoryBroker } from "@sixb/core"
+
+const storage = new SqliteStorage({ path: ".sixb" })
+
+export const sixb = createSixb({ storage, broker: new InMemoryBroker() })
+```
+
+`path` is a **directory**; the provider owns the database file inside it. Omit `path` and the database
+is in-memory: useful for tests, and it also means there is nothing to migrate, so `migrators` is
+empty.
+
+## Migrations
+
+With a `path`, `SqliteStorage` exposes core's `StorageMigrator` contract and the CLI runs it at
+startup. You do not write migrations — they ship inside this package.
+
+Before 1.0 the schema is a single migration whose checksum is verified at boot. A schema change
+**replaces** that migration instead of adding another, so moving between 0.x versions can require
+deleting the database file and starting over.
+
+## Transactions
+
+```ts
+await storage.transaction(async (tx) => {
+  // Use `tx`, never the root storage — the root throws inside a transaction callback.
+})
+```
+
+Nested transactions are rejected. The `isolation` option is accepted and **ignored**: every
+transaction runs through one shared connection, serialized by an internal lock and a
+`BEGIN IMMEDIATE`, so there is no concurrent transaction to isolate against — the lock already gives
+serializable semantics for transaction-vs-transaction races. `isolation: "serializable"` only becomes
+meaningful on a provider with true concurrent connections, such as [`@sixb/pg`](../pg).
+
+That single-connection design is also the reason to reach for `@sixb/pg` before you scale out: every
+process needs its own file, so replicas cannot share this storage.
+
+Call `close()` on shutdown.
