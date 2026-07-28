@@ -46,10 +46,10 @@ describe("create-sixb", () => {
     expect(configSource).toContain('path: ".sixb/ducklake-catalog.db"')
     expect(configSource).toContain("new DuckLakeStorage")
 
-    const resetAction = await readFile(join(projectDir, "actions", "reset.ts"), "utf8")
-    expect(resetAction).toContain(".on(Counter)")
-    expect(resetAction).toContain(".writeback(")
-    expect(resetAction).not.toContain(".target(")
+    const incrementAction = await readFile(join(projectDir, "actions", "increment.ts"), "utf8")
+    expect(incrementAction).toContain('defineAction("increment")')
+    expect(incrementAction).toContain(".edits(")
+    expect(incrementAction).not.toContain(".writeback(")
 
     const packageJson = JSON.parse(await readFile(join(projectDir, "package.json"), "utf8")) as {
       name?: string
