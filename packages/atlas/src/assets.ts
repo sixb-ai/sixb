@@ -72,6 +72,12 @@ export async function buildBuiltInUiBundle(
       outdir,
       "--target",
       "browser",
+      // Resolve `@sixb/*` through the `bun` condition, which points at source. Without it a browser
+      // target picks `import` and reads each package's `dist`, so this build silently depended on
+      // whichever packages happened to be built already — the same dependency `packages/app` avoids
+      // by passing `conditions: ["bun"]`. Atlas bundles its own copy of that source either way.
+      "--conditions",
+      "bun",
       // The entry gets a name no chunk can take. Bun names chunks after the source module they
       // come from, so with `[name]-[hash]` on both, `main.tsx` and its 47 shared chunks all
       // produced `main-*.js` and `findBuiltAsset` could not tell them apart. Prefixes make the
