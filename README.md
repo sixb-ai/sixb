@@ -80,7 +80,8 @@ Bun is the only package manager and runtime used by this repository.
 - `packages/server` — HTTP/WebSocket API and OpenAPI generation
 - `packages/atlas` — built-in React UI
 - `packages/client` — generated typed client
-- `packages/cli` — `sixb` and `create-sixb`
+- `packages/cli` — the `sixb` command
+- `packages/create-sixb` — the zero-dependency project scaffolder and template
 - `docs/` — documentation source, hosted at [docs.sixb.ai](https://docs.sixb.ai)
 - `examples/` — runnable sample projects
 

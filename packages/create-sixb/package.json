@@ -6,17 +6,25 @@
   "bin": {
     "create-sixb": "./dist/index.js"
   },
+  "exports": {
+    "./scaffold": {
+      "types": "./dist/scaffold.d.ts",
+      "bun": "./dist/scaffold.js",
+      "import": "./dist/scaffold.js",
+      "default": "./dist/scaffold.js"
+    }
+  },
   "scripts": {
-    "build": "bun ../../scripts/build-package.ts",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -b tsconfig.build.json --force && bun ../../scripts/build-package.ts",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.template.json",
     "test": "bun test",
     "prepack": "bun run build"
   },
-  "dependencies": {
-    "@sixb/cli": "workspace:*"
-  },
   "devDependencies": {
+    "@tanstack/react-query": "^5.0.0",
     "@types/bun": "latest",
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
     "typescript": "^5.7.0"
   },
   "license": "MIT",
@@ -28,10 +36,14 @@
     "README.md"
   ],
   "sixbBuild": {
+    "entrypoints": [
+      "./src/index.ts",
+      "./src/scaffold.ts"
+    ],
     "assets": [
       {
-        "from": "../../templates/basic",
-        "to": "./dist/templates/basic"
+        "from": "./template",
+        "to": "./dist/template"
       }
     ]
   }

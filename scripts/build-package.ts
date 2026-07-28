@@ -6,6 +6,7 @@ type PackageJson = {
   name?: string
   exports?: ExportsMap
   sixbBuild?: {
+    entrypoints?: string[]
     assets?: Array<{
       from: string
       to: string
@@ -41,7 +42,10 @@ await cleanRuntimeOutputs(distRoot)
 await mkdir(distRoot, { recursive: true })
 await mkdir(buildConfigDir, { recursive: true })
 
-const entrypoints = await resolveEntrypoints(packageJson.exports)
+const entrypoints = await resolveEntrypoints(
+  packageJson.exports,
+  packageJson.sixbBuild?.entrypoints ?? []
+)
 
 if (entrypoints.length > 0) {
   const bundleTsconfigPath = await writeBundleTsconfig()
@@ -118,10 +122,17 @@ async function writeBundleTsconfig(): Promise<string> {
   return bundleTsconfigPath
 }
 
-async function resolveEntrypoints(exportsMap: ExportsMap | undefined): Promise<string[]> {
+async function resolveEntrypoints(
+  exportsMap: ExportsMap | undefined,
+  configuredEntrypoints: string[]
+): Promise<string[]> {
   const sourceTargets = new Set<string>()
 
-  if (!exportsMap) {
+  for (const entrypoint of configuredEntrypoints) {
+    sourceTargets.add(entrypoint)
+  }
+
+  if (!exportsMap && configuredEntrypoints.length === 0) {
     // Bin-only packages (e.g. @sixb/cli) have no exports and nothing to bundle;
     // their build still runs for copyAssets.
     if (await Bun.file(join(srcRoot, "index.ts")).exists()) {

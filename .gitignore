@@ -39,4 +39,3 @@ apps/docs/public/
 .vercel/
 .vercel
 .env*
-!templates/basic/.env.example

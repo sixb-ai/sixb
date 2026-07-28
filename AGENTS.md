@@ -14,7 +14,8 @@ Repo-wide agent instructions for `sixb`.
 - `packages/atlas`: built-in React UI (the Atlas app); pages live in `src/pages/`
 - `packages/ui`: shared React component library used by Atlas
 - `packages/client`: generated typed client artifacts
-- `packages/cli`: CLI entrypoints for `sixb` and `create-sixb`
+- `packages/cli`: CLI entrypoint for `sixb`
+- `packages/create-sixb`: zero-dependency project scaffolder and template
 - `packages/app`: custom app integration
 - `connectors/`, `storage/`, `broker/`: integrations and infrastructure providers
 - `examples/`: runnable sample projects
@@ -41,7 +42,7 @@ bun run check
 bun run check:fix
 bun run generate:client
 bun sixb dev
-bun create sixb
+bun create-sixb my-app
 ```
 
 Targeted:

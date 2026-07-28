@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["bun"],
+    "noEmit": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuild/tsconfig.template.tsbuildinfo"
+  },
+  "include": ["template/**/*.ts", "template/**/*.tsx"]
+}

@@ -5,14 +5,6 @@
   "bin": {
     "sixb": "./src/index.tsx"
   },
-  "exports": {
-    "./create": {
-      "types": "./dist/create.d.ts",
-      "bun": "./src/create.ts",
-      "import": "./dist/create.js",
-      "default": "./dist/create.js"
-    }
-  },
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
@@ -34,6 +26,7 @@
     "@sixb/server": "workspace:*",
     "@sixb/sync-worker": "workspace:*",
     "@sixb/workflow-worker": "workspace:*",
+    "create-sixb": "workspace:*",
     "ink": "^6.0.0",
     "react": "^19.0.0",
     "react-devtools-core": "^4.19.1"
@@ -51,13 +44,5 @@
     "dist",
     "src",
     "README.md"
-  ],
-  "sixbBuild": {
-    "assets": [
-      {
-        "from": "../../templates/basic",
-        "to": "./dist/templates/basic"
-      }
-    ]
-  }
+  ]
 }

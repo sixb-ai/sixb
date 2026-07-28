@@ -55,15 +55,13 @@ describe("sixb init", () => {
     await stat(join(targetDir, "actions", "increment.ts"))
     await stat(join(targetDir, "ontology", "counter.ts"))
     await stat(join(targetDir, "tsconfig.json"))
+    await stat(join(targetDir, ".gitignore"))
 
     const configSource = await readFile(join(targetDir, "sixb.config.ts"), "utf-8")
     expect(configSource).toContain('const projectId = "starter"')
-    expect(configSource).toContain("isProduction")
-    expect(configSource).not.toContain("productionProviders")
-    expect(configSource).toContain('path: ".sixb/ducklake-catalog.db"')
-    expect(configSource).toContain("new PostgresStorage")
-    expect(configSource).toContain("new DuckLakeStorage")
-    expect(configSource).toContain("new S3BlobStorage")
+    expect(configSource).toContain('new SqliteStorage({ path: ".sixb" })')
+    expect(configSource).toContain('new LocalLakeStorage({ path: ".sixb/lake" })')
+    expect(configSource).not.toContain("isProduction")
 
     const packageJson = JSON.parse(await readFile(join(targetDir, "package.json"), "utf-8")) as {
       name: string
@@ -73,10 +71,11 @@ describe("sixb init", () => {
 
     expect(packageJson.name).toBe("starter")
     expect(packageJson.scripts.typecheck).toBe("sixb typegen && tsc --noEmit")
-    expect(packageJson.dependencies["@sixb/client"]).toBe("latest")
-    expect(packageJson.dependencies["@sixb/ducklake"]).toBe("latest")
-    expect(packageJson.dependencies["@sixb/pg"]).toBe("latest")
-    expect(packageJson.dependencies["@sixb/blob-s3"]).toBe("latest")
+    expect(packageJson.dependencies["@sixb/client"]).toBe("^0.1.0")
+    expect(packageJson.dependencies["@sixb/lake-local"]).toBe("^0.1.0")
+    expect(packageJson.dependencies["@sixb/ducklake"]).toBeUndefined()
+    expect(packageJson.dependencies["@sixb/pg"]).toBeUndefined()
+    expect(packageJson.dependencies["@sixb/blob-s3"]).toBeUndefined()
     expect(packageJson.dependencies.react).toBe("^19.0.0")
     expect(packageJson.dependencies["react-router-dom"]).toBe("^7.13.0")
   })
