@@ -1,12 +1,29 @@
 # AGENTS.md
 
-Guidance for AI coding agents (Claude Code, Codex, Cursor, and others) working in this project.
+You are working inside a Sixb project for **[organization or product name]**.
 
-## What this is
+Learn more about the organization and its work at **[organization URL]**.
 
-A [Sixb](https://docs.sixb.ai) project. Sixb is a TypeScript framework for operational
-software: you model a domain as a typed **ontology**, then sync data, run automation, and expose
-a typed API, client, and app from one runtime. **Bun only** — do not use npm, pnpm, or yarn.
+Learn more about Sixb at <https://docs.sixb.ai/llms.txt>. Use that index to find and read the
+relevant Sixb documentation before implementing framework features.
+
+Your job is to build internal operational software that provides measurable value to the
+organization. Favor small, useful deployments that can be validated quickly and improved over
+time.
+
+## Documentation
+
+Keep project documentation in `docs/` clear, minimal, and operational.
+
+- Put planning documents under `docs/planning/`.
+- Prefer short Markdown files with simple headings, tables, and code blocks.
+- Add only documentation worth maintaining.
+
+## Framework limitations
+
+If you encounter a limitation in Sixb while implementing this project, report it clearly rather
+than using an unclean workaround. Include the relevant context and the outcome the limitation
+blocks. Do not propose a framework solution; identifying and explaining the limitation is enough.
 
 ## Commands
 

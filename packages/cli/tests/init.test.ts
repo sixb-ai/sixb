@@ -57,10 +57,13 @@ describe("sixb init", () => {
     await stat(join(targetDir, "tsconfig.json"))
 
     const configSource = await readFile(join(targetDir, "sixb.config.ts"), "utf-8")
-    expect(configSource).toContain('id: "starter"')
-    expect(configSource).toContain("broker:")
-    expect(configSource).toContain("storage:")
-    expect(configSource).not.toContain("providers:")
+    expect(configSource).toContain('const projectId = "starter"')
+    expect(configSource).toContain("isProduction")
+    expect(configSource).not.toContain("productionProviders")
+    expect(configSource).toContain('path: ".sixb/ducklake-catalog.db"')
+    expect(configSource).toContain("new PostgresStorage")
+    expect(configSource).toContain("new DuckLakeStorage")
+    expect(configSource).toContain("new S3BlobStorage")
 
     const packageJson = JSON.parse(await readFile(join(targetDir, "package.json"), "utf-8")) as {
       name: string
@@ -71,6 +74,9 @@ describe("sixb init", () => {
     expect(packageJson.name).toBe("starter")
     expect(packageJson.scripts.typecheck).toBe("sixb typegen && tsc --noEmit")
     expect(packageJson.dependencies["@sixb/client"]).toBe("latest")
+    expect(packageJson.dependencies["@sixb/ducklake"]).toBe("latest")
+    expect(packageJson.dependencies["@sixb/pg"]).toBe("latest")
+    expect(packageJson.dependencies["@sixb/blob-s3"]).toBe("latest")
     expect(packageJson.dependencies.react).toBe("^19.0.0")
     expect(packageJson.dependencies["react-router-dom"]).toBe("^7.13.0")
   })

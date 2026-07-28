@@ -74,6 +74,9 @@
       "path": "packages/cli/tsconfig.build.json"
     },
     {
+      "path": "packages/create-sixb/tsconfig.build.json"
+    },
+    {
       "path": "packages/client/tsconfig.build.json"
     },
     {

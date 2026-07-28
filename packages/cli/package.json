@@ -3,8 +3,15 @@
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "sixb": "./src/index.tsx",
-    "create-sixb": "./src/index.tsx"
+    "sixb": "./src/index.tsx"
+  },
+  "exports": {
+    "./create": {
+      "types": "./dist/create.d.ts",
+      "bun": "./src/create.ts",
+      "import": "./dist/create.js",
+      "default": "./dist/create.js"
+    }
   },
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",

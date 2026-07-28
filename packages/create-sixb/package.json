@@ -1,0 +1,38 @@
+{
+  "name": "create-sixb",
+  "version": "0.1.0",
+  "description": "Create a new Sixb project",
+  "type": "module",
+  "bin": {
+    "create-sixb": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "bun ../../scripts/build-package.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "prepack": "bun run build"
+  },
+  "dependencies": {
+    "@sixb/cli": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sixbBuild": {
+    "assets": [
+      {
+        "from": "../../templates/basic",
+        "to": "./dist/templates/basic"
+      }
+    ]
+  }
+}

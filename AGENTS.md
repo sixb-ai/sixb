@@ -41,7 +41,7 @@ bun run check
 bun run check:fix
 bun run generate:client
 bun sixb dev
-bun create-sixb
+bun create sixb
 ```
 
 Targeted:

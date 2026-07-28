@@ -14,9 +14,11 @@
     "examples/*"
   ],
   "scripts": {
-    "build": "bun run build:types && bun run build:js",
+    "build": "bun run build:dist:clean && bun run build:types:force && bun run build:js",
+    "build:dist:clean": "rm -rf packages/*/dist auth/*/dist connectors/*/dist broker/*/dist queues/*/dist sandboxes/*/dist storage/*/dist loggers/*/dist",
     "build:types": "tsc -b tsconfig.build.json",
-    "build:js": "bun --filter '@sixb/*' build",
+    "build:types:force": "tsc -b tsconfig.build.json --force",
+    "build:js": "bun --filter '@sixb/*' --filter 'create-sixb' build",
     "build:clean": "rm -rf packages/*/dist packages/*/.tsbuild auth/*/dist auth/*/.tsbuild connectors/*/dist connectors/*/.tsbuild broker/*/dist broker/*/.tsbuild queues/*/dist queues/*/.tsbuild sandboxes/*/dist sandboxes/*/.tsbuild storage/*/dist storage/*/.tsbuild loggers/*/dist loggers/*/.tsbuild examples/*/.sixb",
     "dev": "bun sixb dev",
     "test": "bun test",
