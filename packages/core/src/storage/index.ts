@@ -275,6 +275,7 @@ export type {
   OntologyMaterializationStorage,
   OntologyOutboxRecord,
   OntologyOutboxStorage,
+  OntologyOutboxSummary,
   OntologyOutboxWrite,
   OntologySourceMaterializationStatus,
   OntologySourceRecord,
@@ -302,7 +303,10 @@ export type {
   StreamMaterializationStateInput,
   StreamMaterializationWorkInput,
   StreamSourceReplacementStateInput,
+  SummarizeOntologyOutboxInput,
+  SummarizeTerminalSourceMaterializationsInput,
   TelemetryOntologyCommitIntent,
+  TerminalSourceMaterializationSummary,
 } from "./ontology"
 export type {
   FinishPipelineRunInput,
@@ -359,7 +363,12 @@ export {
 export type {
   ListActiveRuleStatesInput,
   ListActiveRuleStatesResult,
+  ListRuleStatesReconciliationPageInput,
+  ListRuleStatesReconciliationPageResult,
+  RuleStateCursor,
+  RuleStateIdentity,
   RuleStateRecord,
+  RuleStateTransitionEvent,
   RulesStorage,
 } from "./rules"
 export { InMemoryRulesStorage } from "./rules"

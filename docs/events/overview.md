@@ -124,27 +124,25 @@ predicates. See [Client events](../client/events.md). For action buttons, prefer
 
 ### Appending events
 
-`sixb.events.append(input)` writes one or more events. Object, link, and telemetry events are emitted
-for you whenever data changes — append manually only when you model your own domain activity.
+`sixb.events.append(input)` authors supported non-ontology domain events. Object, link, and telemetry
+facts are emitted only by the Materializer after their ontology commit succeeds; the public
+`DomainEventLog` cannot publish persisted outbox envelopes.
 
 ```ts
-await sixb.events.append({
-  actor: { type: "service", id: "erp-sync" },
-  events: [
-    {
-      type: "object.updated",
-      payload: {
-        objectTypeId: "invoice",
-        primaryId: "INV-1042",
-        properties: { status: "paid" },
-        propertyChanges: {
-          status: { operation: "updated", before: "sent", after: "paid" },
-        },
-      },
-    },
-  ],
+await sixb.objects(Invoice).upsert({
+  properties: { id: "INV-1042", status: "paid" },
 })
 ```
+
+Ontology facts use at-least-once broker delivery:
+
+```text
+ontology transaction -> durable ontology_outbox -> immediate drain -> 60s recovery catch-up
+```
+
+Broker failure delays subscribers but never rolls back or loses the committed ontology change.
+Consumers deduplicate with stable event IDs when required. CDC/WAL change streams are not part of
+V0.1.0.
 
 ### HTTP: GET /api/events
 

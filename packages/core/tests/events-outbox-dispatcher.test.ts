@@ -54,12 +54,10 @@ describe("OntologyOutboxDispatcher", () => {
       projectId: "project",
       storage,
       events,
-      pollIntervalMs: 10,
       now: () => NOW,
       createLeaseId: () => "lease-1",
     })
-    await dispatcher.start()
-    await waitFor(() => outboxRows(storage)[0]?.publishedAt !== null)
+    await dispatcher.drain()
     await dispatcher.stop()
 
     expect((await events.read()).map((event) => event.id)).toEqual([outboxRow?.envelope.id])
@@ -86,12 +84,10 @@ describe("OntologyOutboxDispatcher", () => {
       storage,
       events,
       batchSize: 100,
-      pollIntervalMs: 10,
       now: () => NOW,
       createLeaseId: () => "lease-batch",
     })
-    await dispatcher.start()
-    await waitFor(() => outboxRows(storage).every((row) => row.publishedAt !== null))
+    await dispatcher.drain()
     await dispatcher.stop()
 
     expect(broker.appended).toHaveLength(1)
@@ -121,32 +117,15 @@ describe("OntologyOutboxDispatcher", () => {
       initialRetryDelayMs: 100,
       maxRetryDelayMs: 250,
       retryJitterRatio: 0.25,
-      pollIntervalMs: 10,
       createLeaseId: () => `dispatcher-lease-${broker.attempts + 1}`,
     })
-    await dispatcher.start()
-    await broker.attempted.promise
-    await waitFor(
-      () =>
-        outboxRows(storage)[0]?.attempts === 1 &&
-        outboxRows(storage)[0]?.availableAt === "2026-01-02T03:04:05.125Z"
-    )
+    await dispatcher.drain()
 
     nowMs = Date.parse("2026-01-02T03:04:05.125Z")
-    dispatcher.wake()
-    await waitFor(
-      () =>
-        outboxRows(storage)[0]?.attempts === 2 &&
-        outboxRows(storage)[0]?.availableAt === "2026-01-02T03:04:05.325Z"
-    )
+    await dispatcher.drain()
 
     nowMs = Date.parse("2026-01-02T03:04:05.325Z")
-    dispatcher.wake()
-    await waitFor(
-      () =>
-        outboxRows(storage)[0]?.attempts === 3 &&
-        outboxRows(storage)[0]?.availableAt === "2026-01-02T03:04:05.575Z"
-    )
+    await dispatcher.drain()
     await dispatcher.stop()
 
     expect(outboxRows(storage)[0]).toMatchObject({
@@ -209,16 +188,13 @@ describe("OntologyOutboxDispatcher", () => {
       initialRetryDelayMs: 100,
       maxRetryDelayMs: 1_000,
       retryJitterRatio: 0,
-      pollIntervalMs: 10,
       createLeaseId: () => "mixed-attempt-lease",
     })
-    await dispatcher.start()
-    await broker.attempted.promise
-    await waitFor(() => outboxRows(storage).every((row) => row.leaseId === null))
+    await dispatcher.drain()
     await dispatcher.stop()
 
     const rows = outboxRows(storage)
-    expect(broker.attempts).toBe(1)
+    expect(broker.attempts).toBe(3)
     expect(rows.find((row) => row.envelope.id === olderId)).toMatchObject({
       attempts: 2,
       availableAt: "2026-01-02T03:04:05.200Z",
@@ -229,7 +205,7 @@ describe("OntologyOutboxDispatcher", () => {
     })
   })
 
-  test("wakes promptly and still discovers rows by polling without a wake notification", async () => {
+  test("publishes only when explicitly drained and never starts an idle polling loop", async () => {
     const storage = new InMemoryStorage()
     const broker = new RecordingBroker()
     const events = new EventsRuntime({ projectId: "project", broker })
@@ -238,24 +214,55 @@ describe("OntologyOutboxDispatcher", () => {
       projectId: "project",
       storage,
       events,
-      pollIntervalMs: 20,
     })
-    await dispatcher.start()
 
     await seedObjectCreated(materializer, "request-wake", "wake")
-    dispatcher.wake()
-    await waitFor(() => broker.appended.length === 1)
+    await dispatcher.drain()
 
     await seedObjectCreated(materializer, "request-poll", "poll")
-    await waitFor(() => broker.appended.length === 2)
+    await Bun.sleep(30)
+    expect(broker.appended).toHaveLength(1)
+    await dispatcher.drain()
     await dispatcher.stop()
 
     expect((await events.read()).map(objectPrimaryId)).toEqual(["wake", "poll"])
   })
 
-  test("settles a poll-loop publication that overlaps a concurrent drain", async () => {
-    // Both ingresses publish, so two batches can be in flight at once. Neither may evict the
-    // other's settlement, or its rows stay leased and are delivered again after lease expiry.
+  test("isolates a poison envelope and reschedules only that row", async () => {
+    const storage = new InMemoryStorage()
+    const { materializer } = createMaterializerFixture({ storage })
+    await seedObjectCreated(materializer, "request-valid-1", "valid-1")
+    await seedObjectCreated(materializer, "request-poison", "poison")
+    await seedObjectCreated(materializer, "request-valid-2", "valid-2")
+    const poisonId = outboxRows(storage).find(
+      (row) => row.envelope.partitionKey === "Device:poison"
+    )!.envelope.id
+    const broker = new PoisonEnvelopeBroker(poisonId)
+    const events = new EventsRuntime({ projectId: "project", broker })
+    const failures: { readonly attempts: number; readonly eventIds: readonly string[] }[] = []
+    const dispatcher = new OntologyOutboxDispatcher({
+      projectId: "project",
+      storage,
+      events,
+      now: () => NOW,
+      retryJitterRatio: 0,
+      onDeliveryFailure: (_error, failure) => failures.push(failure),
+    })
+
+    await dispatcher.drain()
+
+    const rows = outboxRows(storage)
+    expect(rows.filter((row) => row.publishedAt !== null)).toHaveLength(2)
+    expect(rows.find((row) => row.envelope.id === poisonId)).toMatchObject({
+      publishedAt: null,
+      leaseId: null,
+      lastError: "Error: poison envelope",
+    })
+    expect(failures).toMatchObject([{ attempts: 1, eventIds: [poisonId] }])
+    expect((await events.read()).map(objectPrimaryId).sort()).toEqual(["valid-1", "valid-2"])
+  })
+
+  test("coalesces a drain that arrives during an in-flight publication", async () => {
     const storage = new InMemoryStorage()
     const broker = new FirstHeldBroker()
     const events = new EventsRuntime({ projectId: "project", broker })
@@ -266,18 +273,16 @@ describe("OntologyOutboxDispatcher", () => {
       projectId: "project",
       storage,
       events,
-      pollIntervalMs: 10,
       shutdownTimeoutMs: 1_000,
     })
-    await dispatcher.start()
+    const firstDrain = dispatcher.drain()
     await broker.firstStarted.promise
 
-    // A second commit drains while the poll loop's publication is still awaiting the broker.
     await seedObjectCreated(materializer, "request-drain", "drain")
-    await dispatcher.drain()
+    const secondDrain = dispatcher.drain()
 
     broker.releaseFirst.resolve()
-    await waitFor(() => outboxRows(storage).every((row) => row.publishedAt !== null))
+    await Promise.all([firstDrain, secondDrain])
     await dispatcher.stop()
 
     expect(outboxRows(storage).map((row) => row.publishedAt !== null)).toEqual([true, true])
@@ -309,10 +314,9 @@ describe("OntologyOutboxDispatcher", () => {
       projectId: "project",
       storage,
       events,
-      pollIntervalMs: 10,
       shutdownTimeoutMs: 1_000,
     })
-    await dispatcher.start()
+    void dispatcher.drain()
     await broker.started.promise
 
     let stopped = false
@@ -327,34 +331,6 @@ describe("OntologyOutboxDispatcher", () => {
     expect(outboxRows(storage)[0]?.publishedAt).not.toBeNull()
   })
 
-  test("detaches an uncooperative publication so the dispatcher can restart", async () => {
-    const storage = new InMemoryStorage()
-    const broker = new FirstHungBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
-    const { materializer } = createMaterializerFixture({ storage })
-    await seedObjectCreated(materializer, "request-restart", "restart")
-    let lease = 0
-    const dispatcher = new OntologyOutboxDispatcher({
-      projectId: "project",
-      storage,
-      events,
-      now: () => NOW,
-      pollIntervalMs: 10,
-      shutdownTimeoutMs: 10,
-      createLeaseId: () => `restart-lease-${++lease}`,
-    })
-    await dispatcher.start()
-    await broker.firstStarted.promise
-
-    await dispatcher.stop()
-    await dispatcher.start()
-    dispatcher.wake()
-    await waitFor(() => outboxRows(storage)[0]?.publishedAt !== null)
-    await dispatcher.stop()
-
-    expect(broker.calls).toBe(2)
-  })
-
   test("reschedules an unfinished publication when the graceful shutdown bound expires", async () => {
     const storage = new InMemoryStorage()
     const broker = new DelayedBroker()
@@ -366,11 +342,10 @@ describe("OntologyOutboxDispatcher", () => {
       storage,
       events,
       now: () => NOW,
-      pollIntervalMs: 10,
       shutdownTimeoutMs: 5,
       createLeaseId: () => "shutdown-lease",
     })
-    await dispatcher.start()
+    void dispatcher.drain()
     await broker.started.promise
 
     await dispatcher.stop()
@@ -500,22 +475,6 @@ class FailingBroker extends InMemoryBroker {
   }
 }
 
-class FirstHungBroker extends RecordingBroker {
-  readonly firstStarted = deferred<void>()
-  calls = 0
-
-  override append(
-    input: Parameters<InMemoryBroker["append"]>[0]
-  ): ReturnType<InMemoryBroker["append"]> {
-    this.calls += 1
-    if (this.calls === 1) {
-      this.firstStarted.resolve()
-      return new Promise(() => undefined)
-    }
-    return super.append(input)
-  }
-}
-
 /** Holds the first publication open so a second can overlap it. */
 class FirstHeldBroker extends RecordingBroker {
   readonly firstStarted = deferred<void>()
@@ -543,6 +502,21 @@ class DelayedBroker extends RecordingBroker {
   ): ReturnType<InMemoryBroker["append"]> {
     this.started.resolve()
     await this.release.promise
+    return super.append(input)
+  }
+}
+
+class PoisonEnvelopeBroker extends RecordingBroker {
+  constructor(private readonly poisonId: string) {
+    super()
+  }
+
+  override append(
+    input: Parameters<InMemoryBroker["append"]>[0]
+  ): ReturnType<InMemoryBroker["append"]> {
+    if (input.records.some((record) => record.idempotencyKey === this.poisonId)) {
+      return Promise.reject(new Error("poison envelope"))
+    }
     return super.append(input)
   }
 }

@@ -41,6 +41,7 @@ import {
   getConnector,
   getDataset,
   getDatasetVersion,
+  getHealth,
   getLatestTelemetry,
   getObject,
   getObjectFileContent,
@@ -50,6 +51,7 @@ import {
   getProjectInfo,
   getProjection,
   getProjectionRun,
+  getReadiness,
   getRule,
   getStatus,
   getSync,
@@ -212,6 +214,8 @@ import type {
   GetDatasetVersionData,
   GetDatasetVersionError,
   GetDatasetVersionResponse,
+  GetHealthData,
+  GetHealthResponse,
   GetLatestTelemetryData,
   GetLatestTelemetryError,
   GetLatestTelemetryResponse,
@@ -238,6 +242,9 @@ import type {
   GetProjectionRunData,
   GetProjectionRunError,
   GetProjectionRunResponse,
+  GetReadinessData,
+  GetReadinessError,
+  GetReadinessResponse,
   GetRuleData,
   GetRuleError,
   GetRuleResponse,
@@ -1237,6 +1244,56 @@ export const getProjectInfoOptions = (options?: Options<GetProjectInfoData>) =>
       return data
     },
     queryKey: getProjectInfoQueryKey(options),
+  })
+
+export const getHealthQueryKey = (options?: Options<GetHealthData>) =>
+  createQueryKey("getHealth", options)
+
+/**
+ * Check process liveness
+ */
+export const getHealthOptions = (options?: Options<GetHealthData>) =>
+  queryOptions<
+    GetHealthResponse,
+    DefaultError,
+    GetHealthResponse,
+    ReturnType<typeof getHealthQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getHealth({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getHealthQueryKey(options),
+  })
+
+export const getReadinessQueryKey = (options?: Options<GetReadinessData>) =>
+  createQueryKey("getReadiness", options)
+
+/**
+ * Check runtime readiness
+ */
+export const getReadinessOptions = (options?: Options<GetReadinessData>) =>
+  queryOptions<
+    GetReadinessResponse,
+    GetReadinessError,
+    GetReadinessResponse,
+    ReturnType<typeof getReadinessQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getReadiness({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getReadinessQueryKey(options),
   })
 
 export const getStatusQueryKey = (options?: Options<GetStatusData>) =>

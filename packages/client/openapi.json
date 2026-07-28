@@ -4598,6 +4598,110 @@
         }
       }
     },
+    "/health": {
+      "get": {
+        "summary": "Check process liveness",
+        "tags": ["Status"],
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["ok"]
+                    }
+                  },
+                  "required": ["status"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "summary": "Check runtime readiness",
+        "tags": ["Status"],
+        "operationId": "getReadiness",
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["ready", "unready"]
+                    },
+                    "storage": {
+                      "type": "object",
+                      "properties": {
+                        "reachable": {
+                          "type": "boolean"
+                        },
+                        "schemaValid": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["reachable", "schemaValid"],
+                      "additionalProperties": false
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["status", "storage"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["ready", "unready"]
+                    },
+                    "storage": {
+                      "type": "object",
+                      "properties": {
+                        "reachable": {
+                          "type": "boolean"
+                        },
+                        "schemaValid": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["reachable", "schemaValid"],
+                      "additionalProperties": false
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["status", "storage"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/status": {
       "get": {
         "summary": "Get runtime status",
@@ -4613,13 +4717,130 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": ["ok"]
+                      "enum": ["ok", "degraded"]
                     },
                     "objectTypes": {
-                      "type": "number"
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maintenance": {
+                      "type": "object",
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "intervalMs": {
+                          "type": "integer",
+                          "exclusiveMinimum": true,
+                          "minimum": 0
+                        },
+                        "lastStartedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "lastCompletedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "lastDurationMs": {
+                          "type": "number",
+                          "minimum": 0,
+                          "nullable": true
+                        },
+                        "consecutiveFailures": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "outbox": {
+                          "type": "object",
+                          "properties": {
+                            "pendingCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "oldestPendingAt": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "retryingCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "maxAttempts": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "pendingCount",
+                            "oldestPendingAt",
+                            "retryingCount",
+                            "maxAttempts"
+                          ],
+                          "additionalProperties": false,
+                          "nullable": true
+                        },
+                        "terminalSources": {
+                          "type": "object",
+                          "properties": {
+                            "count": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "oldestTerminalAt": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          },
+                          "required": ["count", "oldestTerminalAt"],
+                          "additionalProperties": false,
+                          "nullable": true
+                        },
+                        "cleanup": {
+                          "type": "object",
+                          "properties": {
+                            "publishedOutboxRowsDeleted": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "terminalSourceRowsDeleted": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "terminalSourceMaterializationsDeleted": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "publishedOutboxRowsDeleted",
+                            "terminalSourceRowsDeleted",
+                            "terminalSourceMaterializationsDeleted"
+                          ],
+                          "additionalProperties": false,
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "running",
+                        "intervalMs",
+                        "lastStartedAt",
+                        "lastCompletedAt",
+                        "lastDurationMs",
+                        "consecutiveFailures",
+                        "lastError",
+                        "outbox",
+                        "terminalSources",
+                        "cleanup"
+                      ],
+                      "additionalProperties": false
                     }
                   },
-                  "required": ["status", "objectTypes"],
+                  "required": ["status", "objectTypes", "maintenance"],
                   "additionalProperties": false
                 }
               }

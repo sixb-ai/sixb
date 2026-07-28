@@ -25,11 +25,22 @@ import { ConnectorRuntime } from "../connectors/runtime"
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
-import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
+import {
+  attachSixbErrorReporter,
+  reportEventDeliveryFailure,
+  shareSixbErrorReporter,
+} from "../error-reporting/capability"
 import type { SixbErrorHandler } from "../error-reporting/types"
-import { EventsRuntime, OntologyOutboxDispatcher } from "../events"
+import { type DomainEventLog, EventsRuntime, OntologyOutboxDispatcher } from "../events"
 import type { LakeStorage } from "../lake-storage"
 import { type LoggerProvider, LogsRuntime, type ObservabilityOptions } from "../logging"
+import {
+  OntologyMaintenance,
+  type OntologyMaintenanceHandle,
+  type OntologyMaintenanceOptions,
+  type OntologyOperationalStatus,
+  type SixbReadiness,
+} from "../maintenance"
 import { createOntologyMaterializer } from "../materializer"
 import { createObjectSet, objectService } from "../objects"
 import {
@@ -62,7 +73,7 @@ import type {
   SecurityRegistry,
 } from "../security"
 import { createRuntimeSecurityRegistry } from "../security/runtime"
-import type { ObjectRow, Storage } from "../storage"
+import { isMigrationCapableStorage, type ObjectRow, type Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
 import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webhooks"
@@ -98,8 +109,10 @@ export interface SixbOptions<TOntologySources extends readonly OntologySource[]>
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
   observability?: ObservabilityOptions
-  /** Observes terminal failed runs without changing their outcome. */
+  /** Observes runtime failures without changing their outcome. */
   onError?: SixbErrorHandler
+  /** Recovery and retention settings. The runtime constructor never starts maintenance timers. */
+  ontologyMaintenance?: OntologyMaintenanceOptions
   projectRoot?: string
   actions?: readonly ActionDefinition[]
   datasets?: readonly DatasetDefinition[]
@@ -133,6 +146,8 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   private readonly webhooks: readonly RegisteredWebhook[]
   private readonly runtimeContext: SixbRuntimeContext
   private readonly committedFacts: OntologyOutboxDispatcher
+  private readonly eventsRuntime: EventsRuntime
+  private readonly ontologyMaintenance: OntologyMaintenance
   private readonly projectionRegistry: ProjectionRegistry
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
@@ -140,7 +155,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   readonly workflows: WorkflowsRuntime
   readonly agents: AgentsRuntime
   readonly broker: Broker
-  readonly events: EventsRuntime
+  readonly events: DomainEventLog
   readonly logs: LogsRuntime
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
@@ -158,7 +173,8 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.projectId = options.id ?? "default"
     this.ontologySources = options.ontology
     this.broker = options.broker
-    this.events = new EventsRuntime({ projectId: this.projectId, broker: this.broker })
+    this.eventsRuntime = new EventsRuntime({ projectId: this.projectId, broker: this.broker })
+    this.events = this.eventsRuntime
     this.logs = new LogsRuntime({
       projectId: this.projectId,
       broker: this.broker,
@@ -330,7 +346,18 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.committedFacts = new OntologyOutboxDispatcher({
       projectId: this.projectId,
       storage: this.storage,
-      events: this.events,
+      events: this.eventsRuntime,
+      onDeliveryFailure: (error, failure) =>
+        reportEventDeliveryFailure(this, error, {
+          projectId: this.projectId,
+          ...failure,
+        }),
+    })
+    this.ontologyMaintenance = new OntologyMaintenance({
+      projectId: this.projectId,
+      storage: this.storage,
+      dispatcher: this.committedFacts,
+      options: options.ontologyMaintenance,
     })
 
     this.runtimeContext = {
@@ -480,7 +507,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
     const runtime = new SchedulerRuntime({
       schedules: this.getScheduleDefinitions(),
-      events: this.events,
+      events: this.eventsRuntime,
     })
 
     await runtime.start()
@@ -495,6 +522,49 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     await runtime.stop()
   }
 
+  /** Start the API-owned recovery and retention loop. Embedded runtimes opt in explicitly. */
+  startOntologyMaintenance(): Promise<OntologyMaintenanceHandle> {
+    return this.ontologyMaintenance.start()
+  }
+
+  getOntologyOperationalStatus(): OntologyOperationalStatus {
+    return this.ontologyMaintenance.getOperationalStatus()
+  }
+
+  async checkReadiness(): Promise<SixbReadiness> {
+    try {
+      await this.storage.transaction(() => undefined)
+    } catch {
+      return {
+        status: "unready",
+        storage: { reachable: false, schemaValid: false },
+        reason: "Storage is unreachable.",
+      }
+    }
+
+    if (!isMigrationCapableStorage(this.storage)) {
+      return { status: "ready", storage: { reachable: true, schemaValid: true } }
+    }
+
+    try {
+      const plans = await Promise.all(this.storage.migrators.map((migrator) => migrator.plan()))
+      const schemaValid = plans.every((plan) => plan.pending.length === 0)
+      return schemaValid
+        ? { status: "ready", storage: { reachable: true, schemaValid: true } }
+        : {
+            status: "unready",
+            storage: { reachable: true, schemaValid: false },
+            reason: "Storage schema has pending migrations.",
+          }
+    } catch {
+      return {
+        status: "unready",
+        storage: { reachable: true, schemaValid: false },
+        reason: "Storage schema could not be verified.",
+      }
+    }
+  }
+
   /** Disconnect all currently connected connector clients. */
   async disconnectConnectors(): Promise<void> {
     await this.connectorRuntime.disconnectAll()
@@ -507,6 +577,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
   /** Close the runtime broker provider if it owns external resources. */
   async closeBroker(): Promise<void> {
+    await this.ontologyMaintenance.stop()
     await this.committedFacts.stop()
     await this.broker.close?.()
   }

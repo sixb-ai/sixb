@@ -1,6 +1,7 @@
 import type {
   DatasetVersionCommittedEvent,
   DomainEvent,
+  DomainEventLog,
   PipelineDefinition,
   Queues,
   ScheduleDefinition,
@@ -9,7 +10,6 @@ import type {
   WorkflowDefinition,
   WorkflowScheduleTriggerDefinition,
 } from "@sixb/core"
-import type { EventsRuntime } from "@sixb/core/internal/events"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import type { RuntimeEventScheduleDefinition } from "@sixb/core/internal/schedules"
 import type { LakeStorage } from "@sixb/core/lake-storage"
@@ -105,7 +105,7 @@ export interface ProjectionDispatchPorts {
 
 export interface OrchestratorRuntimeOptions {
   readonly projectId: string
-  readonly events: EventsRuntime
+  readonly events: DomainEventLog
   readonly queues: Queues
   readonly routes: OrchestratorRoutes
   /** Required when the compiled routes contain projections. */

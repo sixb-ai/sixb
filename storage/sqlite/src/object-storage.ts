@@ -679,6 +679,39 @@ export class SqliteObjectStorage implements ObjectStorage {
     return [...deduped.values()]
   }
 
+  async listByPrimaryIdPage(params: {
+    projectId: string
+    objectTypeId: string
+    afterPrimaryId?: string
+    limit: number
+  }): Promise<{ objects: readonly ObjectRow[]; nextPrimaryId?: string }> {
+    assertReconciliationPageLimit(params.limit)
+    const rows = this.db
+      .query(
+        `
+          SELECT * FROM objects
+          WHERE project_id = ? AND object_type_id = ?
+            AND (? IS NULL OR primary_id > ?)
+          ORDER BY primary_id ASC
+          LIMIT ?
+        `
+      )
+      .all(
+        params.projectId,
+        params.objectTypeId,
+        params.afterPrimaryId ?? null,
+        params.afterPrimaryId ?? null,
+        params.limit + 1
+      ) as DatabaseRow[]
+    const hasMore = rows.length > params.limit
+    const objects = rows.slice(0, params.limit).map((row) => this.rowToObject(row))
+    const last = objects.at(-1)
+    return {
+      objects,
+      ...(hasMore && last ? { nextPrimaryId: last.primaryId } : {}),
+    }
+  }
+
   async list(params: {
     projectId: string
     objectTypeId?: string | readonly string[]
@@ -808,6 +841,12 @@ export class SqliteObjectStorage implements ObjectStorage {
    */
   close(): void {
     closeSqliteStoreConnection(this.connection)
+  }
+}
+
+function assertReconciliationPageLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new Error("Object reconciliation page limit must be a positive safe integer.")
   }
 }
 

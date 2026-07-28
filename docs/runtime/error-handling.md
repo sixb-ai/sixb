@@ -1,6 +1,6 @@
-# Failed run notifications
+# Runtime failure notifications
 
-Sixb can notify project code when background runs reach a terminal `failed` state. Configure an
+Sixb can notify project code when background runs fail or durable event delivery is retried. Configure an
 `onError` callback on `createSixb()` and route the notification to the service your project uses.
 
 ```ts
@@ -11,20 +11,23 @@ export const sixb = await createSixb({
   async onError(error, context) {
     await sendToSlack({
       deduplicationKey: context.notificationId,
-      message: `${context.run.kind} run ${context.run.runId} failed: ${error.message}`,
+      message:
+        context.type === "run.failed"
+          ? `${context.run.kind} run ${context.run.runId} failed: ${error.message}`
+          : `${context.eventIds.length} event(s) failed delivery: ${error.message}`,
     })
   },
 })
 ```
 
-The callback covers failed action, agent, pipeline, projection, sync, workflow, and webhook runs.
+The callback covers failed action, agent, pipeline, projection, sync, workflow, and webhook runs,
+plus failed ontology-outbox publication attempts.
 It does not run for successes, cancellations, retries that remain recoverable, workflow nodes or
 pipeline steps separately, or routine webhook 4xx rejections.
 
 ## Context
 
-The second argument is a discriminated `SixbErrorContext`. Its current type is
-`SixbRunFailedContext`:
+The second argument is a discriminated `SixbErrorContext`:
 
 ```ts
 interface SixbRunFailedContext {
@@ -35,12 +38,26 @@ interface SixbRunFailedContext {
   readonly attempt?: number
   readonly run: SixbFailedRun
 }
+
+interface SixbEventDeliveryFailedContext {
+  readonly type: "event.delivery.failed"
+  readonly notificationId: string
+  readonly projectId: string
+  readonly occurredAt: string
+  readonly attempts: number
+  readonly eventIds: readonly string[]
+}
 ```
 
 Narrow `context.run.kind` to access the definition identifier for that run:
 
 ```ts
 onError(error, context) {
+  if (context.type === "event.delivery.failed") {
+    console.error(`Outbox delivery attempt ${context.attempts} failed`, context.eventIds, error)
+    return
+  }
+
   if (context.run.kind === "projection") {
     console.error(`Projection ${context.run.projectionId} failed`, error)
   }
@@ -51,8 +68,7 @@ onError(error, context) {
 }
 ```
 
-`notificationId` is stable for one failed-state transition and includes the project, run identity,
-and failure timestamp. Use it as an idempotency or deduplication key at the notification
+`notificationId` is stable for one reported failure occurrence. Use it as an idempotency or deduplication key at the notification
 destination. If a supported retry reopens and later fails the same run again, that new transition
 receives a different identifier.
 
@@ -69,5 +85,5 @@ delivering its notification, so this API does not provide exactly-once delivery.
 should use `notificationId` to tolerate possible duplicate delivery.
 
 The original `Error` is preserved when one exists. Sixb safely wraps non-`Error` thrown values. The
-context contains identifiers only; it does not include action parameters, webhook bodies,
-credentials, or queue payloads.
+context contains identifiers only; delivery failures expose stable envelope IDs, never payloads or
+lease IDs.

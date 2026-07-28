@@ -13,8 +13,14 @@ export const sixb = createSixb({
   queues: new InMemoryQueues(),
   // `bun run webhooks:demo` includes a deliberate handler failure that exercises this hook.
   onError(error, context) {
+    let failure: string
+    if (context.type === "run.failed") {
+      failure = `${context.run.kind} run '${context.run.runId}' failed`
+    } else {
+      failure = `event delivery failed after ${context.attempts} attempt(s)`
+    }
     console.error(
-      `[Sixb onError Callback] [AcmeCorp] ${context.run.kind} run '${context.run.runId}' failed (${context.notificationId}):`,
+      `[Sixb onError Callback] [AcmeCorp] ${failure} (${context.notificationId}):`,
       error
     )
   },

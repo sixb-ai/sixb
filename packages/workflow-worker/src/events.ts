@@ -1,4 +1,4 @@
-import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { DomainEventLog } from "@sixb/core"
 import type {
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
@@ -14,7 +14,7 @@ import type {
 type TerminalWorkflowRunStatus = Exclude<WorkflowRunStatus, "queued" | "running" | "waiting">
 
 export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
-  constructor(private readonly events: EventsRuntime) {}
+  constructor(private readonly events: DomainEventLog) {}
 
   async onRunStarted(run: WorkflowRunRecord): Promise<void> {
     await this.events.append({
@@ -185,7 +185,7 @@ function requireTerminalStatus(
 }
 
 export async function emitWorkflowRunFinished(
-  events: EventsRuntime,
+  events: DomainEventLog,
   job: {
     readonly id: string
     readonly workflowId: string

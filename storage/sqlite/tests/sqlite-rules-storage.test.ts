@@ -287,6 +287,47 @@ describe("SqliteRulesStorage", () => {
   test("applyResolved is a no-op when no active state exists", async () => {
     await expect(storage.applyResolved(resolvedEvent())).resolves.toBeUndefined()
   })
+
+  test("applyTransitions persists one reconciliation page as a batch", async () => {
+    const tx2 = { kind: "object" as const, objectTypeId: "transaction", primaryId: "tx-2" }
+    await storage.applyTriggered(triggeredEvent())
+
+    await storage.applyTransitions([resolvedEvent(), triggeredEvent({ subject: tx2, cursor: "3" })])
+
+    const active = await storage.listActive({ projectId: "project-a", order: "asc" })
+    expect(active.states.map((state) => state.subject.primaryId)).toEqual(["tx-2"])
+  })
+
+  test("batch reads and reconciliation pages preserve stable identity order", async () => {
+    const tx2 = { kind: "object" as const, objectTypeId: "transaction", primaryId: "tx-2" }
+    const otherRule = "transaction.other"
+    await storage.applyTriggered(triggeredEvent({ subject: tx2, cursor: "2" }))
+    await storage.applyTriggered(triggeredEvent({ subject: defaultSubject, cursor: "1" }))
+    await storage.applyTriggered(
+      triggeredEvent({ ruleId: otherRule, subject: defaultSubject, cursor: "3" })
+    )
+
+    const active = await storage.getActiveBatch({
+      projectId: "project-a",
+      items: [
+        { ruleId: "transaction.requires-document", subject: tx2 },
+        { ruleId: "missing", subject: defaultSubject },
+      ],
+    })
+    const first = await storage.listReconciliationPage({ projectId: "project-a", limit: 2 })
+    const second = await storage.listReconciliationPage({
+      projectId: "project-a",
+      after: first.next,
+      limit: 2,
+    })
+
+    expect(active.map((state) => state.subject.primaryId)).toEqual(["tx-2"])
+    expect(first.states.map((state) => [state.ruleId, state.subject.primaryId])).toEqual([
+      [otherRule, "tx-1"],
+      ["transaction.requires-document", "tx-1"],
+    ])
+    expect(second.states.map((state) => state.subject.primaryId)).toEqual(["tx-2"])
+  })
 })
 
 describe("SqliteStorage", () => {

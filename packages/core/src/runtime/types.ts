@@ -20,9 +20,14 @@ import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
-import type { EventsRuntime } from "../events"
+import type { DomainEventLog } from "../events"
 import type { LakeStorage } from "../lake-storage"
 import type { LogsRuntime } from "../logging"
+import type {
+  OntologyMaintenanceHandle,
+  OntologyOperationalStatus,
+  SixbReadiness,
+} from "../maintenance"
 import type {
   ObjectQuery,
   ObjectQueryExplanation,
@@ -78,7 +83,7 @@ export interface SixbRuntimeContext {
   readonly projectId: string
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
-  readonly events: EventsRuntime
+  readonly events: DomainEventLog
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
@@ -1025,7 +1030,7 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   readonly id: string
   readonly ontology: OntologyRegistry
   readonly broker: Broker
-  readonly events: EventsRuntime
+  readonly events: DomainEventLog
   readonly logs: LogsRuntime
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
@@ -1122,6 +1127,15 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
 
   /** Stop the scheduler runtime. */
   stopScheduler(): Promise<void>
+
+  /** Start durable outbox recovery and bounded ontology retention. */
+  startOntologyMaintenance(): Promise<OntologyMaintenanceHandle>
+
+  /** Latest cached asynchronous delivery and cleanup status. */
+  getOntologyOperationalStatus(): OntologyOperationalStatus
+
+  /** Verify required storage reachability and migration state. */
+  checkReadiness(): Promise<SixbReadiness>
 
   /** Disconnect all currently connected connector clients. */
   disconnectConnectors(): Promise<void>

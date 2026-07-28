@@ -141,7 +141,7 @@ describe("runtime object writes", () => {
     const { sixb } = createRuntime()
     const created = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
     await waitForDeliveredEvents(sixb, 1)
-    const publishSpy = spyPublishedFacts(sixb.events)
+    const publishSpy = spyPublishedFacts(sixb.events as EventsRuntime)
 
     const replayed = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
 
@@ -156,7 +156,7 @@ describe("runtime object writes", () => {
     await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
     await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
     await waitForDeliveredEvents(sixb, 2)
-    const publishSpy = spyPublishedFacts(sixb.events)
+    const publishSpy = spyPublishedFacts(sixb.events as EventsRuntime)
 
     await sixb.removeLink("room", "r1", "sensors", { targetTypeId: "sensor", targetId: "s1" })
 
@@ -438,8 +438,9 @@ describe("committed fact delivery", () => {
   test("keeps committed facts durable through a broker outage and delivers them later", async () => {
     const { deps, sixb } = createRuntime()
     let outage = true
-    const publish = sixb.events.publishEnvelopes.bind(sixb.events)
-    sixb.events.publishEnvelopes = async (envelopes) => {
+    const eventRuntime = sixb.events as EventsRuntime
+    const publish = eventRuntime.publishEnvelopes.bind(eventRuntime)
+    eventRuntime.publishEnvelopes = async (envelopes) => {
       if (outage) throw new Error("broker unavailable")
       return publish(envelopes)
     }
@@ -454,7 +455,7 @@ describe("committed fact delivery", () => {
     await new OntologyOutboxDispatcher({
       projectId: sixb.id,
       storage: deps.storage,
-      events: sixb.events,
+      events: eventRuntime,
       now: () => new Date(Date.now() + 60_000),
     }).drain()
 

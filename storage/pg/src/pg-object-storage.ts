@@ -705,6 +705,30 @@ export class PgObjectStorage implements ObjectStorage {
     return [...deduped.values()]
   }
 
+  async listByPrimaryIdPage(params: {
+    projectId: string
+    objectTypeId: string
+    afterPrimaryId?: string
+    limit: number
+  }): Promise<{ objects: readonly ObjectRow[]; nextPrimaryId?: string }> {
+    assertReconciliationPageLimit(params.limit)
+    const rows = await this.sql<ObjectDatabaseRow[]>`
+      SELECT * FROM objects
+      WHERE project_id = ${params.projectId}
+        AND object_type_id = ${params.objectTypeId}
+        ${params.afterPrimaryId ? this.sql`AND primary_id > ${params.afterPrimaryId}` : this.sql``}
+      ORDER BY primary_id ASC
+      LIMIT ${params.limit + 1}
+    `
+    const hasMore = rows.length > params.limit
+    const objects = rows.slice(0, params.limit).map((row) => rowToObject(row))
+    const last = objects.at(-1)
+    return {
+      objects,
+      ...(hasMore && last ? { nextPrimaryId: last.primaryId } : {}),
+    }
+  }
+
   async list(params: {
     projectId: string
     objectTypeId?: string | readonly string[]
@@ -794,6 +818,12 @@ export class PgObjectStorage implements ObjectStorage {
     const objects = rows.slice(0, limit).map((row) => rowToObject(row))
 
     return { objects, hasMore, total }
+  }
+}
+
+function assertReconciliationPageLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new Error("Object reconciliation page limit must be a positive safe integer.")
   }
 }
 

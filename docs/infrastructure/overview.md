@@ -58,8 +58,10 @@ The two messaging slots are **not** the same thing — keep them distinct.
 | Carries | Domain [events](../events/overview.md) (`object.created`, `object.updated`, `telemetry.appended`, `link.created`, `action.requested`, …) | Run requests, one per lane |
 | Replayable | Yes — retained, ordered history | No — jobs are consumed |
 
-The broker is the source of truth for what occurred. Queues are the execution layer that
-turns requested work into running work, with leases and retries. The `queues` provider
+For ontology facts, the operational database is authoritative: the Materializer writes
+`ontology_commits` and `ontology_outbox` atomically before best-effort broker publication. The
+broker is the retained delivery/read surface, while queues turn requested work into running work
+with leases and retries. The `queues` provider
 exposes one lane per kind of background work:
 
 ```ts
@@ -69,6 +71,10 @@ sixb.queues.pipelines
 sixb.queues.projections
 sixb.queues.workflows
 ```
+
+Storage providers must preserve bounded outbox claims, lease-fenced settlement, retry summaries,
+published-row retention, and child-first cleanup of terminal source materializations. Pending rows,
+nonterminal sources, and `ontology_commits` are never removed by age.
 
 ## Provider matrix
 

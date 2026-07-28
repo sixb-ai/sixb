@@ -282,24 +282,26 @@ async function loadCurrentLinks(
   input: EvaluateRuleForSubjectInput
 ): Promise<ReadonlyMap<string, readonly ObjectLinkRow[]>> {
   const linkIds = referencedLinkIds(input.rule)
-  const links = new Map<string, ObjectLinkRow[]>()
-
-  await Promise.all(
-    linkIds.map(async (linkId) => {
-      const rows = await input.runtime.storage.objects.listLinks({
-        projectId: input.runtime.projectId,
-        objectTypeId: input.subject.objectTypeId,
-        objectId: input.subject.primaryId,
-        linkId,
-      })
-      links.set(linkId, [...rows])
-    })
-  )
+  const links = new Map<string, readonly ObjectLinkRow[]>()
+  const rows = await input.runtime.storage.objects.listLinksBatch({
+    projectId: input.runtime.projectId,
+    items: linkIds.map((linkId) => ({
+      objectTypeId: input.subject.objectTypeId,
+      objectId: input.subject.primaryId,
+      linkId,
+    })),
+  })
+  for (const linkId of linkIds) {
+    links.set(
+      linkId,
+      rows.get(`${input.subject.objectTypeId}:${input.subject.primaryId}:${linkId}`) ?? []
+    )
+  }
 
   return links
 }
 
-function referencedLinkIds(rule: RuleDefinition): readonly string[] {
+export function referencedLinkIds(rule: RuleDefinition): readonly string[] {
   const linkIds: string[] = []
   const seen = new Set<string>()
 

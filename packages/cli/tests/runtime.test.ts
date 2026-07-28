@@ -3,6 +3,7 @@ import {
   col,
   type DatasetDefinition,
   type DatasetRow,
+  type DomainEventLog,
   defineConnector,
   defineDataset,
   defineObjectType,
@@ -26,7 +27,6 @@ import {
   Sixb,
   type StorageMigrator,
 } from "@sixb/core"
-import type { EventsRuntime } from "@sixb/core/internal/events"
 import {
   checkRuntimeLakeDefinitions,
   migrateRuntimeStorage,
@@ -122,7 +122,7 @@ async function waitFor<T>(
 }
 
 async function appendScheduleTriggered(
-  sixb: { readonly id: string; readonly events: EventsRuntime },
+  sixb: { readonly id: string; readonly events: DomainEventLog },
   scheduleId: string
 ) {
   const occurrenceAt = "2026-04-18T02:00:00.000Z"

@@ -1,8 +1,17 @@
 import type { DomainEvent, RuleDefinition } from "@sixb/core"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
 import { Worker } from "@sixb/core/internal/workers"
-import { buildRuleDependencyIndex, evaluateRuleEvents } from "./evaluate-rule-event"
-import type { OntologyRuleEvent, RuleDependencyIndex, RulesWorkerSixb } from "./types"
+import { buildRuleDependencyIndex } from "./evaluate-rule-event"
+import { EvaluationCoordinator } from "./evaluation-coordinator"
+import type {
+  OntologyRuleEvent,
+  RuleDependencyIndex,
+  RulesWorkerOptions,
+  RulesWorkerSixb,
+} from "./types"
+
+const DEFAULT_RECONCILIATION_INTERVAL_MS = 60_000
+const DEFAULT_RECONCILIATION_PAGE_SIZE = 500
 
 const ontologyEventTypes = [
   "object.created",
@@ -14,17 +23,16 @@ const ontologyEventTypes = [
 ] as const satisfies readonly DomainEvent["type"][]
 
 /**
- * Live, event-driven rules worker.
- *
- * It subscribes directly to object/link events and evaluates only rules whose
- * dependency index says they can be affected by the event payload.
+ * Rules worker backed by live wake-up events and periodic current-state reconciliation.
  */
 export class RulesWorker extends Worker {
   private readonly runtime: RulesWorkerSixb
   private readonly rules: readonly RuleDefinition[]
   private readonly index: RuleDependencyIndex
+  private readonly reconciliationIntervalMs: number
+  private readonly reconciliationPageSize: number
 
-  constructor(runtime: RulesWorkerSixb) {
+  constructor(runtime: RulesWorkerSixb, options: RulesWorkerOptions = {}) {
     const rules = runtime.getRuleDefinitions()
     if (rules.length === 0) {
       throw new Error("[SixbRulesWorker] Rules workers require at least one registered rule.")
@@ -40,10 +48,29 @@ export class RulesWorker extends Worker {
     // Rules are definitions, not runtime state, so the dependency index can be
     // computed once per worker instance and reused for every event batch.
     this.index = buildRuleDependencyIndex(rules)
+    this.reconciliationIntervalMs = positiveInteger(
+      options.reconciliationIntervalMs ?? DEFAULT_RECONCILIATION_INTERVAL_MS,
+      "reconciliationIntervalMs"
+    )
+    this.reconciliationPageSize = positiveInteger(
+      options.reconciliationPageSize ?? DEFAULT_RECONCILIATION_PAGE_SIZE,
+      "reconciliationPageSize"
+    )
   }
 
   protected async run(signal: AbortSignal): Promise<void> {
-    let pending: Promise<void> = Promise.resolve()
+    const coordinator = new EvaluationCoordinator({
+      runtime: {
+        projectId: this.runtime.id,
+        events: this.runtime.events,
+        storage: this.runtime.storage,
+      },
+      rules: this.rules,
+      index: this.index,
+      pageSize: this.reconciliationPageSize,
+      signal,
+      onError: (error) => console.error("[SixbRulesWorker] Evaluation failed:", error),
+    })
 
     const unsubscribe = await this.runtime.events.subscribe(
       {
@@ -55,34 +82,17 @@ export class RulesWorker extends Worker {
         const ontologyEvents = events.filter(isOntologyRuleEvent)
         if (ontologyEvents.length === 0) return
 
-        // The events runtime has no acknowledgement contract yet. Keep local
-        // evaluations ordered, log failures, and resume with the next batch.
-        pending = pending
-          .then(() =>
-            evaluateRuleEvents({
-              runtime: {
-                projectId: this.runtime.id,
-                events: this.runtime.events,
-                storage: this.runtime.storage,
-              },
-              rules: this.rules,
-              index: this.index,
-              events: ontologyEvents,
-            })
-          )
-          .then(() => undefined)
-          .catch((error) => {
-            console.error("[SixbRulesWorker] Evaluation failed:", error)
-          })
+        coordinator.enqueueLive(ontologyEvents)
       }
     )
 
-    await waitForAbort(signal)
+    // Subscribe first: events arriving during the initial scan join the same serialized queue and
+    // re-read current state after reconciliation.
+    coordinator.requestReconciliation()
+    await requestPeriodicReconciliation(coordinator, this.reconciliationIntervalMs, signal)
 
-    // Subscribe-and-drain: stop accepting new events first, then finish the
-    // evaluations already accepted into the local pending chain.
     unsubscribe()
-    await pending
+    await coordinator.drain()
   }
 }
 
@@ -99,13 +109,37 @@ function isOntologyRuleEvent(event: StoredDomainEvent): event is OntologyRuleEve
   )
 }
 
-async function waitForAbort(signal: AbortSignal): Promise<void> {
+async function requestPeriodicReconciliation(
+  coordinator: EvaluationCoordinator,
+  intervalMs: number,
+  signal: AbortSignal
+): Promise<void> {
+  while (!signal.aborted) {
+    await waitForAbort(intervalMs, signal)
+    if (!signal.aborted) coordinator.requestReconciliation()
+  }
+}
+
+async function waitForAbort(timeoutMs: number, signal: AbortSignal): Promise<void> {
   await new Promise<void>((resolve) => {
     if (signal.aborted) {
       resolve()
       return
     }
 
-    signal.addEventListener("abort", () => resolve(), { once: true })
+    const timer = setTimeout(finish, timeoutMs)
+    function finish(): void {
+      clearTimeout(timer)
+      signal.removeEventListener("abort", finish)
+      resolve()
+    }
+    signal.addEventListener("abort", finish, { once: true })
   })
+}
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`[SixbRulesWorker] ${name} must be a positive safe integer.`)
+  }
+  return value
 }

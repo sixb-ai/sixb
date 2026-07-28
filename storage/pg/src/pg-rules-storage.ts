@@ -3,7 +3,10 @@ import type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "@sixb/co
 import type {
   ListActiveRuleStatesInput,
   ListActiveRuleStatesResult,
+  ListRuleStatesReconciliationPageInput,
+  ListRuleStatesReconciliationPageResult,
   RuleStateRecord,
+  RuleStateTransitionEvent,
   RulesStorage,
 } from "@sixb/core/storage"
 import type { SqlParameter } from "./pg-client"
@@ -34,6 +37,39 @@ export class PgRulesStorage implements RulesStorage {
     `
 
     return row ? rowToRuleStateRecord(row) : null
+  }
+
+  async getActiveBatch(params: {
+    projectId: string
+    items: readonly {
+      readonly ruleId: string
+      readonly subject: RuleEventSubject
+    }[]
+  }): Promise<readonly RuleStateRecord[]> {
+    if (params.items.length === 0) return []
+    const queryParams: SqlParameter[] = [params.projectId]
+    let index = 2
+    const identities = params.items.map((item) => {
+      queryParams.push(
+        item.ruleId,
+        item.subject.kind,
+        item.subject.objectTypeId,
+        item.subject.primaryId
+      )
+      const clause = `($${index}, $${index + 1}, $${index + 2}, $${index + 3})`
+      index += 4
+      return clause
+    })
+    const rows = await this.sql.unsafe<RuleStateRow[]>(
+      `
+        SELECT project_id, rule_id, subject_kind, object_type_id, primary_id, triggered_at
+        FROM rule_states
+        WHERE project_id = $1
+          AND (rule_id, subject_kind, object_type_id, primary_id) IN (${identities.join(", ")})
+      `,
+      queryParams
+    )
+    return rows.map(rowToRuleStateRecord)
   }
 
   async listActive(input: ListActiveRuleStatesInput): Promise<ListActiveRuleStatesResult> {
@@ -108,6 +144,30 @@ export class PgRulesStorage implements RulesStorage {
     }
   }
 
+  async listReconciliationPage(
+    input: ListRuleStatesReconciliationPageInput
+  ): Promise<ListRuleStatesReconciliationPageResult> {
+    assertPositiveLimit(input.limit)
+    const params: SqlParameter[] = [input.projectId]
+    const cursor = input.after ? "AND (rule_id, object_type_id, primary_id) > ($2, $3, $4)" : ""
+    if (input.after) {
+      params.push(input.after.ruleId, input.after.objectTypeId, input.after.primaryId)
+    }
+    params.push(input.limit + 1)
+    const limitParameter = `$${params.length}`
+    const rows = await this.sql.unsafe<RuleStateRow[]>(
+      `
+        SELECT project_id, rule_id, subject_kind, object_type_id, primary_id, triggered_at
+        FROM rule_states
+        WHERE project_id = $1 AND subject_kind = 'object' ${cursor}
+        ORDER BY rule_id ASC, object_type_id ASC, primary_id ASC
+        LIMIT ${limitParameter}
+      `,
+      params
+    )
+    return reconciliationPage(rows, input.limit)
+  }
+
   async applyTriggered(event: StoredRuleTriggeredEvent): Promise<void> {
     await this.sql`
       INSERT INTO rule_states (
@@ -139,6 +199,83 @@ export class PgRulesStorage implements RulesStorage {
         AND object_type_id = ${event.payload.subject.objectTypeId}
         AND primary_id = ${event.payload.subject.primaryId}
     `
+  }
+
+  async applyTransitions(events: readonly RuleStateTransitionEvent[]): Promise<void> {
+    if (events.length === 0) return
+    const rows = JSON.stringify(events.map(transitionRow))
+    await this.sql`
+      WITH transitions AS MATERIALIZED (
+        SELECT *
+        FROM jsonb_to_recordset(${rows}::text::jsonb) AS transition(
+          type text,
+          project_id text,
+          rule_id text,
+          subject_kind text,
+          object_type_id text,
+          primary_id text,
+          transition_at timestamptz
+        )
+      ), upserted AS (
+        INSERT INTO rule_states (
+          project_id, rule_id, subject_kind, object_type_id, primary_id, triggered_at
+        )
+        SELECT project_id, rule_id, subject_kind, object_type_id, primary_id, transition_at
+        FROM transitions
+        WHERE type = 'rule.triggered'
+        ON CONFLICT (project_id, rule_id, subject_kind, object_type_id, primary_id)
+        DO UPDATE SET triggered_at = excluded.triggered_at
+        RETURNING 1
+      )
+      DELETE FROM rule_states AS states
+      USING transitions
+      WHERE transitions.type = 'rule.resolved'
+        AND states.project_id = transitions.project_id
+        AND states.rule_id = transitions.rule_id
+        AND states.subject_kind = transitions.subject_kind
+        AND states.object_type_id = transitions.object_type_id
+        AND states.primary_id = transitions.primary_id
+    `
+  }
+}
+
+function transitionRow(event: RuleStateTransitionEvent) {
+  return {
+    type: event.type,
+    project_id: event.projectId,
+    rule_id: event.payload.ruleId,
+    subject_kind: event.payload.subject.kind,
+    object_type_id: event.payload.subject.objectTypeId,
+    primary_id: event.payload.subject.primaryId,
+    transition_at:
+      event.type === "rule.triggered" ? event.payload.triggeredAt : event.payload.resolvedAt,
+  }
+}
+
+function reconciliationPage(
+  rows: readonly RuleStateRow[],
+  limit: number
+): ListRuleStatesReconciliationPageResult {
+  const hasMore = rows.length > limit
+  const states = rows.slice(0, limit).map(rowToRuleStateRecord)
+  const last = states.at(-1)
+  return {
+    states,
+    ...(hasMore && last
+      ? {
+          next: {
+            ruleId: last.ruleId,
+            objectTypeId: last.subject.objectTypeId,
+            primaryId: last.subject.primaryId,
+          },
+        }
+      : {}),
+  }
+}
+
+function assertPositiveLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new Error("Rules reconciliation page limit must be a positive safe integer.")
   }
 }
 

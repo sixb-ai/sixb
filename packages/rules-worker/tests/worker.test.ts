@@ -29,6 +29,13 @@ const postedRule: RuleDefinition = {
   },
 }
 
+const hasDocumentRule: RuleDefinition = {
+  kind: "rule",
+  id: "transaction.has-document",
+  subject: { kind: "object", objectTypeId: "transaction" },
+  predicate: { kind: "link", linkId: "document", op: "exists" },
+}
+
 const workers: RulesWorker[] = []
 
 afterEach(async () => {
@@ -150,10 +157,113 @@ describe("RulesWorker", () => {
       await worker.stop()
 
       expect(String(errors[0]?.[0])).toContain("[SixbRulesWorker] Evaluation failed:")
-      expect(await ruleEventTypes(events)).toEqual(["rule.triggered"])
+      expect(await ruleEventTypes(events)).toEqual(["rule.triggered", "rule.triggered"])
     } finally {
       console.error = originalError
     }
+  })
+
+  test("startup reconciliation repairs an object event missed while offline", async () => {
+    const events = createEventsRuntime()
+    const storage = new InMemoryStorage()
+    await seedCurrentObject(storage, "posted")
+    const worker = track(
+      new RulesWorker(createRuntime({ events, storage }), {
+        reconciliationPageSize: 1,
+      })
+    )
+
+    await worker.start()
+    await waitFor(async () => (await ruleEventTypes(events)).length === 1)
+    await worker.stop()
+
+    expect(await ruleEventTypes(events)).toEqual(["rule.triggered"])
+  })
+
+  test("startup reconciliation resolves active state for a deleted subject", async () => {
+    const events = createEventsRuntime()
+    const storage = new InMemoryStorage()
+    const [triggered] = await events.append({
+      events: [
+        {
+          type: "rule.triggered",
+          payload: {
+            ruleId: postedRule.id,
+            subject: { kind: "object", objectTypeId: "transaction", primaryId: "deleted" },
+            triggeredAt: "2026-05-07T10:00:00.000Z",
+          },
+        },
+      ],
+    })
+    if (!triggered || triggered.type !== "rule.triggered") throw new Error("Missing trigger event")
+    await storage.rules.applyTriggered(triggered)
+
+    const worker = track(new RulesWorker(createRuntime({ events, storage })))
+    await worker.start()
+    await waitFor(async () => (await ruleEventTypes(events)).includes("rule.resolved"))
+    await worker.stop()
+
+    expect(
+      await storage.rules.getActive({
+        projectId,
+        ruleId: postedRule.id,
+        subject: { kind: "object", objectTypeId: "transaction", primaryId: "deleted" },
+      })
+    ).toBeNull()
+  })
+
+  test("reconciliation uses stable pages and evaluates every subject", async () => {
+    const events = createEventsRuntime()
+    const storage = new InMemoryStorage()
+    await seedCurrentObject(storage, "posted", "tx-3")
+    await seedCurrentObject(storage, "posted", "tx-1")
+    await seedCurrentObject(storage, "posted", "tx-2")
+    const worker = track(
+      new RulesWorker(createRuntime({ events, storage }), {
+        reconciliationPageSize: 1,
+      })
+    )
+
+    await worker.start()
+    await waitFor(async () => (await ruleEventTypes(events)).length === 3)
+    await worker.stop()
+
+    expect(
+      (await storage.rules.listActive({ projectId, ruleId: postedRule.id })).states.map(
+        (state) => state.subject.primaryId
+      )
+    ).toEqual(["tx-3", "tx-2", "tx-1"])
+  })
+
+  test("serializes live evaluation behind reconciliation", async () => {
+    const events = createEventsRuntime()
+    const objects = new BlockingReconciliationObjectStorage()
+    const storage = createStorage({ objects })
+    await seedCurrentObject(storage, "posted")
+    const worker = track(new RulesWorker(createRuntime({ events, storage })))
+
+    await worker.start()
+    await objects.waitForReconciliation()
+    await events.publishEnvelopes([objectUpdatedEvent("posted")])
+    await Bun.sleep(20)
+
+    expect(objects.liveReads).toBe(0)
+    objects.releaseReconciliation()
+    await waitFor(() => objects.liveReads > 0)
+    await worker.stop()
+  })
+
+  test("loads reconciliation links through one batch port", async () => {
+    const objects = new RecordingBatchLinkObjectStorage()
+    const storage = createStorage({ objects })
+    await seedCurrentObject(storage, "posted")
+    const worker = track(new RulesWorker(createRuntime({ rules: [hasDocumentRule], storage })))
+
+    await worker.start()
+    await waitFor(() => objects.batchReads === 1)
+    await worker.stop()
+
+    expect(objects.directReads).toBe(0)
   })
 })
 
@@ -210,6 +320,52 @@ class ThrowOnceObjectStorage extends InMemoryObjectStorage {
     }
 
     return super.getByPrimaryId(params)
+  }
+}
+
+class BlockingReconciliationObjectStorage extends InMemoryObjectStorage {
+  private readonly reconciliationStarted = createDeferred<void>()
+  private readonly reconciliationRelease = createDeferred<void>()
+  liveReads = 0
+
+  override async listByPrimaryIdPage(
+    params: Parameters<ObjectStorage["listByPrimaryIdPage"]>[0]
+  ): ReturnType<ObjectStorage["listByPrimaryIdPage"]> {
+    this.reconciliationStarted.resolve()
+    await this.reconciliationRelease.promise
+    return super.listByPrimaryIdPage(params)
+  }
+
+  override async getByPrimaryId(
+    params: Parameters<ObjectStorage["getByPrimaryId"]>[0]
+  ): ReturnType<ObjectStorage["getByPrimaryId"]> {
+    this.liveReads += 1
+    return super.getByPrimaryId(params)
+  }
+
+  waitForReconciliation(): Promise<void> {
+    return this.reconciliationStarted.promise
+  }
+
+  releaseReconciliation(): void {
+    this.reconciliationRelease.resolve()
+  }
+}
+
+class RecordingBatchLinkObjectStorage extends InMemoryObjectStorage {
+  batchReads = 0
+  directReads = 0
+
+  override async listLinksBatch(): ReturnType<ObjectStorage["listLinksBatch"]> {
+    this.batchReads += 1
+    return new Map()
+  }
+
+  override async listLinks(
+    params: Parameters<ObjectStorage["listLinks"]>[0]
+  ): ReturnType<ObjectStorage["listLinks"]> {
+    this.directReads += 1
+    return super.listLinks(params)
   }
 }
 

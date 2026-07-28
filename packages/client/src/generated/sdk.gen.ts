@@ -100,6 +100,8 @@ import type {
   GetDatasetVersionData,
   GetDatasetVersionErrors,
   GetDatasetVersionResponses,
+  GetHealthData,
+  GetHealthResponses,
   GetLatestTelemetryData,
   GetLatestTelemetryErrors,
   GetLatestTelemetryResponses,
@@ -126,6 +128,9 @@ import type {
   GetProjectionRunData,
   GetProjectionRunErrors,
   GetProjectionRunResponses,
+  GetReadinessData,
+  GetReadinessErrors,
+  GetReadinessResponses,
   GetRuleData,
   GetRuleErrors,
   GetRuleResponses,
@@ -747,6 +752,28 @@ export const getProjectInfo = <ThrowOnError extends boolean = false>(
   (options?.client ?? client).get<GetProjectInfoResponses, unknown, ThrowOnError>({
     security: [{ scheme: "bearer", type: "http" }],
     url: "/api/project",
+    ...options,
+  })
+
+/**
+ * Check process liveness
+ */
+export const getHealth = <ThrowOnError extends boolean = false>(
+  options?: Options<GetHealthData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<GetHealthResponses, unknown, ThrowOnError>({
+    url: "/health",
+    ...options,
+  })
+
+/**
+ * Check runtime readiness
+ */
+export const getReadiness = <ThrowOnError extends boolean = false>(
+  options?: Options<GetReadinessData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<GetReadinessResponses, GetReadinessErrors, ThrowOnError>({
+    url: "/ready",
     ...options,
   })
 

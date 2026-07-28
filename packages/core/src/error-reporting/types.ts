@@ -37,24 +37,33 @@ export type SixbFailedRun =
       readonly webhookId: string
     }
 
-export interface SixbRunFailedContext {
-  readonly type: "run.failed"
+interface SixbFailureContext<TType extends string> {
+  readonly type: TType
   /** Stable key consumers can use to deduplicate this failure occurrence. */
   readonly notificationId: string
   readonly projectId: string
   readonly occurredAt: string
+}
+
+export interface SixbRunFailedContext extends SixbFailureContext<"run.failed"> {
   /** Queue delivery attempt, when the run was executed through a queue. */
   readonly attempt?: number
   readonly run: SixbFailedRun
 }
 
+export interface SixbEventDeliveryFailedContext
+  extends SixbFailureContext<"event.delivery.failed"> {
+  readonly attempts: number
+  /** Stable envelope IDs only: payloads and lease identifiers are never exposed. */
+  readonly eventIds: readonly string[]
+}
+
 /**
  * Context supplied to the global Sixb error handler.
  *
- * V1 emits terminal `run.failed` notifications only. Additional error context types may be added
- * later.
+ * Failure notifications never change the outcome of the operation they observe.
  */
-export type SixbErrorContext = SixbRunFailedContext
+export type SixbErrorContext = SixbRunFailedContext | SixbEventDeliveryFailedContext
 
-/** Observes terminal failed runs without changing their outcome. */
+/** Observes runtime failures without changing their outcome. */
 export type SixbErrorHandler = (error: Error, context: SixbErrorContext) => void | Promise<void>

@@ -30,6 +30,8 @@ import type {
   ReclaimSourceMaterializationInput,
   StageSourceRowsInput,
   StageSourceRowsResult,
+  SummarizeTerminalSourceMaterializationsInput,
+  TerminalSourceMaterializationSummary,
 } from "@sixb/core/storage"
 import {
   assertNonblank,
@@ -316,6 +318,30 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
         remaining -= removed
       }
       return { rowsDeleted, materializationsDeleted }
+    })
+  }
+
+  async summarizeTerminal(
+    input: SummarizeTerminalSourceMaterializationsInput
+  ): Promise<TerminalSourceMaterializationSummary> {
+    return this.runRootOperation(() => {
+      assertNonblank(input.projectId, "Terminal source summary project id")
+      const summary = this.db
+        .query(
+          `
+            SELECT COUNT(*) AS terminal_count, MIN(terminal_at) AS oldest_terminal_at
+            FROM ontology_sources
+            WHERE project_id = ? AND status IN ('superseded', 'abandoned')
+          `
+        )
+        .get(input.projectId) as {
+        readonly terminal_count: number
+        readonly oldest_terminal_at: string | null
+      }
+      return {
+        count: summary.terminal_count,
+        oldestTerminalAt: summary.oldest_terminal_at,
+      }
     })
   }
 

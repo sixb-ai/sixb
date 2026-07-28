@@ -292,4 +292,17 @@ describe("PgRulesStorage", () => {
   test("applyResolved is a no-op when no active state exists", async () => {
     await expect(storage.rules.applyResolved(resolvedEvent())).resolves.toBeUndefined()
   })
+
+  test("applyTransitions persists one reconciliation page as a batch", async () => {
+    const tx2 = { kind: "object" as const, objectTypeId: "transaction", primaryId: "tx-2" }
+    await storage.rules.applyTriggered(triggeredEvent())
+
+    await storage.rules.applyTransitions([
+      resolvedEvent(),
+      triggeredEvent({ subject: tx2, cursor: "3" }),
+    ])
+
+    const active = await storage.rules.listActive({ projectId: "project-a", order: "asc" })
+    expect(active.states.map((state) => state.subject.primaryId)).toEqual(["tx-2"])
+  })
 })

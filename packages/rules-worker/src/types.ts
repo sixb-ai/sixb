@@ -1,6 +1,11 @@
-import type { RuleDefinition, RuleEventSubject, RulePredicate, Storage } from "@sixb/core"
 import type {
-  EventsRuntime,
+  DomainEventLog,
+  RuleDefinition,
+  RuleEventSubject,
+  RulePredicate,
+  Storage,
+} from "@sixb/core"
+import type {
   StoredLinkCreatedEvent,
   StoredLinkDeletedEvent,
   StoredLinkUpdatedEvent,
@@ -29,16 +34,23 @@ export type RuleLinkMap = ReadonlyMap<string, readonly ObjectLinkRow[]>
  */
 export interface RulesWorkerSixb {
   readonly id: string
-  readonly events: EventsRuntime
+  readonly events: DomainEventLog
   readonly storage: Storage
   getRuleDefinitions(): readonly RuleDefinition[]
   getRuleById(ruleId: string): RuleDefinition | null
 }
 
+export interface RulesWorkerOptions {
+  /** Delay between reconciliation requests. Defaults to 60 seconds. */
+  readonly reconciliationIntervalMs?: number
+  /** Stable object/rule-state page size. Defaults to 500. */
+  readonly reconciliationPageSize?: number
+}
+
 /** Evaluation-only context shared by batch and single-subject helpers. */
 export interface RulesWorkerContext {
   readonly projectId: string
-  readonly events: EventsRuntime
+  readonly events: DomainEventLog
   readonly storage: Storage
 }
 

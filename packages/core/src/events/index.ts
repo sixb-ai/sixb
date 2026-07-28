@@ -42,6 +42,7 @@ export {
 } from "./property-changes"
 export {
   DEFAULT_EVENTS_RETENTION_MS,
+  type DomainEventLog,
   EVENTS_STREAM,
   type EventsAppendInput,
   type EventsReadInput,
@@ -49,6 +50,7 @@ export {
   type EventsRuntimeOptions,
   type EventsSubscribeInput,
   type StableEventEnvelope,
+  type StableEventPublisher,
 } from "./runtime"
 export type { EventScopeKeys } from "./scope"
 export { scopeKeysForEvent } from "./scope"

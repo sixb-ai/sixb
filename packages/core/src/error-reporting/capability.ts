@@ -57,6 +57,32 @@ export function reportRunFailure(
   })
 }
 
+export interface ReportEventDeliveryFailureInput {
+  readonly projectId: string
+  readonly occurredAt: string
+  readonly attempts: number
+  readonly eventIds: readonly string[]
+}
+
+export function reportEventDeliveryFailure(
+  host: unknown,
+  error: unknown,
+  input: ReportEventDeliveryFailureInput
+): void {
+  const reporter = asHost(host)?.[ERROR_REPORTER]
+  if (!reporter || input.eventIds.length === 0) return
+
+  const eventIds = [...input.eventIds].sort()
+  reporter.report(error, {
+    type: "event.delivery.failed",
+    notificationId: `project:${input.projectId}:event-delivery:${eventIds[0]}:attempt:${input.attempts}`,
+    projectId: input.projectId,
+    occurredAt: input.occurredAt,
+    attempts: input.attempts,
+    eventIds,
+  })
+}
+
 export async function flushSixbErrors(host: unknown, timeoutMs?: number): Promise<void> {
   await asHost(host)?.[ERROR_REPORTER]?.flush(timeoutMs)
 }

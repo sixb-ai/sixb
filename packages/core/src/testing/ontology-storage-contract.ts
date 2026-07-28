@@ -340,6 +340,9 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           abandonedAt: "2026-01-01T00:02:00.000Z",
         })
         expect(abandoned).toMatchObject({ status: "abandoned", executionToken: null })
+        expect(
+          await storage.ontology.sources.summarizeTerminal({ projectId: "contract-project" })
+        ).toEqual({ count: 1, oldestTerminalAt: "2026-01-01T00:02:00.000Z" })
 
         expect(
           await storage.ontology.sources.cleanupTerminal({
@@ -355,6 +358,9 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             limit: 1,
           })
         ).toEqual({ rowsDeleted: 0, materializationsDeleted: 1 })
+        expect(
+          await storage.ontology.sources.summarizeTerminal({ projectId: "contract-project" })
+        ).toEqual({ count: 0, oldestTerminalAt: null })
       })
     })
 
@@ -596,6 +602,9 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           leaseExpiresAt: "2026-01-04T01:00:00.000Z",
         })
         expect(retried[0]).toMatchObject({ attempts: 3, lastError: "broker unavailable" })
+        expect(
+          await storage.ontology.outbox.summarize({ projectId: "contract-project" })
+        ).toMatchObject({ pendingCount: 2, retryingCount: 2, maxAttempts: 3 })
         await storage.ontology.outbox.markPublished({
           projectId: "contract-project",
           ids: [retried[0].envelope.id],

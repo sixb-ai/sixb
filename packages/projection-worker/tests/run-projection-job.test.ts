@@ -27,6 +27,7 @@ import {
   stringEnum,
   valueTypeRef,
 } from "@sixb/core"
+import type { EventsRuntime } from "@sixb/core/internal/events"
 import {
   createProjectionRunId,
   getProjectionRegistry,
@@ -1537,9 +1538,10 @@ describe("runProjectionJob", () => {
       await sixb.upsertObject("Building", { id: buildingId, name: buildingId })
     }
 
-    const publish = sixb.events.publishEnvelopes.bind(sixb.events)
+    const events = sixb.events as EventsRuntime
+    const publish = events.publishEnvelopes.bind(events)
     const publishedB1Creates: string[] = []
-    sixb.events.publishEnvelopes = async (envelopes) => {
+    events.publishEnvelopes = async (envelopes) => {
       for (const envelope of envelopes) {
         if (envelope.type === "link.created" && envelope.payload.targetId === "b1") {
           publishedB1Creates.push(envelope.id)
@@ -2230,9 +2232,10 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    const publish = sixb.events.publishEnvelopes.bind(sixb.events)
+    const events = sixb.events as EventsRuntime
+    const publish = events.publishEnvelopes.bind(events)
     let aborted = false
-    sixb.events.publishEnvelopes = async (envelopes) => {
+    events.publishEnvelopes = async (envelopes) => {
       const published = await publish(envelopes)
       if (
         !aborted &&

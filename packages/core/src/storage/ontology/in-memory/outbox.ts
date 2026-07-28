@@ -8,8 +8,10 @@ import type {
   CompleteOntologyOutboxLeaseInput,
   OntologyOutboxRecord,
   OntologyOutboxStorage,
+  OntologyOutboxSummary,
   PurgePublishedOntologyOutboxInput,
   RescheduleOntologyOutboxLeaseInput,
+  SummarizeOntologyOutboxInput,
 } from "../outbox"
 import {
   assertNonblank,
@@ -101,6 +103,28 @@ export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
 
   async purgePublished(input: PurgePublishedOntologyOutboxInput): Promise<number> {
     return this.runRootOperation(() => this.purgePublishedUnlocked(input))
+  }
+
+  async summarize(input: SummarizeOntologyOutboxInput): Promise<OntologyOutboxSummary> {
+    return this.runRootOperation(() => {
+      assertNonblank(input.projectId, "Ontology outbox project id")
+      let pendingCount = 0
+      let oldestPendingAt: string | null = null
+      let retryingCount = 0
+      let maxAttempts = 0
+
+      for (const row of this.state.outbox.values()) {
+        if (row.envelope.projectId !== input.projectId || row.publishedAt !== null) continue
+        pendingCount += 1
+        if (row.attempts > 0) retryingCount += 1
+        maxAttempts = Math.max(maxAttempts, row.attempts)
+        if (oldestPendingAt === null || row.createdAt < oldestPendingAt) {
+          oldestPendingAt = row.createdAt
+        }
+      }
+
+      return { pendingCount, oldestPendingAt, retryingCount, maxAttempts }
+    })
   }
 
   private purgePublishedUnlocked(input: PurgePublishedOntologyOutboxInput): number {

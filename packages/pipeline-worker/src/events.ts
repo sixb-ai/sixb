@@ -1,4 +1,4 @@
-import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { DomainEventLog } from "@sixb/core"
 import type {
   PipelineRunRecord,
   PipelineRunStatus,
@@ -12,7 +12,7 @@ import type {
 } from "./types"
 
 export async function emitPipelineRunStarted(
-  events: EventsRuntime | undefined,
+  events: DomainEventLog | undefined,
   run: Pick<PipelineRunRecord, "id" | "pipelineId" | "startedAt">
 ): Promise<void> {
   if (!events) return
@@ -36,7 +36,7 @@ export async function emitPipelineRunStarted(
 }
 
 export async function emitPipelineRunStepStarted(
-  events: EventsRuntime | undefined,
+  events: DomainEventLog | undefined,
   step: Pick<
     PipelineStepRunRecord,
     "id" | "pipelineRunId" | "pipelineId" | "stepId" | "datasetId" | "startedAt"
@@ -69,7 +69,7 @@ export async function emitPipelineRunStepStarted(
 }
 
 export async function emitPipelineRunStepFinished(
-  events: EventsRuntime | undefined,
+  events: DomainEventLog | undefined,
   step: Pick<
     PipelineStepRunRecord,
     | "id"
@@ -147,7 +147,7 @@ export async function emitDatasetVersionCommitted(
 }
 
 export async function emitPipelineRunFinished(
-  events: EventsRuntime | undefined,
+  events: DomainEventLog | undefined,
   job: {
     readonly id: string
     readonly pipelineId: string

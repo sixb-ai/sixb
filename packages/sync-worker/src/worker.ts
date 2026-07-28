@@ -4,13 +4,13 @@ import type {
   ConnectorClient,
   ConnectorDefinition,
   DatasetDefinition,
+  DomainEventLog,
   LakeStorage,
   Queues,
   Storage,
   SyncDefinition,
 } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import type { EventsRuntime } from "@sixb/core/internal/events"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
@@ -21,7 +21,7 @@ import type { SyncJob, SyncRunResult, SyncWorkerContext } from "./types"
 
 export interface SyncWorkerSixb {
   readonly id: string
-  readonly events?: EventsRuntime
+  readonly events?: DomainEventLog
   readonly logs?: LogsRuntime
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage

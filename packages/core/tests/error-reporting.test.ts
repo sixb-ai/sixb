@@ -4,6 +4,7 @@ import {
   attachSixbErrorReporter,
   flushSixbErrors,
   normalizeReportedError,
+  reportEventDeliveryFailure,
   reportRunFailure,
 } from "../src/error-reporting/internal"
 
@@ -47,6 +48,33 @@ describe("Sixb error reporting", () => {
         projectionKind: "object",
       },
     })
+  })
+
+  test("reports delivery failures with envelope IDs only", async () => {
+    const host = {}
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    attachSixbErrorReporter(host, (error, context) => {
+      reports.push({ error, context })
+    })
+
+    reportEventDeliveryFailure(host, new Error("broker unavailable"), {
+      projectId: PROJECT_ID,
+      occurredAt: "2026-01-02T03:04:05.000Z",
+      attempts: 3,
+      eventIds: ["event-b", "event-a"],
+    })
+    await flushSixbErrors(host)
+
+    expect(reports[0]?.context).toEqual({
+      type: "event.delivery.failed",
+      notificationId: "project:error-reporting-tests:event-delivery:event-a:attempt:3",
+      projectId: PROJECT_ID,
+      occurredAt: "2026-01-02T03:04:05.000Z",
+      attempts: 3,
+      eventIds: ["event-a", "event-b"],
+    })
+    expect(JSON.stringify(reports[0]?.context)).not.toContain("payload")
+    expect(JSON.stringify(reports[0]?.context)).not.toContain("lease")
   })
 
   test("preserves Error identity", () => {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   col,
+  type DomainEventLog,
   defineAction,
   defineConnector,
   defineDataset,
@@ -33,7 +34,6 @@ import {
   type Storage,
   type WorkflowDefinition,
 } from "@sixb/core"
-import type { EventsRuntime } from "@sixb/core/internal/events"
 import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -296,7 +296,7 @@ describe("SixbServer HTTP contract", () => {
   async function withHttpContractServer(
     run: (context: {
       baseUrl: string
-      events: EventsRuntime
+      events: DomainEventLog
       sixb: Sixb<readonly OntologySource[]>
     }) => Promise<void>
   ): Promise<void> {
@@ -565,9 +565,25 @@ describe("SixbServer HTTP contract", () => {
 
       const statusResponse = await fetch(`${baseUrl}/api/status`)
       expect(statusResponse.status).toBe(200)
-      expect(await statusResponse.json()).toEqual({
+      expect(await statusResponse.json()).toMatchObject({
         status: "ok",
         objectTypes: 2,
+        maintenance: {
+          running: false,
+          consecutiveFailures: 0,
+          outbox: { pendingCount: 0 },
+        },
+      })
+
+      const healthResponse = await fetch(`${baseUrl}/health`)
+      expect(healthResponse.status).toBe(200)
+      expect(await healthResponse.json()).toEqual({ status: "ok" })
+
+      const readinessResponse = await fetch(`${baseUrl}/ready`)
+      expect(readinessResponse.status).toBe(200)
+      expect(await readinessResponse.json()).toMatchObject({
+        status: "ready",
+        storage: { reachable: true, schemaValid: true },
       })
 
       const connectorsResponse = await fetch(`${baseUrl}/api/connectors`)

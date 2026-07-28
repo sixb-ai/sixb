@@ -1602,6 +1602,63 @@ export type GetProjectInfoResponses = {
 
 export type GetProjectInfoResponse = GetProjectInfoResponses[keyof GetProjectInfoResponses]
 
+export type GetHealthData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/health"
+}
+
+export type GetHealthResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    status: "ok"
+  }
+}
+
+export type GetHealthResponse = GetHealthResponses[keyof GetHealthResponses]
+
+export type GetReadinessData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/ready"
+}
+
+export type GetReadinessErrors = {
+  /**
+   * Response for status 503
+   */
+  503: {
+    status: "ready" | "unready"
+    storage: {
+      reachable: boolean
+      schemaValid: boolean
+    }
+    reason?: string
+  }
+}
+
+export type GetReadinessError = GetReadinessErrors[keyof GetReadinessErrors]
+
+export type GetReadinessResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    status: "ready" | "unready"
+    storage: {
+      reachable: boolean
+      schemaValid: boolean
+    }
+    reason?: string
+  }
+}
+
+export type GetReadinessResponse = GetReadinessResponses[keyof GetReadinessResponses]
+
 export type GetStatusData = {
   body?: never
   path?: never
@@ -1614,8 +1671,32 @@ export type GetStatusResponses = {
    * Response for status 200
    */
   200: {
-    status: "ok"
+    status: "ok" | "degraded"
     objectTypes: number
+    maintenance: {
+      running: boolean
+      intervalMs: number
+      lastStartedAt: string | null
+      lastCompletedAt: string | null
+      lastDurationMs: number | null
+      consecutiveFailures: number
+      lastError: string | null
+      outbox: {
+        pendingCount: number
+        oldestPendingAt: string | null
+        retryingCount: number
+        maxAttempts: number
+      } | null
+      terminalSources: {
+        count: number
+        oldestTerminalAt: string | null
+      } | null
+      cleanup: {
+        publishedOutboxRowsDeleted: number
+        terminalSourceRowsDeleted: number
+        terminalSourceMaterializationsDeleted: number
+      } | null
+    }
   }
 }
 
