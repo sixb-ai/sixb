@@ -240,7 +240,7 @@ describe("OntologyOutboxDispatcher", () => {
     await dispatcher.stop()
   })
 
-  test("bounds successful work performed by one drain pass", async () => {
+  test("rearms healthy catch-up after a bounded drain slice", async () => {
     const storage = new InMemoryStorage()
     const broker = new RecordingBroker()
     const events = new EventsRuntime({ projectId: "project", broker })
@@ -257,9 +257,9 @@ describe("OntologyOutboxDispatcher", () => {
     })
 
     await dispatcher.drain()
+    await waitFor(() => outboxRows(storage).filter((row) => row.publishedAt !== null).length === 3)
 
-    expect(outboxRows(storage).filter((row) => row.publishedAt !== null)).toHaveLength(2)
-    expect(outboxRows(storage).filter((row) => row.publishedAt === null)).toHaveLength(1)
+    expect(outboxRows(storage).filter((row) => row.publishedAt !== null)).toHaveLength(3)
     await dispatcher.stop()
   })
 
@@ -386,6 +386,30 @@ describe("OntologyOutboxDispatcher", () => {
 
     broker.release.resolve()
     await stopping
+    expect(outboxRows(storage)[0]?.publishedAt).not.toBeNull()
+  })
+
+  test("shares one concurrent stop operation", async () => {
+    const storage = new InMemoryStorage()
+    const broker = new DelayedBroker()
+    const events = new EventsRuntime({ projectId: "project", broker })
+    const { materializer } = createMaterializerFixture({ storage })
+    await seedObjectCreated(materializer, "request-concurrent-stop", "concurrent-stop")
+    const dispatcher = new OntologyOutboxDispatcher({
+      projectId: "project",
+      storage,
+      events,
+      shutdownTimeoutMs: 1_000,
+    })
+    void dispatcher.drain()
+    await broker.started.promise
+
+    const firstStop = dispatcher.stop()
+    const secondStop = dispatcher.stop()
+    expect(secondStop).toBe(firstStop)
+
+    broker.release.resolve()
+    await Promise.all([firstStop, secondStop])
     expect(outboxRows(storage)[0]?.publishedAt).not.toBeNull()
   })
 

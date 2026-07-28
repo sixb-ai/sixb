@@ -144,6 +144,10 @@ Broker failure delays subscribers but never rolls back or loses the committed on
 Consumers deduplicate with stable event IDs when required. CDC/WAL change streams are not part of
 V0.1.0.
 
+An envelope that the broker repeatedly rejects remains durable and retryable; it is never silently
+dropped. After repeated failures `/api/status` stays `degraded` until delivery succeeds. V0.1.0 does
+not provide automatic quarantine or operator requeue.
+
 ### HTTP: GET /api/events
 
 The [server](../server/overview.md) exposes the same log over HTTP. Results are

@@ -90,6 +90,7 @@ export class OntologyOutboxDispatcher {
   private readonly inFlight = new Set<ClaimedBatch>()
   private draining: Promise<void> | null = null
   private pendingDrain: Promise<void> | null = null
+  private stopping: Promise<void> | null = null
   private stopRequested = false
   private readonly forcedStop = new AbortController()
 
@@ -168,7 +169,12 @@ export class OntologyOutboxDispatcher {
     void this.drain().catch((error) => this.reportError(error))
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    this.stopping ??= this.stopOnce()
+    return this.stopping
+  }
+
+  private async stopOnce(): Promise<void> {
     if (this.stopRequested) return
 
     // Include one final bounded pass so commits whose notifications were coalesced immediately
@@ -206,6 +212,10 @@ export class OntologyOutboxDispatcher {
       const publishedCount = await this.publishClaim(rows)
       if (this.stopRequested || publishedCount === 0 || rows.length < this.batchSize) return
     }
+
+    // A healthy full slice means more due rows may remain. Reuse the existing coalescing path so
+    // catch-up continues without recursion, an idle polling loop, or an unbounded individual pass.
+    if (!this.stopRequested) this.notify()
   }
 
   private claimBatch(): Promise<readonly ClaimedOntologyOutboxRow[]> {

@@ -76,6 +76,10 @@ Storage providers must preserve bounded outbox claims, lease-fenced settlement, 
 published-row retention, and child-first cleanup of terminal source materializations. Pending rows,
 nonterminal sources, and `ontology_commits` are never removed by age.
 
+The required `storage.ping()` readiness check must be lightweight and read-only. It must not open a
+write transaction, run migrations, or acquire a migration/advisory lock. Schema validation is a
+separate cached check and retries failures with a cooldown.
+
 ## Provider matrix
 
 Pick a real provider class for each slot. `InMemory*` providers come from `@sixb/core` and

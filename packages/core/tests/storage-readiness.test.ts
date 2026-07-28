@@ -60,6 +60,73 @@ describe("StorageReadiness", () => {
       reason: "Storage is unreachable.",
     })
   })
+
+  test("retries transient schema validation failures only after the cooldown", async () => {
+    let now = new Date("2026-01-02T03:04:05.000Z")
+    let planCalls = 0
+    const storage = new ReadinessStorage([
+      migrator(async () => {
+        planCalls += 1
+        if (planCalls === 1) throw new Error("temporary connection failure")
+        return currentPlan()
+      }),
+    ])
+    const readiness = new StorageReadiness(storage, {
+      schemaRetryDelayMs: 60_000,
+      now: () => now,
+    })
+
+    expect(await readiness.check()).toMatchObject({ status: "unready" })
+    await waitFor(() => Promise.resolve(planCalls === 1))
+    expect(await readiness.check()).toMatchObject({
+      status: "unready",
+      reason: "Storage schema could not be verified.",
+    })
+    expect(planCalls).toBe(1)
+
+    now = new Date(now.getTime() + 59_999)
+    await readiness.check()
+    expect(planCalls).toBe(1)
+
+    now = new Date(now.getTime() + 1)
+    expect(await readiness.check()).toMatchObject({ status: "unready" })
+    await waitFor(async () => (await readiness.check()).status === "ready")
+    expect(planCalls).toBe(2)
+  })
+
+  test("becomes ready after pending migrations are applied", async () => {
+    let now = new Date("2026-01-02T03:04:05.000Z")
+    let migrated = false
+    let planCalls = 0
+    const storage = new ReadinessStorage([
+      migrator(async () => {
+        planCalls += 1
+        return migrated
+          ? currentPlan()
+          : {
+              adapterId: "test",
+              latestVersion: 1,
+              applied: [],
+              pending: [{ id: "001", version: 1, name: "initial", up: () => undefined }],
+            }
+      }),
+    ])
+    const readiness = new StorageReadiness(storage, {
+      schemaRetryDelayMs: 60_000,
+      now: () => now,
+    })
+
+    await waitFor(async () => {
+      const result = await readiness.check()
+      return result.reason === "Storage schema has pending migrations."
+    })
+    expect(planCalls).toBe(1)
+
+    migrated = true
+    now = new Date(now.getTime() + 60_000)
+    await waitFor(async () => (await readiness.check()).status === "ready")
+    expect(planCalls).toBe(2)
+  })
 })
 
 class ReadinessStorage extends InMemoryStorage implements MigrationCapableStorage {
@@ -82,6 +149,25 @@ class UnreachableStorage extends InMemoryStorage {
   override async ping(): Promise<void> {
     throw new Error("unreachable")
   }
+}
+
+function migrator(plan: StorageMigrator["plan"]): StorageMigrator {
+  return {
+    adapterId: "test",
+    latestVersion: 1,
+    plan,
+    migrate: async (): Promise<MigrationReport> => ({
+      adapterId: "test",
+      latestVersion: 1,
+      status: "current",
+      applied: [],
+      skipped: [],
+    }),
+  }
+}
+
+function currentPlan(): MigrationPlan<unknown> {
+  return { adapterId: "test", latestVersion: 1, applied: [], pending: [] }
 }
 
 function deferred<T>() {
