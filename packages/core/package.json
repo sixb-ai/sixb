@@ -19,7 +19,6 @@
     },
     "./agents/context": {
       "types": "./dist/agents/context.d.ts",
-      "browser": "./src/agents/context.ts",
       "bun": "./src/agents/context.ts",
       "import": "./dist/agents/context.js",
       "default": "./dist/agents/context.js"
@@ -38,7 +37,6 @@
     },
     "./blob-storage": {
       "types": "./dist/blob-storage/browser.d.ts",
-      "browser": "./src/blob-storage/browser.ts",
       "bun": "./src/blob-storage/browser.ts",
       "import": "./dist/blob-storage/browser.js",
       "default": "./dist/blob-storage/browser.js"
@@ -63,7 +61,6 @@
     },
     "./events/selectors": {
       "types": "./dist/events/selectors/index.d.ts",
-      "browser": "./src/events/selectors/index.ts",
       "bun": "./src/events/selectors/index.ts",
       "import": "./dist/events/selectors/index.js",
       "default": "./dist/events/selectors/index.js"
@@ -208,7 +205,6 @@
     },
     "./logging": {
       "types": "./dist/logging/types.d.ts",
-      "browser": "./src/logging/types.ts",
       "bun": "./src/logging/types.ts",
       "import": "./dist/logging/types.js",
       "default": "./dist/logging/types.js"

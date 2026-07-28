@@ -4,6 +4,7 @@ import { extname, join, relative, resolve } from "node:path"
 
 type PackageJson = {
   name?: string
+  types?: string
   exports?: ExportsMap
   sixbBuild?: {
     entrypoints?: string[]
@@ -19,6 +20,7 @@ type ExportTarget =
   | string[]
   | {
       bun?: ExportTarget
+      browser?: ExportTarget
       import?: ExportTarget
       default?: ExportTarget
       types?: ExportTarget
@@ -42,6 +44,8 @@ await cleanRuntimeOutputs(distRoot)
 await mkdir(distRoot, { recursive: true })
 await mkdir(buildConfigDir, { recursive: true })
 
+await ensureDeclarations()
+
 const entrypoints = await resolveEntrypoints(
   packageJson.exports,
   packageJson.sixbBuild?.entrypoints ?? []
@@ -62,6 +66,17 @@ if (entrypoints.length > 0) {
     // singletons (e.g. the generated SDK client) and error classes lose
     // identity across entries for published `import`-condition consumers.
     splitting: true,
+    // React stays external here, so a development JSX runtime would ship a bare
+    // `react/jsx-dev-runtime` import. In any consumer that bundles for
+    // production React resolves that to a stub whose `jsxDEV` is `undefined`,
+    // and every component throws `jsxDEV is not a function`. This is also the
+    // only knob that switches the runtime: neither an ambient NODE_ENV nor
+    // `bun build --define` does it.
+    //
+    // Bun folds `process.env.NODE_ENV` into `dist` whether or not we define it,
+    // so this pins the value rather than introducing the fold — and
+    // `"production"` is the honest value for a published artifact.
+    define: { "process.env.NODE_ENV": '"production"' },
     tsconfig: bundleTsconfigPath,
   })
 
@@ -74,6 +89,92 @@ if (entrypoints.length > 0) {
 }
 
 await copyAssets(packageJson.sixbBuild?.assets ?? [])
+
+/**
+ * Emit the `.d.ts` files this package promises, if they are not on disk already.
+ *
+ * Only `tsc -b` writes declarations, and it lives in the root `build:types` script — so a
+ * package-scoped build, or the `prepack` that `bun publish` runs, would otherwise produce a
+ * tarball whose `types` entries point at nothing. `cleanRuntimeOutputs` preserves declarations
+ * rather than rebuilding them, which is what makes the gap survivable and therefore invisible.
+ *
+ * The happy path is a handful of `stat` calls: after a root build every target already exists.
+ * When one is missing we shell out to `tsc -b`, which also builds this package's project
+ * references, so it can write into a sibling's `dist` — expected inside a publish loop.
+ */
+async function ensureDeclarations(): Promise<void> {
+  const declarations = declaredTypeTargets()
+  if (declarations.length === 0) return
+  if (await allExist(declarations)) return
+
+  // `--force` is required, not defensive: `dist` and `.tsbuild/*.tsbuildinfo` are two halves of
+  // one state, and a `dist` that lost its declarations still has a buildinfo claiming they were
+  // emitted. Without it `tsc -b` reports "up to date" and writes nothing.
+  console.log(`[SixbBuild] ${packageName}: emitting missing declarations with tsc -b --force.`)
+  const proc = Bun.spawn([process.execPath, "x", "tsc", "-b", "tsconfig.build.json", "--force"], {
+    cwd: packageRoot,
+    stdout: "inherit",
+    stderr: "inherit",
+  })
+  if ((await proc.exited) !== 0) {
+    throw new Error(`[SixbBuild] ${packageName}: tsc -b failed while emitting declarations.`)
+  }
+
+  const missing = await missingPaths(declarations)
+  if (missing.length > 0) {
+    throw new Error(
+      `[SixbBuild] ${packageName} declares types that tsc did not emit:\n  ${missing.join("\n  ")}`
+    )
+  }
+}
+
+/** Every `./dist/**.d.ts` path this manifest promises, from `types` and from `exports`. */
+function declaredTypeTargets(): string[] {
+  const targets = new Set<string>()
+  collectTypeTargets(packageJson.types, targets)
+  collectExportTypeTargets(packageJson.exports, targets)
+  return [...targets].sort((a, b) => a.localeCompare(b))
+}
+
+function collectExportTypeTargets(target: ExportTarget | undefined, targets: Set<string>): void {
+  if (!target || typeof target === "string") return
+
+  if (Array.isArray(target)) {
+    for (const item of target) collectExportTypeTargets(item, targets)
+    return
+  }
+
+  for (const [condition, value] of Object.entries(target)) {
+    if (condition === "types") {
+      collectTypeTargets(value, targets)
+      continue
+    }
+    collectExportTypeTargets(value as ExportTarget, targets)
+  }
+}
+
+function collectTypeTargets(target: ExportTarget | undefined, targets: Set<string>): void {
+  if (typeof target === "string") {
+    // Wildcard subpaths expand per source file; there is no single path to stat.
+    if (target.endsWith(".d.ts") && !target.includes("*")) targets.add(target)
+    return
+  }
+  if (Array.isArray(target)) {
+    for (const item of target) collectTypeTargets(item, targets)
+  }
+}
+
+async function allExist(targets: string[]): Promise<boolean> {
+  return (await missingPaths(targets)).length === 0
+}
+
+async function missingPaths(targets: string[]): Promise<string[]> {
+  const missing: string[] = []
+  for (const target of targets) {
+    if (!(await Bun.file(resolve(packageRoot, target)).exists())) missing.push(target)
+  }
+  return missing
+}
 
 async function cleanRuntimeOutputs(directory: string): Promise<void> {
   let entries: Dirent[]
