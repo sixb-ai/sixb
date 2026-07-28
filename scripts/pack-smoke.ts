@@ -3,6 +3,9 @@ import { join } from "node:path"
 
 type PackageJson = {
   name?: string
+  version?: string
+  description?: string
+  repository?: { directory?: string }
   private?: boolean
   main?: string
   types?: string
@@ -12,6 +15,8 @@ type PackageJson = {
   license?: string
   publishConfig?: { access?: string }
   dependencies?: Record<string, string>
+  peerDependencies?: Record<string, string>
+  optionalDependencies?: Record<string, string>
 }
 
 type ExportTarget = string | null | ExportTarget[] | { [condition: string]: ExportTarget }
@@ -29,12 +34,37 @@ const workspaceRoots = [
 ]
 const packages = await discoverPublishablePackages()
 
+assertLockstepVersions(packages)
+
 for (const packageInfo of packages) {
   validatePackage(packageInfo)
   await dryRunPack(packageInfo)
 }
 
 console.log(`[SixbPublish] Verified ${packages.length} publishable packages.`)
+
+/**
+ * Every package ships on one train. A stray version means a `workspace:*` dependency resolves to
+ * a version its sibling never published, which only shows up as an install failure downstream.
+ */
+function assertLockstepVersions(all: Array<{ dir: string; packageJson: PackageJson }>): void {
+  const byVersion = new Map<string, string[]>()
+  for (const packageInfo of all) {
+    const version = packageInfo.packageJson.version
+    if (!version) {
+      throw new Error(`[SixbPublish] ${packageName(packageInfo)} has no version.`)
+    }
+    byVersion.set(version, [...(byVersion.get(version) ?? []), packageName(packageInfo)])
+  }
+
+  if (byVersion.size <= 1) return
+
+  const detail = [...byVersion.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([version, names]) => `  ${version}: ${names.join(", ")}`)
+    .join("\n")
+  throw new Error(`[SixbPublish] Publishable packages must share one version.\n${detail}`)
+}
 
 async function discoverPublishablePackages(): Promise<
   Array<{ dir: string; packageJson: PackageJson }>
@@ -94,12 +124,92 @@ function validatePackage(packageInfo: { dir: string; packageJson: PackageJson })
     throw new Error(`[SixbPublish] ${name} must set publishConfig.access to public.`)
   }
 
-  for (const [dependency, version] of Object.entries(packageJson.dependencies ?? {})) {
-    const isSixbWorkspaceDependency =
-      dependency.startsWith("@sixb/") || dependency === "create-sixb"
-    if (version.startsWith("workspace:") && !isSixbWorkspaceDependency) {
-      throw new Error(`[SixbPublish] ${name} has non-Sixb workspace dependency ${dependency}.`)
+  // npm renders these on the package page, and an empty one reads as abandoned.
+  if (!packageJson.description?.trim()) {
+    throw new Error(`[SixbPublish] ${name} must declare a description.`)
+  }
+
+  if (packageJson.repository?.directory !== packageInfo.dir) {
+    throw new Error(
+      `[SixbPublish] ${name} must set repository.directory to ${packageInfo.dir} ` +
+        `(found ${packageJson.repository?.directory ?? "nothing"}).`
+    )
+  }
+
+  for (const required of ["README.md", "LICENSE"]) {
+    if (!packageJson.files?.includes(required)) {
+      throw new Error(`[SixbPublish] ${name} must whitelist ${required} in files.`)
     }
+  }
+
+  assertOnlyBunReadsSource(name, packageJson.exports)
+
+  // A `workspace:` range is rewritten to the exact version at pack time. Anywhere it is *not*
+  // rewritten, a literal "workspace:*" ships and the install fails for the consumer — so every
+  // dependency field has to be checked, not just `dependencies`.
+  for (const field of ["dependencies", "peerDependencies", "optionalDependencies"] as const) {
+    for (const [dependency, range] of Object.entries(packageJson[field] ?? {})) {
+      const isSixbWorkspace = dependency.startsWith("@sixb/") || dependency === "create-sixb"
+      if (range.startsWith("workspace:") && !isSixbWorkspace) {
+        throw new Error(
+          `[SixbPublish] ${name} has non-Sixb workspace dependency ${dependency} in ${field}.`
+        )
+      }
+      if (isSixbWorkspace && range !== "workspace:*") {
+        throw new Error(
+          `[SixbPublish] ${name} must depend on ${dependency} as workspace:* in ${field} ` +
+            `(found ${range}).`
+        )
+      }
+    }
+  }
+}
+
+/**
+ * Only the `bun` condition may resolve TypeScript out of `src`.
+ *
+ * Bun runs TypeScript directly, which is why `bun` points at source and consumers get real stack
+ * traces. Every other condition is read by something that does not compile `node_modules` — a web
+ * bundler, Node, `tsc` — so pointing one at `./src/*.ts` is a hard failure for that consumer. Four
+ * `browser` conditions in `@sixb/core` shipped exactly that. Non-TypeScript assets such as
+ * `globals.css` are fine to serve from source; bundlers handle those.
+ */
+function assertOnlyBunReadsSource(name: string, exports: ExportTarget | undefined): void {
+  const offenders: string[] = []
+  visitExportTargets(exports, [], (conditions, target) => {
+    if (!target.startsWith("./src/") || !/\.tsx?$/.test(target)) return
+    if (conditions.at(-1) === "bun") return
+    offenders.push(`${conditions.join(".") || "(unconditional)"} -> ${target}`)
+  })
+
+  if (offenders.length > 0) {
+    throw new Error(
+      `[SixbPublish] ${name} serves TypeScript source to a non-Bun consumer:\n  ${offenders.join("\n  ")}`
+    )
+  }
+}
+
+function visitExportTargets(
+  target: ExportTarget | undefined,
+  conditions: string[],
+  visit: (conditions: string[], target: string) => void
+): void {
+  if (!target) return
+  if (typeof target === "string") {
+    visit(conditions, target)
+    return
+  }
+  if (Array.isArray(target)) {
+    for (const item of target) visitExportTargets(item, conditions, visit)
+    return
+  }
+  for (const [condition, value] of Object.entries(target)) {
+    // Subpath keys (".", "./x") are not conditions; only nested keys are.
+    visitExportTargets(
+      value,
+      condition.startsWith(".") ? conditions : [...conditions, condition],
+      visit
+    )
   }
 }
 
