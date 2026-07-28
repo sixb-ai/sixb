@@ -39,6 +39,11 @@ export async function buildApp(options: BuildAppOptions): Promise<BuildAppResult
       conditions: ["bun"],
       publicPath: "/",
       minify: true,
+      // React is bundled into this browser output, so without pinning NODE_ENV the production build
+      // of a user's app ships React's development build: dev-only checks on every render, and the
+      // warnings that go with them. This is also the only knob that selects the production JSX
+      // runtime — an ambient NODE_ENV does not.
+      define: { "process.env.NODE_ENV": '"production"' },
       sourcemap: "external",
     })
   } finally {

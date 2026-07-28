@@ -78,6 +78,11 @@ export async function buildBuiltInUiBundle(
       "[name]-[hash].[ext]",
       "--asset-naming",
       "[name]-[hash].[ext]",
+      // React is bundled here rather than external, so without this the production Atlas bundle
+      // ships React's development build: every render pays the dev-only checks and the browser
+      // downloads them. `--production` sets NODE_ENV=production, which picks the production JSX
+      // runtime, and minifies.
+      "--production",
     ],
     {
       cwd: sourceDir,
