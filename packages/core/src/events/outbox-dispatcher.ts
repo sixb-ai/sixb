@@ -8,6 +8,7 @@ const DEFAULT_INITIAL_RETRY_DELAY_MS = 1_000
 const DEFAULT_MAX_RETRY_DELAY_MS = 5 * 60_000
 const DEFAULT_RETRY_JITTER_RATIO = 0.2
 const DEFAULT_MAX_ISOLATION_ATTEMPTS = 16
+const DEFAULT_MAX_CLAIMS_PER_DRAIN = 10
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000
 const SHUTDOWN_RESCHEDULE_ERROR = "Outbox dispatcher stopped before publication completed."
 
@@ -30,6 +31,8 @@ export interface OntologyOutboxDispatcherOptions {
   readonly retryJitterRatio?: number
   /** Maximum broker calls used to isolate poison envelopes in one claimed batch. */
   readonly maxIsolationAttempts?: number
+  /** Maximum claimed batches handled by one drain pass. */
+  readonly maxClaimsPerDrain?: number
   readonly shutdownTimeoutMs?: number
   readonly now?: () => Date
   readonly random?: () => number
@@ -77,6 +80,7 @@ export class OntologyOutboxDispatcher {
   private readonly maxRetryDelayMs: number
   private readonly retryJitterRatio: number
   private readonly maxIsolationAttempts: number
+  private readonly maxClaimsPerDrain: number
   private readonly shutdownTimeoutMs: number
   private readonly now: () => Date
   private readonly random: () => number
@@ -87,6 +91,7 @@ export class OntologyOutboxDispatcher {
   private draining: Promise<void> | null = null
   private pendingDrain: Promise<void> | null = null
   private stopRequested = false
+  private readonly forcedStop = new AbortController()
 
   constructor(options: OntologyOutboxDispatcherOptions) {
     assertNonblank(options.projectId, "projectId")
@@ -123,6 +128,10 @@ export class OntologyOutboxDispatcher {
       options.maxIsolationAttempts ?? DEFAULT_MAX_ISOLATION_ATTEMPTS,
       "maxIsolationAttempts"
     )
+    this.maxClaimsPerDrain = positiveInteger(
+      options.maxClaimsPerDrain ?? DEFAULT_MAX_CLAIMS_PER_DRAIN,
+      "maxClaimsPerDrain"
+    )
     this.shutdownTimeoutMs = nonnegativeInteger(
       options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
       "shutdownTimeoutMs"
@@ -136,7 +145,7 @@ export class OntologyOutboxDispatcher {
   }
 
   /**
-   * Publishes all currently due rows without starting an idle polling loop.
+   * Publishes one bounded pass of currently due rows without starting an idle polling loop.
    *
    * Concurrent callers share one pass and at most one coalesced follow-up pass. This gives every
    * post-commit notification a chance to observe its own rows without serializing one pass per
@@ -160,21 +169,22 @@ export class OntologyOutboxDispatcher {
   }
 
   async stop(): Promise<void> {
-    this.stopRequested = true
-    const active = [this.draining, this.pendingDrain].filter(
-      (promise): promise is Promise<void> => promise !== null
-    )
-    if (active.length === 0) return
-    if (
-      await settlesWithin(
-        Promise.all(active).then(() => undefined),
-        this.shutdownTimeoutMs
-      )
-    ) {
+    if (this.stopRequested) return
+
+    // Include one final bounded pass so commits whose notifications were coalesced immediately
+    // before shutdown are not left pending merely because the process is stopping.
+    const gracefulDrain = this.drain().catch((error) => this.reportError(error))
+    if (await settlesWithin(gracefulDrain, this.shutdownTimeoutMs)) {
+      this.stopRequested = true
       return
     }
 
-    await this.rescheduleUnsettledForShutdown()
+    this.stopRequested = true
+    this.forcedStop.abort()
+    await settlesWithin(
+      this.rescheduleUnsettledForShutdown(),
+      Math.min(this.shutdownTimeoutMs, 1_000)
+    )
     this.draining = null
     this.pendingDrain = null
   }
@@ -189,12 +199,12 @@ export class OntologyOutboxDispatcher {
   }
 
   private async drainAvailable(): Promise<void> {
-    for (;;) {
+    for (let claimCount = 0; claimCount < this.maxClaimsPerDrain; claimCount += 1) {
       if (this.stopRequested) return
       const rows = await this.claimBatch()
       if (rows.length === 0) return
-      await this.publishClaim(rows)
-      if (this.stopRequested || rows.length < this.batchSize) return
+      const publishedCount = await this.publishClaim(rows)
+      if (this.stopRequested || publishedCount === 0 || rows.length < this.batchSize) return
     }
   }
 
@@ -211,24 +221,30 @@ export class OntologyOutboxDispatcher {
     )
   }
 
-  private async publishClaim(rows: readonly ClaimedOntologyOutboxRow[]): Promise<void> {
+  private async publishClaim(rows: readonly ClaimedOntologyOutboxRow[]): Promise<number> {
     const claim = new ClaimedBatch(rows)
+    const failures = new DeliveryFailureAccumulator()
     this.inFlight.add(claim)
     const pending: PublicationGroup[] = [{ rows }]
     let publishAttempts = 0
+    let publishedCount = 0
 
     try {
       while (pending.length > 0 && !this.stopRequested) {
         const group = pending.shift()
         if (!group || group.rows.length === 0) continue
         if (publishAttempts >= this.maxIsolationAttempts && group.failure) {
-          await this.rescheduleFailed(claim, group.rows, group.failure.error)
+          await this.rescheduleFailed(claim, group.rows, group.failure.error, failures)
           continue
         }
         publishAttempts += 1
 
         try {
-          await this.events.publishEnvelopes(group.rows.map((row) => row.envelope))
+          const publication = await publishUntilStopped(
+            this.events.publishEnvelopes(group.rows.map((row) => row.envelope)),
+            this.forcedStop.signal
+          )
+          if (publication === "stopped") break
         } catch (error) {
           if (group.rows.length > 1 && publishAttempts < this.maxIsolationAttempts) {
             const middle = Math.ceil(group.rows.length / 2)
@@ -238,18 +254,23 @@ export class OntologyOutboxDispatcher {
             )
             continue
           }
-          await this.rescheduleFailed(claim, group.rows, error)
+          await this.rescheduleFailed(claim, group.rows, error, failures)
           continue
         }
 
         await this.markPublished(claim, group.rows)
+        publishedCount += group.rows.length
       }
     } finally {
       if (this.stopRequested) {
         await this.rescheduleClaimedForShutdown(claim.close())
       }
       this.inFlight.delete(claim)
+      for (const failure of failures.list()) {
+        this.reportDeliveryFailure(failure.error, failure.context)
+      }
     }
+    return publishedCount
   }
 
   private async markPublished(
@@ -276,13 +297,15 @@ export class OntologyOutboxDispatcher {
   private async rescheduleFailed(
     claim: ClaimedBatch,
     rows: readonly ClaimedOntologyOutboxRow[],
-    error: unknown
+    error: unknown,
+    failures: DeliveryFailureAccumulator
   ): Promise<void> {
     const settling = claim.take(rows)
     if (settling.length === 0) return
     const failedAt = this.now()
 
     for (const [attempts, attemptRows] of rowsByAttempts(settling)) {
+      failures.add(error, failedAt.toISOString(), attempts, attemptRows)
       try {
         await this.withOutbox((outbox) =>
           outbox.reschedule({
@@ -295,18 +318,8 @@ export class OntologyOutboxDispatcher {
         )
       } catch (rescheduleError) {
         this.reportError(rescheduleError)
-        this.reportDeliveryFailure(error, {
-          occurredAt: failedAt.toISOString(),
-          attempts,
-          eventIds: eventIds(attemptRows),
-        })
         throw rescheduleError
       }
-      this.reportDeliveryFailure(error, {
-        occurredAt: failedAt.toISOString(),
-        attempts,
-        eventIds: eventIds(attemptRows),
-      })
     }
   }
 
@@ -371,6 +384,45 @@ interface PublicationGroup {
   readonly failure?: { readonly error: unknown }
 }
 
+interface AccumulatedDeliveryFailure {
+  readonly error: unknown
+  readonly context: OntologyOutboxDeliveryFailure
+}
+
+/** Coalesces bisection failures so one claimed row is reported once per delivery attempt. */
+class DeliveryFailureAccumulator {
+  private readonly groups = new Map<
+    number,
+    { error: unknown; occurredAt: string; eventIds: Set<string> }
+  >()
+
+  add(
+    error: unknown,
+    occurredAt: string,
+    attempts: number,
+    rows: readonly ClaimedOntologyOutboxRow[]
+  ): void {
+    const group = this.groups.get(attempts) ?? {
+      error,
+      occurredAt,
+      eventIds: new Set<string>(),
+    }
+    for (const id of eventIds(rows)) group.eventIds.add(id)
+    this.groups.set(attempts, group)
+  }
+
+  list(): readonly AccumulatedDeliveryFailure[] {
+    return [...this.groups.entries()].map(([attempts, group]) => ({
+      error: group.error,
+      context: {
+        occurredAt: group.occurredAt,
+        attempts,
+        eventIds: [...group.eventIds].sort(),
+      },
+    }))
+  }
+}
+
 function positiveInteger(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`[Sixb] Ontology outbox dispatcher ${name} must be a positive integer.`)
@@ -418,6 +470,26 @@ function sharedLeaseId(rows: readonly ClaimedOntologyOutboxRow[]): string {
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
   return message.slice(0, 2_000)
+}
+
+async function publishUntilStopped(
+  publication: Promise<unknown>,
+  signal: AbortSignal
+): Promise<"published" | "stopped"> {
+  if (signal.aborted) return "stopped"
+
+  return new Promise((resolve, reject) => {
+    const stop = () => finish(() => resolve("stopped"))
+    const finish = (settle: () => void) => {
+      signal.removeEventListener("abort", stop)
+      settle()
+    }
+    signal.addEventListener("abort", stop, { once: true })
+    void publication.then(
+      () => finish(() => resolve("published")),
+      (error) => finish(() => reject(error))
+    )
+  })
 }
 
 /** Awaits a pass without adopting its failure, so one failed drain cannot reject the next. */

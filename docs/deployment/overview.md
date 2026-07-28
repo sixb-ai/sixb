@@ -182,11 +182,13 @@ Workers claim jobs with a **lease** (default 15 minutes). On each outcome:
 - **execution error** — the job is failed (the default) or retried with an
   optional delay.
 - **abort** (shutdown mid-job) — the job is released by default so another
-process can reclaim it.
+  process can reclaim it.
 
 The API role owns `OntologyMaintenance`: immediate post-commit publication still runs in the
 process that committed, while the API performs durable outbox catch-up and retention every 60
 seconds. Queue workers do not poll the outbox, and no dedicated outbox process is required.
+Deployments with separate roles must run at least one API role per project so durable outbox
+catch-up and retention remain active.
 
 Because jobs and run records live in durable, shared providers, a crashed worker
 loses no work: the unfinished job's lease expires and another worker reclaims it.

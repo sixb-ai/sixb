@@ -1,7 +1,8 @@
 # Runtime failure notifications
 
-Sixb can notify project code when background runs fail or durable event delivery is retried. Configure an
-`onError` callback on `createSixb()` and route the notification to the service your project uses.
+Sixb can notify project code when background runs, rule evaluation, or durable event delivery
+fails. Configure an `onError` callback on `createSixb()` and route the notification to the service
+your project uses.
 
 ```ts
 import { createSixb } from "@sixb/core"
@@ -9,19 +10,22 @@ import { createSixb } from "@sixb/core"
 export const sixb = await createSixb({
   // providers and definitions...
   async onError(error, context) {
+    const subject =
+      context.type === "run.failed"
+        ? `${context.run.kind} run ${context.run.runId}`
+        : context.type === "event.delivery.failed"
+          ? `${context.eventIds.length} event delivery`
+          : `${context.source} rule evaluation`
     await sendToSlack({
       deduplicationKey: context.notificationId,
-      message:
-        context.type === "run.failed"
-          ? `${context.run.kind} run ${context.run.runId} failed: ${error.message}`
-          : `${context.eventIds.length} event(s) failed delivery: ${error.message}`,
+      message: `${subject} failed: ${error.message}`,
     })
   },
 })
 ```
 
 The callback covers failed action, agent, pipeline, projection, sync, workflow, and webhook runs,
-plus failed ontology-outbox publication attempts.
+plus failed ontology-outbox publication attempts and Rules evaluation passes.
 It does not run for successes, cancellations, retries that remain recoverable, workflow nodes or
 pipeline steps separately, or routine webhook 4xx rejections.
 
@@ -47,6 +51,15 @@ interface SixbEventDeliveryFailedContext {
   readonly attempts: number
   readonly eventIds: readonly string[]
 }
+
+interface SixbRuleEvaluationFailedContext {
+  readonly type: "rule.evaluation.failed"
+  readonly notificationId: string
+  readonly projectId: string
+  readonly occurredAt: string
+  readonly source: "live" | "reconciliation"
+  readonly eventIds: readonly string[]
+}
 ```
 
 Narrow `context.run.kind` to access the definition identifier for that run:
@@ -55,6 +68,11 @@ Narrow `context.run.kind` to access the definition identifier for that run:
 onError(error, context) {
   if (context.type === "event.delivery.failed") {
     console.error(`Outbox delivery attempt ${context.attempts} failed`, context.eventIds, error)
+    return
+  }
+
+  if (context.type === "rule.evaluation.failed") {
+    console.error(`Rules ${context.source} evaluation failed`, context.eventIds, error)
     return
   }
 

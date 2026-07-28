@@ -1602,63 +1602,6 @@ export type GetProjectInfoResponses = {
 
 export type GetProjectInfoResponse = GetProjectInfoResponses[keyof GetProjectInfoResponses]
 
-export type GetHealthData = {
-  body?: never
-  path?: never
-  query?: never
-  url: "/health"
-}
-
-export type GetHealthResponses = {
-  /**
-   * Response for status 200
-   */
-  200: {
-    status: "ok"
-  }
-}
-
-export type GetHealthResponse = GetHealthResponses[keyof GetHealthResponses]
-
-export type GetReadinessData = {
-  body?: never
-  path?: never
-  query?: never
-  url: "/ready"
-}
-
-export type GetReadinessErrors = {
-  /**
-   * Response for status 503
-   */
-  503: {
-    status: "ready" | "unready"
-    storage: {
-      reachable: boolean
-      schemaValid: boolean
-    }
-    reason?: string
-  }
-}
-
-export type GetReadinessError = GetReadinessErrors[keyof GetReadinessErrors]
-
-export type GetReadinessResponses = {
-  /**
-   * Response for status 200
-   */
-  200: {
-    status: "ready" | "unready"
-    storage: {
-      reachable: boolean
-      schemaValid: boolean
-    }
-    reason?: string
-  }
-}
-
-export type GetReadinessResponse = GetReadinessResponses[keyof GetReadinessResponses]
-
 export type GetStatusData = {
   body?: never
   path?: never

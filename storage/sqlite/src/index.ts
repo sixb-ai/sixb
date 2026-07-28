@@ -129,6 +129,12 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
   }
 
+  async ping(): Promise<void> {
+    await this.runRootStorageOperation(() => {
+      this.connection.db.query("SELECT 1").get()
+    })
+  }
+
   /**
    * The `isolation` option is intentionally ignored. SQLite runs every transaction through one
    * shared connection serialized by {@link withTransactionLock} and a `BEGIN IMMEDIATE`, so there is
@@ -195,6 +201,9 @@ export class SqliteStorage implements MigrationCapableStorage {
           transactionContext,
         }
       ),
+      ping: async () => {
+        this.connection.db.query("SELECT 1").get()
+      },
       transaction: async <T>(): Promise<T> => {
         throwNestedStorageTransaction()
       },

@@ -277,6 +277,9 @@ export interface Storage {
   rules?: RulesStorage
   fileUploadSessions?: FileUploadSessionStore
 
+  /** Lightweight reachability probe. It must not open a write transaction or run migrations. */
+  ping(): Promise<void>
+
   /**
    * Runs every capability exposed on `tx` on one atomic transaction/connection. If the callback
    * throws, writes performed through any of those capabilities must roll back together.

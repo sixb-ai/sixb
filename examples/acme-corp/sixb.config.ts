@@ -16,8 +16,10 @@ export const sixb = createSixb({
     let failure: string
     if (context.type === "run.failed") {
       failure = `${context.run.kind} run '${context.run.runId}' failed`
-    } else {
+    } else if (context.type === "event.delivery.failed") {
       failure = `event delivery failed after ${context.attempts} attempt(s)`
+    } else {
+      failure = `${context.source} rule evaluation failed`
     }
     console.error(
       `[Sixb onError Callback] [AcmeCorp] ${failure} (${context.notificationId}):`,

@@ -58,12 +58,22 @@ export interface SixbEventDeliveryFailedContext
   readonly eventIds: readonly string[]
 }
 
+export interface SixbRuleEvaluationFailedContext
+  extends SixbFailureContext<"rule.evaluation.failed"> {
+  readonly source: "live" | "reconciliation"
+  /** Envelope IDs involved in a live evaluation; empty for reconciliation. */
+  readonly eventIds: readonly string[]
+}
+
 /**
  * Context supplied to the global Sixb error handler.
  *
  * Failure notifications never change the outcome of the operation they observe.
  */
-export type SixbErrorContext = SixbRunFailedContext | SixbEventDeliveryFailedContext
+export type SixbErrorContext =
+  | SixbRunFailedContext
+  | SixbEventDeliveryFailedContext
+  | SixbRuleEvaluationFailedContext
 
 /** Observes runtime failures without changing their outcome. */
 export type SixbErrorHandler = (error: Error, context: SixbErrorContext) => void | Promise<void>

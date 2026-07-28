@@ -24,12 +24,32 @@ describe("OntologyMaintenance", () => {
     expect(await events.read()).toHaveLength(0)
 
     const handle = await maintenance.start()
+    await waitFor(async () => (await events.read()).length === 1)
     expect(await events.read()).toHaveLength(1)
     expect(maintenance.getSnapshot()).toMatchObject({
       running: false,
       consecutiveFailures: 0,
       outbox: { pendingCount: 0, retryingCount: 0 },
     })
+    await handle.stop()
+  })
+
+  test("returns its handle before startup catch-up completes", async () => {
+    const storage = new InMemoryStorage()
+    const dispatcher = new DelayedDispatcher(storage)
+    const maintenance = new OntologyMaintenance({
+      projectId: "project",
+      storage,
+      dispatcher,
+      options: { intervalMs: 60_000 },
+    })
+
+    const handle = await maintenance.start()
+    await dispatcher.started
+
+    expect(maintenance.getSnapshot().running).toBe(true)
+    dispatcher.release()
+    await waitFor(() => maintenance.getSnapshot().running === false)
     await handle.stop()
   })
 
@@ -80,24 +100,45 @@ describe("OntologyMaintenance", () => {
     expect(dispatcher.calls).toBe(callsAfterStop)
   })
 
-  test("reports retrying delivery as degraded without becoming unready", async () => {
+  test("degrades only after repeated or overdue delivery failures", async () => {
     const storage = new InMemoryStorage()
     const events = new EventsRuntime({ projectId: "project", broker: new UnavailableBroker() })
-    const dispatcher = new OntologyOutboxDispatcher({ projectId: "project", storage, events })
+    let nowMs = Date.parse("2026-01-02T03:04:05.000Z")
+    const dispatcher = new OntologyOutboxDispatcher({
+      projectId: "project",
+      storage,
+      events,
+      now: () => new Date(nowMs),
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      retryJitterRatio: 0,
+    })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObject(materializer)
     const maintenance = new OntologyMaintenance({
       projectId: "project",
       storage,
       dispatcher,
+      now: () => new Date(nowMs),
       options: { intervalMs: 60_000 },
     })
 
     const handle = await maintenance.start()
+    await waitFor(() => maintenance.getSnapshot().outbox?.maxAttempts === 1)
+
+    expect(maintenance.getOperationalStatus()).toMatchObject({
+      status: "ok",
+      maintenance: { outbox: { pendingCount: 1, retryingCount: 1, maxAttempts: 1 } },
+    })
+
+    nowMs += 1
+    await maintenance.runNow()
+    nowMs += 2
+    await maintenance.runNow()
 
     expect(maintenance.getOperationalStatus()).toMatchObject({
       status: "degraded",
-      maintenance: { outbox: { pendingCount: 1, retryingCount: 1, maxAttempts: 1 } },
+      maintenance: { outbox: { pendingCount: 1, maxAttempts: 3 } },
     })
     await handle.stop()
   })
@@ -126,6 +167,7 @@ describe("OntologyMaintenance", () => {
       options: { publishedOutboxRetentionMs: 1, intervalMs: 60_000 },
     })
     const handle = await maintenance.start()
+    await waitFor(() => outboxRows(storage).length === 0)
 
     expect(outboxRows(storage)).toHaveLength(0)
     expect(maintenance.getSnapshot().cleanup?.publishedOutboxRowsDeleted).toBe(1)
@@ -214,10 +256,13 @@ function outboxRows(storage: InMemoryStorage) {
   return [...getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot().outbox.values()]
 }
 
-async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 1_000
+): Promise<void> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
-    if (predicate()) return
+    if (await predicate()) return
     await Bun.sleep(5)
   }
   throw new Error("Timed out waiting for maintenance condition.")

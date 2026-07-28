@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import type { DomainEvent, RuleDefinition, Storage } from "@sixb/core"
+import type { DomainEvent, RuleDefinition, SixbErrorContext, Storage } from "@sixb/core"
 import {
   InMemoryBroker,
   InMemoryObjectStorage,
   InMemoryRulesStorage,
   InMemoryStorage,
 } from "@sixb/core"
+import { attachSixbErrorReporter, flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import type { StoredDomainEvent, StoredObjectUpdatedEvent } from "@sixb/core/internal/events"
 import { EventsRuntime } from "@sixb/core/internal/events"
 import type { ObjectStorage, RulesStorage, TimeseriesStorage } from "@sixb/core/storage"
@@ -36,6 +37,11 @@ const hasDocumentRule: RuleDefinition = {
   predicate: { kind: "link", linkId: "document", op: "exists" },
 }
 
+const alsoPostedRule: RuleDefinition = {
+  ...postedRule,
+  id: "transaction.also-posted",
+}
+
 const workers: RulesWorker[] = []
 
 afterEach(async () => {
@@ -61,6 +67,12 @@ describe("RulesWorker", () => {
           })
         )
     ).toThrow("[SixbRulesWorker] Rules workers require storage.rules support.")
+  })
+
+  test("constructor bounds reconciliation pages", () => {
+    expect(() => new RulesWorker(createRuntime(), { reconciliationPageSize: 1_001 })).toThrow(
+      "reconciliationPageSize must not exceed 1000"
+    )
   })
 
   test("worker subscribes to object and link event types", async () => {
@@ -138,16 +150,14 @@ describe("RulesWorker", () => {
       const events = createEventsRuntime()
       const objects = new ThrowOnceObjectStorage()
       const storage = createStorage({ objects })
+      const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+      const runtime = createRuntime({ events, storage })
+      attachSixbErrorReporter(runtime, (error, context) => {
+        reports.push({ error, context })
+      })
       await seedCurrentObject(storage, "posted")
       await seedCurrentObject(storage, "posted", "tx-2")
-      const worker = track(
-        new RulesWorker(
-          createRuntime({
-            events,
-            storage,
-          })
-        )
-      )
+      const worker = track(new RulesWorker(runtime))
       await worker.start()
 
       await events.publishEnvelopes([objectUpdatedEvent("posted")])
@@ -155,8 +165,15 @@ describe("RulesWorker", () => {
 
       await events.publishEnvelopes([objectUpdatedEvent("posted", "tx-2")])
       await worker.stop()
+      await flushSixbErrors(runtime)
 
       expect(String(errors[0]?.[0])).toContain("[SixbRulesWorker] Evaluation failed:")
+      expect(reports).toHaveLength(1)
+      expect(reports[0]?.context).toMatchObject({
+        type: "rule.evaluation.failed",
+        source: "live",
+        eventIds: ["event-tx-1-posted"],
+      })
       expect(await ruleEventTypes(events)).toEqual(["rule.triggered", "rule.triggered"])
     } finally {
       console.error = originalError
@@ -233,6 +250,22 @@ describe("RulesWorker", () => {
         (state) => state.subject.primaryId
       )
     ).toEqual(["tx-3", "tx-2", "tx-1"])
+  })
+
+  test("reconciliation scans one object type once for all of its rules", async () => {
+    const events = createEventsRuntime()
+    const objects = new CountingReconciliationObjectStorage()
+    const storage = createStorage({ objects })
+    await seedCurrentObject(storage, "posted")
+    const worker = track(
+      new RulesWorker(createRuntime({ rules: [postedRule, alsoPostedRule], events, storage }))
+    )
+
+    await worker.start()
+    await waitFor(async () => (await ruleEventTypes(events)).length === 2)
+    await worker.stop()
+
+    expect(objects.pageReads).toBe(1)
   })
 
   test("serializes live evaluation behind reconciliation", async () => {
@@ -366,6 +399,17 @@ class RecordingBatchLinkObjectStorage extends InMemoryObjectStorage {
   ): ReturnType<ObjectStorage["listLinks"]> {
     this.directReads += 1
     return super.listLinks(params)
+  }
+}
+
+class CountingReconciliationObjectStorage extends InMemoryObjectStorage {
+  pageReads = 0
+
+  override async listByPrimaryIdPage(
+    params: Parameters<ObjectStorage["listByPrimaryIdPage"]>[0]
+  ): ReturnType<ObjectStorage["listByPrimaryIdPage"]> {
+    this.pageReads += 1
+    return super.listByPrimaryIdPage(params)
   }
 }
 

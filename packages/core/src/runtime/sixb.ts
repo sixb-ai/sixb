@@ -73,7 +73,7 @@ import type {
   SecurityRegistry,
 } from "../security"
 import { createRuntimeSecurityRegistry } from "../security/runtime"
-import { isMigrationCapableStorage, type ObjectRow, type Storage } from "../storage"
+import type { ObjectRow, Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
 import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webhooks"
@@ -85,6 +85,7 @@ import {
   registerOntologyMutationRuntime,
 } from "./ontology-mutations"
 import { createScopedSixb, type ScopedSixb } from "./scoped"
+import { StorageReadiness } from "./storage-readiness"
 import type {
   BatchItemResult,
   ListResult,
@@ -148,6 +149,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   private readonly committedFacts: OntologyOutboxDispatcher
   private readonly eventsRuntime: EventsRuntime
   private readonly ontologyMaintenance: OntologyMaintenance
+  private readonly storageReadiness: StorageReadiness
   private readonly projectionRegistry: ProjectionRegistry
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
@@ -182,6 +184,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       observability: options.observability?.logs,
     })
     this.storage = options.storage
+    this.storageReadiness = new StorageReadiness(this.storage)
     this.lakeStorage = options.lakeStorage
     this.blobStorage = options.blobStorage
     this.queues = options.queues
@@ -524,6 +527,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
   /** Start the API-owned recovery and retention loop. Embedded runtimes opt in explicitly. */
   startOntologyMaintenance(): Promise<OntologyMaintenanceHandle> {
+    this.storageReadiness.startSchemaValidation()
     return this.ontologyMaintenance.start()
   }
 
@@ -532,37 +536,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   }
 
   async checkReadiness(): Promise<SixbReadiness> {
-    try {
-      await this.storage.transaction(() => undefined)
-    } catch {
-      return {
-        status: "unready",
-        storage: { reachable: false, schemaValid: false },
-        reason: "Storage is unreachable.",
-      }
-    }
-
-    if (!isMigrationCapableStorage(this.storage)) {
-      return { status: "ready", storage: { reachable: true, schemaValid: true } }
-    }
-
-    try {
-      const plans = await Promise.all(this.storage.migrators.map((migrator) => migrator.plan()))
-      const schemaValid = plans.every((plan) => plan.pending.length === 0)
-      return schemaValid
-        ? { status: "ready", storage: { reachable: true, schemaValid: true } }
-        : {
-            status: "unready",
-            storage: { reachable: true, schemaValid: false },
-            reason: "Storage schema has pending migrations.",
-          }
-    } catch {
-      return {
-        status: "unready",
-        storage: { reachable: true, schemaValid: false },
-        reason: "Storage schema could not be verified.",
-      }
-    }
+    return this.storageReadiness.check()
   }
 
   /** Disconnect all currently connected connector clients. */
@@ -577,8 +551,8 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
   /** Close the runtime broker provider if it owns external resources. */
   async closeBroker(): Promise<void> {
-    await this.ontologyMaintenance.stop()
     await this.committedFacts.stop()
+    await this.ontologyMaintenance.stop()
     await this.broker.close?.()
   }
 

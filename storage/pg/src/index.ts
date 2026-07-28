@@ -211,6 +211,11 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.rules = createOperationScopedFacade(stores.rules, scope)
   }
 
+  async ping(): Promise<void> {
+    this.assertRootOperationAvailable()
+    await this.sql`SELECT 1`
+  }
+
   async transaction<T>(
     run: (tx: Storage) => Promise<T> | T,
     options: StorageTransactionOptions = {}
@@ -290,6 +295,9 @@ export class PostgresStorage implements MigrationCapableStorage {
         runOntologyOperation: async (run) => run(client),
         transactionContext,
       }),
+      ping: async () => {
+        await client`SELECT 1`
+      },
       transaction: async <T>(): Promise<T> => {
         throwNestedStorageTransaction()
       },

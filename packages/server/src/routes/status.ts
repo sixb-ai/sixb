@@ -10,6 +10,7 @@ export function registerStatusRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
   app.get("/health", () => ({ status: "ok" as const }), {
     response: { 200: HealthResponseSchema },
     detail: {
+      hide: true,
       summary: "Check process liveness",
       tags: [OPENAPI_TAGS.status.name],
       operationId: "getHealth",
@@ -26,6 +27,7 @@ export function registerStatusRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
     {
       response: { 200: ReadinessResponseSchema, 503: ReadinessResponseSchema },
       detail: {
+        hide: true,
         summary: "Check runtime readiness",
         tags: [OPENAPI_TAGS.status.name],
         operationId: "getReadiness",

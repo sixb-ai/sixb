@@ -178,6 +178,7 @@ describe("OntologyOutboxDispatcher", () => {
     })
     await seedObjectCreated(materializer, "request-newer", "newer")
     const newerId = outboxRows(storage).find((row) => row.envelope.id !== olderId)!.envelope.id
+    const failures: { readonly attempts: number; readonly eventIds: readonly string[] }[] = []
 
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
@@ -189,6 +190,7 @@ describe("OntologyOutboxDispatcher", () => {
       maxRetryDelayMs: 1_000,
       retryJitterRatio: 0,
       createLeaseId: () => "mixed-attempt-lease",
+      onDeliveryFailure: (_error, failure) => failures.push(failure),
     })
     await dispatcher.drain()
     await dispatcher.stop()
@@ -203,6 +205,62 @@ describe("OntologyOutboxDispatcher", () => {
       attempts: 1,
       availableAt: "2026-01-02T03:04:05.100Z",
     })
+    expect([...failures].sort((left, right) => left.attempts - right.attempts)).toEqual([
+      expect.objectContaining({ attempts: 1, eventIds: [newerId] }),
+      expect.objectContaining({ attempts: 2, eventIds: [olderId] }),
+    ])
+  })
+
+  test("stops a drain pass after a fully failed claim instead of walking the backlog", async () => {
+    const storage = new InMemoryStorage()
+    const broker = new FailingBroker()
+    const events = new EventsRuntime({ projectId: "project", broker })
+    const { materializer } = createMaterializerFixture({ storage })
+    for (let index = 0; index < 5; index += 1) {
+      await seedObjectCreated(materializer, `request-${index}`, `device-${index}`)
+    }
+    const failures: { readonly attempts: number; readonly eventIds: readonly string[] }[] = []
+    const dispatcher = new OntologyOutboxDispatcher({
+      projectId: "project",
+      storage,
+      events,
+      batchSize: 2,
+      now: () => NOW,
+      retryJitterRatio: 0,
+      onDeliveryFailure: (_error, failure) => failures.push(failure),
+    })
+
+    await dispatcher.drain()
+
+    expect(broker.attempts).toBe(3)
+    expect(outboxRows(storage).filter((row) => row.attempts === 1)).toHaveLength(2)
+    expect(outboxRows(storage).filter((row) => row.attempts === 0)).toHaveLength(3)
+    expect(failures).toHaveLength(1)
+    expect(failures[0]?.eventIds).toHaveLength(2)
+    await dispatcher.stop()
+  })
+
+  test("bounds successful work performed by one drain pass", async () => {
+    const storage = new InMemoryStorage()
+    const broker = new RecordingBroker()
+    const events = new EventsRuntime({ projectId: "project", broker })
+    const { materializer } = createMaterializerFixture({ storage })
+    for (let index = 0; index < 3; index += 1) {
+      await seedObjectCreated(materializer, `request-bounded-${index}`, `bounded-${index}`)
+    }
+    const dispatcher = new OntologyOutboxDispatcher({
+      projectId: "project",
+      storage,
+      events,
+      batchSize: 1,
+      maxClaimsPerDrain: 2,
+    })
+
+    await dispatcher.drain()
+
+    expect(outboxRows(storage).filter((row) => row.publishedAt !== null)).toHaveLength(2)
+    expect(outboxRows(storage).filter((row) => row.publishedAt === null)).toHaveLength(1)
+    await dispatcher.stop()
   })
 
   test("publishes only when explicitly drained and never starts an idle polling loop", async () => {

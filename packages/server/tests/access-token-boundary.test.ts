@@ -99,4 +99,15 @@ describe("access token auth boundary", () => {
     expect(shouldVerifyCsrfForAuthSource(mutationRoute, "session")).toBe(true)
     expect(shouldVerifyCsrfForAuthSource(mutationRoute, "accessToken")).toBe(false)
   })
+
+  test("classifies infrastructure probes explicitly as public", () => {
+    expect(classifyRoute(request("GET", "/health"))).toEqual({
+      kind: "public",
+      csrfProtected: false,
+    })
+    expect(classifyRoute(request("GET", "/ready"))).toEqual({
+      kind: "public",
+      csrfProtected: false,
+    })
+  })
 })

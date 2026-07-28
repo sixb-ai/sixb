@@ -781,6 +781,7 @@ export type {
   SixbErrorHandler,
   SixbEventDeliveryFailedContext,
   SixbFailedRun,
+  SixbRuleEvaluationFailedContext,
   SixbRunFailedContext,
 } from "./error-reporting/types"
 export type {

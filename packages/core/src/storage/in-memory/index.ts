@@ -113,6 +113,10 @@ export class InMemoryStorage implements Storage {
   >()
   private transactionTail: Promise<void> = Promise.resolve()
 
+  async ping(): Promise<void> {
+    await this.withStorageOperation(() => undefined)
+  }
+
   /**
    * Run `run` against a transactional view of this storage.
    *
@@ -224,6 +228,7 @@ export class InMemoryStorage implements Storage {
       webhookRuns: this.webhookRunStorage,
       rules: this.rulesStorage,
       fileUploadSessions: this.fileUploadSessionStorage,
+      ping: async () => undefined,
       transaction: async <T>(): Promise<T> => {
         throwNestedStorageTransaction()
       },

@@ -47,28 +47,29 @@ export class PgRulesStorage implements RulesStorage {
     }[]
   }): Promise<readonly RuleStateRecord[]> {
     if (params.items.length === 0) return []
-    const queryParams: SqlParameter[] = [params.projectId]
-    let index = 2
-    const identities = params.items.map((item) => {
-      queryParams.push(
-        item.ruleId,
-        item.subject.kind,
-        item.subject.objectTypeId,
-        item.subject.primaryId
-      )
-      const clause = `($${index}, $${index + 1}, $${index + 2}, $${index + 3})`
-      index += 4
-      return clause
-    })
-    const rows = await this.sql.unsafe<RuleStateRow[]>(
-      `
-        SELECT project_id, rule_id, subject_kind, object_type_id, primary_id, triggered_at
-        FROM rule_states
-        WHERE project_id = $1
-          AND (rule_id, subject_kind, object_type_id, primary_id) IN (${identities.join(", ")})
-      `,
-      queryParams
+    const requested = JSON.stringify(
+      params.items.map((item) => ({
+        rule_id: item.ruleId,
+        subject_kind: item.subject.kind,
+        object_type_id: item.subject.objectTypeId,
+        primary_id: item.subject.primaryId,
+      }))
     )
+    const rows = await this.sql<RuleStateRow[]>`
+      WITH requested AS (
+        SELECT *
+        FROM jsonb_to_recordset(${requested}::text::jsonb) AS identity(
+          rule_id text,
+          subject_kind text,
+          object_type_id text,
+          primary_id text
+        )
+      )
+        SELECT project_id, rule_id, subject_kind, object_type_id, primary_id, triggered_at
+        FROM rule_states AS states
+        JOIN requested USING (rule_id, subject_kind, object_type_id, primary_id)
+        WHERE states.project_id = ${params.projectId}
+    `
     return rows.map(rowToRuleStateRecord)
   }
 

@@ -11,6 +11,9 @@ import type {
 const DEFAULT_INTERVAL_MS = 60_000
 const DEFAULT_RETENTION_MS = 24 * 60 * 60_000
 const DEFAULT_CLEANUP_LIMIT = 1_000
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000
+const DEGRADED_ATTEMPT_THRESHOLD = 3
+const DEGRADED_FAILURE_THRESHOLD = 2
 
 interface OntologyMaintenanceDependencies {
   readonly projectId: string
@@ -30,6 +33,7 @@ export class OntologyMaintenance {
   private readonly publishedOutboxRetentionMs: number
   private readonly terminalSourceRetentionMs: number
   private readonly cleanupLimit: number
+  private readonly shutdownTimeoutMs: number
   private readonly now: () => Date
   private readonly onError: (error: unknown) => void
   private readonly owners = new Set<symbol>()
@@ -57,6 +61,10 @@ export class OntologyMaintenance {
       options.cleanupLimit ?? DEFAULT_CLEANUP_LIMIT,
       "cleanupLimit"
     )
+    this.shutdownTimeoutMs = nonnegativeInteger(
+      options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
+      "shutdownTimeoutMs"
+    )
     this.now = dependencies.now ?? (() => new Date())
     this.onError =
       dependencies.onError ??
@@ -64,24 +72,13 @@ export class OntologyMaintenance {
     this.snapshot = emptySnapshot(this.intervalMs)
   }
 
-  /** Acquires maintenance ownership and completes the startup catch-up before returning. */
+  /** Acquires maintenance ownership and starts catch-up without blocking the host from listening. */
   async start(): Promise<OntologyMaintenanceHandle> {
+    if (this.stopping) await this.stopping
     const owner = Symbol("ontology-maintenance-owner")
     const startsHosting = this.owners.size === 0
     this.owners.add(owner)
-    if (this.stopping) await this.stopping
-
-    try {
-      if (startsHosting) {
-        await this.runNow()
-        this.scheduleNextPass()
-      } else if (this.pass) {
-        await this.pass
-      }
-    } catch (error) {
-      this.owners.delete(owner)
-      throw error
-    }
+    if (startsHosting) this.startHostedPass()
 
     let released = false
     return {
@@ -114,13 +111,27 @@ export class OntologyMaintenance {
 
   getOperationalStatus(): OntologyOperationalStatus {
     const snapshot = this.getSnapshot()
-    const lastCompletedAt = snapshot.lastCompletedAt
+    const lastActivityAt = latestTimestamp(snapshot.lastStartedAt, snapshot.lastCompletedAt)
     const overdue =
-      lastCompletedAt !== null &&
-      this.now().getTime() - Date.parse(lastCompletedAt) > this.intervalMs * 2
+      lastActivityAt !== null &&
+      this.now().getTime() - Date.parse(lastActivityAt) > this.intervalMs * 2
+    const oldestPendingAt = snapshot.outbox?.oldestPendingAt ?? null
+    const pendingTooLong =
+      oldestPendingAt !== null &&
+      this.now().getTime() - Date.parse(oldestPendingAt) > this.intervalMs * 2
+    const repeatedlyFailing = (snapshot.outbox?.maxAttempts ?? 0) >= DEGRADED_ATTEMPT_THRESHOLD
     const degraded =
-      snapshot.consecutiveFailures > 0 || (snapshot.outbox?.retryingCount ?? 0) > 0 || overdue
+      snapshot.consecutiveFailures >= DEGRADED_FAILURE_THRESHOLD ||
+      repeatedlyFailing ||
+      pendingTooLong ||
+      overdue
     return { status: degraded ? "degraded" : "ok", maintenance: snapshot }
+  }
+
+  private startHostedPass(): void {
+    void this.runNow()
+      .catch((error) => this.reportError(error))
+      .finally(() => this.scheduleNextPass())
   }
 
   private async runPass(): Promise<void> {
@@ -232,7 +243,14 @@ export class OntologyMaintenance {
       clearTimeout(this.timer)
       this.timer = null
     }
-    const stopping = (this.pass ?? Promise.resolve()).then(() => undefined)
+    const activePass = this.pass ?? Promise.resolve()
+    const stopping = settlesWithin(activePass, this.shutdownTimeoutMs).then((settled) => {
+      if (!settled) {
+        this.reportError(
+          new Error(`[Sixb] Ontology maintenance did not stop within ${this.shutdownTimeoutMs}ms.`)
+        )
+      }
+    })
     this.stopping = stopping.finally(() => {
       this.stopping = null
     })
@@ -289,6 +307,28 @@ function errorMessage(error: unknown): string {
   }
   const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
   return message.slice(0, 2_000)
+}
+
+function latestTimestamp(left: string | null, right: string | null): string | null {
+  if (left === null) return right
+  if (right === null) return left
+  return Date.parse(left) >= Date.parse(right) ? left : right
+}
+
+async function settlesWithin(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs)
+  })
+  const result = await Promise.race([
+    promise.then(
+      () => true as const,
+      () => true as const
+    ),
+    timedOut,
+  ])
+  if (timer !== undefined) clearTimeout(timer)
+  return result
 }
 
 async function captureFailure(run: () => Promise<void>, failures: unknown[]): Promise<void>

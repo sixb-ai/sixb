@@ -135,6 +135,7 @@ export class InMemoryRulesStorage implements RulesStorage {
   ): Promise<ListRuleStatesReconciliationPageResult> {
     const rows = [...this.active.values()]
       .filter((record) => record.projectId === input.projectId)
+      .filter((record) => record.subject.kind === "object")
       .filter((record) => !input.after || compareCursor(record, input.after) > 0)
       .sort(compareRuleStateIdentity)
       .slice(0, input.limit + 1)

@@ -1,4 +1,5 @@
 import type { DomainEvent, RuleDefinition } from "@sixb/core"
+import { reportRuleEvaluationFailure } from "@sixb/core/internal/error-reporting"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
 import { Worker } from "@sixb/core/internal/workers"
 import { buildRuleDependencyIndex } from "./evaluate-rule-event"
@@ -12,6 +13,7 @@ import type {
 
 const DEFAULT_RECONCILIATION_INTERVAL_MS = 60_000
 const DEFAULT_RECONCILIATION_PAGE_SIZE = 500
+const MAX_RECONCILIATION_PAGE_SIZE = 1_000
 
 const ontologyEventTypes = [
   "object.created",
@@ -52,9 +54,10 @@ export class RulesWorker extends Worker {
       options.reconciliationIntervalMs ?? DEFAULT_RECONCILIATION_INTERVAL_MS,
       "reconciliationIntervalMs"
     )
-    this.reconciliationPageSize = positiveInteger(
+    this.reconciliationPageSize = boundedPositiveInteger(
       options.reconciliationPageSize ?? DEFAULT_RECONCILIATION_PAGE_SIZE,
-      "reconciliationPageSize"
+      "reconciliationPageSize",
+      MAX_RECONCILIATION_PAGE_SIZE
     )
   }
 
@@ -69,7 +72,13 @@ export class RulesWorker extends Worker {
       index: this.index,
       pageSize: this.reconciliationPageSize,
       signal,
-      onError: (error) => console.error("[SixbRulesWorker] Evaluation failed:", error),
+      onError: (error, failure) => {
+        console.error("[SixbRulesWorker] Evaluation failed:", error)
+        reportRuleEvaluationFailure(this.runtime, error, {
+          projectId: this.runtime.id,
+          ...failure,
+        })
+      },
     })
 
     const unsubscribe = await this.runtime.events.subscribe(
@@ -142,4 +151,12 @@ function positiveInteger(value: number, name: string): number {
     throw new Error(`[SixbRulesWorker] ${name} must be a positive safe integer.`)
   }
   return value
+}
+
+function boundedPositiveInteger(value: number, name: string, maximum: number): number {
+  const valid = positiveInteger(value, name)
+  if (valid > maximum) {
+    throw new Error(`[SixbRulesWorker] ${name} must not exceed ${maximum}.`)
+  }
+  return valid
 }

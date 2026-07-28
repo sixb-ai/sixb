@@ -25,28 +25,29 @@ export interface ReconcileRulesInput {
 /** Repair rule state from current committed objects, then resolve active states for deleted rows. */
 export async function reconcileRules(input: ReconcileRulesInput): Promise<void> {
   const rulesStorage = requireRulesStorage(input.runtime.storage)
-  for (const rule of input.rules) {
-    await reconcileRuleObjects(input, rulesStorage, rule)
+  for (const [objectTypeId, rules] of groupRulesByObjectType(input.rules)) {
+    await reconcileObjectType(input, rulesStorage, objectTypeId, rules)
     if (input.signal?.aborted) return
   }
   await reconcileDeletedSubjects(input, rulesStorage)
 }
 
-async function reconcileRuleObjects(
+async function reconcileObjectType(
   input: ReconcileRulesInput,
   rulesStorage: RulesStorage,
-  rule: RuleDefinition
+  objectTypeId: string,
+  rules: readonly RuleDefinition[]
 ): Promise<void> {
   let afterPrimaryId: string | undefined
   for (;;) {
     if (input.signal?.aborted) return
     const page = await input.runtime.storage.objects.listByPrimaryIdPage({
       projectId: input.runtime.projectId,
-      objectTypeId: rule.subject.objectTypeId,
+      objectTypeId,
       ...(afterPrimaryId ? { afterPrimaryId } : {}),
       limit: input.pageSize,
     })
-    await evaluateObjectPage(input.runtime, rulesStorage, rule, page.objects)
+    await evaluateObjectPage(input.runtime, rulesStorage, rules, page.objects)
     if (!page.nextPrimaryId) return
     afterPrimaryId = page.nextPrimaryId
   }
@@ -55,7 +56,7 @@ async function reconcileRuleObjects(
 async function evaluateObjectPage(
   runtime: RulesWorkerContext,
   rulesStorage: RulesStorage,
-  rule: RuleDefinition,
+  rules: readonly RuleDefinition[],
   objects: readonly ObjectRow[]
 ): Promise<void> {
   if (objects.length === 0) return
@@ -63,24 +64,29 @@ async function evaluateObjectPage(
   const subjects = objects.map(subjectForObject)
   const active = await rulesStorage.getActiveBatch({
     projectId: runtime.projectId,
-    items: subjects.map((subject) => ({ ruleId: rule.id, subject })),
+    items: subjects.flatMap((subject) => rules.map((rule) => ({ ruleId: rule.id, subject }))),
   })
-  const activeSubjects = new Set(active.map((state) => subjectKey(state.subject)))
-  const links = await loadPageLinks(runtime, rule, objects)
+  const activeStates = new Set(active.map((state) => ruleSubjectKey(state.ruleId, state.subject)))
+  const links = await loadPageLinks(runtime, rules, objects)
   const transitions: RuleTransition[] = []
 
   for (const [index, object] of objects.entries()) {
     const subject = subjects[index]
     if (!subject) continue
-    const matched = evaluateRulePredicate({
-      predicate: rule.predicate,
-      object,
-      links: links.get(object.primaryId) ?? new Map(),
-    })
-    const isActive = activeSubjects.has(subjectKey(subject))
-    if (matched && !isActive) transitions.push({ kind: "triggered", rule, subject, evaluatedAt })
-    if (!matched && isActive)
-      transitions.push({ kind: "resolved", ruleId: rule.id, subject, evaluatedAt })
+    for (const rule of rules) {
+      const matched = evaluateRulePredicate({
+        predicate: rule.predicate,
+        object,
+        links: links.get(object.primaryId) ?? new Map(),
+      })
+      const isActive = activeStates.has(ruleSubjectKey(rule.id, subject))
+      if (matched && !isActive) {
+        transitions.push({ kind: "triggered", rule, subject, evaluatedAt })
+      }
+      if (!matched && isActive) {
+        transitions.push({ kind: "resolved", ruleId: rule.id, subject, evaluatedAt })
+      }
+    }
   }
 
   await applyTransitions(runtime, transitions)
@@ -88,10 +94,10 @@ async function evaluateObjectPage(
 
 async function loadPageLinks(
   runtime: RulesWorkerContext,
-  rule: RuleDefinition,
+  rules: readonly RuleDefinition[],
   objects: readonly ObjectRow[]
 ): Promise<ReadonlyMap<string, RuleLinkMap>> {
-  const linkIds = referencedLinkIds(rule)
+  const linkIds = uniqueReferencedLinkIds(rules)
   if (linkIds.length === 0) return new Map()
   const items = objects.flatMap((object) =>
     linkIds.map((linkId) => ({
@@ -229,8 +235,8 @@ function subjectForObject(object: ObjectRow): RuleEventSubject {
   }
 }
 
-function subjectKey(subject: RuleEventSubject): string {
-  return `${subject.objectTypeId}\0${subject.primaryId}`
+function ruleSubjectKey(ruleId: string, subject: RuleEventSubject): string {
+  return JSON.stringify([ruleId, subject.kind, subject.objectTypeId, subject.primaryId])
 }
 
 function objectKey(objectTypeId: string, primaryId: string): string {
@@ -239,6 +245,26 @@ function objectKey(objectTypeId: string, primaryId: string): string {
 
 function linkRequestKey(objectTypeId: string, primaryId: string, linkId: string): string {
   return `${objectTypeId}:${primaryId}:${linkId}`
+}
+
+function groupRulesByObjectType(
+  rules: readonly RuleDefinition[]
+): ReadonlyMap<string, readonly RuleDefinition[]> {
+  const groups = new Map<string, RuleDefinition[]>()
+  for (const rule of rules) {
+    const group = groups.get(rule.subject.objectTypeId) ?? []
+    group.push(rule)
+    groups.set(rule.subject.objectTypeId, group)
+  }
+  return groups
+}
+
+function uniqueReferencedLinkIds(rules: readonly RuleDefinition[]): readonly string[] {
+  const ids = new Set<string>()
+  for (const rule of rules) {
+    for (const linkId of referencedLinkIds(rule)) ids.add(linkId)
+  }
+  return [...ids]
 }
 
 function requireRulesStorage(storage: RulesWorkerContext["storage"]): RulesStorage {
