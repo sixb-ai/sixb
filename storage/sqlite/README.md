@@ -4,7 +4,8 @@ SQLite storage provider for Sixb, built on `bun:sqlite`.
 
 Backs every Sixb store — objects, ontology commits, auth, agents, timeseries, and the run history for
 actions, syncs, pipelines, projections, workflows, and webhooks — from a single local database file.
-This is what `bun create sixb` scaffolds, and what makes a fresh project run with no infrastructure.
+This is the storage `bun create sixb` scaffolds, and part of what makes a fresh project run with no
+service to install.
 
 ## Install
 

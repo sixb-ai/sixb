@@ -34,8 +34,8 @@ cd my-app
 bun run dev
 ```
 
-A new project runs on SQLite and the local filesystem, with no infrastructure to start. Atlas — the
-built-in operations UI — comes up alongside your app.
+A new project runs on SQLite and DuckLake against local files — nothing to install, no service to
+start. Atlas, the built-in operations UI, comes up alongside your app.
 
 ## What you write
 
