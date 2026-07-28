@@ -26,8 +26,6 @@ export async function validateProjectionJob(
   runtime: ProjectionWorkerContext,
   job: ProjectionJob
 ): Promise<ValidatedProjectionJob> {
-  assertRunId(runtime.projectId, job)
-
   const registry = getProjectionRegistry(runtime)
   const descriptor = resolveDescriptor(registry, job.projectionId)
   assertDescriptorMatchesJob(descriptor, job)
@@ -36,8 +34,7 @@ export async function validateProjectionJob(
   const dataset = requireDataset(runtime, job.datasetVersion.datasetId)
   const version = await requirePinnedVersion(runtime, job)
 
-  assertDatasetVersionMatchesDefinition({ dataset, version })
-  assertProjectionCompatibleWithDataset({ projection, dataset, ontology: runtime.ontology })
+  validatePinnedSchema({ runtime, projection, dataset, version })
 
   return {
     job,
@@ -48,7 +45,25 @@ export async function validateProjectionJob(
   }
 }
 
-function assertRunId(projectId: string, job: ProjectionJob): void {
+function validatePinnedSchema(input: {
+  readonly runtime: ProjectionWorkerContext
+  readonly projection: ProjectionDefinition
+  readonly dataset: DatasetDefinition
+  readonly version: DatasetVersion
+}): void {
+  try {
+    assertDatasetVersionMatchesDefinition(input)
+    assertProjectionCompatibleWithDataset({ ...input, ontology: input.runtime.ontology })
+  } catch (error) {
+    if (error instanceof ProjectionWorkerPermanentError) throw error
+    throw permanent(
+      `Projection '${input.projection.id}' is incompatible with its pinned dataset version: ${errorMessage(error)}`,
+      error
+    )
+  }
+}
+
+export function assertProjectionJobId(projectId: string, job: ProjectionJob): void {
   const expected = createProjectionRunId(projectId, job)
   if (job.id === expected) return
   throw permanent(`Projection job id '${job.id}' does not match its pinned semantic identity.`)
@@ -121,4 +136,8 @@ async function requirePinnedVersion(
 
 function permanent(message: string, cause?: unknown): ProjectionWorkerPermanentError {
   return new ProjectionWorkerPermanentError(`[SixbProjectionWorker] ${message}`, { cause })
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

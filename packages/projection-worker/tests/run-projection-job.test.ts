@@ -37,15 +37,19 @@ import { shareOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import { decorateOperationScopedMethodForTesting } from "@sixb/core/internal/storage-operation-scope"
 import type { BeginDatasetWriteInput, ReadDatasetRowsInput } from "@sixb/core/lake-storage"
 import {
+  type AbandonSourceMaterializationCandidateInput,
   isProjectionMaterializationRunStorage,
+  type OntologySourceRecord,
   type ProjectionMaterializationRunStorage,
   type ProjectionRunStorage,
+  type ReclaimSourceMaterializationInput,
 } from "@sixb/core/storage"
 import {
   isPermanentProjectionFailure,
   runProjectionJob as runCanonicalProjectionJob,
 } from "../src/run-projection-job"
 import type {
+  ProjectionJob,
   ProjectionJobResult,
   ProjectionWorkerContext,
   RunProjectionJobInput,
@@ -734,6 +738,52 @@ describe("runProjectionJob", () => {
     expect(history.map((point) => point.value)).toEqual([70.5])
   })
 
+  test("replays a terminal run without reading registry or lake state", async () => {
+    const deps = createDeps()
+    const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] }, deps)
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+    ])
+    const descriptor = getProjectionRegistry(sixb).resolveDispatch(roomProjection.id)
+    if (descriptor.projectionKind !== "object") throw new Error("Expected object projection.")
+    const identity = {
+      projectionId: descriptor.projectionId,
+      projectionKind: "object" as const,
+      protocol: "replacement" as const,
+      datasetVersion: {
+        datasetId: version.datasetId,
+        versionId: version.versionId,
+        createdAt: version.createdAt.toISOString(),
+      },
+      ontologyRevision: descriptor.ontologyRevision,
+      projectionRevision: descriptor.projectionRevision,
+      ownershipHash: descriptor.ownershipHash,
+    }
+    const job: ProjectionJob = {
+      id: createProjectionRunId(sixb.id, identity),
+      ...identity,
+    }
+    const runtime = createRuntime(sixb)
+    await runCanonicalProjectionJob({ runtime, job })
+
+    const unavailable = () => {
+      throw new Error("terminal replay accessed current configuration or lake state")
+    }
+    const replayRuntime: ProjectionWorkerContext = {
+      ...runtime,
+      lakeStorage: new Proxy(runtime.lakeStorage, { get: unavailable }),
+      getDatasetById: unavailable,
+      getProjectionById: unavailable,
+    }
+
+    await expect(runCanonicalProjectionJob({ runtime: replayRuntime, job })).resolves.toMatchObject(
+      {
+        run: { id: job.id, status: "succeeded" },
+        replayedTerminal: true,
+      }
+    )
+  })
+
   test("resumes telemetry from the durable offset without an exact-multiple empty commit", async () => {
     const deps = createDeps()
     const lakeStorage = new InterruptibleLakeStorage(deps.lakeStorage)
@@ -1291,6 +1341,59 @@ describe("runProjectionJob", () => {
       linkId: "hasSensors",
     })
     expect(links).toEqual([])
+  })
+
+  test("keeps the run running when candidate abandonment cannot be confirmed", async () => {
+    const deps = createDeps()
+    const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] }, deps)
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+    ])
+    const abandonmentFailure = new Error("candidate abandonment unavailable")
+    const restoreAbandon = decorateOperationScopedMethodForTesting(
+      deps.storage.ontology.sources,
+      "abandon",
+      (abandon) => {
+        function failCandidateAbandonment(
+          input: AbandonSourceMaterializationCandidateInput
+        ): Promise<OntologySourceRecord>
+        function failCandidateAbandonment(
+          input: ReclaimSourceMaterializationInput
+        ): Promise<OntologySourceRecord | null>
+        async function failCandidateAbandonment(
+          input: AbandonSourceMaterializationCandidateInput | ReclaimSourceMaterializationInput
+        ): Promise<OntologySourceRecord | null> {
+          if (input.kind === "candidate") throw abandonmentFailure
+          return abandon(input)
+        }
+        return failCandidateAbandonment
+      }
+    )
+
+    try {
+      await expect(
+        runProjectionJob({
+          runtime: createRuntime(sixb),
+          job: {
+            id: "projrun-abandonment-fails",
+            projectionId: roomProjection.id,
+            projectionKind: "object",
+            datasetId: roomsDataset.id,
+            versionId: version.versionId,
+          },
+        })
+      ).rejects.toBe(abandonmentFailure)
+    } finally {
+      restoreAbandon()
+    }
+
+    expect(
+      await deps.storage.projectionRuns.getById({
+        projectId: sixb.id,
+        id: canonicalRunId("projrun-abandonment-fails"),
+      })
+    ).toMatchObject({ status: "running", attempt: 1 })
   })
 
   test("rejects non-contiguous repetitions of the same object root", async () => {

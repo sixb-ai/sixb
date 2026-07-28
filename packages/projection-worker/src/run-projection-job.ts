@@ -7,7 +7,11 @@ import {
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { ProjectionRunObjectTypes, ProjectionRunRecord } from "@sixb/core/storage"
 import { ProjectionWorkerPermanentError } from "./errors"
-import { type ValidatedProjectionJob, validateProjectionJob } from "./job-validation"
+import {
+  assertProjectionJobId,
+  type ValidatedProjectionJob,
+  validateProjectionJob,
+} from "./job-validation"
 import { mapLinkProjectionEntries } from "./run-link-projection"
 import { mapObjectProjectionEntries } from "./run-object-projection"
 import { runTelemetryProjection, TELEMETRY_PROJECTION_BATCH_SIZE } from "./run-telemetry-projection"
@@ -20,10 +24,11 @@ import type {
 
 export async function runProjectionJob(input: RunProjectionJobInput): Promise<ProjectionJobResult> {
   const signal = input.signal ?? new AbortController().signal
-  const validated = await validateProjectionJob(input.runtime, input.job)
-  const terminal = await findMatchingTerminalRun(input, validated.objectTypes)
+  assertProjectionJobId(input.runtime.projectId, input.job)
+  const terminal = await findMatchingTerminalRun(input)
   if (terminal) return terminalResult(terminal)
 
+  const validated = await validateProjectionJob(input.runtime, input.job)
   const execution = await claimOrReplaySucceededRun(input, validated.objectTypes)
   if ("replayedTerminal" in execution) return execution
   try {
@@ -64,15 +69,14 @@ async function claimOrReplaySucceededRun(
 }
 
 async function findMatchingTerminalRun(
-  input: RunProjectionJobInput,
-  objectTypes: ProjectionRunObjectTypes
+  input: RunProjectionJobInput
 ): Promise<ProjectionRunRecord | null> {
   const run = await input.runtime.projectionRunsStorage.getById({
     projectId: input.runtime.projectId,
     id: input.job.id,
   })
   if (!run) return null
-  assertRunMatchesJob(run, input.job, objectTypes)
+  assertRunMatchesJob(run, input.job)
   if (run.status === "running") return null
   if (run.status === "succeeded") return run
   throw new ProjectionWorkerPermanentError(
@@ -216,11 +220,7 @@ async function requireRun(input: RunProjectionJobInput): Promise<ProjectionRunRe
   throw new Error(`[SixbProjectionWorker] Projection run '${input.job.id}' disappeared.`)
 }
 
-function assertRunMatchesJob(
-  run: ProjectionRunRecord,
-  job: ProjectionJob,
-  objectTypes: ProjectionRunObjectTypes
-): void {
+function assertRunMatchesJob(run: ProjectionRunRecord, job: ProjectionJob): void {
   const matches =
     run.projectionId === job.projectionId &&
     run.projectionKind === job.projectionKind &&
@@ -230,10 +230,7 @@ function assertRunMatchesJob(
     run.datasetVersionCreatedAt === job.datasetVersion.createdAt &&
     run.ontologyRevision === job.ontologyRevision &&
     run.projectionRevision === job.projectionRevision &&
-    run.ownershipHash === job.ownershipHash &&
-    run.objectTypeId === objectTypes.objectTypeId &&
-    run.sourceObjectTypeId === objectTypes.sourceObjectTypeId &&
-    run.targetObjectTypeId === objectTypes.targetObjectTypeId
+    run.ownershipHash === job.ownershipHash
   if (matches) return
   throw new ProjectionWorkerPermanentError(
     `[SixbProjectionWorker] Projection run '${run.id}' has a different durable identity.`

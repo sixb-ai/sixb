@@ -1,11 +1,12 @@
 import type { DomainEvent } from "@sixb/core"
 import { SYSTEM_PRINCIPAL } from "@sixb/core"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
-import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
-import { createProjectionRunId } from "@sixb/core/internal/projections"
+import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import { evaluateEventSchedule } from "@sixb/core/internal/schedules"
 import { Worker } from "@sixb/core/internal/workers"
 import { OrchestratorError } from "./errors"
+import { runProjectionDispatchReconciler } from "./projection-dispatch-reconciler"
+import { buildProjectionJob } from "./projection-job"
 import { routeKeysForEvent } from "./route-key"
 import type {
   OrchestratorEventScheduleBinding,
@@ -20,6 +21,7 @@ const EVENT_SCHEDULE_RETRY_MAX_DELAY_MS = 10_000
 
 export class OrchestratorWorker extends Worker {
   private readonly options: OrchestratorRuntimeOptions
+  private readonly projectionDescriptors: readonly ProjectionDispatchDescriptor[]
 
   constructor(options: OrchestratorRuntimeOptions) {
     if (!options.projectId) {
@@ -27,6 +29,12 @@ export class OrchestratorWorker extends Worker {
     }
     super()
     this.options = options
+    this.projectionDescriptors = projectionDescriptors(options.routes)
+    if (this.projectionDescriptors.length > 0 && !options.projectionDispatch) {
+      throw new OrchestratorError(
+        "Projection routes require lake and projection-run storage for durable dispatch."
+      )
+    }
   }
 
   protected async run(signal: AbortSignal): Promise<void> {
@@ -38,6 +46,20 @@ export class OrchestratorWorker extends Worker {
     }
     for (const eventType of eventScheduleTypes) {
       consumers.push(consumeRetainedEventSchedules(this.options, eventType, signal))
+    }
+    if (this.projectionDescriptors.length > 0) {
+      const dispatch = this.options.projectionDispatch!
+      consumers.push(
+        runProjectionDispatchReconciler(
+          {
+            projectId: this.options.projectId,
+            queue: this.options.queues.projections,
+            descriptors: this.projectionDescriptors,
+            ...dispatch,
+          },
+          signal
+        )
+      )
     }
 
     await Promise.all(consumers)
@@ -244,17 +266,19 @@ async function enqueueDirectJob(
           `Projection route for dataset '${item.job.payload.datasetId}' received dataset '${sourceEvent.payload.datasetId}'.`
         )
       }
-      const payload = projectionMaterializationIdentity(item.job.payload, sourceEvent)
+      const job = buildProjectionJob({
+        projectId: options.projectId,
+        descriptor: item.job.payload,
+        datasetVersion: {
+          datasetId: sourceEvent.payload.datasetId,
+          versionId: sourceEvent.payload.versionId,
+          createdAt: sourceEvent.payload.createdAt,
+        },
+        metadata,
+      })
       await options.queues.projections.enqueue({
         projectId: options.projectId,
-        jobs: [
-          {
-            id: createProjectionRunId(options.projectId, payload),
-            type: item.job.type,
-            payload,
-            metadata,
-          },
-        ],
+        jobs: [job],
       })
       return
     }
@@ -285,32 +309,6 @@ async function enqueueDirectJob(
       })
       return
     }
-  }
-}
-
-function projectionMaterializationIdentity(
-  descriptor: Extract<OrchestratorJob, { readonly queue: "projections" }>["job"]["payload"],
-  sourceEvent: Extract<StoredDomainEvent, { readonly type: "dataset.version.committed" }>
-): ProjectionMaterializationIdentity {
-  const common = {
-    projectionId: descriptor.projectionId,
-    datasetVersion: {
-      datasetId: sourceEvent.payload.datasetId,
-      versionId: sourceEvent.payload.versionId,
-      createdAt: sourceEvent.payload.createdAt,
-    },
-    ontologyRevision: descriptor.ontologyRevision,
-    projectionRevision: descriptor.projectionRevision,
-    ownershipHash: descriptor.ownershipHash,
-  }
-
-  switch (descriptor.projectionKind) {
-    case "object":
-      return { ...common, projectionKind: "object", protocol: "replacement" }
-    case "link":
-      return { ...common, projectionKind: "link", protocol: "replacement" }
-    case "telemetry":
-      return { ...common, projectionKind: "telemetry", protocol: "telemetry" }
   }
 }
 
@@ -490,6 +488,42 @@ function buildMetadata(event: StoredDomainEvent): Record<string, string> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function projectionDescriptors(
+  routes: OrchestratorRoutes
+): readonly ProjectionDispatchDescriptor[] {
+  const descriptors = new Map<string, ProjectionDispatchDescriptor>()
+  for (const route of routes.values()) {
+    for (const item of route.jobs) {
+      if (item.queue !== "projections") continue
+      const existing = descriptors.get(item.job.payload.projectionId)
+      if (existing && !projectionDescriptorsEqual(existing, item.job.payload)) {
+        throw new OrchestratorError(
+          `Projection '${item.job.payload.projectionId}' has conflicting dispatch routes.`
+        )
+      }
+      descriptors.set(item.job.payload.projectionId, item.job.payload)
+    }
+  }
+  return [...descriptors.values()].sort((left, right) =>
+    left.projectionId.localeCompare(right.projectionId)
+  )
+}
+
+function projectionDescriptorsEqual(
+  left: ProjectionDispatchDescriptor,
+  right: ProjectionDispatchDescriptor
+): boolean {
+  return (
+    left.projectionId === right.projectionId &&
+    left.projectionKind === right.projectionKind &&
+    left.protocol === right.protocol &&
+    left.datasetId === right.datasetId &&
+    left.ontologyRevision === right.ontologyRevision &&
+    left.projectionRevision === right.projectionRevision &&
+    left.ownershipHash === right.ownershipHash
+  )
 }
 
 function waitForAbort(signal: AbortSignal): Promise<void> {

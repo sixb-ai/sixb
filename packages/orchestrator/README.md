@@ -1,31 +1,39 @@
 # @sixb/orchestrator
 
-Bridges runtime events to `SixbQueues` job lanes.
-V1 routes runtime facts into `syncRuns`, `pipelines`, and `projections` queue lanes.
+Bridges runtime events to queue lanes and durably reconciles projection dispatch from lake state.
 
 ## Delivery contract
 
-**At-most-once per occurrence, at-least-once across cadence.**
+Schedule, sync, pipeline, and workflow routes consume runtime events. Their delivery guarantee follows
+the event source and route-specific retry policy.
 
-The scheduler uses fire-and-forget event emission (`void events.append(...)`).
-If the append is rejected asynchronously, that specific occurrence is lost.
-The next cadence tick will produce a new event normally.
-This gap is a known upstream limitation to be addressed in a follow-up on the scheduler.
+Projection dispatch has two paths:
+
+```text
+dataset.version.committed -> immediate deterministic job
+startup + periodic lake reconciliation -> repair a missing deterministic job
+```
+
+Both paths compute the same job ID. A durable projection run prevents redispatch after queue
+completion; queue-level IDs deduplicate concurrent dispatches.
 
 ## Usage (co-hosted in `sixb dev`)
 
 When `cohostWorkers` is enabled, `sixb dev` automatically compiles routes from registered syncs,
 pipelines, and projections, starts the orchestrator, co-hosts available workers, and starts the scheduler. No manual wiring is needed.
 
-For testing or custom setups:
+Custom framework hosts with projection routes must also provide the narrow reconciliation ports:
 
 ```ts
-import { compileRoutes, OrchestratorWorker } from "@sixb/orchestrator"
+import { getProjectionDispatchDescriptors } from "@sixb/core/internal/projections"
+import { compileRoutesWithDiagnostics, OrchestratorWorker } from "@sixb/orchestrator"
 
-const routes = compileRoutes({
+const projectionDispatchDescriptors = getProjectionDispatchDescriptors(sixb)
+const { routes } = compileRoutesWithDiagnostics({
+  schedules: sixb.getScheduleDefinitions(),
   syncs: sixb.getSyncDefinitions(),
   pipelines: sixb.getPipelineDefinitions(),
-  projections: [...sixb.getObjectProjections(), ...sixb.getLinkProjections()],
+  projections: projectionDispatchDescriptors,
 })
 
 const worker = new OrchestratorWorker({
@@ -33,6 +41,10 @@ const worker = new OrchestratorWorker({
   events: sixb.events,
   queues: sixb.queues,
   routes,
+  projectionDispatch: {
+    lakeStorage: sixb.lakeStorage,
+    projectionRuns: sixb.storage.projectionRuns,
+  },
 })
 
 await worker.start()
@@ -48,7 +60,8 @@ dispatcher role) pointed at shared durable providers. In local development it is
 
 ## Limitations (V1)
 
-- **No deduplication**: if an event is delivered twice, two jobs are enqueued.
-- **No catch-up**: events emitted before `start()` are never processed (live-only).
+- Direct non-projection jobs retain their route-specific event semantics.
+- Projection reconciliation converges to the latest data-bearing dataset version; it is not an
+  event replay log.
 - **No dynamic routes**: adding syncs, pipelines, or projections after startup requires a restart.
 - **Limited event types**: schedule, sync completion, pipeline completion, and dataset commit events are routed. `rule.triggered` and workflow events will be added later.

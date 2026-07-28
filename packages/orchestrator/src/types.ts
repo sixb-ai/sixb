@@ -12,6 +12,7 @@ import type {
 import type { EventsRuntime } from "@sixb/core/internal/events"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import type { RuntimeEventScheduleDefinition } from "@sixb/core/internal/schedules"
+import type { LakeStorage } from "@sixb/core/lake-storage"
 import type {
   NewQueueJob,
   PipelineRunRequestedQueueJob,
@@ -19,6 +20,7 @@ import type {
   SyncRunRequestedQueueJob,
   WorkflowRunRequestedQueueJob,
 } from "@sixb/core/queues"
+import type { ProjectionRunStorage } from "@sixb/core/storage"
 
 export type RoutableProjectionDefinition = ProjectionDispatchDescriptor
 
@@ -96,9 +98,16 @@ export interface CompileRoutesResult {
   readonly diagnostics: readonly CompileRoutesDiagnostic[]
 }
 
+export interface ProjectionDispatchPorts {
+  readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "getVersion" | "listVersions">
+  readonly projectionRuns: Pick<ProjectionRunStorage, "getById">
+}
+
 export interface OrchestratorRuntimeOptions {
   readonly projectId: string
   readonly events: EventsRuntime
   readonly queues: Queues
   readonly routes: OrchestratorRoutes
+  /** Required when the compiled routes contain projections. */
+  readonly projectionDispatch?: ProjectionDispatchPorts
 }

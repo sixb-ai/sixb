@@ -14,6 +14,7 @@ import {
   type ValueType,
   valueTypeRef,
 } from "../src"
+import type { ProjectionMaterializationIdentity } from "../src/materialization"
 import {
   computeOntologyRevision,
   computeProjectionRevision,
@@ -126,7 +127,7 @@ describe("projection registry", () => {
   })
 
   test("derives one stable run id from the complete pinned semantic identity", () => {
-    const identity = {
+    const identity: ProjectionMaterializationIdentity = {
       projectionId: "rooms",
       projectionKind: "object" as const,
       protocol: "replacement" as const,
@@ -143,13 +144,44 @@ describe("projection registry", () => {
     const first = createProjectionRunId("project", identity)
     expect(first).toMatch(/^[a-f0-9]{64}$/)
     expect(createProjectionRunId("project", structuredClone(identity))).toBe(first)
-    expect(
-      createProjectionRunId("project", {
-        ...identity,
-        projectionRevision: "projection-2",
-      })
-    ).not.toBe(first)
-    expect(createProjectionRunId("other-project", identity)).not.toBe(first)
+
+    const changed = (patch: Record<string, unknown>) =>
+      ({ ...identity, ...patch }) as ProjectionMaterializationIdentity
+    const variants: ReadonlyArray<
+      readonly [field: string, projectId: string, value: ProjectionMaterializationIdentity]
+    > = [
+      ["projectId", "other-project", identity],
+      ["projectionId", "project", changed({ projectionId: "other-projection" })],
+      ["projectionKind", "project", changed({ projectionKind: "link" })],
+      ["protocol", "project", changed({ protocol: "telemetry" })],
+      [
+        "datasetId",
+        "project",
+        changed({ datasetVersion: { ...identity.datasetVersion, datasetId: "other-dataset" } }),
+      ],
+      [
+        "versionId",
+        "project",
+        changed({ datasetVersion: { ...identity.datasetVersion, versionId: "v2" } }),
+      ],
+      [
+        "createdAt",
+        "project",
+        changed({
+          datasetVersion: {
+            ...identity.datasetVersion,
+            createdAt: "2026-01-02T00:00:00.000Z",
+          },
+        }),
+      ],
+      ["ontologyRevision", "project", changed({ ontologyRevision: "ontology-2" })],
+      ["projectionRevision", "project", changed({ projectionRevision: "projection-2" })],
+      ["ownershipHash", "project", changed({ ownershipHash: "ownership-2" })],
+    ]
+
+    for (const [field, projectId, variant] of variants) {
+      expect(createProjectionRunId(projectId, variant), field).not.toBe(first)
+    }
   })
 
   test("keeps ontology revisions stable across non-semantic ordering and metadata", () => {

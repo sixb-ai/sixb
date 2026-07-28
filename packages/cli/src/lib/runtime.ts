@@ -121,22 +121,34 @@ export async function startSchedulerRuntime(sixb: LoadedSixb): Promise<RunningSc
 export async function startOrchestratorRuntime(
   sixb: LoadedSixb
 ): Promise<RunningOrchestratorRuntime> {
+  const projections = getProjectionDispatchDescriptors(sixb)
   const { routes, diagnostics } = compileRoutesWithDiagnostics({
     schedules: sixb.getScheduleDefinitions(),
     syncs: sixb.getSyncDefinitions(),
     pipelines: sixb.getPipelineDefinitions(),
-    projections: getProjectionDispatchDescriptors(sixb),
+    projections,
     workflows: sixb.workflows.list(),
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
   let orchestratorWorker: OrchestratorWorker | null = null
 
   if (routes.size > 0) {
+    const projectionRuns = sixb.storage.projectionRuns
+    if (projections.length > 0 && !projectionRuns) {
+      throw new Error(
+        "[SixbCLI] Projection dispatch requires storage.projectionRuns for durable reconciliation."
+      )
+    }
+    const projectionDispatch =
+      projections.length > 0 && projectionRuns
+        ? { lakeStorage: sixb.lakeStorage, projectionRuns }
+        : undefined
     orchestratorWorker = new OrchestratorWorker({
       projectId: sixb.id,
       events: sixb.events,
       queues: sixb.queues,
       routes,
+      ...(projectionDispatch ? { projectionDispatch } : {}),
     })
     await orchestratorWorker.start()
   }

@@ -42,7 +42,6 @@ import { createProjectionRunMaterializationIdentity } from "../shared/projection
 import { createProjectionEntryValidator } from "./entry-validator"
 import { planProjectionReplacement } from "./replacement-plan"
 import {
-  bestEffort,
   type StagedProjectionMaterialization,
   stageProjectionMaterialization,
 } from "./source-materialization"
@@ -423,16 +422,14 @@ async function abandonFailedCandidate(
   error: unknown
 ): Promise<void> {
   if (!shouldAbandonCandidate(error)) return
-  await bestEffort(() =>
-    context.storage.ontology.sources.abandon({
-      kind: "candidate",
-      projectId: context.projectId,
-      source: command.source,
-      materializationId: candidate.materializationId,
-      execution: command.execution,
-      abandonedAt: context.clock().toISOString(),
-    })
-  )
+  await context.storage.ontology.sources.abandon({
+    kind: "candidate",
+    projectId: context.projectId,
+    source: command.source,
+    materializationId: candidate.materializationId,
+    execution: command.execution,
+    abandonedAt: context.clock().toISOString(),
+  })
 }
 
 function shouldAbandonCandidate(error: unknown): boolean {
