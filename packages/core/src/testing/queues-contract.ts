@@ -91,6 +91,49 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         })
       })
 
+      test("treats caller-supplied ids as opaque across the job lifecycle", async () => {
+        await withQueues(async (queues) => {
+          const id = "workflow:review-meeting:node:0"
+          const input = {
+            id,
+            type: "sync.run.requested" as const,
+            payload: { syncId: "sync-1" },
+          }
+
+          const [[first], [duplicate]] = await Promise.all([
+            queues.syncRuns.enqueue({ projectId: "project-a", jobs: [input] }),
+            queues.syncRuns.enqueue({ projectId: "project-a", jobs: [input] }),
+          ])
+          const [claimed] = await queues.syncRuns.claim({
+            projectId: "project-a",
+            workerId: "worker-1",
+            limit: 2,
+          })
+
+          expect(first?.id).toBe(id)
+          expect(duplicate?.id).toBe(id)
+          expect(claimed?.job.id).toBe(id)
+          if (queues.syncRuns.renewLease) {
+            await expect(
+              queues.syncRuns.renewLease({
+                projectId: "project-a",
+                jobId: id,
+                leaseId: claimed!.leaseId,
+                leaseMs: shortLeaseMs * 10,
+              })
+            ).resolves.toMatchObject({ job: { id } })
+          }
+          await queues.syncRuns.complete({
+            projectId: "project-a",
+            jobId: id,
+            leaseId: claimed!.leaseId,
+          })
+          await expect(
+            queues.syncRuns.claim({ projectId: "project-a", workerId: "worker-2" })
+          ).resolves.toHaveLength(0)
+        })
+      })
+
       test("returns empty array when no jobs are passed", async () => {
         await withQueues(async (queues) => {
           const result = await queues.syncRuns.enqueue({ projectId: "project-a", jobs: [] })

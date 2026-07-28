@@ -14,7 +14,13 @@ import {
   type KeepJobs,
   UnrecoverableError,
 } from "bullmq"
-import { buildEnvelope, envelopeToJob, type QueueJobData, toClaimed } from "./adapter"
+import {
+  buildEnvelope,
+  envelopeToJob,
+  type QueueJobData,
+  toBullMqJobId,
+  toClaimed,
+} from "./adapter"
 import type { BullMqConnections } from "./connection"
 import { wrapLeaseError } from "./errors"
 import { assertNonEmpty, assertPositiveNumber, parseTimestamp } from "./validation"
@@ -79,7 +85,7 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
         name: envelope.data.type,
         data: envelope.data,
         opts: {
-          jobId: envelope.data.id,
+          jobId: toBullMqJobId(envelope.data.id),
           delay: envelope.delayMs,
           attempts: 1,
           removeOnComplete: this.shared.removeOnComplete,
@@ -198,7 +204,7 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     assertPositiveNumber(params.leaseMs, "leaseMs")
 
     const queue = this.getQueue(params.projectId)
-    const bullJob = (await queue.getJob(params.jobId)) as
+    const bullJob = (await queue.getJob(toBullMqJobId(params.jobId))) as
       | BullJob<QueueJobData<TQueueJob>>
       | undefined
     if (!bullJob) return null
@@ -237,7 +243,9 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     jobId: string
   ): Promise<BullJob<QueueJobData<TQueueJob>>> {
     const queue = this.getQueue(projectId)
-    const bullJob = (await queue.getJob(jobId)) as BullJob<QueueJobData<TQueueJob>> | undefined
+    const bullJob = (await queue.getJob(toBullMqJobId(jobId))) as
+      | BullJob<QueueJobData<TQueueJob>>
+      | undefined
     if (!bullJob) {
       throw new QueueError(`[Sixb] Unknown queue job '${jobId}'`)
     }

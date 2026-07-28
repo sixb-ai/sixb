@@ -3,6 +3,11 @@ import type { ClaimedQueueJob, NewQueueJob, QueueJob } from "@sixb/core/queues"
 import type { Job as BullJob } from "bullmq"
 import { parseTimestamp } from "./validation"
 
+/** Preserve Sixb's opaque job ids while avoiding BullMQ's reserved `:` separator. */
+export function toBullMqJobId(jobId: string): string {
+  return jobId.replaceAll("%", "%25").replaceAll(":", "%3A")
+}
+
 /**
  * Stored in `job.data` — the serialized Sixb queue-job envelope.
  *
