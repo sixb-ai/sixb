@@ -233,10 +233,15 @@ async function resolveEntrypoints(
     sourceTargets.add(entrypoint)
   }
 
-  if (!exportsMap && configuredEntrypoints.length === 0) {
-    // Bin-only packages (e.g. @sixb/cli) have no exports and nothing to bundle;
-    // their build still runs for copyAssets.
-    if (await Bun.file(join(srcRoot, "index.ts")).exists()) {
+  if (!exportsMap) {
+    // Bin-only packages (e.g. @sixb/cli) have no exports and nothing to bundle; their build still
+    // runs for copyAssets. Declaring `sixbBuild.entrypoints` replaces this fallback — reaching the
+    // `Object.values` branch with no exports at all used to be a TypeError waiting for the first
+    // package that declared entrypoints without exports.
+    if (
+      configuredEntrypoints.length === 0 &&
+      (await Bun.file(join(srcRoot, "index.ts")).exists())
+    ) {
       sourceTargets.add("./src/index.ts")
     }
   } else if (typeof exportsMap === "string" || Array.isArray(exportsMap)) {

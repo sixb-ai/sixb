@@ -1,40 +1,21 @@
-import { readdir } from "node:fs/promises"
 import { join } from "node:path"
-
-type PackageJson = {
-  name?: string
-  version?: string
-  description?: string
-  repository?: { directory?: string }
-  private?: boolean
-  main?: string
-  types?: string
-  exports?: ExportTarget
-  bin?: string | Record<string, string>
-  files?: string[]
-  license?: string
-  publishConfig?: { access?: string }
-  dependencies?: Record<string, string>
-  peerDependencies?: Record<string, string>
-  optionalDependencies?: Record<string, string>
-}
-
-type ExportTarget = string | null | ExportTarget[] | { [condition: string]: ExportTarget }
+import {
+  discoverPublishablePackages,
+  type ExportTarget,
+  type PackageJson,
+  type PublishablePackage,
+  packageName,
+  topologicalPublishOrder,
+} from "./publishable-packages"
 
 const root = process.cwd()
-const workspaceRoots = [
-  "auth",
-  "packages",
-  "connectors",
-  "broker",
-  "loggers",
-  "queues",
-  "sandboxes",
-  "storage",
-]
-const packages = await discoverPublishablePackages()
+const packages = await discoverPublishablePackages(root)
 
 assertLockstepVersions(packages)
+
+// A cycle makes the release unpublishable, because a package cannot go to the registry before
+// something it depends on. Failing here beats finding out halfway through a publish run.
+topologicalPublishOrder(packages)
 
 for (const packageInfo of packages) {
   validatePackage(packageInfo)
@@ -47,7 +28,7 @@ console.log(`[SixbPublish] Verified ${packages.length} publishable packages.`)
  * Every package ships on one train. A stray version means a `workspace:*` dependency resolves to
  * a version its sibling never published, which only shows up as an install failure downstream.
  */
-function assertLockstepVersions(all: Array<{ dir: string; packageJson: PackageJson }>): void {
+function assertLockstepVersions(all: PublishablePackage[]): void {
   const byVersion = new Map<string, string[]>()
   for (const packageInfo of all) {
     const version = packageInfo.packageJson.version
@@ -66,33 +47,7 @@ function assertLockstepVersions(all: Array<{ dir: string; packageJson: PackageJs
   throw new Error(`[SixbPublish] Publishable packages must share one version.\n${detail}`)
 }
 
-async function discoverPublishablePackages(): Promise<
-  Array<{ dir: string; packageJson: PackageJson }>
-> {
-  const found: Array<{ dir: string; packageJson: PackageJson }> = []
-
-  for (const workspaceRoot of workspaceRoots) {
-    const entries = await readdir(join(root, workspaceRoot), { withFileTypes: true })
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-
-      const dir = join(workspaceRoot, entry.name)
-      const packageJsonPath = join(root, dir, "package.json")
-      const packageJsonFile = Bun.file(packageJsonPath)
-      if (!(await packageJsonFile.exists())) continue
-
-      const packageJson = (await packageJsonFile.json()) as PackageJson
-      if (packageJson.private) continue
-
-      found.push({ dir, packageJson })
-    }
-  }
-
-  return found.sort((a, b) => packageName(a).localeCompare(packageName(b)))
-}
-
-function validatePackage(packageInfo: { dir: string; packageJson: PackageJson }): void {
+function validatePackage(packageInfo: PublishablePackage): void {
   const name = packageName(packageInfo)
   const { packageJson } = packageInfo
 
@@ -221,7 +176,7 @@ function hasRootExport(exports: unknown): boolean {
   return keys.includes(".") || keys.every((key) => !key.startsWith("."))
 }
 
-async function dryRunPack(packageInfo: { dir: string; packageJson: PackageJson }): Promise<void> {
+async function dryRunPack(packageInfo: PublishablePackage): Promise<void> {
   const proc = Bun.spawn([process.execPath, "pm", "pack", "--dry-run"], {
     cwd: join(root, packageInfo.dir),
     stdout: "pipe",
@@ -312,8 +267,4 @@ function targetIsPacked(target: string, packedPaths: Set<string>): boolean {
       .join(".*")}$`
   )
   return [...packedPaths].some((packedPath) => pattern.test(packedPath))
-}
-
-function packageName(packageInfo: { dir: string; packageJson: PackageJson }): string {
-  return packageInfo.packageJson.name ?? packageInfo.dir
 }

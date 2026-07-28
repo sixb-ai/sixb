@@ -174,6 +174,24 @@ bun run generate:client
 
 Prefer targeted checks while iterating, then broader checks before review.
 
+## Versioning
+
+Every publishable package shares one version and ships together — a release publishes all of them or
+none. `bun run test:publish` fails if they drift apart, so a version bump touches every manifest.
+
+Releasing is two commands. The first produces exactly what gets published and proves it; the second
+publishes, in dependency order, skipping anything already on the registry so an interrupted run can
+be re-run:
+
+```bash
+bun run release
+bun run release:publish -- --tag next
+```
+
+Publish to a temporary tag first, verify it, then move `latest`. The publish script prints the
+`npm dist-tag` commands to do that. Note that `bun publish --dry-run` still authenticates; to
+rehearse without credentials, point `--registry` at a local registry.
+
 ## The feeling we want
 
 Clear proposals. Easy claims. Small PRs. Fast feedback. Small merges. No silent waiting.
