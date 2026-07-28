@@ -60,7 +60,10 @@ describe("sixb init", () => {
     const configSource = await readFile(join(targetDir, "sixb.config.ts"), "utf-8")
     expect(configSource).toContain('const projectId = "starter"')
     expect(configSource).toContain('new SqliteStorage({ path: ".sixb" })')
-    expect(configSource).toContain('new LocalLakeStorage({ path: ".sixb/lake" })')
+    expect(configSource).toContain("new DuckLakeStorage({")
+    expect(configSource).toContain('path: ".sixb/lake/metadata.ducklake"')
+    expect(configSource).toContain('dataPath: ".sixb/lake/data"')
+    expect(configSource).not.toContain("LocalLakeStorage")
     expect(configSource).not.toContain("isProduction")
 
     const packageJson = JSON.parse(await readFile(join(targetDir, "package.json"), "utf-8")) as {
@@ -72,8 +75,8 @@ describe("sixb init", () => {
     expect(packageJson.name).toBe("starter")
     expect(packageJson.scripts.typecheck).toBe("sixb typegen && tsc --noEmit")
     expect(packageJson.dependencies["@sixb/client"]).toBe("^0.1.0")
-    expect(packageJson.dependencies["@sixb/lake-local"]).toBe("^0.1.0")
-    expect(packageJson.dependencies["@sixb/ducklake"]).toBeUndefined()
+    expect(packageJson.dependencies["@sixb/ducklake"]).toBe("^0.1.0")
+    expect(packageJson.dependencies["@sixb/lake-local"]).toBeUndefined()
     expect(packageJson.dependencies["@sixb/pg"]).toBeUndefined()
     expect(packageJson.dependencies["@sixb/blob-s3"]).toBeUndefined()
     expect(packageJson.dependencies.react).toBe("^19.0.0")

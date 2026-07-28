@@ -43,7 +43,8 @@ export type FinishSyncRunInput =
       readonly status: "succeeded"
       readonly finishedAt?: Date
       readonly rowsRead: number
-      readonly output: DatasetVersionRef
+      /** Absent only when the first append run succeeds without producing any rows. */
+      readonly output?: DatasetVersionRef
       readonly checkpoint?: JsonValue
     }
   | {

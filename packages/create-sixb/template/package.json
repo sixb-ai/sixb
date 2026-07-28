@@ -14,7 +14,7 @@
     "@sixb/cli": "__SIXB_VERSION__",
     "@sixb/client": "__SIXB_VERSION__",
     "@sixb/core": "__SIXB_VERSION__",
-    "@sixb/lake-local": "__SIXB_VERSION__",
+    "@sixb/ducklake": "__SIXB_VERSION__",
     "@sixb/sqlite": "__SIXB_VERSION__",
     "@sixb/ui": "__SIXB_VERSION__",
     "@tailwindcss/cli": "^4.2.2",

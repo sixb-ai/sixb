@@ -760,6 +760,7 @@ describe("runWorkflowJob", () => {
           transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
         },
       },
+      observer: new EventsRuntimeWorkflowRunObserver(sixb.events),
     })
 
     expect(waiting.status).toBe("waiting")
@@ -773,6 +774,19 @@ describe("runWorkflowJob", () => {
       agentId: invoiceResolverAgent.id,
       status: "queued",
       prompt: "Resolve transaction 'txn_1'.",
+    })
+    const waitingEvents = await sixb.events.read({ topics: ["workflows"] })
+    expect(waitingEvents.map((event) => event.type)).toEqual([
+      "workflow.run.started",
+      "workflow.run.node.started",
+      "workflow.run.node.waiting",
+      "workflow.run.waiting",
+    ])
+    expect(waitingEvents[2]?.payload).toMatchObject({
+      workflowId: workflow.id,
+      runId: waiting.id,
+      nodeRunId: node!.id,
+      nodeType: "agent",
     })
     const [queuedAgentJob] = await sixb.queues.agents.claim({
       projectId: sixb.id,
@@ -822,6 +836,47 @@ describe("runWorkflowJob", () => {
     })
     expect(resumed.status).toBe("succeeded")
     expect(resumed.steps.resolveInvoiceWithAgent).toEqual(output)
+  })
+
+  test("notifies run waiting when a parked node notification fails", async () => {
+    const workflow = defineWorkflow("agent-waiting-observer-fails")
+      .input({ transaction: ref(Transaction) })
+      .then(resolveInvoiceWithAgent)
+    const sixb = createSixb({ workflows: [workflow], agents: [invoiceResolverAgent] })
+    let runWaitingNotified = false
+    const observer: WorkflowRunObserver = {
+      onRunStarted: async () => undefined,
+      onNodeStarted: async () => undefined,
+      async onNodeWaiting() {
+        throw new Error("node waiting observer failed")
+      },
+      async onRunWaiting() {
+        runWaitingNotified = true
+      },
+      onNodeFinished: async () => undefined,
+      onRunFinished: async () => undefined,
+    }
+
+    const originalConsoleError = console.error
+    console.error = () => undefined
+    try {
+      const result = await runWorkflowJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "wfrun_agent_waiting_observer_fails",
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+        observer,
+      })
+
+      expect(result.status).toBe("waiting")
+      expect(runWaitingNotified).toBe(true)
+    } finally {
+      console.error = originalConsoleError
+    }
   })
 
   test("resumes submitted interventions and continues workflow dataflow", async () => {

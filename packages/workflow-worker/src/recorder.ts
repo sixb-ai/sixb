@@ -157,6 +157,8 @@ export class WorkflowRunRecorder {
         ...this.nodeContext(),
         waitingAt: params.waitingAt,
       })
+    })
+    await this.notify(async () => {
       await this.dependencies.observer.onRunWaiting?.(params.run, {
         waitingAt: params.waitingAt,
       })

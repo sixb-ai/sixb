@@ -70,6 +70,32 @@ describe("InMemorySyncRunStorage", () => {
     })
   })
 
+  test("stores a checkpoint for a successful empty append without an output version", async () => {
+    const storage = new InMemorySyncRunStorage()
+    await storage.start({
+      id: "syncrun_empty",
+      projectId: "my-app",
+      syncId: "sync-events",
+      datasetId: "raw.erp.events",
+      mode: "append",
+    })
+
+    const finished = await storage.finish({
+      id: "syncrun_empty",
+      projectId: "my-app",
+      status: "succeeded",
+      rowsRead: 0,
+      checkpoint: { cursor: "cursor-1" },
+    })
+
+    expect(finished).toMatchObject({
+      status: "succeeded",
+      rowsRead: 0,
+      checkpoint: { cursor: "cursor-1" },
+    })
+    expect(finished.output).toBeUndefined()
+  })
+
   test("rejects duplicate starts and missing finishes", async () => {
     const storage = new InMemorySyncRunStorage()
 
