@@ -7,6 +7,9 @@ Learn more about the organization and its work at **[organization URL]**.
 Learn more about Sixb at <https://docs.sixb.ai/llms.txt>. Use that index to find and read the
 relevant Sixb documentation before implementing framework features.
 
+Use Bun for package management, scripts, and runtime commands. Do not introduce npm, pnpm, or
+yarn.
+
 Your job is to build internal operational software that provides measurable value to the
 organization. Favor small, useful deployments that can be validated quickly and improved over
 time.
@@ -21,15 +24,15 @@ Keep project documentation in `docs/` clear, minimal, and operational.
 
 ## Framework limitations
 
-If you encounter a limitation in Sixb while implementing this project, report it clearly rather
-than using an unclean workaround. Include the relevant context and the outcome the limitation
-blocks. Do not propose a framework solution; identifying and explaining the limitation is enough.
+If you encounter a limitation in Sixb while implementing this project, open an issue in the Sixb
+repository rather than using an unclean workaround. Include the relevant context, the outcome the
+limitation blocks, and a minimal reproducible example when possible.
 
 ## Commands
 
 - `bun dev` — start the runtime, the built-in Atlas UI, and the app (ports 3000 / 3001 / 3002)
 - `bun run build` — production build
-- `bun run typecheck` — `tsc --noEmit`
+- `bun run typecheck` — generate Sixb types, then run `tsc --noEmit`
 - `bun run check` — format and lint
 
 ## Project layout
@@ -66,15 +69,12 @@ definitions.
 - **Schedules** — `defineSchedule(id).cron(expr, { timezone })`, attached to a sync/pipeline/workflow
   via `.when(...)`.
 - **Workflows** — `defineWorkflow(id).input(...).then(step)`; pause for approvals with interventions.
-- **Apps & client** — import your ontology types and `objects(Type).query()` from
-  `@sixb/client/query`, then feed the query to `useObjectsQuery` / `useObjectsFacets` from
-  `@sixb/client/hooks` for fully typed, live data. Rows are typed `TwinObject`s.
+- **Apps & client** — use query option builders and mutations from `@sixb/client/hooks`, then pass
+  those options to TanStack Query for typed reads and writes.
 
 ## Gotchas
 
 - `createSixb()` is **async** — `await` it (or export the promise and await it where consumed).
-- `upsert` takes `{ properties }` with the primary id **inside** `properties` (there is no separate
-  `key` field).
 - Telemetry `semanticType` must be a real quantitative type (e.g. `Temperature`); there is no
   `Currency` type. A telemetry prop without a `semanticType` is fine.
 - The five providers (`broker`, `storage`, `lakeStorage`, `blobStorage`, `queues`) are all required.

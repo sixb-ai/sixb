@@ -37,7 +37,7 @@ bun add @sixb/cli
 | `sixb lake check` | Check lake dataset definitions for drift against the lake catalog |
 | `sixb lake cleanup` | Run provider-supported lake maintenance cleanup |
 | `sixb init [dir]` | Initialize a new sixb project in a directory |
-| `sixb create <name>` | Scaffold a new sixb project from the built-in template |
+| `sixb create <name>` | Scaffold a new Sixb project with `create-sixb` |
 | `sixb help` | Show help |
 | `sixb --version` | Show version |
 

@@ -12,6 +12,9 @@
   "include": ["src/**/*"],
   "references": [
     {
+      "path": "../create-sixb/tsconfig.build.json"
+    },
+    {
       "path": "../action-worker/tsconfig.build.json"
     },
     {

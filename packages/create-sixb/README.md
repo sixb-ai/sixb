@@ -9,6 +9,5 @@ bun install
 bun run dev
 ```
 
-The launcher reuses the scaffolding implementation from
-[`@sixb/cli`](https://www.npmjs.com/package/@sixb/cli). The generated project installs the CLI and
-uses its local `sixb` command.
+The package owns the project template and scaffolding implementation without pulling the full Sixb
+CLI dependency tree. The generated project installs the CLI and uses its local `sixb` command.

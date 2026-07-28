@@ -460,6 +460,7 @@
         "@sixb/server": "workspace:*",
         "@sixb/sync-worker": "workspace:*",
         "@sixb/workflow-worker": "workspace:*",
+        "create-sixb": "workspace:*",
         "ink": "^6.0.0",
         "react": "^19.0.0",
         "react-devtools-core": "^4.19.1",
@@ -510,11 +511,11 @@
       "bin": {
         "create-sixb": "./dist/index.js",
       },
-      "dependencies": {
-        "@sixb/cli": "workspace:*",
-      },
       "devDependencies": {
+        "@tanstack/react-query": "^5.0.0",
         "@types/bun": "latest",
+        "@types/react": "^19.0.0",
+        "react": "^19.0.0",
         "typescript": "^5.7.0",
       },
     },

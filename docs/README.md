@@ -7,11 +7,11 @@ Sixb is Bun-only. Install [Bun](https://bun.sh) first.
 
 ## Scaffold a project
 
-`create-sixb` writes a starter project from the basic template: an ontology, an action, and a
+`bun create sixb` writes a starter project from the basic template: an ontology, an action, and a
 custom app.
 
 ```bash
-bun create-sixb my-app
+bun create sixb my-app
 cd my-app
 bun install
 ```
