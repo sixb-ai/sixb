@@ -289,8 +289,7 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     projectId: "project-a",
     status: "succeeded",
     finishedAt: new Date("2026-04-19T12:00:01.000Z"),
-    rowsProcessed: 4,
-    objectsUpserted: 4,
+    sourceRowsRead: 4,
   })
   await storage.workflowRuns.start({
     id: "workflow-run-1",

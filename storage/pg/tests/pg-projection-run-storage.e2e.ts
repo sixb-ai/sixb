@@ -87,7 +87,7 @@ describe("PgProjectionRunStorage", () => {
     } as const
     for (const operation of [
       () => storage.projectionRuns.assertMaterializationExecution(stale),
-      () => storage.projectionRuns.updateMaterialization({ ...stale, rowsProcessed: 1 }),
+      () => storage.projectionRuns.updateMaterialization({ ...stale, sourceRowsRead: 1 }),
       () => storage.projectionRuns.finishMaterialization({ ...stale, status: "cancelled" }),
     ]) {
       await expect(operation()).rejects.toMatchObject({
@@ -100,9 +100,9 @@ describe("PgProjectionRunStorage", () => {
       storage.projectionRuns.updateMaterialization({
         ...stale,
         executionToken: current.executionToken,
-        rowsProcessed: 3,
+        sourceRowsRead: 3,
       })
-    ).resolves.toMatchObject({ rowsProcessed: 3 })
+    ).resolves.toMatchObject({ sourceRowsRead: 3 })
     await expect(
       storage.projectionRuns.startOrReclaimMaterialization({
         ...input,
@@ -113,11 +113,15 @@ describe("PgProjectionRunStorage", () => {
       storage.projectionRuns.startOrReclaimMaterialization({ ...input, objectTypeId: "Other" })
     ).rejects.toThrow("target object types do not match")
     await expect(
-      storage.projectionRuns.update({ id: input.id, projectId: input.projectId, rowsProcessed: 4 })
+      storage.projectionRuns.update({
+        id: input.id,
+        projectId: input.projectId,
+        sourceRowsRead: 4,
+      })
     ).rejects.toThrow("use updateMaterialization()")
   })
 
-  test("persists and guards telemetry fixed-batch checkpoints and empty input", async () => {
+  test("persists and guards telemetry fixed-batch checkpoints and EOF", async () => {
     const first = await storage.projectionRuns.startOrReclaimMaterialization({
       id: "telemetry-run",
       projectId: "my-app",
@@ -145,11 +149,12 @@ describe("PgProjectionRunStorage", () => {
         executionToken: first.executionToken,
         batchOrdinal: 0,
         batchRowCount: 3,
+        batchRowsSkipped: 0,
         inputExhausted: false,
       })
     ).rejects.toMatchObject({ kind: "execution-lost" })
     await expect(
-      storage.projectionRuns.completeEmptyTelemetryInput({
+      storage.projectionRuns.completeTelemetryInput({
         ...execution,
         executionToken: first.executionToken,
       })
@@ -162,6 +167,7 @@ describe("PgProjectionRunStorage", () => {
       ...execution,
       batchOrdinal: 0,
       batchRowCount: 3,
+      batchRowsSkipped: 0,
       inputExhausted: false,
     })
     await expect(
@@ -169,6 +175,7 @@ describe("PgProjectionRunStorage", () => {
         ...execution,
         batchOrdinal: 1,
         batchRowCount: 1,
+        batchRowsSkipped: 0,
         inputExhausted: false,
       })
     ).rejects.toThrow("partial non-final batch")
@@ -176,6 +183,7 @@ describe("PgProjectionRunStorage", () => {
       ...execution,
       batchOrdinal: 1,
       batchRowCount: 2,
+      batchRowsSkipped: 0,
       inputExhausted: true,
     })
     expect(exhausted.telemetryCheckpoint).toEqual({
@@ -184,9 +192,9 @@ describe("PgProjectionRunStorage", () => {
       nextRowOffset: 5,
       inputExhausted: true,
     })
-    await expect(storage.projectionRuns.completeEmptyTelemetryInput(execution)).rejects.toThrow(
-      "after progress"
-    )
+    await expect(storage.projectionRuns.completeTelemetryInput(execution)).resolves.toMatchObject({
+      telemetryCheckpoint: { inputExhausted: true },
+    })
     await expect(
       storage.projectionRuns.finishMaterialization({ ...execution, status: "succeeded" })
     ).resolves.toMatchObject({ status: "succeeded" })
@@ -204,17 +212,17 @@ describe("PgProjectionRunStorage", () => {
       identity: telemetryIdentity,
       executionToken: empty.executionToken,
     } as const
-    await storage.projectionRuns.completeEmptyTelemetryInput(emptyExecution)
+    await storage.projectionRuns.completeTelemetryInput(emptyExecution)
     await expect(
-      storage.projectionRuns.completeEmptyTelemetryInput(emptyExecution)
-    ).rejects.toThrow("after progress")
+      storage.projectionRuns.completeTelemetryInput(emptyExecution)
+    ).resolves.toMatchObject({ telemetryCheckpoint: { inputExhausted: true } })
     await expect(
       storage.projectionRuns.finishMaterialization({
         ...emptyExecution,
         status: "succeeded",
-        rowsProcessed: 0,
+        sourceRowsRead: 0,
       })
-    ).resolves.toMatchObject({ status: "succeeded", rowsProcessed: 0 })
+    ).resolves.toMatchObject({ status: "succeeded", sourceRowsRead: 0 })
   })
 
   test("starts, updates, and finishes runs", async () => {
@@ -231,10 +239,8 @@ describe("PgProjectionRunStorage", () => {
     await storage.projectionRuns.update({
       id: "run-1",
       projectId: "my-app",
-      rowsProcessed: 10,
-      objectsUpserted: 8,
-      telemetryPointsAppended: 3,
-      telemetryPointsSkipped: 1,
+      sourceRowsRead: 10,
+      sourceRowsSkipped: 1,
     })
 
     const finished = await storage.projectionRuns.finish({
@@ -242,8 +248,7 @@ describe("PgProjectionRunStorage", () => {
       projectId: "my-app",
       status: "succeeded",
       finishedAt: new Date("2026-04-06T15:00:01.280Z"),
-      rowsProcessed: 12,
-      objectsUpserted: 10,
+      sourceRowsRead: 12,
     })
 
     expect(finished).toMatchObject({
@@ -254,13 +259,8 @@ describe("PgProjectionRunStorage", () => {
       datasetId: "canonical.customers",
       datasetVersionId: "ver_123",
       status: "succeeded",
-      rowsProcessed: 12,
-      rowsSkipped: 0,
-      objectsUpserted: 10,
-      linksUpserted: 0,
-      telemetryPointsAppended: 3,
-      telemetryPointsSkipped: 1,
-      telemetryRowsFailed: 0,
+      sourceRowsRead: 12,
+      sourceRowsSkipped: 1,
     })
     expect(finished.startedAt.toISOString()).toBe("2026-04-06T15:00:00.000Z")
     expect(finished.finishedAt?.toISOString()).toBe("2026-04-06T15:00:01.280Z")
@@ -280,8 +280,8 @@ describe("PgProjectionRunStorage", () => {
       id: "run-1",
       projectId: "my-app",
       status: "failed",
-      rowsProcessed: 3,
-      rowsSkipped: 1,
+      sourceRowsRead: 3,
+      sourceRowsSkipped: 1,
       errorMessage: "Invalid customer row",
     })
 
@@ -322,8 +322,8 @@ describe("PgProjectionRunStorage", () => {
       id: "run-1",
     })
     expect(failed?.errorMessage).toBe("Invalid customer row")
-    expect(failed?.rowsProcessed).toBe(3)
-    expect(failed?.rowsSkipped).toBe(1)
+    expect(failed?.sourceRowsRead).toBe(3)
+    expect(failed?.sourceRowsSkipped).toBe(1)
   })
 
   test("rejects duplicates, missing runs, terminal updates, and invalid counters", async () => {
@@ -367,7 +367,7 @@ describe("PgProjectionRunStorage", () => {
       storage.projectionRuns.update({
         id: "run-1",
         projectId: "my-app",
-        rowsProcessed: 1,
+        sourceRowsRead: 1,
       })
     ).rejects.toBeInstanceOf(ProjectionRunError)
 
@@ -384,7 +384,7 @@ describe("PgProjectionRunStorage", () => {
       storage.projectionRuns.update({
         id: "run-2",
         projectId: "my-app",
-        telemetryRowsFailed: -1,
+        sourceRowsSkipped: -1,
       })
     ).rejects.toBeInstanceOf(ProjectionRunError)
   })

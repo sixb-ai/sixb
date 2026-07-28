@@ -1,6 +1,8 @@
 import type { DomainEvent } from "@sixb/core"
 import { SYSTEM_PRINCIPAL } from "@sixb/core"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
+import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
+import { createProjectionRunId } from "@sixb/core/internal/projections"
 import { evaluateEventSchedule } from "@sixb/core/internal/schedules"
 import { Worker } from "@sixb/core/internal/workers"
 import { OrchestratorError } from "./errors"
@@ -231,7 +233,7 @@ async function enqueueDirectJob(
         ],
       })
       return
-    case "projections":
+    case "projections": {
       if (sourceEvent.type !== "dataset.version.committed") {
         throw new OrchestratorError(
           `Projection jobs can only be dispatched from dataset.version.committed events, got '${sourceEvent.type}'.`
@@ -242,17 +244,20 @@ async function enqueueDirectJob(
           `Projection route for dataset '${item.job.payload.datasetId}' received dataset '${sourceEvent.payload.datasetId}'.`
         )
       }
+      const payload = projectionMaterializationIdentity(item.job.payload, sourceEvent)
       await options.queues.projections.enqueue({
         projectId: options.projectId,
         jobs: [
           {
+            id: createProjectionRunId(options.projectId, payload),
             type: item.job.type,
-            payload: { ...item.job.payload, versionId: sourceEvent.payload.versionId },
+            payload,
             metadata,
           },
         ],
       })
       return
+    }
     case "workflows": {
       const scheduleSource = workflowScheduleSource(sourceEvent)
       await options.queues.workflows.enqueue({
@@ -280,6 +285,32 @@ async function enqueueDirectJob(
       })
       return
     }
+  }
+}
+
+function projectionMaterializationIdentity(
+  descriptor: Extract<OrchestratorJob, { readonly queue: "projections" }>["job"]["payload"],
+  sourceEvent: Extract<StoredDomainEvent, { readonly type: "dataset.version.committed" }>
+): ProjectionMaterializationIdentity {
+  const common = {
+    projectionId: descriptor.projectionId,
+    datasetVersion: {
+      datasetId: sourceEvent.payload.datasetId,
+      versionId: sourceEvent.payload.versionId,
+      createdAt: sourceEvent.payload.createdAt,
+    },
+    ontologyRevision: descriptor.ontologyRevision,
+    projectionRevision: descriptor.projectionRevision,
+    ownershipHash: descriptor.ownershipHash,
+  }
+
+  switch (descriptor.projectionKind) {
+    case "object":
+      return { ...common, projectionKind: "object", protocol: "replacement" }
+    case "link":
+      return { ...common, projectionKind: "link", protocol: "replacement" }
+    case "telemetry":
+      return { ...common, projectionKind: "telemetry", protocol: "telemetry" }
   }
 }
 
@@ -443,6 +474,7 @@ function buildMetadata(event: StoredDomainEvent): Record<string, string> {
         ...base,
         datasetId: event.payload.datasetId,
         versionId: event.payload.versionId,
+        datasetVersionCreatedAt: event.payload.createdAt,
         producerKind: event.payload.producer.kind,
       }
       if (event.payload.producer.id !== undefined) metadata.producerId = event.payload.producer.id

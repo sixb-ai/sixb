@@ -166,15 +166,11 @@ CREATE TABLE projection_runs (
   next_batch_ordinal BIGINT CHECK (next_batch_ordinal IS NULL OR next_batch_ordinal >= 0),
   next_row_offset BIGINT CHECK (next_row_offset IS NULL OR next_row_offset >= 0),
   input_exhausted BOOLEAN,
-  rows_processed BIGINT NOT NULL DEFAULT 0 CHECK (rows_processed >= 0),
-  rows_skipped BIGINT NOT NULL DEFAULT 0 CHECK (rows_skipped >= 0),
-  objects_upserted BIGINT NOT NULL DEFAULT 0 CHECK (objects_upserted >= 0),
-  links_upserted BIGINT NOT NULL DEFAULT 0 CHECK (links_upserted >= 0),
-  telemetry_points_appended BIGINT NOT NULL DEFAULT 0 CHECK (telemetry_points_appended >= 0),
-  telemetry_points_skipped BIGINT NOT NULL DEFAULT 0 CHECK (telemetry_points_skipped >= 0),
-  telemetry_rows_failed BIGINT NOT NULL DEFAULT 0 CHECK (telemetry_rows_failed >= 0),
+  source_rows_read BIGINT NOT NULL DEFAULT 0 CHECK (source_rows_read >= 0),
+  source_rows_skipped BIGINT NOT NULL DEFAULT 0 CHECK (source_rows_skipped >= 0),
   error_message TEXT,
   PRIMARY KEY (project_id, id),
+  CHECK (source_rows_skipped <= source_rows_read),
   CHECK ((status = 'running') = (finished_at IS NULL)),
   CHECK (
     (

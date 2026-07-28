@@ -1,135 +1,81 @@
 import {
   type DatasetDefinition,
-  type DatasetRow,
   getDatasetRowValidationError,
   type LinkProjectionDefinition,
-  ObjectNotFoundError,
+  MaterializationValidationError,
 } from "@sixb/core"
-import { objectService } from "@sixb/core/internal/objects"
-import { type FlushContext, runStreamingProjection } from "./run-streaming-projection"
-import type {
-  ProjectionExecutionResult,
-  ProjectionProgressReporter,
-  ProjectionWorkerContext,
-} from "./types"
-import { errorMessage, isBlank } from "./utils"
+import type { ProjectionSourceEntry } from "@sixb/core/internal/materialization"
+import { ReplacementProgress } from "./replacement-progress"
+import type { ClaimedProjectionExecution, ProjectionWorkerContext } from "./types"
+import { isBlank, throwIfAborted } from "./utils"
 
-interface RunLinkProjectionInput {
+export function mapLinkProjectionEntries(input: {
   readonly runtime: ProjectionWorkerContext
   readonly projection: LinkProjectionDefinition
   readonly dataset: DatasetDefinition
-  readonly versionId: string
+  readonly execution: ClaimedProjectionExecution
   readonly signal: AbortSignal
-  readonly batchSize: number
-  readonly onProgress?: ProjectionProgressReporter
-}
-
-interface CollectedLinkRow {
-  readonly sourceId: string
-  readonly targetId: string
-}
-
-interface LinkItem {
-  readonly objectTypeId: string
-  readonly sourceId: string
-  readonly linkId: string
-  readonly target: {
-    readonly targetTypeId: string
-    readonly targetId: string
-  }
-}
-
-export async function runLinkProjection(
-  input: RunLinkProjectionInput
-): Promise<ProjectionExecutionResult> {
-  const { runtime, projection, dataset, versionId, signal, batchSize, onProgress } = input
-  const readColumns = linkProjectionReadColumns(projection)
-  const seenPairs = new Set<string>()
-
-  return runStreamingProjection<CollectedLinkRow>({
-    runtime,
-    signal,
-    batchSize,
-    onProgress,
-    spec: {
-      datasetId: projection.datasetId,
-      versionId,
-      readColumns,
-      projectRow(row) {
-        const validationError = getDatasetRowValidationError(row, dataset, { columns: readColumns })
-        if (validationError) {
-          return { status: "fail", errorMessage: validationError }
-        }
-
-        const linkRow = collectLinkRow(projection, row)
-        if (!linkRow) {
-          return { status: "skip" }
-        }
-
-        const pairKey = `${linkRow.sourceId}\0${linkRow.targetId}`
-        if (seenPairs.has(pairKey)) {
-          return { status: "skip" }
-        }
-        seenPairs.add(pairKey)
-
-        return { status: "item", item: linkRow }
-      },
-      flushBatch: (rows, ctx) => flushLinkBatch({ runtime, projection, rows, ctx }),
-    },
+}): AsyncIterable<ProjectionSourceEntry> {
+  const { runtime, projection, dataset, execution, signal } = input
+  const columns = [...new Set([projection.sourceField, projection.targetField])]
+  const progress = new ReplacementProgress({
+    storage: runtime.projectionRunsStorage,
+    projectId: runtime.projectId,
+    projectionRunId: execution.run.id,
+    executionToken: execution.run.executionToken,
+    identity: execution.identity,
+    persistedRowsRead: execution.run.sourceRowsRead,
+    persistedRowsSkipped: execution.run.sourceRowsSkipped,
   })
-}
 
-async function flushLinkBatch(input: {
-  readonly runtime: ProjectionWorkerContext
-  readonly projection: LinkProjectionDefinition
-  readonly rows: readonly CollectedLinkRow[]
-  readonly ctx: FlushContext
-}): Promise<void> {
-  const { runtime, projection, rows, ctx } = input
-  const { counters, rememberError } = ctx
+  return entries()
 
-  const linkItems: LinkItem[] = rows.map((row) => ({
-    objectTypeId: projection.sourceObjectTypeId,
-    sourceId: row.sourceId,
-    linkId: projection.linkId,
-    target: {
-      targetTypeId: projection.targetObjectTypeId,
-      targetId: row.targetId,
-    },
-  }))
+  async function* entries(): AsyncIterable<ProjectionSourceEntry> {
+    try {
+      for await (const row of runtime.lakeStorage.readRows({
+        datasetId: execution.run.datasetId,
+        versionId: execution.run.datasetVersionId,
+        columns,
+      })) {
+        throwIfAborted(signal)
+        const validationError = getDatasetRowValidationError(row, dataset, { columns })
+        if (validationError) await failCurrentRow(progress, validationError)
 
-  const linkResults = await objectService.upsertLinkBatch(runtime, linkItems)
-  for (let index = 0; index < linkResults.length; index += 1) {
-    const result = linkResults[index]
-    if (result?.ok) {
-      counters.linksUpserted += 1
-      continue
+        const sourceValue = row[projection.sourceField]
+        const targetValue = row[projection.targetField]
+        if (isBlank(sourceValue) || isBlank(targetValue)) {
+          await progress.recordRow(true)
+          continue
+        }
+
+        const sourceId = requireIdentity(sourceValue, projection.id, projection.sourceField)
+        const targetId = requireIdentity(targetValue, projection.id, projection.targetField)
+        const ref = {
+          source: { objectTypeId: projection.sourceObjectTypeId, primaryId: sourceId },
+          linkId: projection.linkId,
+          target: { objectTypeId: projection.targetObjectTypeId, primaryId: targetId },
+        }
+        await progress.recordRow(false)
+        yield {
+          root: { kind: "link", ref },
+          assertions: [{ kind: "link", ref }],
+        }
+      }
+    } finally {
+      await progress.flush()
     }
-
-    counters.rowsSkipped += 1
-    if (!(result?.error instanceof ObjectNotFoundError)) {
-      rememberError(errorMessage(result?.error))
-    }
   }
 }
 
-function linkProjectionReadColumns(projection: LinkProjectionDefinition): readonly string[] {
-  return [...new Set([projection.sourceField, projection.targetField])]
+function requireIdentity(value: unknown, projectionId: string, column: string): string {
+  if (typeof value === "string" && value.trim().length > 0) return value
+  throw new MaterializationValidationError(
+    `Projection '${projectionId}' dataset column '${column}' must produce a non-empty string identity.`
+  )
 }
 
-function collectLinkRow(
-  projection: LinkProjectionDefinition,
-  row: DatasetRow
-): CollectedLinkRow | null {
-  const sourceId = row[projection.sourceField]
-  const targetId = row[projection.targetField]
-
-  if (isBlank(sourceId) || isBlank(targetId)) {
-    return null
-  }
-
-  return {
-    sourceId: String(sourceId),
-    targetId: String(targetId),
-  }
+async function failCurrentRow(progress: ReplacementProgress, message: string): Promise<never> {
+  await progress.recordRow(false)
+  await progress.flush()
+  throw new MaterializationValidationError(message)
 }

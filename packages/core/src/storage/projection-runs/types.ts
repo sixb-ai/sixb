@@ -13,46 +13,28 @@ export type ProjectionMaterializationProtocol = "replacement" | "telemetry"
  */
 export type ProjectionRunDatasetVersion = PinnedDatasetVersion
 
-export interface ProjectionRunCounters {
-  readonly rowsProcessed: number
-  readonly rowsSkipped: number
-  // objectsUpserted, linksUpserted, and telemetryPointsAppended count
-  // materialization operations *attempted* during the run, not distinct
-  // surviving rows. Operations collapse under last-write-wins upserts (e.g. two
-  // rows for the same (object, property, at) telemetry point, or the same
-  // object/link key), so these counters can exceed the number of stored rows.
-  readonly objectsUpserted: number
-  readonly linksUpserted: number
-  readonly telemetryPointsAppended: number
-  readonly telemetryPointsSkipped: number
-  readonly telemetryRowsFailed: number
+export interface ProjectionRunProgress {
+  /** Physical immutable-version rows consumed, before normalization or semantic materialization. */
+  readonly sourceRowsRead: number
+  /** Physical rows intentionally skipped because a required mapped value was blank. */
+  readonly sourceRowsSkipped: number
 }
 
-// Single source of truth for the counter field names. The Record type forces
-// this map to list every ProjectionRunCounters key — omitting one is a compile
-// error — so zeroing, merging, and snapshotting can iterate the keys instead of
-// re-listing the fields by hand (and silently dropping one).
-const counterKeyFlags: Record<keyof ProjectionRunCounters, true> = {
-  rowsProcessed: true,
-  rowsSkipped: true,
-  objectsUpserted: true,
-  linksUpserted: true,
-  telemetryPointsAppended: true,
-  telemetryPointsSkipped: true,
-  telemetryRowsFailed: true,
+const progressKeyFlags: Record<keyof ProjectionRunProgress, true> = {
+  sourceRowsRead: true,
+  sourceRowsSkipped: true,
 }
 
-export const PROJECTION_COUNTER_KEYS = Object.keys(
-  counterKeyFlags
-) as readonly (keyof ProjectionRunCounters)[]
+export const PROJECTION_RUN_PROGRESS_KEYS = Object.keys(
+  progressKeyFlags
+) as readonly (keyof ProjectionRunProgress)[]
 
-/** Builds a fresh counter record with every field zeroed. */
-export function zeroProjectionRunCounters(): ProjectionRunCounters {
-  const counters = {} as Record<keyof ProjectionRunCounters, number>
-  for (const key of PROJECTION_COUNTER_KEYS) {
-    counters[key] = 0
+export function zeroProjectionRunProgress(): ProjectionRunProgress {
+  const progress = {} as Record<keyof ProjectionRunProgress, number>
+  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
+    progress[key] = 0
   }
-  return counters
+  return progress
 }
 
 // The object type id(s) the projection materializes are stored on the run so
@@ -96,7 +78,7 @@ export interface ProjectionTelemetryCheckpoint {
   readonly inputExhausted: boolean
 }
 
-export interface ProjectionRunRecord extends ProjectionRunCounters, ProjectionRunObjectTypes {
+export interface ProjectionRunRecord extends ProjectionRunProgress, ProjectionRunObjectTypes {
   readonly id: string
   readonly projectId: string
   readonly projectionId: string
@@ -161,7 +143,7 @@ export interface AssertProjectionMaterializationExecutionInput {
 }
 
 export type UpdateProjectionMaterializationInput = AssertProjectionMaterializationExecutionInput &
-  Partial<ProjectionRunCounters>
+  Partial<ProjectionRunProgress>
 
 export type FinishProjectionMaterializationInput = (
   | { readonly status: "succeeded" }
@@ -169,7 +151,7 @@ export type FinishProjectionMaterializationInput = (
 ) &
   AssertProjectionMaterializationExecutionInput & {
     readonly finishedAt?: Date
-  } & Partial<ProjectionRunCounters>
+  } & Partial<ProjectionRunProgress>
 
 export interface AdvanceProjectionTelemetryCheckpointInput
   extends AssertProjectionMaterializationExecutionInput {
@@ -177,17 +159,19 @@ export interface AdvanceProjectionTelemetryCheckpointInput
   readonly batchOrdinal: number
   /** Physical dataset rows consumed by this batch, including skipped rows. */
   readonly batchRowCount: number
+  /** Physical rows intentionally skipped inside this batch. */
+  readonly batchRowsSkipped: number
   /** True when this batch consumed the final row of the immutable dataset version. */
   readonly inputExhausted: boolean
 }
 
-/** Marks a telemetry run's immutable input as empty without creating an ontology batch commit. */
-export type CompleteEmptyProjectionTelemetryInput = AssertProjectionMaterializationExecutionInput
+/** Marks a telemetry run's immutable input as exhausted without creating a fake batch commit. */
+export type CompleteProjectionTelemetryInput = AssertProjectionMaterializationExecutionInput
 
 export type UpdateProjectionRunInput = {
   readonly id: string
   readonly projectId: string
-} & Partial<ProjectionRunCounters>
+} & Partial<ProjectionRunProgress>
 
 export type FinishProjectionRunInput = (
   | {
@@ -201,7 +185,7 @@ export type FinishProjectionRunInput = (
   readonly id: string
   readonly projectId: string
   readonly finishedAt?: Date
-} & Partial<ProjectionRunCounters>
+} & Partial<ProjectionRunProgress>
 
 export interface ListProjectionRunsInput {
   readonly projectId: string
@@ -261,8 +245,8 @@ export interface ProjectionRunStorage {
     input: AdvanceProjectionTelemetryCheckpointInput
   ): Promise<ProjectionMaterializationRunRecord>
   /** @internal Used only by the Materializer's guarded projection-run finalizer. */
-  completeEmptyTelemetryInput?(
-    input: CompleteEmptyProjectionTelemetryInput
+  completeTelemetryInput?(
+    input: CompleteProjectionTelemetryInput
   ): Promise<ProjectionMaterializationRunRecord>
   /**
    * @deprecated Unfenced lifecycle retained while workers and providers migrate.
@@ -300,8 +284,8 @@ export interface ProjectionMaterializationRunStorage extends ProjectionRunStorag
   advanceTelemetryCheckpoint(
     input: AdvanceProjectionTelemetryCheckpointInput
   ): Promise<ProjectionMaterializationRunRecord>
-  completeEmptyTelemetryInput(
-    input: CompleteEmptyProjectionTelemetryInput
+  completeTelemetryInput(
+    input: CompleteProjectionTelemetryInput
   ): Promise<ProjectionMaterializationRunRecord>
 }
 
@@ -315,6 +299,6 @@ export function isProjectionMaterializationRunStorage(
     typeof storage.updateMaterialization === "function" &&
     typeof storage.finishMaterialization === "function" &&
     typeof storage.advanceTelemetryCheckpoint === "function" &&
-    typeof storage.completeEmptyTelemetryInput === "function"
+    typeof storage.completeTelemetryInput === "function"
   )
 }

@@ -7872,16 +7872,12 @@ export type ListProjectionsResponses = {
         sourceObjectTypeId?: string
         targetObjectTypeId?: string
         status: "running" | "succeeded" | "failed" | "cancelled"
+        attempt?: number
         startedAt: string
         finishedAt?: string
         errorMessage?: string
-        rowsProcessed: number
-        rowsSkipped: number
-        objectsUpserted: number
-        linksUpserted: number
-        telemetryPointsAppended: number
-        telemetryPointsSkipped: number
-        telemetryRowsFailed: number
+        sourceRowsRead: number
+        sourceRowsSkipped: number
       } | null
     }>
     linkProjections: Array<{
@@ -7904,16 +7900,12 @@ export type ListProjectionsResponses = {
         sourceObjectTypeId?: string
         targetObjectTypeId?: string
         status: "running" | "succeeded" | "failed" | "cancelled"
+        attempt?: number
         startedAt: string
         finishedAt?: string
         errorMessage?: string
-        rowsProcessed: number
-        rowsSkipped: number
-        objectsUpserted: number
-        linksUpserted: number
-        telemetryPointsAppended: number
-        telemetryPointsSkipped: number
-        telemetryRowsFailed: number
+        sourceRowsRead: number
+        sourceRowsSkipped: number
       } | null
     }>
     telemetryProjections: Array<{
@@ -7937,16 +7929,12 @@ export type ListProjectionsResponses = {
         sourceObjectTypeId?: string
         targetObjectTypeId?: string
         status: "running" | "succeeded" | "failed" | "cancelled"
+        attempt?: number
         startedAt: string
         finishedAt?: string
         errorMessage?: string
-        rowsProcessed: number
-        rowsSkipped: number
-        objectsUpserted: number
-        linksUpserted: number
-        telemetryPointsAppended: number
-        telemetryPointsSkipped: number
-        telemetryRowsFailed: number
+        sourceRowsRead: number
+        sourceRowsSkipped: number
       } | null
     }>
   }
@@ -8006,16 +7994,12 @@ export type GetProjectionResponses = {
           sourceObjectTypeId?: string
           targetObjectTypeId?: string
           status: "running" | "succeeded" | "failed" | "cancelled"
+          attempt?: number
           startedAt: string
           finishedAt?: string
           errorMessage?: string
-          rowsProcessed: number
-          rowsSkipped: number
-          objectsUpserted: number
-          linksUpserted: number
-          telemetryPointsAppended: number
-          telemetryPointsSkipped: number
-          telemetryRowsFailed: number
+          sourceRowsRead: number
+          sourceRowsSkipped: number
         } | null
       }
     | {
@@ -8038,16 +8022,12 @@ export type GetProjectionResponses = {
           sourceObjectTypeId?: string
           targetObjectTypeId?: string
           status: "running" | "succeeded" | "failed" | "cancelled"
+          attempt?: number
           startedAt: string
           finishedAt?: string
           errorMessage?: string
-          rowsProcessed: number
-          rowsSkipped: number
-          objectsUpserted: number
-          linksUpserted: number
-          telemetryPointsAppended: number
-          telemetryPointsSkipped: number
-          telemetryRowsFailed: number
+          sourceRowsRead: number
+          sourceRowsSkipped: number
         } | null
       }
     | {
@@ -8071,16 +8051,12 @@ export type GetProjectionResponses = {
           sourceObjectTypeId?: string
           targetObjectTypeId?: string
           status: "running" | "succeeded" | "failed" | "cancelled"
+          attempt?: number
           startedAt: string
           finishedAt?: string
           errorMessage?: string
-          rowsProcessed: number
-          rowsSkipped: number
-          objectsUpserted: number
-          linksUpserted: number
-          telemetryPointsAppended: number
-          telemetryPointsSkipped: number
-          telemetryRowsFailed: number
+          sourceRowsRead: number
+          sourceRowsSkipped: number
         } | null
       }
 }
@@ -8132,16 +8108,12 @@ export type ListProjectionRunsResponses = {
       sourceObjectTypeId?: string
       targetObjectTypeId?: string
       status: "running" | "succeeded" | "failed" | "cancelled"
+      attempt?: number
       startedAt: string
       finishedAt?: string
       errorMessage?: string
-      rowsProcessed: number
-      rowsSkipped: number
-      objectsUpserted: number
-      linksUpserted: number
-      telemetryPointsAppended: number
-      telemetryPointsSkipped: number
-      telemetryRowsFailed: number
+      sourceRowsRead: number
+      sourceRowsSkipped: number
     }>
     hasMore: boolean
     total: number
@@ -8192,16 +8164,12 @@ export type GetProjectionRunResponses = {
     sourceObjectTypeId?: string
     targetObjectTypeId?: string
     status: "running" | "succeeded" | "failed" | "cancelled"
+    attempt?: number
     startedAt: string
     finishedAt?: string
     errorMessage?: string
-    rowsProcessed: number
-    rowsSkipped: number
-    objectsUpserted: number
-    linksUpserted: number
-    telemetryPointsAppended: number
-    telemetryPointsSkipped: number
-    telemetryRowsFailed: number
+    sourceRowsRead: number
+    sourceRowsSkipped: number
   }
 }
 

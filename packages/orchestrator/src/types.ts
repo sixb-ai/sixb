@@ -2,7 +2,6 @@ import type {
   DatasetVersionCommittedEvent,
   DomainEvent,
   PipelineDefinition,
-  ProjectionDefinition,
   Queues,
   ScheduleDefinition,
   ScheduleTriggeredEvent,
@@ -11,6 +10,7 @@ import type {
   WorkflowScheduleTriggerDefinition,
 } from "@sixb/core"
 import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import type { RuntimeEventScheduleDefinition } from "@sixb/core/internal/schedules"
 import type {
   NewQueueJob,
@@ -20,7 +20,7 @@ import type {
   WorkflowRunRequestedQueueJob,
 } from "@sixb/core/queues"
 
-export type RoutableProjectionDefinition = ProjectionDefinition
+export type RoutableProjectionDefinition = ProjectionDispatchDescriptor
 
 type ScheduleTriggeredRouteKey =
   `${ScheduleTriggeredEvent["type"]}:${ScheduleTriggeredEvent["payload"]["scheduleId"]}`
@@ -34,11 +34,9 @@ export type OrchestratorRouteKey =
   | DatasetVersionCommittedRouteKey
   | EventScheduleRouteKey
 
-export type ProjectionRunRequestedJobTemplate = Omit<
-  NewQueueJob<ProjectionRunRequestedQueueJob>,
-  "payload" | "availableAt" | "metadata"
-> & {
-  readonly payload: Omit<ProjectionRunRequestedQueueJob["payload"], "versionId">
+export interface ProjectionRunRequestedJobTemplate {
+  readonly type: ProjectionRunRequestedQueueJob["type"]
+  readonly payload: ProjectionDispatchDescriptor
 }
 
 export type OrchestratorJob =

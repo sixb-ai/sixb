@@ -59,10 +59,8 @@ describe("SqliteProjectionRunStorage", () => {
     await storage.update({
       id: "run-1",
       projectId: "my-app",
-      rowsProcessed: 10,
-      objectsUpserted: 8,
-      telemetryPointsAppended: 3,
-      telemetryPointsSkipped: 1,
+      sourceRowsRead: 10,
+      sourceRowsSkipped: 1,
     })
 
     const finished = await storage.finish({
@@ -70,8 +68,7 @@ describe("SqliteProjectionRunStorage", () => {
       projectId: "my-app",
       status: "succeeded",
       finishedAt: new Date("2026-04-06T15:00:01.280Z"),
-      rowsProcessed: 12,
-      objectsUpserted: 10,
+      sourceRowsRead: 12,
     })
 
     expect(finished).toMatchObject({
@@ -82,13 +79,8 @@ describe("SqliteProjectionRunStorage", () => {
       datasetId: "canonical.customers",
       datasetVersionId: "ver_123",
       status: "succeeded",
-      rowsProcessed: 12,
-      rowsSkipped: 0,
-      objectsUpserted: 10,
-      linksUpserted: 0,
-      telemetryPointsAppended: 3,
-      telemetryPointsSkipped: 1,
-      telemetryRowsFailed: 0,
+      sourceRowsRead: 12,
+      sourceRowsSkipped: 1,
     })
     expect(finished.startedAt.toISOString()).toBe("2026-04-06T15:00:00.000Z")
     expect(finished.finishedAt?.toISOString()).toBe("2026-04-06T15:00:01.280Z")
@@ -108,8 +100,8 @@ describe("SqliteProjectionRunStorage", () => {
       id: "run-1",
       projectId: "my-app",
       status: "failed",
-      rowsProcessed: 3,
-      rowsSkipped: 1,
+      sourceRowsRead: 3,
+      sourceRowsSkipped: 1,
       errorMessage: "Invalid customer row",
     })
 
@@ -150,8 +142,8 @@ describe("SqliteProjectionRunStorage", () => {
       id: "run-1",
     })
     expect(failed?.errorMessage).toBe("Invalid customer row")
-    expect(failed?.rowsProcessed).toBe(3)
-    expect(failed?.rowsSkipped).toBe(1)
+    expect(failed?.sourceRowsRead).toBe(3)
+    expect(failed?.sourceRowsSkipped).toBe(1)
   })
 
   test("records object type ids, filters by viewable set, and lists latest per projection", async () => {
@@ -236,13 +228,13 @@ describe("SqliteProjectionRunStorage", () => {
       projectId: input.projectId,
       identity: replacementIdentity,
       executionToken: first.executionToken,
-      rowsProcessed: 7,
+      sourceRowsRead: 7,
     })
     const second = await storage.startOrReclaimMaterialization(input)
     expect(second).toMatchObject({
       id: first.id,
       attempt: 2,
-      rowsProcessed: 7,
+      sourceRowsRead: 7,
       startedAt: first.startedAt,
     })
     expect(second.executionToken).not.toBe(first.executionToken)
@@ -362,14 +354,15 @@ describe("SqliteProjectionRunStorage", () => {
 
     const staleOperations = [
       storage.assertMaterializationExecution(staleExecution),
-      storage.updateMaterialization({ ...staleExecution, rowsProcessed: 1 }),
+      storage.updateMaterialization({ ...staleExecution, sourceRowsRead: 0 }),
       storage.advanceTelemetryCheckpoint({
         ...staleExecution,
         batchOrdinal: 0,
         batchRowCount: 2,
+        batchRowsSkipped: 0,
         inputExhausted: false,
       }),
-      storage.completeEmptyTelemetryInput(staleExecution),
+      storage.completeTelemetryInput(staleExecution),
       storage.finishMaterialization({ ...staleExecution, status: "cancelled" }),
     ]
     for (const operation of staleOperations) {
@@ -386,11 +379,11 @@ describe("SqliteProjectionRunStorage", () => {
       storage.updateMaterialization({
         ...staleExecution,
         executionToken: current.executionToken,
-        rowsProcessed: 1,
+        sourceRowsRead: 0,
       })
-    ).resolves.toMatchObject({ rowsProcessed: 1 })
+    ).resolves.toMatchObject({ sourceRowsRead: 0 })
     await expect(
-      storage.update({ id: input.id, projectId: input.projectId, rowsProcessed: 2 })
+      storage.update({ id: input.id, projectId: input.projectId, sourceRowsRead: 2 })
     ).rejects.toThrow("use updateMaterialization()")
     await expect(
       storage.finish({ id: input.id, projectId: input.projectId, status: "cancelled" })
@@ -423,6 +416,7 @@ describe("SqliteProjectionRunStorage", () => {
         ...execution,
         batchOrdinal: 0,
         batchRowCount: 1,
+        batchRowsSkipped: 0,
         inputExhausted: false,
       })
     ).rejects.toThrow("partial non-final batch")
@@ -431,6 +425,7 @@ describe("SqliteProjectionRunStorage", () => {
         ...execution,
         batchOrdinal: 1,
         batchRowCount: 2,
+        batchRowsSkipped: 0,
         inputExhausted: false,
       })
     ).rejects.toThrow("expected batch ordinal 0")
@@ -439,6 +434,7 @@ describe("SqliteProjectionRunStorage", () => {
         ...execution,
         batchOrdinal: 0,
         batchRowCount: 3,
+        batchRowsSkipped: 0,
         inputExhausted: true,
       })
     ).rejects.toThrow("exceeds its fixed size")
@@ -447,6 +443,7 @@ describe("SqliteProjectionRunStorage", () => {
       ...execution,
       batchOrdinal: 0,
       batchRowCount: 2,
+      batchRowsSkipped: 0,
       inputExhausted: false,
     })
     const reclaimed = await storage.startOrReclaimMaterialization({
@@ -463,27 +460,11 @@ describe("SqliteProjectionRunStorage", () => {
       inputExhausted: false,
     })
     await expect(
-      storage.completeEmptyTelemetryInput({
+      storage.completeTelemetryInput({
         ...execution,
         executionToken: reclaimed.executionToken,
       })
-    ).rejects.toThrow("cannot declare empty input after progress")
-    await storage.advanceTelemetryCheckpoint({
-      ...execution,
-      executionToken: reclaimed.executionToken,
-      batchOrdinal: 1,
-      batchRowCount: 1,
-      inputExhausted: true,
-    })
-    await expect(
-      storage.advanceTelemetryCheckpoint({
-        ...execution,
-        executionToken: reclaimed.executionToken,
-        batchOrdinal: 2,
-        batchRowCount: 1,
-        inputExhausted: true,
-      })
-    ).rejects.toThrow("already exhausted")
+    ).resolves.toMatchObject({ telemetryCheckpoint: { inputExhausted: true } })
     await expect(
       storage.finishMaterialization({
         ...execution,
@@ -492,7 +473,7 @@ describe("SqliteProjectionRunStorage", () => {
       })
     ).resolves.toMatchObject({
       status: "succeeded",
-      telemetryCheckpoint: { nextBatchOrdinal: 2, nextRowOffset: 3, inputExhausted: true },
+      telemetryCheckpoint: { nextBatchOrdinal: 1, nextRowOffset: 2, inputExhausted: true },
     })
     await expect(
       storage.startOrReclaimMaterialization({
@@ -523,10 +504,10 @@ describe("SqliteProjectionRunStorage", () => {
     await expect(
       storage.finishMaterialization({ ...execution, status: "succeeded" })
     ).rejects.toThrow("before its input is exhausted")
-    await storage.completeEmptyTelemetryInput(execution)
-    await expect(storage.completeEmptyTelemetryInput(execution)).rejects.toThrow(
-      "cannot declare empty input after progress"
-    )
+    await storage.completeTelemetryInput(execution)
+    await expect(storage.completeTelemetryInput(execution)).resolves.toMatchObject({
+      telemetryCheckpoint: { inputExhausted: true },
+    })
     await expect(
       storage.finishMaterialization({ ...execution, status: "succeeded" })
     ).resolves.toMatchObject({
@@ -585,7 +566,7 @@ describe("SqliteProjectionRunStorage", () => {
         projectId: run.projectId,
         identity: replacementIdentity,
         executionToken: run.executionToken,
-        rowsProcessed: Number.MAX_SAFE_INTEGER + 1,
+        sourceRowsRead: Number.MAX_SAFE_INTEGER + 1,
       })
     ).rejects.toBeInstanceOf(ProjectionRunError)
   })
@@ -631,7 +612,7 @@ describe("SqliteProjectionRunStorage", () => {
       storage.update({
         id: "run-1",
         projectId: "my-app",
-        rowsProcessed: 1,
+        sourceRowsRead: 1,
       })
     ).rejects.toBeInstanceOf(ProjectionRunError)
 
@@ -648,7 +629,7 @@ describe("SqliteProjectionRunStorage", () => {
       storage.update({
         id: "run-2",
         projectId: "my-app",
-        telemetryRowsFailed: -1,
+        sourceRowsSkipped: -1,
       })
     ).rejects.toBeInstanceOf(ProjectionRunError)
   })

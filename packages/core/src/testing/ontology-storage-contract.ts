@@ -710,6 +710,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
               executionToken: run.executionToken,
               batchOrdinal: 0,
               batchRowCount: 2,
+              batchRowsSkipped: 2,
               inputExhausted: true,
             })
             if (throwAfter) throw new Error("telemetry rollback")
@@ -908,6 +909,7 @@ function telemetryHeader(
           datasetVersion: identity.datasetVersion,
           batchOrdinal: 0,
           sourceRowCount: 2,
+          sourceRowsSkipped: 2,
           inputExhausted: true,
         },
         pointCount: 0,

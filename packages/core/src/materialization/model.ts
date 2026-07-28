@@ -186,9 +186,8 @@ type ProjectionRunTerminalStatus =
 /**
  * Queue-agnostic terminal decision for one fenced projection execution.
  *
- * A telemetry run with no physical rows has no ontology batch commit, so its successful
- * completion must declare `emptyInput` explicitly. Non-empty telemetry completion is derived from
- * the durable run checkpoint.
+ * Telemetry success explicitly attests that the worker observed EOF. The guarded finalizer can
+ * then mark a non-exhausted checkpoint complete without manufacturing an empty ontology commit.
  */
 export type ProjectionRunFinishInput =
   | (ProjectionRunFinishBase &
@@ -197,7 +196,7 @@ export type ProjectionRunFinishInput =
       })
   | (ProjectionRunFinishBase &
       (
-        | { readonly status: "succeeded"; readonly emptyInput?: true }
+        | { readonly status: "succeeded"; readonly inputExhausted: true }
         | { readonly status: "failed" | "cancelled"; readonly errorMessage?: string }
       ) & {
         readonly protocol: "telemetry"
@@ -227,6 +226,8 @@ export interface TelemetryAppend {
         readonly batchOrdinal: number
         /** Physical dataset rows consumed to produce this batch, including skipped rows. */
         readonly sourceRowCount: number
+        /** Physical rows skipped because a required mapped value was blank. */
+        readonly sourceRowsSkipped: number
         /** True when this batch consumed the final row of the immutable dataset version. */
         readonly inputExhausted: boolean
       }

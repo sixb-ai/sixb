@@ -3,6 +3,7 @@ import { ActionWorker } from "@sixb/action-worker"
 import { AgentWorker } from "@sixb/agent-worker"
 import { migrateStorage } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
+import { getProjectionDispatchDescriptors } from "@sixb/core/internal/projections"
 import type { Worker } from "@sixb/core/internal/workers"
 import { assertLakeDatasetDefinitionsCompatible } from "@sixb/core/lake-storage"
 import {
@@ -124,11 +125,7 @@ export async function startOrchestratorRuntime(
     schedules: sixb.getScheduleDefinitions(),
     syncs: sixb.getSyncDefinitions(),
     pipelines: sixb.getPipelineDefinitions(),
-    projections: [
-      ...sixb.getObjectProjections(),
-      ...sixb.getLinkProjections(),
-      ...sixb.getTelemetryProjections(),
-    ],
+    projections: getProjectionDispatchDescriptors(sixb),
     workflows: sixb.workflows.list(),
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)

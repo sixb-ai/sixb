@@ -1,4 +1,5 @@
 import type { JsonValue } from "../json"
+import type { ProjectionMaterializationIdentity } from "../materialization/model"
 import type { WorkflowRunSource } from "../workflows/types"
 
 export interface QueueJobEnvelope {
@@ -124,15 +125,7 @@ export interface PipelineRunRequestedQueueJob
   > {}
 
 export interface ProjectionRunRequestedQueueJob
-  extends QueueJob<
-    "projection.run.requested",
-    {
-      readonly projectionId: string
-      readonly projectionKind: "object" | "link" | "telemetry"
-      readonly datasetId: string
-      readonly versionId: string
-    }
-  > {}
+  extends QueueJob<"projection.run.requested", ProjectionMaterializationIdentity> {}
 
 export interface WorkflowRunRequestedQueueJob
   extends QueueJob<

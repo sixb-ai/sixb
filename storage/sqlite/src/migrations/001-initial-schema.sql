@@ -108,15 +108,11 @@ CREATE TABLE projection_runs (
   next_batch_ordinal INTEGER CHECK (next_batch_ordinal >= 0),
   next_row_offset INTEGER CHECK (next_row_offset >= 0),
   input_exhausted INTEGER CHECK (input_exhausted IN (0, 1)),
-  rows_processed INTEGER NOT NULL DEFAULT 0 CHECK (rows_processed >= 0),
-  rows_skipped INTEGER NOT NULL DEFAULT 0 CHECK (rows_skipped >= 0),
-  objects_upserted INTEGER NOT NULL DEFAULT 0 CHECK (objects_upserted >= 0),
-  links_upserted INTEGER NOT NULL DEFAULT 0 CHECK (links_upserted >= 0),
-  telemetry_points_appended INTEGER NOT NULL DEFAULT 0 CHECK (telemetry_points_appended >= 0),
-  telemetry_points_skipped INTEGER NOT NULL DEFAULT 0 CHECK (telemetry_points_skipped >= 0),
-  telemetry_rows_failed INTEGER NOT NULL DEFAULT 0 CHECK (telemetry_rows_failed >= 0),
+  source_rows_read INTEGER NOT NULL DEFAULT 0 CHECK (source_rows_read >= 0),
+  source_rows_skipped INTEGER NOT NULL DEFAULT 0 CHECK (source_rows_skipped >= 0),
   error_message TEXT,
   PRIMARY KEY (project_id, id),
+  CHECK (source_rows_skipped <= source_rows_read),
   CHECK ((status = 'running') = (finished_at IS NULL)),
   CHECK (
     (

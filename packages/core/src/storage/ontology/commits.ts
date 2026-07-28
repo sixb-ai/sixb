@@ -94,6 +94,7 @@ export type TelemetryOntologyCommitIntent =
         readonly datasetVersion: PinnedDatasetVersion
         readonly batchOrdinal: number
         readonly sourceRowCount: number
+        readonly sourceRowsSkipped: number
         readonly inputExhausted: boolean
       }
     })

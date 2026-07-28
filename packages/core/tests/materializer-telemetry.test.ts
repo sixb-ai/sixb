@@ -54,6 +54,7 @@ describe("ontology materializer telemetry", () => {
           execution,
           batchOrdinal: 0,
           sourceRowCount: 1,
+          sourceRowsSkipped: 0,
           inputExhausted: true,
         },
         points: [{ series, value: 20, at: "2026-01-01T01:00:00Z" }],
@@ -70,7 +71,7 @@ describe("ontology materializer telemetry", () => {
     ).rejects.toMatchObject({ kind: "run-correlation" })
   })
 
-  test("finishes telemetry only after exhaustion or an explicit empty input", async () => {
+  test("records explicit telemetry exhaustion atomically with terminal success", async () => {
     const { materializer, storage, projections } = createMaterializerFixture()
     const datasetVersion = {
       datasetId: "readings",
@@ -90,11 +91,9 @@ describe("ontology materializer telemetry", () => {
       datasetVersion,
       execution: emptyExecution,
       status: "succeeded" as const,
+      inputExhausted: true as const,
     }
 
-    await expect(materializer.projections.finishRun(emptyFinish)).rejects.toThrow(
-      "before its input is exhausted"
-    )
     let rejectFinish = true
     decorateOperationScopedMethodForTesting(
       storage.projectionRuns,
@@ -104,9 +103,9 @@ describe("ontology materializer telemetry", () => {
         return finishMaterialization(input)
       }
     )
-    await expect(
-      materializer.projections.finishRun({ ...emptyFinish, emptyInput: true })
-    ).rejects.toThrow("projection run finish failure")
+    await expect(materializer.projections.finishRun(emptyFinish)).rejects.toThrow(
+      "projection run finish failure"
+    )
     await expect(
       storage.projectionRuns.getById({ projectId: "project", id: emptyExecution.projectionRunId })
     ).resolves.toMatchObject({
@@ -114,9 +113,7 @@ describe("ontology materializer telemetry", () => {
       telemetryCheckpoint: { inputExhausted: false },
     })
     rejectFinish = false
-    await expect(
-      materializer.projections.finishRun({ ...emptyFinish, emptyInput: true })
-    ).resolves.toBeUndefined()
+    await expect(materializer.projections.finishRun(emptyFinish)).resolves.toBeUndefined()
     await expect(
       storage.projectionRuns.getById({ projectId: "project", id: emptyExecution.projectionRunId })
     ).resolves.toMatchObject({
@@ -151,6 +148,7 @@ describe("ontology materializer telemetry", () => {
       execution,
       batchOrdinal,
       sourceRowCount: 1,
+      sourceRowsSkipped: 0,
       inputExhausted,
     })
     await materializer.telemetry.append({
@@ -163,13 +161,8 @@ describe("ontology materializer telemetry", () => {
       datasetVersion,
       execution,
       status: "succeeded" as const,
+      inputExhausted: true as const,
     }
-    await expect(
-      materializer.projections.finishRun({ ...finish, emptyInput: true })
-    ).rejects.toThrow("cannot declare empty input after progress")
-    await expect(materializer.projections.finishRun(finish)).rejects.toThrow(
-      "before its input is exhausted"
-    )
     await materializer.telemetry.append({
       source: source(1, true),
       points: [{ series, value: 21, at: "2026-01-01T02:00:00Z" }],
@@ -406,6 +399,7 @@ describe("ontology materializer telemetry", () => {
           execution: pendingProjectionExecution(runId),
           batchOrdinal,
           sourceRowCount: 1,
+          sourceRowsSkipped: 0,
           inputExhausted,
         },
         points: [{ series, value, at: `2026-01-01T0${batchOrdinal + 1}:00:00Z` }],
@@ -509,6 +503,7 @@ describe("ontology materializer telemetry", () => {
         execution,
         batchOrdinal: 0,
         sourceRowCount: 1,
+        sourceRowsSkipped: 0,
         inputExhausted: true,
       },
       points: [{ series, value: 20, at: "2026-01-01T01:00:00Z" }],
@@ -559,6 +554,7 @@ describe("ontology materializer telemetry", () => {
       execution: pendingProjectionExecution("telemetry-deduplicated-run"),
       batchOrdinal,
       sourceRowCount: 2,
+      sourceRowsSkipped: 0,
       inputExhausted: batchOrdinal === 1,
     })
     const duplicate = { series, value: 20, at: "2026-01-01T01:00:00Z" }
@@ -606,6 +602,7 @@ describe("ontology materializer telemetry", () => {
         execution: pendingProjectionExecution("telemetry-skipped-run"),
         batchOrdinal: 0,
         sourceRowCount: 2,
+        sourceRowsSkipped: 2,
         inputExhausted: true,
       },
       points: [],
@@ -634,7 +631,12 @@ describe("ontology materializer telemetry", () => {
       commits: [
         {
           intent: {
-            source: { batchOrdinal: 0, sourceRowCount: 2, inputExhausted: true },
+            source: {
+              batchOrdinal: 0,
+              sourceRowCount: 2,
+              sourceRowsSkipped: 2,
+              inputExhausted: true,
+            },
           },
         },
       ],
@@ -703,6 +705,7 @@ describe("ontology materializer telemetry", () => {
           execution,
           batchOrdinal: 0,
           sourceRowCount: 0,
+          sourceRowsSkipped: 0,
           inputExhausted: true,
         },
         points: [],

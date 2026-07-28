@@ -4,7 +4,7 @@ export { InMemoryProjectionRunStorage } from "./in-memory"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
   AssertProjectionMaterializationExecutionInput,
-  CompleteEmptyProjectionTelemetryInput,
+  CompleteProjectionTelemetryInput,
   FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
   ListLatestProjectionRunsInput,
@@ -15,9 +15,9 @@ export type {
   ProjectionMaterializationProtocol,
   ProjectionMaterializationRunRecord,
   ProjectionMaterializationRunStorage,
-  ProjectionRunCounters,
   ProjectionRunDatasetVersion,
   ProjectionRunObjectTypes,
+  ProjectionRunProgress,
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
@@ -29,7 +29,7 @@ export type {
 } from "./types"
 export {
   isProjectionMaterializationRunStorage,
-  PROJECTION_COUNTER_KEYS,
+  PROJECTION_RUN_PROGRESS_KEYS,
   projectionRunObjectTypesVisible,
-  zeroProjectionRunCounters,
+  zeroProjectionRunProgress,
 } from "./types"

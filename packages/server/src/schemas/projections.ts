@@ -14,16 +14,12 @@ export const ProjectionRunSchema = z.object({
   sourceObjectTypeId: z.string().optional(),
   targetObjectTypeId: z.string().optional(),
   status: ProjectionRunStatusSchema,
+  attempt: z.number().optional(),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   errorMessage: z.string().optional(),
-  rowsProcessed: z.number(),
-  rowsSkipped: z.number(),
-  objectsUpserted: z.number(),
-  linksUpserted: z.number(),
-  telemetryPointsAppended: z.number(),
-  telemetryPointsSkipped: z.number(),
-  telemetryRowsFailed: z.number(),
+  sourceRowsRead: z.number(),
+  sourceRowsSkipped: z.number(),
 })
 
 export const ForeignKeyDescriptorSchema = z.object({

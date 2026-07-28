@@ -62,6 +62,7 @@ import type {
 import type { OntologyMaterializationEvent } from "../outbox"
 import {
   appendScopeSnapshot,
+  assertMaterializationHeader,
   finishScopeAccumulator,
   type ProviderMaterializationTransactionLifecycle,
   startScopeAccumulator,
@@ -90,7 +91,6 @@ import {
 import {
   assertChunkSequence,
   assertLastCommit,
-  assertMaterializationHeader,
   assertPageRows,
   assertPlanChunkCorrelations,
   assertWorkRecord,

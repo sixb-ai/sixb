@@ -19,6 +19,11 @@ import {
   computeProjectionRevision,
   ProjectionRegistry,
 } from "../src/materializer"
+import {
+  createProjectionRunId,
+  getProjectionDispatchDescriptors,
+  registerProjectionRegistry,
+} from "../src/projections/internal"
 
 const Sensor = defineObjectType({
   id: "Sensor",
@@ -94,6 +99,57 @@ describe("projection registry", () => {
     expect(() => projectionRegistry.resolveTelemetry("rooms")).toThrow(
       "does not own a telemetry source"
     )
+
+    const descriptors = projectionRegistry.getDispatchDescriptors()
+    expect(Object.isFrozen(descriptors)).toBe(true)
+    expect(descriptors).toHaveLength(2)
+    expect(descriptors[0]).toMatchObject({
+      projectionId: "rooms",
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetId: "rooms",
+      ontologyRevision: projectionRegistry.ontologyRevision,
+      projectionRevision: resolved.projectionRevision,
+      ownershipHash: resolved.ownershipHash,
+    })
+    expect(Object.isFrozen(descriptors[0])).toBe(true)
+    expect(projectionRegistry.resolveDispatch("rooms")).toBe(descriptors[0])
+    expect(projectionRegistry.resolveDispatch("temperatures")).toMatchObject({
+      projectionKind: "telemetry",
+      protocol: "telemetry",
+    })
+    expect(() => projectionRegistry.resolveDispatch("missing")).toThrow("Unknown projection")
+
+    const runtime = {}
+    registerProjectionRegistry(runtime, projectionRegistry)
+    expect(getProjectionDispatchDescriptors(runtime)).toBe(descriptors)
+  })
+
+  test("derives one stable run id from the complete pinned semantic identity", () => {
+    const identity = {
+      projectionId: "rooms",
+      projectionKind: "object" as const,
+      protocol: "replacement" as const,
+      datasetVersion: {
+        datasetId: "rooms",
+        versionId: "v1",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      ontologyRevision: "ontology-1",
+      projectionRevision: "projection-1",
+      ownershipHash: "ownership-1",
+    }
+
+    const first = createProjectionRunId("project", identity)
+    expect(first).toMatch(/^[a-f0-9]{64}$/)
+    expect(createProjectionRunId("project", structuredClone(identity))).toBe(first)
+    expect(
+      createProjectionRunId("project", {
+        ...identity,
+        projectionRevision: "projection-2",
+      })
+    ).not.toBe(first)
+    expect(createProjectionRunId("other-project", identity)).not.toBe(first)
   })
 
   test("keeps ontology revisions stable across non-semantic ordering and metadata", () => {

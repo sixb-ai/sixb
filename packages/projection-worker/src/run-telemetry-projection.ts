@@ -2,33 +2,20 @@ import {
   type DatasetColumnDefinition,
   type DatasetDefinition,
   getDatasetRowValidationError,
+  isJsonValue,
   MaterializationValidationError,
-  ObjectNotFoundError,
-  OntologyValidationError,
   type Schema,
   type TelemetryProjectionDefinition,
 } from "@sixb/core"
-import { objectService } from "@sixb/core/internal/objects"
+import type { TelemetryPointWrite } from "@sixb/core/internal/materialization"
+import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import { ProjectionWorkerError } from "./errors"
 import { resolveProjectionSchema } from "./projection-schema"
 import { normalizeProjectedValue } from "./projection-value-coercion"
-import { type FlushContext, runStreamingProjection } from "./run-streaming-projection"
-import type {
-  ProjectionExecutionResult,
-  ProjectionProgressReporter,
-  ProjectionWorkerContext,
-} from "./types"
-import { errorMessage, isBlank, isPlainObject } from "./utils"
+import type { ClaimedProjectionExecution, ProjectionWorkerContext } from "./types"
+import { isBlank, isPlainObject, throwIfAborted } from "./utils"
 
-interface RunTelemetryProjectionInput {
-  readonly runtime: ProjectionWorkerContext
-  readonly projection: TelemetryProjectionDefinition
-  readonly dataset: DatasetDefinition
-  readonly versionId: string
-  readonly signal: AbortSignal
-  readonly batchSize: number
-  readonly onProgress?: ProjectionProgressReporter
-}
+export const TELEMETRY_PROJECTION_BATCH_SIZE = 500
 
 interface TelemetryProjectionPlan {
   readonly projection: TelemetryProjectionDefinition
@@ -38,112 +25,116 @@ interface TelemetryProjectionPlan {
   readonly readColumns: readonly string[]
 }
 
-interface ProjectedTelemetryItem {
-  readonly id: string
-  readonly properties: Record<string, unknown>
-  readonly at: Date
-}
-
 type ProjectTelemetryRowResult =
-  | { readonly ok: true; readonly item: ProjectedTelemetryItem | null }
-  | { readonly ok: false; readonly errorMessage: string }
+  | { readonly kind: "point"; readonly point: TelemetryPointWrite }
+  | { readonly kind: "skip" }
+  | { readonly kind: "invalid"; readonly message: string }
 
 /**
- * Telemetry projections append points keyed by (object, property, at); the
- * timeseries store upserts on that identity, so replays are idempotent without
- * any worker-side dedup ledger. This mirrors the object/link projections:
- * read rows, project each, append in batches — sharing the streaming-batch
- * driver and contributing only the telemetry-specific row projection and flush.
+ * Consumes stable physical row batches from the durable checkpoint.
+ *
+ * A full batch is committed inside the loop body, before `for await` requests the next row. EOF
+ * after an exact multiple is therefore represented by guarded completion, not a fake empty commit.
  */
-export async function runTelemetryProjection(
-  input: RunTelemetryProjectionInput
-): Promise<ProjectionExecutionResult> {
-  const { runtime, projection, dataset, versionId, signal, batchSize, onProgress } = input
-  const projectionPlan = buildTelemetryProjectionPlan({ runtime, projection, dataset })
+export async function runTelemetryProjection(input: {
+  readonly runtime: ProjectionWorkerContext
+  readonly projection: TelemetryProjectionDefinition
+  readonly dataset: DatasetDefinition
+  readonly execution: ClaimedProjectionExecution
+  readonly signal: AbortSignal
+}): Promise<void> {
+  const { runtime, projection, dataset, execution, signal } = input
+  const checkpoint = execution.run.telemetryCheckpoint
+  if (!checkpoint) {
+    throw new ProjectionWorkerError(
+      `[SixbProjectionWorker] Telemetry projection run '${execution.run.id}' has no checkpoint.`
+    )
+  }
+  if (checkpoint.inputExhausted) return
 
-  return runStreamingProjection<ProjectedTelemetryItem>({
+  const plan = buildTelemetryProjectionPlan({ runtime, projection, dataset })
+  const batch: unknown[] = []
+  let batchOrdinal = checkpoint.nextBatchOrdinal
+
+  for await (const row of runtime.lakeStorage.readRows({
+    datasetId: execution.run.datasetId,
+    versionId: execution.run.datasetVersionId,
+    columns: plan.readColumns,
+    offset: checkpoint.nextRowOffset,
+  })) {
+    throwIfAborted(signal)
+    batch.push(row)
+    if (batch.length !== checkpoint.fixedBatchSize) continue
+
+    await appendPhysicalBatch({
+      runtime,
+      execution,
+      plan,
+      rows: batch.splice(0, batch.length),
+      batchOrdinal,
+      inputExhausted: false,
+      signal,
+    })
+    batchOrdinal += 1
+  }
+
+  throwIfAborted(signal)
+  if (batch.length === 0) return
+  await appendPhysicalBatch({
     runtime,
+    execution,
+    plan,
+    rows: batch,
+    batchOrdinal,
+    inputExhausted: true,
     signal,
-    batchSize,
-    onProgress,
-    spec: {
-      datasetId: projection.datasetId,
-      versionId,
-      readColumns: projectionPlan.readColumns,
-      projectRow(row) {
-        const projected = projectTelemetryRow(projectionPlan, row)
-        if (!projected.ok) {
-          return { status: "fail", errorMessage: projected.errorMessage }
-        }
-        if (!projected.item) {
-          return { status: "skip" }
-        }
-        return { status: "item", item: projected.item }
-      },
-      // A blank reading is a clean skip; an invalid projection is a row failure.
-      onSkip: (counters) => {
-        counters.telemetryPointsSkipped += 1
-      },
-      onFail: (counters) => {
-        counters.telemetryRowsFailed += 1
-      },
-      flushBatch: (items, ctx) => appendTelemetryItems({ runtime, projection, items, ctx }),
-    },
   })
 }
 
-async function appendTelemetryItems(input: {
+async function appendPhysicalBatch(input: {
   readonly runtime: ProjectionWorkerContext
-  readonly projection: TelemetryProjectionDefinition
-  readonly items: readonly ProjectedTelemetryItem[]
-  readonly ctx: FlushContext
+  readonly execution: ClaimedProjectionExecution
+  readonly plan: TelemetryProjectionPlan
+  readonly rows: readonly unknown[]
+  readonly batchOrdinal: number
+  readonly inputExhausted: boolean
+  readonly signal: AbortSignal
 }): Promise<void> {
-  const { runtime, projection, items, ctx } = input
-  const { counters, rememberError } = ctx
+  const { runtime, execution, plan, rows, batchOrdinal, inputExhausted, signal } = input
+  const points: TelemetryPointWrite[] = []
+  let sourceRowsSkipped = 0
 
-  const appendItems = (batch: readonly ProjectedTelemetryItem[]): Promise<void> =>
-    objectService.appendTelemetry(runtime, projection.objectTypeId, batch)
-
-  try {
-    await appendItems(items)
-    counters.telemetryPointsAppended += items.length
-  } catch (error) {
-    if (!isRecoverableTelemetryRowError(error)) {
-      throw error
+  for (const row of rows) {
+    throwIfAborted(signal)
+    const projected = projectTelemetryRow(plan, row)
+    if (projected.kind === "invalid") {
+      throw new MaterializationValidationError(projected.message)
     }
-    // Isolate the failing row: re-apply individually so the good rows still land.
-    for (const item of items) {
-      await appendSingleTelemetryItem({ appendItems, item, counters, rememberError })
+    if (projected.kind === "skip") {
+      sourceRowsSkipped += 1
+      continue
     }
+    points.push(projected.point)
   }
-}
 
-async function appendSingleTelemetryItem(input: {
-  readonly appendItems: (batch: readonly ProjectedTelemetryItem[]) => Promise<void>
-  readonly item: ProjectedTelemetryItem
-  readonly counters: FlushContext["counters"]
-  readonly rememberError: FlushContext["rememberError"]
-}): Promise<void> {
-  const { appendItems, item, counters, rememberError } = input
-  try {
-    await appendItems([item])
-    counters.telemetryPointsAppended += 1
-  } catch (error) {
-    if (error instanceof ObjectNotFoundError) {
-      // A reading for an object that does not exist yet is a benign, retryable
-      // skip (matching object/link projections); a later run after the object
-      // is created appends the point.
-      counters.rowsSkipped += 1
-      counters.telemetryPointsSkipped += 1
-      return
-    }
-    if (!isRecoverableTelemetryRowError(error)) {
-      throw error
-    }
-    counters.rowsSkipped += 1
-    counters.telemetryRowsFailed += 1
-    rememberError(errorMessage(error))
-  }
+  throwIfAborted(signal)
+  await getOntologyMutationRuntime(runtime).appendTelemetry({
+    source: {
+      kind: "projection",
+      projection: { projectionId: execution.run.projectionId },
+      datasetVersion: {
+        datasetId: execution.run.datasetId,
+        versionId: execution.run.datasetVersionId,
+        createdAt: execution.run.datasetVersionCreatedAt,
+      },
+      execution: execution.execution,
+      batchOrdinal,
+      sourceRowCount: rows.length,
+      sourceRowsSkipped,
+      inputExhausted,
+    },
+    points,
+  })
 }
 
 function buildTelemetryProjectionPlan(input: {
@@ -157,7 +148,6 @@ function buildTelemetryProjectionPlan(input: {
     (candidate) => candidate.id === projection.propertyId
   )
   const valueColumn = dataset.schema.columns.find((column) => column.name === projection.valueField)
-
   if (!objectType || !property || !valueColumn) {
     throw new ProjectionWorkerError(
       `[SixbProjectionWorker] Telemetry projection '${projection.id}' was not validated before execution.`
@@ -194,29 +184,24 @@ function projectTelemetryRow(
   const rowValidationError = getDatasetRowValidationError(row, dataset, {
     columns: plan.readColumns,
   })
-  if (rowValidationError) {
-    return { ok: false, errorMessage: rowValidationError }
-  }
-
+  if (rowValidationError) return { kind: "invalid", message: rowValidationError }
   if (!isPlainObject(row)) {
-    return {
-      ok: false,
-      errorMessage: `Dataset '${dataset.id}' rows must be plain objects.`,
-    }
+    return { kind: "invalid", message: `Dataset '${dataset.id}' rows must be plain objects.` }
   }
 
   const objectId = row[projection.objectIdField]
   const at = row[projection.atField]
   const value = row[projection.valueField]
-  if (isBlank(objectId) || isBlank(at) || isBlank(value)) {
-    return { ok: true, item: null }
+  if (isBlank(objectId) || isBlank(at) || isBlank(value)) return { kind: "skip" }
+  if (typeof objectId !== "string") {
+    return invalidIdentity(projection, projection.objectIdField)
   }
 
   const parsedAt = parseTelemetryTimestamp(at)
   if (!parsedAt) {
     return {
-      ok: false,
-      errorMessage: `[SixbProjectionWorker] Telemetry projection '${projection.id}' at field '${projection.atField}' has invalid timestamp value '${String(at)}'.`,
+      kind: "invalid",
+      message: `Telemetry projection '${projection.id}' field '${projection.atField}' has invalid timestamp '${String(at)}'.`,
     }
   }
 
@@ -225,33 +210,45 @@ function projectTelemetryRow(
     schema: plan.valueSchema,
     value,
   })
-  if (!normalized.ok) {
+  if (!normalized.ok || !isJsonValue(normalized.value)) {
     return {
-      ok: false,
-      errorMessage: `[SixbProjectionWorker] Telemetry projection '${projection.id}' value from dataset column '${projection.valueField}' (${plan.valueColumnType}) ${normalized.errorMessage}.`,
+      kind: "invalid",
+      message: `Telemetry projection '${projection.id}' value field '${projection.valueField}' is invalid${normalized.ok ? "" : `: ${normalized.errorMessage}`}.`,
     }
   }
 
-  const properties: Record<string, unknown> = {}
-  const unit = projection.unitField === undefined ? undefined : row[projection.unitField]
-  properties[projection.propertyId] = isBlank(unit)
-    ? normalized.value
-    : { value: normalized.value, unit }
+  const rawUnit = projection.unitField === undefined ? undefined : row[projection.unitField]
+  if (!isBlank(rawUnit) && typeof rawUnit !== "string") {
+    return {
+      kind: "invalid",
+      message: `Telemetry projection '${projection.id}' unit field '${projection.unitField}' must be a string.`,
+    }
+  }
 
   return {
-    ok: true,
-    item: {
-      id: String(objectId),
-      properties,
-      at: parsedAt,
+    kind: "point",
+    point: {
+      series: {
+        object: { objectTypeId: projection.objectTypeId, primaryId: objectId },
+        propertyId: projection.propertyId,
+      },
+      value: normalized.value,
+      at: parsedAt.toISOString(),
+      ...(typeof rawUnit === "string" && rawUnit.trim().length > 0 ? { unit: rawUnit } : {}),
     },
   }
 }
 
-// Calendar date or datetime with an optional zone designator. Tolerates
-// non-zero-padded month / day / hour fields. A trailing "Z" or a numeric
-// ±HH:MM / ±HHMM offset names the zone; its absence means UTC. Capture groups:
-// year, month, day, hour, minute, second, fraction, zone.
+function invalidIdentity(
+  projection: TelemetryProjectionDefinition,
+  field: string
+): ProjectTelemetryRowResult {
+  return {
+    kind: "invalid",
+    message: `Telemetry projection '${projection.id}' identity field '${field}' must be a non-empty string.`,
+  }
+}
+
 const TELEMETRY_TIMESTAMP =
   /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?)?([zZ]|[+-]\d{2}:?\d{2})?$/
 
@@ -265,31 +262,15 @@ interface TimestampComponents {
   readonly milliseconds: number
 }
 
-// Parse a telemetry `at` value to an absolute instant from explicit calendar
-// components, never via new Date(string) — which would fall back to local-time
-// parsing for non-ISO forms and silently roll over out-of-range fields. The
-// written wall-clock fields are validated as a real calendar date/time
-// (timezone-independent) before the named offset is applied, so a row
-// materializes at the same instant regardless of the worker process timezone
-// and an invalid timestamp is rejected rather than shifted.
 export function parseTelemetryTimestamp(value: unknown): Date | null {
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value
-  }
-  if (typeof value !== "string") {
-    return null
-  }
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+  if (typeof value !== "string") return null
 
   const match = TELEMETRY_TIMESTAMP.exec(value.trim())
-  if (match === null) {
-    return null
-  }
+  if (!match) return null
   const [, year, month, day, hour, minute, second, fraction, zone] = match
-
   const offsetMinutes = parseZoneOffsetMinutes(zone)
-  if (offsetMinutes === null) {
-    return null
-  }
+  if (offsetMinutes === null) return null
 
   const components: TimestampComponents = {
     year: Number(year),
@@ -300,11 +281,6 @@ export function parseTelemetryTimestamp(value: unknown): Date | null {
     second: second === undefined ? 0 : Number(second),
     milliseconds: fraction === undefined ? 0 : Math.trunc(Number(`0.${fraction}`) * 1000),
   }
-
-  // Build the wall-clock instant as if UTC, then re-read every field to reject
-  // any that rolled over (e.g. "2026-02-29", "...09:99", "...24:00"). Calendar
-  // validity is timezone-independent, so this guards both zone-less and zoned
-  // inputs; only after it round-trips do we shift by the offset.
   const wallClock = Date.UTC(
     components.year,
     components.month - 1,
@@ -314,25 +290,16 @@ export function parseTelemetryTimestamp(value: unknown): Date | null {
     components.second,
     components.milliseconds
   )
-  if (!wallClockMatchesComponents(wallClock, components)) {
-    return null
-  }
-
+  if (!wallClockMatchesComponents(wallClock, components)) return null
   return new Date(wallClock - offsetMinutes * 60_000)
 }
 
-// Returns the offset in minutes to subtract from the wall-clock UTC instant, or
-// null if the offset is out of range. Zone-less and "Z" inputs are UTC (0).
 function parseZoneOffsetMinutes(zone: string | undefined): number | null {
-  if (zone === undefined || zone === "Z" || zone === "z") {
-    return 0
-  }
+  if (zone === undefined || zone === "Z" || zone === "z") return 0
   const digits = zone.slice(1).replace(":", "")
   const hours = Number(digits.slice(0, 2))
   const minutes = Number(digits.slice(2, 4))
-  if (hours > 23 || minutes > 59) {
-    return null
-  }
+  if (hours > 23 || minutes > 59) return null
   return (zone[0] === "-" ? -1 : 1) * (hours * 60 + minutes)
 }
 
@@ -345,13 +312,5 @@ function wallClockMatchesComponents(wallClock: number, components: TimestampComp
     date.getUTCHours() === components.hour &&
     date.getUTCMinutes() === components.minute &&
     date.getUTCSeconds() === components.second
-  )
-}
-
-function isRecoverableTelemetryRowError(error: unknown): boolean {
-  return (
-    error instanceof ObjectNotFoundError ||
-    error instanceof OntologyValidationError ||
-    error instanceof MaterializationValidationError
   )
 }

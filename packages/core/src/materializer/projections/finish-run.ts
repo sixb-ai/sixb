@@ -177,19 +177,12 @@ async function prepareTelemetryTerminalDecision(
   input: Extract<ProjectionRunFinishInput, { readonly protocol: "telemetry" }>
 ): Promise<void> {
   if (input.status !== "succeeded") return
-  if (input.emptyInput === true) {
-    await projectionRuns.completeEmptyTelemetryInput({
+  if (!run.telemetryCheckpoint?.inputExhausted) {
+    await projectionRuns.completeTelemetryInput({
       id: input.execution.projectionRunId,
       projectId,
       executionToken: input.execution.executionToken,
       identity,
     })
-    return
-  }
-  if (!run.telemetryCheckpoint?.inputExhausted) {
-    throw new MaterializationConflictError(
-      "run-correlation",
-      `Telemetry projection run '${run.id}' cannot succeed before its input is exhausted.`
-    )
   }
 }

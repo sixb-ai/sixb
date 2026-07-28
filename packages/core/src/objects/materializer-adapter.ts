@@ -35,7 +35,7 @@ import type { SixbRuntimeContext } from "../runtime/types"
 import type { ObjectRow } from "../storage"
 import { ObjectError } from "./errors"
 
-/** The runtime pieces one commit needs: Materializer plus post-commit fact publication. */
+/** The runtime pieces one commit needs. */
 export type RuntimeMaterializerContext = Pick<SixbRuntimeContext, "projectId" | "storage">
 
 /** One caller-supplied batch item, lowered to the operations it contributes. */
@@ -70,7 +70,6 @@ export async function commitRuntimeOperations(
     expectedLinks: [],
     expectedLinkScopes: [],
   })
-  publishCommittedFacts(ctx, commit)
   return commit
 }
 
@@ -103,7 +102,6 @@ export async function commitRuntimeBatch(
     operations,
     ...(operationGroups.length > 0 ? { operationGroups } : {}),
   })
-  publishCommittedFacts(ctx, commit)
 
   const byId = new Map(commit.outcomes.map((outcome) => [outcome.id, outcome]))
   const outcomes = new Map<number, readonly OntologyOperationOutcome[]>()
@@ -271,17 +269,4 @@ function requireOutcome(
     throw new ObjectError(`[Sixb] Materializer returned no outcome for '${id}'.`)
   }
   return outcome
-}
-
-/**
- * Hands committed facts to the in-process publisher.
- *
- * The commit is already durable, so a delivery failure is reported by the publisher rather than
- * failing the caller's write.
- */
-export function publishCommittedFacts(
-  ctx: RuntimeMaterializerContext,
-  commit: Pick<EditCommitResult, "eventCount">
-): void {
-  getOntologyMutationRuntime(ctx).notifyCommittedFacts(commit.eventCount)
 }

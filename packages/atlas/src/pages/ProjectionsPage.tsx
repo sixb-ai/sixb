@@ -120,45 +120,21 @@ function KindBadge({ kind }: { kind: ProjectionKind }) {
   )
 }
 
-// Each projection kind upserts a different target, so the counters worth
-// surfacing differ by kind.
 function runMetrics(run: ProjectionRun): { label: string; value: number }[] {
-  if (run.projectionKind === "telemetry") {
-    return [
-      { label: "Points", value: run.telemetryPointsAppended },
-      { label: "Skipped", value: run.telemetryPointsSkipped },
-      { label: "Failed", value: run.telemetryRowsFailed },
-    ]
-  }
-  if (run.projectionKind === "link") {
-    return [
-      { label: "Rows", value: run.rowsProcessed },
-      { label: "Links", value: run.linksUpserted },
-    ]
-  }
   return [
-    { label: "Rows", value: run.rowsProcessed },
-    { label: "Objects", value: run.objectsUpserted },
+    { label: "Rows read", value: run.sourceRowsRead },
+    { label: "Rows skipped", value: run.sourceRowsSkipped },
   ]
 }
 
-// The headline throughput counter for the summary band, by kind.
 function primaryMetric(run: ProjectionRun): { label: string; value: number } {
-  if (run.projectionKind === "telemetry") {
-    return { label: "Points", value: run.telemetryPointsAppended }
-  }
-  if (run.projectionKind === "link") {
-    return { label: "Links", value: run.linksUpserted }
-  }
-  return { label: "Objects", value: run.objectsUpserted }
+  return { label: "Rows", value: run.sourceRowsRead }
 }
 
-// Runs are identified by `<uuid>:attempt:<n>`; surface a short, stable handle
-// (the uuid prefix + attempt) and keep the full id available on hover.
-function shortRunId(id: string): string {
-  const [base, , attempt] = id.split(":")
-  const head = base.length > 8 ? base.slice(0, 8) : base
-  return attempt ? `${head} · attempt ${attempt}` : head
+// Run ids stay stable across retries; the attempt is a separate execution counter.
+function runLabel(run: ProjectionRun): string {
+  const id = run.id.length > 8 ? run.id.slice(0, 8) : run.id
+  return run.attempt === undefined ? id : `${id} · attempt ${run.attempt}`
 }
 
 function runDuration(run: ProjectionRun): string {
@@ -491,7 +467,7 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
                 </td>
                 <td className="px-3 py-3">
                   <p className="font-mono text-xs text-foreground" title={run.id}>
-                    {shortRunId(run.id)}
+                    {runLabel(run)}
                   </p>
                   <p
                     className="mt-0.5 max-w-[180px] truncate font-mono text-xs text-muted-foreground"
@@ -535,7 +511,7 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
               </span>
             </div>
             <p className="mt-2 font-mono text-xs text-foreground" title={run.id}>
-              {shortRunId(run.id)}
+              {runLabel(run)}
             </p>
             <p
               className="truncate font-mono text-xs text-muted-foreground"

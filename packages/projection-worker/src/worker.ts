@@ -1,9 +1,15 @@
+import { MaterializationCancellationError } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { shareProjectionRegistry } from "@sixb/core/internal/projections"
 import { shareOntologyMutationRuntime } from "@sixb/core/internal/runtime"
+import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
-import type { ProjectionRunStorage } from "@sixb/core/storage"
-import { runProjectionJob } from "./run-projection-job"
+import {
+  isProjectionMaterializationRunStorage,
+  type ProjectionMaterializationRunStorage,
+} from "@sixb/core/storage"
+import { isPermanentProjectionFailure, runProjectionJob } from "./run-projection-job"
 import type { ProjectionWorkerContext, ProjectionWorkerSixb } from "./types"
 
 export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob> {
@@ -20,8 +26,10 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
     }
 
     const projectionRunsStorage = sixb.storage.projectionRuns
-    if (!projectionRunsStorage) {
-      throw new Error("[SixbProjectionWorker] Projection workers require storage.projectionRuns.")
+    if (!isProjectionMaterializationRunStorage(projectionRunsStorage)) {
+      throw new Error(
+        "[SixbProjectionWorker] Projection workers require materialization-capable storage.projectionRuns."
+      )
     }
 
     super({
@@ -29,7 +37,6 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
       queue: sixb.queues.projections,
       workerId: `projection-worker-${sixb.id}`,
     })
-
     this.context = buildProjectionContext(sixb, projectionRunsStorage)
     this.sixb = sixb
   }
@@ -41,14 +48,7 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
     const { job } = claimed
     await runProjectionJob({
       runtime: this.context,
-      job: {
-        id: `${job.id}:attempt:${job.attempt}`,
-        projectionId: job.payload.projectionId,
-        projectionKind: job.payload.projectionKind,
-        datasetId: job.payload.datasetId,
-        versionId: job.payload.versionId,
-        queueJobId: job.id,
-      },
+      job: { id: job.id, ...job.payload },
       signal,
       onRunFailed: (error, run) => {
         reportRunFailure(this.sixb, error, {
@@ -65,11 +65,41 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
       },
     })
   }
+
+  protected override async onExecutionError(
+    claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
+    error: unknown
+  ): Promise<QueueWorkerFailureDecision> {
+    return this.failureDecision(claimed, error)
+  }
+
+  protected override async onAbortError(
+    claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
+    error: unknown
+  ): Promise<QueueWorkerFailureDecision> {
+    if (error instanceof MaterializationCancellationError) {
+      return { kind: "fail" }
+    }
+    return this.failureDecision(claimed, error)
+  }
+
+  private async failureDecision(
+    claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
+    error: unknown
+  ): Promise<QueueWorkerFailureDecision> {
+    const run = await this.context.projectionRunsStorage.getById({
+      projectId: this.context.projectId,
+      id: claimed.job.id,
+    })
+    if (run?.status === "running") return { kind: "retry" }
+    if (run) return { kind: "fail" }
+    return isPermanentProjectionFailure(error) ? { kind: "fail" } : { kind: "retry" }
+  }
 }
 
 function buildProjectionContext(
   sixb: ProjectionWorkerSixb,
-  projectionRunsStorage: ProjectionRunStorage
+  projectionRunsStorage: ProjectionMaterializationRunStorage
 ): ProjectionWorkerContext {
   const context: ProjectionWorkerContext = {
     projectId: sixb.projectId,
@@ -81,13 +111,10 @@ function buildProjectionContext(
     blobStorage: sixb.blobStorage,
     queues: sixb.queues,
     projectionRunsStorage,
-    getDatasetById(datasetId) {
-      return sixb.getDatasetById(datasetId)
-    },
-    getProjectionById(projectionId) {
-      return sixb.getProjectionById(projectionId)
-    },
+    getDatasetById: (datasetId) => sixb.getDatasetById(datasetId),
+    getProjectionById: (projectionId) => sixb.getProjectionById(projectionId),
   }
   shareOntologyMutationRuntime(sixb, context)
+  shareProjectionRegistry(sixb, context)
   return context
 }

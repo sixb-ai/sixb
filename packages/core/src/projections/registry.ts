@@ -11,6 +11,7 @@ import type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
+  ProjectionDispatchDescriptor,
   ResolvedProjection,
   TelemetryProjectionDefinition,
 } from "./types"
@@ -29,6 +30,8 @@ export class ProjectionRegistry {
     string,
     ResolvedProjection<TelemetryProjectionDefinition>
   >()
+  private readonly dispatchById = new Map<string, ProjectionDispatchDescriptor>()
+  private readonly dispatchDescriptors: readonly ProjectionDispatchDescriptor[]
 
   constructor(input: {
     readonly projections: readonly ProjectionDefinition[]
@@ -75,20 +78,28 @@ export class ProjectionRegistry {
     )
     this.ontologyRevision = computeOntologyRevision(input.ontology)
 
+    const dispatchDescriptors: ProjectionDispatchDescriptor[] = []
     for (const record of validated.objectProjections) {
       const resolved = createResolvedProjection(record)
       this.sourceById.set(resolved.projectionId, resolved)
       this.projectionsById.set(resolved.projectionId, resolved.definition)
+      dispatchDescriptors.push(createDispatchDescriptor(resolved, this.ontologyRevision))
     }
     for (const record of validated.linkProjections) {
       const resolved = createResolvedProjection(record)
       this.sourceById.set(resolved.projectionId, resolved)
       this.projectionsById.set(resolved.projectionId, resolved.definition)
+      dispatchDescriptors.push(createDispatchDescriptor(resolved, this.ontologyRevision))
     }
     for (const record of validated.telemetryProjections) {
       const resolved = createResolvedProjection(record)
       this.telemetryById.set(resolved.projectionId, resolved)
       this.projectionsById.set(resolved.projectionId, resolved.definition)
+      dispatchDescriptors.push(createDispatchDescriptor(resolved, this.ontologyRevision))
+    }
+    this.dispatchDescriptors = Object.freeze(dispatchDescriptors)
+    for (const descriptor of this.dispatchDescriptors) {
+      this.dispatchById.set(descriptor.projectionId, descriptor)
     }
   }
 
@@ -106,6 +117,16 @@ export class ProjectionRegistry {
 
   getProjectionById(projectionId: string): ProjectionDefinition | null {
     return this.projectionsById.get(projectionId) ?? null
+  }
+
+  getDispatchDescriptors(): readonly ProjectionDispatchDescriptor[] {
+    return this.dispatchDescriptors
+  }
+
+  resolveDispatch(projectionId: string): ProjectionDispatchDescriptor {
+    const descriptor = this.dispatchById.get(projectionId)
+    if (descriptor) return descriptor
+    throw new ProjectionValidationError(`[Sixb] Unknown projection '${projectionId}'.`)
   }
 
   resolveSource(projectionId: string): ResolvedProjection<SourceProjectionDefinition> {
@@ -132,6 +153,28 @@ export class ProjectionRegistry {
       throw new ProjectionValidationError(`[Sixb] Unknown telemetry projection '${projectionId}'.`)
     }
     return resolved
+  }
+}
+
+function createDispatchDescriptor(
+  resolved: ResolvedProjection<ProjectionDefinition>,
+  ontologyRevision: string
+): ProjectionDispatchDescriptor {
+  const common = {
+    projectionId: resolved.projectionId,
+    datasetId: resolved.datasetId,
+    ontologyRevision,
+    projectionRevision: resolved.projectionRevision,
+    ownershipHash: resolved.ownershipHash,
+  }
+
+  switch (resolved.definition._tag) {
+    case "ObjectProjectionDefinition":
+      return deepFreeze({ ...common, projectionKind: "object", protocol: "replacement" })
+    case "LinkProjectionDefinition":
+      return deepFreeze({ ...common, projectionKind: "link", protocol: "replacement" })
+    case "TelemetryProjectionDefinition":
+      return deepFreeze({ ...common, projectionKind: "telemetry", protocol: "telemetry" })
   }
 }
 

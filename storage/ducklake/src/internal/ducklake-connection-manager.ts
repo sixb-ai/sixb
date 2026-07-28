@@ -152,6 +152,9 @@ export class DuckLakeConnectionManager {
 
     const runtime = await createDuckDbRuntime(this.options.duckdb)
     try {
+      // Projection checkpoints use physical offsets. DuckDB must preserve insertion order for
+      // immutable DuckLake snapshot scans, including after this runtime is recreated.
+      await runtime.run("SET preserve_insertion_order = true")
       await this.ensureExtensionsInstalled(runtime)
       await setupDuckLake(runtime, this.options, {
         attach: false,

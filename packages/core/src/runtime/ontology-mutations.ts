@@ -14,7 +14,6 @@ export interface OntologyMutationRuntime {
   replaceProjection(input: ProjectionSourceReplacement): Promise<ProjectionCommitResult>
   finishProjection(input: ProjectionRunFinishInput): Promise<void>
   appendTelemetry(input: TelemetryAppend): Promise<TelemetryCommitResult>
-  notifyCommittedFacts(eventCount: number): void
 }
 
 const ontologyMutationRuntimeKey: unique symbol = Symbol("sixb.ontologyMutationRuntime")
@@ -55,12 +54,37 @@ export function createOntologyMutationRuntime(input: {
   readonly notifyCommittedFacts: () => void
 }): OntologyMutationRuntime {
   return {
-    commitEdits: (command) => input.materializer.edits.commit(command),
-    replaceProjection: (command) => input.materializer.projections.replace(command),
+    commitEdits: (command) =>
+      commitAndNotify(() => input.materializer.edits.commit(command), input.notifyCommittedFacts),
+    replaceProjection: (command) =>
+      commitAndNotify(
+        () => input.materializer.projections.replace(command),
+        input.notifyCommittedFacts
+      ),
     finishProjection: (command) => input.materializer.projections.finishRun(command),
-    appendTelemetry: (command) => input.materializer.telemetry.append(command),
-    notifyCommittedFacts(eventCount) {
-      if (eventCount > 0) input.notifyCommittedFacts()
-    },
+    appendTelemetry: (command) =>
+      commitAndNotify(
+        () => input.materializer.telemetry.append(command),
+        input.notifyCommittedFacts
+      ),
+  }
+}
+
+async function commitAndNotify<TResult extends { readonly eventCount: number }>(
+  commit: () => Promise<TResult>,
+  notify: () => void
+): Promise<TResult> {
+  const result = await commit()
+  if (result.eventCount > 0) notifyWithoutAffectingCommit(notify)
+  return result
+}
+
+function notifyWithoutAffectingCommit(notify: () => void): void {
+  try {
+    notify()
+  } catch (error) {
+    // The ontology commit is already durable. A wake-up failure must never turn it into an apparent
+    // mutation failure; the outbox poll loop remains the correctness fallback.
+    console.error("[Sixb] Failed to wake the ontology outbox dispatcher:", error)
   }
 }

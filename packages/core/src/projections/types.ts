@@ -110,6 +110,30 @@ export interface ProjectionOwnership {
   }[]
 }
 
+/**
+ * Frozen semantic identity used to dispatch one registered projection.
+ *
+ * Dataset version metadata is attached only when a committed dataset event is routed. Keeping the
+ * registry-owned fields together prevents the orchestrator from recomputing ontology semantics.
+ */
+export type ProjectionDispatchDescriptor =
+  | ProjectionDispatchDescriptorBase<"object", "replacement">
+  | ProjectionDispatchDescriptorBase<"link", "replacement">
+  | ProjectionDispatchDescriptorBase<"telemetry", "telemetry">
+
+interface ProjectionDispatchDescriptorBase<
+  TKind extends "object" | "link" | "telemetry",
+  TProtocol extends "replacement" | "telemetry",
+> {
+  readonly projectionId: string
+  readonly projectionKind: TKind
+  readonly protocol: TProtocol
+  readonly datasetId: string
+  readonly ontologyRevision: string
+  readonly projectionRevision: string
+  readonly ownershipHash: string
+}
+
 export interface ResolvedProjection<TDefinition extends ProjectionDefinition> {
   readonly projectionId: string
   readonly datasetId: string

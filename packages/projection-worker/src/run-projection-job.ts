@@ -1,346 +1,272 @@
-import type { DatasetDefinition, ProjectionDefinition } from "@sixb/core"
-import { projectionKindOf, projectionObjectTypeIds } from "@sixb/core"
-import type { DatasetVersion } from "@sixb/core/lake-storage"
-import type { ProjectionRunCounters, ProjectionRunRecord } from "@sixb/core/storage"
-import { PROJECTION_COUNTER_KEYS } from "@sixb/core/storage"
-import { ProjectionWorkerError } from "./errors"
-import { runLinkProjection } from "./run-link-projection"
-import { runObjectProjection } from "./run-object-projection"
-import { runTelemetryProjection } from "./run-telemetry-projection"
 import {
-  assertDatasetVersionMatchesDefinition,
-  assertProjectionCompatibleWithDataset,
-} from "./schema-validation"
+  isMaterializationConflictError,
+  MaterializationCancellationError,
+  MaterializationValidationError,
+  type ProjectionDefinition,
+} from "@sixb/core"
+import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
+import type { ProjectionRunObjectTypes, ProjectionRunRecord } from "@sixb/core/storage"
+import { ProjectionWorkerPermanentError } from "./errors"
+import { type ValidatedProjectionJob, validateProjectionJob } from "./job-validation"
+import { mapLinkProjectionEntries } from "./run-link-projection"
+import { mapObjectProjectionEntries } from "./run-object-projection"
+import { runTelemetryProjection, TELEMETRY_PROJECTION_BATCH_SIZE } from "./run-telemetry-projection"
 import type {
-  ProjectionExecutionResult,
+  ClaimedProjectionExecution,
   ProjectionJob,
   ProjectionJobResult,
   RunProjectionJobInput,
 } from "./types"
-import {
-  createAbortError,
-  createZeroCounters,
-  errorMessage,
-  snapshotCounters,
-  throwIfAborted,
-} from "./utils"
-
-const DEFAULT_BATCH_SIZE = 500
 
 export async function runProjectionJob(input: RunProjectionJobInput): Promise<ProjectionJobResult> {
-  const { runtime, job } = input
   const signal = input.signal ?? new AbortController().signal
-  const batchSize = input.batchSize ?? DEFAULT_BATCH_SIZE
-  const projectId = runtime.projectId
-  const counters = createZeroCounters()
-  let started = false
-  let finished = false
-  let runFinishAttempted = false
-  let materialized = false
+  const validated = await validateProjectionJob(input.runtime, input.job)
+  const terminal = await findMatchingTerminalRun(input, validated.objectTypes)
+  if (terminal) return terminalResult(terminal)
 
+  const execution = await claimOrReplaySucceededRun(input, validated.objectTypes)
+  if ("replayedTerminal" in execution) return execution
   try {
-    // Resolve up front so the run records the object type(s) it targets (used
-    // for authorization). Resolution still happens before validation, so an
-    // unknown projection is recorded as a started run and then fails below.
-    const resolvedProjection = runtime.getProjectionById(job.projectionId)
+    await materializeProjection(input, validated, execution, signal)
+    await finishProjection(input, execution, "succeeded")
+    return { run: await requireRun(input), replayedTerminal: false }
+  } catch (error) {
+    const succeeded = await findSucceededRun(input)
+    if (succeeded) return terminalResult(succeeded)
 
-    await runtime.projectionRunsStorage.start({
-      projectId,
-      id: job.id,
-      projectionId: job.projectionId,
-      projectionKind: job.projectionKind,
-      datasetId: job.datasetId,
-      datasetVersionId: job.versionId,
-      ...(resolvedProjection ? projectionObjectTypeIds(resolvedProjection) : {}),
-    })
-    started = true
-
-    throwIfAborted(signal)
-
-    const projection = requireProjection(resolvedProjection, job)
-    const dataset = requireRegisteredDataset(runtime.getDatasetById(job.datasetId), job)
-    await assertLakeDatasetExists(runtime.lakeStorage, job)
-    const version = await requireDatasetVersion(runtime.lakeStorage, job)
-
-    assertDatasetVersionMatchesDefinition({ dataset, version })
-    assertProjectionCompatibleWithDataset({ projection, dataset, ontology: runtime.ontology })
-
-    // V1 materialization is batch-scoped, not globally transactional across object storage writes.
-    // A failed or cancelled run can leave flushed batches visible; retries must stay idempotent.
-    const execution = await executeProjection({
-      runtime,
-      job,
-      projection,
-      dataset,
-      signal,
-      batchSize,
-      onProgress: async (nextCounters) => {
-        Object.assign(counters, nextCounters)
-        materialized = hasMaterialized(nextCounters)
-        await runtime.projectionRunsStorage.update({
-          projectId,
-          id: job.id,
-          ...nextCounters,
-        })
-      },
-    })
-
-    for (const key of PROJECTION_COUNTER_KEYS) {
-      counters[key] = execution[key]
-    }
-    materialized = hasMaterialized(counters)
-
-    if (execution.firstErrorMessage) {
-      const error = new ProjectionWorkerError(
-        `[SixbProjectionWorker] Projection run '${job.id}' failed. ${execution.firstErrorMessage}`
-      )
-      runFinishAttempted = true
-      const run = await finishRun({
-        runtime,
-        job,
-        status: "failed",
-        counters,
-        errorMessage: execution.firstErrorMessage,
-        materialized,
-      })
-      finished = true
-      if (run.status === "failed") input.onRunFailed?.(error, run)
+    if (isExplicitCancellation(error)) {
+      await finishProjection(input, execution, "cancelled", error.message)
       throw error
     }
-
-    runFinishAttempted = true
-    const run = await finishRun({
-      runtime,
-      job,
-      status: "succeeded",
-      counters,
-      materialized,
-    })
-    finished = true
-
-    return {
-      id: job.id,
-      projectionId: job.projectionId,
-      projectionKind: job.projectionKind,
-      datasetId: job.datasetId,
-      datasetVersionId: job.versionId,
-      ...snapshotCounters(counters),
-      run,
+    if (isPermanentFailure(error) && !signal.aborted) {
+      await finishProjection(input, execution, "failed", errorMessage(error))
+      const run = await requireRun(input)
+      input.onRunFailed?.(error, run)
     }
-  } catch (error) {
-    if (started && !finished && !runFinishAttempted) {
-      await finishAfterError({
-        runtime,
-        job,
-        counters,
-        error,
-        materialized,
-        signal,
-        onRunFailed: input.onRunFailed,
-      })
-    }
-
+    // Transient errors, delivery loss, shutdown, and stale executions deliberately leave the run
+    // running so the next QueueDelivery can reclaim it with a fresh token.
     throw error
   }
 }
 
-async function executeProjection(input: {
-  readonly runtime: RunProjectionJobInput["runtime"]
-  readonly job: ProjectionJob
-  readonly projection: ProjectionDefinition
-  readonly dataset: DatasetDefinition
-  readonly signal: AbortSignal
-  readonly batchSize: number
-  readonly onProgress: (counters: ProjectionRunCounters) => Promise<void>
-}): Promise<ProjectionExecutionResult> {
-  const { runtime, job, projection, dataset, signal, batchSize, onProgress } = input
-  if (projection._tag === "ObjectProjectionDefinition") {
-    return runObjectProjection({
-      runtime,
-      projection,
-      dataset,
-      runId: job.id,
-      versionId: job.versionId,
-      signal,
-      batchSize,
-      onProgress,
-    })
+async function claimOrReplaySucceededRun(
+  input: RunProjectionJobInput,
+  objectTypes: ProjectionRunObjectTypes
+): Promise<ClaimedProjectionExecution | ProjectionJobResult> {
+  try {
+    return await claimExecution(input, objectTypes)
+  } catch (error) {
+    // Another delivery may have finished after our initial terminal read but before the claim.
+    const succeeded = await findSucceededRun(input)
+    if (succeeded) return terminalResult(succeeded)
+    throw error
   }
+}
 
-  if (projection._tag === "LinkProjectionDefinition") {
-    return runLinkProjection({
-      runtime,
-      projection,
-      dataset,
-      versionId: job.versionId,
-      signal,
-      batchSize,
-      onProgress,
-    })
-  }
-
-  if (projection._tag === "TelemetryProjectionDefinition") {
-    return runTelemetryProjection({
-      runtime,
-      projection,
-      dataset,
-      versionId: job.versionId,
-      signal,
-      batchSize,
-      onProgress,
-    })
-  }
-
-  throw new ProjectionWorkerError(
-    `[SixbProjectionWorker] Unsupported projection kind '${(projection as { _tag: string })._tag}'.`
+async function findMatchingTerminalRun(
+  input: RunProjectionJobInput,
+  objectTypes: ProjectionRunObjectTypes
+): Promise<ProjectionRunRecord | null> {
+  const run = await input.runtime.projectionRunsStorage.getById({
+    projectId: input.runtime.projectId,
+    id: input.job.id,
+  })
+  if (!run) return null
+  assertRunMatchesJob(run, input.job, objectTypes)
+  if (run.status === "running") return null
+  if (run.status === "succeeded") return run
+  throw new ProjectionWorkerPermanentError(
+    `[SixbProjectionWorker] Projection run '${run.id}' is already '${run.status}'.`
   )
 }
 
-function requireProjection(
-  projection: ProjectionDefinition | null,
-  job: ProjectionJob
-): ProjectionDefinition {
-  if (!projection) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Unknown projection '${job.projectionId}'.`
-    )
+async function claimExecution(
+  input: RunProjectionJobInput,
+  objectTypes: ProjectionRunObjectTypes
+): Promise<ClaimedProjectionExecution> {
+  const fixedBatchSize = telemetryBatchSize(input)
+  const run = await input.runtime.projectionRunsStorage.startOrReclaimMaterialization({
+    projectId: input.runtime.projectId,
+    id: input.job.id,
+    identity: input.job,
+    ...objectTypes,
+    ...(fixedBatchSize === undefined ? {} : { fixedBatchSize }),
+  })
+  return {
+    run,
+    identity: input.job,
+    execution: { projectionRunId: run.id, executionToken: run.executionToken },
   }
-
-  const actualKind = projectionKindOf(projection)
-  if (actualKind !== job.projectionKind) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Projection '${job.projectionId}' has kind '${actualKind}', job requested '${job.projectionKind}'.`
-    )
-  }
-
-  if (projection.datasetId !== job.datasetId) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Projection '${job.projectionId}' targets dataset '${projection.datasetId}', job requested '${job.datasetId}'.`
-    )
-  }
-
-  return projection
 }
 
-function requireRegisteredDataset(
-  dataset: DatasetDefinition | null,
-  job: ProjectionJob
-): DatasetDefinition {
-  if (!dataset) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Projection job '${job.id}' references unknown dataset '${job.datasetId}'.`
-    )
-  }
-  return dataset
+function telemetryBatchSize(input: RunProjectionJobInput): number | undefined {
+  if (input.job.protocol !== "telemetry") return undefined
+  return input.telemetryBatchSize ?? TELEMETRY_PROJECTION_BATCH_SIZE
 }
 
-async function assertLakeDatasetExists(
-  lakeStorage: RunProjectionJobInput["runtime"]["lakeStorage"],
-  job: ProjectionJob
+async function materializeProjection(
+  input: RunProjectionJobInput,
+  validated: ValidatedProjectionJob,
+  execution: ClaimedProjectionExecution,
+  signal: AbortSignal
 ): Promise<void> {
-  const lakeDataset = await lakeStorage.getDataset(job.datasetId)
-  if (!lakeDataset) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Dataset '${job.datasetId}' is not registered in lake storage.`
-    )
-  }
-}
-
-async function requireDatasetVersion(
-  lakeStorage: RunProjectionJobInput["runtime"]["lakeStorage"],
-  job: ProjectionJob
-): Promise<DatasetVersion> {
-  const version = await lakeStorage.getVersion(job.datasetId, job.versionId)
-  if (!version) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Dataset '${job.datasetId}' version '${job.versionId}' was not found.`
-    )
-  }
-  return version
-}
-
-async function finishRun(input: {
-  readonly runtime: RunProjectionJobInput["runtime"]
-  readonly job: ProjectionJob
-  readonly status: "succeeded" | "failed" | "cancelled"
-  readonly counters: ProjectionRunCounters
-  readonly materialized: boolean
-  readonly errorMessage?: string
-}): Promise<ProjectionRunRecord> {
-  try {
-    return await input.runtime.projectionRunsStorage.finish({
-      projectId: input.runtime.projectId,
-      id: input.job.id,
-      status: input.status,
-      ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
-      ...input.counters,
+  const { projection, dataset } = validated
+  if (projection._tag === "TelemetryProjectionDefinition") {
+    await runTelemetryProjection({
+      runtime: input.runtime,
+      projection,
+      dataset,
+      execution,
+      signal,
     })
-  } catch (error) {
-    if (input.materialized) {
-      throw createBookkeepingError({
-        projectionId: input.job.projectionId,
-        runId: input.job.id,
-        datasetVersionId: input.job.versionId,
-        cause: error,
-      })
-    }
-    throw error
+    return
   }
+
+  const entries = replacementEntries(input, projection, dataset, execution, signal)
+  await getOntologyMutationRuntime(input.runtime).replaceProjection({
+    source: { projectionId: projection.id },
+    datasetVersion: input.job.datasetVersion,
+    execution: execution.execution,
+    entries,
+    signal,
+  })
 }
 
-async function finishAfterError(input: {
-  readonly runtime: RunProjectionJobInput["runtime"]
-  readonly job: ProjectionJob
-  readonly counters: ProjectionRunCounters
-  readonly error: unknown
-  readonly materialized: boolean
-  readonly signal: AbortSignal
-  readonly onRunFailed: RunProjectionJobInput["onRunFailed"]
-}): Promise<void> {
-  const status = input.signal.aborted || isAbortError(input.error) ? "cancelled" : "failed"
-  const error = status === "cancelled" ? createAbortError() : input.error
+function replacementEntries(
+  input: RunProjectionJobInput,
+  projection: Exclude<ProjectionDefinition, { readonly _tag: "TelemetryProjectionDefinition" }>,
+  dataset: ValidatedProjectionJob["dataset"],
+  execution: ClaimedProjectionExecution,
+  signal: AbortSignal
+) {
+  if (projection._tag === "ObjectProjectionDefinition") {
+    return mapObjectProjectionEntries({
+      runtime: input.runtime,
+      projection,
+      dataset,
+      execution,
+      signal,
+    })
+  }
+  return mapLinkProjectionEntries({
+    runtime: input.runtime,
+    projection,
+    dataset,
+    execution,
+    signal,
+  })
+}
 
-  try {
-    const run = await input.runtime.projectionRunsStorage.finish({
-      projectId: input.runtime.projectId,
-      id: input.job.id,
+async function finishProjection(
+  input: RunProjectionJobInput,
+  execution: ClaimedProjectionExecution,
+  status: "succeeded" | "failed" | "cancelled",
+  errorMessage?: string
+): Promise<void> {
+  const common = {
+    source: { projectionId: input.job.projectionId },
+    datasetVersion: input.job.datasetVersion,
+    execution: execution.execution,
+  }
+  const mutations = getOntologyMutationRuntime(input.runtime)
+  if (input.job.protocol === "replacement") {
+    await mutations.finishProjection({
+      ...common,
+      protocol: "replacement",
       status,
-      errorMessage: errorMessage(error),
-      ...input.counters,
+      ...(status === "succeeded" ? {} : { errorMessage }),
     })
-    if (status === "failed" && run.status === "failed") input.onRunFailed?.(input.error, run)
-  } catch (finishError) {
-    if (input.materialized) {
-      throw createBookkeepingError({
-        projectionId: input.job.projectionId,
-        runId: input.job.id,
-        datasetVersionId: input.job.versionId,
-        cause: finishError,
-      })
-    }
+    return
+  }
+  if (status === "succeeded") {
+    await mutations.finishProjection({
+      ...common,
+      protocol: "telemetry",
+      status: "succeeded",
+      inputExhausted: true,
+    })
+    return
+  }
+  await mutations.finishProjection({
+    ...common,
+    protocol: "telemetry",
+    status,
+    errorMessage,
+  })
+}
+
+async function findSucceededRun(input: RunProjectionJobInput): Promise<ProjectionRunRecord | null> {
+  try {
+    const run = await input.runtime.projectionRunsStorage.getById({
+      projectId: input.runtime.projectId,
+      id: input.job.id,
+    })
+    return run?.status === "succeeded" ? run : null
+  } catch {
+    return null
   }
 }
 
-function hasMaterialized(counters: ProjectionRunCounters): boolean {
+async function requireRun(input: RunProjectionJobInput): Promise<ProjectionRunRecord> {
+  const run = await input.runtime.projectionRunsStorage.getById({
+    projectId: input.runtime.projectId,
+    id: input.job.id,
+  })
+  if (run) return run
+  throw new Error(`[SixbProjectionWorker] Projection run '${input.job.id}' disappeared.`)
+}
+
+function assertRunMatchesJob(
+  run: ProjectionRunRecord,
+  job: ProjectionJob,
+  objectTypes: ProjectionRunObjectTypes
+): void {
+  const matches =
+    run.projectionId === job.projectionId &&
+    run.projectionKind === job.projectionKind &&
+    run.materializationProtocol === job.protocol &&
+    run.datasetId === job.datasetVersion.datasetId &&
+    run.datasetVersionId === job.datasetVersion.versionId &&
+    run.datasetVersionCreatedAt === job.datasetVersion.createdAt &&
+    run.ontologyRevision === job.ontologyRevision &&
+    run.projectionRevision === job.projectionRevision &&
+    run.ownershipHash === job.ownershipHash &&
+    run.objectTypeId === objectTypes.objectTypeId &&
+    run.sourceObjectTypeId === objectTypes.sourceObjectTypeId &&
+    run.targetObjectTypeId === objectTypes.targetObjectTypeId
+  if (matches) return
+  throw new ProjectionWorkerPermanentError(
+    `[SixbProjectionWorker] Projection run '${run.id}' has a different durable identity.`
+  )
+}
+
+function terminalResult(run: ProjectionRunRecord): ProjectionJobResult {
+  return { run, replayedTerminal: true }
+}
+
+function isPermanentFailure(error: unknown): boolean {
+  if (
+    error instanceof ProjectionWorkerPermanentError ||
+    error instanceof MaterializationValidationError
+  ) {
+    return true
+  }
+  if (!isMaterializationConflictError(error)) return false
   return (
-    counters.objectsUpserted > 0 ||
-    counters.linksUpserted > 0 ||
-    counters.telemetryPointsAppended > 0
+    error.kind === "idempotency" ||
+    error.kind === "projection-fence" ||
+    error.kind === "run-correlation"
   )
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError"
+function isExplicitCancellation(error: unknown): error is MaterializationCancellationError {
+  return error instanceof MaterializationCancellationError
 }
 
-function createBookkeepingError(input: {
-  readonly projectionId: string
-  readonly runId: string
-  readonly datasetVersionId: string
-  readonly cause: unknown
-}): Error {
-  return new ProjectionWorkerError(
-    `[SixbProjectionWorker] Projection '${input.projectionId}' materialized dataset version '${input.datasetVersionId}', but failed to finalize projection run '${input.runId}'. The materialized projection state may need repair.`,
-    { cause: input.cause }
-  )
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+export function isPermanentProjectionFailure(error: unknown): boolean {
+  return isPermanentFailure(error) || isExplicitCancellation(error)
 }

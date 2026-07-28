@@ -108,8 +108,5 @@ export async function runEditsAndCommitPhase(
     dependencies: reads.dependencies(),
   })
 
-  // Committed state is readable; publication of its durable facts is best effort.
-  input.runtime.ontologyMutations.notifyCommittedFacts(commit.eventCount)
-
   return { run, result: commit }
 }

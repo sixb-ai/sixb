@@ -67,7 +67,7 @@ describe("projection run materialization ownership", () => {
         projectId: input.projectId,
         identity: replacementIdentity,
         executionToken: "execution-1",
-        rowsProcessed: 1,
+        sourceRowsRead: 1,
       })
     ).rejects.toThrow("execution token is stale")
     await expect(
@@ -76,9 +76,9 @@ describe("projection run materialization ownership", () => {
         projectId: input.projectId,
         identity: replacementIdentity,
         executionToken: "execution-2",
-        rowsProcessed: 1,
+        sourceRowsRead: 1,
       })
-    ).resolves.toMatchObject({ rowsProcessed: 1 })
+    ).resolves.toMatchObject({ sourceRowsRead: 1 })
   })
 
   test("stores only telemetry resume state and advances it contiguously", async () => {
@@ -100,6 +100,26 @@ describe("projection run materialization ownership", () => {
       },
     })
 
+    await expect(
+      storage.updateMaterialization({
+        id: "telemetry-run",
+        projectId: "project",
+        identity: telemetryIdentity,
+        executionToken: "execution",
+        sourceRowsRead: 1,
+      })
+    ).rejects.toThrow("can only advance with its checkpoint")
+    await expect(
+      storage.finishMaterialization({
+        id: "telemetry-run",
+        projectId: "project",
+        identity: telemetryIdentity,
+        executionToken: "execution",
+        status: "failed",
+        sourceRowsSkipped: 1,
+      })
+    ).rejects.toThrow("can only advance with its checkpoint")
+
     await storage.advanceTelemetryCheckpoint({
       id: "telemetry-run",
       projectId: "project",
@@ -107,6 +127,7 @@ describe("projection run materialization ownership", () => {
       executionToken: "execution",
       batchOrdinal: 0,
       batchRowCount: 2,
+      batchRowsSkipped: 0,
       inputExhausted: false,
     })
     expect(await storage.getById({ projectId: "project", id: "telemetry-run" })).toMatchObject({
@@ -125,6 +146,7 @@ describe("projection run materialization ownership", () => {
         executionToken: "execution",
         batchOrdinal: 2,
         batchRowCount: 1,
+        batchRowsSkipped: 0,
         inputExhausted: false,
       })
     ).rejects.toThrow("expected batch ordinal 1")
@@ -137,6 +159,7 @@ describe("projection run materialization ownership", () => {
         executionToken: "execution",
         batchOrdinal: 1,
         batchRowCount: 1,
+        batchRowsSkipped: 0,
         inputExhausted: false,
       })
     ).rejects.toThrow("partial non-final batch")
@@ -148,6 +171,7 @@ describe("projection run materialization ownership", () => {
         executionToken: "execution",
         batchOrdinal: 1,
         batchRowCount: 3,
+        batchRowsSkipped: 0,
         inputExhausted: true,
       })
     ).rejects.toThrow("exceeds its fixed size")
@@ -159,6 +183,7 @@ describe("projection run materialization ownership", () => {
       executionToken: "execution",
       batchOrdinal: 1,
       batchRowCount: 1,
+      batchRowsSkipped: 0,
       inputExhausted: true,
     })
     expect(await storage.getById({ projectId: "project", id: "telemetry-run" })).toMatchObject({
@@ -177,6 +202,7 @@ describe("projection run materialization ownership", () => {
         executionToken: "execution",
         batchOrdinal: 2,
         batchRowCount: 1,
+        batchRowsSkipped: 0,
         inputExhausted: true,
       })
     ).rejects.toThrow("already exhausted")
@@ -202,7 +228,7 @@ describe("projection run materialization ownership", () => {
       })
     ).rejects.toThrow("before its input is exhausted")
 
-    await storage.completeEmptyTelemetryInput({
+    await storage.completeTelemetryInput({
       id: "telemetry-run",
       projectId: "project",
       identity: telemetryIdentity,
@@ -229,7 +255,7 @@ describe("projection run materialization ownership", () => {
     })
 
     await expect(
-      storage.update({ id: "replacement-run", projectId: "project", rowsProcessed: 1 })
+      storage.update({ id: "replacement-run", projectId: "project", sourceRowsRead: 1 })
     ).rejects.toThrow("use updateMaterialization()")
     await expect(
       storage.finish({ id: "replacement-run", projectId: "project", status: "succeeded" })
@@ -384,7 +410,7 @@ describe("in-memory run root lock", () => {
         projectId: "project",
         identity: replacementIdentity,
         executionToken: projection.executionToken!,
-        rowsProcessed: 99,
+        sourceRowsRead: 99,
       })
       await tx.actionRuns.enterPhase({
         id: "action-run",
@@ -405,7 +431,7 @@ describe("in-memory run root lock", () => {
         projectId: "project",
         identity: replacementIdentity,
         executionToken: projection.executionToken,
-        rowsProcessed: 1,
+        sourceRowsRead: 1,
       })
       .then((record) => {
         projectionFinished = true
@@ -425,11 +451,11 @@ describe("in-memory run root lock", () => {
 
     releaseTransaction()
     await expect(failedTransaction).rejects.toThrow("rollback")
-    expect(await projectionWrite).toMatchObject({ rowsProcessed: 1 })
+    expect(await projectionWrite).toMatchObject({ sourceRowsRead: 1 })
     expect(await actionWrite).toMatchObject({ phase: "effects" })
     expect(
       await storage.projectionRuns.getById({ projectId: "project", id: "replacement-run" })
-    ).toMatchObject({ rowsProcessed: 1 })
+    ).toMatchObject({ sourceRowsRead: 1 })
     expect(
       await storage.actionRuns.getById({ projectId: "project", id: "action-run" })
     ).toMatchObject({ phase: "effects" })

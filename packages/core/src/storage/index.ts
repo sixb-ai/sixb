@@ -325,7 +325,7 @@ export { InMemoryPipelineRunStorage, PipelineRunError } from "./pipeline-runs"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
   AssertProjectionMaterializationExecutionInput,
-  CompleteEmptyProjectionTelemetryInput,
+  CompleteProjectionTelemetryInput,
   FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
   ListLatestProjectionRunsInput,
@@ -336,9 +336,9 @@ export type {
   ProjectionMaterializationProtocol,
   ProjectionMaterializationRunRecord,
   ProjectionMaterializationRunStorage,
-  ProjectionRunCounters,
   ProjectionRunDatasetVersion,
   ProjectionRunObjectTypes,
+  ProjectionRunProgress,
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
@@ -351,10 +351,10 @@ export type {
 export {
   InMemoryProjectionRunStorage,
   isProjectionMaterializationRunStorage,
-  PROJECTION_COUNTER_KEYS,
+  PROJECTION_RUN_PROGRESS_KEYS,
   ProjectionRunError,
   projectionRunObjectTypesVisible,
-  zeroProjectionRunCounters,
+  zeroProjectionRunProgress,
 } from "./projection-runs"
 export type {
   ListActiveRuleStatesInput,

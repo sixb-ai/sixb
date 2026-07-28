@@ -60,7 +60,12 @@ export interface BeginDatasetWriteInput {
 
 export interface ReadDatasetRowsInput {
   readonly datasetId: string
+  /**
+   * Pins an immutable physical row sequence. For an explicit version, providers must return the
+   * same order across reads and reopen; `offset: N` is exactly the suffix starting at row N.
+   */
   readonly versionId?: string
+  /** Column projection must not alter the physical row order. */
   readonly columns?: readonly string[]
   readonly limit?: number
   readonly offset?: number
@@ -122,5 +127,6 @@ export interface LakeStorage {
 
   getLatestVersion(datasetId: string): Promise<DatasetVersion | null>
   getVersion(datasetId: string, versionId: string): Promise<DatasetVersion | null>
+  /** Explicit immutable-version reads have stable physical order and stable offset semantics. */
   readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow>
 }

@@ -1,119 +1,109 @@
 import {
   type DatasetDefinition,
-  ObjectNotFoundError,
+  isJsonValue,
+  MaterializationValidationError,
   type ObjectProjectionDefinition,
 } from "@sixb/core"
-import { objectService } from "@sixb/core/internal/objects"
+import type { ProjectionSourceEntry } from "@sixb/core/internal/materialization"
 import {
   buildObjectProjectionPlan,
   type ProjectedObjectRow,
   projectObjectRow,
 } from "./object-projection-plan"
-import { type FlushContext, runStreamingProjection } from "./run-streaming-projection"
-import type {
-  ProjectionExecutionResult,
-  ProjectionProgressReporter,
-  ProjectionWorkerContext,
-} from "./types"
-import { errorMessage, isBlank } from "./utils"
+import { ReplacementProgress } from "./replacement-progress"
+import type { ClaimedProjectionExecution, ProjectionWorkerContext } from "./types"
+import { isBlank, throwIfAborted } from "./utils"
 
-interface RunObjectProjectionInput {
+export function mapObjectProjectionEntries(input: {
   readonly runtime: ProjectionWorkerContext
   readonly projection: ObjectProjectionDefinition
   readonly dataset: DatasetDefinition
-  readonly runId: string
-  readonly versionId: string
+  readonly execution: ClaimedProjectionExecution
   readonly signal: AbortSignal
-  readonly batchSize: number
-  readonly onProgress?: ProjectionProgressReporter
-}
-
-interface ForeignKeyLinkItem {
-  readonly objectTypeId: string
-  readonly sourceId: string
-  readonly linkId: string
-  readonly target: {
-    readonly targetTypeId: string
-    readonly targetId: string
-  }
-}
-
-export async function runObjectProjection(
-  input: RunObjectProjectionInput
-): Promise<ProjectionExecutionResult> {
-  const { runtime, projection, dataset, versionId, signal, batchSize, onProgress } = input
-  const primaryPropertyId = runtime.ontology.getPrimaryPropertyId(projection.objectTypeId)
-  const projectionPlan = buildObjectProjectionPlan({
+}): AsyncIterable<ProjectionSourceEntry> {
+  const { runtime, projection, dataset, execution, signal } = input
+  const plan = buildObjectProjectionPlan({
     ontology: runtime.ontology,
     projection,
     dataset,
-    primaryPropertyId,
+    primaryPropertyId: runtime.ontology.getPrimaryPropertyId(projection.objectTypeId),
   })
+  const progress = createProgress(runtime, execution)
 
-  return runStreamingProjection<ProjectedObjectRow>({
-    runtime,
-    signal,
-    batchSize,
-    onProgress,
-    spec: {
-      datasetId: projection.datasetId,
-      versionId,
-      readColumns: objectProjectionReadColumns(projection),
-      projectRow(row) {
-        const projected = projectObjectRow(projectionPlan, row)
+  return entries()
+
+  async function* entries(): AsyncIterable<ProjectionSourceEntry> {
+    try {
+      for await (const row of runtime.lakeStorage.readRows({
+        datasetId: execution.run.datasetId,
+        versionId: execution.run.datasetVersionId,
+        columns: objectProjectionReadColumns(projection),
+      })) {
+        throwIfAborted(signal)
+        const projected = projectObjectRow(plan, row)
         if (!projected.ok) {
-          return { status: "fail", errorMessage: projected.errorMessage }
+          await failCurrentRow(progress, projected.errorMessage)
+          continue
         }
         if (isBlank(projected.row.primaryValue)) {
-          return { status: "skip" }
+          await progress.recordRow(true)
+          continue
         }
-        return { status: "item", item: projected.row }
-      },
-      flushBatch(rows, ctx) {
-        return flushObjectBatch({ runtime, projection, rows, ctx })
-      },
-    },
-  })
+
+        let entry: ProjectionSourceEntry
+        try {
+          entry = toSourceEntry(projection, plan.primaryPropertyId, projected.row)
+        } catch (error) {
+          if (error instanceof MaterializationValidationError) {
+            await failCurrentRow(progress, error.message)
+          }
+          throw error
+        }
+        await progress.recordRow(false)
+        yield entry
+      }
+    } finally {
+      await progress.flush()
+    }
+  }
 }
 
-async function flushObjectBatch(input: {
-  readonly runtime: ProjectionWorkerContext
-  readonly projection: ObjectProjectionDefinition
-  readonly rows: readonly ProjectedObjectRow[]
-  readonly ctx: FlushContext
-}): Promise<void> {
-  const { runtime, projection, rows, ctx } = input
-  const { counters, rememberError } = ctx
-
-  const batchResults = await objectService.upsertObjectBatch(
-    runtime,
-    projection.objectTypeId,
-    rows.map((row) => ({ properties: row.properties }))
+function toSourceEntry(
+  projection: ObjectProjectionDefinition,
+  primaryPropertyId: string,
+  row: ProjectedObjectRow
+): ProjectionSourceEntry {
+  const primaryId = requireIdentity(row.primaryValue, projection.id, "primary property")
+  const objectRef = { objectTypeId: projection.objectTypeId, primaryId }
+  const properties = Object.fromEntries(
+    Object.entries(row.properties).filter(([propertyId]) => propertyId !== primaryPropertyId)
   )
-
-  const succeededRows: ProjectedObjectRow[] = []
-  for (let index = 0; index < rows.length; index += 1) {
-    const result = batchResults[index]
-    const row = rows[index]!
-    if (result?.ok) {
-      counters.objectsUpserted += 1
-      succeededRows.push(row)
-      continue
-    }
-
-    counters.rowsSkipped += 1
-    rememberError(
-      `Failed to upsert object '${String(row.primaryValue)}': ${errorMessage(result?.error)}`
-    )
+  if (!isJsonValue(properties)) {
+    throw validationError(projection.id, "produced non-JSON object properties")
   }
 
-  await materializeForeignKeyLinks({
-    runtime,
-    projection,
-    rows: succeededRows,
-    counters,
-    rememberError,
+  const linkAssertions: ProjectionSourceEntry["assertions"] = Object.values(
+    projection.links
+  ).flatMap((descriptor) => {
+    const value = row.foreignKeyValues[descriptor.linkId]
+    if (isBlank(value)) return []
+    const targetId = requireIdentity(value, projection.id, `foreign key '${descriptor.linkId}'`)
+    return [
+      {
+        kind: "link" as const,
+        ref: {
+          source: objectRef,
+          linkId: descriptor.linkId,
+          target: { objectTypeId: descriptor.targetObjectTypeId, primaryId: targetId },
+        },
+      },
+    ]
   })
+
+  return {
+    root: { kind: "object", ref: objectRef },
+    assertions: [{ kind: "object", ref: objectRef, properties }, ...linkAssertions],
+  }
 }
 
 function objectProjectionReadColumns(projection: ObjectProjectionDefinition): readonly string[] {
@@ -123,74 +113,32 @@ function objectProjectionReadColumns(projection: ObjectProjectionDefinition): re
   return [...new Set([...Object.values(projection.properties), ...linkSourceFields])]
 }
 
-async function materializeForeignKeyLinks(input: {
-  readonly runtime: ProjectionWorkerContext
-  readonly projection: ObjectProjectionDefinition
-  readonly rows: readonly ProjectedObjectRow[]
-  readonly counters: {
-    linksUpserted: number
-  }
-  readonly rememberError: (message: string) => void
-}): Promise<void> {
-  const { runtime, projection, rows, counters, rememberError } = input
-  const descriptors = Object.values(projection.links)
-  if (descriptors.length === 0 || rows.length === 0) {
-    return
-  }
-
-  const objectType = runtime.ontology.resolveObjectType(projection.objectTypeId)
-  const linksById = new Map(objectType.links.map((link) => [link.id, link]))
-  const assignmentItems: ForeignKeyLinkItem[] = []
-  const additiveItems: ForeignKeyLinkItem[] = []
-
-  for (const row of rows) {
-    for (const descriptor of descriptors) {
-      const fkValue = row.foreignKeyValues[descriptor.linkId]
-      if (isBlank(fkValue)) {
-        continue
-      }
-
-      const item: ForeignKeyLinkItem = {
-        objectTypeId: projection.objectTypeId,
-        sourceId: String(row.primaryValue),
-        linkId: descriptor.linkId,
-        target: {
-          targetTypeId: descriptor.targetObjectTypeId,
-          targetId: String(fkValue),
-        },
-      }
-      const linkDefinition = linksById.get(descriptor.linkId)
-      if (!linkDefinition) {
-        throw new Error(
-          `[SixbProjectionWorker] Projection '${projection.id}' references unknown link '${descriptor.linkId}' on object type '${projection.objectTypeId}'.`
-        )
-      }
-
-      if (linkDefinition.cardinality === "one") {
-        assignmentItems.push(item)
-      } else {
-        additiveItems.push(item)
-      }
-    }
-  }
-
-  const assignmentResults = await objectService.setLinkBatch(runtime, assignmentItems)
-  recordLinkResults(assignmentResults, counters, rememberError)
-
-  const additiveResults = await objectService.upsertLinkBatch(runtime, additiveItems)
-  recordLinkResults(additiveResults, counters, rememberError)
+function requireIdentity(value: unknown, projectionId: string, field: string): string {
+  if (typeof value === "string" && value.trim().length > 0) return value
+  throw validationError(projectionId, `${field} must produce a non-empty string identity`)
 }
 
-function recordLinkResults(
-  results: readonly { readonly ok: boolean; readonly error?: Error }[],
-  counters: { linksUpserted: number },
-  rememberError: (message: string) => void
-): void {
-  for (const result of results) {
-    if (result.ok) {
-      counters.linksUpserted += 1
-    } else if (!(result.error instanceof ObjectNotFoundError)) {
-      rememberError(errorMessage(result.error))
-    }
-  }
+function createProgress(
+  runtime: ProjectionWorkerContext,
+  execution: ClaimedProjectionExecution
+): ReplacementProgress {
+  return new ReplacementProgress({
+    storage: runtime.projectionRunsStorage,
+    projectId: runtime.projectId,
+    projectionRunId: execution.run.id,
+    executionToken: execution.run.executionToken,
+    identity: execution.identity,
+    persistedRowsRead: execution.run.sourceRowsRead,
+    persistedRowsSkipped: execution.run.sourceRowsSkipped,
+  })
+}
+
+async function failCurrentRow(progress: ReplacementProgress, message: string): Promise<never> {
+  await progress.recordRow(false)
+  await progress.flush()
+  throw new MaterializationValidationError(message)
+}
+
+function validationError(projectionId: string, message: string): MaterializationValidationError {
+  return new MaterializationValidationError(`Projection '${projectionId}' ${message}.`)
 }

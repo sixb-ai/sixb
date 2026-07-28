@@ -42,14 +42,10 @@ function makeRun(overrides: Partial<ProjectionRunRecord>): ProjectionRunRecord {
     datasetVersionId: "ver_1",
     objectTypeId: "room",
     status: "succeeded",
+    attempt: 2,
     startedAt: new Date("2026-05-04T09:00:00.000Z"),
-    rowsProcessed: 0,
-    rowsSkipped: 0,
-    objectsUpserted: 0,
-    linksUpserted: 0,
-    telemetryPointsAppended: 0,
-    telemetryPointsSkipped: 0,
-    telemetryRowsFailed: 0,
+    sourceRowsRead: 0,
+    sourceRowsSkipped: 0,
     ...overrides,
   }
 }
@@ -158,6 +154,7 @@ describe("projection routes", () => {
     )
     const body = (await response.json()) as { runs: Record<string, unknown>[] }
 
+    expect(body.runs[0]).toMatchObject({ attempt: 2 })
     expect(body.runs[0]).not.toHaveProperty("executionToken")
     expect(body.runs[0]).not.toHaveProperty("ontologyRevision")
   })

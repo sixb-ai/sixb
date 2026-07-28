@@ -22,6 +22,10 @@ import {
   EventsRuntime,
   type StableEventEnvelope,
 } from "@sixb/core/internal/events"
+import {
+  createProjectionRunId,
+  type ProjectionDispatchDescriptor,
+} from "@sixb/core/internal/projections"
 import { compileRoutes } from "../src/compile-routes"
 import type { OrchestratorRoutes } from "../src/types"
 import { OrchestratorWorker } from "../src/worker"
@@ -117,6 +121,7 @@ function makeDatasetVersionCommittedEvent(versionId = "v-1"): EventDraft {
     payload: {
       datasetId: rawInvoices.id,
       versionId,
+      createdAt: "2026-04-18T02:00:00.000Z",
       producer: { kind: "sync", id: "source-sync", runId: "run-1" },
     },
   }
@@ -388,11 +393,20 @@ describe("OrchestratorWorker", () => {
     const projection = defineProjection("invoice-projection", Invoice)
       .fromDataset(rawInvoices)
       .properties({ id: "id" })
+    const descriptor: ProjectionDispatchDescriptor = {
+      projectionId: projection.id,
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetId: rawInvoices.id,
+      ontologyRevision: "ontology-1",
+      projectionRevision: "projection-1",
+      ownershipHash: "ownership-1",
+    }
     const routes = compileRoutes({
       schedules: [],
       syncs: [],
       pipelines: [],
-      projections: [projection],
+      projections: [descriptor],
     })
     const eventRuntime = createEvents()
     const queues = new InMemoryQueues()
@@ -407,12 +421,21 @@ describe("OrchestratorWorker", () => {
         workerId: "observer",
       })
       if (claimed.length === 0) return false
-      expect(claimed[0]!.job.payload).toEqual({
+      const expectedPayload = {
         projectionId: projection.id,
-        projectionKind: "object",
-        datasetId: rawInvoices.id,
-        versionId: "version-42",
-      })
+        projectionKind: "object" as const,
+        protocol: "replacement" as const,
+        datasetVersion: {
+          datasetId: rawInvoices.id,
+          versionId: "version-42",
+          createdAt: "2026-04-18T02:00:00.000Z",
+        },
+        ontologyRevision: "ontology-1",
+        projectionRevision: "projection-1",
+        ownershipHash: "ownership-1",
+      }
+      expect(claimed[0]!.job.payload).toEqual(expectedPayload)
+      expect(claimed[0]!.job.id).toBe(createProjectionRunId(PROJECT_ID, expectedPayload))
       expect(claimed[0]!.job.metadata).toMatchObject({
         sourceEventId: sourceEvent!.id,
         sourceEventType: "dataset.version.committed",

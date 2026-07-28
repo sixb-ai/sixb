@@ -257,6 +257,7 @@ const datasetEvent: StoredDatasetVersionCommittedEvent = {
   payload: {
     datasetId: "raw.orders",
     versionId: "v1",
+    createdAt: envelope.occurredAt,
     producer: { kind: "sync", id: "erp-orders", runId: "run_1" },
   },
 }

@@ -40,21 +40,21 @@ import type {
  * from `@sixb/core/storage` instead.
  */
 
+export { assertMaterializationHeader } from "./provider-header-validation"
 export {
   assertNonblank,
   assertNonnegativeInteger,
   assertPositiveInteger,
   assertTimestamp,
+  invalidCorrelation,
 } from "./provider-validation"
 export {
-  assertMaterializationHeader,
   assertPageRows,
   assertPlanChunkCorrelations,
   assertWorkRecord,
   compareCardinalityWork,
   compareEventWork,
   comparePlanWork,
-  invalidCorrelation,
   materializationChunkRows,
   materializationPlanItems,
   workUniquenessKey,

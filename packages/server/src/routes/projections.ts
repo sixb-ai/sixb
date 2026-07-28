@@ -35,16 +35,12 @@ function serializeProjectionRun(run: ProjectionRunRecord) {
     sourceObjectTypeId: run.sourceObjectTypeId,
     targetObjectTypeId: run.targetObjectTypeId,
     status: run.status,
+    attempt: run.attempt,
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
     errorMessage: run.errorMessage,
-    rowsProcessed: run.rowsProcessed,
-    rowsSkipped: run.rowsSkipped,
-    objectsUpserted: run.objectsUpserted,
-    linksUpserted: run.linksUpserted,
-    telemetryPointsAppended: run.telemetryPointsAppended,
-    telemetryPointsSkipped: run.telemetryPointsSkipped,
-    telemetryRowsFailed: run.telemetryRowsFailed,
+    sourceRowsRead: run.sourceRowsRead,
+    sourceRowsSkipped: run.sourceRowsSkipped,
   }
 }
 
