@@ -19,16 +19,17 @@ export function mapObjectProjectionEntries(input: {
   readonly projection: ObjectProjectionDefinition
   readonly dataset: DatasetDefinition
   readonly execution: ClaimedProjectionExecution
+  readonly expectedRows?: number
   readonly signal: AbortSignal
 }): AsyncIterable<ProjectionSourceEntry> {
-  const { runtime, projection, dataset, execution, signal } = input
+  const { runtime, projection, dataset, execution, expectedRows, signal } = input
   const plan = buildObjectProjectionPlan({
     ontology: runtime.ontology,
     projection,
     dataset,
     primaryPropertyId: runtime.ontology.getPrimaryPropertyId(projection.objectTypeId),
   })
-  const progress = createProgress(runtime, execution)
+  const progress = createProgress(runtime, execution, expectedRows)
 
   return entries()
 
@@ -62,6 +63,7 @@ export function mapObjectProjectionEntries(input: {
         await progress.recordRow(false)
         yield entry
       }
+      progress.assertComplete()
     } finally {
       await progress.flush()
     }
@@ -120,7 +122,8 @@ function requireIdentity(value: unknown, projectionId: string, field: string): s
 
 function createProgress(
   runtime: ProjectionWorkerContext,
-  execution: ClaimedProjectionExecution
+  execution: ClaimedProjectionExecution,
+  expectedRows: number | undefined
 ): ReplacementProgress {
   return new ReplacementProgress({
     storage: runtime.projectionRunsStorage,
@@ -130,6 +133,7 @@ function createProgress(
     identity: execution.identity,
     persistedRowsRead: execution.run.sourceRowsRead,
     persistedRowsSkipped: execution.run.sourceRowsSkipped,
+    ...(expectedRows === undefined ? {} : { expectedRows }),
   })
 }
 

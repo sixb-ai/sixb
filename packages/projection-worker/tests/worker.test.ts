@@ -96,21 +96,8 @@ function projectionIdentity(
   datasetVersion: ProjectionMaterializationIdentity["datasetVersion"]
 ): ProjectionMaterializationIdentity {
   const descriptor = getProjectionRegistry(sixb).resolveDispatch(projectionId)
-  const common = {
-    projectionId: descriptor.projectionId,
-    datasetVersion,
-    ontologyRevision: descriptor.ontologyRevision,
-    projectionRevision: descriptor.projectionRevision,
-    ownershipHash: descriptor.ownershipHash,
-  }
-  switch (descriptor.projectionKind) {
-    case "object":
-      return { ...common, projectionKind: "object", protocol: "replacement" }
-    case "link":
-      return { ...common, projectionKind: "link", protocol: "replacement" }
-    case "telemetry":
-      return { ...common, projectionKind: "telemetry", protocol: "telemetry" }
-  }
+  const { datasetId: _datasetId, ...semanticIdentity } = descriptor
+  return { ...semanticIdentity, datasetVersion }
 }
 
 async function waitFor<T>(
@@ -357,6 +344,48 @@ describe("ProjectionWorker", () => {
       expect(
         await requireProjectionRunsStorage(sixb).getById({ projectId: sixb.id, id: runId })
       ).toBeNull()
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("delays retryable infrastructure failures", async () => {
+    const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] })
+    const version = await commitDatasetVersion(sixb.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen" },
+    ])
+    const payload = projectionIdentity(sixb, roomProjection.id, {
+      datasetId: roomsDataset.id,
+      versionId: version.versionId,
+      createdAt: version.createdAt.toISOString(),
+    })
+    const runId = createProjectionRunId(sixb.id, payload)
+    await sixb.queues.projections.enqueue({
+      projectId: sixb.id,
+      jobs: [{ id: runId, type: "projection.run.requested", payload }],
+    })
+
+    sixb.lakeStorage.getDataset = async () => {
+      throw new Error("temporary lake outage")
+    }
+    const retry = sixb.queues.projections.retry.bind(sixb.queues.projections)
+    let retryAvailableAt: string | undefined
+    sixb.queues.projections.retry = async (input) => {
+      retryAvailableAt = input.availableAt
+      return retry(input)
+    }
+
+    const startedAt = Date.now()
+    const worker = new ProjectionWorker(sixb)
+    await worker.start()
+    try {
+      await waitFor(
+        async () => retryAvailableAt,
+        (availableAt) => availableAt !== undefined
+      )
+      const delay = Date.parse(retryAvailableAt!) - startedAt
+      expect(delay).toBeGreaterThanOrEqual(400)
+      expect(delay).toBeLessThanOrEqual(1_500)
     } finally {
       await worker.stop()
     }

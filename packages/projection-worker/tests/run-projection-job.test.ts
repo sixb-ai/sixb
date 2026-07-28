@@ -220,10 +220,20 @@ class RecordingLakeStorage implements LakeStorage {
 
 class InterruptibleLakeStorage extends RecordingLakeStorage {
   failAfterRows: number | undefined
+  stopAfterRows: number | undefined
+  omitVersionRowCount = false
+
+  override async getVersion(datasetId: string, versionId: string) {
+    const version = await super.getVersion(datasetId, versionId)
+    if (!version || !this.omitVersionRowCount) return version
+    const { rowCount: _rowCount, ...withoutRowCount } = version
+    return withoutRowCount
+  }
 
   override async *readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {
     let rowsRead = 0
     for await (const row of super.readRows(input)) {
+      if (this.stopAfterRows !== undefined && rowsRead >= this.stopAfterRows) return
       if (this.failAfterRows !== undefined && rowsRead >= this.failAfterRows) {
         throw new Error("lake read interrupted")
       }
@@ -324,23 +334,15 @@ async function runProjectionJob(
   } catch {
     descriptor = unknownProjectionDescriptor(input.job, registry.ontologyRevision)
   }
-  const common = {
-    projectionId: descriptor.projectionId,
+  const { datasetId: _descriptorDatasetId, ...semanticIdentity } = descriptor
+  const identity = {
+    ...semanticIdentity,
     datasetVersion: {
       datasetId: input.job.datasetId,
       versionId: input.job.versionId,
       createdAt: version?.createdAt.toISOString() ?? "1970-01-01T00:00:00.000Z",
     },
-    ontologyRevision: descriptor.ontologyRevision,
-    projectionRevision: descriptor.projectionRevision,
-    ownershipHash: descriptor.ownershipHash,
   }
-  const identity =
-    descriptor.projectionKind === "telemetry"
-      ? { ...common, projectionKind: "telemetry" as const, protocol: "telemetry" as const }
-      : descriptor.projectionKind === "link"
-        ? { ...common, projectionKind: "link" as const, protocol: "replacement" as const }
-        : { ...common, projectionKind: "object" as const, protocol: "replacement" as const }
   const id = createProjectionRunId(input.runtime.projectId, identity)
   canonicalRunIds.set(input.job.id, id)
   const { batchSize, ...canonicalInput } = input
@@ -854,6 +856,63 @@ describe("runProjectionJob", () => {
     ).toEqual([0, 1])
   })
 
+  test("does not complete telemetry when a known pinned row count is not reached", async () => {
+    const deps = createDeps()
+    const lakeStorage = new InterruptibleLakeStorage(deps.lakeStorage)
+    const sixb = createSixb(
+      {
+        datasets: [roomReadingsDataset],
+        projections: [roomTemperatureProjection],
+      },
+      { ...deps, lakeStorage }
+    )
+    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    const version = await commitDatasetVersion(
+      lakeStorage,
+      roomReadingsDataset,
+      Array.from({ length: 3 }, (_, index) => ({
+        room_id: "r1",
+        observed_at: `2026-06-01T12:0${index}:00.000Z`,
+        temperature: 70 + index,
+        sync_row_id: `reading-${index}`,
+        unused: null,
+      }))
+    )
+    const input = {
+      runtime: createRuntime(sixb),
+      batchSize: 2,
+      job: {
+        id: "projrun-telemetry-short-read",
+        projectionId: roomTemperatureProjection.id,
+        projectionKind: "telemetry" as const,
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    }
+
+    lakeStorage.stopAfterRows = 2
+    await expect(runProjectionJob(input)).rejects.toThrow("reached EOF after 2 of 3 pinned rows")
+    expect(
+      await deps.storage.projectionRuns.getById({
+        projectId: sixb.id,
+        id: canonicalRunId(input.job.id),
+      })
+    ).toMatchObject({
+      status: "running",
+      sourceRowsRead: 2,
+      telemetryCheckpoint: { nextRowOffset: 2, inputExhausted: false },
+    })
+
+    lakeStorage.stopAfterRows = undefined
+    await expect(runProjectionJob(input)).resolves.toMatchObject({
+      run: {
+        status: "succeeded",
+        sourceRowsRead: 3,
+        telemetryCheckpoint: { nextRowOffset: 3, inputExhausted: true },
+      },
+    })
+  })
+
   test("finishes empty telemetry input without creating a batch commit", async () => {
     const deps = createDeps()
     const sixb = createSixb(
@@ -1341,6 +1400,75 @@ describe("runProjectionJob", () => {
       linkId: "hasSensors",
     })
     expect(links).toEqual([])
+  })
+
+  test("does not activate a replacement shorter than its persisted progress floor", async () => {
+    const deps = createDeps()
+    const lakeStorage = new InterruptibleLakeStorage(deps.lakeStorage)
+    const sixb = createSixb(
+      { datasets: [roomsDataset], projections: [roomProjection] },
+      { ...deps, lakeStorage }
+    )
+    const initialVersion = await commitDatasetVersion(lakeStorage, roomsDataset, [
+      { room_id: "old", room_name: "Old room", building_ref: null },
+    ])
+    await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-replacement-floor-initial",
+        projectionId: roomProjection.id,
+        projectionKind: "object",
+        datasetId: roomsDataset.id,
+        versionId: initialVersion.versionId,
+      },
+    })
+
+    const nextVersion = await commitDatasetVersion(
+      lakeStorage,
+      roomsDataset,
+      ["one", "two", "three"].map((id) => ({
+        room_id: id,
+        room_name: `Room ${id}`,
+        building_ref: null,
+      }))
+    )
+    const input = {
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-replacement-floor",
+        projectionId: roomProjection.id,
+        projectionKind: "object" as const,
+        datasetId: roomsDataset.id,
+        versionId: nextVersion.versionId,
+      },
+    }
+    lakeStorage.omitVersionRowCount = true
+    lakeStorage.failAfterRows = 2
+    await expect(runProjectionJob(input)).rejects.toThrow("lake read interrupted")
+
+    lakeStorage.failAfterRows = undefined
+    lakeStorage.stopAfterRows = 1
+    await expect(runProjectionJob(input)).rejects.toThrow("persisted progress floor")
+    expect(
+      await deps.storage.projectionRuns.getById({
+        projectId: sixb.id,
+        id: canonicalRunId(input.job.id),
+      })
+    ).toMatchObject({ status: "running", attempt: 2, sourceRowsRead: 2 })
+    expect(
+      await deps.storage.objects.getByPrimaryId({
+        projectId: sixb.id,
+        objectTypeId: Room.id,
+        primaryId: "old",
+      })
+    ).toMatchObject({ properties: { name: "Old room" } })
+    expect(
+      await deps.storage.objects.getByPrimaryId({
+        projectId: sixb.id,
+        objectTypeId: Room.id,
+        primaryId: "one",
+      })
+    ).toBeNull()
   })
 
   test("keeps the run running when candidate abandonment cannot be confirmed", async () => {

@@ -30,9 +30,10 @@ export interface ForeignKeyDescriptor {
 /**
  * Lowered, serializable definition for projecting a dataset into object instances.
  *
- * Each row in the dataset becomes an object upsert, with properties mapped
- * from dataset columns to object type properties. FK links are resolved from
- * source property or dataset field values to target object primary values.
+ * Each row contributes one complete object root to an authoritative replacement snapshot, with
+ * properties mapped from dataset columns to object type properties. Duplicate roots are rejected.
+ * FK links are resolved from source property or dataset field values to target object primary
+ * values.
  */
 export interface ObjectProjectionDefinition {
   readonly _tag: "ObjectProjectionDefinition"
@@ -48,8 +49,8 @@ export interface ObjectProjectionDefinition {
 /**
  * Lowered, serializable definition for projecting a join dataset into link instances.
  *
- * Each row in the join dataset becomes a link between a source and target object,
- * identified by their respective primary property values.
+ * Each row in the join dataset contributes one complete link root to an authoritative replacement
+ * snapshot, identified by its source, link id, and target. Duplicate roots are rejected.
  */
 export interface LinkProjectionDefinition {
   readonly _tag: "LinkProjectionDefinition"
@@ -110,24 +111,23 @@ export interface ProjectionOwnership {
   }[]
 }
 
+/** Canonical correlation between a projection kind and its materialization protocol. */
+export type ProjectionProtocolIdentity =
+  | { readonly projectionKind: "object"; readonly protocol: "replacement" }
+  | { readonly projectionKind: "link"; readonly protocol: "replacement" }
+  | { readonly projectionKind: "telemetry"; readonly protocol: "telemetry" }
+
 /**
  * Frozen semantic identity used to dispatch one registered projection.
  *
  * Dataset version metadata is attached only when a committed dataset event is routed. Keeping the
  * registry-owned fields together prevents the orchestrator from recomputing ontology semantics.
  */
-export type ProjectionDispatchDescriptor =
-  | ProjectionDispatchDescriptorBase<"object", "replacement">
-  | ProjectionDispatchDescriptorBase<"link", "replacement">
-  | ProjectionDispatchDescriptorBase<"telemetry", "telemetry">
+export type ProjectionDispatchDescriptor = ProjectionDispatchDescriptorBase &
+  ProjectionProtocolIdentity
 
-interface ProjectionDispatchDescriptorBase<
-  TKind extends "object" | "link" | "telemetry",
-  TProtocol extends "replacement" | "telemetry",
-> {
+interface ProjectionDispatchDescriptorBase {
   readonly projectionId: string
-  readonly projectionKind: TKind
-  readonly protocol: TProtocol
   readonly datasetId: string
   readonly ontologyRevision: string
   readonly projectionRevision: string

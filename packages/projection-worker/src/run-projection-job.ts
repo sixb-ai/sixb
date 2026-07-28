@@ -120,13 +120,26 @@ async function materializeProjection(
       runtime: input.runtime,
       projection,
       dataset,
+      version: validated.version,
       execution,
       signal,
+    })
+    await getOntologyMutationRuntime(input.runtime).completeProjectionTelemetryInput({
+      source: { projectionId: projection.id },
+      datasetVersion: input.job.datasetVersion,
+      execution: execution.execution,
     })
     return
   }
 
-  const entries = replacementEntries(input, projection, dataset, execution, signal)
+  const entries = replacementEntries(
+    input,
+    projection,
+    dataset,
+    execution,
+    validated.version.rowCount,
+    signal
+  )
   await getOntologyMutationRuntime(input.runtime).replaceProjection({
     source: { projectionId: projection.id },
     datasetVersion: input.job.datasetVersion,
@@ -141,6 +154,7 @@ function replacementEntries(
   projection: Exclude<ProjectionDefinition, { readonly _tag: "TelemetryProjectionDefinition" }>,
   dataset: ValidatedProjectionJob["dataset"],
   execution: ClaimedProjectionExecution,
+  expectedRows: number | undefined,
   signal: AbortSignal
 ) {
   if (projection._tag === "ObjectProjectionDefinition") {
@@ -149,6 +163,7 @@ function replacementEntries(
       projection,
       dataset,
       execution,
+      expectedRows,
       signal,
     })
   }
@@ -157,6 +172,7 @@ function replacementEntries(
     projection,
     dataset,
     execution,
+    expectedRows,
     signal,
   })
 }
@@ -187,7 +203,6 @@ async function finishProjection(
       ...common,
       protocol: "telemetry",
       status: "succeeded",
-      inputExhausted: true,
     })
     return
   }

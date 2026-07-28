@@ -9,6 +9,7 @@ import {
 } from "@sixb/core"
 import type { TelemetryPointWrite } from "@sixb/core/internal/materialization"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { ProjectionWorkerError } from "./errors"
 import { resolveProjectionSchema } from "./projection-schema"
 import { normalizeProjectedValue } from "./projection-value-coercion"
@@ -40,10 +41,11 @@ export async function runTelemetryProjection(input: {
   readonly runtime: ProjectionWorkerContext
   readonly projection: TelemetryProjectionDefinition
   readonly dataset: DatasetDefinition
+  readonly version: DatasetVersion
   readonly execution: ClaimedProjectionExecution
   readonly signal: AbortSignal
 }): Promise<void> {
-  const { runtime, projection, dataset, execution, signal } = input
+  const { runtime, projection, dataset, version, execution, signal } = input
   const checkpoint = execution.run.telemetryCheckpoint
   if (!checkpoint) {
     throw new ProjectionWorkerError(
@@ -55,6 +57,7 @@ export async function runTelemetryProjection(input: {
   const plan = buildTelemetryProjectionPlan({ runtime, projection, dataset })
   const batch: unknown[] = []
   let batchOrdinal = checkpoint.nextBatchOrdinal
+  let attemptRowsRead = 0
 
   for await (const row of runtime.lakeStorage.readRows({
     datasetId: execution.run.datasetId,
@@ -63,6 +66,12 @@ export async function runTelemetryProjection(input: {
     offset: checkpoint.nextRowOffset,
   })) {
     throwIfAborted(signal)
+    attemptRowsRead += 1
+    assertWithinPinnedInput({
+      projectionRunId: execution.run.id,
+      expectedRows: version.rowCount,
+      rowsRead: checkpoint.nextRowOffset + attemptRowsRead,
+    })
     batch.push(row)
     if (batch.length !== checkpoint.fixedBatchSize) continue
 
@@ -79,6 +88,11 @@ export async function runTelemetryProjection(input: {
   }
 
   throwIfAborted(signal)
+  assertCompletePinnedInput({
+    projectionRunId: execution.run.id,
+    expectedRows: version.rowCount,
+    rowsRead: checkpoint.nextRowOffset + attemptRowsRead,
+  })
   if (batch.length === 0) return
   await appendPhysicalBatch({
     runtime,
@@ -89,6 +103,28 @@ export async function runTelemetryProjection(input: {
     inputExhausted: true,
     signal,
   })
+}
+
+function assertWithinPinnedInput(input: {
+  readonly projectionRunId: string
+  readonly expectedRows: number | undefined
+  readonly rowsRead: number
+}): void {
+  if (input.expectedRows === undefined || input.rowsRead <= input.expectedRows) return
+  throw new ProjectionWorkerError(
+    `[SixbProjectionWorker] Telemetry projection run '${input.projectionRunId}' read more than its ${input.expectedRows} pinned rows.`
+  )
+}
+
+function assertCompletePinnedInput(input: {
+  readonly projectionRunId: string
+  readonly expectedRows: number | undefined
+  readonly rowsRead: number
+}): void {
+  if (input.expectedRows === undefined || input.rowsRead === input.expectedRows) return
+  throw new ProjectionWorkerError(
+    `[SixbProjectionWorker] Telemetry projection run '${input.projectionRunId}' reached EOF after ${input.rowsRead} of ${input.expectedRows} pinned rows.`
+  )
 }
 
 async function appendPhysicalBatch(input: {

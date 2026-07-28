@@ -34,8 +34,10 @@ await worker.start()
 - Object/link projections are authoritative replacement snapshots: missing source assertions are
   withdrawn when the candidate activates.
 - Replacement staging remains invisible until one atomic activation commit succeeds.
-- Telemetry resumes from its durable physical row offset and batch ordinal.
+- Telemetry resumes from its durable physical row offset and batch ordinal; terminal success
+  requires a separately persisted EOF observation.
 - `QueueDelivery` owns liveness; the opaque execution token fences every durable write.
+- Retryable failures use capped exponential backoff and remain retryable without an attempt limit.
 - Semantic outcomes live in `ontology_commits`; run records contain lifecycle and physical progress.
 
 ## Development

@@ -55,6 +55,38 @@ describe("DuckLakeStorage stable pinned reads", () => {
       await expect(collectRows(storage.readRows({ ...pinned, offset: 2 }))).resolves.toEqual(
         expected.slice(2)
       )
+      await expect(
+        collectRows(storage.readRows({ ...pinned, columns: ["id"], offset: 1 }))
+      ).resolves.toEqual(expected.slice(1).map(({ id }) => ({ id })))
+    } finally {
+      await storage.close()
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  })
+
+  test("preserves offsets when a dataset column shadows DuckDB rowid", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-rowid-order-"))
+    let storage = createLocalDuckLakeStorage(rootDir)
+    try {
+      const dataset = defineDataset("stable.rowid-order", {
+        schema: [col("rowid", "int64"), col("value", "string")],
+      })
+      const expected = [
+        { rowid: "30", value: "third" },
+        { rowid: "10", value: "first" },
+        { rowid: "20", value: "second" },
+      ]
+      await storage.createDataset(dataset)
+      const write = await storage.beginWrite({ dataset, mode: "snapshot" })
+      await write.writeRows(expected)
+      const version = await write.commit()
+      await storage.close()
+
+      storage = createLocalDuckLakeStorage(rootDir)
+      const pinned = { datasetId: dataset.id, versionId: version.versionId }
+      await expect(collectRows(storage.readRows({ ...pinned, offset: 1 }))).resolves.toEqual(
+        expected.slice(1)
+      )
     } finally {
       await storage.close()
       await rm(rootDir, { recursive: true, force: true })

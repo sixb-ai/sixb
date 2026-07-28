@@ -71,7 +71,7 @@ describe("ontology materializer telemetry", () => {
     ).rejects.toMatchObject({ kind: "run-correlation" })
   })
 
-  test("records explicit telemetry exhaustion atomically with terminal success", async () => {
+  test("persists telemetry EOF before terminal success and resumes finalization", async () => {
     const { materializer, storage, projections } = createMaterializerFixture()
     const datasetVersion = {
       datasetId: "readings",
@@ -91,7 +91,6 @@ describe("ontology materializer telemetry", () => {
       datasetVersion,
       execution: emptyExecution,
       status: "succeeded" as const,
-      inputExhausted: true as const,
     }
 
     let rejectFinish = true
@@ -104,13 +103,27 @@ describe("ontology materializer telemetry", () => {
       }
     )
     await expect(materializer.projections.finishRun(emptyFinish)).rejects.toThrow(
-      "projection run finish failure"
+      "before its input is exhausted"
     )
     await expect(
       storage.projectionRuns.getById({ projectId: "project", id: emptyExecution.projectionRunId })
     ).resolves.toMatchObject({
       status: "running",
       telemetryCheckpoint: { inputExhausted: false },
+    })
+    await materializer.projections.completeTelemetryInput({
+      source: { projectionId: "temperatures" },
+      datasetVersion,
+      execution: emptyExecution,
+    })
+    await expect(materializer.projections.finishRun(emptyFinish)).rejects.toThrow(
+      "projection run finish failure"
+    )
+    await expect(
+      storage.projectionRuns.getById({ projectId: "project", id: emptyExecution.projectionRunId })
+    ).resolves.toMatchObject({
+      status: "running",
+      telemetryCheckpoint: { nextRowOffset: 0, inputExhausted: true },
     })
     rejectFinish = false
     await expect(materializer.projections.finishRun(emptyFinish)).resolves.toBeUndefined()
@@ -161,11 +174,15 @@ describe("ontology materializer telemetry", () => {
       datasetVersion,
       execution,
       status: "succeeded" as const,
-      inputExhausted: true as const,
     }
     await materializer.telemetry.append({
       source: source(1, true),
       points: [{ series, value: 21, at: "2026-01-01T02:00:00Z" }],
+    })
+    await materializer.projections.completeTelemetryInput({
+      source: { projectionId: "temperatures" },
+      datasetVersion,
+      execution,
     })
     await expect(materializer.projections.finishRun(finish)).resolves.toBeUndefined()
   })

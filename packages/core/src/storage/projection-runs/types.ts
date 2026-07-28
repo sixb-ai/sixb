@@ -244,7 +244,7 @@ export interface ProjectionRunStorage {
   advanceTelemetryCheckpoint?(
     input: AdvanceProjectionTelemetryCheckpointInput
   ): Promise<ProjectionMaterializationRunRecord>
-  /** @internal Used only by the Materializer's guarded projection-run finalizer. */
+  /** @internal Persists a worker-observed telemetry EOF through the guarded Materializer port. */
   completeTelemetryInput?(
     input: CompleteProjectionTelemetryInput
   ): Promise<ProjectionMaterializationRunRecord>

@@ -27,20 +27,6 @@ function projectionMaterializationIdentity(
   descriptor: ProjectionDispatchDescriptor,
   datasetVersion: PinnedProjectionDatasetVersion
 ): ProjectionMaterializationIdentity {
-  const common = {
-    projectionId: descriptor.projectionId,
-    datasetVersion,
-    ontologyRevision: descriptor.ontologyRevision,
-    projectionRevision: descriptor.projectionRevision,
-    ownershipHash: descriptor.ownershipHash,
-  }
-
-  switch (descriptor.projectionKind) {
-    case "object":
-      return { ...common, projectionKind: "object", protocol: "replacement" }
-    case "link":
-      return { ...common, projectionKind: "link", protocol: "replacement" }
-    case "telemetry":
-      return { ...common, projectionKind: "telemetry", protocol: "telemetry" }
-  }
+  const { datasetId: _datasetId, ...semanticIdentity } = descriptor
+  return { ...semanticIdentity, datasetVersion }
 }

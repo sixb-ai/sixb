@@ -51,11 +51,18 @@ export class DuckLakeRowReader {
       // directly after validation.
       const columnsSql = selectedColumns.map((column) => quoteIdentifier(column.name)).join(", ")
       const tableSql = qualifiedTableName(this.options, tableRef.tableName)
+      // A user column named `rowid` shadows DuckDB's virtual row id. In that edge case the
+      // connection-level invariant still preserves insertion order; otherwise make it explicit.
+      const orderSql = version.schema.columns.some(
+        (column) => column.name.toLowerCase() === "rowid"
+      )
+        ? ""
+        : " ORDER BY rowid"
       const limitSql =
         input.limit === undefined ? "" : ` LIMIT ${Math.max(0, Math.trunc(input.limit))}`
       const offsetSql =
         input.offset === undefined ? "" : ` OFFSET ${Math.max(0, Math.trunc(input.offset))}`
-      const sql = `SELECT ${columnsSql} FROM ${tableSql} AT (VERSION => ${snapshotId})${limitSql}${offsetSql}`
+      const sql = `SELECT ${columnsSql} FROM ${tableSql} AT (VERSION => ${snapshotId})${orderSql}${limitSql}${offsetSql}`
 
       // HTTP previews are bounded, so materialize them eagerly and release the
       // runtime queue as soon as DuckDB has returned the small page.

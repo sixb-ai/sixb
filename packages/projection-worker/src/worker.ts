@@ -9,6 +9,7 @@ import {
   isProjectionMaterializationRunStorage,
   type ProjectionMaterializationRunStorage,
 } from "@sixb/core/storage"
+import { projectionRetryAvailableAt } from "./retry-backoff"
 import { isPermanentProjectionFailure, runProjectionJob } from "./run-projection-job"
 import type { ProjectionWorkerContext, ProjectionWorkerSixb } from "./types"
 
@@ -91,9 +92,21 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
       projectId: this.context.projectId,
       id: claimed.job.id,
     })
-    if (run?.status === "running") return { kind: "retry" }
+    if (run?.status === "running") return retryWithBackoff(claimed)
     if (run) return { kind: "fail" }
-    return isPermanentProjectionFailure(error) ? { kind: "fail" } : { kind: "retry" }
+    return isPermanentProjectionFailure(error) ? { kind: "fail" } : retryWithBackoff(claimed)
+  }
+}
+
+function retryWithBackoff(
+  claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>
+): QueueWorkerFailureDecision {
+  return {
+    kind: "retry",
+    availableAt: projectionRetryAvailableAt({
+      jobId: claimed.job.id,
+      attempt: claimed.job.attempt,
+    }),
   }
 }
 

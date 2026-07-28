@@ -19,6 +19,7 @@ import {
   ProjectionRegistry,
   type ProjectionSourceEntry,
   type ProjectionSourceReplacement,
+  type ProjectionTelemetryInputCompletion,
   type TelemetryAppend,
 } from "../src/materializer"
 
@@ -96,6 +97,14 @@ export function createMaterializerFixture(
           datasetVersion: request.datasetVersion,
         })
         return baseMaterializer.projections.replace({ ...request, execution })
+      },
+      async completeTelemetryInput(request: ProjectionTelemetryInputCompletion) {
+        const execution = await resolveFixtureExecution(storage, projections, request.execution, {
+          projectionId: request.source.projectionId,
+          protocol: "telemetry",
+          datasetVersion: request.datasetVersion,
+        })
+        return baseMaterializer.projections.completeTelemetryInput({ ...request, execution })
       },
       finishRun: baseMaterializer.projections.finishRun,
     },
@@ -250,7 +259,7 @@ async function resolveFixtureExecution(
   execution: ProjectionExecution,
   input: {
     readonly projectionId: string
-    readonly protocol: "replacement"
+    readonly protocol: "replacement" | "telemetry"
     readonly datasetVersion: PinnedDatasetVersion
   }
 ): Promise<ProjectionExecution> {

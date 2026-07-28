@@ -1,5 +1,6 @@
 import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
 import type { ProjectionMaterializationRunStorage } from "@sixb/core/storage"
+import { ProjectionWorkerError } from "./errors"
 
 const DEFAULT_PROGRESS_FLUSH_INTERVAL = 500
 
@@ -24,6 +25,7 @@ export class ReplacementProgress {
       readonly identity: ProjectionMaterializationIdentity
       readonly persistedRowsRead: number
       readonly persistedRowsSkipped: number
+      readonly expectedRows?: number
       readonly flushInterval?: number
     }
   ) {
@@ -49,6 +51,18 @@ export class ReplacementProgress {
     })
     this.lastFlushedRowsRead = run.sourceRowsRead
     this.lastFlushedRowsSkipped = run.sourceRowsSkipped
+  }
+
+  assertComplete(): void {
+    if (this.input.expectedRows !== undefined && this.sourceRowsRead !== this.input.expectedRows) {
+      throw new ProjectionWorkerError(
+        `[SixbProjectionWorker] Projection run '${this.input.projectionRunId}' reached EOF after ${this.sourceRowsRead} of ${this.input.expectedRows} pinned rows.`
+      )
+    }
+    if (this.hasReachedPersistedFloor()) return
+    throw new ProjectionWorkerError(
+      `[SixbProjectionWorker] Projection run '${this.input.projectionRunId}' reached EOF before its persisted progress floor (${this.sourceRowsRead}/${this.input.persistedRowsRead} rows, ${this.sourceRowsSkipped}/${this.input.persistedRowsSkipped} skipped).`
+    )
   }
 
   private shouldFlush(): boolean {

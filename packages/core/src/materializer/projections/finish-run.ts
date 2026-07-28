@@ -8,10 +8,7 @@ import type {
   ProjectionRunFinishInput,
 } from "../../materialization/model"
 import type { ProjectionDefinition, ResolvedProjection } from "../../projections/types"
-import type {
-  ProjectionMaterializationRunRecord,
-  ProjectionMaterializationRunStorage,
-} from "../../storage"
+import type { ProjectionMaterializationRunRecord } from "../../storage"
 import type { OntologyCommitRecord } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { withSerializationRetry } from "../execution/commit-lifecycle"
@@ -88,13 +85,7 @@ async function finishProjectionRunTransaction(
   if (command.input.protocol === "replacement") {
     await assertReplacementTerminalDecision(storage, command)
   } else {
-    await prepareTelemetryTerminalDecision(
-      projectionRuns,
-      run,
-      command.projectId,
-      command.identity,
-      command.input
-    )
+    assertTelemetryTerminalDecision(run, command.input)
   }
 
   await projectionRuns.finishMaterialization({
@@ -169,20 +160,15 @@ function datasetVersionsEqual(left: PinnedDatasetVersion, right: PinnedDatasetVe
   )
 }
 
-async function prepareTelemetryTerminalDecision(
-  projectionRuns: ProjectionMaterializationRunStorage,
+function assertTelemetryTerminalDecision(
   run: ProjectionMaterializationRunRecord,
-  projectId: string,
-  identity: ProjectionMaterializationIdentity,
-  input: Extract<ProjectionRunFinishInput, { readonly protocol: "telemetry" }>
-): Promise<void> {
+  input: ProjectionRunFinishInput
+): void {
   if (input.status !== "succeeded") return
   if (!run.telemetryCheckpoint?.inputExhausted) {
-    await projectionRuns.completeTelemetryInput({
-      id: input.execution.projectionRunId,
-      projectId,
-      executionToken: input.execution.executionToken,
-      identity,
-    })
+    throw new MaterializationConflictError(
+      "run-correlation",
+      `Telemetry projection run '${run.id}' cannot succeed before its input is exhausted.`
+    )
   }
 }

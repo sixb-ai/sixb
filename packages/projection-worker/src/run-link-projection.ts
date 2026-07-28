@@ -14,9 +14,10 @@ export function mapLinkProjectionEntries(input: {
   readonly projection: LinkProjectionDefinition
   readonly dataset: DatasetDefinition
   readonly execution: ClaimedProjectionExecution
+  readonly expectedRows?: number
   readonly signal: AbortSignal
 }): AsyncIterable<ProjectionSourceEntry> {
-  const { runtime, projection, dataset, execution, signal } = input
+  const { runtime, projection, dataset, execution, expectedRows, signal } = input
   const columns = [...new Set([projection.sourceField, projection.targetField])]
   const progress = new ReplacementProgress({
     storage: runtime.projectionRunsStorage,
@@ -26,6 +27,7 @@ export function mapLinkProjectionEntries(input: {
     identity: execution.identity,
     persistedRowsRead: execution.run.sourceRowsRead,
     persistedRowsSkipped: execution.run.sourceRowsSkipped,
+    ...(expectedRows === undefined ? {} : { expectedRows }),
   })
 
   return entries()
@@ -61,6 +63,7 @@ export function mapLinkProjectionEntries(input: {
           assertions: [{ kind: "link", ref }],
         }
       }
+      progress.assertComplete()
     } finally {
       await progress.flush()
     }

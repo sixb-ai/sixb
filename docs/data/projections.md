@@ -10,8 +10,8 @@ links on top of them. There are three kinds:
 
 | Builder | Produces | One row becomes |
 | --- | --- | --- |
-| `defineProjection` | Objects (and FK links) | One object upsert |
-| `defineLinkProjection` | Many-to-many links | One link |
+| `defineProjection` | Objects (and FK links) | One complete object root |
+| `defineLinkProjection` | Many-to-many links | One complete link root |
 | `defineTelemetryProjection` | Telemetry points | One reading on a series |
 
 ## Object projection
@@ -230,9 +230,14 @@ sixb worker projection
 
 - `.properties(...)` checks that mapped properties and columns exist and that their types are
   compatible. The primary property must be mapped.
-- Projections are set-only: missing rows do not delete existing objects or links.
-- A nonblank FK assigns a cardinality-one link, replacing a different current target atomically.
-  Blank FKs are no-ops; cardinality-many FK links remain additive.
+- Object and link projections are authoritative replacements for their source. A later dataset
+  version withdraws source-owned objects or links that are no longer present; managed edits remain
+  separate overrides.
+- An object projection requires one nonblank primary identity per dataset row and one row per object
+  root. Repeated roots fail the run instead of merging partial object state.
+- A nonblank FK contributes a link from that object row. Blank FKs contribute no link. Model
+  cardinality-many relationships with a dedicated link projection, where each dataset row is one
+  complete link root.
 - Link projections require string source and target fields.
 - For an FK descriptor, `target` must be the link's declared target type or a subtype (via
   `extends`).
