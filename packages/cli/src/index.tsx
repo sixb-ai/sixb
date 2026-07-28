@@ -1,10 +1,9 @@
 #!/usr/bin/env bun
 
-import { basename, join } from "node:path"
+import { join } from "node:path"
 import { ErrorView, HelpView, renderStatic, VersionView } from "./ui"
 
 const args = process.argv.slice(2)
-const executable = basename(process.argv[1] ?? "sixb")
 
 const VERSION = `sixb v${await readPackageVersion()}`
 
@@ -103,7 +102,6 @@ function getCommandPositionals(): string[] {
 }
 
 function getCommand(): string {
-  if (executable.startsWith("create-sixb")) return "create"
   if (args[0] === "db") {
     return args[1] ? `db:${args[1]}` : "db"
   }
@@ -340,9 +338,7 @@ async function main(): Promise<void> {
     }
 
     case "create": {
-      // The `create-sixb <name>` bin has no leading subcommand, so the project
-      // name is the first positional; `sixb create <name>` puts it second.
-      const name = executable.startsWith("create-sixb") ? args[0] : args[1]
+      const name = args[1]
       if (!name) {
         throw new Error("create requires a project name")
       }

@@ -64,19 +64,19 @@ function validatePackage(packageInfo: { dir: string; packageJson: PackageJson })
   const name = packageName(packageInfo)
   const { packageJson } = packageInfo
 
-  // Bin-only packages (e.g. @sixb/cli) expose commands, not importable modules,
-  // so they carry no main/types/exports.
-  const binOnly = Boolean(packageJson.bin) && !packageJson.exports
+  // Command packages can expose supported utility subpaths without exposing an
+  // importable package root. They do not need root main/types entries.
+  const commandOnly = Boolean(packageJson.bin) && !hasRootExport(packageJson.exports)
 
-  if (!binOnly && !packageJson.main?.startsWith("./dist/")) {
+  if (!commandOnly && !packageJson.main?.startsWith("./dist/")) {
     throw new Error(`[SixbPublish] ${name} must publish main from ./dist/.`)
   }
 
-  if (!binOnly && !packageJson.types?.startsWith("./dist/")) {
+  if (!commandOnly && !packageJson.types?.startsWith("./dist/")) {
     throw new Error(`[SixbPublish] ${name} must publish types from ./dist/.`)
   }
 
-  if (!binOnly && !packageJson.exports) {
+  if (!commandOnly && !packageJson.exports) {
     throw new Error(`[SixbPublish] ${name} must define package exports.`)
   }
 
@@ -97,6 +97,14 @@ function validatePackage(packageInfo: { dir: string; packageJson: PackageJson })
       throw new Error(`[SixbPublish] ${name} has non-Sixb workspace dependency ${dependency}.`)
     }
   }
+}
+
+function hasRootExport(exports: unknown): boolean {
+  if (typeof exports === "string" || Array.isArray(exports)) return true
+  if (!exports || typeof exports !== "object") return false
+
+  const keys = Object.keys(exports)
+  return keys.includes(".") || keys.every((key) => !key.startsWith("."))
 }
 
 async function dryRunPack(packageInfo: { dir: string; packageJson: PackageJson }): Promise<void> {

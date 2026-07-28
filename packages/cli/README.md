@@ -41,7 +41,8 @@ bun add @sixb/cli
 | `sixb help` | Show help |
 | `sixb --version` | Show version |
 
-Also available as `create-sixb <name>` (alias for `sixb create`).
+Scaffold a new project without installing the CLI first with `bun create sixb <name>`. After the
+CLI is installed, use `sixb create <name>`.
 
 ## Options
 

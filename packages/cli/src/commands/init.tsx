@@ -56,7 +56,9 @@ async function writeTemplateProject(targetDir: string): Promise<string[]> {
 
   const configPath = join(targetDir, "sixb.config.ts")
   const configSource = await Bun.file(configPath).text()
-  const updatedConfig = configSource.replace(/id:\s*"[^"]+"/, `id: "${projectName}"`)
+  const updatedConfig = configSource.includes("const projectId =")
+    ? configSource.replace(/const projectId = "[^"]+"/, `const projectId = "${projectName}"`)
+    : configSource.replace(/id:\s*"[^"]+"/, `id: "${projectName}"`)
   await writeFile(configPath, updatedConfig)
 
   const copiedFiles = await collectFiles(targetDir)

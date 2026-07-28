@@ -9,12 +9,16 @@
     "typecheck": "sixb typegen && tsc --noEmit"
   },
   "dependencies": {
+    "@sixb/app": "latest",
     "@sixb/blob-local": "latest",
+    "@sixb/blob-s3": "latest",
+    "@sixb/broker-redis": "latest",
     "@sixb/cli": "latest",
     "@sixb/client": "latest",
     "@sixb/core": "latest",
-    "@sixb/app": "latest",
-    "@sixb/lake-local": "latest",
+    "@sixb/ducklake": "latest",
+    "@sixb/pg": "latest",
+    "@sixb/queues-bullmq": "latest",
     "@sixb/sqlite": "latest",
     "@sixb/ui": "latest",
     "@tailwindcss/cli": "^4.2.2",

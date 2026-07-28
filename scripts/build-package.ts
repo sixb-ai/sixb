@@ -1,4 +1,5 @@
-import { cp, mkdir, readdir, writeFile } from "node:fs/promises"
+import type { Dirent } from "node:fs"
+import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises"
 import { extname, join, relative, resolve } from "node:path"
 
 type PackageJson = {
@@ -33,6 +34,10 @@ const buildConfigDir = join(packageRoot, ".tsbuild")
 const packageJson = (await Bun.file(packageJsonPath).json()) as PackageJson
 const packageName = packageJson.name ?? relative(process.cwd(), packageRoot)
 
+// Root builds remove dist before TypeScript emits declarations. Package-scoped builds and
+// prepack runs preserve those declarations but remove every runtime artifact so stale chunks,
+// styles, and copied assets cannot leak into a later tarball.
+await cleanRuntimeOutputs(distRoot)
 await mkdir(distRoot, { recursive: true })
 await mkdir(buildConfigDir, { recursive: true })
 
@@ -65,6 +70,35 @@ if (entrypoints.length > 0) {
 }
 
 await copyAssets(packageJson.sixbBuild?.assets ?? [])
+
+async function cleanRuntimeOutputs(directory: string): Promise<void> {
+  let entries: Dirent[]
+  try {
+    entries = await readdir(directory, { withFileTypes: true })
+  } catch (error) {
+    if (isMissingPathError(error)) return
+    throw error
+  }
+
+  for (const entry of entries) {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) {
+      await cleanRuntimeOutputs(path)
+      if ((await readdir(path)).length === 0) {
+        await rm(path, { recursive: true, force: true })
+      }
+      continue
+    }
+
+    if (!entry.name.endsWith(".d.ts") && !entry.name.endsWith(".d.ts.map")) {
+      await rm(path, { force: true })
+    }
+  }
+}
+
+function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && error.code === "ENOENT"
+}
 
 async function writeBundleTsconfig(): Promise<string> {
   const bundleTsconfigPath = join(buildConfigDir, "tsconfig.bundle.json")
