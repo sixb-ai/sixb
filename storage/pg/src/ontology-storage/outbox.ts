@@ -7,8 +7,10 @@ import type {
   ClaimOntologyOutboxInput,
   CompleteOntologyOutboxLeaseInput,
   OntologyOutboxStorage,
+  OntologyOutboxSummary,
   PurgePublishedOntologyOutboxInput,
   RescheduleOntologyOutboxLeaseInput,
+  SummarizeOntologyOutboxInput,
 } from "@sixb/core/storage"
 import {
   assertNonblank,
@@ -154,6 +156,38 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
       return rows.length
     })
   }
+
+  async summarize(input: SummarizeOntologyOutboxInput): Promise<OntologyOutboxSummary> {
+    return this.runRootOperation(async (sql) => {
+      assertNonblank(input.projectId, "Ontology outbox project id")
+      const [summary] = await sql<
+        {
+          readonly pending_count: number
+          readonly oldest_pending_at: Date | string | null
+          readonly retrying_count: number
+          readonly max_attempts: number
+        }[]
+      >`
+        SELECT COUNT(*)::int AS pending_count,
+          MIN(created_at) AS oldest_pending_at,
+          COUNT(*) FILTER (WHERE attempts > 0)::int AS retrying_count,
+          COALESCE(MAX(attempts), 0)::int AS max_attempts
+        FROM ontology_outbox
+        WHERE project_id = ${input.projectId} AND published_at IS NULL
+      `
+      return {
+        pendingCount: summary?.pending_count ?? 0,
+        oldestPendingAt: toOptionalIsoString(summary?.oldest_pending_at),
+        retryingCount: summary?.retrying_count ?? 0,
+        maxAttempts: summary?.max_attempts ?? 0,
+      }
+    })
+  }
+}
+
+function toOptionalIsoString(value: Date | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
 }
 
 function validateLeaseIds(ids: readonly string[]): string[] {

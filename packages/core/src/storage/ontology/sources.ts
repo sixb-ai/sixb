@@ -150,6 +150,15 @@ export interface CleanupTerminalSourceMaterializationsResult {
   readonly materializationsDeleted: number
 }
 
+export interface SummarizeTerminalSourceMaterializationsInput {
+  readonly projectId: string
+}
+
+export interface TerminalSourceMaterializationSummary {
+  readonly count: number
+  readonly oldestTerminalAt: string | null
+}
+
 export interface AssertSourceMaterializationExecutionInput {
   readonly projectId: string
   readonly source: ProjectionSourceRef
@@ -180,4 +189,7 @@ export interface OntologySourceStorage {
   cleanupTerminal(
     input: CleanupTerminalSourceMaterializationsInput
   ): Promise<CleanupTerminalSourceMaterializationsResult>
+  summarizeTerminal(
+    input: SummarizeTerminalSourceMaterializationsInput
+  ): Promise<TerminalSourceMaterializationSummary>
 }

@@ -1,5 +1,4 @@
-import type { ActionDefinition, Queues, Storage } from "@sixb/core"
-import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { ActionDefinition, DomainEventLog, Queues, Storage } from "@sixb/core"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
@@ -16,7 +15,7 @@ import type {
 
 export interface ActionWorkerSixb {
   readonly id: string
-  readonly events: EventsRuntime
+  readonly events: DomainEventLog
   readonly logs?: LogsRuntime
   readonly storage: Storage
   readonly queues: Queues

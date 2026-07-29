@@ -89,6 +89,12 @@ function objectRowKey(projectId: string, objectTypeId: string): string {
   return `${projectId}:${objectTypeId}`
 }
 
+function comparePrimaryIds(left: string, right: string): number {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
+}
+
 function sourceLinkBucketKey(projectId: string, sourceTypeId: string, sourceId: string): string {
   return `${projectId}:${sourceTypeId}:${sourceId}`
 }
@@ -800,6 +806,30 @@ export class InMemoryObjectStorage implements ObjectStorage {
     return [...deduped.values()]
   }
 
+  async listByPrimaryIdPage(params: {
+    projectId: string
+    objectTypeId: string
+    afterPrimaryId?: string
+    limit: number
+  }): Promise<{ objects: readonly ObjectRow[]; nextPrimaryId?: string }> {
+    assertReconciliationPageLimit(params.limit)
+    const bucket = this.rows.get(objectRowKey(params.projectId, params.objectTypeId))
+    const rows = [...(bucket?.values() ?? [])]
+      .filter(
+        (row) =>
+          !params.afterPrimaryId || comparePrimaryIds(row.primaryId, params.afterPrimaryId) > 0
+      )
+      .sort((left, right) => comparePrimaryIds(left.primaryId, right.primaryId))
+      .slice(0, params.limit + 1)
+    const hasMore = rows.length > params.limit
+    const objects = rows.slice(0, params.limit).map((row) => structuredClone(row))
+    const last = objects.at(-1)
+    return {
+      objects,
+      ...(hasMore && last ? { nextPrimaryId: last.primaryId } : {}),
+    }
+  }
+
   async list(params: {
     projectId: string
     objectTypeId?: string | readonly string[]
@@ -907,6 +937,12 @@ export class InMemoryObjectStorage implements ObjectStorage {
   ): void {
     const bucket = this.links.get(sourceLinkBucketKey(projectId, sourceTypeId, sourceId))
     bucket?.delete(linkRowKey(linkId, targetTypeId, targetId))
+  }
+}
+
+function assertReconciliationPageLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new Error("Object reconciliation page limit must be a positive safe integer.")
   }
 }
 

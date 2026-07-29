@@ -25,6 +25,7 @@ import type { DatasetDefinition } from "../datasets"
 import type { SixbErrorHandler } from "../error-reporting/types"
 import type { LakeStorage } from "../lake-storage"
 import type { LoggerProvider, ObservabilityOptions } from "../logging"
+import type { OntologyMaintenanceOptions } from "../maintenance"
 import type { PipelineDefinition } from "../pipelines/types"
 import type { ProjectionDefinition } from "../projections/types"
 import type { Queues } from "../queues"
@@ -51,8 +52,10 @@ export interface CreateSixbOptions {
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
   observability?: ObservabilityOptions
-  /** Observes terminal failed runs without changing their outcome. */
+  /** Observes runtime failures without changing their outcome. */
   onError?: SixbErrorHandler
+  /** Recovery and retention settings. The runtime constructor never starts maintenance timers. */
+  ontologyMaintenance?: OntologyMaintenanceOptions
   ontologies?: readonly OntologySource[]
   actions?: readonly ActionDefinition[]
   /** Agent definitions to register in addition to auto-discovered `agents/` exports. */
@@ -139,6 +142,7 @@ export async function createSixb(
     logger: options.logger,
     observability: options.observability,
     onError: options.onError,
+    ontologyMaintenance: options.ontologyMaintenance,
     projectRoot,
     actions,
     datasets: [...(options.datasets ?? []), ...datasets],

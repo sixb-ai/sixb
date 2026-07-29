@@ -406,6 +406,35 @@ describe("PgObjectStorage", () => {
     expect(countOnly.hasMore).toBe(true)
   })
 
+  test("listByPrimaryIdPage uses a stable keyset without totals", async () => {
+    await storage.objects.applyObjectUpsert(
+      createObjectEvent("project-a", "Room", "room:103", {}, "3")
+    )
+    await storage.objects.applyObjectUpsert(
+      createObjectEvent("project-a", "Room", "room:101", {}, "1")
+    )
+    await storage.objects.applyObjectUpsert(
+      createObjectEvent("project-a", "Room", "room:102", {}, "2")
+    )
+
+    const first = await storage.objects.listByPrimaryIdPage({
+      projectId: "project-a",
+      objectTypeId: "Room",
+      limit: 2,
+    })
+    const second = await storage.objects.listByPrimaryIdPage({
+      projectId: "project-a",
+      objectTypeId: "Room",
+      afterPrimaryId: first.nextPrimaryId,
+      limit: 2,
+    })
+
+    expect(first.objects.map((row) => row.primaryId)).toEqual(["room:101", "room:102"])
+    expect(first.nextPrimaryId).toBe("room:102")
+    expect(second.objects.map((row) => row.primaryId)).toEqual(["room:103"])
+    expect(second.nextPrimaryId).toBeUndefined()
+  })
+
   test("list with primaryIdPrefix filter", async () => {
     await storage.objects.applyObjectUpsert(
       createObjectEvent("project-a", "Room", "room:101", {}, "1")

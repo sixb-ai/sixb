@@ -151,7 +151,7 @@ describe("upsertObjectBatch", () => {
   test("publishes one batch of facts for the whole commit", async () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
-    const publishSpy = spyPublishedFacts(sixb.events)
+    const publishSpy = spyPublishedFacts(sixb.events as EventsRuntime)
 
     await sixb.upsertObjectBatch("room", [
       { properties: { id: "r1", name: "A" } },
@@ -297,7 +297,7 @@ describe("upsertLinkBatch", () => {
   test("publishes one batch of facts for the whole commit", async () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
-    const publishSpy = spyPublishedFacts(sixb.events)
+    const publishSpy = spyPublishedFacts(sixb.events as EventsRuntime)
 
     await sixb.upsertObject("room", { id: "r1", name: "Room 1" })
     await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
@@ -354,7 +354,7 @@ describe("setLinkBatch", () => {
       () => sixb.events.read(),
       (published) => published.length === 4
     )
-    const publishSpy = spyPublishedFacts(sixb.events)
+    const publishSpy = spyPublishedFacts(sixb.events as EventsRuntime)
 
     const results = await objectService.setLinkBatch(sixb, [
       {

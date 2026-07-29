@@ -56,8 +56,24 @@ export interface EventsSubscribeInput {
 /** Exact, already-identified materialization event persisted before broker publication. @internal */
 export type StableEventEnvelope = OntologyMaterializationEvent
 
+/** Public domain-event log. Stable ontology envelopes are intentionally absent. */
+export interface DomainEventLog {
+  append(input: EventsAppendInput): Promise<readonly StoredDomainEvent[]>
+  read(input?: EventsReadInput): Promise<readonly StoredDomainEvent[]>
+  latestCursor(): Promise<string | undefined>
+  subscribe(
+    input: EventsSubscribeInput,
+    handler: (events: readonly StoredDomainEvent[]) => void
+  ): Promise<() => void>
+}
+
+/** Narrow internal port used to publish envelopes already persisted in the ontology outbox. */
+export interface StableEventPublisher {
+  publishEnvelopes(envelopes: readonly StableEventEnvelope[]): Promise<readonly StoredDomainEvent[]>
+}
+
 /** Project-scoped domain event runtime backed by the shared broker provider. */
-export class EventsRuntime {
+export class EventsRuntime implements DomainEventLog, StableEventPublisher {
   private readonly projectId: string
   private readonly broker: Broker
   private readonly stream: BrokerStreamDefinition

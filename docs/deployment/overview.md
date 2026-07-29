@@ -184,6 +184,12 @@ Workers claim jobs with a **lease** (default 15 minutes). On each outcome:
 - **abort** (shutdown mid-job) — the job is released by default so another
   process can reclaim it.
 
+The API role owns `OntologyMaintenance`: immediate post-commit publication still runs in the
+process that committed, while the API performs durable outbox catch-up and retention every 60
+seconds. Queue workers do not poll the outbox, and no dedicated outbox process is required.
+Deployments with separate roles must run at least one API role per project so durable outbox
+catch-up and retention remain active.
+
 Because jobs and run records live in durable, shared providers, a crashed worker
 loses no work: the unfinished job's lease expires and another worker reclaims it.
 
@@ -232,8 +238,9 @@ sixb rules          # rule evaluation
 sixb worker-group   # all registered queue workers
 ```
 
-Scale by running more copies of any role. Extra `sixb worker` processes share the
-queue and increase throughput, since each job is claimed by exactly one worker.
+Scale queue-worker roles horizontally: extra `sixb worker` processes share the queue and increase
+throughput because each job is claimed by one worker. V0.1.0 runs one API maintenance owner and one
+Rules worker per project; Rules reconciliation has no cross-process lease yet.
 
 ## Related
 

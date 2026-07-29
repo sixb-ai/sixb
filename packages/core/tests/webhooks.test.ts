@@ -157,6 +157,7 @@ describe("webhooks", () => {
     const storage = new InMemoryStorage()
     const storageWithoutDeliveries: Storage = {
       ...storage,
+      ping: storage.ping.bind(storage),
       transaction: storage.transaction.bind(storage),
       webhookDeliveries: undefined,
     }

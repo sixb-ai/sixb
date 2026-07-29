@@ -4613,13 +4613,130 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": ["ok"]
+                      "enum": ["ok", "degraded"]
                     },
                     "objectTypes": {
-                      "type": "number"
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maintenance": {
+                      "type": "object",
+                      "properties": {
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "intervalMs": {
+                          "type": "integer",
+                          "exclusiveMinimum": true,
+                          "minimum": 0
+                        },
+                        "lastStartedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "lastCompletedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "lastDurationMs": {
+                          "type": "number",
+                          "minimum": 0,
+                          "nullable": true
+                        },
+                        "consecutiveFailures": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "lastError": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "outbox": {
+                          "type": "object",
+                          "properties": {
+                            "pendingCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "oldestPendingAt": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "retryingCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "maxAttempts": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "pendingCount",
+                            "oldestPendingAt",
+                            "retryingCount",
+                            "maxAttempts"
+                          ],
+                          "additionalProperties": false,
+                          "nullable": true
+                        },
+                        "terminalSources": {
+                          "type": "object",
+                          "properties": {
+                            "count": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "oldestTerminalAt": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          },
+                          "required": ["count", "oldestTerminalAt"],
+                          "additionalProperties": false,
+                          "nullable": true
+                        },
+                        "cleanup": {
+                          "type": "object",
+                          "properties": {
+                            "publishedOutboxRowsDeleted": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "terminalSourceRowsDeleted": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "terminalSourceMaterializationsDeleted": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "publishedOutboxRowsDeleted",
+                            "terminalSourceRowsDeleted",
+                            "terminalSourceMaterializationsDeleted"
+                          ],
+                          "additionalProperties": false,
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "running",
+                        "intervalMs",
+                        "lastStartedAt",
+                        "lastCompletedAt",
+                        "lastDurationMs",
+                        "consecutiveFailures",
+                        "lastError",
+                        "outbox",
+                        "terminalSources",
+                        "cleanup"
+                      ],
+                      "additionalProperties": false
                     }
                   },
-                  "required": ["status", "objectTypes"],
+                  "required": ["status", "objectTypes", "maintenance"],
                   "additionalProperties": false
                 }
               }

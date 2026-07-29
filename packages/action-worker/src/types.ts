@@ -1,5 +1,11 @@
-import type { ActionDefinition, ActionSubject, OntologySource, Sixb, Storage } from "@sixb/core"
-import type { EventsRuntime } from "@sixb/core/internal/events"
+import type {
+  ActionDefinition,
+  ActionSubject,
+  DomainEventLog,
+  OntologySource,
+  Sixb,
+  Storage,
+} from "@sixb/core"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
 import type { OntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type {
@@ -25,7 +31,7 @@ export interface ActionWorkerSixbFacade
 
 export interface ActionWorkerContext {
   readonly id: string
-  readonly events: EventsRuntime
+  readonly events: DomainEventLog
   readonly logs?: LogsRuntime
   readonly storage: Storage
   readonly actionRunsStorage: ActionRunStorage

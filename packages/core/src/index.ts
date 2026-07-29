@@ -225,7 +225,9 @@ export type {
   DatasetEventToken,
   DatasetVersionCommittedEvent,
   DomainEvent,
+  DomainEventLog,
   EventActor,
+  EventDraft,
   EventOrigin,
   EventPropertySelector,
   EventScopeKeys,
@@ -233,6 +235,9 @@ export type {
   EventSelectorEvent,
   EventSelectorSpec,
   EventSelectors,
+  EventsAppendInput,
+  EventsReadInput,
+  EventsSubscribeInput,
   InferEventSelectorContext,
   InferEventSelectorEvent,
   LinkCreatedEvent,
@@ -774,9 +779,19 @@ export {
 export type {
   SixbErrorContext,
   SixbErrorHandler,
+  SixbEventDeliveryFailedContext,
   SixbFailedRun,
+  SixbRuleEvaluationFailedContext,
   SixbRunFailedContext,
 } from "./error-reporting/types"
+export type {
+  OntologyMaintenanceCleanupSnapshot,
+  OntologyMaintenanceHandle,
+  OntologyMaintenanceOptions,
+  OntologyMaintenanceSnapshot,
+  OntologyOperationalStatus,
+  SixbReadiness,
+} from "./maintenance"
 export type {
   BatchItemResult,
   CreateSixbOptions,

@@ -1,13 +1,13 @@
 import type {
   BlobStorage,
   Broker,
+  DomainEventLog,
   Queues,
   SandboxFactory,
   SixbRuntimeContext,
   Storage,
 } from "@sixb/core"
 import type { AgentsRuntime } from "@sixb/core/internal/agents"
-import type { EventsRuntime } from "@sixb/core/internal/events"
 import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
 import type { AgentStorage, AuthStorage } from "@sixb/core/storage"
 import type { ToolSet } from "ai"
@@ -30,7 +30,7 @@ export type AgentWorkerStorage = Storage & {
 export interface AgentWorkerSixb {
   readonly id: string
   readonly broker: Broker
-  readonly events: EventsRuntime
+  readonly events: DomainEventLog
   readonly storage: Storage
   readonly queues: Queues
   readonly agents: AgentsRuntime

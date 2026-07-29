@@ -1398,4 +1398,27 @@ describe("SqliteObjectStorage", () => {
     const empty = await storage.listIncidentLinksBatch({ projectId: "p1", items: [] })
     expect(empty).toHaveLength(0)
   })
+
+  test("listByPrimaryIdPage — uses a stable keyset without totals", async () => {
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Room", "r3", {}, "3"))
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Room", "r1", {}, "1"))
+    await storage.applyObjectUpsert(createObjectEvent("p1", "Room", "r2", {}, "2"))
+
+    const first = await storage.listByPrimaryIdPage({
+      projectId: "p1",
+      objectTypeId: "Room",
+      limit: 2,
+    })
+    const second = await storage.listByPrimaryIdPage({
+      projectId: "p1",
+      objectTypeId: "Room",
+      afterPrimaryId: first.nextPrimaryId,
+      limit: 2,
+    })
+
+    expect(first.objects.map((row) => row.primaryId)).toEqual(["r1", "r2"])
+    expect(first.nextPrimaryId).toBe("r2")
+    expect(second.objects.map((row) => row.primaryId)).toEqual(["r3"])
+    expect(second.nextPrimaryId).toBeUndefined()
+  })
 })

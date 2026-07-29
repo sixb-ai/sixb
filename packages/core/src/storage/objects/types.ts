@@ -237,6 +237,14 @@ export interface ObjectStorage {
     items: readonly { objectTypeId: string; objectId: string }[]
   }): Promise<readonly ObjectLinkRow[]>
 
+  /** Stable keyset page used by background reconciliation without a total-count scan. */
+  listByPrimaryIdPage(params: {
+    projectId: string
+    objectTypeId: string
+    afterPrimaryId?: string
+    limit: number
+  }): Promise<{ objects: readonly ObjectRow[]; nextPrimaryId?: string }>
+
   list(params: {
     projectId: string
     objectTypeId?: string | readonly string[]

@@ -8,8 +8,10 @@ import type {
   ClaimOntologyOutboxInput,
   CompleteOntologyOutboxLeaseInput,
   OntologyOutboxStorage,
+  OntologyOutboxSummary,
   PurgePublishedOntologyOutboxInput,
   RescheduleOntologyOutboxLeaseInput,
+  SummarizeOntologyOutboxInput,
 } from "@sixb/core/storage"
 import {
   assertNonblank,
@@ -176,6 +178,35 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
           `
         )
         .run(input.projectId, input.publishedBefore, input.limit).changes
+    })
+  }
+
+  async summarize(input: SummarizeOntologyOutboxInput): Promise<OntologyOutboxSummary> {
+    return this.runRootOperation(() => {
+      assertNonblank(input.projectId, "Ontology outbox project id")
+      const summary = this.db
+        .query(
+          `
+            SELECT COUNT(*) AS pending_count,
+              MIN(created_at) AS oldest_pending_at,
+              SUM(CASE WHEN attempts > 0 THEN 1 ELSE 0 END) AS retrying_count,
+              COALESCE(MAX(attempts), 0) AS max_attempts
+            FROM ontology_outbox
+            WHERE project_id = ? AND published_at IS NULL
+          `
+        )
+        .get(input.projectId) as {
+        readonly pending_count: number
+        readonly oldest_pending_at: string | null
+        readonly retrying_count: number | null
+        readonly max_attempts: number
+      }
+      return {
+        pendingCount: summary.pending_count,
+        oldestPendingAt: summary.oldest_pending_at,
+        retryingCount: summary.retrying_count ?? 0,
+        maxAttempts: summary.max_attempts,
+      }
     })
   }
 }

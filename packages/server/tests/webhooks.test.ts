@@ -527,7 +527,13 @@ describe("webhook routes", () => {
     ])
     expect(reports[2]?.error.message).toBe("Webhook handler returned HTTP 503")
     expect(reports[3]?.error.message).toBe("Webhook handler returned HTTP 302")
-    expect(reports.map((report) => report.context.run)).toEqual([
+    const runContexts = reports.map((report) => {
+      if (report.context.type !== "run.failed") {
+        throw new Error(`Unexpected error context '${report.context.type}'.`)
+      }
+      return report.context
+    })
+    expect(runContexts.map((context) => context.run)).toEqual([
       {
         kind: "webhook",
         runId: expect.stringMatching(/^webhookrun_/),
@@ -554,7 +560,7 @@ describe("webhook routes", () => {
       },
     ])
     expect(reports.every((report) => report.context.projectId === "test-project")).toBe(true)
-    expect(new Set(reports.map((report) => report.context.run.runId)).size).toBe(4)
+    expect(new Set(runContexts.map((context) => context.run.runId)).size).toBe(4)
   })
 
   test("retries idempotent deliveries after a returned server failure", async () => {

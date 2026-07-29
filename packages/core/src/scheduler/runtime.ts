@@ -1,17 +1,17 @@
-import type { EventsRuntime } from "../events"
+import type { DomainEventLog } from "../events"
 import type { CronScheduleDefinition, ScheduleDefinition } from "../schedules"
 import { nextCronOccurrence } from "../schedules"
 import { SchedulerValidationError } from "./errors"
 
 export interface SchedulerRuntimeOptions {
   schedules: readonly ScheduleDefinition[]
-  events: EventsRuntime
+  events: DomainEventLog
   now?: () => Date
 }
 
 export class SchedulerRuntime {
   private readonly schedules: readonly CronScheduleDefinition[]
-  private readonly events: EventsRuntime
+  private readonly events: DomainEventLog
   private readonly now: () => Date
   private started = false
   private timer: ReturnType<typeof setTimeout> | null = null

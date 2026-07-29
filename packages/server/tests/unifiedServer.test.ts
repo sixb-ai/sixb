@@ -10,6 +10,7 @@ import {
   Sixb,
   type SixbOptions,
 } from "@sixb/core"
+import type { EventsRuntime } from "@sixb/core/internal/events"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -113,7 +114,7 @@ describe("SixbServer API serving", () => {
       queues: new InMemoryQueues(),
     })
 
-    await sixb.events.publishEnvelopes([
+    await (sixb.events as EventsRuntime).publishEnvelopes([
       {
         id: "telemetry-fan-1-rpm",
         schemaVersion: 1,

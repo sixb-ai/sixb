@@ -42,6 +42,10 @@ export function isPublicRoute(pathname: string, method: string): boolean {
     return true
   }
 
+  if ((pathname === "/health" || pathname === "/ready") && normalizedMethod === "GET") {
+    return true
+  }
+
   if (pathname.startsWith(`${AGENT_API_GATEWAY_PREFIX}/`)) {
     return true
   }

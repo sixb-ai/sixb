@@ -81,9 +81,11 @@ export type {
   OntologyMaterializationEventDraft,
   OntologyOutboxRecord,
   OntologyOutboxStorage,
+  OntologyOutboxSummary,
   OntologyOutboxWrite,
   PurgePublishedOntologyOutboxInput,
   RescheduleOntologyOutboxLeaseInput,
+  SummarizeOntologyOutboxInput,
 } from "./outbox"
 export type {
   AbandonSourceMaterializationCandidateInput,
@@ -105,6 +107,8 @@ export type {
   StoredSourceAssertion,
   StoredSourceLinkAssertion,
   StoredSourceObjectAssertion,
+  SummarizeTerminalSourceMaterializationsInput,
+  TerminalSourceMaterializationSummary,
 } from "./sources"
 
 export interface OntologyStorage {

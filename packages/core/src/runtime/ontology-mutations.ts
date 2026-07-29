@@ -88,7 +88,7 @@ function notifyWithoutAffectingCommit(notify: () => void): void {
     notify()
   } catch (error) {
     // The ontology commit is already durable. A wake-up failure must never turn it into an apparent
-    // mutation failure; the outbox poll loop remains the correctness fallback.
+    // mutation failure; API-hosted ontology maintenance remains the correctness fallback.
     console.error("[Sixb] Failed to wake the ontology outbox dispatcher:", error)
   }
 }

@@ -1,6 +1,6 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { OntologyMaintenanceHandle, OntologySource, Sixb } from "@sixb/core"
 import { CSRF_HEADER_NAME } from "@sixb/core/internal/auth"
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
@@ -64,6 +64,7 @@ export class SixbServer {
   private readonly authRedirectContextResolver: ResolveAuthRedirectContext
   private app: SixbApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
+  private maintenance: OntologyMaintenanceHandle | null = null
 
   constructor(options: SixbServerOptions) {
     this.sixb = options.sixb
@@ -116,9 +117,15 @@ export class SixbServer {
   }
 
   async start(): Promise<void> {
-    this.app = createSixbApi(this)
+    if (this.app !== null || this.bunServer !== null || this.maintenance !== null) {
+      throw new Error("[SixbServer] Server is already running.")
+    }
+
+    const maintenance = await this.sixb.startOntologyMaintenance()
+    this.maintenance = maintenance
 
     try {
+      this.app = createSixbApi(this)
       this.bunServer = startApiServer(this.app, {
         host: this.host,
         port: this.port,
@@ -126,6 +133,8 @@ export class SixbServer {
     } catch (error) {
       this.app = null
       this.bunServer = null
+      this.maintenance = null
+      await maintenance.stop()
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`[SixbServer] Failed to listen on ${this.host}:${this.port}: ${message}`)
     }
@@ -147,6 +156,10 @@ export class SixbServer {
       await this.app.stop()
       this.app = null
     }
+
+    const maintenance = this.maintenance
+    this.maintenance = null
+    await maintenance?.stop()
   }
 }
 

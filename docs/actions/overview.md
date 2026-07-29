@@ -186,6 +186,11 @@ Each handler receives a context object. Every phase gets `params` (validated), `
 Sixb emits the domain events for those changes itself, so drive notifications and fan-out from
 `changes` instead of appending mutation events by hand.
 
+The ontology write, Action commit-ledger entry, and mutation-event envelopes land in one database
+transaction. `effects` starts only after that commit exists and receives its persisted identity;
+retries resolve the same Action-origin commit and never re-commit edits. Broker delivery is
+post-commit and at-least-once.
+
 `writeback` runs an external call before the local commit, and its return value flows into `edits`
 and `effects` as `writeback` (see the `markPaid` example above, which carries the ERP receipt id
 into the edit). Writeback and effects handlers can stream immutable file content into Sixb with

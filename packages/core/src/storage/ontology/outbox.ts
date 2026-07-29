@@ -57,10 +57,23 @@ export interface PurgePublishedOntologyOutboxInput {
   readonly limit: number
 }
 
+export interface SummarizeOntologyOutboxInput {
+  readonly projectId: string
+}
+
+export interface OntologyOutboxSummary {
+  readonly pendingCount: number
+  readonly oldestPendingAt: string | null
+  /** Pending rows that have already been claimed at least once. */
+  readonly retryingCount: number
+  readonly maxAttempts: number
+}
+
 export interface OntologyOutboxStorage {
   /** Selects each claimed batch deterministically; concurrent publishers may complete out of order. */
   claim(input: ClaimOntologyOutboxInput): Promise<readonly ClaimedOntologyOutboxRow[]>
   markPublished(input: CompleteOntologyOutboxLeaseInput): Promise<void>
   reschedule(input: RescheduleOntologyOutboxLeaseInput): Promise<void>
   purgePublished(input: PurgePublishedOntologyOutboxInput): Promise<number>
+  summarize(input: SummarizeOntologyOutboxInput): Promise<OntologyOutboxSummary>
 }

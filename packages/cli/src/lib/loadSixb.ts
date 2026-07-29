@@ -8,10 +8,13 @@ import type {
   DatasetDefinition,
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
+  OntologyMaintenanceHandle,
+  OntologyOperationalStatus,
   PipelineDefinition,
   ProjectionDefinition,
   RuleDefinition,
   ScheduleDefinition,
+  SixbReadiness,
   SixbRuntimeContext,
   SyncDefinition,
   TelemetryProjectionDefinition,
@@ -49,6 +52,9 @@ export interface LoadedSixb extends SixbRuntimeContext {
   ): Promise<ConnectorClient<TAdapter>>
   startScheduler(): Promise<void>
   stopScheduler(): Promise<void>
+  startOntologyMaintenance(): Promise<OntologyMaintenanceHandle>
+  getOntologyOperationalStatus(): OntologyOperationalStatus
+  checkReadiness(): Promise<SixbReadiness>
   disconnectConnectors(): Promise<void>
   closeLogger(): Promise<void>
   closeBroker(): Promise<void>
@@ -63,47 +69,80 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return !!value && typeof value === "object" && "then" in value
 }
 
+const REQUIRED_RUNTIME_PROPERTIES = [
+  "ontology",
+  "actionRegistry",
+  "events",
+  "broker",
+  "storage",
+  "lakeStorage",
+  "blobStorage",
+  "queues",
+  "auth",
+  "agents",
+] as const
+
+const REQUIRED_DEFINITION_METHODS = [
+  "listObjectTypes",
+  "getSubTypes",
+  "getActionDefinitions",
+  "getActionById",
+  "getSyncDefinitions",
+  "getPipelineDefinitions",
+  "getPipelineById",
+  "getScheduleDefinitions",
+  "getObjectProjections",
+  "getLinkProjections",
+  "getTelemetryProjections",
+  "getDatasetDefinitions",
+  "getRuleDefinitions",
+  "getDatasetById",
+  "getProjectionById",
+  "getSyncById",
+  "getRuleById",
+] as const
+
+const REQUIRED_LIFECYCLE_METHODS = [
+  "startScheduler",
+  "stopScheduler",
+  "startOntologyMaintenance",
+  "getOntologyOperationalStatus",
+  "checkReadiness",
+  "disconnectConnectors",
+  "closeLogger",
+  "closeBroker",
+] as const
+
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return value !== null && typeof value === "object"
+}
+
+function hasProperties(
+  value: Record<PropertyKey, unknown>,
+  properties: readonly PropertyKey[]
+): boolean {
+  return properties.every((property) => property in value)
+}
+
+function hasMethods(value: Record<PropertyKey, unknown>, methods: readonly PropertyKey[]): boolean {
+  return methods.every((method) => typeof value[method] === "function")
+}
+
+function hasWorkflows(value: Record<PropertyKey, unknown>): boolean {
+  return isRecord(value.workflows) && hasMethods(value.workflows, ["list", "getById"])
+}
+
 function isSixbInstance(value: unknown): value is LoadedSixb {
+  if (!isRecord(value)) return false
+
   return (
-    !!value &&
-    typeof value === "object" &&
-    typeof (value as { id?: unknown }).id === "string" &&
-    typeof (value as { projectId?: unknown }).projectId === "string" &&
-    "ontology" in value &&
-    "actionRegistry" in value &&
-    "events" in value &&
-    "broker" in value &&
-    "storage" in value &&
-    "lakeStorage" in value &&
-    "blobStorage" in value &&
-    "queues" in value &&
-    "auth" in value &&
-    typeof (value as { listObjectTypes?: unknown }).listObjectTypes === "function" &&
-    typeof (value as { getSubTypes?: unknown }).getSubTypes === "function" &&
-    typeof (value as { getActionDefinitions?: unknown }).getActionDefinitions === "function" &&
-    typeof (value as { getActionById?: unknown }).getActionById === "function" &&
-    typeof (value as { getSyncDefinitions?: unknown }).getSyncDefinitions === "function" &&
-    typeof (value as { getPipelineDefinitions?: unknown }).getPipelineDefinitions === "function" &&
-    typeof (value as { getPipelineById?: unknown }).getPipelineById === "function" &&
-    typeof (value as { getScheduleDefinitions?: unknown }).getScheduleDefinitions === "function" &&
-    typeof (value as { workflows?: { list?: unknown } }).workflows?.list === "function" &&
-    typeof (value as { workflows?: { getById?: unknown } }).workflows?.getById === "function" &&
-    typeof (value as { getObjectProjections?: unknown }).getObjectProjections === "function" &&
-    typeof (value as { getLinkProjections?: unknown }).getLinkProjections === "function" &&
-    typeof (value as { getTelemetryProjections?: unknown }).getTelemetryProjections ===
-      "function" &&
-    typeof (value as { getDatasetDefinitions?: unknown }).getDatasetDefinitions === "function" &&
-    typeof (value as { getRuleDefinitions?: unknown }).getRuleDefinitions === "function" &&
-    typeof (value as { getDatasetById?: unknown }).getDatasetById === "function" &&
-    typeof (value as { getProjectionById?: unknown }).getProjectionById === "function" &&
-    typeof (value as { getSyncById?: unknown }).getSyncById === "function" &&
-    typeof (value as { getRuleById?: unknown }).getRuleById === "function" &&
-    typeof (value as { getPipelineById?: unknown }).getPipelineById === "function" &&
-    typeof (value as { startScheduler?: unknown }).startScheduler === "function" &&
-    typeof (value as { stopScheduler?: unknown }).stopScheduler === "function" &&
-    typeof (value as { disconnectConnectors?: unknown }).disconnectConnectors === "function" &&
-    typeof (value as { closeLogger?: unknown }).closeLogger === "function" &&
-    typeof (value as { closeBroker?: unknown }).closeBroker === "function"
+    typeof value.id === "string" &&
+    typeof value.projectId === "string" &&
+    hasProperties(value, REQUIRED_RUNTIME_PROPERTIES) &&
+    hasMethods(value, REQUIRED_DEFINITION_METHODS) &&
+    hasMethods(value, REQUIRED_LIFECYCLE_METHODS) &&
+    hasMethods(value, ["connector", "list"]) &&
+    hasWorkflows(value)
   )
 }
 

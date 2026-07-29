@@ -1,11 +1,11 @@
 import type {
   DatasetDefinition,
+  DomainEventLog,
   LakeStorage,
   PipelineDefinition,
   Queues,
   Storage,
 } from "@sixb/core"
-import type { EventsRuntime } from "@sixb/core/internal/events"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type {
@@ -27,7 +27,7 @@ export interface PipelineWorkerContext {
 
 export interface PipelineWorkerSixb {
   readonly id: string
-  readonly events?: EventsRuntime
+  readonly events?: DomainEventLog
   readonly logs?: LogsRuntime
   readonly lakeStorage: LakeStorage
   readonly queues: Queues

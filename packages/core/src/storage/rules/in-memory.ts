@@ -6,7 +6,11 @@ import type {
 import type {
   ListActiveRuleStatesInput,
   ListActiveRuleStatesResult,
+  ListRuleStatesReconciliationPageInput,
+  ListRuleStatesReconciliationPageResult,
+  RuleStateCursor,
   RuleStateRecord,
+  RuleStateTransitionEvent,
   RulesStorage,
 } from "./types"
 
@@ -50,6 +54,22 @@ function compareRuleStateRecords(
   return 0
 }
 
+function compareRuleStateIdentity(left: RuleStateRecord, right: RuleStateRecord): number {
+  return (
+    left.ruleId.localeCompare(right.ruleId) ||
+    left.subject.objectTypeId.localeCompare(right.subject.objectTypeId) ||
+    left.subject.primaryId.localeCompare(right.subject.primaryId)
+  )
+}
+
+function compareCursor(record: RuleStateRecord, cursor: RuleStateCursor): number {
+  return (
+    record.ruleId.localeCompare(cursor.ruleId) ||
+    record.subject.objectTypeId.localeCompare(cursor.objectTypeId) ||
+    record.subject.primaryId.localeCompare(cursor.primaryId)
+  )
+}
+
 export class InMemoryRulesStorage implements RulesStorage {
   private readonly active = new Map<string, RuleStateRecord>()
 
@@ -71,6 +91,16 @@ export class InMemoryRulesStorage implements RulesStorage {
   }): Promise<RuleStateRecord | null> {
     const record = this.active.get(stateKey(params))
     return record ? cloneRuleStateRecord(record) : null
+  }
+
+  async getActiveBatch(params: {
+    projectId: string
+    items: readonly { readonly ruleId: string; readonly subject: RuleEventSubject }[]
+  }): Promise<readonly RuleStateRecord[]> {
+    return params.items.flatMap((item) => {
+      const record = this.active.get(stateKey({ projectId: params.projectId, ...item }))
+      return record ? [cloneRuleStateRecord(record)] : []
+    })
   }
 
   async listActive(input: ListActiveRuleStatesInput): Promise<ListActiveRuleStatesResult> {
@@ -100,6 +130,32 @@ export class InMemoryRulesStorage implements RulesStorage {
     }
   }
 
+  async listReconciliationPage(
+    input: ListRuleStatesReconciliationPageInput
+  ): Promise<ListRuleStatesReconciliationPageResult> {
+    const rows = [...this.active.values()]
+      .filter((record) => record.projectId === input.projectId)
+      .filter((record) => record.subject.kind === "object")
+      .filter((record) => !input.after || compareCursor(record, input.after) > 0)
+      .sort(compareRuleStateIdentity)
+      .slice(0, input.limit + 1)
+    const hasMore = rows.length > input.limit
+    const states = rows.slice(0, input.limit).map(cloneRuleStateRecord)
+    const last = states.at(-1)
+    return {
+      states,
+      ...(hasMore && last
+        ? {
+            next: {
+              ruleId: last.ruleId,
+              objectTypeId: last.subject.objectTypeId,
+              primaryId: last.subject.primaryId,
+            },
+          }
+        : {}),
+    }
+  }
+
   async applyTriggered(event: StoredRuleTriggeredEvent): Promise<void> {
     const record: RuleStateRecord = {
       projectId: event.projectId,
@@ -119,6 +175,16 @@ export class InMemoryRulesStorage implements RulesStorage {
         subject: event.payload.subject,
       })
     )
+  }
+
+  async applyTransitions(events: readonly RuleStateTransitionEvent[]): Promise<void> {
+    for (const event of events) {
+      if (event.type === "rule.triggered") {
+        await this.applyTriggered(event)
+      } else {
+        await this.applyResolved(event)
+      }
+    }
   }
 }
 

@@ -29,6 +29,8 @@ import type {
   ReclaimSourceMaterializationInput,
   StageSourceRowsInput,
   StageSourceRowsResult,
+  SummarizeTerminalSourceMaterializationsInput,
+  TerminalSourceMaterializationSummary,
 } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 import { lockAdvisoryKeys } from "../transactions"
@@ -298,6 +300,29 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
         remaining -= removed.length
       }
       return { rowsDeleted, materializationsDeleted }
+    })
+  }
+
+  async summarizeTerminal(
+    input: SummarizeTerminalSourceMaterializationsInput
+  ): Promise<TerminalSourceMaterializationSummary> {
+    return this.runRootOperation(async (sql) => {
+      assertNonblank(input.projectId, "Terminal source summary project id")
+      const [summary] = await sql<
+        {
+          readonly terminal_count: number
+          readonly oldest_terminal_at: Date | string | null
+        }[]
+      >`
+        SELECT COUNT(*)::int AS terminal_count, MIN(terminal_at) AS oldest_terminal_at
+        FROM ontology_sources
+        WHERE project_id = ${input.projectId}
+          AND status IN ('superseded', 'abandoned')
+      `
+      return {
+        count: summary?.terminal_count ?? 0,
+        oldestTerminalAt: toOptionalIsoString(summary?.oldest_terminal_at),
+      }
     })
   }
 
@@ -621,6 +646,11 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
     if (!row) throw sourceConflict(`Source materialization '${materializationId}' does not exist.`)
     return row
   }
+}
+
+function toOptionalIsoString(value: Date | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
 }
 
 function numberOrNull(value: number | string | null): number | null {

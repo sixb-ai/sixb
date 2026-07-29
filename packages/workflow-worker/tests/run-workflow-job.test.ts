@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
   type AgentDefinition,
+  type DomainEventLog,
   defineAction,
   defineAgent,
   defineAgentStep,
@@ -23,7 +24,6 @@ import {
   type WorkflowDefinition,
   WorkflowValidationError,
 } from "@sixb/core"
-import type { EventsRuntime } from "@sixb/core/internal/events"
 import type { ActionRunStorage, WorkflowRunStorage } from "@sixb/core/storage"
 import { WorkflowWorkerError } from "../src/errors"
 import { EventsRuntimeWorkflowRunObserver } from "../src/events"
@@ -264,7 +264,7 @@ function createRuntime(sixb: {
 async function completeRequestedActions(
   sixb: {
     readonly id: string
-    readonly events: EventsRuntime
+    readonly events: DomainEventLog
     readonly storage: { readonly actionRuns?: ActionRunStorage }
   },
   status: "succeeded" | "failed",

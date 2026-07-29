@@ -1614,8 +1614,32 @@ export type GetStatusResponses = {
    * Response for status 200
    */
   200: {
-    status: "ok"
+    status: "ok" | "degraded"
     objectTypes: number
+    maintenance: {
+      running: boolean
+      intervalMs: number
+      lastStartedAt: string | null
+      lastCompletedAt: string | null
+      lastDurationMs: number | null
+      consecutiveFailures: number
+      lastError: string | null
+      outbox: {
+        pendingCount: number
+        oldestPendingAt: string | null
+        retryingCount: number
+        maxAttempts: number
+      } | null
+      terminalSources: {
+        count: number
+        oldestTerminalAt: string | null
+      } | null
+      cleanup: {
+        publishedOutboxRowsDeleted: number
+        terminalSourceRowsDeleted: number
+        terminalSourceMaterializationsDeleted: number
+      } | null
+    }
   }
 }
 

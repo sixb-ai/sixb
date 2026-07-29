@@ -173,6 +173,10 @@ Subscribe to it to react to new readings — drive [rules](../rules/overview.md)
 to the UI, or fan out to a broker. See [events](../events/overview.md) for how to consume domain
 events.
 
+Point storage, the latest object value, the durable ontology commit, and stable event envelopes are
+one atomic Materializer commit. Publication happens afterward with at-least-once delivery; a broker
+outage delays the event but does not lose or roll back the telemetry point.
+
 A point also refreshes the object's latest value for that property, so an append emits an
 `object.updated` event alongside `telemetry.appended`.
 

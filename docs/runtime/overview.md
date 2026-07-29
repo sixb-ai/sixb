@@ -51,8 +51,8 @@ local for dev, hosted backends for production).
 Optional: `id` (project id), `auth` (a `SixbAuthConfig`, see
 [Authentication](../auth/authentication.md)), `sandboxes` (a `SandboxFactory`), `logger` (a
 `LoggerProvider` for process-level log output), `observability` (broker log-capture controls),
-`onError` (terminal [failed run notifications](error-handling.md)), and `projectRoot` (discovery
-root, defaults to `process.cwd()`). Logging options are covered in
+`onError` ([runtime failure notifications](error-handling.md)), `ontologyMaintenance` (recovery and
+retention intervals), and `projectRoot` (discovery root, defaults to `process.cwd()`). Logging options are covered in
 [Logging](../logging/overview.md).
 
 ## The Sixb instance
@@ -88,7 +88,9 @@ cross-type listing (dashboards, search) the instance also exposes a global `sixb
 
 ### Events
 
-`sixb.events` is the read/append surface for domain events — `object.created`, `object.updated`, `telemetry.appended`, `link.created`, `link.updated`, `link.deleted`, and `action.requested`. Writes emit these for you; read or subscribe to them to observe change.
+`sixb.events` is the author-facing read, append, and subscribe facade. Object/link/telemetry facts
+are emitted from the durable ontology outbox and cannot be authored or republished through this
+surface.
 
 ```ts
 const recent = await sixb.events.read({
@@ -113,19 +115,27 @@ builder. See [Logging](../logging/overview.md).
 
 ### Lifecycle
 
-The scheduler is started explicitly — constructing the runtime does not start it. Its lifecycle
-methods are idempotent and no-op when there is nothing to run.
+Constructing the runtime starts no timers. The server owns ontology maintenance automatically;
+embedded runtimes without a server acquire it explicitly.
 
 | Method | Effect |
 | --- | --- |
 | `sixb.startScheduler()` | Start the scheduler for discovered `schedules/` |
 | `sixb.stopScheduler()` | Stop the scheduler |
+| `sixb.startOntologyMaintenance()` | Start outbox recovery and bounded retention; returns a stop handle |
 
 ```ts
 await sixb.startScheduler()
+const maintenance = await sixb.startOntologyMaintenance()
 // ... on shutdown
 await sixb.stopScheduler()
+await maintenance.stop()
 ```
+
+`OntologyMaintenance` runs once at startup, then every 60 seconds by default. It drains due
+`ontology_outbox` rows, purges old published rows, and cleans only source materializations already
+marked `superseded` or `abandoned`. It never age-deletes pending outbox rows, active candidates, or
+the durable `ontology_commits` ledger.
 
 Release connector, broker, and logger resources with `sixb.disconnectConnectors()`,
 `sixb.closeBroker()`, and `sixb.closeLogger()`.

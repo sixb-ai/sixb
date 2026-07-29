@@ -84,7 +84,15 @@ All JSON routes are prefixed with `/api` and mirror the runtime's typed APIs; se
 | Connectors     | `GET /api/connectors`, `GET /api/connectors/:connectorId`                            | [Connectors](../data/connectors.md)             |
 | Webhooks       | `POST /api/webhooks/:connectorId/:webhookId`, `GET /api/webhook-runs`               | [Connectors](../data/connectors.md)             |
 | Auth           | `/api/auth/session`, `/auth/sign-in`, `/auth/callback`, `/api/auth/...`              | [Auth](../auth/overview.md)                     |
-| Project/Status | `GET /api/project`, `GET /api/status`                                                | —                                               |
+| Project/Status | `GET /api/project`, `GET /api/status`, `GET /health`, `GET /ready`                   | —                                               |
+
+Status endpoints have distinct meanings:
+
+| Endpoint | Meaning | Failure behavior |
+| --- | --- | --- |
+| `GET /health` | The API process is alive. | Returns `200` while the process can serve HTTP. |
+| `GET /ready` | Storage is reachable and its schema is current. | Returns `503` when the runtime must leave traffic. |
+| `GET /api/status` | Cached outbox, retry, cleanup, and maintenance state. | Reports `degraded` without removing a healthy API from traffic. |
 
 ## Real-time events
 
