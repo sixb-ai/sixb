@@ -327,10 +327,10 @@ export type {
   LoggerProvider,
   LogLevel,
   LogRecord,
-  LogRunKind,
   LogRunRef,
   LogsObservabilityOptions,
   ObservabilityOptions,
+  SixbRunKind,
   StoredLogLine,
 } from "./logging"
 export {
@@ -338,14 +338,14 @@ export {
   isLevelEnabled,
   isLogLevel,
   isLogRecord,
-  isLogRunKind,
+  isSixbRunKind,
   isStoredLogLine,
   LOG_LEVELS,
-  LOG_RUN_KINDS,
   logLevelsAtOrAbove,
   noopLogger,
   noopLoggerProvider,
   normalizeLogError,
+  SIXB_RUN_KINDS,
 } from "./logging"
 
 // ── Predicates ─────────────────────────────────────────────

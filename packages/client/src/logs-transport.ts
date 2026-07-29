@@ -1,8 +1,8 @@
 import {
   isStoredLogLine,
   type LogLevel,
-  type LogRunKind,
   type LogRunRef,
+  type SixbRunKind,
   type StoredLogLine,
 } from "@sixb/core/logging"
 import {
@@ -14,7 +14,7 @@ import {
 export type LogSocketState = ReconnectingSocketState
 
 export interface LogSocketOptions {
-  readonly kinds?: readonly LogRunKind[]
+  readonly kinds?: readonly SixbRunKind[]
   readonly levels?: readonly LogLevel[]
   readonly run?: LogRunRef
   readonly afterCursor?: string

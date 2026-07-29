@@ -15,12 +15,12 @@ import {
 import {
   isLogRecord,
   LOG_LEVELS,
-  LOG_RUN_KINDS,
   type LoggerProvider,
   type LogLevel,
   type LogRecord,
-  type LogRunKind,
   type LogRunRef,
+  SIXB_RUN_KINDS,
+  type SixbRunKind,
   type StoredLogLine,
 } from "./types"
 
@@ -33,7 +33,7 @@ export interface LogsPage {
 export interface LogsReadInput {
   readonly afterCursor?: string
   readonly limit?: number
-  readonly kinds?: readonly LogRunKind[]
+  readonly kinds?: readonly SixbRunKind[]
   readonly levels?: readonly LogLevel[]
   readonly run?: LogRunRef
 }
@@ -41,7 +41,7 @@ export interface LogsReadInput {
 export interface LogsTailInput {
   readonly beforeCursor?: string
   readonly limit?: number
-  readonly kinds?: readonly LogRunKind[]
+  readonly kinds?: readonly SixbRunKind[]
   readonly levels?: readonly LogLevel[]
   readonly run?: LogRunRef
 }
@@ -49,7 +49,7 @@ export interface LogsTailInput {
 export interface LogsSubscribeInput {
   readonly from?: "latest" | "earliest"
   readonly afterCursor?: string
-  readonly kinds?: readonly LogRunKind[]
+  readonly kinds?: readonly SixbRunKind[]
   readonly levels?: readonly LogLevel[]
   readonly run?: LogRunRef
 }
@@ -319,7 +319,7 @@ function nonNegativeInteger(value: number, path: string): number {
 }
 
 function logRecordNames(
-  kinds: readonly LogRunKind[] | undefined,
+  kinds: readonly SixbRunKind[] | undefined,
   levels: readonly LogLevel[] | undefined,
   run: LogRunRef | undefined
 ): readonly string[] | undefined {
@@ -327,7 +327,7 @@ function logRecordNames(
   if ((!selectedKinds || selectedKinds.length === 0) && (!levels || levels.length === 0)) {
     return undefined
   }
-  const resolvedKinds = selectedKinds && selectedKinds.length > 0 ? selectedKinds : LOG_RUN_KINDS
+  const resolvedKinds = selectedKinds && selectedKinds.length > 0 ? selectedKinds : SIXB_RUN_KINDS
   const resolvedLevels = levels && levels.length > 0 ? levels : LOG_LEVELS
   return resolvedKinds.flatMap((kind) => resolvedLevels.map((level) => `${kind}.${level}`))
 }

@@ -1,9 +1,9 @@
-import { LOG_LEVELS, LOG_RUN_KINDS } from "@sixb/core"
+import { LOG_LEVELS, SIXB_RUN_KINDS } from "@sixb/core"
 import { z } from "zod"
 
-export { LOG_LEVELS, LOG_RUN_KINDS }
+export { LOG_LEVELS, SIXB_RUN_KINDS }
 
-export const LogRunKindSchema = z.enum(LOG_RUN_KINDS)
+export const SixbRunKindSchema = z.enum(SIXB_RUN_KINDS)
 export const LogLevelSchema = z.enum(LOG_LEVELS)
 export const LogRunIdSchema = z.string().regex(/\S/, "run id must not be blank")
 export const DEFAULT_LOGS_PAGE_LIMIT = 200
@@ -13,7 +13,7 @@ const LogsLimitSchema = z.coerce.number().int().positive().max(MAX_LOGS_PAGE_LIM
 
 export const LogsQuerySchema = z
   .object({
-    kind: LogRunKindSchema.optional(),
+    kind: SixbRunKindSchema.optional(),
     runId: LogRunIdSchema.optional(),
     level: LogLevelSchema.optional(),
     direction: z.enum(["forward", "backward"]).optional(),
@@ -58,7 +58,7 @@ export const LogLineSchema = z.object({
   at: z.string(),
   context: z.object({
     run: z.object({
-      kind: LogRunKindSchema,
+      kind: SixbRunKindSchema,
       id: z.string(),
     }),
     stepId: z.string().optional(),

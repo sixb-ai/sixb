@@ -105,10 +105,10 @@ function ActionLogs({ runId }: { runId: string }) {
 }
 ```
 
-The root selectors are `logs.all()`, `logs.syncs()`, `logs.pipelines()`, `logs.workflows()`, and
-`logs.actions()`. Refine with `.level(level)` (captures that level and above) and, on a
-run-kind builder, `.run(runId)`. Every builder terminates with `.subscribe(handler, options?)` for
-a live socket or `.read(options?)` / `.tail(options?)` for a page.
+The root selectors are `logs.all()`, `logs.syncs()`, `logs.pipelines()`, `logs.workflows()`,
+`logs.actions()`, and `logs.webhooks()`. Refine with `.level(level)` (captures that level and above)
+and, on a run-kind builder, `.run(runId)`. Every builder terminates with `.subscribe(handler,
+options?)` for a live socket or `.read(options?)` / `.tail(options?)` for a page.
 
 ## The Atlas Logs page
 

@@ -4,8 +4,8 @@ export type {
   LogFields,
   LogLevel,
   LogRecord,
-  LogRunKind,
   LogRunRef,
+  SixbRunKind,
   StoredLogLine,
 } from "@sixb/core/logging"
 export { isStoredLogLine, isStoredLogLine as isSixbLogLine } from "@sixb/core/logging"
