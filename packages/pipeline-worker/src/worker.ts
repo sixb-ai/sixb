@@ -75,7 +75,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
           emitPipelineRunStepStarted(this.sixb.events, step, context),
         onStepFinished: (step, context) =>
           emitPipelineRunStepFinished(this.sixb.events, step, context),
-        onStepCommitted: (step) => emitDatasetVersionCommitted(this.sixb, pipelineJob, step),
+        onStepCommitted: (step) => emitDatasetVersionCommitted(this.sixb.events, pipelineJob, step),
       })
     } catch (error) {
       if (error instanceof PipelineRunAlreadyStartedError) return

@@ -175,7 +175,12 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.projectId = options.id ?? "default"
     this.ontologySources = options.ontology
     this.broker = options.broker
-    this.eventsRuntime = new EventsRuntime({ projectId: this.projectId, broker: this.broker })
+    // `host: this` is how `events.emit()` reaches the reporter attached at the top of this constructor.
+    this.eventsRuntime = new EventsRuntime({
+      projectId: this.projectId,
+      broker: this.broker,
+      host: this,
+    })
     this.events = this.eventsRuntime
     this.logs = new LogsRuntime({
       projectId: this.projectId,

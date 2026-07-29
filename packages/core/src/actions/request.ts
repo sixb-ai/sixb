@@ -210,8 +210,10 @@ async function enqueueActionRunJob(
     throw error
   }
 
-  try {
-    await runtime.events.append({
+  // The run is persisted and the job is queued, so the request has succeeded and the caller must not
+  // be told otherwise. `emit` keeps that promise and still escalates the lost trigger edge.
+  await runtime.events.emit(
+    {
       events: [
         {
           type: "action.requested",
@@ -223,10 +225,9 @@ async function enqueueActionRunJob(
           },
         },
       ],
-    })
-  } catch (error) {
-    console.error("[Sixb] Failed to append action.requested observation event:", error)
-  }
+    },
+    { source: "Sixb" }
+  )
 
   return {
     runId: params.runId,

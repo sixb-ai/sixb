@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { Broker, BrokerCursor, BrokerRecord, BrokerStreamDefinition } from "../broker"
+import { reportEventDeliveryFailure } from "../error-reporting/capability"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
 import type { OntologyMaterializationEvent } from "../materialization/events"
 import {
@@ -30,6 +31,11 @@ export interface EventsRuntimeOptions {
   readonly projectId: string
   readonly broker: Broker
   readonly stream?: BrokerStreamDefinition
+  /**
+   * The `Sixb` instance — or anything sharing its error reporter — that owns this runtime. Only `emit`
+   * needs it, to escalate a lost batch. Absent means a lost batch is logged and nothing more.
+   */
+  readonly host?: object
 }
 
 export interface EventsAppendInput {
@@ -37,6 +43,11 @@ export interface EventsAppendInput {
   readonly correlationId?: string
   readonly causationId?: string
   readonly events: readonly EventDraft[]
+}
+
+export interface EventsEmitOptions {
+  /** Package prefix for the console line, such as `SixbPipelineWorker`. */
+  readonly source: string
 }
 
 export interface EventsReadInput {
@@ -59,6 +70,13 @@ export type StableEventEnvelope = OntologyMaterializationEvent
 /** Public domain-event log. Stable ontology envelopes are intentionally absent. */
 export interface DomainEventLog {
   append(input: EventsAppendInput): Promise<readonly StoredDomainEvent[]>
+  /**
+   * Append events after the work that produced them has already succeeded.
+   *
+   * Contract: this never rejects. The caller's unit of work is done, so a delivery failure must not
+   * turn a successful run into a failed one — the implementation escalates the loss instead.
+   */
+  emit(input: EventsAppendInput, options: EventsEmitOptions): Promise<void>
   read(input?: EventsReadInput): Promise<readonly StoredDomainEvent[]>
   latestCursor(): Promise<string | undefined>
   subscribe(
@@ -77,12 +95,48 @@ export class EventsRuntime implements DomainEventLog, StableEventPublisher {
   private readonly projectId: string
   private readonly broker: Broker
   private readonly stream: BrokerStreamDefinition
+  private readonly host: object | undefined
   private readonly ensureStreamPromises = new Map<string, Promise<void>>()
 
   constructor(options: EventsRuntimeOptions) {
     this.projectId = options.projectId
     this.broker = options.broker
     this.stream = options.stream ?? EVENTS_STREAM
+    this.host = options.host
+  }
+
+  /**
+   * Append events after the work that produced them has already succeeded.
+   *
+   * Unlike `append`, this never rejects: the caller's unit of work is done, so a broker outage must not
+   * turn a successful run into a failed one. It is not a swallow either — every event Sixb publishes is
+   * a potential trigger edge (a rule's `.when()`, an event schedule, a workflow's wait node), so a lost
+   * batch is a handler that silently never runs. The loss is escalated to `onError` as
+   * `event.delivery.failed`; the console line is there for local debugging.
+   *
+   * Framework emit sites want this. Application code wants `append`, which reports failure to the
+   * caller and returns the stored envelopes.
+   */
+  async emit(input: EventsAppendInput, options: EventsEmitOptions): Promise<void> {
+    try {
+      await this.append(input)
+    } catch (error) {
+      try {
+        const eventTypes = input.events.map((event) => event.type)
+        // Escalate before logging. `console` is replaceable and `onError` is the contract, so a
+        // replacement that throws must not be what loses the report.
+        reportEventDeliveryFailure(this.host, error, {
+          projectId: this.projectId,
+          eventTypes,
+        })
+        console.error(`[${options.source}] Failed to emit ${eventTypes.join(", ")}:`, error)
+      } catch {
+        // The contract above is absolute, so escalation cannot be the thing that breaks it: a replaced
+        // `console` that throws would turn a run that already succeeded into a failed one. The loss is
+        // already unreported at this point — rejecting on top of it helps nobody. `SixbErrorReporter`
+        // guards its own console line the same way.
+      }
+    }
   }
 
   async append(input: EventsAppendInput): Promise<readonly StoredDomainEvent[]> {

@@ -19,6 +19,8 @@ import type { SyncRunRecord } from "@sixb/core/storage"
 import { runSyncJob, SyncRunAlreadyStartedError } from "./run-sync-job"
 import type { SyncJob, SyncRunResult, SyncWorkerContext } from "./types"
 
+const SOURCE = "SixbSyncWorker"
+
 export interface SyncWorkerSixb {
   readonly id: string
   readonly events?: DomainEventLog
@@ -112,9 +114,8 @@ async function emitSyncRunStarted(
   sixb: SyncWorkerSixb,
   run: Pick<SyncRunRecord, "id" | "syncId" | "startedAt">
 ): Promise<void> {
-  if (!sixb.events) return
-  try {
-    await sixb.events.append({
+  await sixb.events?.emit(
+    {
       events: [
         {
           type: "sync.run.started",
@@ -125,10 +126,9 @@ async function emitSyncRunStarted(
           },
         },
       ],
-    })
-  } catch (error) {
-    console.error("[SixbSyncWorker] Failed to emit sync.run.started:", error)
-  }
+    },
+    { source: SOURCE }
+  )
 }
 
 async function emitSyncSucceededEvents(
@@ -136,9 +136,8 @@ async function emitSyncSucceededEvents(
   job: Pick<SyncJob, "id" | "syncId">,
   result: SyncRunResult
 ): Promise<void> {
-  if (!sixb.events) return
-  try {
-    await sixb.events.append({
+  await sixb.events?.emit(
+    {
       events: [
         ...(result.versionCreated
           ? [
@@ -168,19 +167,17 @@ async function emitSyncSucceededEvents(
           },
         },
       ],
-    })
-  } catch (error) {
-    console.error("[SixbSyncWorker] Failed to emit sync success events:", error)
-  }
+    },
+    { source: SOURCE }
+  )
 }
 
 async function emitSyncRunFinished(
   sixb: SyncWorkerSixb,
   job: Pick<SyncJob, "id" | "syncId">
 ): Promise<void> {
-  if (!sixb.events) return
-  try {
-    await sixb.events.append({
+  await sixb.events?.emit(
+    {
       events: [
         {
           type: "sync.run.finished",
@@ -191,10 +188,9 @@ async function emitSyncRunFinished(
           },
         },
       ],
-    })
-  } catch (error) {
-    console.error("[SixbSyncWorker] Failed to emit sync.run.finished:", error)
-  }
+    },
+    { source: SOURCE }
+  )
 }
 
 function buildSyncContext(sixb: SyncWorkerSixb): SyncWorkerContext {

@@ -73,7 +73,11 @@ export class RulesWorker extends Worker {
       pageSize: this.reconciliationPageSize,
       signal,
       onError: (error, failure) => {
-        console.error("[SixbRulesWorker] Evaluation failed:", error)
+        const where =
+          failure.ruleId && failure.subject
+            ? `Rule '${failure.ruleId}' on ${failure.subject.objectTypeId}:${failure.subject.primaryId}`
+            : `${failure.source} evaluation`
+        console.error(`[SixbRulesWorker] ${where} failed:`, error)
         reportRuleEvaluationFailure(this.runtime, error, {
           projectId: this.runtime.id,
           ...failure,

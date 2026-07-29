@@ -22,18 +22,21 @@ export interface Logger {
 }
 
 /**
- * Every primitive Sixb runs on a project's behalf.
+ * Every kind of run Sixb records on a project's behalf.
  *
  * This is the one list: log lines, failed-run reports, and log stream selectors all name their
- * producer from here. A kind is listed as soon as the primitive exists, even when nothing writes
- * logs for it yet — adding a writer later is additive, widening this union is not.
+ * producer from here. A kind is listed as soon as the run record exists, even when nothing writes logs
+ * for it yet — adding a writer later is additive, widening this union is not.
+ *
+ * The test is whether the thing has a run with an id. Rules do not: they are evaluated live, per
+ * subject, and Sixb keeps no record of an evaluation, which is why they are absent here and report
+ * through `SixbRuleEvaluationFailedContext` instead.
  */
 export const SIXB_RUN_KINDS = [
   "action",
   "agent",
   "pipeline",
   "projection",
-  "rule",
   "sync",
   "webhook",
   "workflow",

@@ -15,6 +15,12 @@ interface EvaluationCoordinatorOptions {
 export interface RuleEvaluationFailure {
   readonly source: "live" | "reconciliation"
   readonly eventIds: readonly string[]
+  /**
+   * Set when the failure was attributed to one candidate. Absent when a whole batch or pass died
+   * before any single rule could be blamed — which is the more serious case, not the vaguer one.
+   */
+  readonly ruleId?: string
+  readonly subject?: { readonly objectTypeId: string; readonly primaryId: string }
 }
 
 /** Serializes live evaluations and full reconciliation through one failure-isolated queue. */
@@ -26,15 +32,28 @@ export class EvaluationCoordinator {
 
   enqueueLive(events: readonly OntologyRuleEvent[]): void {
     if (events.length === 0 || this.options.signal.aborted) return
+    const eventIds = events.map((event) => event.id)
     this.enqueue(
-      () =>
-        evaluateRuleEvents({
+      async () => {
+        const { failures } = await evaluateRuleEvents({
           runtime: this.options.runtime,
           rules: this.options.rules,
           index: this.options.index,
           events,
-        }).then(() => undefined),
-      { source: "live", eventIds: events.map((event) => event.id) }
+        })
+        // The evaluator isolates candidates, so a batch can succeed overall and still have failed
+        // ones. Each is reported on its own, named — the queue's `catch` below only ever sees the
+        // failures that took the whole batch down before any candidate could be blamed.
+        for (const failure of failures) {
+          this.options.onError(failure.error, {
+            source: "live",
+            eventIds,
+            ruleId: failure.ruleId,
+            subject: failure.subject,
+          })
+        }
+      },
+      { source: "live", eventIds }
     )
   }
 

@@ -753,6 +753,7 @@ describe("startSixbRuntime", () => {
         projectId: sixb.id,
         occurredAt: "2026-01-02T03:04:05.000Z",
         attempts: 2,
+        eventTypes: ["object.updated"],
         eventIds: ["event-final-drain"],
       })
     }

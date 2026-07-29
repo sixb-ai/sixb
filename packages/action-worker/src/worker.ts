@@ -120,45 +120,40 @@ async function emitActionTerminalEvent(
   sixb: ActionWorkerSixb,
   result: Exclude<ActionRunResult, { skipped: true }>
 ): Promise<void> {
-  try {
-    const finishedAt = result.finishedAt.toISOString()
+  const finishedAt = result.finishedAt.toISOString()
 
-    if (result.status === "succeeded") {
-      await sixb.events.append({
-        events: [
-          {
-            type: "action.completed",
-            idempotencyKey: `action.completed:${result.id}`,
-            payload: {
-              actionId: result.actionId,
-              runId: result.id,
-              subject: result.subject,
-              finishedAt,
-            },
-          },
-        ],
-      })
-      return
-    }
-
-    await sixb.events.append({
-      events: [
-        {
-          type: "action.failed",
-          idempotencyKey: `action.failed:${result.id}`,
-          payload: {
-            actionId: result.actionId,
-            runId: result.id,
-            subject: result.subject,
-            error: result.error,
-            finishedAt,
-          },
-        },
-      ],
-    })
-  } catch (error) {
-    console.error("[SixbActionWorker] Failed to emit action terminal event:", error)
-  }
+  await sixb.events.emit(
+    {
+      events:
+        result.status === "succeeded"
+          ? [
+              {
+                type: "action.completed",
+                idempotencyKey: `action.completed:${result.id}`,
+                payload: {
+                  actionId: result.actionId,
+                  runId: result.id,
+                  subject: result.subject,
+                  finishedAt,
+                },
+              },
+            ]
+          : [
+              {
+                type: "action.failed",
+                idempotencyKey: `action.failed:${result.id}`,
+                payload: {
+                  actionId: result.actionId,
+                  runId: result.id,
+                  subject: result.subject,
+                  error: result.error,
+                  finishedAt,
+                },
+              },
+            ],
+    },
+    { source: "SixbActionWorker" }
+  )
 }
 
 function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {

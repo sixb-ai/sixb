@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import type { SixbErrorContext } from "../src"
+import type { Broker } from "../src/broker"
 import {
   attachSixbErrorReporter,
   flushSixbErrors,
@@ -8,8 +9,10 @@ import {
   reportRuleEvaluationFailure,
   reportRunFailure,
 } from "../src/error-reporting/internal"
+import { EventsRuntime } from "../src/events"
 
 const PROJECT_ID = "error-reporting-tests"
+const OCCURRED_AT = "2026-07-29T12:00:00.000Z"
 
 describe("Sixb error reporting", () => {
   test("reports a normalized terminal run failure with stable context", async () => {
@@ -62,20 +65,65 @@ describe("Sixb error reporting", () => {
       projectId: PROJECT_ID,
       occurredAt: "2026-01-02T03:04:05.000Z",
       attempts: 3,
+      eventTypes: ["object.updated"],
       eventIds: ["event-b", "event-a"],
     })
     await flushSixbErrors(host)
 
     expect(reports[0]?.context).toEqual({
       type: "event.delivery.failed",
-      notificationId: "project:error-reporting-tests:event-delivery:event-a:attempt:3",
+      notificationId: "project:error-reporting-tests:event-delivery:events:event-a:attempt:3",
       projectId: PROJECT_ID,
       occurredAt: "2026-01-02T03:04:05.000Z",
       attempts: 3,
+      eventTypes: ["object.updated"],
       eventIds: ["event-a", "event-b"],
     })
     expect(JSON.stringify(reports[0]?.context)).not.toContain("payload")
     expect(JSON.stringify(reports[0]?.context)).not.toContain("lease")
+  })
+
+  test("two concurrent losses of the same event types are two notifications", async () => {
+    const host = {}
+    const reports: SixbErrorContext[] = []
+    attachSixbErrorReporter(host, (_error, context) => {
+      reports.push(context)
+    })
+
+    // The case that forced an identity onto this path: a broker outage during one scheduler tick loses
+    // `schedule.triggered` for every due schedule at once. Nothing was persisted, so there are no
+    // envelope ids; `attempts` is 1 for all of them; and the reports land in the same millisecond, which
+    // is why the timestamp cannot separate them. Both are passed the *same* `occurredAt` on purpose — a
+    // consumer deduplicating on `notificationId` must still see two losses.
+    for (const _loss of [1, 2]) {
+      reportEventDeliveryFailure(host, new Error("broker unavailable"), {
+        projectId: PROJECT_ID,
+        occurredAt: "2026-01-02T03:04:05.000Z",
+        eventTypes: ["schedule.triggered"],
+      })
+    }
+    await flushSixbErrors(host)
+
+    expect(reports).toHaveLength(2)
+    expect(new Set(reports.map((context) => context.notificationId)).size).toBe(2)
+  })
+
+  test("a delivery failure key is reproducible when the occurrence id is given", async () => {
+    const host = {}
+    const reports: SixbErrorContext[] = []
+    attachSixbErrorReporter(host, (_error, context) => {
+      reports.push(context)
+    })
+
+    reportEventDeliveryFailure(host, new Error("broker unavailable"), {
+      projectId: PROJECT_ID,
+      occurredAt: "2026-01-02T03:04:05.000Z",
+      eventTypes: ["schedule.triggered"],
+      occurrenceId: "loss-1",
+    })
+    await flushSixbErrors(host)
+
+    expect(reports[0]?.notificationId).toBe(`project:${PROJECT_ID}:event-delivery:emit:loss-1`)
   })
 
   test("reports rule evaluation failures without event payloads", async () => {
@@ -190,4 +238,150 @@ describe("Sixb error reporting", () => {
     })
     await expect(flushSixbErrors(host)).resolves.toBeUndefined()
   })
+
+  test("a rule failure is correlated by candidate, since it has no run id", async () => {
+    const host = {}
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    attachSixbErrorReporter(host, (error, context) => {
+      reports.push({ error, context })
+    })
+
+    reportRuleEvaluationFailure(host, new Error("predicate exploded"), {
+      projectId: PROJECT_ID,
+      occurredAt: OCCURRED_AT,
+      source: "live",
+      eventIds: ["event-1"],
+      ruleId: "invoice.overdue",
+      subject: { objectTypeId: "invoice", primaryId: "inv-1" },
+    })
+    await flushSixbErrors(host)
+
+    // Keyed on the candidate, not the batch: two rules failing over the same events stay two
+    // notifications instead of collapsing into one.
+    expect(reports[0]?.context.notificationId).toBe(
+      `project:${PROJECT_ID}:rule-evaluation:live:invoice.overdue:invoice:inv-1:failed:${OCCURRED_AT}`
+    )
+  })
+
+  test("a rule failure with no attributable candidate falls back to the batch", async () => {
+    const host = {}
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    attachSixbErrorReporter(host, (error, context) => {
+      reports.push({ error, context })
+    })
+
+    reportRuleEvaluationFailure(host, new Error("reconciliation exploded"), {
+      projectId: PROJECT_ID,
+      occurredAt: OCCURRED_AT,
+      source: "reconciliation",
+    })
+    await flushSixbErrors(host)
+
+    expect(reports[0]?.context.notificationId).toBe(
+      `project:${PROJECT_ID}:rule-evaluation:reconciliation:current-state:failed:${OCCURRED_AT}`
+    )
+  })
+
+  test("a failed emit is reported instead of being swallowed", async () => {
+    const consoleError = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const host = {}
+      const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+      attachSixbErrorReporter(host, (error, context) => {
+        reports.push({ error, context })
+      })
+      const appendFailure = new Error("broker unavailable")
+      const events = eventsRuntimeFor(host)
+      spyOn(events, "append").mockImplementation(() => Promise.reject(appendFailure))
+
+      await events.emit(
+        {
+          events: [
+            {
+              type: "sync.run.finished",
+              payload: { syncId: "nightly", runId: "sync-run-1", status: "failed" },
+            },
+          ],
+        },
+        { source: "SixbTestWorker" }
+      )
+      await flushSixbErrors(host)
+
+      expect(reports).toHaveLength(1)
+      expect(reports[0]?.error).toBe(appendFailure)
+      const context = reports[0]?.context
+      if (context?.type !== "event.delivery.failed") throw new Error("expected a delivery failure")
+      expect(context.eventTypes).toEqual(["sync.run.finished"])
+      expect(context.notificationId).toStartWith(`project:${PROJECT_ID}:event-delivery:emit:`)
+      // The console line stays for local debugging; the report is what makes it visible in prod.
+      expect(consoleError).toHaveBeenCalledWith(
+        "[SixbTestWorker] Failed to emit sync.run.finished:",
+        appendFailure
+      )
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  test("emit still resolves when escalation itself throws", async () => {
+    // `emit` promises never to reject, and that promise cannot depend on the escalation path working:
+    // an app that replaced `console` with something that throws would otherwise turn a run that had
+    // already succeeded into a failed one. The batch is lost either way — rejecting on top helps nobody.
+    const consoleError = spyOn(console, "error").mockImplementation(() => {
+      throw new Error("console is broken")
+    })
+    try {
+      const host = {}
+      const events = eventsRuntimeFor(host)
+      spyOn(events, "append").mockImplementation(() =>
+        Promise.reject(new Error("broker unavailable"))
+      )
+
+      await expect(
+        events.emit(
+          {
+            events: [
+              {
+                type: "sync.run.finished",
+                payload: { syncId: "nightly", runId: "sync-run-1", status: "failed" },
+              },
+            ],
+          },
+          { source: "SixbTestWorker" }
+        )
+      ).resolves.toBeUndefined()
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  test("an emit that reaches the broker reports nothing", async () => {
+    const host = {}
+    const reports: SixbErrorContext[] = []
+    attachSixbErrorReporter(host, (_error, context) => {
+      reports.push(context)
+    })
+    const events = eventsRuntimeFor(host)
+    spyOn(events, "append").mockImplementation(() => Promise.resolve([]))
+
+    await events.emit(
+      {
+        events: [
+          {
+            type: "sync.run.finished",
+            payload: { syncId: "nightly", runId: "sync-run-1", status: "failed" },
+          },
+        ],
+      },
+      { source: "SixbTestWorker" }
+    )
+    await flushSixbErrors(host)
+
+    expect(reports).toEqual([])
+  })
 })
+
+// The broker is never reached: every test here spies on `append`, which is the seam `emit` wraps.
+function eventsRuntimeFor(host: object): EventsRuntime {
+  return new EventsRuntime({ projectId: PROJECT_ID, broker: {} as Broker, host })
+}

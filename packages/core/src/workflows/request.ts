@@ -120,20 +120,25 @@ export async function requestWorkflowRun(
     throw error
   }
 
-  await runtime.events.append({
-    events: [
-      {
-        type: "workflow.run.queued",
-        payload: {
-          workflowId: workflow.id,
-          runId,
-          queuedAt: queuedAt.toISOString(),
-          ...(job?.id ? { jobId: job.id } : {}),
-          ...(options.source ? { source: options.source } : {}),
+  // Past this point the run row exists and the job is queued, so the run *will* execute. Rejecting
+  // here would report a failure for work already under way, and leave the run unmarked either way.
+  await runtime.events.emit(
+    {
+      events: [
+        {
+          type: "workflow.run.queued",
+          payload: {
+            workflowId: workflow.id,
+            runId,
+            queuedAt: queuedAt.toISOString(),
+            ...(job?.id ? { jobId: job.id } : {}),
+            ...(options.source ? { source: options.source } : {}),
+          },
         },
-      },
-    ],
-  })
+      ],
+    },
+    { source: "Sixb" }
+  )
 
   return {
     workflowId: workflow.id,

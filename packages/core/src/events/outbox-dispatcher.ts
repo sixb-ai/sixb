@@ -16,6 +16,8 @@ export interface OntologyOutboxDeliveryFailure {
   readonly occurredAt: string
   readonly attempts: number
   readonly eventIds: readonly string[]
+  /** Types of the undelivered envelopes. The one field both delivery paths can always report. */
+  readonly eventTypes: readonly string[]
 }
 
 export interface OntologyOutboxDispatcherOptions {
@@ -403,7 +405,7 @@ interface AccumulatedDeliveryFailure {
 class DeliveryFailureAccumulator {
   private readonly groups = new Map<
     number,
-    { error: unknown; occurredAt: string; eventIds: Set<string> }
+    { error: unknown; occurredAt: string; eventIds: Set<string>; eventTypes: Set<string> }
   >()
 
   add(
@@ -416,8 +418,12 @@ class DeliveryFailureAccumulator {
       error,
       occurredAt,
       eventIds: new Set<string>(),
+      eventTypes: new Set<string>(),
     }
-    for (const id of eventIds(rows)) group.eventIds.add(id)
+    for (const row of rows) {
+      group.eventIds.add(row.envelope.id)
+      group.eventTypes.add(row.envelope.type)
+    }
     this.groups.set(attempts, group)
   }
 
@@ -428,6 +434,7 @@ class DeliveryFailureAccumulator {
         occurredAt: group.occurredAt,
         attempts,
         eventIds: [...group.eventIds].sort(),
+        eventTypes: [...group.eventTypes].sort(),
       },
     }))
   }

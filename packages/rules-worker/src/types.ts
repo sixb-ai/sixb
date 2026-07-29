@@ -95,8 +95,21 @@ export interface EvaluateRuleEventsInput {
   readonly evaluatedAt?: string
 }
 
+/** One candidate whose evaluation threw. Every other candidate in the batch still evaluates. */
+export interface RuleCandidateFailure {
+  readonly ruleId: string
+  readonly subject: RuleEventSubject
+  readonly error: unknown
+}
+
 export interface EvaluateRuleEventResult {
   readonly evaluations: readonly EvaluateRuleForSubjectResult[]
+  /**
+   * Candidates that threw. The evaluator returns them rather than reporting them: `runtime` here is
+   * a reduced context with no error reporter attached, so the coordinator — whose `onError` reaches
+   * the `Sixb` instance — is what turns these into notifications.
+   */
+  readonly failures: readonly RuleCandidateFailure[]
 }
 
 export interface EvaluateRuleForSubjectInput {

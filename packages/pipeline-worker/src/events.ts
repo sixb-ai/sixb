@@ -4,21 +4,16 @@ import type {
   PipelineRunStatus,
   PipelineStepRunRecord,
 } from "@sixb/core/storage"
-import type {
-  PipelineJob,
-  PipelineStepLifecycleContext,
-  PipelineStepRunResult,
-  PipelineWorkerSixb,
-} from "./types"
+import type { PipelineJob, PipelineStepLifecycleContext, PipelineStepRunResult } from "./types"
+
+const SOURCE = "SixbPipelineWorker"
 
 export async function emitPipelineRunStarted(
   events: DomainEventLog | undefined,
   run: Pick<PipelineRunRecord, "id" | "pipelineId" | "startedAt">
 ): Promise<void> {
-  if (!events) return
-
-  try {
-    await events.append({
+  await events?.emit(
+    {
       events: [
         {
           type: "pipeline.run.started",
@@ -29,10 +24,9 @@ export async function emitPipelineRunStarted(
           },
         },
       ],
-    })
-  } catch (error) {
-    console.error("[SixbPipelineWorker] Failed to emit pipeline.run.started:", error)
-  }
+    },
+    { source: SOURCE }
+  )
 }
 
 export async function emitPipelineRunStepStarted(
@@ -43,10 +37,8 @@ export async function emitPipelineRunStepStarted(
   >,
   context: PipelineStepLifecycleContext
 ): Promise<void> {
-  if (!events) return
-
-  try {
-    await events.append({
+  await events?.emit(
+    {
       events: [
         {
           type: "pipeline.run.step.started",
@@ -62,10 +54,9 @@ export async function emitPipelineRunStepStarted(
           },
         },
       ],
-    })
-  } catch (error) {
-    console.error("[SixbPipelineWorker] Failed to emit pipeline.run.step.started:", error)
-  }
+    },
+    { source: SOURCE }
+  )
 }
 
 export async function emitPipelineRunStepFinished(
@@ -85,10 +76,8 @@ export async function emitPipelineRunStepFinished(
   >,
   context: PipelineStepLifecycleContext
 ): Promise<void> {
-  if (!events) return
-
-  try {
-    await events.append({
+  await events?.emit(
+    {
       events: [
         {
           type: "pipeline.run.step.finished",
@@ -108,22 +97,21 @@ export async function emitPipelineRunStepFinished(
           },
         },
       ],
-    })
-  } catch (error) {
-    console.error("[SixbPipelineWorker] Failed to emit pipeline.run.step.finished:", error)
-  }
+    },
+    { source: SOURCE }
+  )
 }
 
 export async function emitDatasetVersionCommitted(
-  sixb: PipelineWorkerSixb,
+  events: DomainEventLog | undefined,
   job: PipelineJob,
   step: PipelineStepRunResult
 ): Promise<void> {
-  if (!sixb.events || !step.versionCreated) return
+  if (!step.versionCreated) return
 
-  try {
-    // Emit step outputs immediately so dataset event schedules can react before later steps finish.
-    await sixb.events.append({
+  // Emit step outputs immediately so dataset event schedules can react before later steps finish.
+  await events?.emit(
+    {
       events: [
         {
           type: "dataset.version.committed" as const,
@@ -140,10 +128,9 @@ export async function emitDatasetVersionCommitted(
           },
         },
       ],
-    })
-  } catch (error) {
-    console.error("[SixbPipelineWorker] Failed to emit dataset.version.committed:", error)
-  }
+    },
+    { source: SOURCE }
+  )
 }
 
 export async function emitPipelineRunFinished(
@@ -156,20 +143,10 @@ export async function emitPipelineRunFinished(
     readonly versionId?: string
   }
 ): Promise<void> {
-  if (!events) return
-
-  try {
-    await events.append({
-      events: [
-        {
-          type: "pipeline.run.finished",
-          payload: buildPipelineRunFinishedPayload(job),
-        },
-      ],
-    })
-  } catch (error) {
-    console.error("[SixbPipelineWorker] Failed to emit pipeline.run.finished:", error)
-  }
+  await events?.emit(
+    { events: [{ type: "pipeline.run.finished", payload: buildPipelineRunFinishedPayload(job) }] },
+    { source: SOURCE }
+  )
 }
 
 function buildPipelineRunFinishedPayload(job: {

@@ -131,6 +131,8 @@ async function failQueuedRun(input: RunWorkflowJobInput, error: unknown): Promis
   try {
     await input.observer?.onRunFinished(failed)
   } catch (observerError) {
-    console.error("[SixbWorkflowWorker] Failed to emit workflow lifecycle event:", observerError)
+    // Lost event batches are reported by the observer itself. Anything reaching here is a broken
+    // invariant in a custom observer, not a delivery failure.
+    console.error("[SixbWorkflowWorker] Workflow lifecycle observer failed:", observerError)
   }
 }

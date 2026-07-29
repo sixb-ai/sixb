@@ -273,7 +273,9 @@ export class WorkflowRunRecorder {
     try {
       await fn()
     } catch (error) {
-      console.error("[SixbWorkflowWorker] Failed to emit workflow lifecycle event:", error)
+      // Lost event batches are reported by the observer itself. Anything reaching here is a broken
+      // invariant in a custom observer, not a delivery failure.
+      console.error("[SixbWorkflowWorker] Workflow lifecycle observer failed:", error)
     }
   }
 }
