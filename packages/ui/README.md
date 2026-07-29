@@ -371,7 +371,7 @@ the import — no Tailwind config, no component changes:
 ```
 
 Light values belong on `:root`; if the app supports dark mode, put the dark values on
-`.dark` (the package toggles that class via `ThemeProvider`). `examples/acme-corp` is a
+`.dark` (the package toggles that class via `ThemeProvider`). `examples/northline` is a
 complete working override.
 
 The token contract:

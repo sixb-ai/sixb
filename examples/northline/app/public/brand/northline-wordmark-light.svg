@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" role="img" aria-label="Northline Mechanical">
+  <g transform="translate(0 0)">
+    <path d="M7 38V10l30 28V10" fill="none" stroke="#F4F8F9" stroke-width="5"/>
+    <path d="M14 38V24l16 14V10" fill="none" stroke="#78B8C2" stroke-width="2.5"/>
+    <path d="M34 10h5v5" fill="none" stroke="#DF8D5B" stroke-width="2.5"/>
+  </g>
+  <text x="52" y="23" fill="#F4F8F9" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="16" font-weight="700" letter-spacing="1.2">NORTHLINE</text>
+  <text x="53" y="37" fill="#A9B9BE" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="8" font-weight="600" letter-spacing="2.3">MECHANICAL</text>
+</svg>

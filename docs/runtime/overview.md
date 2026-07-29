@@ -20,7 +20,7 @@ import { LocalLakeStorage } from "@sixb/lake-local"
 import { SqliteStorage } from "@sixb/sqlite"
 
 export const sixb = await createSixb({
-  id: "acme-corp",
+  id: "northline",
   broker: new InMemoryBroker(),
   storage: new SqliteStorage({ path: ".sixb" }),
   lakeStorage: new LocalLakeStorage({ path: ".sixb/lake" }),

@@ -1,79 +1,97 @@
 # Examples
 
-The `examples/` folder holds runnable Sixb projects. Clone one, run it with `bun dev`, and read
-it end to end. Use them as working references for how the pieces fit together in a real app.
-
-Each example is a standard Sixb project: a `sixb.config.ts` that calls
-[`createSixb()`](../runtime/overview.md) plus convention folders (`ontology/`, `actions/`,
-`connectors/`, and so on) that are auto-discovered at startup. They differ in *which* capabilities
-they exercise, not in how they are wired.
+The `examples/` folder holds runnable Sixb projects. Clone one, run it with Bun, and read it end to
+end. Each is a standard Sixb project: `sixb.config.ts` calls
+[`createSixb()`](../runtime/overview.md), while convention folders such as `ontology/`, `actions/`,
+and `connectors/` are discovered at startup.
 
 | Example | What it shows | Storage / broker |
 | --- | --- | --- |
-| `acme-corp` | The canonical business-operations app: ontology, connectors, syncs, pipelines, projections, file attachments, actions, agents, rules, scheduled workflows, a custom React app, and a typed client | SQLite + in-memory broker |
+| `northline` | Canonical commercial service-operations app: three typed source clients, SQL pipelines, projections, actions, workflows, and an optional context-aware operations assistant | SQLite + DuckLake + local sandbox + in-memory broker |
 | `auth` | Authentication strategies, groups, membership policies, and scoped roles | SQLite + in-memory broker |
-| `panasonic-ac` | Real-device integration: a typed connector and scheduled sync snapshot Panasonic AC units into a dataset, projections materialize devices and telemetry, and actions control power, mode, temperature, fan, and eco | Postgres + NATS |
-| `roku-tv` | Device control: a connector discovers Roku TVs, a scheduled sync snapshots device state, projections materialize twins and telemetry, and remote actions launch apps or press buttons | SQLite + in-memory broker |
+| `panasonic-ac` | Real-device integration: scheduled snapshots, device and telemetry projections, and control actions | Postgres + NATS |
+| `roku-tv` | Device discovery, telemetry twins, and remote-control actions | SQLite + in-memory broker |
 
-Run any example from its own folder:
+Run the reference example from the repository root:
 
 ```bash
-cd examples/acme-corp
-bun dev
+bun --filter @sixb/example-northline dev
 ```
 
-`acme-corp` is the reference these docs are built on. Every code sample across the documentation
-models the same domain — a company running its operations on Sixb: the `Customer`s it serves, the
-`Project`s it delivers, the `Employee`s who do the work, and the `Invoice`s it bills.
+Or from its folder:
 
-## acme-corp — the business-OS reference
+```bash
+cd examples/northline
+bun run dev
+```
 
-A back-office app for a company that delivers projects and bills for them. It is the broadest
-example and touches nearly every concept in Sixb, so it is the one to read first.
+## northline — the operations reference
+
+[Northline Mechanical](../../examples/northline/README.md) is a fictional commercial HVAC and
+building-services operator. Northline Operations connects customer and contract records,
+field-service work, and building-controls data around a central `ServiceCase`.
+
+The golden journey is:
+
+```text
+alarm -> coverage -> dispatch -> diagnosis -> quote -> repair -> recovery -> closure
+```
 
 | Folder | Demonstrates |
 | --- | --- |
-| `ontology/` | Object types `Customer`, `Department`, `Document`, `Employee`, `Invoice`, `Project`, `Task`, with links between them — see [Ontology](../ontology/overview.md) |
-| `connectors/`, `lib/` | An `acme-erp` connector to a mock ERP exposing customers, invoices, employees, and departments — see [Connectors](../data/connectors.md) |
-| `datasets/`, `syncs/`, `schedules/` | Pulling ERP rows into datasets like `erp.invoices` and file-backed `erp.documents` rows on a schedule — see [Datasets](../data/datasets.md) and [Syncs](../data/syncs.md) |
-| `pipelines/` | `project-reporting` transforms dataset rows — see [Pipelines](../data/pipelines.md) |
-| `projections/` | Mapping dataset and pipeline rows into ontology objects — see [Projections](../data/projections.md) |
-| `actions/` | `createDraftInvoice`, `markPaid`, `sendReminder`, `deleteInvoice`, `attachInvoiceSourceFile` — see [Actions](../actions/overview.md) |
-| `rules/` | Business-health rules like `invoice.collection-risk` and `project.large-active-engagement` — see [Rules](../rules/overview.md) |
-| `workflows/` | `check-overdue-invoices` (scheduled), `invoice-reminder` (a human approval step), and `document-intake` — see [Workflows](../workflows/overview.md) |
-| `agents/` | `business-analyst` and `invoice-assistant` conversational agents — see [Agents](../agents/overview.md) |
-| `app/` | A custom React app with project, review, and intervention pages — see [Apps](../apps/overview.md) |
+| `ontology/` | Eleven focused object types including `Equipment`, `ServiceCase`, `WorkOrder`, `ServiceVisit`, and `Quote` — see [Ontology](../ontology/overview.md) |
+| `lib/sources/`, `connectors/` | Validated, atomic file-backed source clients behind three typed connectors — see [Connectors](../data/connectors.md) |
+| `datasets/`, `syncs/`, `schedules/` | Source-shaped business, field-service, and controls ingestion — see [Datasets](../data/datasets.md) and [Syncs](../data/syncs.md) |
+| `pipelines/` | DuckDB SQL for reading normalization, equipment-health derivation, and alarm context assembly — see [Pipelines](../data/pipelines.md) |
+| `projections/` | Object, link, and physical telemetry materialization — see [Projections](../data/projections.md) |
+| `actions/` | Contract-aware lifecycle commands with idempotent source writeback — see [Actions](../actions/overview.md) |
+| `rules/` | Dispatch, SLA, assignment, and recovery attention state — see [Rules](../rules/overview.md) |
+| `workflows/` | Deterministic dispatch and repair-quote reviews with human interventions — see [Workflows](../workflows/overview.md) |
+| `agents/` | An optional Vercel AI Gateway operations assistant backed by a local sandbox — see [Agents](../agents/overview.md) |
+| `app/` | Northline Operations: a compact desktop shell, mobile technician route, and contextual agent panel — see [Apps](../apps/overview.md) |
+| `tests/` | Fixed-clock scenario, source persistence, and business identity checks — see [Testing](../testing/overview.md) |
 
-Its `sixb.config.ts` uses local-first providers, so it runs with no external services:
+Its `sixb.config.ts` uses local-first providers and needs no external services:
 
 ```ts
+import { mkdirSync } from "node:fs"
 import { LocalBlobStorage } from "@sixb/blob-local"
 import { createSixb, InMemoryBroker, InMemoryQueues } from "@sixb/core"
-import { LocalLakeStorage } from "@sixb/lake-local"
+import { DuckLakeStorage } from "@sixb/ducklake"
+import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { SqliteStorage } from "@sixb/sqlite"
 
+const localLakePath = ".sixb/lake"
+mkdirSync(localLakePath, { recursive: true })
+
 export const sixb = createSixb({
-  id: "acme-corp",
+  id: "northline",
   broker: new InMemoryBroker(),
   storage: new SqliteStorage({ path: ".sixb" }),
-  lakeStorage: new LocalLakeStorage({ path: ".sixb/lake" }),
+  lakeStorage: new DuckLakeStorage({
+    catalog: { type: "duckdb", path: `${localLakePath}/catalog.ducklake` },
+    dataPath: `${localLakePath}/data`,
+  }),
   blobStorage: new LocalBlobStorage({ basePath: ".sixb" }),
   queues: new InMemoryQueues(),
+  sandboxes: new LocalSandboxFactory({ timeout: 30_000 }),
 })
 ```
 
-Two demo scripts seed the system from the mock ERP and replay events. With the default development
-topology they call the Sixb API on port `3002`:
+First-run data follows the same path as later refreshes. `bun run dev` initializes source files,
+starts the runtime, requests ordered syncs after readiness, and waits for the required projections.
+The core example needs no credentials; set `AI_GATEWAY_API_KEY` only to use the embedded Operations
+Assistant. Use the explicit replay commands when exploring integration behavior:
 
 ```bash
-bun run sync:erp       # pull ERP rows into datasets, then project them into objects
-bun run webhooks:demo  # send sample webhook events to the running API
+bun run demo:reset
+bun run demo:sync
+bun run demo:alarm
+bun run demo:approve-quote
 ```
 
-The ERP document sync stores a sample PDF and PNG through Sixb blob storage, writes them as
-`fileRef` values into `erp.documents`, and projects them onto `Document.attachment`. After
-`bun run sync:erp`, open Atlas, go to Objects, and select a Document to view or download the
-attachment with the native browser viewer.
+Read the [example README](../../examples/northline/README.md) for the complete walkthrough and
+recommended code-reading order.
 
 ## auth — authentication and access control
 
@@ -118,8 +136,8 @@ Beyond sign-in, the `security/` folder shows the full access-control model:
 | File | Demonstrates |
 | --- | --- |
 | `security/groups/` | The `security-admins` and `team-members` groups |
-| `security/policies/` | Security admins can invite, assign groups, suspend, and reactivate users in `team-members` and `security-admins` |
-| `security/roles/` | Scoped grants per group — `team-members` get `can.view(Note)`, view on the team-notes dataset, and `can.apply(acknowledgeNote)`; `security-admins` get wildcard grants over all objects, datasets, actions, and workflows |
+| `security/policies/` | Security admins can invite, assign groups, suspend, and reactivate users |
+| `security/roles/` | Scoped grants for application, objects, datasets, actions, and workflows |
 
 Because grants are scoped, the same UI shows different objects, datasets, and actions depending on
 who is signed in. See [Authorization](../auth/authorization.md) for how grants and roles are defined.
@@ -127,5 +145,5 @@ who is signed in. See [Authorization](../auth/authorization.md) for how grants a
 ## Next
 
 - [Get Started](../README.md) — install Sixb and create a new project
-- [Project Structure](../fundamentals/project-structure.md) — the convention folders these examples use
-- [Ontology](../ontology/overview.md) — model the `acme-corp` domain yourself
+- [Project Structure](../fundamentals/project-structure.md) — convention folders used by examples
+- [Ontology](../ontology/overview.md) — model a connected operations domain
