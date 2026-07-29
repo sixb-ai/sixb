@@ -23,6 +23,7 @@ export type {
   GrantCapability,
   GrantDefinition,
   GroupDefinition,
+  GroupReference,
   MembershipOperation,
   MembershipPolicyDefinition,
   ObserveGrant,

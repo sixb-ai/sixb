@@ -226,6 +226,46 @@ The server and Atlas use the same scope for visibility. Existing users are liste
 caller can assign groups or suspend/reactivate over the user's current groups, so out-of-scope
 emails, statuses, and group membership are not exposed.
 
+### Asking what a caller may administer
+
+`sixb.auth.getMembershipCapabilities({ callerGroups })` answers the same question the member-admin
+routes ask, from groups alone and with no `Request` involved — so project code, a custom UI, and a
+test can all ask it the way the routes do.
+
+```ts
+const capabilities = sixb.auth.getMembershipCapabilities({ callerGroups: [financeAdmins] })
+
+capabilities.holds.suspend                     // any policy grants `suspend` at all
+capabilities.assignableGroupIds                // groups this caller may assign
+capabilities.covers("suspend", [teamMembers])  // the scope reaches a member holding these groups
+```
+
+Both accept group definitions or ids. Pass definitions when your code knows the groups, so a rename is
+a compile error; pass ids when they came from a session or a member's stored memberships, which is all
+a route or a UI has.
+
+```ts
+const session = await sixb.auth.getSession(request)
+if (session.authenticated) {
+  sixb.auth.getMembershipCapabilities({ callerGroups: session.groupIds })
+}
+```
+
+The three answer different questions, and the difference matters:
+
+| | Question | Use it for |
+| --- | --- | --- |
+| `holds` | Does any policy grant this operation, whatever the groups? | Enabling a control at all — a "Suspend" menu that should not exist for this caller |
+| `covers` | Does the scope reach a member currently holding these groups? | Offering the control for one specific member row |
+| the runtime method | May this operation run, right now, on this target? | The decision itself |
+
+**Coverage is not authorization.** `covers` reports the group boundary the policies draw; the
+operation applies rules that boundary cannot see. `suspendMember` refuses the current user even when
+the scope covers their groups. `assignGroups` also checks the groups being *assigned* against
+`assignableGroupIds`, which `covers` is not asked about. A member's status can rule the operation out
+on its own. Use the capability query to decide what to show, and the runtime method to decide what
+happens.
+
 ## How principals join groups
 
 Roles and membership policies act on group membership, so principals need a way into a group.

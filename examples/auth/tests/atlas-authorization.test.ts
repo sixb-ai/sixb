@@ -14,6 +14,8 @@ import {
   type Sixb,
 } from "@sixb/core"
 import { adminAuditDataset, teamNotesDataset } from "../datasets/auth-data"
+import { securityAdmins } from "../security/groups/security-admins"
+import { teamMembers } from "../security/groups/team-members"
 import { seedAuthExampleObjects } from "../seed"
 
 async function createAuthExampleRuntime() {
@@ -46,8 +48,8 @@ describe("auth example Atlas authorization", () => {
     await seedAuthExampleObjects(sixb)
 
     const roles = sixb.security.listResolvedRoles()
-    const teamMemberContext = atlasContext(sixb, ["team-members"])
-    const adminContext = atlasContext(sixb, ["security-admins"])
+    const teamMemberContext = atlasContext(sixb, [teamMembers.id])
+    const adminContext = atlasContext(sixb, [securityAdmins.id])
     const noGroupsContext = atlasContext(sixb, [])
     const teamMember = sixb.as(teamMemberContext)
     const admin = sixb.as(adminContext)
@@ -128,11 +130,30 @@ describe("auth example Atlas authorization", () => {
       })
     ).resolves.toMatchObject({ runId: expect.any(String) })
     expect((await admin.readEvents()).map((event) => event.type)).toContain("object.created")
-    expect(isAllowed(atlasContext(sixb, ["security-admins"]), { kind: "logs.observe" })).toBe(true)
-    expect(isAllowed(atlasContext(sixb, ["team-members"]), { kind: "logs.observe" })).toBe(false)
+    expect(isAllowed(atlasContext(sixb, [securityAdmins.id]), { kind: "logs.observe" })).toBe(true)
+    expect(isAllowed(atlasContext(sixb, [teamMembers.id]), { kind: "logs.observe" })).toBe(false)
 
     expect(await noGroups.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
     expect(noGroups.listActions()).toEqual([])
     expect(noGroups.listDatasets()).toEqual([])
+  })
+
+  test("security admins can administer members while team members cannot", async () => {
+    const sixb = await createAuthExampleRuntime()
+    const admin = sixb.auth.getMembershipCapabilities({ callerGroups: [securityAdmins] })
+    const teamMember = sixb.auth.getMembershipCapabilities({ callerGroups: [teamMembers] })
+
+    // The scope of `member-administration` is both example groups, so an admin reaches either one.
+    expect([...admin.assignableGroupIds].sort()).toEqual([securityAdmins.id, teamMembers.id])
+
+    for (const operation of ["invite", "assignGroups", "suspend"] as const) {
+      expect(admin.holds[operation]).toBe(true)
+      expect(admin.covers(operation, [])).toBe(true)
+      expect(admin.covers(operation, [teamMembers])).toBe(true)
+      expect(admin.covers(operation, [securityAdmins])).toBe(true)
+
+      expect(teamMember.holds[operation]).toBe(false)
+      expect(teamMember.covers(operation, [teamMembers])).toBe(false)
+    }
   })
 })

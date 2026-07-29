@@ -115,6 +115,7 @@ export type {
   MagicLinkRequestStatus,
   MemberCapabilities,
   MemberSummary,
+  MembershipCapabilities,
   MembershipOperationCapabilities,
   OidcAuthStrategy,
   OidcCallbackInput,

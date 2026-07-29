@@ -9,6 +9,15 @@ export interface GroupDefinition<TId extends string = string> {
 }
 
 /**
+ * A group named either by its definition or by its id.
+ *
+ * Both forms are unavoidable. Sessions and stored memberships hand you ids, so a runtime caller has
+ * nothing else to pass; code that knows the group at authoring time has the definition, and naming it
+ * makes a rename a compile error instead of a silent miss. Runtime entry points normalize to ids.
+ */
+export type GroupReference = GroupDefinition | string
+
+/**
  * A capability's reach over its target's id space. Either the whole registered
  * universe minus an exclusion list (`every.object().except([...])`) or an
  * explicit set of ids (`can.view([A, B])`). Both forms expand to a concrete set
