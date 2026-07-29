@@ -1,18 +1,20 @@
 # @sixb/projection-worker
 
-Queue worker helpers for materializing committed dataset versions into Sixb objects and links.
+Queue worker for materializing committed dataset versions into the Sixb ontology.
 
-The projection worker turns one queued `projection.run.requested` job into one projection run
-record and latest-state object/link writes through the core object service.
+One deterministic `projection.run.requested` job pins the dataset version and complete projection
+identity. The worker validates that identity, then routes replacement or telemetry input through the
+internal ontology mutation runtime.
 
 ## Responsibilities
 
-- look up the projection definition for a queued job
-- create, update, and finalize the projection-run record
+- replay an existing terminal run before reading registry or lake state
+- validate the pinned projection and dataset-version identity
+- claim and fence projection execution through the projection-run record
 - read the exact committed dataset version from lake storage
-- validate the committed version against the registered dataset definition
-- upsert projected objects and links through `objectService`
-- mark failed or cancelled runs in `ProjectionRunStorage`
+- stage and atomically activate object/link replacement snapshots through the Materializer
+- append telemetry in resumable fixed physical batches
+- leave transient failures running for queue redelivery; terminalize only confirmed outcomes
 
 ## Usage
 
@@ -27,31 +29,16 @@ const worker = new ProjectionWorker(sixb)
 await worker.start()
 ```
 
-For lower-level tests, use the function form:
-
-```ts
-import { runProjectionJob } from "@sixb/projection-worker"
-
-await runProjectionJob({
-  runtime,
-  job: {
-    id: "run_123",
-    projectionId: "room-proj",
-    projectionKind: "object",
-    datasetId: "canonical.rooms",
-    versionId: "ver_123",
-  },
-})
-```
-
 ## Notes
 
-- The worker executes the projection named by the job. It does not resolve projection dependencies.
-- V1 materialization is set-only: projected rows upsert state, missing rows do not delete state.
-- A nonblank FK assigns a cardinality-one link, atomically replacing a different current target.
-  Blank FKs remain no-ops; cardinality-many FK links remain additive.
-- V1 traceability lives in dataset versions and projection run records; object writes do not carry
-  projection-specific metadata.
+- Object/link projections are authoritative replacement snapshots: missing source assertions are
+  withdrawn when the candidate activates.
+- Replacement staging remains invisible until one atomic activation commit succeeds.
+- Telemetry resumes from its durable physical row offset and batch ordinal; terminal success
+  requires a separately persisted EOF observation.
+- `QueueDelivery` owns liveness; the opaque execution token fences every durable write.
+- Retryable failures use capped exponential backoff and remain retryable without an attempt limit.
+- Semantic outcomes live in `ontology_commits`; run records contain lifecycle and physical progress.
 
 ## Development
 

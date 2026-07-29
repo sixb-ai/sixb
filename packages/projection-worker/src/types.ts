@@ -6,15 +6,15 @@ import type {
   SixbRuntimeContext,
   TelemetryProjectionDefinition,
 } from "@sixb/core"
+import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
 import type {
-  ProjectionKind,
-  ProjectionRunCounters,
+  ProjectionMaterializationRunRecord,
+  ProjectionMaterializationRunStorage,
   ProjectionRunRecord,
-  ProjectionRunStorage,
 } from "@sixb/core/storage"
 
 export interface ProjectionWorkerContext extends SixbRuntimeContext {
-  readonly projectionRunsStorage: ProjectionRunStorage
+  readonly projectionRunsStorage: ProjectionMaterializationRunStorage
   getDatasetById(datasetId: string): DatasetDefinition | null
   getProjectionById(projectionId: string): ProjectionDefinition | null
 }
@@ -28,36 +28,33 @@ export interface ProjectionWorkerSixb extends SixbRuntimeContext {
   getProjectionById(projectionId: string): ProjectionDefinition | null
 }
 
-export interface ProjectionJob {
+export type ProjectionJob = ProjectionMaterializationIdentity & {
+  /** Stable logical run id; identical to the durable queue job id. */
   readonly id: string
-  readonly projectionId: string
-  readonly projectionKind: ProjectionKind
-  readonly datasetId: string
-  readonly versionId: string
-  readonly queueJobId?: string
 }
 
 export interface RunProjectionJobInput {
   readonly runtime: ProjectionWorkerContext
   readonly job: ProjectionJob
   readonly signal?: AbortSignal
-  readonly batchSize?: number
+  /** Test seam only. Production always uses the protocol constant (500 physical rows). */
+  readonly telemetryBatchSize?: number
   readonly onRunFailed?: ProjectionRunFailedHandler
 }
 
 export type ProjectionRunFailedHandler = (error: unknown, run: ProjectionRunRecord) => void
 
-export interface ProjectionJobResult extends ProjectionRunCounters {
-  readonly id: string
-  readonly projectionId: string
-  readonly projectionKind: ProjectionKind
-  readonly datasetId: string
-  readonly datasetVersionId: string
+export interface ProjectionJobResult {
   readonly run: ProjectionRunRecord
+  /** True when a terminal redelivery required no source read. */
+  readonly replayedTerminal: boolean
 }
 
-export interface ProjectionExecutionResult extends ProjectionRunCounters {
-  readonly firstErrorMessage?: string
+export interface ClaimedProjectionExecution {
+  readonly run: ProjectionMaterializationRunRecord
+  readonly identity: ProjectionMaterializationIdentity
+  readonly execution: {
+    readonly projectionRunId: string
+    readonly executionToken: string
+  }
 }
-
-export type ProjectionProgressReporter = (counters: ProjectionRunCounters) => Promise<void> | void

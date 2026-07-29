@@ -13,7 +13,6 @@ import type { TelemetryCommitResult, TelemetryPointWrite } from "../../materiali
 import { getOntologyMutationRuntime } from "../../runtime/ontology-mutations"
 import { ObjectNotFoundError } from "../../storage/errors"
 import type { RuntimeMaterializerContext } from "../materializer-adapter"
-import { publishCommittedFacts } from "../materializer-adapter"
 
 export type TelemetryWriteContext = RuntimeMaterializerContext & {
   readonly authorization?: AuthorizationContext
@@ -42,6 +41,5 @@ export async function writeTelemetryBatch(
     }
     throw error
   }
-  publishCommittedFacts(ctx, commit)
   return commit
 }

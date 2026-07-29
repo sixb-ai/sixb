@@ -22506,6 +22506,9 @@
                                 "type": "string",
                                 "enum": ["running", "succeeded", "failed", "cancelled"]
                               },
+                              "attempt": {
+                                "type": "number"
+                              },
                               "startedAt": {
                                 "type": "string"
                               },
@@ -22515,25 +22518,10 @@
                               "errorMessage": {
                                 "type": "string"
                               },
-                              "rowsProcessed": {
+                              "sourceRowsRead": {
                                 "type": "number"
                               },
-                              "rowsSkipped": {
-                                "type": "number"
-                              },
-                              "objectsUpserted": {
-                                "type": "number"
-                              },
-                              "linksUpserted": {
-                                "type": "number"
-                              },
-                              "telemetryPointsAppended": {
-                                "type": "number"
-                              },
-                              "telemetryPointsSkipped": {
-                                "type": "number"
-                              },
-                              "telemetryRowsFailed": {
+                              "sourceRowsSkipped": {
                                 "type": "number"
                               }
                             },
@@ -22546,13 +22534,8 @@
                               "datasetVersionId",
                               "status",
                               "startedAt",
-                              "rowsProcessed",
-                              "rowsSkipped",
-                              "objectsUpserted",
-                              "linksUpserted",
-                              "telemetryPointsAppended",
-                              "telemetryPointsSkipped",
-                              "telemetryRowsFailed"
+                              "sourceRowsRead",
+                              "sourceRowsSkipped"
                             ],
                             "additionalProperties": false,
                             "nullable": true
@@ -22635,6 +22618,9 @@
                                 "type": "string",
                                 "enum": ["running", "succeeded", "failed", "cancelled"]
                               },
+                              "attempt": {
+                                "type": "number"
+                              },
                               "startedAt": {
                                 "type": "string"
                               },
@@ -22644,25 +22630,10 @@
                               "errorMessage": {
                                 "type": "string"
                               },
-                              "rowsProcessed": {
+                              "sourceRowsRead": {
                                 "type": "number"
                               },
-                              "rowsSkipped": {
-                                "type": "number"
-                              },
-                              "objectsUpserted": {
-                                "type": "number"
-                              },
-                              "linksUpserted": {
-                                "type": "number"
-                              },
-                              "telemetryPointsAppended": {
-                                "type": "number"
-                              },
-                              "telemetryPointsSkipped": {
-                                "type": "number"
-                              },
-                              "telemetryRowsFailed": {
+                              "sourceRowsSkipped": {
                                 "type": "number"
                               }
                             },
@@ -22675,13 +22646,8 @@
                               "datasetVersionId",
                               "status",
                               "startedAt",
-                              "rowsProcessed",
-                              "rowsSkipped",
-                              "objectsUpserted",
-                              "linksUpserted",
-                              "telemetryPointsAppended",
-                              "telemetryPointsSkipped",
-                              "telemetryRowsFailed"
+                              "sourceRowsRead",
+                              "sourceRowsSkipped"
                             ],
                             "additionalProperties": false,
                             "nullable": true
@@ -22769,6 +22735,9 @@
                                 "type": "string",
                                 "enum": ["running", "succeeded", "failed", "cancelled"]
                               },
+                              "attempt": {
+                                "type": "number"
+                              },
                               "startedAt": {
                                 "type": "string"
                               },
@@ -22778,25 +22747,10 @@
                               "errorMessage": {
                                 "type": "string"
                               },
-                              "rowsProcessed": {
+                              "sourceRowsRead": {
                                 "type": "number"
                               },
-                              "rowsSkipped": {
-                                "type": "number"
-                              },
-                              "objectsUpserted": {
-                                "type": "number"
-                              },
-                              "linksUpserted": {
-                                "type": "number"
-                              },
-                              "telemetryPointsAppended": {
-                                "type": "number"
-                              },
-                              "telemetryPointsSkipped": {
-                                "type": "number"
-                              },
-                              "telemetryRowsFailed": {
+                              "sourceRowsSkipped": {
                                 "type": "number"
                               }
                             },
@@ -22809,13 +22763,8 @@
                               "datasetVersionId",
                               "status",
                               "startedAt",
-                              "rowsProcessed",
-                              "rowsSkipped",
-                              "objectsUpserted",
-                              "linksUpserted",
-                              "telemetryPointsAppended",
-                              "telemetryPointsSkipped",
-                              "telemetryRowsFailed"
+                              "sourceRowsRead",
+                              "sourceRowsSkipped"
                             ],
                             "additionalProperties": false,
                             "nullable": true
@@ -22947,6 +22896,9 @@
                               "type": "string",
                               "enum": ["running", "succeeded", "failed", "cancelled"]
                             },
+                            "attempt": {
+                              "type": "number"
+                            },
                             "startedAt": {
                               "type": "string"
                             },
@@ -22956,25 +22908,10 @@
                             "errorMessage": {
                               "type": "string"
                             },
-                            "rowsProcessed": {
+                            "sourceRowsRead": {
                               "type": "number"
                             },
-                            "rowsSkipped": {
-                              "type": "number"
-                            },
-                            "objectsUpserted": {
-                              "type": "number"
-                            },
-                            "linksUpserted": {
-                              "type": "number"
-                            },
-                            "telemetryPointsAppended": {
-                              "type": "number"
-                            },
-                            "telemetryPointsSkipped": {
-                              "type": "number"
-                            },
-                            "telemetryRowsFailed": {
+                            "sourceRowsSkipped": {
                               "type": "number"
                             }
                           },
@@ -22987,13 +22924,8 @@
                             "datasetVersionId",
                             "status",
                             "startedAt",
-                            "rowsProcessed",
-                            "rowsSkipped",
-                            "objectsUpserted",
-                            "linksUpserted",
-                            "telemetryPointsAppended",
-                            "telemetryPointsSkipped",
-                            "telemetryRowsFailed"
+                            "sourceRowsRead",
+                            "sourceRowsSkipped"
                           ],
                           "additionalProperties": false,
                           "nullable": true
@@ -23073,6 +23005,9 @@
                               "type": "string",
                               "enum": ["running", "succeeded", "failed", "cancelled"]
                             },
+                            "attempt": {
+                              "type": "number"
+                            },
                             "startedAt": {
                               "type": "string"
                             },
@@ -23082,25 +23017,10 @@
                             "errorMessage": {
                               "type": "string"
                             },
-                            "rowsProcessed": {
+                            "sourceRowsRead": {
                               "type": "number"
                             },
-                            "rowsSkipped": {
-                              "type": "number"
-                            },
-                            "objectsUpserted": {
-                              "type": "number"
-                            },
-                            "linksUpserted": {
-                              "type": "number"
-                            },
-                            "telemetryPointsAppended": {
-                              "type": "number"
-                            },
-                            "telemetryPointsSkipped": {
-                              "type": "number"
-                            },
-                            "telemetryRowsFailed": {
+                            "sourceRowsSkipped": {
                               "type": "number"
                             }
                           },
@@ -23113,13 +23033,8 @@
                             "datasetVersionId",
                             "status",
                             "startedAt",
-                            "rowsProcessed",
-                            "rowsSkipped",
-                            "objectsUpserted",
-                            "linksUpserted",
-                            "telemetryPointsAppended",
-                            "telemetryPointsSkipped",
-                            "telemetryRowsFailed"
+                            "sourceRowsRead",
+                            "sourceRowsSkipped"
                           ],
                           "additionalProperties": false,
                           "nullable": true
@@ -23204,6 +23119,9 @@
                               "type": "string",
                               "enum": ["running", "succeeded", "failed", "cancelled"]
                             },
+                            "attempt": {
+                              "type": "number"
+                            },
                             "startedAt": {
                               "type": "string"
                             },
@@ -23213,25 +23131,10 @@
                             "errorMessage": {
                               "type": "string"
                             },
-                            "rowsProcessed": {
+                            "sourceRowsRead": {
                               "type": "number"
                             },
-                            "rowsSkipped": {
-                              "type": "number"
-                            },
-                            "objectsUpserted": {
-                              "type": "number"
-                            },
-                            "linksUpserted": {
-                              "type": "number"
-                            },
-                            "telemetryPointsAppended": {
-                              "type": "number"
-                            },
-                            "telemetryPointsSkipped": {
-                              "type": "number"
-                            },
-                            "telemetryRowsFailed": {
+                            "sourceRowsSkipped": {
                               "type": "number"
                             }
                           },
@@ -23244,13 +23147,8 @@
                             "datasetVersionId",
                             "status",
                             "startedAt",
-                            "rowsProcessed",
-                            "rowsSkipped",
-                            "objectsUpserted",
-                            "linksUpserted",
-                            "telemetryPointsAppended",
-                            "telemetryPointsSkipped",
-                            "telemetryRowsFailed"
+                            "sourceRowsRead",
+                            "sourceRowsSkipped"
                           ],
                           "additionalProperties": false,
                           "nullable": true
@@ -23429,6 +23327,9 @@
                             "type": "string",
                             "enum": ["running", "succeeded", "failed", "cancelled"]
                           },
+                          "attempt": {
+                            "type": "number"
+                          },
                           "startedAt": {
                             "type": "string"
                           },
@@ -23438,25 +23339,10 @@
                           "errorMessage": {
                             "type": "string"
                           },
-                          "rowsProcessed": {
+                          "sourceRowsRead": {
                             "type": "number"
                           },
-                          "rowsSkipped": {
-                            "type": "number"
-                          },
-                          "objectsUpserted": {
-                            "type": "number"
-                          },
-                          "linksUpserted": {
-                            "type": "number"
-                          },
-                          "telemetryPointsAppended": {
-                            "type": "number"
-                          },
-                          "telemetryPointsSkipped": {
-                            "type": "number"
-                          },
-                          "telemetryRowsFailed": {
+                          "sourceRowsSkipped": {
                             "type": "number"
                           }
                         },
@@ -23469,13 +23355,8 @@
                           "datasetVersionId",
                           "status",
                           "startedAt",
-                          "rowsProcessed",
-                          "rowsSkipped",
-                          "objectsUpserted",
-                          "linksUpserted",
-                          "telemetryPointsAppended",
-                          "telemetryPointsSkipped",
-                          "telemetryRowsFailed"
+                          "sourceRowsRead",
+                          "sourceRowsSkipped"
                         ],
                         "additionalProperties": false
                       }
@@ -23569,6 +23450,9 @@
                       "type": "string",
                       "enum": ["running", "succeeded", "failed", "cancelled"]
                     },
+                    "attempt": {
+                      "type": "number"
+                    },
                     "startedAt": {
                       "type": "string"
                     },
@@ -23578,25 +23462,10 @@
                     "errorMessage": {
                       "type": "string"
                     },
-                    "rowsProcessed": {
+                    "sourceRowsRead": {
                       "type": "number"
                     },
-                    "rowsSkipped": {
-                      "type": "number"
-                    },
-                    "objectsUpserted": {
-                      "type": "number"
-                    },
-                    "linksUpserted": {
-                      "type": "number"
-                    },
-                    "telemetryPointsAppended": {
-                      "type": "number"
-                    },
-                    "telemetryPointsSkipped": {
-                      "type": "number"
-                    },
-                    "telemetryRowsFailed": {
+                    "sourceRowsSkipped": {
                       "type": "number"
                     }
                   },
@@ -23609,13 +23478,8 @@
                     "datasetVersionId",
                     "status",
                     "startedAt",
-                    "rowsProcessed",
-                    "rowsSkipped",
-                    "objectsUpserted",
-                    "linksUpserted",
-                    "telemetryPointsAppended",
-                    "telemetryPointsSkipped",
-                    "telemetryRowsFailed"
+                    "sourceRowsRead",
+                    "sourceRowsSkipped"
                   ],
                   "additionalProperties": false
                 }

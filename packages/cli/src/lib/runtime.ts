@@ -3,6 +3,7 @@ import { ActionWorker } from "@sixb/action-worker"
 import { AgentWorker } from "@sixb/agent-worker"
 import { migrateStorage } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
+import { getProjectionDispatchDescriptors } from "@sixb/core/internal/projections"
 import type { Worker } from "@sixb/core/internal/workers"
 import { assertLakeDatasetDefinitionsCompatible } from "@sixb/core/lake-storage"
 import {
@@ -120,26 +121,34 @@ export async function startSchedulerRuntime(sixb: LoadedSixb): Promise<RunningSc
 export async function startOrchestratorRuntime(
   sixb: LoadedSixb
 ): Promise<RunningOrchestratorRuntime> {
+  const projections = getProjectionDispatchDescriptors(sixb)
   const { routes, diagnostics } = compileRoutesWithDiagnostics({
     schedules: sixb.getScheduleDefinitions(),
     syncs: sixb.getSyncDefinitions(),
     pipelines: sixb.getPipelineDefinitions(),
-    projections: [
-      ...sixb.getObjectProjections(),
-      ...sixb.getLinkProjections(),
-      ...sixb.getTelemetryProjections(),
-    ],
+    projections,
     workflows: sixb.workflows.list(),
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
   let orchestratorWorker: OrchestratorWorker | null = null
 
   if (routes.size > 0) {
+    const projectionRuns = sixb.storage.projectionRuns
+    if (projections.length > 0 && !projectionRuns) {
+      throw new Error(
+        "[SixbCLI] Projection dispatch requires storage.projectionRuns for durable reconciliation."
+      )
+    }
+    const projectionDispatch =
+      projections.length > 0 && projectionRuns
+        ? { lakeStorage: sixb.lakeStorage, projectionRuns }
+        : undefined
     orchestratorWorker = new OrchestratorWorker({
       projectId: sixb.id,
       events: sixb.events,
       queues: sixb.queues,
       routes,
+      ...(projectionDispatch ? { projectionDispatch } : {}),
     })
     await orchestratorWorker.start()
   }

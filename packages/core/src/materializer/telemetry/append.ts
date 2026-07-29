@@ -116,9 +116,9 @@ function validateTelemetryBatch(input: NormalizedTelemetryAppend, inputPointCoun
         "Projection telemetry batches must consume at least one source row; an empty dataset produces no batch commit."
       )
     }
-    if (input.source.sourceRowCount < inputPointCount) {
+    if (input.source.sourceRowCount !== inputPointCount + input.source.sourceRowsSkipped) {
       throw new MaterializationValidationError(
-        "Projection telemetry sourceRowCount cannot be smaller than its input point count."
+        "Projection telemetry sourceRowCount must equal input points plus skipped rows."
       )
     }
   }
@@ -217,6 +217,7 @@ function projectionTelemetryCallerIntent(
       datasetVersion: source.datasetVersion,
       batchOrdinal: source.batchOrdinal,
       sourceRowCount: source.sourceRowCount,
+      sourceRowsSkipped: source.sourceRowsSkipped,
       inputExhausted: source.inputExhausted,
     },
     inputPointCount,
@@ -472,6 +473,7 @@ function telemetryCommitIntent(command: PreparedTelemetryAppend): TelemetryOntol
       datasetVersion: command.source.datasetVersion,
       batchOrdinal: command.source.batchOrdinal,
       sourceRowCount: command.source.sourceRowCount,
+      sourceRowsSkipped: command.source.sourceRowsSkipped,
       inputExhausted: command.source.inputExhausted,
     },
   }
@@ -499,6 +501,7 @@ async function finalizeTelemetryMaterialization(
       identity: command.runIdentity,
       batchOrdinal: command.source.batchOrdinal,
       batchRowCount: command.source.sourceRowCount,
+      batchRowsSkipped: command.source.sourceRowsSkipped,
       inputExhausted: command.source.inputExhausted,
     })
   }

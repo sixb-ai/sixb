@@ -130,6 +130,7 @@ export async function emitDatasetVersionCommitted(
           payload: {
             datasetId: step.version.datasetId,
             versionId: step.version.versionId,
+            createdAt: step.version.createdAt.toISOString(),
             producer: {
               kind: "pipeline" as const,
               id: job.pipelineId,

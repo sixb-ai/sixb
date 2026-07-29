@@ -6,25 +6,25 @@ import { ProjectionRunError } from "./errors"
 import {
   type AdvanceProjectionTelemetryCheckpointInput,
   type AssertProjectionMaterializationExecutionInput,
-  type CompleteEmptyProjectionTelemetryInput,
+  type CompleteProjectionTelemetryInput,
   type FinishProjectionMaterializationInput,
   type FinishProjectionRunInput,
   type ListLatestProjectionRunsInput,
   type ListLatestProjectionRunsResult,
   type ListProjectionRunsInput,
   type ListProjectionRunsResult,
-  PROJECTION_COUNTER_KEYS,
+  PROJECTION_RUN_PROGRESS_KEYS,
   type ProjectionMaterializationRunRecord,
   type ProjectionMaterializationRunStorage,
-  type ProjectionRunCounters,
   type ProjectionRunObjectTypes,
+  type ProjectionRunProgress,
   type ProjectionRunRecord,
   projectionRunObjectTypesVisible,
   type StartOrReclaimProjectionMaterializationInput,
   type StartProjectionRunInput,
   type UpdateProjectionMaterializationInput,
   type UpdateProjectionRunInput,
-  zeroProjectionRunCounters,
+  zeroProjectionRunProgress,
 } from "./types"
 
 type RunRootOperation = <T>(run: () => Promise<T> | T) => Promise<T>
@@ -103,16 +103,43 @@ function compareRuns(a: ProjectionRunRecord, b: ProjectionRunRecord, order: "asc
   return order === "asc" ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id)
 }
 
-function applyCounters<TRecord extends ProjectionRunRecord>(
+function applyProgress<TRecord extends ProjectionRunRecord>(
   record: TRecord,
-  input: Partial<ProjectionRunCounters>
+  input: Partial<ProjectionRunProgress>
 ): TRecord {
-  const merged = {} as Record<keyof ProjectionRunCounters, number>
-  for (const key of PROJECTION_COUNTER_KEYS) {
+  const merged = {} as Record<keyof ProjectionRunProgress, number>
+  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
     assertOptionalCounter(input[key], key)
-    merged[key] = input[key] ?? record[key]
+    const value = input[key] ?? record[key]
+    if (value < record[key]) {
+      throw new ProjectionRunError(`[Sixb] Projection run ${key} must not decrease.`)
+    }
+    merged[key] = value
   }
+  assertProgress(merged)
   return { ...record, ...merged }
+}
+
+function assertProgress(progress: ProjectionRunProgress): void {
+  if (progress.sourceRowsSkipped > progress.sourceRowsRead) {
+    throw new ProjectionRunError(
+      "[Sixb] Projection run sourceRowsSkipped must not exceed sourceRowsRead."
+    )
+  }
+}
+
+function assertGenericProgressDoesNotAdvanceTelemetry(
+  record: ProjectionRunRecord,
+  input: Partial<ProjectionRunProgress>
+): void {
+  if (record.materializationProtocol !== "telemetry") return
+  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
+    if (input[key] !== undefined && input[key] !== record[key]) {
+      throw new ProjectionRunError(
+        `[Sixb] Telemetry projection run '${record.id}' progress can only advance with its checkpoint.`
+      )
+    }
+  }
 }
 
 function assertLegacyMutationAllowed(
@@ -229,10 +256,17 @@ function assertCompleteMaterializationRecord(
       `[Sixb] Projection run '${record.id}' has incomplete materialization state.`
     )
   }
-  if (record.materializationProtocol === "telemetry" && !record.telemetryCheckpoint) {
-    throw new ProjectionRunError(
-      `[Sixb] Telemetry projection run '${record.id}' has incomplete checkpoint state.`
-    )
+  if (record.materializationProtocol === "telemetry") {
+    if (!record.telemetryCheckpoint) {
+      throw new ProjectionRunError(
+        `[Sixb] Telemetry projection run '${record.id}' has incomplete checkpoint state.`
+      )
+    }
+    if (record.sourceRowsRead !== record.telemetryCheckpoint.nextRowOffset) {
+      throw new ProjectionRunError(
+        `[Sixb] Telemetry projection run '${record.id}' progress does not match its checkpoint.`
+      )
+    }
   }
 }
 
@@ -366,7 +400,7 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
                   },
                 }
               : {}),
-            ...zeroProjectionRunCounters(),
+            ...zeroProjectionRunProgress(),
           }
 
       this.rows.set(key, structuredClone(record))
@@ -418,7 +452,8 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
   ): Promise<ProjectionMaterializationRunRecord> {
     return this.runRootOperation(() => {
       const existing = this.requireMaterializationExecution(input)
-      const next = applyCounters(existing, input)
+      assertGenericProgressDoesNotAdvanceTelemetry(existing, input)
+      const next = applyProgress(existing, input)
       this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
       return cloneProjectionRunRecord(next)
     })
@@ -429,6 +464,7 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
   ): Promise<ProjectionRunRecord> {
     return this.runRootOperation(() => {
       const existing = this.requireMaterializationExecution(input)
+      assertGenericProgressDoesNotAdvanceTelemetry(existing, input)
       if (
         input.status === "succeeded" &&
         existing.materializationProtocol === "telemetry" &&
@@ -438,9 +474,9 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
           `[Sixb] Telemetry projection run '${existing.id}' cannot succeed before its input is exhausted.`
         )
       }
-      const withCounters = applyCounters(existing, input)
+      const withProgress = applyProgress(existing, input)
       const next: StoredProjectionRunRecord = {
-        ...withCounters,
+        ...withProgress,
         executionToken: undefined,
         status: input.status,
         finishedAt: new Date(input.finishedAt ?? new Date()),
@@ -469,6 +505,12 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
       }
       assertCounter(input.batchOrdinal, "batchOrdinal")
       assertPositiveCounter(input.batchRowCount, "batchRowCount")
+      assertCounter(input.batchRowsSkipped, "batchRowsSkipped")
+      if (input.batchRowsSkipped > input.batchRowCount) {
+        throw new ProjectionRunError(
+          `[Sixb] Telemetry projection run '${existing.id}' skipped rows exceed its batch row count.`
+        )
+      }
       if (input.batchOrdinal !== checkpoint.nextBatchOrdinal) {
         throw new ProjectionRunError(
           `[Sixb] Telemetry projection run '${existing.id}' expected batch ordinal ${checkpoint.nextBatchOrdinal}, got ${input.batchOrdinal}.`
@@ -489,12 +531,19 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
           `[Sixb] Telemetry projection run '${existing.id}' has already exhausted its input.`
         )
       }
+      const nextRowOffset = safeAdd(checkpoint.nextRowOffset, input.batchRowCount, "nextRowOffset")
       const next: ProjectionMaterializationRunRecord = {
         ...existing,
+        sourceRowsRead: nextRowOffset,
+        sourceRowsSkipped: safeAdd(
+          existing.sourceRowsSkipped,
+          input.batchRowsSkipped,
+          "sourceRowsSkipped"
+        ),
         telemetryCheckpoint: {
           ...checkpoint,
           nextBatchOrdinal: safeAdd(checkpoint.nextBatchOrdinal, 1, "nextBatchOrdinal"),
-          nextRowOffset: safeAdd(checkpoint.nextRowOffset, input.batchRowCount, "nextRowOffset"),
+          nextRowOffset,
           inputExhausted: input.inputExhausted,
         },
       }
@@ -503,8 +552,8 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
     })
   }
 
-  async completeEmptyTelemetryInput(
-    input: CompleteEmptyProjectionTelemetryInput
+  async completeTelemetryInput(
+    input: CompleteProjectionTelemetryInput
   ): Promise<ProjectionMaterializationRunRecord> {
     return this.runRootOperation(() => {
       const existing = this.requireMaterializationExecution(input)
@@ -514,15 +563,7 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
           `[Sixb] Projection run '${existing.id}' does not have a telemetry checkpoint.`
         )
       }
-      if (
-        checkpoint.nextBatchOrdinal !== 0 ||
-        checkpoint.nextRowOffset !== 0 ||
-        checkpoint.inputExhausted
-      ) {
-        throw new ProjectionRunError(
-          `[Sixb] Telemetry projection run '${existing.id}' cannot declare empty input after progress.`
-        )
-      }
+      if (checkpoint.inputExhausted) return cloneProjectionRunRecord(existing)
       const next: ProjectionMaterializationRunRecord = {
         ...existing,
         telemetryCheckpoint: { ...checkpoint, inputExhausted: true },
@@ -559,7 +600,7 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
         status: "running",
         startedAt: new Date(input.startedAt ?? new Date()),
         attempt: 0,
-        ...zeroProjectionRunCounters(),
+        ...zeroProjectionRunProgress(),
       }
       this.rows.set(key, structuredClone(record))
       return publicProjectionRunRecord(record)
@@ -570,7 +611,7 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
     return this.runRootOperation(() => {
       const existing = this.requireRunning(input.projectId, input.id)
       assertLegacyMutationAllowed(existing, "update")
-      const next = applyCounters(existing, input)
+      const next = applyProgress(existing, input)
       this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
       return publicProjectionRunRecord(next)
     })
@@ -580,9 +621,9 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
     return this.runRootOperation(() => {
       const existing = this.requireRunning(input.projectId, input.id)
       assertLegacyMutationAllowed(existing, "finish")
-      const withCounters = applyCounters(existing, input)
+      const withProgress = applyProgress(existing, input)
       const next: StoredProjectionRunRecord = {
-        ...withCounters,
+        ...withProgress,
         executionToken: undefined,
         status: input.status,
         finishedAt: new Date(input.finishedAt ?? new Date()),

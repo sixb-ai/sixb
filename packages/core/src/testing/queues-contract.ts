@@ -280,8 +280,15 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
                 payload: {
                   projectionId: "room-projection",
                   projectionKind: "object",
-                  datasetId: "canonical.rooms",
-                  versionId: "ver_1",
+                  protocol: "replacement",
+                  datasetVersion: {
+                    datasetId: "canonical.rooms",
+                    versionId: "ver_1",
+                    createdAt: "2026-01-01T00:00:00.000Z",
+                  },
+                  ontologyRevision: "ontology-v1",
+                  projectionRevision: "projection-v1",
+                  ownershipHash: "ownership-v1",
                 },
               },
             ],

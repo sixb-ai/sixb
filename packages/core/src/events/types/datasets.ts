@@ -7,6 +7,8 @@ export interface DatasetVersionCommittedEvent extends EventEnvelope {
   payload: {
     datasetId: string
     versionId: string
+    /** Canonical UTC ISO timestamp from the committed immutable dataset version. */
+    createdAt: string
     producer: {
       kind: "sync" | "pipeline"
       id?: string

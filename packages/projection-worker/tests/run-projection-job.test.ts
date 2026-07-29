@@ -18,18 +18,42 @@ import {
   integerEnum,
   type LakeStorage,
   link,
+  MaterializationCancellationError,
+  MaterializationConflictError,
+  MaterializationValidationError,
   type ProjectionDefinition,
   prop,
   Sixb,
   stringEnum,
   valueTypeRef,
 } from "@sixb/core"
+import {
+  createProjectionRunId,
+  getProjectionRegistry,
+  type ProjectionDispatchDescriptor,
+  shareProjectionRegistry,
+} from "@sixb/core/internal/projections"
 import { shareOntologyMutationRuntime } from "@sixb/core/internal/runtime"
+import { decorateOperationScopedMethodForTesting } from "@sixb/core/internal/storage-operation-scope"
 import type { BeginDatasetWriteInput, ReadDatasetRowsInput } from "@sixb/core/lake-storage"
-import type { ProjectionRunStorage } from "@sixb/core/storage"
-import { ProjectionWorkerError } from "../src/errors"
-import { runProjectionJob } from "../src/run-projection-job"
-import type { ProjectionWorkerContext } from "../src/types"
+import {
+  type AbandonSourceMaterializationCandidateInput,
+  isProjectionMaterializationRunStorage,
+  type OntologySourceRecord,
+  type ProjectionMaterializationRunStorage,
+  type ProjectionRunStorage,
+  type ReclaimSourceMaterializationInput,
+} from "@sixb/core/storage"
+import {
+  isPermanentProjectionFailure,
+  runProjectionJob as runCanonicalProjectionJob,
+} from "../src/run-projection-job"
+import type {
+  ProjectionJob,
+  ProjectionJobResult,
+  ProjectionWorkerContext,
+  RunProjectionJobInput,
+} from "../src/types"
 
 const Building = defineObjectType({
   id: "Building",
@@ -194,6 +218,31 @@ class RecordingLakeStorage implements LakeStorage {
   }
 }
 
+class InterruptibleLakeStorage extends RecordingLakeStorage {
+  failAfterRows: number | undefined
+  stopAfterRows: number | undefined
+  omitVersionRowCount = false
+
+  override async getVersion(datasetId: string, versionId: string) {
+    const version = await super.getVersion(datasetId, versionId)
+    if (!version || !this.omitVersionRowCount) return version
+    const { rowCount: _rowCount, ...withoutRowCount } = version
+    return withoutRowCount
+  }
+
+  override async *readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {
+    let rowsRead = 0
+    for await (const row of super.readRows(input)) {
+      if (this.stopAfterRows !== undefined && rowsRead >= this.stopAfterRows) return
+      if (this.failAfterRows !== undefined && rowsRead >= this.failAfterRows) {
+        throw new Error("lake read interrupted")
+      }
+      rowsRead += 1
+      yield row
+    }
+  }
+}
+
 interface TestRuntimeDeps {
   readonly broker: InMemoryBroker
   readonly storage: InMemoryStorage
@@ -227,38 +276,12 @@ interface ProjectionRuntimeSource {
 
 function requireProjectionRunsStorage(input: {
   readonly storage: { readonly projectionRuns?: ProjectionRunStorage }
-}): ProjectionRunStorage {
+}): ProjectionMaterializationRunStorage {
   const projectionRunsStorage = input.storage.projectionRuns
-  if (!projectionRunsStorage) {
-    throw new Error("Expected projection run storage in test runtime.")
+  if (!isProjectionMaterializationRunStorage(projectionRunsStorage)) {
+    throw new Error("Expected materialization-capable projection run storage in test runtime.")
   }
   return projectionRunsStorage
-}
-
-function createFinishFailingProjectionRunStorage(
-  delegate: ProjectionRunStorage,
-  cause: Error
-): ProjectionRunStorage {
-  return {
-    start(input) {
-      return delegate.start(input)
-    },
-    update(input) {
-      return delegate.update(input)
-    },
-    async finish() {
-      throw cause
-    },
-    getById(params) {
-      return delegate.getById(params)
-    },
-    list(input) {
-      return delegate.list(input)
-    },
-    listLatestByProjectionIds(input) {
-      return delegate.listLatestByProjectionIds(input)
-    },
-  }
 }
 
 function createRuntime(sixb: ProjectionRuntimeSource) {
@@ -280,7 +303,81 @@ function createRuntime(sixb: ProjectionRuntimeSource) {
     },
   } satisfies ProjectionWorkerContext
   shareOntologyMutationRuntime(sixb, runtime)
+  shareProjectionRegistry(sixb, runtime)
   return runtime
+}
+
+interface LegacyTestProjectionJob {
+  readonly id: string
+  readonly projectionId: string
+  readonly projectionKind: "object" | "link" | "telemetry"
+  readonly datasetId: string
+  readonly versionId: string
+}
+
+const canonicalRunIds = new Map<string, string>()
+
+async function runProjectionJob(
+  input: Omit<RunProjectionJobInput, "job"> & {
+    readonly job: LegacyTestProjectionJob
+    readonly batchSize?: number
+  }
+): Promise<ProjectionJobResult> {
+  const registry = getProjectionRegistry(input.runtime)
+  const version = await input.runtime.lakeStorage.getVersion(
+    input.job.datasetId,
+    input.job.versionId
+  )
+  let descriptor: ProjectionDispatchDescriptor
+  try {
+    descriptor = registry.resolveDispatch(input.job.projectionId)
+  } catch {
+    descriptor = unknownProjectionDescriptor(input.job, registry.ontologyRevision)
+  }
+  const { datasetId: _descriptorDatasetId, ...semanticIdentity } = descriptor
+  const identity = {
+    ...semanticIdentity,
+    datasetVersion: {
+      datasetId: input.job.datasetId,
+      versionId: input.job.versionId,
+      createdAt: version?.createdAt.toISOString() ?? "1970-01-01T00:00:00.000Z",
+    },
+  }
+  const id = createProjectionRunId(input.runtime.projectId, identity)
+  canonicalRunIds.set(input.job.id, id)
+  const { batchSize, ...canonicalInput } = input
+  return runCanonicalProjectionJob({
+    ...canonicalInput,
+    job: { id, ...identity },
+    ...(batchSize === undefined ? {} : { telemetryBatchSize: batchSize }),
+  })
+}
+
+function unknownProjectionDescriptor(
+  job: LegacyTestProjectionJob,
+  ontologyRevision: string
+): ProjectionDispatchDescriptor {
+  const common = {
+    projectionId: job.projectionId,
+    datasetId: job.datasetId,
+    ontologyRevision,
+    projectionRevision: "unknown-projection",
+    ownershipHash: "unknown-projection",
+  }
+  switch (job.projectionKind) {
+    case "object":
+      return { ...common, projectionKind: "object", protocol: "replacement" }
+    case "link":
+      return { ...common, projectionKind: "link", protocol: "replacement" }
+    case "telemetry":
+      return { ...common, projectionKind: "telemetry", protocol: "telemetry" }
+  }
+}
+
+function canonicalRunId(testRunId: string): string {
+  const id = canonicalRunIds.get(testRunId)
+  if (id) return id
+  throw new Error(`Test projection run '${testRunId}' was not dispatched.`)
 }
 
 function createSixb(
@@ -315,6 +412,29 @@ async function commitDatasetVersion(
 }
 
 describe("runProjectionJob", () => {
+  test("classifies only terminal materialization conflicts as permanent", () => {
+    expect(
+      isPermanentProjectionFailure(
+        new MaterializationConflictError("projection-fence", "A newer version is active.")
+      )
+    ).toBe(true)
+    expect(
+      isPermanentProjectionFailure(
+        new MaterializationConflictError("run-correlation", "Identity mismatch.")
+      )
+    ).toBe(true)
+    expect(
+      isPermanentProjectionFailure(
+        new MaterializationConflictError("execution-lost", "Delivery was reclaimed.")
+      )
+    ).toBe(false)
+    expect(
+      isPermanentProjectionFailure(
+        new MaterializationConflictError("effective-state", "Concurrent state changed.")
+      )
+    ).toBe(false)
+  })
+
   test("materializes an object projection from the exact dataset version", async () => {
     const deps = createDeps()
     const sixb = createSixb(
@@ -343,8 +463,7 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.rowsProcessed).toBe(1)
-    expect(result.objectsUpserted).toBe(1)
+    expect(result.run.sourceRowsRead).toBe(1)
     expect(result.run.status).toBe("succeeded")
 
     const room = await deps.storage.objects.getByPrimaryId({
@@ -450,12 +569,7 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.rowsProcessed).toBe(1)
-    expect(result.telemetryPointsAppended).toBe(1)
-    expect(result.telemetryPointsSkipped).toBe(0)
-    expect(result.telemetryRowsFailed).toBe(0)
-    expect(result.objectsUpserted).toBe(0)
-    expect(result.linksUpserted).toBe(0)
+    expect(result.run.sourceRowsRead).toBe(1)
     expect(result.run.status).toBe("succeeded")
 
     const history = await deps.storage.timeseries.getHistory({
@@ -542,7 +656,7 @@ describe("runProjectionJob", () => {
       },
     ])
 
-    const result = await runProjectionJob({
+    await runProjectionJob({
       runtime: createRuntime(sixb),
       job: {
         id: "projrun-telemetry-late",
@@ -552,10 +666,6 @@ describe("runProjectionJob", () => {
         versionId: version.versionId,
       },
     })
-
-    expect(result.telemetryPointsAppended).toBe(2)
-    expect(result.telemetryPointsSkipped).toBe(0)
-    expect(result.telemetryRowsFailed).toBe(0)
 
     const room = await deps.storage.objects.getByPrimaryId({
       projectId: sixb.id,
@@ -595,7 +705,7 @@ describe("runProjectionJob", () => {
       },
     ])
 
-    const first = await runProjectionJob({
+    await runProjectionJob({
       runtime: createRuntime(sixb),
       job: {
         id: "projrun-telemetry-first",
@@ -617,10 +727,8 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(first.telemetryPointsAppended).toBe(1)
     expect(replay.run.status).toBe("succeeded")
-    expect(replay.telemetryPointsAppended).toBe(1)
-    expect(replay.telemetryRowsFailed).toBe(0)
+    expect(replay.replayedTerminal).toBe(true)
 
     // The store upserts on (series, at), so replaying leaves a single point.
     const history = await deps.storage.timeseries.getHistory({
@@ -630,6 +738,215 @@ describe("runProjectionJob", () => {
       propertyId: "temperature",
     })
     expect(history.map((point) => point.value)).toEqual([70.5])
+  })
+
+  test("replays a terminal run without reading registry or lake state", async () => {
+    const deps = createDeps()
+    const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] }, deps)
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+    ])
+    const descriptor = getProjectionRegistry(sixb).resolveDispatch(roomProjection.id)
+    if (descriptor.projectionKind !== "object") throw new Error("Expected object projection.")
+    const identity = {
+      projectionId: descriptor.projectionId,
+      projectionKind: "object" as const,
+      protocol: "replacement" as const,
+      datasetVersion: {
+        datasetId: version.datasetId,
+        versionId: version.versionId,
+        createdAt: version.createdAt.toISOString(),
+      },
+      ontologyRevision: descriptor.ontologyRevision,
+      projectionRevision: descriptor.projectionRevision,
+      ownershipHash: descriptor.ownershipHash,
+    }
+    const job: ProjectionJob = {
+      id: createProjectionRunId(sixb.id, identity),
+      ...identity,
+    }
+    const runtime = createRuntime(sixb)
+    await runCanonicalProjectionJob({ runtime, job })
+
+    const unavailable = () => {
+      throw new Error("terminal replay accessed current configuration or lake state")
+    }
+    const replayRuntime: ProjectionWorkerContext = {
+      ...runtime,
+      lakeStorage: new Proxy(runtime.lakeStorage, { get: unavailable }),
+      getDatasetById: unavailable,
+      getProjectionById: unavailable,
+    }
+
+    await expect(runCanonicalProjectionJob({ runtime: replayRuntime, job })).resolves.toMatchObject(
+      {
+        run: { id: job.id, status: "succeeded" },
+        replayedTerminal: true,
+      }
+    )
+  })
+
+  test("resumes telemetry from the durable offset without an exact-multiple empty commit", async () => {
+    const deps = createDeps()
+    const lakeStorage = new InterruptibleLakeStorage(deps.lakeStorage)
+    const sixb = createSixb(
+      {
+        datasets: [roomReadingsDataset],
+        projections: [roomTemperatureProjection],
+      },
+      { ...deps, lakeStorage }
+    )
+    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    const version = await commitDatasetVersion(
+      lakeStorage,
+      roomReadingsDataset,
+      Array.from({ length: 4 }, (_, index) => ({
+        room_id: "r1",
+        observed_at: `2026-06-01T12:0${index}:00.000Z`,
+        temperature: 70 + index,
+        sync_row_id: `reading-${index}`,
+        unused: null,
+      }))
+    )
+    const input = {
+      runtime: createRuntime(sixb),
+      batchSize: 2,
+      job: {
+        id: "projrun-telemetry-resume",
+        projectionId: roomTemperatureProjection.id,
+        projectionKind: "telemetry" as const,
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    }
+
+    lakeStorage.failAfterRows = 2
+    await expect(runProjectionJob(input)).rejects.toThrow("lake read interrupted")
+    const runId = canonicalRunId(input.job.id)
+    expect(
+      await deps.storage.projectionRuns.getById({ projectId: sixb.id, id: runId })
+    ).toMatchObject({
+      status: "running",
+      attempt: 1,
+      sourceRowsRead: 2,
+      telemetryCheckpoint: { nextBatchOrdinal: 1, nextRowOffset: 2, inputExhausted: false },
+    })
+
+    lakeStorage.failAfterRows = undefined
+    await expect(runProjectionJob(input)).resolves.toMatchObject({
+      run: {
+        status: "succeeded",
+        attempt: 2,
+        sourceRowsRead: 4,
+        telemetryCheckpoint: { nextBatchOrdinal: 2, nextRowOffset: 4, inputExhausted: true },
+      },
+    })
+    expect(lakeStorage.readInputs.map((read) => read.offset)).toEqual([0, 2])
+
+    const commits = await deps.storage.ontology.commits.list({
+      projectId: sixb.id,
+      run: { kind: "projection", id: runId },
+    })
+    expect(
+      commits.commits.map((commit) =>
+        commit.intent.kind === "telemetry" && commit.intent.source.kind === "projection"
+          ? commit.intent.source.batchOrdinal
+          : null
+      )
+    ).toEqual([0, 1])
+  })
+
+  test("does not complete telemetry when a known pinned row count is not reached", async () => {
+    const deps = createDeps()
+    const lakeStorage = new InterruptibleLakeStorage(deps.lakeStorage)
+    const sixb = createSixb(
+      {
+        datasets: [roomReadingsDataset],
+        projections: [roomTemperatureProjection],
+      },
+      { ...deps, lakeStorage }
+    )
+    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    const version = await commitDatasetVersion(
+      lakeStorage,
+      roomReadingsDataset,
+      Array.from({ length: 3 }, (_, index) => ({
+        room_id: "r1",
+        observed_at: `2026-06-01T12:0${index}:00.000Z`,
+        temperature: 70 + index,
+        sync_row_id: `reading-${index}`,
+        unused: null,
+      }))
+    )
+    const input = {
+      runtime: createRuntime(sixb),
+      batchSize: 2,
+      job: {
+        id: "projrun-telemetry-short-read",
+        projectionId: roomTemperatureProjection.id,
+        projectionKind: "telemetry" as const,
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    }
+
+    lakeStorage.stopAfterRows = 2
+    await expect(runProjectionJob(input)).rejects.toThrow("reached EOF after 2 of 3 pinned rows")
+    expect(
+      await deps.storage.projectionRuns.getById({
+        projectId: sixb.id,
+        id: canonicalRunId(input.job.id),
+      })
+    ).toMatchObject({
+      status: "running",
+      sourceRowsRead: 2,
+      telemetryCheckpoint: { nextRowOffset: 2, inputExhausted: false },
+    })
+
+    lakeStorage.stopAfterRows = undefined
+    await expect(runProjectionJob(input)).resolves.toMatchObject({
+      run: {
+        status: "succeeded",
+        sourceRowsRead: 3,
+        telemetryCheckpoint: { nextRowOffset: 3, inputExhausted: true },
+      },
+    })
+  })
+
+  test("finishes empty telemetry input without creating a batch commit", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomReadingsDataset],
+        projections: [roomTemperatureProjection],
+      },
+      deps
+    )
+    const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      batchSize: 2,
+      job: {
+        id: "projrun-empty-telemetry",
+        projectionId: roomTemperatureProjection.id,
+        projectionKind: "telemetry",
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.run).toMatchObject({
+      status: "succeeded",
+      sourceRowsRead: 0,
+      telemetryCheckpoint: { nextBatchOrdinal: 0, nextRowOffset: 0, inputExhausted: true },
+    })
+    await expect(
+      deps.storage.ontology.commits.list({
+        projectId: sixb.id,
+        run: { kind: "projection", id: result.run.id },
+      })
+    ).resolves.toMatchObject({ commits: [], total: 0 })
   })
 
   test("telemetry projections overwrite a prior value at the same instant (last-write-wins)", async () => {
@@ -703,7 +1020,7 @@ describe("runProjectionJob", () => {
     expect(history.map((point) => point.value)).toEqual([71])
   })
 
-  test("telemetry projections skip readings for missing objects and keep the run successful", async () => {
+  test("fails one telemetry batch atomically when a referenced object is missing", async () => {
     const deps = createDeps()
     const sixb = createSixb(
       {
@@ -732,26 +1049,25 @@ describe("runProjectionJob", () => {
       },
     ])
 
-    const result = await runProjectionJob({
-      runtime: createRuntime(sixb),
-      batchSize: 10,
-      job: {
-        id: "projrun-telemetry-partial-failure",
-        projectionId: "room-temperature-proj",
-        projectionKind: "telemetry",
-        datasetId: roomReadingsDataset.id,
-        versionId: version.versionId,
-      },
-    })
+    await expect(
+      runProjectionJob({
+        runtime: createRuntime(sixb),
+        batchSize: 10,
+        job: {
+          id: "projrun-telemetry-partial-failure",
+          projectionId: "room-temperature-proj",
+          projectionKind: "telemetry",
+          datasetId: roomReadingsDataset.id,
+          versionId: version.versionId,
+        },
+      })
+    ).rejects.toThrow("missing object")
 
-    // A reading for an object that does not exist yet is a benign, retryable
-    // skip (matching object/link projections), not a whole-run failure.
-    expect(result.run.status).toBe("succeeded")
-    expect(result.rowsProcessed).toBe(2)
-    expect(result.rowsSkipped).toBe(1)
-    expect(result.telemetryPointsAppended).toBe(1)
-    expect(result.telemetryPointsSkipped).toBe(1)
-    expect(result.telemetryRowsFailed).toBe(0)
+    const run = await deps.storage.projectionRuns.getById({
+      projectId: sixb.id,
+      id: canonicalRunId("projrun-telemetry-partial-failure"),
+    })
+    expect(run).toMatchObject({ status: "failed", sourceRowsRead: 0, sourceRowsSkipped: 0 })
 
     const history = await deps.storage.timeseries.getHistory({
       projectId: sixb.id,
@@ -759,7 +1075,7 @@ describe("runProjectionJob", () => {
       objectId: "r1",
       propertyId: "temperature",
     })
-    expect(history.map((point) => point.value)).toEqual([70.5])
+    expect(history).toEqual([])
   })
 
   test("telemetry projections parse zone-less timestamps as UTC", async () => {
@@ -794,7 +1110,6 @@ describe("runProjectionJob", () => {
     })
 
     expect(result.run.status).toBe("succeeded")
-    expect(result.telemetryPointsAppended).toBe(1)
 
     const history = await deps.storage.timeseries.getHistory({
       projectId: sixb.id,
@@ -845,7 +1160,6 @@ describe("runProjectionJob", () => {
 
     // Both rows share (object, property, instant); the upsert keeps the last.
     expect(result.run.status).toBe("succeeded")
-    expect(result.telemetryRowsFailed).toBe(0)
 
     const history = await deps.storage.timeseries.getHistory({
       projectId: sixb.id,
@@ -931,8 +1245,7 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.objectsUpserted).toBe(1)
-    expect(result.rowsSkipped).toBe(0)
+    expect(result.run.sourceRowsSkipped).toBe(0)
     expect(lakeStorage.readInputs).toHaveLength(1)
     expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "room_name"])
   })
@@ -951,7 +1264,7 @@ describe("runProjectionJob", () => {
       { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
     ])
 
-    const result = await runProjectionJob({
+    await runProjectionJob({
       runtime: createRuntime(sixb),
       job: {
         id: "projrun-fk",
@@ -961,9 +1274,6 @@ describe("runProjectionJob", () => {
         versionId: version.versionId,
       },
     })
-
-    expect(result.objectsUpserted).toBe(1)
-    expect(result.linksUpserted).toBe(1)
 
     const links = await deps.storage.objects.listLinks({
       projectId: sixb.id,
@@ -986,11 +1296,20 @@ describe("runProjectionJob", () => {
     )
     await sixb.upsertObject("Building", { id: "b1", name: "Old HQ" })
     await sixb.upsertObject("Building", { id: "b2", name: "New HQ" })
-    await sixb.upsertObject("Room", { id: "r1", name: "Kitchen", buildingRef: "b1" })
-    await sixb.upsertLink("Room", "r1", "inBuilding", {
-      targetTypeId: "Building",
-      targetId: "b1",
+    const firstVersion = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
+    ])
+    await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-initial-fk",
+        projectionId: "room-proj",
+        projectionKind: "object",
+        datasetId: "canonical.rooms",
+        versionId: firstVersion.versionId,
+      },
     })
+
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: "b2" },
     ])
@@ -1007,7 +1326,6 @@ describe("runProjectionJob", () => {
     })
 
     expect(result.run.status).toBe("succeeded")
-    expect(result.linksUpserted).toBe(1)
 
     const links = await deps.storage.objects.listLinks({
       projectId: sixb.id,
@@ -1029,7 +1347,6 @@ describe("runProjectionJob", () => {
       },
     })
     expect(repeated.run.status).toBe("succeeded")
-    expect(repeated.linksUpserted).toBe(1)
     expect(
       await deps.storage.objects.listLinks({
         projectId: sixb.id,
@@ -1040,7 +1357,7 @@ describe("runProjectionJob", () => {
     ).toHaveLength(1)
   })
 
-  test("keeps cardinality-many FK links additive", async () => {
+  test("rejects duplicate object roots instead of merging repeated source rows", async () => {
     const deps = createDeps()
     const sixb = createSixb(
       {
@@ -1057,29 +1374,157 @@ describe("runProjectionJob", () => {
       { room_id: "r1", room_name: "Kitchen", building_ref: "s2" },
     ])
 
-    const result = await runProjectionJob({
-      runtime: createRuntime(sixb),
-      job: {
-        id: "projrun-many-fk",
-        projectionId: "room-proj",
-        projectionKind: "object",
-        datasetId: "canonical.rooms",
-        versionId: version.versionId,
-      },
-    })
+    await expect(
+      runProjectionJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "projrun-many-fk",
+          projectionId: "room-proj",
+          projectionKind: "object",
+          datasetId: "canonical.rooms",
+          versionId: version.versionId,
+        },
+      })
+    ).rejects.toThrow("repeats root")
 
-    expect(result.run.status).toBe("succeeded")
-    expect(result.linksUpserted).toBe(2)
+    expect(
+      await deps.storage.projectionRuns.getById({
+        projectId: sixb.id,
+        id: canonicalRunId("projrun-many-fk"),
+      })
+    ).toMatchObject({ status: "failed", sourceRowsRead: 2 })
     const links = await deps.storage.objects.listLinks({
       projectId: sixb.id,
       objectTypeId: "Room",
       objectId: "r1",
       linkId: "hasSensors",
     })
-    expect(links.map((link) => link.targetId).sort()).toEqual(["s1", "s2"])
+    expect(links).toEqual([])
   })
 
-  test("converges repeated FK edges onto one link with distinct committed facts", async () => {
+  test("does not activate a replacement shorter than its persisted progress floor", async () => {
+    const deps = createDeps()
+    const lakeStorage = new InterruptibleLakeStorage(deps.lakeStorage)
+    const sixb = createSixb(
+      { datasets: [roomsDataset], projections: [roomProjection] },
+      { ...deps, lakeStorage }
+    )
+    const initialVersion = await commitDatasetVersion(lakeStorage, roomsDataset, [
+      { room_id: "old", room_name: "Old room", building_ref: null },
+    ])
+    await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-replacement-floor-initial",
+        projectionId: roomProjection.id,
+        projectionKind: "object",
+        datasetId: roomsDataset.id,
+        versionId: initialVersion.versionId,
+      },
+    })
+
+    const nextVersion = await commitDatasetVersion(
+      lakeStorage,
+      roomsDataset,
+      ["one", "two", "three"].map((id) => ({
+        room_id: id,
+        room_name: `Room ${id}`,
+        building_ref: null,
+      }))
+    )
+    const input = {
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-replacement-floor",
+        projectionId: roomProjection.id,
+        projectionKind: "object" as const,
+        datasetId: roomsDataset.id,
+        versionId: nextVersion.versionId,
+      },
+    }
+    lakeStorage.omitVersionRowCount = true
+    lakeStorage.failAfterRows = 2
+    await expect(runProjectionJob(input)).rejects.toThrow("lake read interrupted")
+
+    lakeStorage.failAfterRows = undefined
+    lakeStorage.stopAfterRows = 1
+    await expect(runProjectionJob(input)).rejects.toThrow("persisted progress floor")
+    expect(
+      await deps.storage.projectionRuns.getById({
+        projectId: sixb.id,
+        id: canonicalRunId(input.job.id),
+      })
+    ).toMatchObject({ status: "running", attempt: 2, sourceRowsRead: 2 })
+    expect(
+      await deps.storage.objects.getByPrimaryId({
+        projectId: sixb.id,
+        objectTypeId: Room.id,
+        primaryId: "old",
+      })
+    ).toMatchObject({ properties: { name: "Old room" } })
+    expect(
+      await deps.storage.objects.getByPrimaryId({
+        projectId: sixb.id,
+        objectTypeId: Room.id,
+        primaryId: "one",
+      })
+    ).toBeNull()
+  })
+
+  test("keeps the run running when candidate abandonment cannot be confirmed", async () => {
+    const deps = createDeps()
+    const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] }, deps)
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+    ])
+    const abandonmentFailure = new Error("candidate abandonment unavailable")
+    const restoreAbandon = decorateOperationScopedMethodForTesting(
+      deps.storage.ontology.sources,
+      "abandon",
+      (abandon) => {
+        function failCandidateAbandonment(
+          input: AbandonSourceMaterializationCandidateInput
+        ): Promise<OntologySourceRecord>
+        function failCandidateAbandonment(
+          input: ReclaimSourceMaterializationInput
+        ): Promise<OntologySourceRecord | null>
+        async function failCandidateAbandonment(
+          input: AbandonSourceMaterializationCandidateInput | ReclaimSourceMaterializationInput
+        ): Promise<OntologySourceRecord | null> {
+          if (input.kind === "candidate") throw abandonmentFailure
+          return abandon(input)
+        }
+        return failCandidateAbandonment
+      }
+    )
+
+    try {
+      await expect(
+        runProjectionJob({
+          runtime: createRuntime(sixb),
+          job: {
+            id: "projrun-abandonment-fails",
+            projectionId: roomProjection.id,
+            projectionKind: "object",
+            datasetId: roomsDataset.id,
+            versionId: version.versionId,
+          },
+        })
+      ).rejects.toBe(abandonmentFailure)
+    } finally {
+      restoreAbandon()
+    }
+
+    expect(
+      await deps.storage.projectionRuns.getById({
+        projectId: sixb.id,
+        id: canonicalRunId("projrun-abandonment-fails"),
+      })
+    ).toMatchObject({ status: "running", attempt: 1 })
+  })
+
+  test("rejects non-contiguous repetitions of the same object root", async () => {
     const deps = createDeps()
     const sixb = createSixb(
       {
@@ -1108,23 +1553,19 @@ describe("runProjectionJob", () => {
       { room_id: "r1", room_name: "Kitchen", building_ref: "b2" },
       { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
     ])
-    const result = await runProjectionJob({
-      runtime: createRuntime(sixb),
-      job: {
-        id: "projrun-repeated-edge",
-        projectionId: "room-proj",
-        projectionKind: "object",
-        datasetId: "canonical.rooms",
-        versionId: version.versionId,
-      },
-      batchSize: 1,
-    })
-
-    expect(result.run.status).toBe("succeeded")
-    expect(result.linksUpserted).toBe(3)
-    // Each assignment commit is its own fact; stable event ids keep them distinguishable.
-    expect(publishedB1Creates).toHaveLength(2)
-    expect(new Set(publishedB1Creates).size).toBe(2)
+    await expect(
+      runProjectionJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "projrun-repeated-edge",
+          projectionId: "room-proj",
+          projectionKind: "object",
+          datasetId: "canonical.rooms",
+          versionId: version.versionId,
+        },
+      })
+    ).rejects.toThrow("repeats root")
+    expect(publishedB1Creates).toEqual([])
 
     const links = await deps.storage.objects.listLinks({
       projectId: sixb.id,
@@ -1132,7 +1573,7 @@ describe("runProjectionJob", () => {
       objectId: "r1",
       linkId: "inBuilding",
     })
-    expect(links.map((link) => link.targetId)).toEqual(["b1"])
+    expect(links).toEqual([])
   })
 
   test("preserves cardinality-one links for blank or missing FK targets", async () => {
@@ -1169,7 +1610,6 @@ describe("runProjectionJob", () => {
     })
 
     expect(result.run.status).toBe("succeeded")
-    expect(result.linksUpserted).toBe(0)
     for (const roomId of ["r1", "r2"]) {
       const links = await deps.storage.objects.listLinks({
         projectId: sixb.id,
@@ -1196,7 +1636,7 @@ describe("runProjectionJob", () => {
       { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
     ])
 
-    const result = await runProjectionJob({
+    await runProjectionJob({
       runtime: createRuntime(sixb),
       job: {
         id: "projrun-field-fk",
@@ -1206,9 +1646,6 @@ describe("runProjectionJob", () => {
         versionId: version.versionId,
       },
     })
-
-    expect(result.objectsUpserted).toBe(1)
-    expect(result.linksUpserted).toBe(1)
 
     const room = await deps.storage.objects.getByPrimaryId({
       projectId: sixb.id,
@@ -1251,14 +1688,7 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.objectsUpserted).toBe(1)
-    expect(result.linksUpserted).toBe(0)
-
-    const run = await deps.storage.projectionRuns.getById({
-      projectId: sixb.id,
-      id: "projrun-missing-fk-target",
-    })
-    expect(run?.status).toBe("succeeded")
+    expect(result.run.status).toBe("succeeded")
   })
 
   test("materializes a link projection from a join dataset", async () => {
@@ -1274,7 +1704,6 @@ describe("runProjectionJob", () => {
     await sixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
     const version = await commitDatasetVersion(deps.lakeStorage, roomSensorsDataset, [
       { room_id: "r1", sensor_id: "s1" },
-      { room_id: "r1", sensor_id: "s1" },
     ])
 
     const result = await runProjectionJob({
@@ -1288,9 +1717,8 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.rowsProcessed).toBe(2)
-    expect(result.rowsSkipped).toBe(1)
-    expect(result.linksUpserted).toBe(1)
+    expect(result.run.sourceRowsRead).toBe(1)
+    expect(result.run.sourceRowsSkipped).toBe(0)
 
     const links = await deps.storage.objects.listLinks({
       projectId: sixb.id,
@@ -1388,8 +1816,7 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.linksUpserted).toBe(1)
-    expect(result.rowsSkipped).toBe(0)
+    expect(result.run.sourceRowsSkipped).toBe(0)
     expect(lakeStorage.readInputs).toHaveLength(1)
     expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "sensor_id"])
   })
@@ -1419,9 +1846,8 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(objectResult.rowsProcessed).toBe(2)
-    expect(objectResult.rowsSkipped).toBe(1)
-    expect(objectResult.objectsUpserted).toBe(1)
+    expect(objectResult.run.sourceRowsRead).toBe(2)
+    expect(objectResult.run.sourceRowsSkipped).toBe(1)
 
     await objectSixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
     await objectSixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
@@ -1449,9 +1875,8 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(linkResult.rowsProcessed).toBe(3)
-    expect(linkResult.rowsSkipped).toBe(2)
-    expect(linkResult.linksUpserted).toBe(1)
+    expect(linkResult.run.sourceRowsRead).toBe(3)
+    expect(linkResult.run.sourceRowsSkipped).toBe(2)
   })
 
   test("marks the run failed when projected values violate ontology validation", async () => {
@@ -1492,16 +1917,15 @@ describe("runProjectionJob", () => {
           versionId: version.versionId,
         },
       })
-    ).rejects.toBeInstanceOf(ProjectionWorkerError)
+    ).rejects.toBeInstanceOf(MaterializationValidationError)
 
     const run = await deps.storage.projectionRuns.getById({
       projectId: sixb.id,
-      id: "projrun-invalid-property",
+      id: canonicalRunId("projrun-invalid-property"),
     })
     expect(run?.status).toBe("failed")
-    expect(run?.rowsProcessed).toBe(1)
-    expect(run?.rowsSkipped).toBe(1)
-    expect(run?.objectsUpserted).toBe(0)
+    expect(run?.sourceRowsRead).toBe(1)
+    expect(run?.sourceRowsSkipped).toBe(0)
     expect(run?.errorMessage).toContain("must be one of")
   })
 
@@ -1554,7 +1978,7 @@ describe("runProjectionJob", () => {
       },
     ])
 
-    const result = await runProjectionJob({
+    await runProjectionJob({
       runtime: createRuntime(sixb),
       job: {
         id: "projrun-int64-string",
@@ -1565,7 +1989,6 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.objectsUpserted).toBe(1)
     const device = await deps.storage.objects.getByPrimaryId({
       projectId: sixb.id,
       objectTypeId: "Device",
@@ -1618,12 +2041,11 @@ describe("runProjectionJob", () => {
 
     const run = await deps.storage.projectionRuns.getById({
       projectId: sixb.id,
-      id: "projrun-unsafe-int64-string",
+      id: canonicalRunId("projrun-unsafe-int64-string"),
     })
     expect(run?.status).toBe("failed")
-    expect(run?.rowsProcessed).toBe(1)
-    expect(run?.rowsSkipped).toBe(1)
-    expect(run?.objectsUpserted).toBe(0)
+    expect(run?.sourceRowsRead).toBe(1)
+    expect(run?.sourceRowsSkipped).toBe(0)
     expect(run?.errorMessage).toContain("cannot safely coerce")
   })
 
@@ -1661,7 +2083,7 @@ describe("runProjectionJob", () => {
       { document_id: "doc1", attachment },
     ])
 
-    const result = await runProjectionJob({
+    await runProjectionJob({
       runtime: createRuntime(sixb),
       job: {
         id: "projrun-fileref",
@@ -1672,7 +2094,6 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.objectsUpserted).toBe(1)
     const document = await deps.storage.objects.getByPrimaryId({
       projectId: sixb.id,
       objectTypeId: "Document",
@@ -1681,7 +2102,7 @@ describe("runProjectionJob", () => {
     expect(document?.properties.attachment).toEqual(attachment)
   })
 
-  test("marks the run failed before reading rows when the committed schema mismatches", async () => {
+  test("rejects a committed schema mismatch before claiming a run", async () => {
     const deps = createDeps()
     const mismatchedRoomsDataset = defineDataset("canonical.rooms", {
       schema: [col("room_id", "string"), col("name", "string"), col("building_ref", "string")],
@@ -1712,13 +2133,12 @@ describe("runProjectionJob", () => {
 
     const run = await deps.storage.projectionRuns.getById({
       projectId: sixb.id,
-      id: "projrun-schema-mismatch",
+      id: canonicalRunId("projrun-schema-mismatch"),
     })
-    expect(run?.status).toBe("failed")
-    expect(run?.rowsProcessed).toBe(0)
+    expect(run).toBeNull()
   })
 
-  test("marks the run failed when the projection id is unknown", async () => {
+  test("rejects an unknown projection before claiming a run", async () => {
     const deps = createDeps()
     const sixb = createSixb(
       {
@@ -1742,13 +2162,13 @@ describe("runProjectionJob", () => {
           versionId: version.versionId,
         },
       })
-    ).rejects.toThrow("Unknown projection")
+    ).rejects.toThrow("not registered")
 
     const run = await deps.storage.projectionRuns.getById({
       projectId: sixb.id,
-      id: "projrun-unknown",
+      id: canonicalRunId("projrun-unknown"),
     })
-    expect(run?.status).toBe("failed")
+    expect(run).toBeNull()
   })
 
   test("rejects an incompatible object FK target at startup before reading rows", () => {
@@ -1800,7 +2220,7 @@ describe("runProjectionJob", () => {
     ).toThrow("not compatible")
   })
 
-  test("marks the run cancelled when the signal aborts during the final object flush", async () => {
+  test("finishes a replacement whose ontology commit won a race with a late abort", async () => {
     const deps = createDeps()
     const abortController = new AbortController()
     const sixb = createSixb(
@@ -1829,29 +2249,79 @@ describe("runProjectionJob", () => {
       { room_id: "r1", room_name: "Kitchen", building_ref: null },
     ])
 
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-abort-final-flush",
+        projectionId: "room-proj",
+        projectionKind: "object",
+        datasetId: "canonical.rooms",
+        versionId: version.versionId,
+      },
+      signal: abortController.signal,
+    })
+
+    const run = await deps.storage.projectionRuns.getById({
+      projectId: sixb.id,
+      id: canonicalRunId("projrun-abort-final-flush"),
+    })
+    expect(result.run.status).toBe("succeeded")
+    expect(run?.status).toBe("succeeded")
+  })
+
+  test("records explicit cancellation after claim without committing source state", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomsDataset],
+        projections: [roomProjection],
+      },
+      deps
+    )
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+    ])
+    const cancellation = new MaterializationCancellationError("Cancelled by test.")
+    const abortController = new AbortController()
+    abortController.abort(cancellation)
+    let failuresReported = 0
+
     await expect(
       runProjectionJob({
         runtime: createRuntime(sixb),
         job: {
-          id: "projrun-abort-final-flush",
+          id: "projrun-explicit-cancellation",
           projectionId: "room-proj",
           projectionKind: "object",
-          datasetId: "canonical.rooms",
+          datasetId: roomsDataset.id,
           versionId: version.versionId,
         },
         signal: abortController.signal,
+        onRunFailed: () => {
+          failuresReported += 1
+        },
       })
-    ).rejects.toThrow("Projection worker aborted")
+    ).rejects.toBe(cancellation)
 
-    const run = await deps.storage.projectionRuns.getById({
-      projectId: sixb.id,
-      id: "projrun-abort-final-flush",
-    })
-    expect(run?.status).toBe("cancelled")
-    expect(run?.objectsUpserted).toBe(1)
+    expect(failuresReported).toBe(0)
+    expect(
+      await deps.storage.projectionRuns.getById({
+        projectId: sixb.id,
+        id: canonicalRunId("projrun-explicit-cancellation"),
+      })
+    ).toMatchObject({ status: "cancelled", sourceRowsRead: 0 })
+    expect(
+      await deps.storage.ontology.commits.getByOrigin({
+        projectId: sixb.id,
+        origin: {
+          kind: "projection",
+          projectionRunId: canonicalRunId("projrun-explicit-cancellation"),
+        },
+      })
+    ).toBeNull()
   })
 
-  test("throws a repair-needed error when finalization fails after materialization", async () => {
+  test("reclaims a run when terminal finalization failed after the durable commit", async () => {
     const deps = createDeps()
     const sixb = createSixb(
       {
@@ -1865,30 +2335,39 @@ describe("runProjectionJob", () => {
     ])
     const finishCause = new Error("finish unavailable")
     const runtime = createRuntime(sixb)
-
-    try {
-      await runProjectionJob({
-        runtime: {
-          ...runtime,
-          projectionRunsStorage: createFinishFailingProjectionRunStorage(
-            runtime.projectionRunsStorage,
-            finishCause
-          ),
-        },
-        job: {
-          id: "projrun-finish-fails",
-          projectionId: "room-proj",
-          projectionKind: "object",
-          datasetId: "canonical.rooms",
-          versionId: version.versionId,
-        },
-      })
-      throw new Error("Expected runProjectionJob to fail.")
-    } catch (error) {
-      expect(error).toBeInstanceOf(ProjectionWorkerError)
-      expect(error).toHaveProperty("cause", finishCause)
-      expect(errorMessage(error)).toContain("may need repair")
+    const restoreFinish = decorateOperationScopedMethodForTesting(
+      deps.storage.projectionRuns,
+      "finishMaterialization",
+      () => async () => Promise.reject(finishCause)
+    )
+    const input = {
+      runtime,
+      job: {
+        id: "projrun-finish-fails",
+        projectionId: "room-proj",
+        projectionKind: "object" as const,
+        datasetId: "canonical.rooms",
+        versionId: version.versionId,
+      },
     }
+
+    await expect(runProjectionJob(input)).rejects.toBe(finishCause)
+    const runId = canonicalRunId("projrun-finish-fails")
+    expect(
+      await deps.storage.projectionRuns.getById({ projectId: sixb.id, id: runId })
+    ).toMatchObject({ status: "running", attempt: 1 })
+    expect(
+      await deps.storage.ontology.commits.getByOrigin({
+        projectId: sixb.id,
+        origin: { kind: "projection", projectionRunId: runId },
+      })
+    ).not.toBeNull()
+
+    restoreFinish()
+    await expect(runProjectionJob(input)).resolves.toMatchObject({
+      run: { status: "succeeded", attempt: 2 },
+      replayedTerminal: false,
+    })
   })
 
   test("telemetry projections carry units in history and materialize the latest value", async () => {
@@ -1929,8 +2408,6 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.telemetryPointsAppended).toBe(2)
-    expect(result.telemetryRowsFailed).toBe(0)
     expect(result.run.status).toBe("succeeded")
 
     const history = await deps.storage.timeseries.getHistory({
@@ -1952,7 +2429,7 @@ describe("runProjectionJob", () => {
     expect(room?.properties.targetTemperature).toBe(22)
   })
 
-  test("isolates an invalid-unit telemetry row, failing the run while keeping good points", async () => {
+  test("rolls back the whole telemetry batch when one point has an invalid unit", async () => {
     const deps = createDeps()
     const sixb = createSixb(
       {
@@ -1989,29 +2466,27 @@ describe("runProjectionJob", () => {
           versionId: version.versionId,
         },
       })
-    ).rejects.toBeInstanceOf(ProjectionWorkerError)
+    ).rejects.toBeInstanceOf(MaterializationValidationError)
 
     const run = await deps.storage.projectionRuns.getById({
       projectId: sixb.id,
-      id: "projrun-target-bad-unit",
+      id: canonicalRunId("projrun-target-bad-unit"),
     })
     expect(run?.status).toBe("failed")
-    expect(run?.rowsProcessed).toBe(2)
-    expect(run?.telemetryPointsAppended).toBe(1)
-    expect(run?.telemetryRowsFailed).toBe(1)
+    expect(run?.sourceRowsRead).toBe(0)
     expect(run?.errorMessage).toContain("Invalid unit")
 
-    // The good reading from the same batch still landed via per-row isolation.
+    // The fixed physical batch is atomic: no prefix of it is committed.
     const history = await deps.storage.timeseries.getHistory({
       projectId: sixb.id,
       objectTypeId: "Room",
       objectId: "r1",
       propertyId: "targetTemperature",
     })
-    expect(history.map((point) => point.value)).toEqual([21])
+    expect(history).toEqual([])
   })
 
-  test("fails before reading rows when a telemetry at field is not date-like", async () => {
+  test("rejects an incompatible telemetry timestamp mapping before claiming a run", async () => {
     const deps = createDeps()
     const invalidAtProjection = {
       _tag: "TelemetryProjectionDefinition",
@@ -2055,13 +2530,8 @@ describe("runProjectionJob", () => {
 
     const run = await deps.storage.projectionRuns.getById({
       projectId: sixb.id,
-      id: "projrun-invalid-at",
+      id: canonicalRunId("projrun-invalid-at"),
     })
-    expect(run?.status).toBe("failed")
-    expect(run?.rowsProcessed).toBe(0)
+    expect(run).toBeNull()
   })
 })
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}

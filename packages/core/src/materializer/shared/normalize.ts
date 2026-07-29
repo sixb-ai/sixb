@@ -462,9 +462,15 @@ export function normalizeTelemetryAppend(input: TelemetryAppend): TelemetryAppen
     const normalized = normalizeTelemetryPoint(point)
     const key = telemetryPointKey(normalized.series, normalized.at)
     const existing = pointsByKey.get(key)
-    if (existing && stableJsonStringify(existing) !== stableJsonStringify(normalized)) {
+    if (
+      input.source.kind === "runtime" &&
+      existing &&
+      stableJsonStringify(existing) !== stableJsonStringify(normalized)
+    ) {
       throw new MaterializationValidationError(`Conflicting telemetry points for ${key}.`)
     }
+    // Projection batches follow stable physical source order: the last occurrence wins. Runtime
+    // callers remain strict because contradictory points usually indicate a request bug.
     pointsByKey.set(key, normalized)
   }
   const points = [...pointsByKey.entries()]
@@ -483,6 +489,7 @@ export function normalizeTelemetryAppend(input: TelemetryAppend): TelemetryAppen
           execution: normalizeProjectionExecution(input.source.execution),
           batchOrdinal: input.source.batchOrdinal,
           sourceRowCount: input.source.sourceRowCount,
+          sourceRowsSkipped: input.source.sourceRowsSkipped,
           inputExhausted: input.source.inputExhausted,
         })
   if (source.kind === "projection") {
@@ -494,6 +501,16 @@ export function normalizeTelemetryAppend(input: TelemetryAppend): TelemetryAppen
     if (!Number.isSafeInteger(source.sourceRowCount) || source.sourceRowCount < 0) {
       throw new MaterializationValidationError(
         "Telemetry projection sourceRowCount must be a nonnegative safe integer."
+      )
+    }
+    if (!Number.isSafeInteger(source.sourceRowsSkipped) || source.sourceRowsSkipped < 0) {
+      throw new MaterializationValidationError(
+        "Telemetry projection sourceRowsSkipped must be a nonnegative safe integer."
+      )
+    }
+    if (source.sourceRowsSkipped > source.sourceRowCount) {
+      throw new MaterializationValidationError(
+        "Telemetry projection sourceRowsSkipped cannot exceed sourceRowCount."
       )
     }
     if (typeof source.inputExhausted !== "boolean") {

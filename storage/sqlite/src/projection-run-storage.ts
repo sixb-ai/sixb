@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
   AssertProjectionMaterializationExecutionInput,
-  CompleteEmptyProjectionTelemetryInput,
+  CompleteProjectionTelemetryInput,
   FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
   ListLatestProjectionRunsInput,
@@ -13,8 +13,8 @@ import type {
   ProjectionKind,
   ProjectionMaterializationRunRecord,
   ProjectionMaterializationRunStorage,
-  ProjectionRunCounters,
   ProjectionRunObjectTypes,
+  ProjectionRunProgress,
   ProjectionRunRecord,
   ProjectionRunStatus,
   StartOrReclaimProjectionMaterializationInput,
@@ -22,7 +22,7 @@ import type {
   UpdateProjectionMaterializationInput,
   UpdateProjectionRunInput,
 } from "@sixb/core/storage"
-import { PROJECTION_COUNTER_KEYS, ProjectionRunError } from "@sixb/core/storage"
+import { PROJECTION_RUN_PROGRESS_KEYS, ProjectionRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
@@ -159,16 +159,11 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
                 next_batch_ordinal,
                 next_row_offset,
                 input_exhausted,
-                rows_processed,
-                rows_skipped,
-                objects_upserted,
-                links_upserted,
-                telemetry_points_appended,
-                telemetry_points_skipped,
-                telemetry_rows_failed
+                source_rows_read,
+                source_rows_skipped
               ) VALUES (
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, 1, ?, ?, ?, ?, ?,
-                0, 0, 0, 0, 0, 0, 0
+                0, 0
               )
             `
             )
@@ -219,8 +214,10 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
   ): Promise<ProjectionMaterializationRunRecord> {
     return runImmediateTransaction(this.db, () => {
       const existing = this.requireMaterializationExecution(input)
-      const counters = mergeCounters(rowToCounters(existing), input)
-      const result = this.updateCounters(existing, counters, input.executionToken)
+      const currentProgress = rowToProgress(existing)
+      assertGenericProgressDoesNotAdvanceTelemetry(existing, currentProgress, input)
+      const progress = mergeProgress(currentProgress, input)
+      const result = this.updateProgress(existing, progress, input.executionToken)
       if (result !== 1) throw staleExecutionTokenError(input.id)
       return rowToProjectionMaterializationRunRecord(this.requireRow(input.projectId, input.id))
     })
@@ -231,6 +228,8 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
   ): Promise<ProjectionRunRecord> {
     return runImmediateTransaction(this.db, () => {
       const existing = this.requireMaterializationExecution(input)
+      const currentProgress = rowToProgress(existing)
+      assertGenericProgressDoesNotAdvanceTelemetry(existing, currentProgress, input)
       if (
         input.status === "succeeded" &&
         existing.materialization_protocol === "telemetry" &&
@@ -240,7 +239,7 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
           `[SixbSqlite] Telemetry projection run '${existing.id}' cannot succeed before its input is exhausted.`
         )
       }
-      const counters = mergeCounters(rowToCounters(existing), input)
+      const progress = mergeProgress(currentProgress, input)
       const result = this.db
         .query(
           `
@@ -249,13 +248,8 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
             status = ?,
             finished_at = ?,
             execution_token = NULL,
-            rows_processed = ?,
-            rows_skipped = ?,
-            objects_upserted = ?,
-            links_upserted = ?,
-            telemetry_points_appended = ?,
-            telemetry_points_skipped = ?,
-            telemetry_rows_failed = ?,
+            source_rows_read = ?,
+            source_rows_skipped = ?,
             error_message = ?
           WHERE project_id = ? AND id = ? AND status = 'running' AND execution_token = ?
         `
@@ -263,13 +257,8 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
         .run(
           input.status,
           (input.finishedAt ?? new Date()).toISOString(),
-          counters.rowsProcessed,
-          counters.rowsSkipped,
-          counters.objectsUpserted,
-          counters.linksUpserted,
-          counters.telemetryPointsAppended,
-          counters.telemetryPointsSkipped,
-          counters.telemetryRowsFailed,
+          progress.sourceRowsRead,
+          progress.sourceRowsSkipped,
           input.status === "succeeded" ? null : (input.errorMessage ?? null),
           input.projectId,
           input.id,
@@ -298,6 +287,12 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
       }
       assertCounter(input.batchOrdinal, "batchOrdinal")
       assertPositiveCounter(input.batchRowCount, "batchRowCount")
+      assertCounter(input.batchRowsSkipped, "batchRowsSkipped")
+      if (input.batchRowsSkipped > input.batchRowCount) {
+        throw new ProjectionRunError(
+          `[SixbSqlite] Telemetry projection run '${existing.id}' skipped rows exceed its batch row count.`
+        )
+      }
       if (input.batchOrdinal !== checkpoint.nextBatchOrdinal) {
         throw new ProjectionRunError(
           `[SixbSqlite] Telemetry projection run '${existing.id}' expected batch ordinal ${checkpoint.nextBatchOrdinal}, got ${input.batchOrdinal}.`
@@ -321,11 +316,21 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
 
       const nextBatchOrdinal = safeAdd(checkpoint.nextBatchOrdinal, 1, "nextBatchOrdinal")
       const nextRowOffset = safeAdd(checkpoint.nextRowOffset, input.batchRowCount, "nextRowOffset")
+      const nextRowsSkipped = safeAdd(
+        rowToProgress(existing).sourceRowsSkipped,
+        input.batchRowsSkipped,
+        "sourceRowsSkipped"
+      )
       const result = this.db
         .query(
           `
           UPDATE projection_runs
-          SET next_batch_ordinal = ?, next_row_offset = ?, input_exhausted = ?
+          SET
+            next_batch_ordinal = ?,
+            next_row_offset = ?,
+            input_exhausted = ?,
+            source_rows_read = ?,
+            source_rows_skipped = ?
           WHERE project_id = ? AND id = ? AND status = 'running' AND execution_token = ?
             AND next_batch_ordinal = ? AND input_exhausted = 0
         `
@@ -334,6 +339,8 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
           nextBatchOrdinal,
           nextRowOffset,
           input.inputExhausted ? 1 : 0,
+          nextRowOffset,
+          nextRowsSkipped,
           input.projectId,
           input.id,
           input.executionToken,
@@ -344,8 +351,8 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
     })
   }
 
-  async completeEmptyTelemetryInput(
-    input: CompleteEmptyProjectionTelemetryInput
+  async completeTelemetryInput(
+    input: CompleteProjectionTelemetryInput
   ): Promise<ProjectionMaterializationRunRecord> {
     return runImmediateTransaction(this.db, () => {
       const existing = this.requireMaterializationExecution(input)
@@ -355,14 +362,8 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
           `[SixbSqlite] Projection run '${existing.id}' does not have a telemetry checkpoint.`
         )
       }
-      if (
-        checkpoint.nextBatchOrdinal !== 0 ||
-        checkpoint.nextRowOffset !== 0 ||
-        checkpoint.inputExhausted
-      ) {
-        throw new ProjectionRunError(
-          `[SixbSqlite] Telemetry projection run '${existing.id}' cannot declare empty input after progress.`
-        )
+      if (checkpoint.inputExhausted) {
+        return rowToProjectionMaterializationRunRecord(existing)
       }
 
       const result = this.db
@@ -371,7 +372,7 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
           UPDATE projection_runs
           SET input_exhausted = 1
           WHERE project_id = ? AND id = ? AND status = 'running' AND execution_token = ?
-            AND next_batch_ordinal = 0 AND next_row_offset = 0 AND input_exhausted = 0
+            AND input_exhausted = 0
         `
         )
         .run(input.projectId, input.id, input.executionToken)
@@ -404,14 +405,9 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
             status,
             started_at,
             attempt,
-            rows_processed,
-            rows_skipped,
-            objects_upserted,
-            links_upserted,
-            telemetry_points_appended,
-            telemetry_points_skipped,
-            telemetry_rows_failed
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, 0, 0, 0, 0, 0, 0, 0, 0)
+            source_rows_read,
+            source_rows_skipped
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, 0, 0, 0)
         `
         )
         .run(
@@ -448,8 +444,8 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
     return runImmediateTransaction(this.db, () => {
       const existing = this.requireRunning(input.projectId, input.id)
       assertLegacyMutationAllowed(existing, "update")
-      const counters = mergeCounters(rowToCounters(existing), input)
-      this.updateCounters(existing, counters)
+      const progress = mergeProgress(rowToProgress(existing), input)
+      this.updateProgress(existing, progress)
       return rowToProjectionRunRecord(this.requireRow(input.projectId, input.id))
     })
   }
@@ -458,7 +454,7 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
     return runImmediateTransaction(this.db, () => {
       const existing = this.requireRunning(input.projectId, input.id)
       assertLegacyMutationAllowed(existing, "finish")
-      const counters = mergeCounters(rowToCounters(existing), input)
+      const progress = mergeProgress(rowToProgress(existing), input)
 
       const result = this.db
         .query(
@@ -467,13 +463,8 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
           SET
             status = ?,
             finished_at = ?,
-            rows_processed = ?,
-            rows_skipped = ?,
-            objects_upserted = ?,
-            links_upserted = ?,
-            telemetry_points_appended = ?,
-            telemetry_points_skipped = ?,
-            telemetry_rows_failed = ?,
+            source_rows_read = ?,
+            source_rows_skipped = ?,
             error_message = ?
           WHERE project_id = ? AND id = ? AND status = 'running'
             AND materialization_protocol IS NULL
@@ -482,13 +473,8 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
         .run(
           input.status,
           (input.finishedAt ?? new Date()).toISOString(),
-          counters.rowsProcessed,
-          counters.rowsSkipped,
-          counters.objectsUpserted,
-          counters.linksUpserted,
-          counters.telemetryPointsAppended,
-          counters.telemetryPointsSkipped,
-          counters.telemetryRowsFailed,
+          progress.sourceRowsRead,
+          progress.sourceRowsSkipped,
           input.status === "succeeded" ? null : (input.errorMessage ?? null),
           input.projectId,
           input.id
@@ -605,20 +591,15 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
     closeSqliteStoreConnection(this.connection)
   }
 
-  private updateCounters(
+  private updateProgress(
     existing: DatabaseRow,
-    counters: ProjectionRunCounters,
+    progress: ProjectionRunProgress,
     executionToken?: string
   ): number {
     const tokenPredicate = executionToken === undefined ? "" : " AND execution_token = ?"
     const args: (string | number)[] = [
-      counters.rowsProcessed,
-      counters.rowsSkipped,
-      counters.objectsUpserted,
-      counters.linksUpserted,
-      counters.telemetryPointsAppended,
-      counters.telemetryPointsSkipped,
-      counters.telemetryRowsFailed,
+      progress.sourceRowsRead,
+      progress.sourceRowsSkipped,
       existing.project_id,
       existing.id,
     ]
@@ -628,13 +609,8 @@ export class SqliteProjectionRunStorage implements ProjectionMaterializationRunS
         `
         UPDATE projection_runs
         SET
-          rows_processed = ?,
-          rows_skipped = ?,
-          objects_upserted = ?,
-          links_upserted = ?,
-          telemetry_points_appended = ?,
-          telemetry_points_skipped = ?,
-          telemetry_rows_failed = ?
+          source_rows_read = ?,
+          source_rows_skipped = ?
         WHERE project_id = ? AND id = ? AND status = 'running'
           AND materialization_protocol ${executionToken === undefined ? "IS NULL" : "IS NOT NULL"}${tokenPredicate}
       `
@@ -853,10 +829,18 @@ function assertCompleteMaterializationRow(row: DatabaseRow): void {
       `[SixbSqlite] Projection run '${row.id}' has incomplete materialization state.`
     )
   }
-  if (row.materialization_protocol === "telemetry" && !checkpointFromRow(row)) {
-    throw new ProjectionRunError(
-      `[SixbSqlite] Telemetry projection run '${row.id}' has incomplete checkpoint state.`
-    )
+  if (row.materialization_protocol === "telemetry") {
+    const checkpoint = checkpointFromRow(row)
+    if (!checkpoint) {
+      throw new ProjectionRunError(
+        `[SixbSqlite] Telemetry projection run '${row.id}' has incomplete checkpoint state.`
+      )
+    }
+    if (row.source_rows_read !== checkpoint.nextRowOffset) {
+      throw new ProjectionRunError(
+        `[SixbSqlite] Telemetry projection run '${row.id}' progress does not match its checkpoint.`
+      )
+    }
   }
 }
 
@@ -870,33 +854,50 @@ function invalidLegacyTransition(id: string, operation: "update" | "finish"): Pr
   )
 }
 
-function mergeCounters(
-  existing: ProjectionRunCounters,
-  input: Partial<ProjectionRunCounters>
-): ProjectionRunCounters {
-  const merged = {} as Record<keyof ProjectionRunCounters, number>
-  for (const key of PROJECTION_COUNTER_KEYS) {
+function mergeProgress(
+  existing: ProjectionRunProgress,
+  input: Partial<ProjectionRunProgress>
+): ProjectionRunProgress {
+  const merged = {} as Record<keyof ProjectionRunProgress, number>
+  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
     assertOptionalCounter(input[key], key)
-    merged[key] = input[key] ?? existing[key]
+    const value = input[key] ?? existing[key]
+    if (value < existing[key]) {
+      throw new ProjectionRunError(`[SixbSqlite] Projection run ${key} must not decrease.`)
+    }
+    merged[key] = value
   }
+  assertProgress(merged)
   return merged
 }
 
-function rowToCounters(row: DatabaseRow): ProjectionRunCounters {
+function assertProgress(progress: ProjectionRunProgress): void {
+  if (progress.sourceRowsSkipped > progress.sourceRowsRead) {
+    throw new ProjectionRunError(
+      "[SixbSqlite] Projection run sourceRowsSkipped must not exceed sourceRowsRead."
+    )
+  }
+}
+
+function assertGenericProgressDoesNotAdvanceTelemetry(
+  row: Pick<DatabaseRow, "id" | "materialization_protocol">,
+  current: ProjectionRunProgress,
+  input: Partial<ProjectionRunProgress>
+): void {
+  if (row.materialization_protocol !== "telemetry") return
+  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
+    if (input[key] !== undefined && input[key] !== current[key]) {
+      throw new ProjectionRunError(
+        `[SixbSqlite] Telemetry projection run '${row.id}' progress can only advance with its checkpoint.`
+      )
+    }
+  }
+}
+
+function rowToProgress(row: DatabaseRow): ProjectionRunProgress {
   return {
-    rowsProcessed: databaseSafeInteger(row.rows_processed, "rowsProcessed"),
-    rowsSkipped: databaseSafeInteger(row.rows_skipped, "rowsSkipped"),
-    objectsUpserted: databaseSafeInteger(row.objects_upserted, "objectsUpserted"),
-    linksUpserted: databaseSafeInteger(row.links_upserted, "linksUpserted"),
-    telemetryPointsAppended: databaseSafeInteger(
-      row.telemetry_points_appended,
-      "telemetryPointsAppended"
-    ),
-    telemetryPointsSkipped: databaseSafeInteger(
-      row.telemetry_points_skipped,
-      "telemetryPointsSkipped"
-    ),
-    telemetryRowsFailed: databaseSafeInteger(row.telemetry_rows_failed, "telemetryRowsFailed"),
+    sourceRowsRead: databaseSafeInteger(row.source_rows_read, "sourceRowsRead"),
+    sourceRowsSkipped: databaseSafeInteger(row.source_rows_skipped, "sourceRowsSkipped"),
   }
 }
 
@@ -938,7 +939,7 @@ function rowToProjectionRunRecord(row: DatabaseRow): ProjectionRunRecord {
     projectionRevision: row.projection_revision ?? undefined,
     ownershipHash: row.ownership_hash ?? undefined,
     telemetryCheckpoint: checkpointFromRow(row),
-    ...rowToCounters(row),
+    ...rowToProgress(row),
     errorMessage: row.error_message ?? undefined,
   }
 }
@@ -996,12 +997,7 @@ interface DatabaseRow {
   next_batch_ordinal: number | null
   next_row_offset: number | null
   input_exhausted: 0 | 1 | null
-  rows_processed: number
-  rows_skipped: number
-  objects_upserted: number
-  links_upserted: number
-  telemetry_points_appended: number
-  telemetry_points_skipped: number
-  telemetry_rows_failed: number
+  source_rows_read: number
+  source_rows_skipped: number
   error_message: string | null
 }

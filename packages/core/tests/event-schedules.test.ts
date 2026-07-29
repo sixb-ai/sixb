@@ -87,6 +87,7 @@ describe("evaluateEventSchedule", () => {
           payload: {
             datasetId: invoices.id,
             versionId: "version-1",
+            createdAt: "2026-01-01T00:00:00.000Z",
             producer: { kind: "sync", id: "sync-invoices", runId: "run-1" },
           },
         },
@@ -96,6 +97,7 @@ describe("evaluateEventSchedule", () => {
     expect(evaluateEventSchedule(schedule, event!)?.event).toEqual({
       datasetId: invoices.id,
       versionId: "version-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
       producer: { kind: "sync", id: "sync-invoices", runId: "run-1" },
     })
   })

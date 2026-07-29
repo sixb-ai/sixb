@@ -21,6 +21,7 @@ import {
   type ScheduleDefinition,
   type WorkflowDefinition,
 } from "@sixb/core"
+import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import { compileRoutes, compileRoutesWithDiagnostics } from "../src/compile-routes"
 import type { CompileRoutesParams, OrchestratorRouteKey } from "../src/types"
 
@@ -73,6 +74,28 @@ function makeDataset(id: string) {
 const rawRooms = makeDataset("raw.rooms")
 const cleanRooms = makeDataset("clean.rooms")
 const rawRoomsUpdated = defineSchedule("raw-rooms-updated").on(events.dataset(rawRooms).updated())
+
+function projectionDescriptor(
+  projectionId: string,
+  datasetId: string,
+  projectionKind: ProjectionDispatchDescriptor["projectionKind"]
+): ProjectionDispatchDescriptor {
+  const common = {
+    projectionId,
+    datasetId,
+    ontologyRevision: "ontology-1",
+    projectionRevision: `${projectionId}-revision`,
+    ownershipHash: `${projectionId}-ownership`,
+  }
+  switch (projectionKind) {
+    case "object":
+      return { ...common, projectionKind, protocol: "replacement" }
+    case "link":
+      return { ...common, projectionKind, protocol: "replacement" }
+    case "telemetry":
+      return { ...common, projectionKind, protocol: "telemetry" }
+  }
+}
 
 function makeSync(id: string, schedule?: ScheduleDefinition) {
   const builder = defineSync(id)
@@ -261,17 +284,14 @@ describe("compileRoutes", () => {
     const projection = defineProjection("rooms-projection", Room)
       .fromDataset(rawRooms)
       .properties({ id: "id" })
+    const descriptor = projectionDescriptor(projection.id, projection.datasetId, "object")
 
-    expect(jobsFor({ projections: [projection] }, "dataset.version.committed:raw.rooms")).toEqual([
+    expect(jobsFor({ projections: [descriptor] }, "dataset.version.committed:raw.rooms")).toEqual([
       {
         queue: "projections",
         job: {
           type: "projection.run.requested",
-          payload: {
-            projectionId: "rooms-projection",
-            projectionKind: "object",
-            datasetId: "raw.rooms",
-          },
+          payload: descriptor,
         },
       },
     ])
@@ -297,11 +317,24 @@ describe("compileRoutes", () => {
       .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 
     expect(
-      jobsFor({ projections: [linkProjection] }, "dataset.version.committed:raw.room-sensors")[0]
+      jobsFor(
+        {
+          projections: [projectionDescriptor(linkProjection.id, linkProjection.datasetId, "link")],
+        },
+        "dataset.version.committed:raw.room-sensors"
+      )[0]
     ).toMatchObject({ queue: "projections", job: { payload: { projectionKind: "link" } } })
     expect(
       jobsFor(
-        { projections: [telemetryProjection] },
+        {
+          projections: [
+            projectionDescriptor(
+              telemetryProjection.id,
+              telemetryProjection.datasetId,
+              "telemetry"
+            ),
+          ],
+        },
         "dataset.version.committed:raw.room-temperature"
       )[0]
     ).toMatchObject({ queue: "projections", job: { payload: { projectionKind: "telemetry" } } })

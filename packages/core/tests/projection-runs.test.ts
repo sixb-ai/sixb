@@ -28,33 +28,20 @@ describe("InMemoryProjectionRunStorage", () => {
       datasetId: "canonical.rooms",
       datasetVersionId: "ver_1",
       status: "running",
-      rowsProcessed: 0,
-      rowsSkipped: 0,
-      objectsUpserted: 0,
-      linksUpserted: 0,
-      telemetryPointsAppended: 0,
-      telemetryPointsSkipped: 0,
-      telemetryRowsFailed: 0,
+      sourceRowsRead: 0,
+      sourceRowsSkipped: 0,
     })
 
     const updated = await storage.update({
       id: "projrun_1",
       projectId: "my-app",
-      rowsProcessed: 10,
-      rowsSkipped: 2,
-      objectsUpserted: 8,
-      telemetryPointsAppended: 3,
-      telemetryPointsSkipped: 1,
+      sourceRowsRead: 10,
+      sourceRowsSkipped: 2,
     })
 
     expect(updated).toMatchObject({
-      rowsProcessed: 10,
-      rowsSkipped: 2,
-      objectsUpserted: 8,
-      linksUpserted: 0,
-      telemetryPointsAppended: 3,
-      telemetryPointsSkipped: 1,
-      telemetryRowsFailed: 0,
+      sourceRowsRead: 10,
+      sourceRowsSkipped: 2,
       status: "running",
     })
 
@@ -63,23 +50,15 @@ describe("InMemoryProjectionRunStorage", () => {
       projectId: "my-app",
       status: "succeeded",
       finishedAt,
-      rowsProcessed: 12,
-      objectsUpserted: 10,
-      telemetryPointsAppended: 4,
-      telemetryRowsFailed: 1,
+      sourceRowsRead: 12,
     })
 
     const stored = await storage.getById({ projectId: "my-app", id: "projrun_1" })
 
     expect(finished).toMatchObject({
       status: "succeeded",
-      rowsProcessed: 12,
-      rowsSkipped: 2,
-      objectsUpserted: 10,
-      linksUpserted: 0,
-      telemetryPointsAppended: 4,
-      telemetryPointsSkipped: 1,
-      telemetryRowsFailed: 1,
+      sourceRowsRead: 12,
+      sourceRowsSkipped: 2,
       errorMessage: undefined,
     })
     expect(stored?.startedAt.toISOString()).toBe(startedAt.toISOString())
@@ -103,8 +82,8 @@ describe("InMemoryProjectionRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       finishedAt: new Date("2026-05-04T09:00:01.000Z"),
-      rowsProcessed: 5,
-      rowsSkipped: 1,
+      sourceRowsRead: 5,
+      sourceRowsSkipped: 1,
       errorMessage: "Invalid row",
     })
 
@@ -121,8 +100,7 @@ describe("InMemoryProjectionRunStorage", () => {
       id: "run-2",
       projectId: "my-app",
       status: "succeeded",
-      rowsProcessed: 20,
-      objectsUpserted: 20,
+      sourceRowsRead: 20,
     })
 
     await storage.start({
@@ -151,8 +129,8 @@ describe("InMemoryProjectionRunStorage", () => {
 
     const failed = await storage.getById({ projectId: "my-app", id: "run-1" })
     expect(failed?.status).toBe("failed")
-    expect(failed?.rowsProcessed).toBe(5)
-    expect(failed?.rowsSkipped).toBe(1)
+    expect(failed?.sourceRowsRead).toBe(5)
+    expect(failed?.sourceRowsSkipped).toBe(1)
     expect(failed?.errorMessage).toBe("Invalid row")
   })
 
@@ -183,7 +161,7 @@ describe("InMemoryProjectionRunStorage", () => {
       storage.update({
         id: "missing",
         projectId: "my-app",
-        rowsProcessed: 1,
+        sourceRowsRead: 1,
       })
     ).rejects.toBeInstanceOf(ProjectionRunError)
 
@@ -198,7 +176,7 @@ describe("InMemoryProjectionRunStorage", () => {
       storage.update({
         id: "run-1",
         projectId: "my-app",
-        rowsProcessed: 2,
+        sourceRowsRead: 2,
       })
     ).rejects.toBeInstanceOf(ProjectionRunError)
 
@@ -308,7 +286,7 @@ describe("InMemoryProjectionRunStorage", () => {
       storage.update({
         id: "run-1",
         projectId: "my-app",
-        rowsProcessed: -1,
+        sourceRowsRead: -1,
       })
     ).rejects.toBeInstanceOf(ProjectionRunError)
 
@@ -317,7 +295,7 @@ describe("InMemoryProjectionRunStorage", () => {
         id: "run-1",
         projectId: "my-app",
         status: "succeeded",
-        telemetryRowsFailed: 1.5,
+        sourceRowsSkipped: 1.5,
       })
     ).rejects.toBeInstanceOf(ProjectionRunError)
   })

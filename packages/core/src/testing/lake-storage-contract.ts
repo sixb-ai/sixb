@@ -262,6 +262,34 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
     })
 
     describe("writes and reads", () => {
+      test("keeps immutable-version row order and offsets stable", async () => {
+        await withStorage(async (storage) => {
+          await storage.createDataset(writeDataset)
+          const write = await storage.beginWrite({ dataset: writeDataset, mode: "snapshot" })
+          const expected = [
+            { orderId: "ord_3", customerName: "Katherine" },
+            { orderId: "ord_1", customerName: "Ada" },
+            { orderId: "ord_5", customerName: "Margaret" },
+            { orderId: "ord_2", customerName: "Grace" },
+            { orderId: "ord_4", customerName: "Dorothy" },
+          ]
+          await write.writeRows(expected)
+          const version = await write.commit()
+          const pinned = { datasetId: writeDataset.id, versionId: version.versionId }
+
+          await expect(collectRows(storage.readRows(pinned))).resolves.toEqual(expected)
+          await expect(collectRows(storage.readRows(pinned))).resolves.toEqual(expected)
+          for (const offset of [0, 2, expected.length, expected.length + 3]) {
+            await expect(collectRows(storage.readRows({ ...pinned, offset }))).resolves.toEqual(
+              expected.slice(offset)
+            )
+          }
+          await expect(
+            collectRows(storage.readRows({ ...pinned, columns: ["orderId"], offset: 1, limit: 2 }))
+          ).resolves.toEqual([{ orderId: "ord_1" }, { orderId: "ord_5" }])
+        })
+      })
+
       test("rejects writes for unknown datasets", async () => {
         await withStorage(async (storage) => {
           await expect(storage.beginWrite({ dataset: writeDataset })).rejects.toThrow(

@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { col, defineDataset } from "@sixb/core"
 import { DuckLakeStorage } from "../src"
 import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runtime"
+import { DuckLakeConnectionManager } from "../src/internal/ducklake-connection-manager"
 
 const ordersDataset = defineDataset("raw.erp.orders", {
   schema: [col("orderId", "string")],
@@ -72,6 +73,27 @@ describe("DuckLakeStorage catalog options", () => {
       expect(row?.value).toBe(42)
     } finally {
       await runtime.close()
+    }
+  })
+
+  test("reapplies insertion-order preservation after setupSql", async () => {
+    const manager = new DuckLakeConnectionManager({
+      catalog: {
+        type: "duckdb",
+        path: join(rootDir, "ordered-metadata.ducklake"),
+      },
+      dataPath: join(rootDir, "ordered-data"),
+      setupSql: ["SET preserve_insertion_order = false"],
+    })
+
+    try {
+      const runtime = await manager.runtime()
+      const [row] = await runtime.query(
+        "SELECT current_setting('preserve_insertion_order')::BOOLEAN AS enabled"
+      )
+      expect(row?.enabled).toBe(true)
+    } finally {
+      await manager.close()
     }
   })
 

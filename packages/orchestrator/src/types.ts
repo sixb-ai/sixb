@@ -2,7 +2,6 @@ import type {
   DatasetVersionCommittedEvent,
   DomainEvent,
   PipelineDefinition,
-  ProjectionDefinition,
   Queues,
   ScheduleDefinition,
   ScheduleTriggeredEvent,
@@ -11,7 +10,9 @@ import type {
   WorkflowScheduleTriggerDefinition,
 } from "@sixb/core"
 import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import type { RuntimeEventScheduleDefinition } from "@sixb/core/internal/schedules"
+import type { LakeStorage } from "@sixb/core/lake-storage"
 import type {
   NewQueueJob,
   PipelineRunRequestedQueueJob,
@@ -19,8 +20,9 @@ import type {
   SyncRunRequestedQueueJob,
   WorkflowRunRequestedQueueJob,
 } from "@sixb/core/queues"
+import type { ProjectionRunStorage } from "@sixb/core/storage"
 
-export type RoutableProjectionDefinition = ProjectionDefinition
+export type RoutableProjectionDefinition = ProjectionDispatchDescriptor
 
 type ScheduleTriggeredRouteKey =
   `${ScheduleTriggeredEvent["type"]}:${ScheduleTriggeredEvent["payload"]["scheduleId"]}`
@@ -34,11 +36,9 @@ export type OrchestratorRouteKey =
   | DatasetVersionCommittedRouteKey
   | EventScheduleRouteKey
 
-export type ProjectionRunRequestedJobTemplate = Omit<
-  NewQueueJob<ProjectionRunRequestedQueueJob>,
-  "payload" | "availableAt" | "metadata"
-> & {
-  readonly payload: Omit<ProjectionRunRequestedQueueJob["payload"], "versionId">
+export interface ProjectionRunRequestedJobTemplate {
+  readonly type: ProjectionRunRequestedQueueJob["type"]
+  readonly payload: ProjectionDispatchDescriptor
 }
 
 export type OrchestratorJob =
@@ -98,9 +98,16 @@ export interface CompileRoutesResult {
   readonly diagnostics: readonly CompileRoutesDiagnostic[]
 }
 
+export interface ProjectionDispatchPorts {
+  readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "getVersion" | "listVersions">
+  readonly projectionRuns: Pick<ProjectionRunStorage, "getById">
+}
+
 export interface OrchestratorRuntimeOptions {
   readonly projectId: string
   readonly events: EventsRuntime
   readonly queues: Queues
   readonly routes: OrchestratorRoutes
+  /** Required when the compiled routes contain projections. */
+  readonly projectionDispatch?: ProjectionDispatchPorts
 }

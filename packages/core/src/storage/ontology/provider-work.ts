@@ -21,11 +21,9 @@ import {
   materializationApplyPhase,
 } from "./materializations"
 import type { OntologyOutboxWrite } from "./outbox"
-import { assertNonblank, assertTimestamp } from "./provider-validation"
+import { assertTimestamp, invalidCorrelation } from "./provider-validation"
 
-export function invalidCorrelation(message: string): never {
-  throw new MaterializationValidationError(message)
-}
+export { invalidCorrelation } from "./provider-validation"
 
 export function assertPageRows(value: number): void {
   if (!Number.isSafeInteger(value) || value <= 0)
@@ -200,85 +198,6 @@ function planPhaseMatches(record: MaterializationPlanWorkRecord): boolean {
   // Validate the submitted phase against the neutral contract's canonical mapping so a provider
   // still rejects a mis-ordered record without re-encoding the phase table here.
   return record.applyPhase === materializationApplyPhase(record.item.kind)
-}
-
-export function assertMaterializationHeader(header: MaterializationPlanHeader): void {
-  const { commit } = header
-  assertNonblank(commit.projectId, "Materialization project id")
-  assertNonblank(commit.id, "Materialization commit id")
-  assertNonblank(commit.idempotencyKey, "Materialization idempotency key")
-  assertNonblank(commit.requestHash, "Materialization request hash")
-  assertNonblank(commit.ontologyRevision, "Materialization ontology revision")
-  assertTimestamp(commit.committedAt, "Materialization commit time")
-  if (commit.intent.kind === "edit") {
-    if (commit.origin.kind !== "action" && commit.origin.kind !== "runtime") {
-      invalidCorrelation("Edit commit origin does not correlate with its intent.")
-    }
-    if (!Number.isSafeInteger(commit.intent.operationCount) || commit.intent.operationCount < 0) {
-      invalidCorrelation("Edit commit operation count is invalid.")
-    }
-    if (commit.origin.kind === "action") {
-      assertNonblank(commit.origin.actionId, "Action origin action id")
-      assertNonblank(commit.origin.runId, "Action origin run id")
-    } else {
-      assertNonblank(commit.origin.requestId, "Runtime origin request id")
-    }
-  } else if (commit.intent.kind === "projection") {
-    if (
-      commit.origin.kind !== "projection" ||
-      commit.origin.projectionId !== commit.intent.source.projectionId ||
-      commit.origin.datasetId !== commit.intent.datasetVersion.datasetId ||
-      commit.origin.datasetVersionId !== commit.intent.datasetVersion.versionId ||
-      !commit.projectionRevision ||
-      !commit.ownershipHash
-    ) {
-      invalidCorrelation("Projection commit metadata does not correlate with its intent.")
-    }
-    assertNonblank(commit.origin.projectionRunId, "Projection run id")
-    assertTimestamp(commit.intent.datasetVersion.createdAt, "Projection dataset version createdAt")
-  } else {
-    if (commit.origin.kind !== "telemetry") {
-      invalidCorrelation("Telemetry commit origin does not correlate with its intent.")
-    }
-    if (
-      !Number.isSafeInteger(commit.intent.pointCount) ||
-      commit.intent.pointCount < 0 ||
-      !Number.isSafeInteger(commit.intent.inputPointCount) ||
-      commit.intent.inputPointCount < commit.intent.pointCount
-    ) {
-      invalidCorrelation("Telemetry commit point counts are invalid.")
-    }
-    if (commit.intent.source.kind === "projection") {
-      if (
-        commit.origin.source.kind !== "projection" ||
-        commit.intent.source.projection.projectionId !== commit.origin.source.projectionId ||
-        commit.intent.source.datasetVersion.datasetId !== commit.origin.source.datasetId ||
-        commit.intent.source.datasetVersion.versionId !== commit.origin.source.datasetVersionId ||
-        commit.intent.source.batchOrdinal !== commit.origin.source.batchOrdinal ||
-        !Number.isSafeInteger(commit.intent.source.batchOrdinal) ||
-        commit.intent.source.batchOrdinal < 0 ||
-        !Number.isSafeInteger(commit.intent.source.sourceRowCount) ||
-        commit.intent.source.sourceRowCount <= 0 ||
-        commit.intent.source.sourceRowCount < commit.intent.inputPointCount ||
-        typeof commit.intent.source.inputExhausted !== "boolean" ||
-        !commit.projectionRevision ||
-        !commit.ownershipHash
-      ) {
-        invalidCorrelation("Projection telemetry metadata does not correlate with its intent.")
-      }
-      assertNonblank(commit.origin.source.projectionRunId, "Telemetry projection run id")
-      assertTimestamp(
-        commit.intent.source.datasetVersion.createdAt,
-        "Telemetry dataset version createdAt"
-      )
-    } else if (
-      commit.origin.source.kind !== "runtime" ||
-      commit.projectionRevision !== undefined ||
-      commit.ownershipHash !== undefined
-    ) {
-      invalidCorrelation("Runtime telemetry commit contains projection-only metadata.")
-    }
-  }
 }
 
 export function assertPlanChunkCorrelations(

@@ -349,6 +349,7 @@ describe("materializer canonical contracts", () => {
         execution: { projectionRunId: "run-1", executionToken: "execution-1" },
         batchOrdinal: 2,
         sourceRowCount: 1,
+        sourceRowsSkipped: 0,
         inputExhausted: true,
       },
       points: [point],
@@ -385,6 +386,7 @@ describe("materializer canonical contracts", () => {
       },
       batchOrdinal: 4,
       batchRowCount: 512,
+      batchRowsSkipped: 0,
       inputExhausted: false,
     } satisfies AdvanceProjectionTelemetryCheckpointInput
     expect(checkpoint.batchRowCount).toBe(512)

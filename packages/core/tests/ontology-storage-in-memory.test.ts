@@ -75,6 +75,7 @@ describe("in-memory ontology storage", () => {
         execution: pendingProjectionExecution("origin-telemetry-run"),
         batchOrdinal: 0,
         sourceRowCount: 1,
+        sourceRowsSkipped: 0,
         inputExhausted: true,
       },
       points: [
@@ -2156,7 +2157,7 @@ describe("in-memory ontology storage", () => {
           if (header.commit.origin.kind !== "projection") throw new Error("bad fixture origin")
           header.commit.origin.projectionId = "other"
         },
-        message: "metadata does not correlate with its intent",
+        message: "origin does not match its projection",
       },
       {
         name: "empty run origin",

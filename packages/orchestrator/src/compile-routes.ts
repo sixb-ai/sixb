@@ -1,9 +1,4 @@
-import {
-  type DomainEvent,
-  projectionKindOf,
-  type ScheduleDefinition,
-  type ScheduleReference,
-} from "@sixb/core"
+import type { DomainEvent, ScheduleDefinition, ScheduleReference } from "@sixb/core"
 import { eventScheduleSubscribedEventTypes } from "@sixb/core/internal/schedules"
 import { OrchestratorError } from "./errors"
 import { eventScheduleRouteKeyForSelector } from "./route-key"
@@ -102,11 +97,7 @@ export function compileRoutesWithDiagnostics(params: CompileRoutesParams): Compi
       queue: "projections",
       job: {
         type: "projection.run.requested",
-        payload: {
-          projectionId: projection.id,
-          projectionKind: projectionKindOf(projection),
-          datasetId: projection.datasetId,
-        },
+        payload: projection,
       },
     })
   }

@@ -57,7 +57,9 @@
       "@sixb/core/internal/materializer": ["./packages/core/src/materializer/index.ts"],
       "@sixb/core/internal/objects": ["./packages/core/src/objects/index.ts"],
       "@sixb/core/internal/ontology": ["./packages/core/src/ontology/internal.ts"],
+      "@sixb/core/internal/projections": ["./packages/core/src/projections/internal.ts"],
       "@sixb/core/internal/query": ["./packages/core/src/objects/query/index.ts"],
+      "@sixb/core/internal/runtime": ["./packages/core/src/runtime/internal.ts"],
       "@sixb/core/internal/scheduler": ["./packages/core/src/scheduler/index.ts"],
       "@sixb/core/internal/schedules": ["./packages/core/src/schedules/index.ts"],
       "@sixb/core/internal/storage-operation-scope": [

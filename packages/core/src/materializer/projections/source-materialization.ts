@@ -97,9 +97,3 @@ export async function stageProjectionMaterialization(
   })
   return { rootCount, assertionCount }
 }
-
-export async function bestEffort(run: () => Promise<unknown>): Promise<void> {
-  try {
-    await run()
-  } catch {}
-}

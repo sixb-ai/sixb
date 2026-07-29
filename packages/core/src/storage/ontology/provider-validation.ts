@@ -30,3 +30,7 @@ export function assertTimestamp(value: string, label: string, canonical = true):
   }
   return milliseconds
 }
+
+export function invalidCorrelation(message: string): never {
+  throw new MaterializationValidationError(message)
+}

@@ -70,6 +70,7 @@ describe("routeKeyForEvent", () => {
       payload: {
         datasetId: "raw.erp.orders",
         versionId: "v-1",
+        createdAt: "2026-04-18T02:00:00.000Z",
         producer: { kind: "sync", id: "sync-orders", runId: "run-1" },
       },
       cursor: "5",

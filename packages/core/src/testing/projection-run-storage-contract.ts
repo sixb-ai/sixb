@@ -108,9 +108,9 @@ export function runProjectionRunStorageContractSuite<
         await expect(storage.assertMaterializationExecution(stale)).rejects.toThrow(
           "execution token is stale"
         )
-        await expect(storage.updateMaterialization({ ...stale, rowsProcessed: 1 })).rejects.toThrow(
-          "execution token is stale"
-        )
+        await expect(
+          storage.updateMaterialization({ ...stale, sourceRowsRead: 1 })
+        ).rejects.toThrow("execution token is stale")
         await expect(
           storage.finishMaterialization({ ...stale, status: "cancelled" })
         ).rejects.toThrow("execution token is stale")
@@ -119,9 +119,9 @@ export function runProjectionRunStorageContractSuite<
           storage.updateMaterialization({
             ...stale,
             executionToken: current.executionToken,
-            rowsProcessed: 3,
+            sourceRowsRead: 3,
           })
-        ).resolves.toMatchObject({ rowsProcessed: 3 })
+        ).resolves.toMatchObject({ sourceRowsRead: 3 })
       })
     })
 
@@ -153,6 +153,28 @@ export function runProjectionRunStorageContractSuite<
             executionToken: claimed.executionToken,
           })
         ).rejects.toThrow("identity does not match")
+      })
+    })
+
+    test("keeps skipped physical rows bounded by rows read", async () => {
+      await withStorage(async (storage) => {
+        const claimed = await storage.startOrReclaimMaterialization({
+          id: "invalid-progress-run",
+          projectId: "contract-project",
+          identity: replacementIdentity,
+          objectTypeId: "Device",
+        })
+
+        await expect(
+          storage.updateMaterialization({
+            id: claimed.id,
+            projectId: claimed.projectId,
+            identity: replacementIdentity,
+            executionToken: claimed.executionToken,
+            sourceRowsRead: 1,
+            sourceRowsSkipped: 2,
+          })
+        ).rejects.toThrow("sourceRowsSkipped must not exceed sourceRowsRead")
       })
     })
 
@@ -203,10 +225,21 @@ export function runProjectionRunStorageContractSuite<
           nextRowOffset: 0,
           inputExhausted: false,
         })
+        await expect(
+          storage.updateMaterialization({ ...execution, sourceRowsRead: 1 })
+        ).rejects.toThrow("can only advance with its checkpoint")
+        await expect(
+          storage.finishMaterialization({
+            ...execution,
+            status: "failed",
+            sourceRowsSkipped: 1,
+          })
+        ).rejects.toThrow("can only advance with its checkpoint")
         await storage.advanceTelemetryCheckpoint({
           ...execution,
           batchOrdinal: 0,
           batchRowCount: 3,
+          batchRowsSkipped: 1,
           inputExhausted: false,
         })
         await expect(
@@ -214,6 +247,7 @@ export function runProjectionRunStorageContractSuite<
             ...execution,
             batchOrdinal: 2,
             batchRowCount: 1,
+            batchRowsSkipped: 0,
             inputExhausted: true,
           })
         ).rejects.toThrow("expected batch ordinal 1")
@@ -222,6 +256,7 @@ export function runProjectionRunStorageContractSuite<
             ...execution,
             batchOrdinal: 1,
             batchRowCount: 1,
+            batchRowsSkipped: 0,
             inputExhausted: false,
           })
         ).rejects.toThrow("partial non-final batch")
@@ -230,6 +265,7 @@ export function runProjectionRunStorageContractSuite<
             ...execution,
             batchOrdinal: 1,
             batchRowCount: 4,
+            batchRowsSkipped: 0,
             inputExhausted: true,
           })
         ).rejects.toThrow("exceeds its fixed size")
@@ -238,8 +274,10 @@ export function runProjectionRunStorageContractSuite<
           ...execution,
           batchOrdinal: 1,
           batchRowCount: 2,
+          batchRowsSkipped: 1,
           inputExhausted: true,
         })
+        expect(exhausted).toMatchObject({ sourceRowsRead: 5, sourceRowsSkipped: 2 })
         expect(exhausted.telemetryCheckpoint).toEqual({
           fixedBatchSize: 3,
           nextBatchOrdinal: 2,
@@ -251,13 +289,14 @@ export function runProjectionRunStorageContractSuite<
             ...execution,
             batchOrdinal: 2,
             batchRowCount: 1,
+            batchRowsSkipped: 0,
             inputExhausted: true,
           })
         ).rejects.toThrow("already exhausted")
       })
     })
 
-    test("requires telemetry exhaustion and supports explicit empty input", async () => {
+    test("requires telemetry exhaustion and completes EOF idempotently", async () => {
       await withStorage(async (storage) => {
         const claimed = await storage.startOrReclaimMaterialization({
           id: "empty-telemetry-run",
@@ -276,16 +315,15 @@ export function runProjectionRunStorageContractSuite<
         await expect(
           storage.finishMaterialization({ ...execution, status: "succeeded" })
         ).rejects.toThrow("before its input is exhausted")
-        await storage.completeEmptyTelemetryInput(execution)
-        await expect(storage.completeEmptyTelemetryInput(execution)).rejects.toThrow(
-          "after progress"
-        )
+        await storage.completeTelemetryInput(execution)
+        await expect(storage.completeTelemetryInput(execution)).resolves.toMatchObject({
+          telemetryCheckpoint: { inputExhausted: true },
+        })
         const finished = await storage.finishMaterialization({
           ...execution,
           status: "succeeded",
-          rowsProcessed: 0,
         })
-        expect(finished).toMatchObject({ status: "succeeded", rowsProcessed: 0 })
+        expect(finished).toMatchObject({ status: "succeeded", sourceRowsRead: 0 })
         await expect(storage.assertMaterializationExecution(execution)).rejects.toThrow(
           "already terminal"
         )
@@ -308,7 +346,7 @@ export function runProjectionRunStorageContractSuite<
         } as const
 
         await expect(
-          storage.update({ id: claimed.id, projectId: claimed.projectId, rowsProcessed: 1 })
+          storage.update({ id: claimed.id, projectId: claimed.projectId, sourceRowsRead: 1 })
         ).rejects.toThrow("use updateMaterialization()")
         await expect(
           storage.finish({ id: claimed.id, projectId: claimed.projectId, status: "succeeded" })

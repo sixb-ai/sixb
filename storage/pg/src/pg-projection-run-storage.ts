@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
   AssertProjectionMaterializationExecutionInput,
-  CompleteEmptyProjectionTelemetryInput,
+  CompleteProjectionTelemetryInput,
   FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
   ListLatestProjectionRunsInput,
@@ -13,8 +13,8 @@ import type {
   ProjectionMaterializationIdentity,
   ProjectionMaterializationRunRecord,
   ProjectionMaterializationRunStorage,
-  ProjectionRunCounters,
   ProjectionRunObjectTypes,
+  ProjectionRunProgress,
   ProjectionRunRecord,
   ProjectionRunStatus,
   StartOrReclaimProjectionMaterializationInput,
@@ -22,7 +22,7 @@ import type {
   UpdateProjectionMaterializationInput,
   UpdateProjectionRunInput,
 } from "@sixb/core/storage"
-import { PROJECTION_COUNTER_KEYS, ProjectionRunError } from "@sixb/core/storage"
+import { PROJECTION_RUN_PROGRESS_KEYS, ProjectionRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
@@ -176,17 +176,14 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
   ): Promise<ProjectionMaterializationRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
       const existing = await requireMaterializationExecution(tx, input)
-      const counters = mergeCounters(rowToCounters(existing), input)
+      const currentProgress = rowToProgress(existing)
+      assertGenericProgressDoesNotAdvanceTelemetry(existing, currentProgress, input)
+      const progress = mergeProgress(currentProgress, input)
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
         SET
-          rows_processed = ${counters.rowsProcessed},
-          rows_skipped = ${counters.rowsSkipped},
-          objects_upserted = ${counters.objectsUpserted},
-          links_upserted = ${counters.linksUpserted},
-          telemetry_points_appended = ${counters.telemetryPointsAppended},
-          telemetry_points_skipped = ${counters.telemetryPointsSkipped},
-          telemetry_rows_failed = ${counters.telemetryRowsFailed}
+          source_rows_read = ${progress.sourceRowsRead},
+          source_rows_skipped = ${progress.sourceRowsSkipped}
         WHERE project_id = ${input.projectId}
           AND id = ${input.id}
           AND status = ${"running"}
@@ -204,6 +201,8 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
     return runPgTransaction(this.sql, async (tx) => {
       const existingRow = await requireMaterializationExecution(tx, input)
       const existing = rowToMaterializationRunRecord(existingRow)
+      const currentProgress = rowToProgress(existingRow)
+      assertGenericProgressDoesNotAdvanceTelemetry(existingRow, currentProgress, input)
       if (
         input.status === "succeeded" &&
         existing.materializationProtocol === "telemetry" &&
@@ -213,20 +212,15 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
           `[SixbPg] Telemetry projection run '${existing.id}' cannot succeed before its input is exhausted.`
         )
       }
-      const counters = mergeCounters(rowToCounters(existingRow), input)
+      const progress = mergeProgress(currentProgress, input)
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
         SET
           status = ${input.status},
           finished_at = ${input.finishedAt ?? new Date()},
           execution_token = ${null},
-          rows_processed = ${counters.rowsProcessed},
-          rows_skipped = ${counters.rowsSkipped},
-          objects_upserted = ${counters.objectsUpserted},
-          links_upserted = ${counters.linksUpserted},
-          telemetry_points_appended = ${counters.telemetryPointsAppended},
-          telemetry_points_skipped = ${counters.telemetryPointsSkipped},
-          telemetry_rows_failed = ${counters.telemetryRowsFailed},
+          source_rows_read = ${progress.sourceRowsRead},
+          source_rows_skipped = ${progress.sourceRowsSkipped},
           error_message = ${input.status === "succeeded" ? null : (input.errorMessage ?? null)}
         WHERE project_id = ${input.projectId}
           AND id = ${input.id}
@@ -258,6 +252,12 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
       }
       assertCounter(input.batchOrdinal, "batchOrdinal")
       assertPositiveCounter(input.batchRowCount, "batchRowCount")
+      assertCounter(input.batchRowsSkipped, "batchRowsSkipped")
+      if (input.batchRowsSkipped > input.batchRowCount) {
+        throw new ProjectionRunError(
+          `[SixbPg] Telemetry projection run '${existing.id}' skipped rows exceed its batch row count.`
+        )
+      }
       if (input.batchOrdinal !== checkpoint.nextBatchOrdinal) {
         throw new ProjectionRunError(
           `[SixbPg] Telemetry projection run '${existing.id}' expected batch ordinal ${checkpoint.nextBatchOrdinal}, got ${input.batchOrdinal}.`
@@ -281,12 +281,19 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
 
       const nextBatchOrdinal = safeAdd(checkpoint.nextBatchOrdinal, 1, "nextBatchOrdinal")
       const nextRowOffset = safeAdd(checkpoint.nextRowOffset, input.batchRowCount, "nextRowOffset")
+      const nextRowsSkipped = safeAdd(
+        existing.sourceRowsSkipped,
+        input.batchRowsSkipped,
+        "sourceRowsSkipped"
+      )
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
         SET
           next_batch_ordinal = ${nextBatchOrdinal},
           next_row_offset = ${nextRowOffset},
-          input_exhausted = ${input.inputExhausted}
+          input_exhausted = ${input.inputExhausted},
+          source_rows_read = ${nextRowOffset},
+          source_rows_skipped = ${nextRowsSkipped}
         WHERE project_id = ${input.projectId}
           AND id = ${input.id}
           AND status = ${"running"}
@@ -300,8 +307,8 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
     })
   }
 
-  async completeEmptyTelemetryInput(
-    input: CompleteEmptyProjectionTelemetryInput
+  async completeTelemetryInput(
+    input: CompleteProjectionTelemetryInput
   ): Promise<ProjectionMaterializationRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
       const existingRow = await requireMaterializationExecution(tx, input)
@@ -312,15 +319,7 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
           `[SixbPg] Projection run '${existing.id}' does not have a telemetry checkpoint.`
         )
       }
-      if (
-        checkpoint.nextBatchOrdinal !== 0 ||
-        checkpoint.nextRowOffset !== 0 ||
-        checkpoint.inputExhausted
-      ) {
-        throw new ProjectionRunError(
-          `[SixbPg] Telemetry projection run '${existing.id}' cannot declare empty input after progress.`
-        )
-      }
+      if (checkpoint.inputExhausted) return existing
 
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
@@ -329,8 +328,6 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
           AND id = ${input.id}
           AND status = ${"running"}
           AND execution_token = ${input.executionToken}
-          AND next_batch_ordinal = ${0}
-          AND next_row_offset = ${0}
           AND input_exhausted = ${false}
         RETURNING *
       `
@@ -391,18 +388,13 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
     return runPgTransaction(this.sql, async (tx) => {
       const existing = await requireRunning(tx, input.projectId, input.id)
       assertLegacyMutationAllowed(rowToStoredProjectionRunRecord(existing), "update")
-      const counters = mergeCounters(rowToCounters(existing), input)
+      const progress = mergeProgress(rowToProgress(existing), input)
 
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
         SET
-          rows_processed = ${counters.rowsProcessed},
-          rows_skipped = ${counters.rowsSkipped},
-          objects_upserted = ${counters.objectsUpserted},
-          links_upserted = ${counters.linksUpserted},
-          telemetry_points_appended = ${counters.telemetryPointsAppended},
-          telemetry_points_skipped = ${counters.telemetryPointsSkipped},
-          telemetry_rows_failed = ${counters.telemetryRowsFailed}
+          source_rows_read = ${progress.sourceRowsRead},
+          source_rows_skipped = ${progress.sourceRowsSkipped}
         WHERE project_id = ${input.projectId}
           AND id = ${input.id}
           AND status = ${"running"}
@@ -418,20 +410,15 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
     return runPgTransaction(this.sql, async (tx) => {
       const existing = await requireRunning(tx, input.projectId, input.id)
       assertLegacyMutationAllowed(rowToStoredProjectionRunRecord(existing), "finish")
-      const counters = mergeCounters(rowToCounters(existing), input)
+      const progress = mergeProgress(rowToProgress(existing), input)
 
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
         SET
           status = ${input.status},
           finished_at = ${input.finishedAt ?? new Date()},
-          rows_processed = ${counters.rowsProcessed},
-          rows_skipped = ${counters.rowsSkipped},
-          objects_upserted = ${counters.objectsUpserted},
-          links_upserted = ${counters.linksUpserted},
-          telemetry_points_appended = ${counters.telemetryPointsAppended},
-          telemetry_points_skipped = ${counters.telemetryPointsSkipped},
-          telemetry_rows_failed = ${counters.telemetryRowsFailed},
+          source_rows_read = ${progress.sourceRowsRead},
+          source_rows_skipped = ${progress.sourceRowsSkipped},
           error_message = ${input.status === "succeeded" ? null : (input.errorMessage ?? null)}
         WHERE project_id = ${input.projectId}
           AND id = ${input.id}
@@ -737,40 +724,64 @@ function assertCompleteMaterializationRecord(
       `[SixbPg] Projection run '${record.id}' has incomplete materialization state.`
     )
   }
-  if (record.materializationProtocol === "telemetry" && !record.telemetryCheckpoint) {
+  if (record.materializationProtocol === "telemetry") {
+    if (!record.telemetryCheckpoint) {
+      throw new ProjectionRunError(
+        `[SixbPg] Telemetry projection run '${record.id}' has incomplete checkpoint state.`
+      )
+    }
+    if (record.sourceRowsRead !== record.telemetryCheckpoint.nextRowOffset) {
+      throw new ProjectionRunError(
+        `[SixbPg] Telemetry projection run '${record.id}' progress does not match its checkpoint.`
+      )
+    }
+  }
+}
+
+function mergeProgress(
+  existing: ProjectionRunProgress,
+  input: Partial<ProjectionRunProgress>
+): ProjectionRunProgress {
+  const merged = {} as Record<keyof ProjectionRunProgress, number>
+  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
+    assertOptionalCounter(input[key], key)
+    const value = input[key] ?? existing[key]
+    if (value < existing[key]) {
+      throw new ProjectionRunError(`[SixbPg] Projection run ${key} must not decrease.`)
+    }
+    merged[key] = value
+  }
+  assertProgress(merged)
+  return merged
+}
+
+function assertProgress(progress: ProjectionRunProgress): void {
+  if (progress.sourceRowsSkipped > progress.sourceRowsRead) {
     throw new ProjectionRunError(
-      `[SixbPg] Telemetry projection run '${record.id}' has incomplete checkpoint state.`
+      "[SixbPg] Projection run sourceRowsSkipped must not exceed sourceRowsRead."
     )
   }
 }
 
-function mergeCounters(
-  existing: ProjectionRunCounters,
-  input: Partial<ProjectionRunCounters>
-): ProjectionRunCounters {
-  const merged = {} as Record<keyof ProjectionRunCounters, number>
-  for (const key of PROJECTION_COUNTER_KEYS) {
-    assertOptionalCounter(input[key], key)
-    merged[key] = input[key] ?? existing[key]
+function assertGenericProgressDoesNotAdvanceTelemetry(
+  row: Pick<DatabaseRow, "id" | "materialization_protocol">,
+  current: ProjectionRunProgress,
+  input: Partial<ProjectionRunProgress>
+): void {
+  if (row.materialization_protocol !== "telemetry") return
+  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
+    if (input[key] !== undefined && input[key] !== current[key]) {
+      throw new ProjectionRunError(
+        `[SixbPg] Telemetry projection run '${row.id}' progress can only advance with its checkpoint.`
+      )
+    }
   }
-  return merged
 }
 
-function rowToCounters(row: DatabaseRow): ProjectionRunCounters {
+function rowToProgress(row: DatabaseRow): ProjectionRunProgress {
   return {
-    rowsProcessed: databaseSafeInteger(row.rows_processed, "rowsProcessed"),
-    rowsSkipped: databaseSafeInteger(row.rows_skipped, "rowsSkipped"),
-    objectsUpserted: databaseSafeInteger(row.objects_upserted, "objectsUpserted"),
-    linksUpserted: databaseSafeInteger(row.links_upserted, "linksUpserted"),
-    telemetryPointsAppended: databaseSafeInteger(
-      row.telemetry_points_appended,
-      "telemetryPointsAppended"
-    ),
-    telemetryPointsSkipped: databaseSafeInteger(
-      row.telemetry_points_skipped,
-      "telemetryPointsSkipped"
-    ),
-    telemetryRowsFailed: databaseSafeInteger(row.telemetry_rows_failed, "telemetryRowsFailed"),
+    sourceRowsRead: databaseSafeInteger(row.source_rows_read, "sourceRowsRead"),
+    sourceRowsSkipped: databaseSafeInteger(row.source_rows_skipped, "sourceRowsSkipped"),
   }
 }
 
@@ -809,7 +820,7 @@ function rowToStoredProjectionRunRecord(row: DatabaseRow): StoredProjectionRunRe
     projectionRevision: row.projection_revision ?? undefined,
     ownershipHash: row.ownership_hash ?? undefined,
     telemetryCheckpoint,
-    ...rowToCounters(row),
+    ...rowToProgress(row),
     errorMessage: row.error_message ?? undefined,
   }
 }
@@ -914,12 +925,7 @@ interface DatabaseRow {
   next_batch_ordinal: number | string | null
   next_row_offset: number | string | null
   input_exhausted: boolean | null
-  rows_processed: number | string
-  rows_skipped: number | string
-  objects_upserted: number | string
-  links_upserted: number | string
-  telemetry_points_appended: number | string
-  telemetry_points_skipped: number | string
-  telemetry_rows_failed: number | string
+  source_rows_read: number | string
+  source_rows_skipped: number | string
   error_message: string | null
 }

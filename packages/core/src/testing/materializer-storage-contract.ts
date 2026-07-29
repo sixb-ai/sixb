@@ -234,6 +234,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
             },
             batchOrdinal: 0,
             sourceRowCount: 1,
+            sourceRowsSkipped: 0,
             inputExhausted: true,
           },
           points: [
@@ -264,6 +265,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
           execution: telemetryExecution,
           batchOrdinal: 0,
           sourceRowCount: 1,
+          sourceRowsSkipped: 0,
           inputExhausted: true,
         },
         points: [

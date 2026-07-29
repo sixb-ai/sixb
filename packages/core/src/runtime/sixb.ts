@@ -40,6 +40,7 @@ import {
 } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { PipelineDefinition } from "../pipelines/types"
+import { registerProjectionRegistry } from "../projections/internal"
 import { ProjectionRegistry } from "../projections/registry"
 import type {
   LinkProjectionDefinition,
@@ -318,6 +319,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       ontology: this.ontology,
       datasetsById: this.datasetsById,
     })
+    registerProjectionRegistry(this, this.projectionRegistry)
 
     const materializer = createOntologyMaterializer({
       projectId: this.projectId,
@@ -343,6 +345,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       sandboxes: this.sandboxes,
       rules: this.rules,
     }
+    registerProjectionRegistry(this.runtimeContext, this.projectionRegistry)
     const ontologyMutations = createOntologyMutationRuntime({
       materializer,
       notifyCommittedFacts: () => this.committedFacts.notify(),

@@ -164,6 +164,12 @@
       "import": "./dist/ontology/internal.js",
       "default": "./dist/ontology/internal.js"
     },
+    "./internal/projections": {
+      "types": "./dist/projections/internal.d.ts",
+      "bun": "./src/projections/internal.ts",
+      "import": "./dist/projections/internal.js",
+      "default": "./dist/projections/internal.js"
+    },
     "./internal/runtime": {
       "types": "./dist/runtime/internal.d.ts",
       "bun": "./src/runtime/internal.ts",

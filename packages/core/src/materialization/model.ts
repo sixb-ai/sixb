@@ -1,6 +1,9 @@
 import type { EventActor, EventOrigin } from "../events/envelope"
 import type { PropertyChange, PropertyChangeMap } from "../events/property-changes"
 import type { JsonValue } from "../json"
+import type { ProjectionProtocolIdentity } from "../projections/types"
+
+export type { ProjectionProtocolIdentity } from "../projections/types"
 
 export interface OntologyObjectRef {
   readonly objectTypeId: string
@@ -39,16 +42,7 @@ interface ProjectionMaterializationIdentityBase {
 
 /** Immutable semantic identity pinned for the lifetime of one logical projection run. */
 export type ProjectionMaterializationIdentity = ProjectionMaterializationIdentityBase &
-  (
-    | {
-        readonly projectionKind: "object" | "link"
-        readonly protocol: "replacement"
-      }
-    | {
-        readonly projectionKind: "telemetry"
-        readonly protocol: "telemetry"
-      }
-  )
+  ProjectionProtocolIdentity
 
 export type OntologyMaterializationOrigin = EventOrigin
 
@@ -179,6 +173,9 @@ interface ProjectionRunFinishBase {
   readonly execution: ProjectionExecution
 }
 
+/** Fenced acknowledgement that a telemetry worker observed the pinned input's EOF. */
+export type ProjectionTelemetryInputCompletion = ProjectionRunFinishBase
+
 type ProjectionRunTerminalStatus =
   | { readonly status: "succeeded" }
   | { readonly status: "failed" | "cancelled"; readonly errorMessage?: string }
@@ -186,22 +183,13 @@ type ProjectionRunTerminalStatus =
 /**
  * Queue-agnostic terminal decision for one fenced projection execution.
  *
- * A telemetry run with no physical rows has no ontology batch commit, so its successful
- * completion must declare `emptyInput` explicitly. Non-empty telemetry completion is derived from
- * the durable run checkpoint.
+ * Telemetry completion is persisted separately when the worker observes EOF. Terminal success
+ * only validates that durable checkpoint and never manufactures an empty ontology commit.
  */
-export type ProjectionRunFinishInput =
-  | (ProjectionRunFinishBase &
-      ProjectionRunTerminalStatus & {
-        readonly protocol: "replacement"
-      })
-  | (ProjectionRunFinishBase &
-      (
-        | { readonly status: "succeeded"; readonly emptyInput?: true }
-        | { readonly status: "failed" | "cancelled"; readonly errorMessage?: string }
-      ) & {
-        readonly protocol: "telemetry"
-      })
+export type ProjectionRunFinishInput = ProjectionRunFinishBase &
+  ProjectionRunTerminalStatus & {
+    readonly protocol: ProjectionProtocolIdentity["protocol"]
+  }
 
 export interface TelemetrySeriesRef {
   readonly object: OntologyObjectRef
@@ -227,6 +215,8 @@ export interface TelemetryAppend {
         readonly batchOrdinal: number
         /** Physical dataset rows consumed to produce this batch, including skipped rows. */
         readonly sourceRowCount: number
+        /** Physical rows skipped because a required mapped value was blank. */
+        readonly sourceRowsSkipped: number
         /** True when this batch consumed the final row of the immutable dataset version. */
         readonly inputExhausted: boolean
       }
@@ -368,6 +358,7 @@ export interface OntologyMaterializer {
   }
   readonly projections: {
     replace(input: ProjectionSourceReplacement): Promise<ProjectionCommitResult>
+    completeTelemetryInput(input: ProjectionTelemetryInputCompletion): Promise<void>
     finishRun(input: ProjectionRunFinishInput): Promise<void>
   }
   readonly telemetry: {

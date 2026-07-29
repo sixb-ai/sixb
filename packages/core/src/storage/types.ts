@@ -140,7 +140,7 @@ export { PipelineRunError } from "./pipeline-runs"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
   AssertProjectionMaterializationExecutionInput,
-  CompleteEmptyProjectionTelemetryInput,
+  CompleteProjectionTelemetryInput,
   FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
   ListProjectionRunsInput,
@@ -149,8 +149,8 @@ export type {
   ProjectionMaterializationProtocol,
   ProjectionMaterializationRunRecord,
   ProjectionMaterializationRunStorage,
-  ProjectionRunCounters,
   ProjectionRunDatasetVersion,
+  ProjectionRunProgress,
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,

@@ -462,6 +462,7 @@ describe("startSixbRuntime", () => {
             payload: {
               datasetId: "raw.erp.orders",
               versionId: version.versionId,
+              createdAt: version.createdAt.toISOString(),
               producer: { kind: "sync", id: "sync-orders", runId: "run-1" },
             },
           },
@@ -490,7 +491,7 @@ describe("startSixbRuntime", () => {
           }),
         (value) => value.total === 1
       )
-      expect(projectionRuns.runs[0]?.objectsUpserted).toBe(1)
+      expect(projectionRuns.runs[0]?.sourceRowsRead).toBe(1)
 
       const projectionJobs = await sixb.queues.projections.claim({
         projectId: sixb.id,
@@ -551,6 +552,7 @@ describe("startSixbRuntime", () => {
             payload: {
               datasetId: rawOrdersDataset.id,
               versionId: version.versionId,
+              createdAt: version.createdAt.toISOString(),
               producer: { kind: "sync", id: "sync-orders", runId: "run-1" },
             },
           },

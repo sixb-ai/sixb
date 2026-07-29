@@ -147,6 +147,7 @@ async function emitSyncSucceededEvents(
                 payload: {
                   datasetId: result.datasetId,
                   versionId: result.version.versionId,
+                  createdAt: result.version.createdAt.toISOString(),
                   producer: {
                     kind: "sync" as const,
                     id: job.syncId,
