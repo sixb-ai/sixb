@@ -5,6 +5,7 @@ import type {
   OntologySource,
   Sixb,
 } from "@sixb/core"
+import { emptyGrantIndex } from "@sixb/core"
 import type {
   ListLatestProjectionRunsInput,
   ListProjectionRunsInput,
@@ -55,17 +56,7 @@ function authzViewing(...objectTypeIds: string[]): AuthorizationContext {
     principal: { type: "user", id: "u1" },
     groupIds: [],
     roleIds: [],
-    grants: {
-      "access:application": new Set(),
-      "view:object": new Set(objectTypeIds),
-      "view:dataset": new Set(),
-      "apply:action": new Set(),
-      "run:workflow": new Set(),
-      "run:sync": new Set(),
-      "run:pipeline": new Set(),
-      "run:agent": new Set(),
-      "observe:logs": new Set(),
-    },
+    grants: { ...emptyGrantIndex(), "view:object": new Set(objectTypeIds) },
   }
 }
 

@@ -1,15 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type { DomainEvent, RuleDefinition, SixbErrorContext, Storage } from "@sixb/core"
-import {
-  InMemoryBroker,
-  InMemoryObjectStorage,
-  InMemoryRulesStorage,
-  InMemoryStorage,
-} from "@sixb/core"
+import { InMemoryBroker, InMemoryStorage } from "@sixb/core"
 import { attachSixbErrorReporter, flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import type { StoredDomainEvent, StoredObjectUpdatedEvent } from "@sixb/core/internal/events"
 import { EventsRuntime } from "@sixb/core/internal/events"
 import type { ObjectStorage, RulesStorage, TimeseriesStorage } from "@sixb/core/storage"
+import { InMemoryObjectStorage, InMemoryRulesStorage } from "@sixb/core/storage"
 import type { RulesWorkerSixb } from "../src"
 import { RulesWorker } from "../src"
 

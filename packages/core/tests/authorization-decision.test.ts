@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { type AuthorizationContext, isAllowed } from "../src"
+import { type AuthorizationContext, emptyGrantIndex, isAllowed } from "../src"
 import { canViewEvent, evaluate } from "../src/authorization"
 import type {
   StoredActionRequestedEvent,
@@ -30,6 +30,7 @@ function context(grants: {
     groupIds: [],
     roleIds: [],
     grants: {
+      ...emptyGrantIndex(),
       "access:application": new Set(grants.applications ?? []),
       "view:object": new Set(grants.view ?? []),
       "view:dataset": new Set(grants.datasets ?? []),

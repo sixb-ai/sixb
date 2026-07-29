@@ -8,7 +8,6 @@ import {
   createSixb,
   defineObjectType,
   defineRule,
-  deriveRuleEventDependencies,
   InMemoryBroker,
   link,
   prop,
@@ -16,6 +15,7 @@ import {
   Sixb,
 } from "../src"
 import { EventsRuntime } from "../src/events"
+import { deriveRuleEventDependencies } from "../src/rules"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index.ts")).href

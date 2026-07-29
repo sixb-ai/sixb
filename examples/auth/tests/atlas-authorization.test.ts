@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
 import {
   canAccessApplication,
-  canPerformMembershipOperation,
   createSixb,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -12,7 +11,6 @@ import {
   isAllowed,
   type OntologySource,
   resolveAuthorizationContext,
-  resolveMembershipPolicyScope,
   type Sixb,
 } from "@sixb/core"
 import { adminAuditDataset, teamNotesDataset } from "../datasets/auth-data"
@@ -136,27 +134,5 @@ describe("auth example Atlas authorization", () => {
     expect(await noGroups.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
     expect(noGroups.listActions()).toEqual([])
     expect(noGroups.listDatasets()).toEqual([])
-  })
-
-  test("security admins can administer members while team members cannot", async () => {
-    const sixb = await createAuthExampleRuntime()
-    const membershipPolicies = sixb.security.getMembershipPolicyDefinitions()
-    const adminScope = resolveMembershipPolicyScope({
-      membershipPolicies,
-      callerGroupIds: ["security-admins"],
-    })
-    const teamMemberScope = resolveMembershipPolicyScope({
-      membershipPolicies,
-      callerGroupIds: ["team-members"],
-    })
-
-    for (const operation of ["invite", "assignGroups", "suspend"] as const) {
-      expect(canPerformMembershipOperation(adminScope, operation, [])).toBe(true)
-      expect(canPerformMembershipOperation(adminScope, operation, ["team-members"])).toBe(true)
-      expect(canPerformMembershipOperation(adminScope, operation, ["security-admins"])).toBe(true)
-      expect(canPerformMembershipOperation(teamMemberScope, operation, ["team-members"])).toBe(
-        false
-      )
-    }
   })
 })

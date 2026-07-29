@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryPipelineRunStorage, InMemoryStorage } from "../src"
-import { PipelineRunError } from "../src/storage"
+import { InMemoryStorage } from "../src"
+import { InMemoryPipelineRunStorage, PipelineRunError } from "../src/storage"
 
 describe("InMemoryPipelineRunStorage", () => {
   test("starts and finishes a successful pipeline run", async () => {

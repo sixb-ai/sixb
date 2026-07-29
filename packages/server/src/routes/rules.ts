@@ -1,10 +1,5 @@
-import {
-  deriveRuleEventDependencies,
-  isAllowed,
-  type OntologySource,
-  type RuleDefinition,
-  type Sixb,
-} from "@sixb/core"
+import { isAllowed, type OntologySource, type RuleDefinition, type Sixb } from "@sixb/core"
+import { deriveRuleEventDependencies } from "@sixb/core/internal/rules"
 import type { RuleStateRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"

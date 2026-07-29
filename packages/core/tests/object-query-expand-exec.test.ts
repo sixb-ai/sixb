@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import {
   defineObjectType,
-  InMemoryObjectStorage,
   type JsonValue,
   link,
   type ObjectExpansion,
@@ -12,6 +11,7 @@ import {
 import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "../src/events"
 import { countObjects, executeObjectQuery } from "../src/objects/query"
 import type { ExpandedLinkValue, ExpandedObjectRow } from "../src/storage"
+import { InMemoryObjectStorage } from "../src/storage"
 import { createStoredLinkMutationEvent, createStoredObjectMutationEvent } from "../src/testing"
 
 // Execution-side tests for `.expand()`: the planner routes expand through the

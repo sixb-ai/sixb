@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { createServer } from "node:net"
 import {
   type AuthorizationContext,
+  emptyGrantIndex,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -602,17 +603,7 @@ function authz(principal: Principal, agentIds: readonly string[] = []): Authoriz
     principal,
     groupIds: [],
     roleIds: [],
-    grants: {
-      "access:application": new Set(),
-      "view:object": new Set(),
-      "view:dataset": new Set(),
-      "apply:action": new Set(),
-      "run:workflow": new Set(),
-      "run:sync": new Set(),
-      "run:pipeline": new Set(),
-      "run:agent": new Set(agentIds),
-      "observe:logs": new Set(),
-    },
+    grants: { ...emptyGrantIndex(), "run:agent": new Set(agentIds) },
   }
 }
 

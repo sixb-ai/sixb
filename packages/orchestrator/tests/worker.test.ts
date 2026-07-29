@@ -14,7 +14,6 @@ import {
   events,
   InMemoryBroker,
   InMemoryLakeStorage,
-  InMemoryProjectionRunStorage,
   InMemoryQueues,
   prop,
   SYSTEM_PRINCIPAL,
@@ -29,6 +28,7 @@ import {
   type ProjectionDispatchDescriptor,
 } from "@sixb/core/internal/projections"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
+import { InMemoryProjectionRunStorage } from "@sixb/core/storage"
 import { compileRoutes } from "../src/compile-routes"
 import { reconcileProjectionDispatch } from "../src/projection-dispatch-reconciler"
 import type { OrchestratorRoutes, OrchestratorRuntimeOptions } from "../src/types"

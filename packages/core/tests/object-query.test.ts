@@ -3,7 +3,6 @@ import type { JsonValue } from "../src"
 import {
   decimal,
   defineObjectType,
-  InMemoryObjectStorage,
   link,
   type ObjectQuery,
   ObjectQueryExecutionError,
@@ -38,6 +37,7 @@ import type {
   QueryObjectsInput,
   QueryObjectsResult,
 } from "../src/storage"
+import { InMemoryObjectStorage } from "../src/storage"
 import { createStoredLinkMutationEvent, createStoredObjectMutationEvent } from "../src/testing"
 
 const Order = defineObjectType({

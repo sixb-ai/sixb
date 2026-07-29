@@ -113,19 +113,20 @@ Each builder takes one definition, a list, or a breadth selector.
 | One application | `can.access(applications.atlas)` |
 | One definition | `can.view(Invoice)` |
 | Several definitions | `can.view([Customer, Invoice])` |
-| Every object type | `can.view(ontology.objects())` |
-| Every dataset | `can.view(datasets())` |
-| Every action | `can.apply(actions())` |
-| Every workflow | `can.run(workflows())` |
-| Every sync | `can.run(syncs())` |
-| Every pipeline | `can.run(pipelines())` |
-| Every agent | `can.run(agents())` |
-| Everything but a few | `can.view(ontology.objects().except([Customer]))` |
+| Every object type | `can.view(every.object())` |
+| Every dataset | `can.view(every.dataset())` |
+| Every action | `can.apply(every.action())` |
+| Every workflow | `can.run(every.workflow())` |
+| Every sync | `can.run(every.sync())` |
+| Every pipeline | `can.run(every.pipeline())` |
+| Every agent | `can.run(every.agent())` |
+| Every application | `can.access(every.application())` |
+| Everything but a few | `can.view(every.object().except([Customer]))` |
 
-The breadth selectors are exported from `@sixb/core`: `ontology.objects()`, `datasets()`,
-`actions()`, `workflows()`, `syncs()`, `pipelines()`, and `agents()`. Each picks its target
-family's whole registered universe and is branded by target, so `can.view(actions())` does not
-compile.
+The breadth selectors live on one `every` namespace exported from `@sixb/core`. Each picks its target
+family's whole registered universe and is branded by target, so `can.view(every.action())` does not
+compile — and passing the wrong family from untyped code throws at definition time rather than
+silently granting the wrong universe.
 
 ## Broad grants
 
@@ -134,31 +135,36 @@ a selection broad while carving out a few definitions.
 
 ```ts
 // security/roles/billing-access.ts
-import { actions, can, datasets, defineRole, ontology, workflows } from "@sixb/core"
+import { can, defineRole, every } from "@sixb/core"
 import { financeAdmins } from "../groups/finance-admins"
 
 export const financeAdminFullAccess = defineRole("finance-admin.full-access", {
   grantedTo: [financeAdmins],
   grants: [
-    can.view(ontology.objects()),
-    can.view(datasets()),
-    can.apply(actions()),
-    can.run(workflows()),
+    can.view(every.object()),
+    can.view(every.dataset()),
+    can.apply(every.action()),
+    can.run(every.workflow()),
   ],
 })
 ```
 
 ```ts
 // Grant every object type except Customer
-can.view(ontology.objects().except([Customer]))
+can.view(every.object().except([Customer]))
 ```
 
 ## Application access
 
-Application grants control whether a signed-in principal may open Atlas or the custom app. They are
-opt-in per application for compatibility: when no role grants an application, every authenticated
-user may open it. Once any role grants that application, it becomes an allowlist and principals
-without the grant receive an access-denied page before application data loads.
+Application grants control whether a signed-in principal may open Atlas or the custom app.
+
+> **Known limitation in 0.1.x.** Application access is the only capability that is not
+> deny-by-default. While **no** role mentions an application, every authenticated principal may open
+> it. The allowlist switches on only once some role grants that application — after which principals
+> without the grant get an access-denied page before any application data loads. `view`, `apply`,
+> `run`, and `observe` all deny unless granted, so this is the single asymmetry in the model. If you
+> want Atlas closed, grant it explicitly to the groups that should reach it; the grant is what turns
+> enforcement on.
 
 ```ts
 import { applications, can, defineRole } from "@sixb/core"

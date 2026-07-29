@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import {
-  agents as agentScope,
   can,
   defineAgent,
   defineGroup,
   defineObjectType,
   defineRole,
+  every,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -94,7 +94,7 @@ const opsAgentRunner = defineRole("ops.agent-runner", {
 
 const adminAgentRunner = defineRole("admin.agent-runner", {
   grantedTo: [admins],
-  grants: [can.run(agentScope())],
+  grants: [can.run(every.agent())],
 })
 
 const agentOnlyRunner = defineRole("agent-only.runner", {

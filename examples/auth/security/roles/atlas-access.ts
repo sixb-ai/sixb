@@ -1,4 +1,4 @@
-import { actions, applications, can, datasets, defineRole, ontology, workflows } from "@sixb/core"
+import { applications, can, defineRole, every } from "@sixb/core"
 import { acknowledgeNote } from "../../actions/acknowledge-note"
 import { teamNotesDataset } from "../../datasets/auth-data"
 import { Note } from "../../ontology/note"
@@ -19,10 +19,10 @@ export const securityAdminFullAccess = defineRole("security-admin.full-access", 
   grantedTo: [securityAdmins],
   grants: [
     can.access([applications.atlas, applications.app]),
-    can.view(ontology.objects()),
-    can.view(datasets()),
-    can.apply(actions()),
-    can.run(workflows()),
+    can.view(every.object()),
+    can.view(every.dataset()),
+    can.apply(every.action()),
+    can.run(every.workflow()),
     can.observe("logs"),
   ],
 })

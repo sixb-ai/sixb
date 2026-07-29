@@ -9,7 +9,7 @@ import type {
   Schema,
   ValueType,
 } from "@sixb/core"
-import { validateTelemetryProjectionFieldMapping } from "@sixb/core"
+import { validateTelemetryProjectionFieldMapping } from "@sixb/core/internal/projections"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { ProjectionWorkerPermanentError } from "./errors"
 import { isIntegerEnumSchema, resolveProjectionSchema } from "./projection-schema"

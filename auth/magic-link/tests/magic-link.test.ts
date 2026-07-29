@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { type AuthSessionAudience, InMemoryAuthStorage } from "@sixb/core"
+import type { AuthSessionAudience } from "@sixb/core"
 import type { CompleteAuthSessionInput } from "@sixb/core/storage"
+import { InMemoryAuthStorage } from "@sixb/core/storage"
 import { magicLink, type SendMagicLinkInput } from "../src"
 import { hashMagicLinkToken } from "../src/tokens"
 

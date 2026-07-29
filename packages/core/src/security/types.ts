@@ -10,7 +10,7 @@ export interface GroupDefinition<TId extends string = string> {
 
 /**
  * A capability's reach over its target's id space. Either the whole registered
- * universe minus an exclusion list (`ontology.objects().except([...])`) or an
+ * universe minus an exclusion list (`every.object().except([...])`) or an
  * explicit set of ids (`can.view([A, B])`). Both forms expand to a concrete set
  * of ids at startup, so the resolved index only ever holds plain `Set`s.
  */

@@ -6,14 +6,11 @@ import { pathToFileURL } from "node:url"
 import {
   type ActionDefinition,
   type AgentDefinition,
-  agents,
   applications,
   can,
-  canPerformMembershipOperation,
   col,
   createSixb,
   type DatasetDefinition,
-  datasets,
   defineAction,
   defineAgent,
   defineConnector,
@@ -25,19 +22,17 @@ import {
   definePipelineStep,
   defineRole,
   defineSync,
+  every,
   type GroupDefinition,
   type MembershipPolicyDefinition,
-  ontology,
   type PipelineDefinition,
-  pipelines,
   prop,
   type RoleDefinition,
-  resolveMembershipPolicyScope,
   SecurityValidationError,
   Sixb,
   type SyncDefinition,
-  syncs,
 } from "../src"
+import { canPerformMembershipOperation, resolveMembershipPolicyScope } from "../src/security"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index.ts")).href
@@ -401,8 +396,8 @@ describe("role definitions", () => {
       target: "dataset",
       selection: { all: false, ids: ["account.snapshot"] },
     })
-    expect(can.view(datasets()).selection).toEqual({ all: true, except: [] })
-    expect(can.view(datasets().except([AccountSnapshot]))).toEqual({
+    expect(can.view(every.dataset()).selection).toEqual({ all: true, except: [] })
+    expect(can.view(every.dataset().except([AccountSnapshot]))).toEqual({
       kind: "grant",
       capability: "view",
       target: "dataset",
@@ -426,8 +421,8 @@ describe("role definitions", () => {
       target: "sync",
       selection: { all: false, ids: ["sync-accounts"] },
     })
-    expect(can.run(syncs()).selection).toEqual({ all: true, except: [] })
-    expect(can.run(syncs().except([syncAccounts]))).toEqual({
+    expect(can.run(every.sync()).selection).toEqual({ all: true, except: [] })
+    expect(can.run(every.sync().except([syncAccounts]))).toEqual({
       kind: "grant",
       capability: "run",
       target: "sync",
@@ -439,8 +434,8 @@ describe("role definitions", () => {
       target: "pipeline",
       selection: { all: false, ids: ["normalize-accounts"] },
     })
-    expect(can.run(pipelines()).selection).toEqual({ all: true, except: [] })
-    expect(can.run(pipelines().except([normalizeAccountsPipeline]))).toEqual({
+    expect(can.run(every.pipeline()).selection).toEqual({ all: true, except: [] })
+    expect(can.run(every.pipeline().except([normalizeAccountsPipeline]))).toEqual({
       kind: "grant",
       capability: "run",
       target: "pipeline",
@@ -452,8 +447,8 @@ describe("role definitions", () => {
       target: "agent",
       selection: { all: false, ids: ["ops"] },
     })
-    expect(can.run(agents()).selection).toEqual({ all: true, except: [] })
-    expect(can.run(agents().except([opsAgent]))).toEqual({
+    expect(can.run(every.agent()).selection).toEqual({ all: true, except: [] })
+    expect(can.run(every.agent().except([opsAgent]))).toEqual({
       kind: "grant",
       capability: "run",
       target: "agent",
@@ -462,10 +457,73 @@ describe("role definitions", () => {
   })
 
   test("scopes select the whole universe, with optional exclusions", () => {
-    expect(can.view(ontology.objects()).selection).toEqual({ all: true, except: [] })
-    expect(can.view(ontology.objects().except([Account])).selection).toEqual({
+    expect(can.view(every.object()).selection).toEqual({ all: true, except: [] })
+    expect(can.view(every.object().except([Account])).selection).toEqual({
       all: true,
       except: ["account"],
+    })
+  })
+
+  test("a breadth selector from the wrong family is rejected, not silently granted", () => {
+    // Typing already blocks this from TypeScript. The runtime check is what protects an untyped
+    // caller, or an `as never`, from turning `can.apply` into a grant over every object type.
+    expect(() => can.apply(every.object() as never)).toThrow(
+      "[Sixb] can.apply accepts action selectors, but received every.object()."
+    )
+    expect(() => can.access(every.action() as never)).toThrow(
+      "[Sixb] can.access accepts application selectors, but received every.action()."
+    )
+    expect(() => can.view(every.sync() as never)).toThrow(
+      "[Sixb] can.view accepts object or dataset selectors, but received every.sync()."
+    )
+    expect(() => can.run(every.dataset() as never)).toThrow(
+      "[Sixb] can.run accepts workflow or sync or pipeline or agent selectors, but received every.dataset()."
+    )
+  })
+
+  test("a definition from the wrong family is rejected, not filed under its own target", () => {
+    // Recognising a `kind` is not accepting it. These used to return `run:dataset` / `view:application`,
+    // and since neither is in `GRANT_KINDS`, startup died on `spec.universeKey` with a `TypeError`
+    // naming neither the role nor the definition.
+    expect(() => can.run(AccountSnapshot as never)).toThrow(
+      "[Sixb] can.run accepts workflow or sync or pipeline or agent definitions, but received one targeting dataset."
+    )
+    expect(() => can.view(applications.atlas as never)).toThrow(
+      "[Sixb] can.view accepts object or dataset definitions, but received one targeting application."
+    )
+    // The guard sits in `targetOfDefinition`, so it covers the two builders that never read `target`
+    // back either. These used to reach startup and be reported as an unknown *action* / *application*.
+    expect(() => can.apply(AccountSnapshot as never)).toThrow(
+      "[Sixb] can.apply accepts action definitions, but received one targeting dataset."
+    )
+    expect(() => can.access(syncAccounts as never)).toThrow(
+      "[Sixb] can.access accepts application definitions, but received one targeting sync."
+    )
+  })
+
+  test("an explicit list of two targets is rejected, not filed under the first one", () => {
+    // Sniffing only `input[0]` filed the pipeline's id under `run:sync`, so startup validation then
+    // reported a real pipeline as an unknown *sync*. Every element has to agree on the target.
+    expect(() => can.run([syncAccounts, normalizeAccountsPipeline] as never)).toThrow(
+      "[Sixb] can.run requires one target per grant, but received both sync and pipeline definitions. Use one grant each."
+    )
+    expect(() => can.view([Account, AccountSnapshot] as never)).toThrow(
+      "[Sixb] can.view requires one target per grant, but received both object and dataset definitions. Use one grant each."
+    )
+    // A homogeneous list still resolves to the one target it describes.
+    expect(can.run([syncAccounts]).target).toBe("sync")
+  })
+
+  test("every.application() selects the whole application universe", () => {
+    expect(can.access(every.application())).toEqual({
+      kind: "grant",
+      capability: "access",
+      target: "application",
+      selection: { all: true, except: [] },
+    })
+    expect(can.access(every.application().except([applications.atlas])).selection).toEqual({
+      all: true,
+      except: ["atlas"],
     })
   })
 

@@ -1,5 +1,4 @@
 import type { RuleEventSubject } from "@sixb/core"
-import type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "@sixb/core/internal/events"
 import type {
   ListActiveRuleStatesInput,
   ListActiveRuleStatesResult,
@@ -8,6 +7,8 @@ import type {
   RuleStateRecord,
   RuleStateTransitionEvent,
   RulesStorage,
+  StoredRuleResolvedEvent,
+  StoredRuleTriggeredEvent,
 } from "@sixb/core/storage"
 import type { SqlParameter } from "./pg-client"
 import type { PgStoreClient } from "./transactions"

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryAuthStorage, InMemoryStorage } from "../src"
+import { InMemoryStorage } from "../src"
+import { InMemoryAuthStorage } from "../src/storage"
 import { runAuthStorageContractSuite } from "../src/testing"
 
 runAuthStorageContractSuite("InMemoryAuthStorage", {

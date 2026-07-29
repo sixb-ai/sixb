@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
-import type { StoredTelemetryAppendedEvent } from "@sixb/core/internal/events"
 import type {
+  StoredTelemetryAppendedEvent,
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
   TimeseriesPoint,

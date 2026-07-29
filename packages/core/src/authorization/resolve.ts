@@ -12,7 +12,7 @@ import type { AuthorizationContext, GrantIndex, ResolvedRole } from "./types"
 /**
  * Expand a role's grants into concrete id sets once at startup.
  *
- * Broad grants (`ontology.objects().except(...)`) expand against the registered
+ * Broad grants (`every.object().except([...])`) expand against the registered
  * universe; object-type grants also expand to subtypes. The result holds only
  * `Set`s, so per-request resolution and runtime checks stay simple `set.has`.
  * The per-kind universe and subtype rules come from the `GRANT_KINDS` table, so

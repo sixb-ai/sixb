@@ -12,10 +12,10 @@ import {
   definePipeline,
   definePipelineStep,
   InMemoryLakeStorage,
-  InMemoryPipelineRunStorage,
 } from "@sixb/core"
 import type { DatasetWriteMode, ExecuteSqlTransformInput } from "@sixb/core/lake-storage"
 import type { PipelineRunStorage } from "@sixb/core/storage"
+import { InMemoryPipelineRunStorage } from "@sixb/core/storage"
 import { runPipelineJob } from "../src/run-pipeline-job"
 import type { PipelineWorkerContext } from "../src/types"
 

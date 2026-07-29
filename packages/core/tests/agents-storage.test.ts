@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryAgentStorage, InMemoryStorage } from "../src"
-import { AgentStorageError } from "../src/storage"
+import { InMemoryStorage } from "../src"
+import { AgentStorageError, InMemoryAgentStorage } from "../src/storage"
 import { runAgentStorageContractSuite } from "../src/testing"
 
 runAgentStorageContractSuite("InMemoryAgentStorage", {

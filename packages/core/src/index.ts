@@ -38,8 +38,6 @@ export type {
   ValueTypeRefSchema,
 } from "./ontology"
 export {
-  createLinkTokenMap,
-  createPropertyTokenMap,
   defineInterface,
   defineObjectType,
   defineOntology,
@@ -121,6 +119,11 @@ export {
   requestActionAndWait,
   waitForActionRun,
 } from "./actions"
+/**
+ * `ctx.edits()` rejects an invalid batch with this, so it crosses a public boundary and users need
+ * it to write `catch (error) { if (error instanceof EditBatchError) … }`.
+ */
+export { EditBatchError } from "./edits"
 export {
   ActionRunFailedError,
   ActionRunTimeoutError,
@@ -149,16 +152,16 @@ export {
 
 // ── Broker ─────────────────────────────────────────────────
 
-export type { Broker } from "./broker"
+export type { Broker, BrokerCursor } from "./broker"
 export { InMemoryBroker } from "./broker"
 export type { JsonValue } from "./json"
 export {
   assertJsonValue,
   cloneJsonValue,
-  compareStrings,
   getInvalidJsonValueReason,
   isJsonValue,
-  jsonValuesEqual,
+  // Also on `@sixb/core/storage`, where a provider reaches for it. The six `json` helpers are one
+  // cohesive set, so splitting them across subpaths by historical consumer would be arbitrary.
   stableJsonStringify,
 } from "./json"
 
@@ -236,6 +239,7 @@ export type {
   EventSelectorSpec,
   EventSelectors,
   EventsAppendInput,
+  EventsEmitOptions,
   EventsReadInput,
   EventsSubscribeInput,
   InferEventSelectorContext,
@@ -280,6 +284,8 @@ export type {
   RuntimeMutationEventOrigin,
   ScheduleEvent,
   ScheduleTriggeredEvent,
+  StoredAuthorableEvent,
+  StoredDomainEvent,
   SyncEvent,
   SyncEventSelectorBuilder,
   SyncEventSelectorContext,
@@ -299,10 +305,7 @@ export type {
   WorkflowRunStartedEvent,
 } from "./events"
 export {
-  buildEventSelectorPredicate,
-  eventSelectorSpec,
   events,
-  getEventTopic,
   isDomainEventType,
 } from "./events"
 
@@ -344,7 +347,6 @@ export {
   logLevelsAtOrAbove,
   noopLogger,
   noopLoggerProvider,
-  normalizeLogError,
   SIXB_RUN_KINDS,
 } from "./logging"
 
@@ -375,7 +377,6 @@ export type {
 } from "./rules"
 export {
   defineRule,
-  deriveRuleEventDependencies,
   isRuleDefinition,
   RuleValidationError,
 } from "./rules"
@@ -403,10 +404,11 @@ export {
 
 // ── Authorization ──────────────────────────────────────────
 
-export type { AuthorizationContext } from "./authorization"
+export type { AuthorizationContext, GrantIndex, GrantKind } from "./authorization"
 export {
   AuthorizationError,
   canAccessApplication,
+  emptyGrantIndex,
   isAllowed,
   isApplicationAccessControlled,
   resolveAuthorizationContext,
@@ -418,6 +420,8 @@ export type {
   AccessGrant,
   ApplicationDefinition,
   ApplyGrant,
+  BreadthSelector,
+  BreadthTarget,
   DefineGroupOptions,
   DefineMembershipPolicyOptions,
   DefineRoleOptions,
@@ -425,47 +429,26 @@ export type {
   GrantDefinition,
   GroupDefinition,
   MembershipOperation,
-  MembershipOperationScope,
   MembershipPolicyDefinition,
-  MembershipPolicyScope,
   ObserveGrant,
   ObserveGrantTarget,
   RegisteredSecurityDefinitions,
   RoleDefinition,
   RunGrant,
   RunGrantTarget,
-  Scope,
-  ScopeTarget,
   SecurityRegistry,
   Selection,
   ViewGrant,
   ViewGrantTarget,
 } from "./security"
 export {
-  actions,
-  agents,
   applications,
-  assertGrantDefinition,
-  assertGroupDefinition,
-  assertMembershipPolicyDefinition,
-  assertRoleDefinition,
   can,
-  canPerformMembershipOperation,
-  datasets,
   defineGroup,
   defineMembershipPolicy,
   defineRole,
-  isGroupDefinition,
-  isMembershipOperation,
-  isMembershipPolicyDefinition,
-  isRoleDefinition,
-  missingMembershipGroupIds,
-  ontology,
-  pipelines,
-  resolveMembershipPolicyScope,
+  every,
   SecurityValidationError,
-  syncs,
-  workflows,
 } from "./security"
 
 // ── Storage ────────────────────────────────────────────────
@@ -481,22 +464,8 @@ export type {
   StorageTransactionOptions,
 } from "./storage"
 export {
-  InMemoryActionRunStorage,
-  InMemoryAgentStorage,
-  InMemoryAuthStorage,
   InMemoryFileUploadSessions,
-  InMemoryObjectStorage,
-  InMemoryPipelineRunStorage,
-  InMemoryProjectionRunStorage,
-  InMemoryRulesStorage,
   InMemoryStorage,
-  InMemorySyncRunStorage,
-  InMemoryTimeseriesStorage,
-  InMemoryWebhookDeliveryStorage,
-  InMemoryWebhookRunStorage,
-  InMemoryWorkflowInterventionStorage,
-  InMemoryWorkflowNodeRunStorage,
-  InMemoryWorkflowRunStorage,
   isMigrationCapableStorage,
   migrateStorage,
 } from "./storage"
@@ -514,8 +483,6 @@ export type {
   FileRef,
 } from "./blob-storage"
 export {
-  blobDigestHex,
-  blobIdFromDigest,
   DEFAULT_SIMPLE_FILE_UPLOAD_BYTES,
   fileNameFor,
   InMemoryBlobStorage,
@@ -674,10 +641,8 @@ export type {
   ScheduleTriggerDefinition,
 } from "./schedules"
 export {
-  assertScheduleDefinition,
   defineSchedule,
   isScheduleDefinition,
-  isScheduleReference,
   ScheduleValidationError,
 } from "./schedules"
 
@@ -896,7 +861,7 @@ export {
 
 // ── Scheduling ──────────────────────────────────────────────
 
-export { CronValidationError, createCronMatcher, nextCronOccurrence } from "./schedules"
+export { CronValidationError } from "./schedules"
 
 // ── Projections ─────────────────────────────────────────────
 
@@ -918,7 +883,4 @@ export {
   isObjectProjectionDefinition,
   isProjectionDefinition,
   isTelemetryProjectionDefinition,
-  projectionKindOf,
-  projectionObjectTypeIds,
-  validateTelemetryProjectionFieldMapping,
 } from "./projections"

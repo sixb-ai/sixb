@@ -1,10 +1,10 @@
 import type { RuleDefinition, RuleEventSubject } from "@sixb/core"
-import { deriveRuleEventDependencies } from "@sixb/core"
 import type {
   StoredDomainEvent,
   StoredRuleResolvedEvent,
   StoredRuleTriggeredEvent,
 } from "@sixb/core/internal/events"
+import { deriveRuleEventDependencies } from "@sixb/core/internal/rules"
 import type { ObjectLinkRow, RulesStorage } from "@sixb/core/storage"
 import { evaluateRulePredicate } from "./evaluate-predicate"
 import type {

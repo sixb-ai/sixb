@@ -82,10 +82,12 @@ shared source (notably `@sixb/core`) once per dependent, which made the step the
 
 ## Export Surfaces
 
-- Exports are curated — never re-export something from a barrel just because it exists.
-- A package root (`.`) is for app authors: `@sixb/core` exports the authoring API (`define*`, `createSixb`, config types, `InMemory*` providers); other packages export only what consumers call (workers export just their `*Worker` class).
-- `@sixb/core/{storage,broker,queues,sandboxes,lake-storage,blob-storage/server,auth/strategy}` are the public contracts that providers implement.
-- `@sixb/core/internal/*` is for this repo's packages only — no compatibility promise.
+- Exports are curated — never re-export something from a barrel just because it exists. If nothing imports it, it does not belong on a public surface; a selector or helper that can only return nothing is dead API.
+- A package root (`.`) is for app authors: `@sixb/core` exports the authoring API (`define*`, `createSixb`, config types, and the `InMemory*` providers that fill a `createSixb` slot); other packages export only what consumers call (workers export just their `*Worker` class).
+- These six are the provider contracts a third party implements: `@sixb/core/{broker,queues,sandboxes,lake-storage,blob-storage/server,auth/strategy}`.
+- `@sixb/core/storage` is broader: it is both the read/run-history contract and where the in-memory storage implementations live. A third-party storage provider is not supported in 0.1.x — the materialization contract is still moving.
+- A type that appears in a public interface signature must be exported from the same subpath as the interface, or the interface cannot be implemented from outside.
+- `@sixb/core/internal/*` is for this repo's packages only — no compatibility promise. Nothing in `docs/`, `examples/`, `templates/`, or `apps/` may import from it.
 - Export types freely (users need them to annotate their own code); keep runtime values minimal. Connectors export all their wire types on purpose.
 
 ## Code Style
