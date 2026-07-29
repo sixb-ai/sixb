@@ -73,8 +73,10 @@ describe("createAtlasApp", () => {
 
       expect(html).toContain('"api":{"baseUrl":"http://api.localhost"}')
       expect(html).toContain('"auth":{"audience":"atlas","enabled":true}')
-      expect(scriptPath).toMatch(/^\/__sixb\/main-[^.]+\.js$/)
-      expect(stylesheetPath).toMatch(/^\/__sixb\/main-[^.]+\.css$/)
+      // The entry is named `atlas-*` and split chunks `chunk-*`, so the shell can never point at a
+      // chunk. Naming both `[name]-[hash]` made `main.tsx` and its 47 shared chunks indistinguishable.
+      expect(scriptPath).toMatch(/^\/__sixb\/atlas-[^.]+\.js$/)
+      expect(stylesheetPath).toMatch(/^\/__sixb\/atlas-[^.]+\.css$/)
       expect(html).toContain('<div id="root"></div>')
       expect(dottedRouteHtml).toContain('<div id="root"></div>')
 

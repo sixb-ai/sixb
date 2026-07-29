@@ -305,6 +305,17 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         }, 80)
       })
 
+      // An FSWatcher emits `error` as an event, and an unhandled one takes the whole dev process
+      // down — the `.catch()` above only covers a failed rebuild. Losing file watching should cost
+      // hot reload, not the server: keep serving the last good build and say so.
+      watcher.on("error", (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error(
+          `[SixbCustomApp] Stopped watching ${appDir}: ${message}. ` +
+            "Serving the last build; restart to resume hot reload."
+        )
+      })
+
       const displayHost = host === "0.0.0.0" ? "localhost" : host
 
       return {

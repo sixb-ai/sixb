@@ -72,12 +72,33 @@ export async function buildBuiltInUiBundle(
       outdir,
       "--target",
       "browser",
+      // Resolve `@sixb/*` through the `bun` condition, which points at source. Without it a browser
+      // target picks `import` and reads each package's `dist`, so this build silently depended on
+      // whichever packages happened to be built already — the same dependency `packages/app` avoids
+      // by passing `conditions: ["bun"]`. Atlas bundles its own copy of that source either way.
+      "--conditions",
+      "bun",
+      // The entry gets a name no chunk can take. Bun names chunks after the source module they
+      // come from, so with `[name]-[hash]` on both, `main.tsx` and its 47 shared chunks all
+      // produced `main-*.js` and `findBuiltAsset` could not tell them apart. Prefixes make the
+      // three kinds of output distinguishable by name alone.
       "--entry-naming",
-      "[name]-[hash].[ext]",
+      "atlas-[hash].[ext]",
       "--chunk-naming",
-      "[name]-[hash].[ext]",
+      "chunk-[name]-[hash].[ext]",
       "--asset-naming",
-      "[name]-[hash].[ext]",
+      "asset-[name]-[hash].[ext]",
+      // React is bundled here rather than external, so without this the production Atlas bundle
+      // ships React's development build: every render pays the dev-only checks and the browser
+      // downloads them. `--production` sets NODE_ENV=production, which picks the production JSX
+      // runtime, and minifies.
+      "--production",
+      // Moves everything behind a dynamic import out of the entry. Shiki's ~350 language grammars
+      // are the bulk of Atlas: without this the browser downloads all 11.5 MB to render the first
+      // page, with it 2.3 MB, and the grammars arrive only when a page highlights that language.
+      // The shell loads the entry with `type="module"`, so the relative chunk imports Bun emits
+      // resolve against the same served directory.
+      "--splitting",
     ],
     {
       cwd: sourceDir,
@@ -139,8 +160,8 @@ export function renderBuiltInUiShell(config: BuiltInUiShellConfig): string {
 
 async function resolveBuiltInUiBundle(outdir: string): Promise<BuiltInUiBundle> {
   const files = await readdir(outdir)
-  const scriptFile = findBuiltAsset(files, "main", "js")
-  const stylesheetFile = findBuiltAsset(files, "main", "css")
+  const scriptFile = findBuiltAsset(files, "atlas", "js")
+  const stylesheetFile = findBuiltAsset(files, "atlas", "css")
 
   return {
     outdir,

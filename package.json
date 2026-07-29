@@ -16,8 +16,10 @@
   "scripts": {
     "build": "bun run build:clean && bun run build:types && bun run build:js",
     "build:types": "tsc -b tsconfig.build.json",
-    "build:js": "bun --filter '@sixb/*' --filter 'create-sixb' build",
+    "build:js": "bun --filter './packages/*' --filter './auth/*' --filter './connectors/*' --filter './broker/*' --filter './loggers/*' --filter './queues/*' --filter './sandboxes/*' --filter './storage/*' build",
     "build:clean": "rm -rf {packages,auth,connectors,broker,queues,sandboxes,storage,loggers}/*/{dist,.tsbuild} examples/*/.sixb",
+    "release": "bun install --frozen-lockfile && bun run build && bun run test:publish",
+    "release:publish": "bun scripts/publish.ts",
     "dev": "bun sixb dev",
     "test": "bun test",
     "test:e2e": "bun run --workspaces --if-present test:e2e",
