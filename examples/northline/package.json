@@ -1,0 +1,42 @@
+{
+  "name": "@sixb/example-northline",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun scripts/dev.ts",
+    "dev:runtime": "bun ../../packages/cli/src/index.tsx dev",
+    "build": "bun ../../packages/cli/src/index.tsx build",
+    "check": "bun ../../packages/cli/src/index.tsx check",
+    "demo:reset": "bun scripts/reset-demo.ts",
+    "demo:sync": "bun scripts/sync-demo.ts",
+    "demo:alarm": "bun scripts/send-alarm.ts",
+    "demo:approve-quote": "bun scripts/approve-quote.ts",
+    "typecheck": "bun ../../packages/cli/src/index.tsx typegen && tsc --noEmit"
+  },
+  "dependencies": {
+    "@sixb/app": "workspace:*",
+    "@sixb/blob-local": "workspace:*",
+    "@sixb/client": "workspace:*",
+    "@sixb/core": "workspace:*",
+    "@sixb/ducklake": "workspace:*",
+    "@sixb/sandboxes-local": "workspace:*",
+    "@sixb/sqlite": "workspace:*",
+    "@sixb/ui": "workspace:*",
+    "@tailwindcss/cli": "^4.2.2",
+    "@tanstack/react-query": "^5.0.0",
+    "ai": "^7.0.4",
+    "lucide-react": "^0.562.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.13.0",
+    "tailwindcss": "^4.1.18",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@sixb/server": "workspace:*",
+    "@types/bun": "latest",
+    "@types/node": "^22.15.30",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  }
+}

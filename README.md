@@ -145,7 +145,7 @@ See [CHANGELOG.md](https://github.com/sixb-ai/sixb/blob/main/CHANGELOG.md).
 git clone https://github.com/sixb-ai/sixb.git
 cd sixb
 bun install
-bun --filter @sixb/example-acme-corp dev
+bun --filter @sixb/example-northline dev
 ```
 
 Atlas on `http://localhost:3000`, the example app on `:3001`, API docs on `:3002/docs`.

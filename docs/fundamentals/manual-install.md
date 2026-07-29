@@ -72,7 +72,7 @@ throws `No ontology found.`
 ### With durable providers
 
 Swap in-memory for durable providers per slot. This is the setup the
-[acme-corp example](../examples/overview.md) uses — SQLite for objects and
+[Northline example](../examples/overview.md) uses — SQLite for objects and
 telemetry, local disk for the lake and blobs:
 
 ```ts
@@ -82,7 +82,7 @@ import { LocalLakeStorage } from "@sixb/lake-local"
 import { SqliteStorage } from "@sixb/sqlite"
 
 export const sixb = await createSixb({
-  id: "acme-corp",
+  id: "northline",
   broker: new InMemoryBroker(),
   storage: new SqliteStorage({ path: ".sixb" }),
   lakeStorage: new LocalLakeStorage({ path: ".sixb/lake" }),

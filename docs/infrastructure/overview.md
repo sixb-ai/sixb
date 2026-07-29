@@ -21,7 +21,7 @@ import { LocalLakeStorage } from "@sixb/lake-local"
 import { LocalBlobStorage } from "@sixb/blob-local"
 
 export const sixb = await createSixb({
-  id: "acme-corp",
+  id: "northline",
   storage: new SqliteStorage({ path: ".sixb" }),
   lakeStorage: new LocalLakeStorage({ path: ".sixb/lake" }),
   blobStorage: new LocalBlobStorage({ basePath: ".sixb" }),

@@ -235,24 +235,26 @@
         "typescript": "^5.7.0",
       },
     },
-    "examples/acme-corp": {
-      "name": "@sixb/example-acme-corp",
+    "examples/northline": {
+      "name": "@sixb/example-northline",
       "dependencies": {
         "@sixb/app": "workspace:*",
         "@sixb/blob-local": "workspace:*",
         "@sixb/client": "workspace:*",
         "@sixb/core": "workspace:*",
-        "@sixb/lake-local": "workspace:*",
+        "@sixb/ducklake": "workspace:*",
         "@sixb/sandboxes-local": "workspace:*",
         "@sixb/sqlite": "workspace:*",
         "@sixb/ui": "workspace:*",
         "@tailwindcss/cli": "^4.2.2",
         "@tanstack/react-query": "^5.0.0",
         "ai": "^7.0.4",
+        "lucide-react": "^0.562.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "react-router-dom": "^7.13.0",
         "tailwindcss": "^4.1.18",
+        "zod": "^3.24.0",
       },
       "devDependencies": {
         "@sixb/server": "workspace:*",
@@ -1273,7 +1275,7 @@
 
     "@sixb/ducklake": ["@sixb/ducklake@workspace:storage/ducklake"],
 
-    "@sixb/example-acme-corp": ["@sixb/example-acme-corp@workspace:examples/acme-corp"],
+    "@sixb/example-northline": ["@sixb/example-northline@workspace:examples/northline"],
 
     "@sixb/example-auth": ["@sixb/example-auth@workspace:examples/auth"],
 

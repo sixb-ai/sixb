@@ -1,0 +1,90 @@
+@import "@sixb/ui/globals.css";
+@source "./**/*.{ts,tsx}";
+
+:root {
+  --background: #f3f5f4;
+  --foreground: #172126;
+  --card: #fbfcfb;
+  --card-foreground: #172126;
+  --popover: #ffffff;
+  --popover-foreground: #172126;
+  --primary: #2f7280;
+  --primary-foreground: #ffffff;
+  --secondary: #e9eff0;
+  --secondary-foreground: #20343b;
+  --accent: #e8eeed;
+  --accent-foreground: #172126;
+  --muted: #e9eeed;
+  --muted-foreground: #647278;
+  --border: #d6dedd;
+  --input: #cfd9db;
+  --ring: #4d8d99;
+  --destructive: #b63b3b;
+  --success: #287a52;
+  --warning: #a96316;
+  --info: #356f9c;
+  --northline-navy: #132a33;
+  --northline-blue: #2f7280;
+  --northline-air: #78b8c2;
+  --northline-copper: #c86f3d;
+  --sidebar: #132a33;
+  --sidebar-foreground: #f4f8f9;
+  --sidebar-primary: #78b8c2;
+  --sidebar-primary-foreground: #0d2027;
+  --sidebar-accent: #1c3943;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #29434c;
+  --sidebar-ring: #78b8c2;
+  --font-sans: "SF Pro Text", "SF Pro Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
+  --radius: 0.4rem;
+  --shadow-sm: 0 1px 2px rgba(13, 32, 39, 0.06);
+  --shadow: 0 10px 28px rgba(13, 32, 39, 0.08);
+}
+
+.dark {
+  --background: #0d1518;
+  --foreground: #edf3f4;
+  --card: #142126;
+  --card-foreground: #edf3f4;
+  --popover: #18272d;
+  --popover-foreground: #edf3f4;
+  --primary: #63a7b2;
+  --primary-foreground: #0d2027;
+  --secondary: #203137;
+  --secondary-foreground: #edf3f4;
+  --accent: #25383f;
+  --accent-foreground: #ffffff;
+  --muted: #1d2c31;
+  --muted-foreground: #a9b5ba;
+  --border: #2d4047;
+  --input: #3b5058;
+  --ring: #78b8c2;
+  --destructive: #f07878;
+  --success: #61c994;
+  --warning: #e4a64e;
+  --info: #75b7e8;
+  --sidebar: #0d2027;
+  --sidebar-foreground: #f4f8f9;
+  --sidebar-primary: #8bc7d0;
+  --sidebar-primary-foreground: #0d2027;
+  --sidebar-accent: #183640;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #27424b;
+  --sidebar-ring: #8bc7d0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--northline-air) 35%, transparent);
+}

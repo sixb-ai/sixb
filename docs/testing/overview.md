@@ -24,8 +24,8 @@ Run targeted files first while iterating, then widen when you touch shared
 behavior:
 
 ```bash
-bun test examples/acme-corp/tests/client-query.test.ts
-bun test examples/acme-corp/tests/
+bun test examples/northline/tests/scenario.test.ts
+bun test examples/northline/tests/
 ```
 
 ## In-memory providers as fixtures
@@ -229,7 +229,7 @@ grants, groups, and membership policies resolve; the full pattern lives in
 
 End-to-end tests start a real `SixbServer` over HTTP and drive it with the typed
 `@sixb/client` builders, proving the client and server agree on the wire format.
-The shape mirrors `examples/acme-corp/tests/client-query.test.ts`:
+Use this shape for a full typed-client/server contract test:
 
 1. Build a `Sixb` runtime and seed data through `sixb.objects(...)`.
 2. Allocate a free port and start a `SixbServer` bound to it.

@@ -9,7 +9,7 @@ the matching folder, and Sixb wires it in.
 ## Directory tree
 
 ```txt
-acme-corp/
+my-sixb-app/
 ├── sixb.config.ts
 ├── ontology/
 │   ├── customer.ts
@@ -121,7 +121,7 @@ import { LocalLakeStorage } from "@sixb/lake-local"
 import { SqliteStorage } from "@sixb/sqlite"
 
 export const sixb = createSixb({
-  id: "acme-corp",
+  id: "my-sixb-app",
   broker: new InMemoryBroker(),
   storage: new SqliteStorage({ path: ".sixb" }),
   lakeStorage: new LocalLakeStorage({ path: ".sixb/lake" }),
@@ -145,7 +145,7 @@ is returned:
 export const sixb = bootstrap()
 
 async function bootstrap() {
-  const runtime = await createSixb({ id: "acme-corp" /* ...providers */ })
+  const runtime = await createSixb({ id: "my-sixb-app" /* ...providers */ })
   await seedCustomers(runtime)
   return runtime
 }

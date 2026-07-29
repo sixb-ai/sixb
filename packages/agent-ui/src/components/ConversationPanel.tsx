@@ -411,7 +411,12 @@ function Welcome({ agent, compact }: { agent: Agent | undefined; compact: boolea
     >
       <div className="inline-flex max-w-full items-center justify-center gap-3">
         <AgentAvatar name={name} className="size-9 text-sm md:size-10" />
-        <p className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
+        <p
+          className={cn(
+            "min-w-0 truncate font-semibold tracking-tight text-foreground",
+            compact ? "text-xl md:text-2xl" : "text-2xl md:text-3xl"
+          )}
+        >
           {name}
         </p>
         {description ? (
