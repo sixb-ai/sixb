@@ -794,8 +794,9 @@ export type {
   SixbInstance,
   SixbOptions,
   SixbRuntimeContext,
-  TelemetryAppender,
   TelemetryAppendInput,
+  TelemetryChannel,
+  TelemetryHistoryInput,
   TelemetryPropertyToken,
   TwinObject,
 } from "./runtime"

@@ -1,6 +1,6 @@
 # Reading & Writing
 
-Create, read, and list objects through the typed API. Reach for this whenever you need to
+Create, read, list, and delete objects through the typed API. Reach for this whenever you need to
 write a record, fetch one by id, or page through a type's objects in code.
 
 Once an object type is registered, `sixb.objects(Type)` returns a typed collection ("object
@@ -207,6 +207,26 @@ await handle.requestAction({ actionId: "markPaid" })
 
 The handle does not check that the object exists when you create it; operations are validated
 when they run.
+
+## delete and restore
+
+`delete()` removes one object, cascading over its links in the same commit. Deleting an object that
+does not exist is a no-op.
+
+```ts
+await invoices.byId("inv-001").delete()
+```
+
+What `restore()` does depends on where the object came from:
+
+| The object | `delete()` | `restore()` |
+| --- | --- | --- |
+| Written only from code | Ceases to exist. Not reversible. | No-op — `upsert` it again instead. |
+| Also written by a projection | Stays hidden even while the projection keeps asserting it. | Reveals the projected object again. |
+
+There is no HTTP route for either yet. Write capabilities are not part of the grant model in 0.1.0,
+so a `DELETE` endpoint would expose a cascading delete to every authenticated session. An ungated
+`upsert` is recoverable; an ungated delete of a managed object is not.
 
 ## requestAction
 

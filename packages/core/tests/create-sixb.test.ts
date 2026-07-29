@@ -135,7 +135,7 @@ export const syncOrders = defineSync("sync-orders")
     const client = await sixb.connector(erpDb)
 
     expect(sixb.listActions().map((action) => action.id)).toEqual(["setTemperature"])
-    expect(sixb.getActionsForType(sixb.listObjectTypes()[0]).map((action) => action.id)).toEqual([
+    expect(sixb.listActionsForType(sixb.listObjectTypes()[0]).map((action) => action.id)).toEqual([
       "setTemperature",
     ])
     expect(sixb.listDatasets().map((dataset) => dataset.id)).toEqual(["raw.erp.orders"])
@@ -853,7 +853,7 @@ export const MyEquipment = defineObjectType({
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getSubTypes("Equipment")).toContain("MyEquipment")
+    expect(sixb.listSubTypes("Equipment")).toContain("MyEquipment")
   })
 
   test("loads ValueTypes from OntologyDocumentInput", async () => {
@@ -1097,7 +1097,7 @@ export const roomTemperatureProjection = defineTelemetryProjection(
     expect(sixb.listTelemetryProjections()[0].datasetId).toBe("canonical.room-readings")
   })
 
-  test("uses explicit projections when provided", async () => {
+  test("registers explicit projections", async () => {
     const projectRoot = await createTempProjectRoot()
 
     const Room = defineObjectType({
@@ -1120,6 +1120,120 @@ export const roomTemperatureProjection = defineTelemetryProjection(
 
     expect(sixb.listObjectProjections()).toHaveLength(1)
     expect(sixb.listObjectProjections()[0].id).toBe("room-proj")
+  })
+
+  test("merges explicit projections with discovered projections", async () => {
+    // `actions` and `projections` used to *replace* discovery while the other eleven families merged.
+    // The test above passes either way, because its temp root is empty.
+    const projectRoot = await createTempProjectRoot()
+
+    const Room = defineObjectType({
+      id: "Room",
+      name: "Room",
+      properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
+    })
+
+    const explicitProjection = defineProjection("explicit-rooms", Room)
+      .fromDataset(canonicalRoomsDataset)
+      .properties({ id: "room_id", name: "room_name" })
+
+    // A different object type: two projections cannot both own one type's existence.
+    await writeProjectFile(
+      projectRoot,
+      "projections/discovered-buildings.ts",
+      `import { defineProjection } from "${coreModuleUrl}"
+import { canonicalRoomsDataset } from "../datasets/canonical-rooms"
+import { Building } from "../ontology/room"
+
+export const discoveredBuildings = defineProjection("discovered-buildings", Building)
+  .fromDataset(canonicalRoomsDataset)
+  .properties({ id: "room_id", name: "room_name" })
+`
+    )
+    await writeProjectFile(
+      projectRoot,
+      "ontology/room.ts",
+      `import { defineObjectType, prop } from "${coreModuleUrl}"
+
+export const Room = defineObjectType({
+  id: "Room",
+  name: "Room",
+  properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
+})
+
+export const Building = defineObjectType({
+  id: "Building",
+  name: "Building",
+  properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
+})
+`
+    )
+    await writeProjectFile(
+      projectRoot,
+      "datasets/canonical-rooms.ts",
+      `import { col, defineDataset } from "${coreModuleUrl}"
+
+export const canonicalRoomsDataset = defineDataset("canonical.rooms", {
+  schema: [col("room_id", "string"), col("room_name", "string")],
+})
+`
+    )
+
+    const sixb = await createSixb({
+      projectRoot,
+      projections: [explicitProjection],
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.listObjectProjections().map((projection) => projection.id)).toEqual([
+      "explicit-rooms",
+      "discovered-buildings",
+    ])
+  })
+
+  test("rejects duplicate action ids across explicit and discovered actions", async () => {
+    // The merge turned a silent override into a startup failure. That is the point: two definitions
+    // claiming one id is a mistake, and a project that relied on the override must see it.
+    const projectRoot = await createTempProjectRoot()
+
+    await writeProjectFile(
+      projectRoot,
+      "ontology/room.ts",
+      `import { defineObjectType, prop } from "${coreModuleUrl}"
+
+export const Room = defineObjectType({
+  id: "Room",
+  name: "Room",
+  properties: [prop("id", "string", { required: true, primary: true })],
+})
+`
+    )
+    await writeProjectFile(
+      projectRoot,
+      "actions/setTemperature.ts",
+      `import { defineAction, param } from "${coreModuleUrl}"
+import { Room } from "../ontology/room"
+
+export const setTemperature = defineAction("setTemperature")
+  .on(Room)
+  .params({ target: param("double") })
+  .writeback(async () => {})
+`
+    )
+
+    const Room = defineObjectType({
+      id: "Room",
+      name: "Room",
+      properties: [prop("id", "string", { required: true, primary: true })],
+    })
+    const duplicate = defineAction("setTemperature")
+      .on(Room)
+      .params({})
+      .writeback(async () => {})
+
+    await expect(
+      createSixb({ projectRoot, actions: [duplicate], ...createTestRuntimeDeps() })
+    ).rejects.toThrow("setTemperature")
   })
 
   test("uses explicit telemetry projections when provided", async () => {

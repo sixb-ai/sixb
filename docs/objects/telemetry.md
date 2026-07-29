@@ -103,7 +103,23 @@ This makes telemetry writes idempotent under replay — re-appending or re-proje
 
 ## Read history and latest
 
-Reads go through the time-series store at `sixb.storage.timeseries`.
+The typed channel reads its own series back:
+
+```ts
+const progress = sixb.objects(Project).byId("proj-001").telemetry(Project.p.progress)
+
+await progress.append({ value: 42, at: new Date() })
+const points = await progress.history({
+  from: new Date("2026-06-01T00:00:00Z"),
+  to: new Date("2026-06-23T00:00:00Z"),
+  limit: 100,
+})
+```
+
+`history()` returns `{ value, at, unit? }` in chronological order — pass `order: "desc"` for newest
+first. The value is typed through the property token, the same way `append` is.
+
+For cross-series reads, or `getLatest`, drop to the time-series store at `sixb.storage.timeseries`:
 
 ```ts
 const history = await sixb.storage.timeseries.getHistory({

@@ -164,7 +164,7 @@ If you wrote `sixb.objects(...)` you are in the runtime API. If you destructured
 
 ## In this section
 
-- [CRUD](./crud.md) — create, read, update, delete with `upsert`/`get`/`list`.
+- [CRUD](./crud.md) — create, read, update, delete with `upsert`/`get`/`list`/`delete`.
 - [Querying](./querying.md) — filter, search, sort, follow links, and page.
 - [Telemetry](./telemetry.md) — append and read per-property timeseries.
 - [HTTP reference](./http-reference.md) — the REST/WebSocket surface.

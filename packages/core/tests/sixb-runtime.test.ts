@@ -491,6 +491,58 @@ describe("Sixb runtime", () => {
     ).rejects.toThrow("Invalid unit")
   })
 
+  test("reads telemetry back through the same typed channel that wrote it", async () => {
+    const sixb = new Sixb({
+      id: "project-a",
+      ontology: [Room, Thermostat],
+      ...createTestRuntimeDeps(),
+    })
+
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
+    })
+
+    const temperature = sixb.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature)
+    for (const [index, value] of [21.5, 22, 22.5].entries()) {
+      await temperature.append({
+        value,
+        unit: "degreeCelsius",
+        at: new Date(Date.UTC(2026, 0, 1, 10, index)),
+      })
+    }
+
+    // Before `history()`, reading this back meant leaving the typed surface for
+    // `sixb.storage.timeseries` — telemetry was the only write-only ontology data.
+    // Chronological by default, matching `storage.timeseries.getHistoryBatch`.
+    const points = await temperature.history()
+    expect(points.map((point) => point.value)).toEqual([21.5, 22, 22.5])
+    expect(points[0]?.unit).toBe("degreeCelsius")
+    expect(points[0]?.at).toEqual(new Date("2026-01-01T10:00:00.000Z"))
+
+    expect((await temperature.history({ order: "desc" })).map((point) => point.value)).toEqual([
+      22.5, 22, 21.5,
+    ])
+    expect((await temperature.history({ limit: 2 })).map((point) => point.value)).toEqual([
+      21.5, 22,
+    ])
+    expect(
+      (
+        await temperature.history({
+          from: new Date("2026-01-01T10:01:00.000Z"),
+          to: new Date("2026-01-01T10:01:30.000Z"),
+        })
+      ).map((point) => point.value)
+    ).toEqual([22])
+
+    // An empty series reads as an empty page, not a throw.
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:102", externalId: "RM-102", name: "Conference 102" },
+    })
+    expect(
+      await sixb.objects(Room).byId("room:102").telemetry(Room.p.currentTemperature).history()
+    ).toEqual([])
+  })
+
   test("emits typed events and projects through the runtime dependencies", async () => {
     const runtimeDeps = createTestRuntimeDeps()
 

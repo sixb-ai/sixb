@@ -16,7 +16,8 @@ import {
 } from "../action"
 import type { ResolvedLinkContext, ResolvedObjectContext } from "../context"
 import { removeLink as removeLinkLeaf, upsertLink as upsertLinkLeaf } from "../link"
-import { createTelemetryAppender } from "./telemetry-appender"
+import { deleteObject, restoreObject } from "../object"
+import { createTelemetryChannel } from "./telemetry-channel"
 
 type ObjectRefInput = ObjectRef
 type AnyLinkToken = LinkToken<string, string, string | readonly string[], ObjectLink>
@@ -79,6 +80,14 @@ export function createObjectByIdHandle<
       })
     },
 
+    delete: async () => {
+      await deleteObject(ctx, primaryId)
+    },
+
+    restore: async () => {
+      await restoreObject(ctx, primaryId)
+    },
+
     requestAction: async (input: {
       action?: ActionDefinition
       actionId?: string
@@ -123,7 +132,7 @@ export function createObjectByIdHandle<
       })
     },
 
-    telemetry: createTelemetryAppender<TObjectType, TValueTypes>(ctx, primaryId),
+    telemetry: createTelemetryChannel<TObjectType, TValueTypes>(ctx, primaryId),
   }
 
   return objectHandle as unknown as ObjectByIdHandle<TObjectType, TValueTypes>

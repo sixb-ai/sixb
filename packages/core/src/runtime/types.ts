@@ -397,11 +397,48 @@ export type TelemetryAppendInput<
   at: Date
 } & TelemetryUnitField<TToken, TValueTypes>
 
-export interface TelemetryAppender<
+export interface TelemetryHistoryInput {
+  readonly from?: Date
+  readonly to?: Date
+  readonly limit?: number
+  readonly order?: "asc" | "desc"
+}
+
+/**
+ * One object's telemetry for one property, readable and writable.
+ *
+ * Named a channel rather than an appender because telemetry is not write-only: `history()` reads the
+ * same series back, typed through the same token, instead of sending the caller under the typed
+ * surface to `sixb.storage.timeseries`.
+ */
+// A type alias for the same reason as `TwinObject` above: `history()` puts
+// `InferPropertyValue` in an output position, and probing a generic interface's variance there
+// overflows TS's recursion limits (TS2589) in consumers as ordinary as `points.map(...)`.
+export type TelemetryChannel<
   TToken extends AnyPropertyToken,
   TValueTypes extends readonly ValueType[],
-> {
+> = {
   append(input: TelemetryAppendInput<TToken, TValueTypes>): Promise<void>
+  /**
+   * Points for this series, oldest first unless `order: "desc"`.
+   *
+   * The default matches `storage.timeseries.getHistoryBatch`, deliberately: a typed read that ordered
+   * differently from the contract underneath it would be its own trap.
+   *
+   * The point shape is written inline rather than extracted into a named alias. One more level of
+   * alias indirection around `InferPropertyValue` in this output position overflows TS's instantiation
+   * depth (TS2589) in consumers as ordinary as `points.map(...)` — the same budget the note on
+   * `TwinObject` describes. `unit` is inferred through the same token as `append` writes it, rather
+   * than widened to `string`: a read that kept `value` precise and gave up on `unit` would be an
+   * arbitrary line, and both are the current ontology's view of a series it validated on write.
+   */
+  history(input?: TelemetryHistoryInput): Promise<
+    readonly {
+      readonly value: InferPropertyValue<TToken["property"], TValueTypes>
+      readonly at: Date
+      readonly unit?: InferPropertyUnit<TToken["property"], TValueTypes>
+    }[]
+  >
 }
 
 type TypedActionReference<TParams extends ActionParamsConfig = ActionParamsConfig> = {
@@ -1021,10 +1058,25 @@ export interface ObjectByIdHandle<
     signal?: AbortSignal
   }): Promise<ActionRunRecord>
 
-  /** Append telemetry to a telemetry-mode property token. */
+  /**
+   * Delete this object, cascading over its links in the same commit.
+   *
+   * For an object written only from code this is not reversible — the identity ceases to exist, and
+   * `restore()` has nothing to bring back. For an object a projection also writes, the delete records
+   * a managed override: the object stays hidden even while the projection keeps asserting it, until
+   * `restore()` withdraws the override.
+   *
+   * Deleting a missing object is a no-op.
+   */
+  delete(): Promise<void>
+
+  /** Withdraw a previous `delete()`. A no-op unless a projection still asserts this object. */
+  restore(): Promise<void>
+
+  /** Read and write telemetry for one telemetry-mode property token. */
   telemetry<TToken extends TelemetryPropertyToken<TObjectType>>(
     property: TToken
-  ): TelemetryAppender<TToken, TValueTypes>
+  ): TelemetryChannel<TToken, TValueTypes>
 }
 
 /**
