@@ -6,7 +6,7 @@ import type {
   TelemetryProjectionDefinition,
 } from "../src"
 import { canViewProjection, canViewProjectionRun, emptyGrantIndex } from "../src/authorization"
-import type { ProjectionRunObjectTypes } from "../src/storage"
+import type { ProjectionRunTarget } from "../src/storage"
 
 function authzViewing(...objectTypeIds: string[]): AuthorizationContext {
   return {
@@ -68,8 +68,8 @@ describe("canViewProjection", () => {
 })
 
 describe("canViewProjectionRun", () => {
-  const objectRun: ProjectionRunObjectTypes = { objectTypeId: "room" }
-  const linkRun: ProjectionRunObjectTypes = {
+  const objectRun: ProjectionRunTarget = { objectTypeId: "room" }
+  const linkRun: ProjectionRunTarget = {
     sourceObjectTypeId: "room",
     targetObjectTypeId: "sensor",
   }
@@ -79,10 +79,5 @@ describe("canViewProjectionRun", () => {
     expect(canViewProjectionRun(authzViewing("sensor"), objectRun)).toBe(false)
     expect(canViewProjectionRun(authzViewing("room", "sensor"), linkRun)).toBe(true)
     expect(canViewProjectionRun(authzViewing("room"), linkRun)).toBe(false)
-  })
-
-  test("runs with no recorded object types are hidden from scoped principals", () => {
-    expect(canViewProjectionRun(authzViewing("room"), {})).toBe(false)
-    expect(canViewProjectionRun(null, {})).toBe(true)
   })
 })

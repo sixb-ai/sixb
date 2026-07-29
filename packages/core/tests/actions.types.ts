@@ -320,7 +320,7 @@ defineAction("badEditsContext")
 
 defineAction("legacy")
   .params({})
-  // @ts-expect-error .run(...) is not part of Actions V2 authoring
+  // @ts-expect-error action execution is defined through writeback
   .run(async () => {})
 
 defineAction("effectsWithoutEdits")

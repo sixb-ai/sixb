@@ -1,11 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage, type JsonValue } from "../src"
-import type { StoredTelemetryAppendedEvent } from "../src/events"
+import { InMemoryStorage } from "../src"
 import type { Storage, StorageTransactionOptions } from "../src/storage"
-import { InMemoryTimeseriesStorage } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
-import { createStoredTelemetryAppendedEvent } from "../src/testing"
 import {
   claimProjectionExecution,
   createMaterializerFixture,
@@ -28,7 +25,7 @@ describe("ontology materializer telemetry", () => {
       versionId: "wrong-telemetry-target",
       createdAt: "2026-01-01T00:00:00.000Z",
     }
-    const run = await storage.projectionRuns.startOrReclaimMaterialization({
+    const run = await storage.projectionRuns.startOrReclaim({
       id: "wrong-telemetry-target-run",
       projectId: "project",
       identity: {
@@ -40,11 +37,10 @@ describe("ontology materializer telemetry", () => {
         projectionRevision: resolved.projectionRevision,
         ownershipHash: resolved.ownershipHash,
       },
-      objectTypeId: "Secret",
+      target: { objectTypeId: "Secret" },
       fixedBatchSize: 1,
     })
-    if (!run.executionToken) throw new Error("Projection run was not claimed")
-    const execution = { projectionRunId: run.id, executionToken: run.executionToken }
+    const execution = run.execution
 
     await expect(
       materializer.telemetry.append({
@@ -72,7 +68,7 @@ describe("ontology materializer telemetry", () => {
     ).rejects.toMatchObject({ kind: "run-correlation" })
   })
 
-  test("persists telemetry EOF before terminal success and resumes finalization", async () => {
+  test("persists telemetry EOF atomically with terminal success", async () => {
     const { materializer, storage, projections } = createMaterializerFixture()
     const datasetVersion = {
       datasetId: "readings",
@@ -97,26 +93,12 @@ describe("ontology materializer telemetry", () => {
     let rejectFinish = true
     decorateOperationScopedMethodForTesting(
       storage.projectionRuns,
-      "finishMaterialization",
-      (finishMaterialization) => async (input) => {
+      "finish",
+      (finish) => async (input) => {
         if (rejectFinish) throw new Error("projection run finish failure")
-        return finishMaterialization(input)
+        return finish(input)
       }
     )
-    await expect(materializer.projections.finishRun(emptyFinish)).rejects.toThrow(
-      "before its input is exhausted"
-    )
-    await expect(
-      storage.projectionRuns.getById({ projectId: "project", id: emptyExecution.projectionRunId })
-    ).resolves.toMatchObject({
-      status: "running",
-      telemetryCheckpoint: { inputExhausted: false },
-    })
-    await materializer.projections.completeTelemetryInput({
-      source: { projectionId: "temperatures" },
-      datasetVersion,
-      execution: emptyExecution,
-    })
     await expect(materializer.projections.finishRun(emptyFinish)).rejects.toThrow(
       "projection run finish failure"
     )
@@ -124,7 +106,7 @@ describe("ontology materializer telemetry", () => {
       storage.projectionRuns.getById({ projectId: "project", id: emptyExecution.projectionRunId })
     ).resolves.toMatchObject({
       status: "running",
-      telemetryCheckpoint: { nextRowOffset: 0, inputExhausted: true },
+      telemetryCheckpoint: { inputExhausted: false },
     })
     rejectFinish = false
     await expect(materializer.projections.finishRun(emptyFinish)).resolves.toBeUndefined()
@@ -179,11 +161,6 @@ describe("ontology materializer telemetry", () => {
     await materializer.telemetry.append({
       source: source(1, true),
       points: [{ series, value: 21, at: "2026-01-01T02:00:00Z" }],
-    })
-    await materializer.projections.completeTelemetryInput({
-      source: { projectionId: "temperatures" },
-      datasetVersion,
-      execution,
     })
     await expect(materializer.projections.finishRun(finish)).resolves.toBeUndefined()
   })
@@ -765,54 +742,5 @@ describe("ontology materializer telemetry", () => {
         idempotencyKey: "runtime:missing-object",
       })
     ).toBeNull()
-  })
-
-  test("uses collision-free canonical series keys and clones returned point values", async () => {
-    const storage = new InMemoryTimeseriesStorage()
-    const event = (
-      id: string,
-      projectId: string,
-      objectTypeId: string,
-      value: JsonValue
-    ): StoredTelemetryAppendedEvent =>
-      createStoredTelemetryAppendedEvent({
-        id,
-        cursor: id,
-        projectId,
-        occurredAt: "2026-01-01T00:00:00.000Z",
-        objectTypeId,
-        objectId: "c",
-        propertyId: "d",
-        value,
-        at: "2026-01-01T00:00:00.000Z",
-      })
-    await storage.applyTelemetryAppended(event("one", "p:a", "b", { nested: 1 }))
-    await storage.applyTelemetryAppended(event("two", "p", "a:b", { nested: 2 }))
-
-    const first = await storage.getHistory({
-      projectId: "p:a",
-      objectTypeId: "b",
-      objectId: "c",
-      propertyId: "d",
-    })
-    const second = await storage.getHistory({
-      projectId: "p",
-      objectTypeId: "a:b",
-      objectId: "c",
-      propertyId: "d",
-    })
-    expect(first[0].value).toEqual({ nested: 1 })
-    expect(second[0].value).toEqual({ nested: 2 })
-    ;(first[0].value as { nested: number }).nested = 99
-    expect(
-      (
-        await storage.getLatest({
-          projectId: "p:a",
-          objectTypeId: "b",
-          objectId: "c",
-          propertyId: "d",
-        })
-      )?.value
-    ).toEqual({ nested: 1 })
   })
 })

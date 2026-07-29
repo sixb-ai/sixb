@@ -1,4 +1,3 @@
-export { InMemoryTimeseriesStorage } from "./store"
 export type {
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,

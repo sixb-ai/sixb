@@ -37,13 +37,11 @@ import {
 import { shareOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import { decorateOperationScopedMethodForTesting } from "@sixb/core/internal/storage-operation-scope"
 import type { BeginDatasetWriteInput, ReadDatasetRowsInput } from "@sixb/core/lake-storage"
-import {
-  type AbandonSourceMaterializationCandidateInput,
-  isProjectionMaterializationRunStorage,
-  type OntologySourceRecord,
-  type ProjectionMaterializationRunStorage,
-  type ProjectionRunStorage,
-  type ReclaimSourceMaterializationInput,
+import type {
+  AbandonSourceMaterializationCandidateInput,
+  OntologySourceRecord,
+  ProjectionRunStorage,
+  ReclaimSourceMaterializationInput,
 } from "@sixb/core/storage"
 import {
   isPermanentProjectionFailure,
@@ -277,9 +275,9 @@ interface ProjectionRuntimeSource {
 
 function requireProjectionRunsStorage(input: {
   readonly storage: { readonly projectionRuns?: ProjectionRunStorage }
-}): ProjectionMaterializationRunStorage {
+}): ProjectionRunStorage {
   const projectionRunsStorage = input.storage.projectionRuns
-  if (!isProjectionMaterializationRunStorage(projectionRunsStorage)) {
+  if (!projectionRunsStorage) {
     throw new Error("Expected materialization-capable projection run storage in test runtime.")
   }
   return projectionRunsStorage
@@ -464,7 +462,7 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.run.sourceRowsRead).toBe(1)
+    expect(result.run.progress.sourceRowsRead).toBe(1)
     expect(result.run.status).toBe("succeeded")
 
     const room = await deps.storage.objects.getByPrimaryId({
@@ -570,7 +568,7 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.run.sourceRowsRead).toBe(1)
+    expect(result.run.progress.sourceRowsRead).toBe(1)
     expect(result.run.status).toBe("succeeded")
 
     const history = await deps.storage.timeseries.getHistory({
@@ -829,7 +827,7 @@ describe("runProjectionJob", () => {
     ).toMatchObject({
       status: "running",
       attempt: 1,
-      sourceRowsRead: 2,
+      progress: { sourceRowsRead: 2 },
       telemetryCheckpoint: { nextBatchOrdinal: 1, nextRowOffset: 2, inputExhausted: false },
     })
 
@@ -838,7 +836,7 @@ describe("runProjectionJob", () => {
       run: {
         status: "succeeded",
         attempt: 2,
-        sourceRowsRead: 4,
+        progress: { sourceRowsRead: 4 },
         telemetryCheckpoint: { nextBatchOrdinal: 2, nextRowOffset: 4, inputExhausted: true },
       },
     })
@@ -900,7 +898,7 @@ describe("runProjectionJob", () => {
       })
     ).toMatchObject({
       status: "running",
-      sourceRowsRead: 2,
+      progress: { sourceRowsRead: 2 },
       telemetryCheckpoint: { nextRowOffset: 2, inputExhausted: false },
     })
 
@@ -908,7 +906,7 @@ describe("runProjectionJob", () => {
     await expect(runProjectionJob(input)).resolves.toMatchObject({
       run: {
         status: "succeeded",
-        sourceRowsRead: 3,
+        progress: { sourceRowsRead: 3 },
         telemetryCheckpoint: { nextRowOffset: 3, inputExhausted: true },
       },
     })
@@ -939,7 +937,7 @@ describe("runProjectionJob", () => {
 
     expect(result.run).toMatchObject({
       status: "succeeded",
-      sourceRowsRead: 0,
+      progress: { sourceRowsRead: 0 },
       telemetryCheckpoint: { nextBatchOrdinal: 0, nextRowOffset: 0, inputExhausted: true },
     })
     await expect(
@@ -1068,7 +1066,10 @@ describe("runProjectionJob", () => {
       projectId: sixb.id,
       id: canonicalRunId("projrun-telemetry-partial-failure"),
     })
-    expect(run).toMatchObject({ status: "failed", sourceRowsRead: 0, sourceRowsSkipped: 0 })
+    expect(run).toMatchObject({
+      status: "failed",
+      progress: { sourceRowsRead: 0, sourceRowsSkipped: 0 },
+    })
 
     const history = await deps.storage.timeseries.getHistory({
       projectId: sixb.id,
@@ -1246,7 +1247,7 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.run.sourceRowsSkipped).toBe(0)
+    expect(result.run.progress.sourceRowsSkipped).toBe(0)
     expect(lakeStorage.readInputs).toHaveLength(1)
     expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "room_name"])
   })
@@ -1393,7 +1394,7 @@ describe("runProjectionJob", () => {
         projectId: sixb.id,
         id: canonicalRunId("projrun-many-fk"),
       })
-    ).toMatchObject({ status: "failed", sourceRowsRead: 2 })
+    ).toMatchObject({ status: "failed", progress: { sourceRowsRead: 2 } })
     const links = await deps.storage.objects.listLinks({
       projectId: sixb.id,
       objectTypeId: "Room",
@@ -1455,7 +1456,7 @@ describe("runProjectionJob", () => {
         projectId: sixb.id,
         id: canonicalRunId(input.job.id),
       })
-    ).toMatchObject({ status: "running", attempt: 2, sourceRowsRead: 2 })
+    ).toMatchObject({ status: "running", attempt: 2, progress: { sourceRowsRead: 2 } })
     expect(
       await deps.storage.objects.getByPrimaryId({
         projectId: sixb.id,
@@ -1719,8 +1720,8 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.run.sourceRowsRead).toBe(1)
-    expect(result.run.sourceRowsSkipped).toBe(0)
+    expect(result.run.progress.sourceRowsRead).toBe(1)
+    expect(result.run.progress.sourceRowsSkipped).toBe(0)
 
     const links = await deps.storage.objects.listLinks({
       projectId: sixb.id,
@@ -1818,7 +1819,7 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(result.run.sourceRowsSkipped).toBe(0)
+    expect(result.run.progress.sourceRowsSkipped).toBe(0)
     expect(lakeStorage.readInputs).toHaveLength(1)
     expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "sensor_id"])
   })
@@ -1848,8 +1849,8 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(objectResult.run.sourceRowsRead).toBe(2)
-    expect(objectResult.run.sourceRowsSkipped).toBe(1)
+    expect(objectResult.run.progress.sourceRowsRead).toBe(2)
+    expect(objectResult.run.progress.sourceRowsSkipped).toBe(1)
 
     await objectSixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
     await objectSixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
@@ -1877,8 +1878,8 @@ describe("runProjectionJob", () => {
       },
     })
 
-    expect(linkResult.run.sourceRowsRead).toBe(3)
-    expect(linkResult.run.sourceRowsSkipped).toBe(2)
+    expect(linkResult.run.progress.sourceRowsRead).toBe(3)
+    expect(linkResult.run.progress.sourceRowsSkipped).toBe(2)
   })
 
   test("marks the run failed when projected values violate ontology validation", async () => {
@@ -1926,8 +1927,8 @@ describe("runProjectionJob", () => {
       id: canonicalRunId("projrun-invalid-property"),
     })
     expect(run?.status).toBe("failed")
-    expect(run?.sourceRowsRead).toBe(1)
-    expect(run?.sourceRowsSkipped).toBe(0)
+    expect(run?.progress.sourceRowsRead).toBe(1)
+    expect(run?.progress.sourceRowsSkipped).toBe(0)
     expect(run?.errorMessage).toContain("must be one of")
   })
 
@@ -2046,8 +2047,8 @@ describe("runProjectionJob", () => {
       id: canonicalRunId("projrun-unsafe-int64-string"),
     })
     expect(run?.status).toBe("failed")
-    expect(run?.sourceRowsRead).toBe(1)
-    expect(run?.sourceRowsSkipped).toBe(0)
+    expect(run?.progress.sourceRowsRead).toBe(1)
+    expect(run?.progress.sourceRowsSkipped).toBe(0)
     expect(run?.errorMessage).toContain("cannot safely coerce")
   })
 
@@ -2312,7 +2313,7 @@ describe("runProjectionJob", () => {
         projectId: sixb.id,
         id: canonicalRunId("projrun-explicit-cancellation"),
       })
-    ).toMatchObject({ status: "cancelled", sourceRowsRead: 0 })
+    ).toMatchObject({ status: "cancelled", progress: { sourceRowsRead: 0 } })
     expect(
       await deps.storage.ontology.commits.getByOrigin({
         projectId: sixb.id,
@@ -2340,7 +2341,7 @@ describe("runProjectionJob", () => {
     const runtime = createRuntime(sixb)
     const restoreFinish = decorateOperationScopedMethodForTesting(
       deps.storage.projectionRuns,
-      "finishMaterialization",
+      "finish",
       () => async () => Promise.reject(finishCause)
     )
     const input = {
@@ -2476,7 +2477,7 @@ describe("runProjectionJob", () => {
       id: canonicalRunId("projrun-target-bad-unit"),
     })
     expect(run?.status).toBe("failed")
-    expect(run?.sourceRowsRead).toBe(0)
+    expect(run?.progress.sourceRowsRead).toBe(0)
     expect(run?.errorMessage).toContain("Invalid unit")
 
     // The fixed physical batch is atomic: no prefix of it is committed.

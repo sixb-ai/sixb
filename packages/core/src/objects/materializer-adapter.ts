@@ -262,7 +262,6 @@ export function toObjectRow(projectId: string, snapshot: EffectiveObjectSnapshot
     updatedAt: new Date(snapshot.updatedAt),
     version: snapshot.version,
     lastCommitId: snapshot.lastCommitId,
-    sourceEventId: undefined,
   }
 }
 

@@ -4,7 +4,8 @@ import { type AgentStorage, InMemoryAgentStorage } from "../agents"
 import { type AuthStorage, InMemoryAuthStorage } from "../auth"
 import { StorageTransactionError } from "../errors"
 import { type FileUploadSessionStore, InMemoryFileUploadSessions } from "../file-upload-sessions"
-import { InMemoryObjectStorage } from "../objects"
+import type { ObjectStorage } from "../objects"
+import { InMemoryObjectStorage } from "../objects/in-memory"
 import type { OntologyStorage } from "../ontology"
 import { InMemoryOntologyStorage } from "../ontology/in-memory"
 import { ProviderMaterializationTransactionLifecycle } from "../ontology/provider"
@@ -20,7 +21,8 @@ import { InMemoryPipelineRunStorage, type PipelineRunStorage } from "../pipeline
 import { InMemoryProjectionRunStorage } from "../projection-runs"
 import { InMemoryRulesStorage, type RulesStorage } from "../rules"
 import { InMemorySyncRunStorage, type SyncRunStorage } from "../sync-runs"
-import { InMemoryTimeseriesStorage } from "../timeseries"
+import type { TimeseriesStorage } from "../timeseries"
+import { InMemoryTimeseriesStorage } from "../timeseries/store"
 import { createTransactionStorageProxy, throwNestedStorageTransaction } from "../transaction"
 import type { Storage, StorageTransactionOptions } from "../types"
 import { InMemoryWebhookDeliveryStorage, type WebhookDeliveryStorage } from "../webhook-deliveries"
@@ -30,6 +32,7 @@ import {
   type WorkflowInterventionStorage,
 } from "../workflow-interventions"
 import { InMemoryWorkflowRunStorage, type WorkflowRunStorage } from "../workflow-runs"
+import { registerInMemoryStorageTestingAdapter } from "./testing"
 
 /**
  * In-memory {@link Storage} used for dev and tests.
@@ -41,8 +44,8 @@ import { InMemoryWorkflowRunStorage, type WorkflowRunStorage } from "../workflow
  * its non-reentrant lock.
  */
 export class InMemoryStorage implements Storage {
-  readonly objects: InMemoryObjectStorage
-  readonly timeseries: InMemoryTimeseriesStorage
+  readonly objects: ObjectStorage
+  readonly timeseries: TimeseriesStorage
   readonly ontology: OntologyStorage
   private readonly objectStorage = new InMemoryObjectStorage()
   private readonly timeseriesStorage = new InMemoryTimeseriesStorage()
@@ -103,6 +106,7 @@ export class InMemoryStorage implements Storage {
     })
     this.ontology = createOntologyOperationScope(this.ontologyStorage, scope)
     this.ontologyStorage.registerTestingAlias(this.ontology)
+    registerInMemoryStorageTestingAdapter(this, { snapshot: () => this.snapshot() })
   }
 
   private readonly transactionScope = new AsyncLocalStorage<object>()
@@ -274,7 +278,7 @@ export class InMemoryStorage implements Storage {
   }
 }
 
-interface InMemoryStorageSnapshot {
+export interface InMemoryStorageSnapshot {
   readonly objects: ReturnType<InMemoryObjectStorage["snapshot"]>
   readonly timeseries: ReturnType<InMemoryTimeseriesStorage["snapshot"]>
   readonly ontology: ReturnType<InMemoryOntologyStorage["snapshot"]>

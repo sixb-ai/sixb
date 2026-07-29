@@ -8,11 +8,10 @@ import type {
   ProjectionRunFinishInput,
 } from "../../materialization/model"
 import type { ProjectionDefinition, ResolvedProjection } from "../../projections/types"
-import type { ProjectionMaterializationRunRecord } from "../../storage"
 import type { OntologyCommitRecord } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { withSerializationRetry } from "../execution/commit-lifecycle"
-import { assertProjectionMaterializationExecution } from "../execution/run-correlation"
+import { lockProjectionRunForMaterialization } from "../execution/run-correlation"
 import {
   normalizePinnedDatasetVersion,
   normalizeProjectionExecution,
@@ -74,7 +73,7 @@ async function finishProjectionRunTransaction(
   storage: MaterializerStorage,
   command: PreparedProjectionRunFinish
 ): Promise<void> {
-  const { projectionRuns, run } = await assertProjectionMaterializationExecution(storage, {
+  const { projectionRuns } = await lockProjectionRunForMaterialization(storage, {
     projectId: command.projectId,
     projectionRunId: command.input.execution.projectionRunId,
     executionToken: command.input.execution.executionToken,
@@ -84,11 +83,9 @@ async function finishProjectionRunTransaction(
 
   if (command.input.protocol === "replacement") {
     await assertReplacementTerminalDecision(storage, command)
-  } else {
-    assertTelemetryTerminalDecision(run, command.input)
   }
 
-  await projectionRuns.finishMaterialization({
+  await projectionRuns.finish({
     id: command.input.execution.projectionRunId,
     projectId: command.projectId,
     executionToken: command.input.execution.executionToken,
@@ -158,17 +155,4 @@ function datasetVersionsEqual(left: PinnedDatasetVersion, right: PinnedDatasetVe
     left.versionId === right.versionId &&
     left.createdAt === right.createdAt
   )
-}
-
-function assertTelemetryTerminalDecision(
-  run: ProjectionMaterializationRunRecord,
-  input: ProjectionRunFinishInput
-): void {
-  if (input.status !== "succeeded") return
-  if (!run.telemetryCheckpoint?.inputExhausted) {
-    throw new MaterializationConflictError(
-      "run-correlation",
-      `Telemetry projection run '${run.id}' cannot succeed before its input is exhausted.`
-    )
-  }
 }

@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { isActionMaterializationRunStorage } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -90,7 +89,7 @@ describe("PgActionRunStorage", () => {
     const locked = deferred<void>()
     const release = deferred<void>()
     const materialization = storage.transaction(async (tx) => {
-      if (!isActionMaterializationRunStorage(tx.actionRuns)) throw new Error("missing fence")
+      if (!tx.actionRuns) throw new Error("missing fence")
       await tx.actionRuns.lockForMaterialization({
         projectId: "my-app",
         actionId: "createInvoice",
@@ -144,7 +143,7 @@ describe("PgActionRunStorage", () => {
     let fenceSettled = false
     const fence = storage
       .transaction(async (tx) => {
-        if (!isActionMaterializationRunStorage(tx.actionRuns)) throw new Error("missing fence")
+        if (!tx.actionRuns) throw new Error("missing fence")
         await tx.actionRuns.lockForMaterialization({
           projectId: "my-app",
           actionId: "createInvoice",

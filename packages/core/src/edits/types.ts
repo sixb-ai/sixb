@@ -3,9 +3,6 @@ import type { ObjectRef, ObjectType, Property, ValueType } from "../ontology"
 import type { InferPropertyValue } from "../ontology/inference"
 import type { LinkToken, ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 
-/** Identifies the one final EditBatch wire shape. There is no parallel legacy version. */
-export type EditBatchVersion = 1
-
 export interface EditObjectRef<TObjectTypeId extends string = string>
   extends ObjectRef<TObjectTypeId> {}
 
@@ -89,7 +86,6 @@ export type EditOperation =
   | LinkResetEdit
 
 export interface EditBatch {
-  readonly version: EditBatchVersion
   readonly operations: readonly EditOperation[]
 }
 

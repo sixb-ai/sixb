@@ -17,11 +17,11 @@ export type {
 } from "../events"
 export { stableJsonStringify } from "../json"
 export type {
+  PinnedDatasetVersion,
   ProjectionExecution,
   ProjectionMaterializationIdentity,
 } from "../materialization/model"
 export type {
-  ActionMaterializationRunStorage,
   ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunParams,
@@ -50,7 +50,6 @@ export {
   canRequeueActionRunAfterEnqueueFailure,
   finishActionRunPhase,
   InMemoryActionRunStorage,
-  isActionMaterializationRunStorage,
   isTerminalActionRun,
 } from "./action-runs"
 export type {
@@ -224,7 +223,6 @@ export type {
   QueryObjectsInput,
   QueryObjectsResult,
 } from "./objects"
-export { InMemoryObjectStorage } from "./objects"
 export type {
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
@@ -346,36 +344,34 @@ export type {
 export { InMemoryPipelineRunStorage, PipelineRunError } from "./pipeline-runs"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
-  AssertProjectionMaterializationExecutionInput,
-  CompleteProjectionTelemetryInput,
-  FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
+  LinkProjectionRunRecord,
+  LinkProjectionTarget,
   ListLatestProjectionRunsInput,
   ListLatestProjectionRunsResult,
   ListProjectionRunsInput,
   ListProjectionRunsResult,
+  LockProjectionRunForMaterializationInput,
+  ObjectProjectionRunRecord,
+  ObjectProjectionTarget,
   ProjectionKind,
-  ProjectionMaterializationProtocol,
-  ProjectionMaterializationRunRecord,
-  ProjectionMaterializationRunStorage,
-  ProjectionRunDatasetVersion,
-  ProjectionRunObjectTypes,
+  ProjectionRunClaim,
   ProjectionRunProgress,
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
+  ProjectionRunTarget,
   ProjectionTelemetryCheckpoint,
-  StartOrReclaimProjectionMaterializationInput,
-  StartProjectionRunInput,
-  UpdateProjectionMaterializationInput,
+  StartOrReclaimProjectionRunInput,
+  TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
 } from "./projection-runs"
 export {
   InMemoryProjectionRunStorage,
-  isProjectionMaterializationRunStorage,
   PROJECTION_RUN_PROGRESS_KEYS,
   ProjectionRunError,
   projectionRunObjectTypesVisible,
+  projectionTargetObjectTypesVisible,
   zeroProjectionRunProgress,
 } from "./projection-runs"
 export type {
@@ -410,7 +406,6 @@ export type {
   TimeseriesPoint,
   TimeseriesStorage,
 } from "./timeseries"
-export { InMemoryTimeseriesStorage } from "./timeseries"
 export {
   assertTransactionActive,
   createTransactionStorageProxy,

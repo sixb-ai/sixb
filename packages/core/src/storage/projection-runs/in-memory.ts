@@ -5,29 +5,26 @@ import { latestStartedAtByOwnerId } from "../run-listing"
 import { ProjectionRunError } from "./errors"
 import {
   type AdvanceProjectionTelemetryCheckpointInput,
-  type AssertProjectionMaterializationExecutionInput,
-  type CompleteProjectionTelemetryInput,
-  type FinishProjectionMaterializationInput,
   type FinishProjectionRunInput,
   type ListLatestProjectionRunsInput,
   type ListLatestProjectionRunsResult,
   type ListProjectionRunsInput,
   type ListProjectionRunsResult,
+  type LockProjectionRunForMaterializationInput,
   PROJECTION_RUN_PROGRESS_KEYS,
-  type ProjectionMaterializationRunRecord,
-  type ProjectionMaterializationRunStorage,
-  type ProjectionRunObjectTypes,
+  type ProjectionRunClaim,
   type ProjectionRunProgress,
   type ProjectionRunRecord,
+  type ProjectionRunStorage,
   projectionRunObjectTypesVisible,
-  type StartOrReclaimProjectionMaterializationInput,
-  type StartProjectionRunInput,
-  type UpdateProjectionMaterializationInput,
+  type StartOrReclaimProjectionRunInput,
+  type TelemetryProjectionRunRecord,
   type UpdateProjectionRunInput,
   zeroProjectionRunProgress,
 } from "./types"
 
 type RunRootOperation = <T>(run: () => Promise<T> | T) => Promise<T>
+type StoredProjectionRunRecord = ProjectionRunRecord & { readonly executionToken?: string }
 
 const runDirectly: RunRootOperation = async <T>(run: () => Promise<T> | T): Promise<T> => run()
 
@@ -35,13 +32,7 @@ function projectionRunKey(projectId: string, id: string): string {
   return JSON.stringify([projectId, id])
 }
 
-type StoredProjectionRunRecord = ProjectionRunRecord & { readonly executionToken?: string }
-
-function cloneProjectionRunRecord<T extends StoredProjectionRunRecord>(record: T): T {
-  return structuredClone(record)
-}
-
-function publicProjectionRunRecord(record: StoredProjectionRunRecord): ProjectionRunRecord {
+function publicRecord(record: StoredProjectionRunRecord): ProjectionRunRecord {
   const cloned = structuredClone(record)
   Reflect.deleteProperty(cloned, "executionToken")
   return cloned
@@ -78,10 +69,6 @@ function assertPositiveCounter(value: number, fieldName: string): void {
   }
 }
 
-function assertOptionalCounter(value: number | undefined, fieldName: string): void {
-  if (value !== undefined) assertCounter(value, fieldName)
-}
-
 function assertOptionalWindowValue(value: number | undefined, fieldName: string): void {
   if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
     throw new ProjectionRunError(`[Sixb] Projection run list ${fieldName} must be >= 0.`)
@@ -96,79 +83,8 @@ function safeAdd(left: number, right: number, fieldName: string): number {
   return result
 }
 
-function compareRuns(a: ProjectionRunRecord, b: ProjectionRunRecord, order: "asc" | "desc") {
-  const delta = a.startedAt.getTime() - b.startedAt.getTime()
-  if (delta !== 0) return order === "asc" ? delta : -delta
-  if (a.id === b.id) return 0
-  return order === "asc" ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id)
-}
-
-function applyProgress<TRecord extends ProjectionRunRecord>(
-  record: TRecord,
-  input: Partial<ProjectionRunProgress>
-): TRecord {
-  const merged = {} as Record<keyof ProjectionRunProgress, number>
-  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
-    assertOptionalCounter(input[key], key)
-    const value = input[key] ?? record[key]
-    if (value < record[key]) {
-      throw new ProjectionRunError(`[Sixb] Projection run ${key} must not decrease.`)
-    }
-    merged[key] = value
-  }
-  assertProgress(merged)
-  return { ...record, ...merged }
-}
-
-function assertProgress(progress: ProjectionRunProgress): void {
-  if (progress.sourceRowsSkipped > progress.sourceRowsRead) {
-    throw new ProjectionRunError(
-      "[Sixb] Projection run sourceRowsSkipped must not exceed sourceRowsRead."
-    )
-  }
-}
-
-function assertGenericProgressDoesNotAdvanceTelemetry(
-  record: ProjectionRunRecord,
-  input: Partial<ProjectionRunProgress>
-): void {
-  if (record.materializationProtocol !== "telemetry") return
-  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
-    if (input[key] !== undefined && input[key] !== record[key]) {
-      throw new ProjectionRunError(
-        `[Sixb] Telemetry projection run '${record.id}' progress can only advance with its checkpoint.`
-      )
-    }
-  }
-}
-
-function assertLegacyMutationAllowed(
-  record: ProjectionRunRecord,
-  operation: "update" | "finish"
-): void {
-  if (record.materializationProtocol !== undefined) {
-    throw new ProjectionRunError(
-      `[Sixb] Projection materialization run '${record.id}' cannot use legacy ${operation}(); use ${operation}Materialization() with the current execution token.`
-    )
-  }
-}
-
 function assertIdentity(identity: ProjectionMaterializationIdentity): void {
   assertNonEmpty(identity.projectionId, "projectionId")
-  if (
-    identity.projectionKind !== "object" &&
-    identity.projectionKind !== "link" &&
-    identity.projectionKind !== "telemetry"
-  ) {
-    throw new ProjectionRunError(
-      "[Sixb] Projection run projectionKind must be 'object', 'link', or 'telemetry'."
-    )
-  }
-  if (identity.protocol !== "replacement" && identity.protocol !== "telemetry") {
-    throw new ProjectionRunError(
-      "[Sixb] Projection run protocol must be 'replacement' or 'telemetry'."
-    )
-  }
   assertNonEmpty(identity.datasetVersion.datasetId, "datasetId")
   assertNonEmpty(identity.datasetVersion.versionId, "datasetVersionId")
   assertCanonicalTimestamp(identity.datasetVersion.createdAt, "datasetVersionCreatedAt")
@@ -182,95 +98,185 @@ function assertIdentity(identity: ProjectionMaterializationIdentity): void {
   }
 }
 
-function assertObjectTypes(
-  kind: ProjectionRunRecord["projectionKind"],
-  input: ProjectionRunObjectTypes
-) {
-  if (kind === "link") {
-    assertNonEmpty(input.sourceObjectTypeId ?? "", "sourceObjectTypeId")
-    assertNonEmpty(input.targetObjectTypeId ?? "", "targetObjectTypeId")
-    if (input.objectTypeId !== undefined) {
-      throw new ProjectionRunError(
-        "[Sixb] Link projection runs cannot declare a singular objectTypeId."
-      )
-    }
-    return
-  }
-  assertNonEmpty(input.objectTypeId ?? "", "objectTypeId")
-  if (input.sourceObjectTypeId !== undefined || input.targetObjectTypeId !== undefined) {
-    throw new ProjectionRunError(
-      "[Sixb] Object and telemetry projection runs cannot declare link endpoint types."
-    )
-  }
+function identitiesEqual(
+  left: ProjectionMaterializationIdentity,
+  right: ProjectionMaterializationIdentity
+): boolean {
+  return (
+    left.projectionId === right.projectionId &&
+    left.projectionKind === right.projectionKind &&
+    left.protocol === right.protocol &&
+    left.datasetVersion.datasetId === right.datasetVersion.datasetId &&
+    left.datasetVersion.versionId === right.datasetVersion.versionId &&
+    left.datasetVersion.createdAt === right.datasetVersion.createdAt &&
+    left.ontologyRevision === right.ontologyRevision &&
+    left.projectionRevision === right.projectionRevision &&
+    left.ownershipHash === right.ownershipHash
+  )
 }
 
-function assertMaterializationIdentityMatches(
+function assertIdentityMatches(
   record: ProjectionRunRecord,
   identity: ProjectionMaterializationIdentity
 ): void {
-  if (
-    record.projectionId !== identity.projectionId ||
-    record.projectionKind !== identity.projectionKind ||
-    record.materializationProtocol !== identity.protocol ||
-    record.datasetId !== identity.datasetVersion.datasetId ||
-    record.datasetVersionId !== identity.datasetVersion.versionId ||
-    record.datasetVersionCreatedAt !== identity.datasetVersion.createdAt ||
-    record.ontologyRevision !== identity.ontologyRevision ||
-    record.projectionRevision !== identity.projectionRevision ||
-    record.ownershipHash !== identity.ownershipHash
-  ) {
-    throw new ProjectionRunError(
-      `[Sixb] Projection run '${record.id}' materialization identity does not match.`
-    )
-  }
+  if (identitiesEqual(record.identity, identity)) return
+  throw new ProjectionRunError(
+    `[Sixb] Projection run '${record.id}' materialization identity does not match.`
+  )
 }
 
-function assertObjectTypesMatch(
+function targetsEqual(
+  left: ProjectionRunRecord["target"],
+  right: StartOrReclaimProjectionRunInput["target"]
+): boolean {
+  if ("sourceObjectTypeId" in left || "sourceObjectTypeId" in right) {
+    return (
+      "sourceObjectTypeId" in left &&
+      "sourceObjectTypeId" in right &&
+      left.sourceObjectTypeId === right.sourceObjectTypeId &&
+      left.targetObjectTypeId === right.targetObjectTypeId
+    )
+  }
+  return left.objectTypeId === right.objectTypeId
+}
+
+function assertTargetMatches(
   record: ProjectionRunRecord,
-  input: ProjectionRunObjectTypes
+  input: StartOrReclaimProjectionRunInput
 ): void {
-  if (
-    record.objectTypeId !== input.objectTypeId ||
-    record.sourceObjectTypeId !== input.sourceObjectTypeId ||
-    record.targetObjectTypeId !== input.targetObjectTypeId
-  ) {
+  if (targetsEqual(record.target, input.target)) return
+  throw new ProjectionRunError(
+    `[Sixb] Projection run '${record.id}' target object types do not match.`
+  )
+}
+
+function assertStartInput(input: StartOrReclaimProjectionRunInput): void {
+  assertNonEmpty(input.id, "id")
+  assertNonEmpty(input.projectId, "projectId")
+  assertIdentity(input.identity)
+  if ("sourceObjectTypeId" in input.target) {
+    assertNonEmpty(input.target.sourceObjectTypeId, "sourceObjectTypeId")
+    assertNonEmpty(input.target.targetObjectTypeId, "targetObjectTypeId")
+  } else {
+    assertNonEmpty(input.target.objectTypeId, "objectTypeId")
+  }
+  if (input.identity.projectionKind === "telemetry") {
+    assertPositiveCounter(input.fixedBatchSize ?? 0, "fixedBatchSize")
+  } else if (input.fixedBatchSize !== undefined) {
     throw new ProjectionRunError(
-      `[Sixb] Projection run '${record.id}' target object types do not match.`
+      "[Sixb] Replacement projection runs cannot declare a telemetry fixedBatchSize."
     )
   }
 }
 
-function assertCompleteMaterializationRecord(
-  record: StoredProjectionRunRecord
-): asserts record is ProjectionMaterializationRunRecord {
-  if (
-    record.attempt === undefined ||
-    !record.executionToken ||
-    !record.materializationProtocol ||
-    !record.datasetVersionCreatedAt ||
-    !record.ontologyRevision ||
-    !record.projectionRevision ||
-    !record.ownershipHash
-  ) {
+function createRunRecord(input: StartOrReclaimProjectionRunInput): ProjectionRunRecord {
+  const base = {
+    id: input.id,
+    projectId: input.projectId,
+    status: "running" as const,
+    attempt: 1,
+    progress: zeroProjectionRunProgress(),
+    startedAt: new Date(input.startedAt ?? new Date()),
+  }
+  switch (input.identity.projectionKind) {
+    case "object": {
+      const typed = input as Extract<
+        StartOrReclaimProjectionRunInput,
+        { readonly identity: { readonly projectionKind: "object" } }
+      >
+      return { ...base, identity: typed.identity, target: typed.target }
+    }
+    case "link": {
+      const typed = input as Extract<
+        StartOrReclaimProjectionRunInput,
+        { readonly identity: { readonly projectionKind: "link" } }
+      >
+      return { ...base, identity: typed.identity, target: typed.target }
+    }
+    case "telemetry": {
+      const typed = input as Extract<
+        StartOrReclaimProjectionRunInput,
+        { readonly identity: { readonly projectionKind: "telemetry" } }
+      >
+      return {
+        ...base,
+        identity: typed.identity,
+        target: typed.target,
+        telemetryCheckpoint: {
+          fixedBatchSize: typed.fixedBatchSize,
+          nextBatchOrdinal: 0,
+          nextRowOffset: 0,
+          inputExhausted: false,
+        },
+      }
+    }
+  }
+}
+
+function applyProgress<TRecord extends ProjectionRunRecord>(
+  record: TRecord,
+  patch: Partial<ProjectionRunProgress>
+): TRecord {
+  const progress = { ...record.progress }
+  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
+    const value = patch[key]
+    if (value === undefined) continue
+    assertCounter(value, key)
+    if (value < record.progress[key]) {
+      throw new ProjectionRunError(`[Sixb] Projection run ${key} must not decrease.`)
+    }
+    progress[key] = value
+  }
+  if (progress.sourceRowsSkipped > progress.sourceRowsRead) {
     throw new ProjectionRunError(
-      `[Sixb] Projection run '${record.id}' has incomplete materialization state.`
+      "[Sixb] Projection run sourceRowsSkipped must not exceed sourceRowsRead."
     )
   }
-  if (record.materializationProtocol === "telemetry") {
-    if (!record.telemetryCheckpoint) {
+  return { ...record, progress }
+}
+
+function assertGenericProgressDoesNotAdvanceTelemetry(
+  record: ProjectionRunRecord,
+  patch: Partial<ProjectionRunProgress>
+): void {
+  if (record.identity.protocol !== "telemetry") return
+  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
+    if (patch[key] !== undefined && patch[key] !== record.progress[key]) {
       throw new ProjectionRunError(
-        `[Sixb] Telemetry projection run '${record.id}' has incomplete checkpoint state.`
-      )
-    }
-    if (record.sourceRowsRead !== record.telemetryCheckpoint.nextRowOffset) {
-      throw new ProjectionRunError(
-        `[Sixb] Telemetry projection run '${record.id}' progress does not match its checkpoint.`
+        `[Sixb] Telemetry projection run '${record.id}' progress can only advance with its checkpoint.`
       )
     }
   }
 }
 
-export class InMemoryProjectionRunStorage implements ProjectionMaterializationRunStorage {
+function compareRuns(a: ProjectionRunRecord, b: ProjectionRunRecord, order: "asc" | "desc") {
+  const delta = a.startedAt.getTime() - b.startedAt.getTime()
+  if (delta !== 0) return order === "asc" ? delta : -delta
+  if (a.id === b.id) return 0
+  return order === "asc" ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id)
+}
+
+function finishRecord(
+  record: StoredProjectionRunRecord,
+  input: FinishProjectionRunInput
+): StoredProjectionRunRecord {
+  const terminal = {
+    executionToken: undefined,
+    status: input.status,
+    finishedAt: new Date(input.finishedAt ?? new Date()),
+    errorMessage: input.status === "succeeded" ? undefined : input.errorMessage,
+  }
+  if (input.status === "succeeded" && record.telemetryCheckpoint) {
+    return {
+      ...(record as TelemetryProjectionRunRecord),
+      ...terminal,
+      telemetryCheckpoint: { ...record.telemetryCheckpoint, inputExhausted: true },
+    }
+  }
+  return { ...record, ...terminal }
+}
+
+export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
   private readonly rows = new Map<string, StoredProjectionRunRecord>()
   /** Durable per-run history prevents a reclaimed execution token from becoming valid again. */
   private readonly executionTokensByRun = new Map<string, Set<string>>()
@@ -303,119 +309,43 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
     }
   }
 
-  async startOrReclaimMaterialization(
-    input: StartOrReclaimProjectionMaterializationInput
-  ): Promise<ProjectionMaterializationRunRecord> {
+  async startOrReclaim(input: StartOrReclaimProjectionRunInput): Promise<ProjectionRunClaim> {
     return this.runRootOperation(() => {
-      assertNonEmpty(input.id, "id")
-      assertNonEmpty(input.projectId, "projectId")
-      assertIdentity(input.identity)
-      assertObjectTypes(input.identity.projectionKind, input)
-      if (input.identity.protocol === "telemetry") {
-        assertPositiveCounter(input.fixedBatchSize ?? 0, "fixedBatchSize")
-      } else if (input.fixedBatchSize !== undefined) {
-        throw new ProjectionRunError(
-          "[Sixb] Replacement projection runs cannot declare a telemetry fixedBatchSize."
-        )
-      }
-
-      for (const candidate of this.rows.values()) {
-        if (
-          candidate.projectId === input.projectId &&
-          candidate.id !== input.id &&
-          candidate.datasetId === input.identity.datasetVersion.datasetId &&
-          candidate.datasetVersionId === input.identity.datasetVersion.versionId &&
-          candidate.datasetVersionCreatedAt !== undefined &&
-          candidate.datasetVersionCreatedAt !== input.identity.datasetVersion.createdAt
-        ) {
-          throw new ProjectionRunError(
-            `[Sixb] Dataset version '${input.identity.datasetVersion.versionId}' reused an immutable dataset version id with different metadata.`
-          )
-        }
-      }
+      assertStartInput(input)
+      this.assertDatasetVersionIsImmutable(input)
 
       const key = projectionRunKey(input.projectId, input.id)
       const existing = this.rows.get(key)
       if (existing) {
         this.assertRunning(existing)
-        assertMaterializationIdentityMatches(existing, input.identity)
-        assertObjectTypesMatch(existing, input)
-        if (existing.telemetryCheckpoint?.fixedBatchSize !== input.fixedBatchSize) {
+        assertIdentityMatches(existing, input.identity)
+        assertTargetMatches(existing, input)
+        const expectedBatchSize = existing.telemetryCheckpoint?.fixedBatchSize
+        if (expectedBatchSize !== input.fixedBatchSize) {
           throw new ProjectionRunError(
             `[Sixb] Projection run '${input.id}' fixed batch size does not match.`
           )
         }
-        assertCompleteMaterializationRecord(existing)
       }
 
-      const previousAttempt = existing?.attempt ?? 0
-      if (!Number.isSafeInteger(previousAttempt + 1)) {
-        throw new ProjectionRunError(
-          `[Sixb] Projection run '${input.id}' attempt exceeds safe integer range.`
-        )
-      }
-      const executionToken = this.createExecutionToken()
-      assertNonEmpty(executionToken, "executionToken")
-      const usedExecutionTokens =
-        this.executionTokensByRun.get(key) ??
-        new Set(existing?.executionToken ? [existing.executionToken] : [])
-      if (usedExecutionTokens.has(executionToken)) {
-        throw new ProjectionRunError(
-          `[Sixb] Projection run '${input.id}' execution token was already used.`
-        )
-      }
-
-      const record: ProjectionMaterializationRunRecord = existing
-        ? {
-            ...existing,
-            attempt: previousAttempt + 1,
-            executionToken,
-          }
-        : {
-            id: input.id,
-            projectId: input.projectId,
-            projectionId: input.identity.projectionId,
-            projectionKind: input.identity.projectionKind,
-            datasetId: input.identity.datasetVersion.datasetId,
-            datasetVersionId: input.identity.datasetVersion.versionId,
-            objectTypeId: input.objectTypeId,
-            sourceObjectTypeId: input.sourceObjectTypeId,
-            targetObjectTypeId: input.targetObjectTypeId,
-            status: "running",
-            startedAt: new Date(input.startedAt ?? new Date()),
-            attempt: 1,
-            executionToken,
-            materializationProtocol: input.identity.protocol,
-            datasetVersionCreatedAt: input.identity.datasetVersion.createdAt,
-            ontologyRevision: input.identity.ontologyRevision,
-            projectionRevision: input.identity.projectionRevision,
-            ownershipHash: input.identity.ownershipHash,
-            ...(input.fixedBatchSize !== undefined
-              ? {
-                  telemetryCheckpoint: {
-                    fixedBatchSize: input.fixedBatchSize,
-                    nextBatchOrdinal: 0,
-                    nextRowOffset: 0,
-                    inputExhausted: false,
-                  },
-                }
-              : {}),
-            ...zeroProjectionRunProgress(),
-          }
+      const attempt = safeAdd(existing?.attempt ?? 0, 1, "attempt")
+      const executionToken = this.issueExecutionToken(key, input.id, existing?.executionToken)
+      const record: StoredProjectionRunRecord = existing
+        ? { ...existing, attempt, executionToken }
+        : { ...createRunRecord(input), executionToken }
 
       this.rows.set(key, structuredClone(record))
-      usedExecutionTokens.add(executionToken)
-      this.executionTokensByRun.set(key, usedExecutionTokens)
-      return cloneProjectionRunRecord(record)
+      return {
+        run: publicRecord(record),
+        execution: { projectionRunId: input.id, executionToken },
+      }
     })
   }
 
-  async assertMaterializationExecution(
-    input: AssertProjectionMaterializationExecutionInput
-  ): Promise<ProjectionMaterializationRunRecord> {
-    return this.runRootOperation(() =>
-      cloneProjectionRunRecord(this.requireMaterializationExecution(input))
-    )
+  async lockForMaterialization(
+    input: LockProjectionRunForMaterializationInput
+  ): Promise<ProjectionRunRecord> {
+    return this.runRootOperation(() => publicRecord(this.requireExecution(input)))
   }
 
   /** @internal The caller must already hold InMemoryStorage's root operation lock. */
@@ -426,83 +356,40 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
     assertNonEmpty(input.execution.executionToken, "executionToken")
     const record = this.requireRunning(input.projectId, input.execution.projectionRunId)
     if (
-      record.projectionId !== input.source.projectionId ||
-      record.materializationProtocol !== "replacement"
+      record.identity.projectionId !== input.source.projectionId ||
+      record.identity.protocol !== "replacement"
     ) {
       throw new ProjectionRunError(
         `[Sixb] Projection run '${record.id}' does not own replacement source '${input.source.projectionId}'.`
       )
     }
-    if (!record.executionToken || record.executionToken !== input.execution.executionToken) {
+    if (record.executionToken !== input.execution.executionToken) {
       throw new ProjectionRunError(
         `[Sixb] Projection run '${record.id}' execution token is stale.`,
         "execution-lost"
       )
     }
     if (input.identity) {
-      assertMaterializationIdentityMatches(record, {
-        projectionId: input.source.projectionId,
-        ...input.identity,
-      })
+      assertIdentityMatches(record, { projectionId: input.source.projectionId, ...input.identity })
     }
   }
 
-  async updateMaterialization(
-    input: UpdateProjectionMaterializationInput
-  ): Promise<ProjectionMaterializationRunRecord> {
+  async update(input: UpdateProjectionRunInput): Promise<ProjectionRunRecord> {
     return this.runRootOperation(() => {
-      const existing = this.requireMaterializationExecution(input)
-      assertGenericProgressDoesNotAdvanceTelemetry(existing, input)
-      const next = applyProgress(existing, input)
+      const existing = this.requireExecution(input)
+      assertGenericProgressDoesNotAdvanceTelemetry(existing, input.progress)
+      const next = applyProgress(existing, input.progress)
       this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
-      return cloneProjectionRunRecord(next)
-    })
-  }
-
-  async finishMaterialization(
-    input: FinishProjectionMaterializationInput
-  ): Promise<ProjectionRunRecord> {
-    return this.runRootOperation(() => {
-      const existing = this.requireMaterializationExecution(input)
-      assertGenericProgressDoesNotAdvanceTelemetry(existing, input)
-      if (
-        input.status === "succeeded" &&
-        existing.materializationProtocol === "telemetry" &&
-        !existing.telemetryCheckpoint?.inputExhausted
-      ) {
-        throw new ProjectionRunError(
-          `[Sixb] Telemetry projection run '${existing.id}' cannot succeed before its input is exhausted.`
-        )
-      }
-      const withProgress = applyProgress(existing, input)
-      const next: StoredProjectionRunRecord = {
-        ...withProgress,
-        executionToken: undefined,
-        status: input.status,
-        finishedAt: new Date(input.finishedAt ?? new Date()),
-        errorMessage: input.status === "succeeded" ? undefined : input.errorMessage,
-      }
-      this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
-      return publicProjectionRunRecord(next)
+      return publicRecord(next)
     })
   }
 
   async advanceTelemetryCheckpoint(
     input: AdvanceProjectionTelemetryCheckpointInput
-  ): Promise<ProjectionMaterializationRunRecord> {
+  ): Promise<TelemetryProjectionRunRecord> {
     return this.runRootOperation(() => {
-      const existing = this.requireMaterializationExecution(input)
-      if (existing.materializationProtocol !== "telemetry") {
-        throw new ProjectionRunError(
-          `[Sixb] Projection run '${existing.id}' does not have a telemetry checkpoint.`
-        )
-      }
+      const existing = this.requireTelemetryExecution(input)
       const checkpoint = existing.telemetryCheckpoint
-      if (!checkpoint) {
-        throw new ProjectionRunError(
-          `[Sixb] Telemetry projection run '${existing.id}' has incomplete checkpoint state.`
-        )
-      }
       assertCounter(input.batchOrdinal, "batchOrdinal")
       assertPositiveCounter(input.batchRowCount, "batchRowCount")
       assertCounter(input.batchRowsSkipped, "batchRowsSkipped")
@@ -531,15 +418,18 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
           `[Sixb] Telemetry projection run '${existing.id}' has already exhausted its input.`
         )
       }
+
       const nextRowOffset = safeAdd(checkpoint.nextRowOffset, input.batchRowCount, "nextRowOffset")
-      const next: ProjectionMaterializationRunRecord = {
+      const next: TelemetryProjectionRunRecord & { readonly executionToken: string } = {
         ...existing,
-        sourceRowsRead: nextRowOffset,
-        sourceRowsSkipped: safeAdd(
-          existing.sourceRowsSkipped,
-          input.batchRowsSkipped,
-          "sourceRowsSkipped"
-        ),
+        progress: {
+          sourceRowsRead: nextRowOffset,
+          sourceRowsSkipped: safeAdd(
+            existing.progress.sourceRowsSkipped,
+            input.batchRowsSkipped,
+            "sourceRowsSkipped"
+          ),
+        },
         telemetryCheckpoint: {
           ...checkpoint,
           nextBatchOrdinal: safeAdd(checkpoint.nextBatchOrdinal, 1, "nextBatchOrdinal"),
@@ -548,96 +438,26 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
         },
       }
       this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
-      return cloneProjectionRunRecord(next)
-    })
-  }
-
-  async completeTelemetryInput(
-    input: CompleteProjectionTelemetryInput
-  ): Promise<ProjectionMaterializationRunRecord> {
-    return this.runRootOperation(() => {
-      const existing = this.requireMaterializationExecution(input)
-      const checkpoint = existing.telemetryCheckpoint
-      if (existing.materializationProtocol !== "telemetry" || !checkpoint) {
-        throw new ProjectionRunError(
-          `[Sixb] Projection run '${existing.id}' does not have a telemetry checkpoint.`
-        )
-      }
-      if (checkpoint.inputExhausted) return cloneProjectionRunRecord(existing)
-      const next: ProjectionMaterializationRunRecord = {
-        ...existing,
-        telemetryCheckpoint: { ...checkpoint, inputExhausted: true },
-      }
-      this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
-      return cloneProjectionRunRecord(next)
-    })
-  }
-
-  async start(input: StartProjectionRunInput): Promise<ProjectionRunRecord> {
-    return this.runRootOperation(() => {
-      assertNonEmpty(input.id, "id")
-      assertNonEmpty(input.projectId, "projectId")
-      assertNonEmpty(input.projectionId, "projectionId")
-      assertNonEmpty(input.datasetId, "datasetId")
-      assertNonEmpty(input.datasetVersionId, "datasetVersionId")
-
-      const key = projectionRunKey(input.projectId, input.id)
-      if (this.rows.has(key)) {
-        throw new ProjectionRunError(
-          `[Sixb] Projection run '${input.id}' already exists for project '${input.projectId}'.`
-        )
-      }
-      const record: ProjectionRunRecord = {
-        id: input.id,
-        projectId: input.projectId,
-        projectionId: input.projectionId,
-        projectionKind: input.projectionKind,
-        datasetId: input.datasetId,
-        datasetVersionId: input.datasetVersionId,
-        objectTypeId: input.objectTypeId,
-        sourceObjectTypeId: input.sourceObjectTypeId,
-        targetObjectTypeId: input.targetObjectTypeId,
-        status: "running",
-        startedAt: new Date(input.startedAt ?? new Date()),
-        attempt: 0,
-        ...zeroProjectionRunProgress(),
-      }
-      this.rows.set(key, structuredClone(record))
-      return publicProjectionRunRecord(record)
-    })
-  }
-
-  async update(input: UpdateProjectionRunInput): Promise<ProjectionRunRecord> {
-    return this.runRootOperation(() => {
-      const existing = this.requireRunning(input.projectId, input.id)
-      assertLegacyMutationAllowed(existing, "update")
-      const next = applyProgress(existing, input)
-      this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
-      return publicProjectionRunRecord(next)
+      return publicRecord(next) as TelemetryProjectionRunRecord
     })
   }
 
   async finish(input: FinishProjectionRunInput): Promise<ProjectionRunRecord> {
     return this.runRootOperation(() => {
-      const existing = this.requireRunning(input.projectId, input.id)
-      assertLegacyMutationAllowed(existing, "finish")
-      const withProgress = applyProgress(existing, input)
-      const next: StoredProjectionRunRecord = {
-        ...withProgress,
-        executionToken: undefined,
-        status: input.status,
-        finishedAt: new Date(input.finishedAt ?? new Date()),
-        errorMessage: input.status === "succeeded" ? undefined : input.errorMessage,
-      }
+      const existing = this.requireExecution(input)
+      const patch = input.progress ?? {}
+      assertGenericProgressDoesNotAdvanceTelemetry(existing, patch)
+      const withProgress = applyProgress(existing, patch)
+      const next = finishRecord(withProgress, input)
       this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
-      return publicProjectionRunRecord(next)
+      return publicRecord(next)
     })
   }
 
   async getById(params: { projectId: string; id: string }): Promise<ProjectionRunRecord | null> {
     return this.runRootOperation(() => {
       const record = this.rows.get(projectionRunKey(params.projectId, params.id))
-      return record ? publicProjectionRunRecord(record) : null
+      return record ? publicRecord(record) : null
     })
   }
 
@@ -656,14 +476,18 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
       const filtered = [...this.rows.values()]
         .filter((record) => record.projectId === input.projectId)
         .filter((record) =>
-          input.projectionId ? record.projectionId === input.projectionId : true
+          input.projectionId ? record.identity.projectionId === input.projectionId : true
         )
         .filter((record) =>
-          input.projectionKind ? record.projectionKind === input.projectionKind : true
+          input.projectionKind ? record.identity.projectionKind === input.projectionKind : true
         )
-        .filter((record) => (input.datasetId ? record.datasetId === input.datasetId : true))
         .filter((record) =>
-          input.datasetVersionId ? record.datasetVersionId === input.datasetVersionId : true
+          input.datasetId ? record.identity.datasetVersion.datasetId === input.datasetId : true
+        )
+        .filter((record) =>
+          input.datasetVersionId
+            ? record.identity.datasetVersion.versionId === input.datasetVersionId
+            : true
         )
         .filter((record) =>
           objectTypeIds
@@ -676,7 +500,7 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
         .sort((left, right) => compareRuns(left, right, order))
 
       const total = filtered.length
-      const runs = filtered.slice(offset, offset + limit).map(publicProjectionRunRecord)
+      const runs = filtered.slice(offset, offset + limit).map(publicRecord)
       return { runs, hasMore: offset + runs.length < total, total }
     })
   }
@@ -688,27 +512,73 @@ export class InMemoryProjectionRunStorage implements ProjectionMaterializationRu
       const runs = latestStartedAtByOwnerId(
         [...this.rows.values()].filter((record) => record.projectId === input.projectId),
         input.projectionIds,
-        (record) => record.projectionId
+        (record) => record.identity.projectionId
       )
-      return { runs: runs.map(publicProjectionRunRecord) }
+      return { runs: runs.map(publicRecord) }
     })
   }
 
-  private requireMaterializationExecution(
-    input: AssertProjectionMaterializationExecutionInput
-  ): ProjectionMaterializationRunRecord {
+  private assertDatasetVersionIsImmutable(input: StartOrReclaimProjectionRunInput): void {
+    for (const candidate of this.rows.values()) {
+      if (
+        candidate.projectId === input.projectId &&
+        candidate.id !== input.id &&
+        candidate.identity.datasetVersion.datasetId === input.identity.datasetVersion.datasetId &&
+        candidate.identity.datasetVersion.versionId === input.identity.datasetVersion.versionId &&
+        candidate.identity.datasetVersion.createdAt !== input.identity.datasetVersion.createdAt
+      ) {
+        throw new ProjectionRunError(
+          `[Sixb] Dataset version '${input.identity.datasetVersion.versionId}' reused an immutable dataset version id with different metadata.`
+        )
+      }
+    }
+  }
+
+  private issueExecutionToken(
+    key: string,
+    runId: string,
+    currentToken: string | undefined
+  ): string {
+    const executionToken = this.createExecutionToken()
+    assertNonEmpty(executionToken, "executionToken")
+    const usedTokens = this.executionTokensByRun.get(key) ?? new Set<string>()
+    if (currentToken) usedTokens.add(currentToken)
+    if (usedTokens.has(executionToken)) {
+      throw new ProjectionRunError(
+        `[Sixb] Projection run '${runId}' execution token was already used.`
+      )
+    }
+    usedTokens.add(executionToken)
+    this.executionTokensByRun.set(key, usedTokens)
+    return executionToken
+  }
+
+  private requireExecution(
+    input: LockProjectionRunForMaterializationInput
+  ): StoredProjectionRunRecord & { readonly executionToken: string } {
     assertNonEmpty(input.executionToken, "executionToken")
     assertIdentity(input.identity)
     const record = this.requireRunning(input.projectId, input.id)
-    assertMaterializationIdentityMatches(record, input.identity)
-    if (!record.executionToken || record.executionToken !== input.executionToken) {
+    assertIdentityMatches(record, input.identity)
+    if (record.executionToken !== input.executionToken) {
       throw new ProjectionRunError(
         `[Sixb] Projection run '${input.id}' execution token is stale.`,
         "execution-lost"
       )
     }
-    assertCompleteMaterializationRecord(record)
-    return record
+    return record as StoredProjectionRunRecord & { readonly executionToken: string }
+  }
+
+  private requireTelemetryExecution(
+    input: LockProjectionRunForMaterializationInput
+  ): TelemetryProjectionRunRecord & { readonly executionToken: string } {
+    const record = this.requireExecution(input)
+    if (record.identity.projectionKind !== "telemetry") {
+      throw new ProjectionRunError(
+        `[Sixb] Projection run '${record.id}' does not have a telemetry checkpoint.`
+      )
+    }
+    return record as TelemetryProjectionRunRecord & { readonly executionToken: string }
   }
 
   private requireRunning(projectId: string, id: string): StoredProjectionRunRecord {

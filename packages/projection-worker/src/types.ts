@@ -8,13 +8,13 @@ import type {
 } from "@sixb/core"
 import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
 import type {
-  ProjectionMaterializationRunRecord,
-  ProjectionMaterializationRunStorage,
+  ProjectionRunClaim,
   ProjectionRunRecord,
+  ProjectionRunStorage,
 } from "@sixb/core/storage"
 
 export interface ProjectionWorkerContext extends SixbRuntimeContext {
-  readonly projectionRunsStorage: ProjectionMaterializationRunStorage
+  readonly projectionRunsStorage: ProjectionRunStorage
   getDatasetById(datasetId: string): DatasetDefinition | null
   getProjectionById(projectionId: string): ProjectionDefinition | null
 }
@@ -50,11 +50,4 @@ export interface ProjectionJobResult {
   readonly replayedTerminal: boolean
 }
 
-export interface ClaimedProjectionExecution {
-  readonly run: ProjectionMaterializationRunRecord
-  readonly identity: ProjectionMaterializationIdentity
-  readonly execution: {
-    readonly projectionRunId: string
-    readonly executionToken: string
-  }
-}
+export type ClaimedProjectionExecution = ProjectionRunClaim

@@ -10,7 +10,6 @@ export {
 } from "./idempotency"
 export { InMemoryActionRunStorage } from "./in-memory"
 export type {
-  ActionMaterializationRunStorage,
   ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunParams,
@@ -30,4 +29,3 @@ export type {
   RecordActionWritebackInput,
   StartActionRunInput,
 } from "./types"
-export { isActionMaterializationRunStorage } from "./types"

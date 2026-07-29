@@ -60,8 +60,8 @@ export async function runTelemetryProjection(input: {
   let attemptRowsRead = 0
 
   for await (const row of runtime.lakeStorage.readRows({
-    datasetId: execution.run.datasetId,
-    versionId: execution.run.datasetVersionId,
+    datasetId: execution.run.identity.datasetVersion.datasetId,
+    versionId: execution.run.identity.datasetVersion.versionId,
     columns: plan.readColumns,
     offset: checkpoint.nextRowOffset,
   })) {
@@ -157,11 +157,11 @@ async function appendPhysicalBatch(input: {
   await getOntologyMutationRuntime(runtime).appendTelemetry({
     source: {
       kind: "projection",
-      projection: { projectionId: execution.run.projectionId },
+      projection: { projectionId: execution.run.identity.projectionId },
       datasetVersion: {
-        datasetId: execution.run.datasetId,
-        versionId: execution.run.datasetVersionId,
-        createdAt: execution.run.datasetVersionCreatedAt,
+        datasetId: execution.run.identity.datasetVersion.datasetId,
+        versionId: execution.run.identity.datasetVersion.versionId,
+        createdAt: execution.run.identity.datasetVersion.createdAt,
       },
       execution: execution.execution,
       batchOrdinal,

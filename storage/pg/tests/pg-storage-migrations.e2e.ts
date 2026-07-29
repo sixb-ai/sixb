@@ -1,13 +1,21 @@
 import { describe, expect, test } from "bun:test"
-import { migrateStorage } from "@sixb/core"
-import {
-  createStoredObjectMutationEvent,
-  createStoredTelemetryAppendedEvent,
-} from "@sixb/core/testing"
+import { defineObjectType, migrateStorage, OntologyRegistry, prop } from "@sixb/core"
+import { createMaterializerTestFixture } from "@sixb/core/testing"
 import { SQL } from "bun"
 import { PostgresStorage, type PostgresStorage as PostgresStorageType } from "../src"
 import { POSTGRES_STORAGE_ADAPTER_ID, quoteIdent } from "../src/migrations"
 import { createTestStorage } from "./helpers"
+
+const Room = defineObjectType({
+  id: "Room",
+  name: "Room",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("name", "string"),
+    prop("temperature", "double", { mode: "telemetry" }),
+  ],
+})
+const ontology = new OntologyRegistry({ sources: [Room] })
 
 describe("Postgres storage migrations", () => {
   test("migrateStorage writes schema-level migration history", async () => {
@@ -31,6 +39,13 @@ describe("Postgres storage migrations", () => {
           version: 1,
         },
       ])
+    })
+  })
+
+  test("repeated migration planning is idempotent", async () => {
+    await withStorage(false, async (storage) => {
+      await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+      await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
     })
   })
 
@@ -67,6 +82,15 @@ describe("Postgres storage migrations", () => {
       expect(await readTableColumns(schemaName, "objects")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "links")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "timeseries")).toContain("last_commit_id")
+      expect(await readTableColumns(schemaName, "objects")).not.toContain("source_event_id")
+      expect(await readTableColumns(schemaName, "links")).not.toContain("source_event_id")
+      expect(await readTableColumns(schemaName, "timeseries")).not.toContain("source_event_id")
+      expect(await readTableNames(schemaName)).not.toContain("applied_events_objects")
+      await expect(readColumnNullable(schemaName, "objects", "last_commit_id")).resolves.toBe("NO")
+      await expect(readColumnNullable(schemaName, "links", "last_commit_id")).resolves.toBe("NO")
+      await expect(readColumnNullable(schemaName, "timeseries", "last_commit_id")).resolves.toBe(
+        "NO"
+      )
       expect(await readTableColumns(schemaName, "timeseries_latest")).toEqual(
         expect.arrayContaining([
           "object_type_id",
@@ -231,30 +255,24 @@ async function withStorage(
 }
 
 async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
-  await storage.objects.applyObjectUpsert(
-    createStoredObjectMutationEvent({
-      id: "object-event",
-      cursor: "1",
-      projectId: "project-a",
-      occurredAt: "2026-04-19T12:00:00.000Z",
-      objectTypeId: "Room",
-      primaryId: "room:101",
-      properties: { name: "Legacy Room" },
-    })
-  )
-  await storage.timeseries.applyTelemetryAppended(
-    createStoredTelemetryAppendedEvent({
-      id: "telemetry-event",
-      cursor: "2",
-      projectId: "project-a",
-      occurredAt: "2026-04-19T12:00:01.000Z",
-      objectTypeId: "Room",
-      objectId: "room:101",
-      propertyId: "temperature",
-      value: 21.5,
-      at: "2026-04-19T12:00:01.000Z",
-    })
-  )
+  await createMaterializerTestFixture({ projectId: "project-a", ontology, storage }).seed({
+    objects: [
+      {
+        ref: { objectTypeId: "Room", primaryId: "room:101" },
+        properties: { id: "room:101", name: "Legacy Room" },
+      },
+    ],
+    telemetry: [
+      {
+        series: {
+          object: { objectTypeId: "Room", primaryId: "room:101" },
+          propertyId: "temperature",
+        },
+        value: 21.5,
+        at: "2026-04-19T12:00:01.000Z",
+      },
+    ],
+  })
   await storage.syncRuns.start({
     id: "run-1",
     projectId: "project-a",
@@ -275,21 +293,33 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     },
     checkpoint: { cursor: "legacy" },
   })
-  await storage.projectionRuns.start({
+  const projectionRun = await storage.projectionRuns.startOrReclaim({
     id: "proj-run-1",
     projectId: "project-a",
-    projectionId: "room-proj",
-    projectionKind: "object",
-    datasetId: "raw.orders",
-    datasetVersionId: "ver_1",
+    identity: {
+      projectionId: "room-proj",
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetVersion: {
+        datasetId: "raw.orders",
+        versionId: "ver_1",
+        createdAt: "2026-04-19T12:00:00.000Z",
+      },
+      ontologyRevision: "ontology-1",
+      projectionRevision: "projection-1",
+      ownershipHash: "ownership-1",
+    },
+    target: { objectTypeId: "Room" },
     startedAt: new Date("2026-04-19T12:00:00.000Z"),
   })
   await storage.projectionRuns.finish({
     id: "proj-run-1",
     projectId: "project-a",
+    identity: projectionRun.run.identity,
+    executionToken: projectionRun.execution.executionToken,
     status: "succeeded",
     finishedAt: new Date("2026-04-19T12:00:01.000Z"),
-    sourceRowsRead: 4,
+    progress: { sourceRowsRead: 4 },
   })
   await storage.workflowRuns.start({
     id: "workflow-run-1",
@@ -400,6 +430,27 @@ async function readTableColumns(schemaName: string, tableName: string): Promise<
     )) as Array<{ column_name: string }>
 
     return rows.map((row) => row.column_name)
+  })
+}
+
+async function readColumnNullable(
+  schemaName: string,
+  tableName: string,
+  columnName: string
+): Promise<"YES" | "NO"> {
+  return withSql(async (sql) => {
+    const [row] = (await sql.unsafe(
+      `
+        SELECT is_nullable
+        FROM information_schema.columns
+        WHERE table_schema = $1
+          AND table_name = $2
+          AND column_name = $3
+      `,
+      [schemaName, tableName, columnName]
+    )) as Array<{ is_nullable: "YES" | "NO" }>
+    if (!row) throw new Error(`Column ${tableName}.${columnName} was not found.`)
+    return row.is_nullable
   })
 }
 

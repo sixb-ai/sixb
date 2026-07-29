@@ -82,7 +82,7 @@ describe("materializer architecture", () => {
     for (const file of await typescriptFiles(join(sourceRoot, "materializer"))) {
       if (file.endsWith("/projections/finish-run.ts")) continue
       const contents = await readFile(file, "utf8")
-      expect(contents, relative(sourceRoot, file)).not.toMatch(/\.finishMaterialization\s*\(/)
+      expect(contents, relative(sourceRoot, file)).not.toMatch(/projectionRuns\.finish\s*\(/)
     }
   })
 })

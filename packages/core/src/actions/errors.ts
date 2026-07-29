@@ -13,6 +13,3 @@ export function missingActionMutationMessage(actionId: string): string {
 export function effectsWithoutEditsMessage(actionId: string): string {
   return `Action "${actionId}" cannot declare .effects(...) without .edits(...).`
 }
-
-export const legacyRunMessage =
-  "Actions V2 no longer supports .run(...). Use .writeback(...), .edits(...), and .effects(...) instead."

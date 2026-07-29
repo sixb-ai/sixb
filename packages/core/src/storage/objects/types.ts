@@ -1,10 +1,4 @@
 import type {
-  StoredLinkDeletedEvent,
-  StoredLinkMutationEvent,
-  StoredObjectMutationEvent,
-  StoredTelemetryAppendedEvent,
-} from "../../events"
-import type {
   ObjectQuery,
   ObjectQueryDirection,
   ObjectQueryPredicate,
@@ -25,9 +19,8 @@ export interface ObjectRow {
   createdAt: Date
   updatedAt: Date
   version: number
-  /** Materializer commit provenance. Absent only on rows written by the legacy compile bridge. */
-  lastCommitId?: string
-  sourceEventId?: string
+  /** Commit that produced the current effective row. */
+  lastCommitId: string
   /**
    * Linked objects attached by an `expand` query node, keyed by link id.
    *
@@ -65,9 +58,8 @@ export interface ObjectLinkRow {
   properties?: Record<string, unknown>
   createdAt: Date
   updatedAt: Date
-  /** Materializer commit provenance. Absent only on rows written by the legacy compile bridge. */
-  lastCommitId?: string
-  sourceEventId?: string
+  /** Commit that produced the current effective row. */
+  lastCommitId: string
 }
 
 export type LinkDirection = "outgoing" | "incoming" | "both"
@@ -183,16 +175,6 @@ export interface ObjectStorage {
   countObjects?(params: CountObjectsInput): Promise<CountObjectsResult>
   existsObjects?(params: ExistsObjectsInput): Promise<ExistsObjectsResult>
   facetObjects?(params: FacetObjectsInput): Promise<FacetObjectsResult>
-
-  applyObjectUpsert(event: StoredObjectMutationEvent): Promise<ObjectRow>
-  applyObjectUpsertBatch(
-    events: readonly StoredObjectMutationEvent[]
-  ): Promise<readonly ObjectRow[]>
-  applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void>
-  applyTelemetryAppendedBatch(events: readonly StoredTelemetryAppendedEvent[]): Promise<void>
-  applyLinkUpsert(event: StoredLinkMutationEvent): Promise<void>
-  applyLinkUpsertBatch(events: readonly StoredLinkMutationEvent[]): Promise<void>
-  applyLinkDelete(event: StoredLinkDeletedEvent): Promise<void>
 
   getByPrimaryId(params: {
     projectId: string

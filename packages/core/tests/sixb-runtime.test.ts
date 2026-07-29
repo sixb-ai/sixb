@@ -102,7 +102,9 @@ function countObjectQueryCalls(deps: ReturnType<typeof createTestRuntimeDeps>): 
   readonly calls: number
 } {
   let calls = 0
-  const originalQueryObjects = deps.storage.objects.queryObjects.bind(deps.storage.objects)
+  const queryObjects = deps.storage.objects.queryObjects
+  if (!queryObjects) throw new Error("Expected in-memory object query pushdown.")
+  const originalQueryObjects = queryObjects.bind(deps.storage.objects)
   deps.storage.objects.queryObjects = async (
     input: QueryObjectsInput
   ): Promise<QueryObjectsResult> => {

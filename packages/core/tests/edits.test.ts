@@ -117,7 +117,6 @@ describe("EditBatch authoring contract", () => {
       invoice.restore()
     })
 
-    expect(batch.version).toBe(1)
     expect(batch.operations.map((operation) => operation.kind)).toEqual([
       "object.update",
       "object.update",

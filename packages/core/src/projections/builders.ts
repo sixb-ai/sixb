@@ -697,11 +697,9 @@ export function projectionKindOf(
 }
 
 /** The object type id(s) a projection materializes. */
-export interface ProjectionObjectTypeIds {
-  readonly objectTypeId?: string
-  readonly sourceObjectTypeId?: string
-  readonly targetObjectTypeId?: string
-}
+export type ProjectionObjectTypeIds =
+  | { readonly objectTypeId: string }
+  | { readonly sourceObjectTypeId: string; readonly targetObjectTypeId: string }
 
 /**
  * Extracts the object type id(s) a projection targets, used to authorize run

@@ -1,0 +1,19 @@
+{
+  "name": "@sixb/benchmark-ontology-materialization",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "benchmark": "bun src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sixb/core": "workspace:*",
+    "@sixb/pg": "workspace:*",
+    "@sixb/sqlite": "workspace:*",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  }
+}

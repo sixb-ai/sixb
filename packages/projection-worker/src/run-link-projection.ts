@@ -23,10 +23,10 @@ export function mapLinkProjectionEntries(input: {
     storage: runtime.projectionRunsStorage,
     projectId: runtime.projectId,
     projectionRunId: execution.run.id,
-    executionToken: execution.run.executionToken,
-    identity: execution.identity,
-    persistedRowsRead: execution.run.sourceRowsRead,
-    persistedRowsSkipped: execution.run.sourceRowsSkipped,
+    executionToken: execution.execution.executionToken,
+    identity: execution.run.identity,
+    persistedRowsRead: execution.run.progress.sourceRowsRead,
+    persistedRowsSkipped: execution.run.progress.sourceRowsSkipped,
     ...(expectedRows === undefined ? {} : { expectedRows }),
   })
 
@@ -35,8 +35,8 @@ export function mapLinkProjectionEntries(input: {
   async function* entries(): AsyncIterable<ProjectionSourceEntry> {
     try {
       for await (const row of runtime.lakeStorage.readRows({
-        datasetId: execution.run.datasetId,
-        versionId: execution.run.datasetVersionId,
+        datasetId: execution.run.identity.datasetVersion.datasetId,
+        versionId: execution.run.identity.datasetVersion.versionId,
         columns,
       })) {
         throwIfAborted(signal)

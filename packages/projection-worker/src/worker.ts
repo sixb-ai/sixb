@@ -5,10 +5,7 @@ import { shareOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
-import {
-  isProjectionMaterializationRunStorage,
-  type ProjectionMaterializationRunStorage,
-} from "@sixb/core/storage"
+import type { ProjectionRunStorage } from "@sixb/core/storage"
 import { projectionRetryAvailableAt } from "./retry-backoff"
 import { isPermanentProjectionFailure, runProjectionJob } from "./run-projection-job"
 import type { ProjectionWorkerContext, ProjectionWorkerSixb } from "./types"
@@ -27,7 +24,7 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
     }
 
     const projectionRunsStorage = sixb.storage.projectionRuns
-    if (!isProjectionMaterializationRunStorage(projectionRunsStorage)) {
+    if (!projectionRunsStorage) {
       throw new Error(
         "[SixbProjectionWorker] Projection workers require materialization-capable storage.projectionRuns."
       )
@@ -59,8 +56,8 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
           run: {
             kind: "projection",
             runId: run.id,
-            projectionId: run.projectionId,
-            projectionKind: run.projectionKind,
+            projectionId: run.identity.projectionId,
+            projectionKind: run.identity.projectionKind,
           },
         })
       },
@@ -112,7 +109,7 @@ function retryWithBackoff(
 
 function buildProjectionContext(
   sixb: ProjectionWorkerSixb,
-  projectionRunsStorage: ProjectionMaterializationRunStorage
+  projectionRunsStorage: ProjectionRunStorage
 ): ProjectionWorkerContext {
   const context: ProjectionWorkerContext = {
     projectId: sixb.projectId,

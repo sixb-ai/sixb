@@ -476,11 +476,10 @@ describe("committed fact delivery", () => {
     ).toEqual(["r1"])
   })
 
-  test("never appends events or writes providers outside the materializer", async () => {
-    const { deps, sixb } = createRuntime()
+  test("never appends events outside the materializer", async () => {
+    const { sixb } = createRuntime()
     const appendSpy = mock(sixb.events.append.bind(sixb.events))
     sixb.events.append = appendSpy
-    const providerWrites = spyLegacyProviderWrites(deps.storage)
 
     await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
     await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
@@ -492,7 +491,6 @@ describe("committed fact delivery", () => {
     await sixb.upsertObjectBatch("room", [{ properties: { id: "r2", name: "Bedroom" } }])
 
     expect(appendSpy).not.toHaveBeenCalled()
-    expect(providerWrites.filter((spy) => spy.mock.calls.length > 0)).toEqual([])
   })
 })
 
@@ -535,20 +533,4 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
     if (Date.now() >= deadline) throw new Error("Timed out waiting for asynchronous delivery.")
     await Bun.sleep(1)
   }
-}
-
-/** Watches the event-command provider methods the Materializer replaced. */
-function spyLegacyProviderWrites(storage: InMemoryStorage) {
-  const names = [
-    "applyObjectUpsert",
-    "applyObjectUpsertBatch",
-    "applyLinkUpsert",
-    "applyLinkUpsertBatch",
-    "applyLinkDelete",
-  ] as const
-  return names.map((name) => {
-    const spy = mock(storage.objects[name].bind(storage.objects))
-    Object.defineProperty(storage.objects, name, { value: spy, configurable: true })
-    return spy
-  })
 }

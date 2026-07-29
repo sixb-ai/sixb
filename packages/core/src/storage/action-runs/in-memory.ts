@@ -6,11 +6,11 @@ import {
   isTerminalActionRun,
 } from "./idempotency"
 import type {
-  ActionMaterializationRunStorage,
   ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunParams,
   ActionRunRecord,
+  ActionRunStorage,
   ActionRunWritebackRecord,
   EnterActionRunPhaseInput,
   FinishActionRunInput,
@@ -105,7 +105,7 @@ function compareRuns(a: ActionRunRecord, b: ActionRunRecord, order: "asc" | "des
   return order === "asc" ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id)
 }
 
-export class InMemoryActionRunStorage implements ActionMaterializationRunStorage {
+export class InMemoryActionRunStorage implements ActionRunStorage {
   private readonly rows = new Map<string, ActionRunRecord>()
   private readonly runRootOperation: RunRootOperation
 

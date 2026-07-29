@@ -1,9 +1,3 @@
-import type {
-  StoredLinkDeletedEvent,
-  StoredLinkMutationEvent,
-  StoredObjectMutationEvent,
-  StoredTelemetryAppendedEvent,
-} from "../../events"
 import type { EffectiveLinkSnapshot, EffectiveObjectSnapshot } from "../../materialization/model"
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "../../objects/query"
 import { compareQueryScalarValues, queryScalarValuesEqual } from "../../objects/query/scalar-values"
@@ -125,7 +119,6 @@ const PAGE_TOKEN_PREFIX = "offset:"
 export interface InMemoryObjectStorageSnapshot {
   readonly rows: Map<string, Map<string, ObjectRow>>
   readonly links: Map<string, Map<string, ObjectLinkRow>>
-  readonly appliedEventIds: Set<string>
 }
 
 interface InMemoryObjectMaterializerAdapter {
@@ -175,7 +168,6 @@ export function getInMemoryObjectMaterializerAdapter(
 export class InMemoryObjectStorage implements ObjectStorage {
   private readonly rows = new Map<string, Map<string, ObjectRow>>()
   private readonly links = new Map<string, Map<string, ObjectLinkRow>>()
-  private readonly appliedEventIds = new Set<string>()
 
   constructor() {
     materializerAdapters.set(this, {
@@ -208,7 +200,6 @@ export class InMemoryObjectStorage implements ObjectStorage {
     return {
       rows: cloneObjectBuckets(this.rows),
       links: cloneLinkBuckets(this.links),
-      appliedEventIds: new Set(this.appliedEventIds),
     }
   }
 
@@ -221,11 +212,6 @@ export class InMemoryObjectStorage implements ObjectStorage {
     this.links.clear()
     for (const [key, bucket] of cloneLinkBuckets(snapshot.links)) {
       this.links.set(key, bucket)
-    }
-
-    this.appliedEventIds.clear()
-    for (const eventId of snapshot.appliedEventIds) {
-      this.appliedEventIds.add(eventId)
     }
   }
 
@@ -267,7 +253,6 @@ export class InMemoryObjectStorage implements ObjectStorage {
       updatedAt: new Date(row.updatedAt),
       version: row.version,
       lastCommitId: row.lastCommitId,
-      sourceEventId: undefined,
     })
   }
 
@@ -296,7 +281,6 @@ export class InMemoryObjectStorage implements ObjectStorage {
       createdAt: new Date(row.createdAt),
       updatedAt: new Date(row.updatedAt),
       lastCommitId: row.lastCommitId,
-      sourceEventId: undefined,
     })
   }
 
@@ -559,141 +543,6 @@ export class InMemoryObjectStorage implements ObjectStorage {
     }
 
     return [...resultsByKey.values()]
-  }
-
-  async applyObjectUpsert(event: StoredObjectMutationEvent): Promise<ObjectRow> {
-    const bucketId = objectRowKey(event.projectId, event.payload.objectTypeId)
-    const bucket = this.rows.get(bucketId) ?? new Map<string, ObjectRow>()
-    this.rows.set(bucketId, bucket)
-
-    const existing = bucket.get(event.payload.primaryId)
-
-    if (this.appliedEventIds.has(event.id) && existing) {
-      return existing
-    }
-
-    const occurredAt = new Date(event.occurredAt)
-    const next: ObjectRow = {
-      projectId: event.projectId,
-      objectTypeId: event.payload.objectTypeId,
-      primaryId: event.payload.primaryId,
-      properties: {
-        ...(existing?.properties ?? {}),
-        ...event.payload.properties,
-      },
-      createdAt: existing?.createdAt ?? occurredAt,
-      updatedAt: occurredAt,
-      version: (existing?.version ?? 0) + 1,
-      sourceEventId: event.id,
-    }
-
-    bucket.set(event.payload.primaryId, next)
-    this.appliedEventIds.add(event.id)
-    return next
-  }
-
-  async applyObjectUpsertBatch(
-    events: readonly StoredObjectMutationEvent[]
-  ): Promise<readonly ObjectRow[]> {
-    const results: ObjectRow[] = []
-    for (const event of events) {
-      results.push(await this.applyObjectUpsert(event))
-    }
-    return results
-  }
-
-  async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
-    const bucketId = objectRowKey(event.projectId, event.payload.objectTypeId)
-    const bucket = this.rows.get(bucketId)
-    if (!bucket) return
-
-    const existing = bucket.get(event.payload.objectId)
-    if (!existing) return
-
-    if (this.appliedEventIds.has(event.id)) {
-      return
-    }
-
-    const next: ObjectRow = {
-      ...existing,
-      properties: {
-        ...existing.properties,
-        [event.payload.propertyId]: event.payload.value,
-      },
-      updatedAt: new Date(event.payload.at),
-      sourceEventId: event.id,
-      version: existing.version + 1,
-    }
-
-    bucket.set(event.payload.objectId, next)
-    this.appliedEventIds.add(event.id)
-  }
-
-  async applyTelemetryAppendedBatch(
-    events: readonly StoredTelemetryAppendedEvent[]
-  ): Promise<void> {
-    for (const event of events) {
-      await this.applyTelemetryAppended(event)
-    }
-  }
-
-  async applyLinkUpsert(event: StoredLinkMutationEvent): Promise<void> {
-    const bucketKey = sourceLinkBucketKey(
-      event.projectId,
-      event.payload.sourceTypeId,
-      event.payload.sourceId
-    )
-    const bucket = this.links.get(bucketKey) ?? new Map<string, ObjectLinkRow>()
-    this.links.set(bucketKey, bucket)
-
-    const key = linkRowKey(event.payload.linkId, event.payload.targetTypeId, event.payload.targetId)
-
-    const existing = bucket.get(key)
-    if (this.appliedEventIds.has(event.id) && existing) {
-      return
-    }
-
-    const occurredAt = new Date(event.occurredAt)
-    const next: ObjectLinkRow = {
-      projectId: event.projectId,
-      sourceTypeId: event.payload.sourceTypeId,
-      sourceId: event.payload.sourceId,
-      linkId: event.payload.linkId,
-      targetTypeId: event.payload.targetTypeId,
-      targetId: event.payload.targetId,
-      properties: event.payload.properties,
-      createdAt: existing?.createdAt ?? occurredAt,
-      updatedAt: occurredAt,
-      sourceEventId: event.id,
-    }
-
-    bucket.set(key, next)
-    this.appliedEventIds.add(event.id)
-  }
-
-  async applyLinkUpsertBatch(events: readonly StoredLinkMutationEvent[]): Promise<void> {
-    for (const event of events) {
-      await this.applyLinkUpsert(event)
-    }
-  }
-
-  async applyLinkDelete(event: StoredLinkDeletedEvent): Promise<void> {
-    const bucketKey = sourceLinkBucketKey(
-      event.projectId,
-      event.payload.sourceTypeId,
-      event.payload.sourceId
-    )
-    const bucket = this.links.get(bucketKey)
-    if (!bucket) return
-
-    const key = linkRowKey(event.payload.linkId, event.payload.targetTypeId, event.payload.targetId)
-
-    if (this.appliedEventIds.has(event.id)) {
-      return
-    }
-
-    bucket.delete(key)
-    this.appliedEventIds.add(event.id)
   }
 
   /**

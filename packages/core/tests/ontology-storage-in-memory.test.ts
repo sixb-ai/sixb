@@ -16,6 +16,7 @@ import {
   type OntologyCommitWrite,
   StorageTransactionError,
 } from "../src/storage"
+import { getInMemoryStorageTestingAdapter } from "../src/storage/in-memory/testing"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import {
   atomic,
@@ -318,11 +319,7 @@ describe("in-memory ontology storage", () => {
         ])
       }
 
-      const before = {
-        objects: storage.objects.snapshot(),
-        timeseries: storage.timeseries.snapshot(),
-        ontology: getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot(),
-      }
+      const before = getInMemoryStorageTestingAdapter(storage).snapshot()
       failBoundary = boundary
       const attempt =
         boundary === "source.activate"
@@ -364,8 +361,9 @@ describe("in-memory ontology storage", () => {
                   } as Parameters<typeof commit>[1][number],
                 ])
       await expect(attempt).rejects.toThrow(`injected ${boundary}`)
-      expect(storage.objects.snapshot()).toEqual(before.objects)
-      expect(storage.timeseries.snapshot()).toEqual(before.timeseries)
+      const after = getInMemoryStorageTestingAdapter(storage).snapshot()
+      expect(after.objects).toEqual(before.objects)
+      expect(after.timeseries).toEqual(before.timeseries)
       const afterOntology = getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot()
       if (boundary === "source.activate") {
         expect({
@@ -2014,14 +2012,13 @@ describe("in-memory ontology storage", () => {
       projectionRevision: "projection-revision",
       ownershipHash: "ownership-hash",
     }
-    const run = await storage.projectionRuns.startOrReclaimMaterialization({
+    const run = await storage.projectionRuns.startOrReclaim({
       id: "sealed-run",
       projectId: "project",
       identity,
-      objectTypeId: "Device",
+      target: { objectTypeId: "Device" },
     })
-    if (!run.executionToken) throw new Error("Expected a projection execution token")
-    const execution = { projectionRunId: run.id, executionToken: run.executionToken }
+    const execution = run.execution
     await storage.ontology.sources.beginMaterialization({
       projectId: "project",
       source,
@@ -2071,7 +2068,7 @@ describe("in-memory ontology storage", () => {
         origin: {
           kind: "projection",
           projectionId: "devices",
-          projectionRunId: run.id,
+          projectionRunId: run.run.id,
           datasetId: datasetVersion.datasetId,
           datasetVersionId: datasetVersion.versionId,
         },
@@ -2226,7 +2223,7 @@ describe("in-memory ontology storage", () => {
         versionId: "v1",
         createdAt: "2026-01-01T00:00:00.000Z",
       }
-      const run = await storage.projectionRuns.startOrReclaimMaterialization({
+      const run = await storage.projectionRuns.startOrReclaim({
         id: "run",
         projectId: "project",
         identity: {
@@ -2238,10 +2235,9 @@ describe("in-memory ontology storage", () => {
           projectionRevision: "projection-revision",
           ownershipHash: "ownership-hash",
         },
-        objectTypeId: "Device",
+        target: { objectTypeId: "Device" },
       })
-      if (!run.executionToken) throw new Error("Expected a projection execution token")
-      const execution = { projectionRunId: run.id, executionToken: run.executionToken }
+      const execution = run.execution
       await storage.ontology.sources.beginMaterialization({
         projectId: "project",
         source,
@@ -2452,14 +2448,13 @@ async function claimReplacementExecution(
   if (resolved.definition._tag !== "ObjectProjectionDefinition") {
     throw new Error("Expected the devices object projection")
   }
-  const run = await storage.projectionRuns.startOrReclaimMaterialization({
+  const run = await storage.projectionRuns.startOrReclaim({
     id: input.runId,
     projectId: input.projectId,
     identity: replacementIdentity(projections, input.datasetVersion),
-    objectTypeId: resolved.definition.objectTypeId,
+    target: { objectTypeId: resolved.definition.objectTypeId },
   })
-  if (!run.executionToken) throw new Error("Projection run claim returned no execution token")
-  return { projectionRunId: run.id, executionToken: run.executionToken }
+  return run.execution
 }
 
 function replacementIdentity(

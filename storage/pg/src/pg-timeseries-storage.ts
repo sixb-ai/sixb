@@ -1,12 +1,11 @@
 import type {
-  StoredTelemetryAppendedEvent,
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
   TimeseriesPoint,
   TimeseriesStorage,
 } from "@sixb/core/storage"
 import type { SqlParameter } from "./pg-client"
-import { type PgStoreClient, runPgTransaction } from "./transactions"
+import type { PgStoreClient } from "./transactions"
 
 /**
  * PostgreSQL-based TimeseriesStorage implementation.
@@ -18,65 +17,6 @@ import { type PgStoreClient, runPgTransaction } from "./transactions"
  */
 export class PgTimeseriesStorage implements TimeseriesStorage {
   constructor(private readonly sql: PgStoreClient) {}
-
-  async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
-    await this.upsertPoint(this.sql, event)
-  }
-
-  async applyTelemetryAppendedBatch(
-    events: readonly StoredTelemetryAppendedEvent[]
-  ): Promise<void> {
-    if (events.length === 0) return
-    await runPgTransaction(this.sql, async (tx) => {
-      for (const event of events) {
-        await this.upsertPoint(tx, event)
-      }
-    })
-  }
-
-  // A telemetry point is uniquely identified by (series, at). Re-applying the
-  // same instant is a last-write-wins upsert, so telemetry writes are idempotent
-  // under replay without a separate dedup ledger.
-  private async upsertPoint(
-    sql: PgStoreClient,
-    event: StoredTelemetryAppendedEvent
-  ): Promise<void> {
-    await sql`
-      WITH written AS (
-        INSERT INTO timeseries (
-          project_id, object_type_id, object_id, property_id,
-          value, unit, at, source_event_id
-        ) VALUES (
-          ${event.projectId}, ${event.payload.objectTypeId}, ${event.payload.objectId},
-          ${event.payload.propertyId},
-          ${JSON.stringify(event.payload.value)}::text::jsonb,
-          ${event.payload.unit ?? null}, ${event.payload.at}::timestamptz,
-          ${event.id}
-        )
-        ON CONFLICT (project_id, object_type_id, object_id, property_id, at)
-        DO UPDATE SET
-          value = EXCLUDED.value,
-          unit = EXCLUDED.unit,
-          source_event_id = EXCLUDED.source_event_id
-        RETURNING *
-      )
-      INSERT INTO timeseries_latest (
-        project_id, object_type_id, object_id, property_id,
-        value, unit, at, source_event_id, last_commit_id
-      )
-      SELECT project_id, object_type_id, object_id, property_id,
-        value, unit, at, source_event_id, last_commit_id
-      FROM written
-      ON CONFLICT (project_id, object_type_id, object_id, property_id)
-      DO UPDATE SET
-        value = EXCLUDED.value,
-        unit = EXCLUDED.unit,
-        at = EXCLUDED.at,
-        source_event_id = EXCLUDED.source_event_id,
-        last_commit_id = EXCLUDED.last_commit_id
-      WHERE EXCLUDED.at >= timeseries_latest.at
-    `
-  }
 
   async getHistory(params: {
     projectId: string
@@ -224,8 +164,7 @@ function rowToPoint(row: TimeseriesDatabaseRow): TimeseriesPoint {
     value: row.value,
     unit: row.unit ?? undefined,
     at: new Date(row.at),
-    sourceEventId: row.source_event_id ?? undefined,
-    lastCommitId: row.last_commit_id ?? undefined,
+    lastCommitId: row.last_commit_id,
   }
 }
 
@@ -237,6 +176,5 @@ interface TimeseriesDatabaseRow {
   value: unknown
   unit: string | null
   at: Date | string
-  source_event_id: string | null
-  last_commit_id: string | null
+  last_commit_id: string
 }

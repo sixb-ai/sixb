@@ -84,15 +84,5 @@ describe("SqliteStorage auth", () => {
 })
 
 function closeSqliteStorage(storage: SqliteStorage): void {
-  storage.objects.close()
-  storage.auth.close()
-  storage.actionRuns.close()
-  storage.pipelineRuns.close()
-  storage.projectionRuns.close()
-  storage.workflowRuns.close()
-  storage.syncRuns.close()
-  storage.timeseries.close()
-  storage.webhookDeliveries.close()
-  storage.webhookRuns.close()
-  storage.rules.close()
+  storage.close()
 }

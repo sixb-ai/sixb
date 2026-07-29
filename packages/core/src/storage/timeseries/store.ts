@@ -1,4 +1,3 @@
-import type { StoredTelemetryAppendedEvent } from "../../events"
 import type { TelemetrySeriesRef } from "../../materialization/model"
 import type { StoredTelemetryPoint } from "../ontology/materializations"
 import type { TimeseriesHistoryBatchInput, TimeseriesPoint, TimeseriesStorage } from "./types"
@@ -99,39 +98,8 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
       ...(point.unit !== undefined ? { unit: point.unit } : {}),
       at: new Date(point.at),
       lastCommitId: point.lastCommitId,
-      sourceEventId: undefined,
     })
     this.pointsByKey.set(key, series)
-  }
-
-  async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
-    const key = pointKey(
-      event.projectId,
-      event.payload.objectTypeId,
-      event.payload.objectId,
-      event.payload.propertyId
-    )
-    const at = new Date(event.payload.at)
-    const series = this.pointsByKey.get(key) ?? new Map<number, TimeseriesPoint>()
-    series.set(at.getTime(), {
-      projectId: event.projectId,
-      objectTypeId: event.payload.objectTypeId,
-      objectId: event.payload.objectId,
-      propertyId: event.payload.propertyId,
-      value: structuredClone(event.payload.value),
-      unit: event.payload.unit,
-      at,
-      sourceEventId: event.id,
-    })
-    this.pointsByKey.set(key, series)
-  }
-
-  async applyTelemetryAppendedBatch(
-    events: readonly StoredTelemetryAppendedEvent[]
-  ): Promise<void> {
-    for (const event of events) {
-      await this.applyTelemetryAppended(event)
-    }
   }
 
   async getHistory(params: {

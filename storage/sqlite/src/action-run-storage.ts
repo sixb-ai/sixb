@@ -1,12 +1,12 @@
 import type { Database } from "bun:sqlite"
 import type { ActionSubject, JsonValue } from "@sixb/core"
 import type {
-  ActionMaterializationRunStorage,
   ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
+  ActionRunStorage,
   ActionRunWritebackRecord,
   EnterActionRunPhaseInput,
   FinishActionRunInput,
@@ -39,7 +39,7 @@ export interface SqliteActionRunStorageOptions {
   connection?: SqliteStoreConnection
 }
 
-export class SqliteActionRunStorage implements ActionMaterializationRunStorage {
+export class SqliteActionRunStorage implements ActionRunStorage {
   private readonly connection: SqliteStoreConnection
   private readonly db: Database
 

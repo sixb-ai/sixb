@@ -43,7 +43,6 @@ export type {
   ProjectionSourceEntry,
   ProjectionSourceRef,
   ProjectionSourceReplacement,
-  ProjectionTelemetryInputCompletion,
   TelemetryAppend,
   TelemetryCommitResult,
   TelemetryPointWrite,

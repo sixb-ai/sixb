@@ -233,9 +233,9 @@ async function runGeneratedSequence(seed: number): Promise<void> {
     )
     expect(canonicalRows).toEqual(expectedLinks)
     for (const row of rows) {
-      expect(row.lastCommitId).toBe(
-        linkRevisions.get(linkKey(row.linkId, row.sourceId, row.targetId))
-      )
+      const revision = linkRevisions.get(linkKey(row.linkId, row.sourceId, row.targetId))
+      if (!revision) throw new Error("Expected every materialized link to have a revision.")
+      expect(row.lastCommitId).toBe(revision)
     }
 
     const snapshot = getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot()

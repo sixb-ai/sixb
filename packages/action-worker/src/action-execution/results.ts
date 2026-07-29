@@ -1,7 +1,7 @@
 import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { ActionRunFailure, ActionRunRecord } from "@sixb/core/storage"
-import { isActionMaterializationRunStorage, isTerminalActionRun } from "@sixb/core/storage"
+import { isTerminalActionRun } from "@sixb/core/storage"
 import { ActionWorkerError } from "../errors"
 import type { ActionRunResult, RunActionJobInput } from "../types"
 
@@ -51,7 +51,7 @@ export async function resolveRedeliveredRunningRun(
 async function resolveRunningRunUnderFence(input: RunActionJobInput, run: ActionRunRecord) {
   return input.runtime.storage.transaction(
     async (storage) => {
-      if (!isActionMaterializationRunStorage(storage.actionRuns)) {
+      if (!storage.actionRuns) {
         throw new ActionWorkerError(
           "Action workers require transactional Action materialization fencing."
         )

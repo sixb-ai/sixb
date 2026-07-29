@@ -10,7 +10,9 @@ import type {
   MaterializationSession,
   MaterializationStatePage,
   OntologyMaterializationStorage,
+  ProjectionRunClaim,
 } from "../src/storage"
+import { createMaterializerFixture } from "./materializer-fixture"
 
 const projectId = "project"
 const ontologyRevision = "ontology-revision"
@@ -52,24 +54,38 @@ async function prepareEmptyCandidate(
     versionId: input.versionId,
     createdAt: input.datasetCreatedAt,
   }
-  const run = await storage.projectionRuns.startOrReclaimMaterialization({
-    id: input.runId,
-    projectId,
-    identity: {
-      projectionId: input.projectionId,
-      projectionKind: input.projectionKind,
-      protocol: "replacement",
-      datasetVersion,
-      ontologyRevision,
-      projectionRevision,
-      ownershipHash,
-    },
-    ...(input.projectionKind === "object"
-      ? { objectTypeId: "Device" }
-      : { sourceObjectTypeId: "Device", targetObjectTypeId: "Device" }),
-  })
-  if (!run.executionToken) throw new Error("Expected a projection execution token")
-  const execution = { projectionRunId: run.id, executionToken: run.executionToken }
+  let run: ProjectionRunClaim
+  const common = { id: input.runId, projectId }
+  if (input.projectionKind === "object") {
+    run = await storage.projectionRuns.startOrReclaim({
+      ...common,
+      identity: {
+        projectionId: input.projectionId,
+        projectionKind: "object",
+        protocol: "replacement",
+        datasetVersion,
+        ontologyRevision,
+        projectionRevision,
+        ownershipHash,
+      },
+      target: { objectTypeId: "Device" },
+    })
+  } else {
+    run = await storage.projectionRuns.startOrReclaim({
+      ...common,
+      identity: {
+        projectionId: input.projectionId,
+        projectionKind: "link",
+        protocol: "replacement",
+        datasetVersion,
+        ontologyRevision,
+        projectionRevision,
+        ownershipHash,
+      },
+      target: { sourceObjectTypeId: "Device", targetObjectTypeId: "Device" },
+    })
+  }
+  const execution = run.execution
   await storage.ontology.sources.beginMaterialization({
     projectId,
     source,
@@ -692,26 +708,28 @@ describe("in-memory ontology materialization finalization", () => {
       linkId: "parent",
       target: { objectTypeId: "Device", primaryId: "two" },
     }
-    await storage.objects.applyLinkUpsert({
-      id: "existing-link",
-      cursor: "existing-link",
-      schemaVersion: 1,
-      projectId,
-      origin: { kind: "runtime", requestId: "existing-link" },
-      commitId: "commit-existing-link",
-      commitOrdinal: 0,
-      type: "link.created",
-      topic: "links",
-      partitionKey: "Device:one:parent",
-      payload: {
-        sourceTypeId: ref.source.objectTypeId,
-        sourceId: ref.source.primaryId,
-        linkId: ref.linkId,
-        targetTypeId: ref.target.objectTypeId,
-        targetId: ref.target.primaryId,
-        propertyChanges: {},
-      },
-      occurredAt: header.commit.committedAt,
+    const { materializer } = createMaterializerFixture({ storage })
+    await materializer.edits.commit({
+      mode: "atomic",
+      source: { kind: "runtime", requestId: "existing-link" },
+      operations: [
+        {
+          id: "create-one",
+          kind: "object.create",
+          ref: ref.source,
+          properties: { name: "One" },
+        },
+        {
+          id: "create-two",
+          kind: "object.create",
+          ref: ref.target,
+          properties: { name: "Two" },
+        },
+        { id: "existing-link", kind: "link.upsert", ref },
+      ],
+      expectedObjects: [],
+      expectedLinks: [],
+      expectedLinkScopes: [],
     })
 
     await expect(

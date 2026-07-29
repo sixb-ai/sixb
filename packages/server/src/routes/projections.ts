@@ -24,24 +24,19 @@ import {
 import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
 
 function serializeProjectionRun(run: ProjectionRunRecord) {
-  return {
+  return ProjectionRunSchema.parse({
     id: run.id,
     projectId: run.projectId,
-    projectionId: run.projectionId,
-    projectionKind: run.projectionKind,
-    datasetId: run.datasetId,
-    datasetVersionId: run.datasetVersionId,
-    objectTypeId: run.objectTypeId,
-    sourceObjectTypeId: run.sourceObjectTypeId,
-    targetObjectTypeId: run.targetObjectTypeId,
+    identity: run.identity,
+    target: run.target,
     status: run.status,
     attempt: run.attempt,
+    progress: run.progress,
+    telemetryCheckpoint: run.telemetryCheckpoint,
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
     errorMessage: run.errorMessage,
-    sourceRowsRead: run.sourceRowsRead,
-    sourceRowsSkipped: run.sourceRowsSkipped,
-  }
+  })
 }
 
 type SerializedProjectionRun = ReturnType<typeof serializeProjectionRun>
@@ -63,7 +58,7 @@ async function getLatestProjectionRuns(
   }
 
   const result = await storage.listLatestByProjectionIds({ projectId: sixb.id, projectionIds })
-  return new Map(result.runs.map((run) => [run.projectionId, serializeProjectionRun(run)]))
+  return new Map(result.runs.map((run) => [run.identity.projectionId, serializeProjectionRun(run)]))
 }
 
 function listViewableProjections(
@@ -221,7 +216,7 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
           }
 
           const run = await storage.getById({ projectId: sixb.id, id: params.runId })
-          if (!run || !canViewProjectionRun(authz, run)) {
+          if (!run || !canViewProjectionRun(authz, run.target)) {
             set.status = 404
             return { error: "Projection run not found" }
           }

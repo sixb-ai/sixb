@@ -8,8 +8,6 @@
  * The current target is read before the commit, so a concurrent assignment to the same scope reports
  * an item error rather than violating cardinality.
  *
- * TODO(ontology-materializer/phase-4): Delete once projection workers materialize foreign-key links
- * through `projections.replace` instead of runtime CRUD.
  */
 
 import { assertPrivileged } from "../../authorization"

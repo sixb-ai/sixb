@@ -1,4 +1,5 @@
 import { InMemoryStorage } from "../src"
+import { getInMemoryStorageTestingAdapter } from "../src/storage/in-memory/testing"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { InMemoryProjectionRunStorage } from "../src/storage/projection-runs/in-memory"
 import {
@@ -26,12 +27,7 @@ runProjectionRunStorageContractSuite("in-memory projection-run storage contract"
 runMaterializationFailureContractSuite("in-memory materialization failure contract", {
   createStorage: () => new InMemoryStorage(),
   captureState(storage) {
-    return {
-      objects: storage.objects.snapshot(),
-      timeseries: storage.timeseries.snapshot(),
-      ontology: getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot(),
-      projectionRuns: storage.projectionRuns.snapshot(),
-    }
+    return getInMemoryStorageTestingAdapter(storage).snapshot()
   },
   injectFailure(storage, boundary, failure) {
     getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({

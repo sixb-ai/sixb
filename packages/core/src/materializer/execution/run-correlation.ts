@@ -4,14 +4,9 @@ import {
 } from "../../materialization/errors"
 import type { ProjectionMaterializationIdentity } from "../../materialization/model"
 import type { ProjectionDefinition, ResolvedProjection } from "../../projections/types"
-import {
-  isProjectionMaterializationRunStorage,
-  type ProjectionMaterializationRunRecord,
-  type ProjectionMaterializationRunStorage,
-  type Storage,
-} from "../../storage"
+import type { ProjectionRunRecord, ProjectionRunStorage, Storage } from "../../storage"
 
-export interface AssertProjectionExecutionInput {
+export interface LockProjectionExecutionInput {
   readonly projectId: string
   readonly projectionRunId: string
   readonly executionToken: string
@@ -20,24 +15,25 @@ export interface AssertProjectionExecutionInput {
   readonly capabilityErrorMessage?: string
 }
 
-export interface AssertedProjectionExecution {
-  readonly projectionRuns: ProjectionMaterializationRunStorage
-  readonly run: ProjectionMaterializationRunRecord
+export interface LockedProjectionExecution {
+  readonly projectionRuns: ProjectionRunStorage
+  readonly run: ProjectionRunRecord
 }
 
-export async function assertProjectionMaterializationExecution(
+/** Locks and validates the current execution inside the materialization transaction. */
+export async function lockProjectionRunForMaterialization(
   storage: Pick<Storage, "projectionRuns">,
-  input: AssertProjectionExecutionInput
-): Promise<AssertedProjectionExecution> {
-  if (!isProjectionMaterializationRunStorage(storage.projectionRuns)) {
+  input: LockProjectionExecutionInput
+): Promise<LockedProjectionExecution> {
+  const projectionRuns = storage.projectionRuns
+  if (!projectionRuns) {
     throw new MaterializationValidationError(
       input.capabilityErrorMessage ??
         "Storage transaction does not provide projection run capabilities."
     )
   }
 
-  const projectionRuns = storage.projectionRuns
-  const run = await projectionRuns.assertMaterializationExecution({
+  const run = await projectionRuns.lockForMaterialization({
     id: input.projectionRunId,
     projectId: input.projectId,
     executionToken: input.executionToken,
@@ -48,7 +44,7 @@ export async function assertProjectionMaterializationExecution(
 }
 
 export function assertProjectionRunTargets(
-  run: ProjectionMaterializationRunRecord,
+  run: ProjectionRunRecord,
   resolved: ResolvedProjection<ProjectionDefinition>
 ): void {
   if (projectionRunTargetsMatch(run, resolved.definition)) return
@@ -60,37 +56,18 @@ export function assertProjectionRunTargets(
 }
 
 function projectionRunTargetsMatch(
-  run: ProjectionMaterializationRunRecord,
+  run: ProjectionRunRecord,
   definition: ProjectionDefinition
 ): boolean {
   switch (definition._tag) {
     case "ObjectProjectionDefinition":
     case "TelemetryProjectionDefinition":
-      return matchesSingleObjectTarget(run, definition.objectTypeId)
+      return "objectTypeId" in run.target && run.target.objectTypeId === definition.objectTypeId
     case "LinkProjectionDefinition":
-      return matchesLinkTargets(run, definition.sourceObjectTypeId, definition.targetObjectTypeId)
+      return (
+        "sourceObjectTypeId" in run.target &&
+        run.target.sourceObjectTypeId === definition.sourceObjectTypeId &&
+        run.target.targetObjectTypeId === definition.targetObjectTypeId
+      )
   }
-}
-
-function matchesSingleObjectTarget(
-  run: ProjectionMaterializationRunRecord,
-  objectTypeId: string
-): boolean {
-  return (
-    run.objectTypeId === objectTypeId &&
-    run.sourceObjectTypeId === undefined &&
-    run.targetObjectTypeId === undefined
-  )
-}
-
-function matchesLinkTargets(
-  run: ProjectionMaterializationRunRecord,
-  sourceObjectTypeId: string,
-  targetObjectTypeId: string
-): boolean {
-  return (
-    run.objectTypeId === undefined &&
-    run.sourceObjectTypeId === sourceObjectTypeId &&
-    run.targetObjectTypeId === targetObjectTypeId
-  )
 }

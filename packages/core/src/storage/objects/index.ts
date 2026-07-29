@@ -1,4 +1,3 @@
-export { InMemoryObjectStorage } from "./in-memory"
 export type {
   CountObjectsInput,
   CountObjectsResult,

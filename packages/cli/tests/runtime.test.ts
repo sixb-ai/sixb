@@ -492,7 +492,7 @@ describe("startSixbRuntime", () => {
           }),
         (value) => value.total === 1
       )
-      expect(projectionRuns.runs[0]?.sourceRowsRead).toBe(1)
+      expect(projectionRuns.runs[0]?.progress.sourceRowsRead).toBe(1)
 
       const projectionJobs = await sixb.queues.projections.claim({
         projectId: sixb.id,

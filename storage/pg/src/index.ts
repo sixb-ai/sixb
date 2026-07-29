@@ -124,7 +124,7 @@ export interface PostgresStorageOptions {
  * ```
  */
 export class PostgresStorage implements MigrationCapableStorage {
-  readonly objects: PgObjectStorage
+  readonly objects: Storage["objects"]
   readonly ontology: PgOntologyStorage
   readonly auth: PgAuthStorage
   readonly agents: PgAgentStorage
@@ -134,7 +134,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly workflowInterventions: PgWorkflowInterventionStorage
   readonly syncRuns: PgSyncRunStorage
   readonly projectionRuns: PgProjectionRunStorage
-  readonly timeseries: PgTimeseriesStorage
+  readonly timeseries: Storage["timeseries"]
   readonly webhookDeliveries: PgWebhookDeliveryStorage
   readonly webhookRuns: PgWebhookRunStorage
   readonly rules: PgRulesStorage

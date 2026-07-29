@@ -15,6 +15,10 @@ export {
   runBrokerContractSuite,
 } from "./broker-contract"
 export {
+  type EffectiveStorageContractSuiteOptions,
+  runEffectiveStorageContractSuite,
+} from "./effective-storage-contract"
+export {
   type LakeStorageContractSuiteOptions,
   type LakeStorageSchemaEvolutionCapability,
   runLakeStorageContractSuite,
@@ -31,6 +35,13 @@ export {
   type MaterializationFailureContractSuiteOptions,
   runMaterializationFailureContractSuite,
 } from "./materialization-failure-contract"
+export {
+  createMaterializerTestFixture,
+  type MaterializerFixtureLink,
+  type MaterializerFixtureObject,
+  type MaterializerFixtureSeed,
+  type MaterializerTestFixture,
+} from "./materializer-fixture"
 export {
   type MaterializerStorageContractProvider,
   runMaterializerStorageContractSuite,

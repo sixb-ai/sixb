@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import type { JsonValue } from "../src"
 import {
   decimal,
   defineObjectType,
+  InMemoryStorage,
   link,
   type ObjectQuery,
   ObjectQueryExecutionError,
@@ -12,7 +12,6 @@ import {
   prop,
   stringEnum,
 } from "../src"
-import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "../src/events"
 import {
   collectObjectQueryValidationIssues,
   countObjects,
@@ -37,8 +36,7 @@ import type {
   QueryObjectsInput,
   QueryObjectsResult,
 } from "../src/storage"
-import { InMemoryObjectStorage } from "../src/storage"
-import { createStoredLinkMutationEvent, createStoredObjectMutationEvent } from "../src/testing"
+import { createMaterializerTestFixture, type MaterializerTestFixture } from "../src/testing"
 
 const Order = defineObjectType({
   id: "Order",
@@ -146,138 +144,162 @@ const ontology = new OntologyRegistry({
   sources: [Customer, Order, WildcardSource, SearchProfileCustomer, TextNoDefault, Balance],
 })
 
-function makeObjectMutationEvent(
-  projectId: string,
-  objectTypeId: string,
-  primaryId: string,
-  properties: Record<string, JsonValue>
-): StoredObjectMutationEvent {
-  return createStoredObjectMutationEvent({
-    projectId,
-    occurredAt: new Date().toISOString(),
-    cursor: crypto.randomUUID(),
-    objectTypeId,
-    primaryId,
-    properties,
+interface QueryCallCounts {
+  queryObjects: number
+  countObjects: number
+  existsObjects: number
+  facetObjects: number
+}
+
+function createTestStorage(testOntology: OntologyRegistry = ontology) {
+  const provider = new InMemoryStorage()
+  return {
+    provider,
+    objects: provider.objects,
+    fixture: createMaterializerTestFixture({
+      projectId: "p1",
+      ontology: testOntology,
+      storage: provider,
+    }),
+  }
+}
+
+function countQueryCalls(storage: ObjectStorage): {
+  readonly storage: ObjectStorage
+  readonly calls: QueryCallCounts
+} {
+  const calls: QueryCallCounts = {
+    queryObjects: 0,
+    countObjects: 0,
+    existsObjects: 0,
+    facetObjects: 0,
+  }
+  const methods = {
+    queryObjects: async (params: QueryObjectsInput): Promise<QueryObjectsResult> => {
+      calls.queryObjects += 1
+      return storage.queryObjects!(params)
+    },
+    countObjects: async (params: CountObjectsInput): Promise<CountObjectsResult> => {
+      calls.countObjects += 1
+      return storage.countObjects!(params)
+    },
+    existsObjects: async (params: ExistsObjectsInput): Promise<ExistsObjectsResult> => {
+      calls.existsObjects += 1
+      return storage.existsObjects!(params)
+    },
+    facetObjects: async (params: FacetObjectsInput): Promise<FacetObjectsResult> => {
+      calls.facetObjects += 1
+      return storage.facetObjects!(params)
+    },
+  }
+  return {
+    storage: new Proxy(storage, {
+      get(target, property) {
+        if (property in methods) return methods[property as keyof typeof methods]
+        return Reflect.get(target, property, target)
+      },
+    }),
+    calls,
+  }
+}
+
+function disableQueryObjects(storage: ObjectStorage): ObjectStorage {
+  return new Proxy(storage, {
+    get(target, property) {
+      if (property === "queryCapabilities") return () => ({ queryObjects: false })
+      if (property === "queryObjects") return undefined
+      return Reflect.get(target, property, target)
+    },
   })
 }
 
-function makeLinkMutationEvent(
-  projectId: string,
-  sourceTypeId: string,
-  sourceId: string,
-  linkId: string,
-  targetTypeId: string,
-  targetId: string
-): StoredLinkMutationEvent {
-  return createStoredLinkMutationEvent({
-    projectId,
-    occurredAt: new Date().toISOString(),
-    cursor: crypto.randomUUID(),
-    sourceTypeId,
-    sourceId,
-    linkId,
-    targetTypeId,
-    targetId,
+async function seedCustomers(fixture: MaterializerTestFixture): Promise<void> {
+  await fixture.seed({
+    objects: [
+      {
+        ref: { objectTypeId: "Customer", primaryId: "cust-1" },
+        properties: {
+          id: "cust-1",
+          name: "Beta Co",
+          email: "beta@example.com",
+          status: "active",
+          embedding: [1, 0],
+        },
+      },
+      {
+        ref: { objectTypeId: "Customer", primaryId: "cust-2" },
+        properties: {
+          id: "cust-2",
+          name: "Paused Co",
+          email: "paused@example.com",
+          status: "paused",
+          embedding: [0, 1],
+        },
+      },
+      {
+        ref: { objectTypeId: "Customer", primaryId: "cust-3" },
+        properties: {
+          id: "cust-3",
+          name: "Acme Co",
+          email: "acme@example.com",
+          status: "active",
+          embedding: [0.9, 0.1],
+        },
+      },
+    ],
   })
 }
 
-class CountingQueryStorage extends InMemoryObjectStorage {
-  queryObjectCalls = 0
-  countObjectCalls = 0
-  existsObjectCalls = 0
-  facetObjectCalls = 0
-
-  override async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
-    this.queryObjectCalls += 1
-    return super.queryObjects(params)
-  }
-
-  override async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
-    this.countObjectCalls += 1
-    return super.countObjects(params)
-  }
-
-  override async existsObjects(params: ExistsObjectsInput): Promise<ExistsObjectsResult> {
-    this.existsObjectCalls += 1
-    return super.existsObjects(params)
-  }
-
-  override async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
-    this.facetObjectCalls += 1
-    return super.facetObjects(params)
-  }
-}
-
-function disableQueryObjects(storage: InMemoryObjectStorage): ObjectStorage {
-  const objectStorage = storage as ObjectStorage
-  objectStorage.queryCapabilities = () => ({ queryObjects: false })
-  objectStorage.queryObjects = undefined
-  return objectStorage
-}
-
-async function seedCustomers(storage: InMemoryObjectStorage): Promise<void> {
-  await storage.applyObjectUpsert(
-    makeObjectMutationEvent("p1", "Customer", "cust-1", {
-      id: "cust-1",
-      name: "Beta Co",
-      email: "beta@example.com",
-      status: "active",
-      embedding: [1, 0],
-    })
-  )
-  await storage.applyObjectUpsert(
-    makeObjectMutationEvent("p1", "Customer", "cust-2", {
-      id: "cust-2",
-      name: "Paused Co",
-      email: "paused@example.com",
-      status: "paused",
-      embedding: [0, 1],
-    })
-  )
-  await storage.applyObjectUpsert(
-    makeObjectMutationEvent("p1", "Customer", "cust-3", {
-      id: "cust-3",
-      name: "Acme Co",
-      email: "acme@example.com",
-      status: "active",
-      embedding: [0.9, 0.1],
-    })
-  )
-}
-
-async function seedCustomerOrders(storage: InMemoryObjectStorage): Promise<void> {
-  await seedCustomers(storage)
-  await storage.applyObjectUpsert(
-    makeObjectMutationEvent("p1", "Order", "order-1", {
-      id: "order-1",
-      total: 100,
-      createdAt: "2026-01-01T00:00:00Z",
-    })
-  )
-  await storage.applyObjectUpsert(
-    makeObjectMutationEvent("p1", "Order", "order-2", {
-      id: "order-2",
-      total: 200,
-      createdAt: "2026-01-02T00:00:00Z",
-    })
-  )
-  await storage.applyObjectUpsert(
-    makeObjectMutationEvent("p1", "Order", "order-3", {
-      id: "order-3",
-      total: 300,
-      createdAt: "2026-01-03T00:00:00Z",
-    })
-  )
-  await storage.applyLinkUpsert(
-    makeLinkMutationEvent("p1", "Customer", "cust-1", "orders", "Order", "order-1")
-  )
-  await storage.applyLinkUpsert(
-    makeLinkMutationEvent("p1", "Customer", "cust-2", "orders", "Order", "order-2")
-  )
-  await storage.applyLinkUpsert(
-    makeLinkMutationEvent("p1", "Customer", "cust-3", "orders", "Order", "order-3")
-  )
+async function seedCustomerOrders(fixture: MaterializerTestFixture): Promise<void> {
+  await fixture.seed({
+    objects: [
+      {
+        ref: { objectTypeId: "Customer", primaryId: "cust-1" },
+        properties: {
+          id: "cust-1",
+          name: "Beta Co",
+          email: "beta@example.com",
+          status: "active",
+          embedding: [1, 0],
+        },
+      },
+      {
+        ref: { objectTypeId: "Customer", primaryId: "cust-2" },
+        properties: {
+          id: "cust-2",
+          name: "Paused Co",
+          email: "paused@example.com",
+          status: "paused",
+          embedding: [0, 1],
+        },
+      },
+      {
+        ref: { objectTypeId: "Customer", primaryId: "cust-3" },
+        properties: {
+          id: "cust-3",
+          name: "Acme Co",
+          email: "acme@example.com",
+          status: "active",
+          embedding: [0.9, 0.1],
+        },
+      },
+      ...[100, 200, 300].map((total, index) => ({
+        ref: { objectTypeId: "Order", primaryId: `order-${index + 1}` },
+        properties: {
+          id: `order-${index + 1}`,
+          total,
+          createdAt: `2026-01-0${index + 1}T00:00:00Z`,
+        },
+      })),
+    ],
+    links: [1, 2, 3].map((ordinal) => ({
+      ref: {
+        source: { objectTypeId: "Customer", primaryId: `cust-${ordinal}` },
+        linkId: "orders",
+        target: { objectTypeId: "Order", primaryId: `order-${ordinal}` },
+      },
+    })),
+  })
 }
 
 const boundedCustomerQuery: ObjectQuery = {
@@ -782,16 +804,17 @@ describe("object query explain", () => {
 
 describe("object query planner and executor", () => {
   test("filters and sorts decimals exactly beyond JS number precision", async () => {
-    const storage = new InMemoryObjectStorage()
-    for (const [primaryId, amount] of [
-      ["small", decimal("0.00000000000000000002")],
-      ["large-a", decimal("9007199254740992")],
-      ["large-b", decimal("9007199254740993")],
-    ] as const) {
-      await storage.applyObjectUpsert(
-        makeObjectMutationEvent("p1", "Balance", primaryId, { id: primaryId, amount })
-      )
-    }
+    const { objects, fixture } = createTestStorage()
+    await fixture.seed({
+      objects: [
+        ["small", decimal("0.00000000000000000002")],
+        ["large-a", decimal("9007199254740992")],
+        ["large-b", decimal("9007199254740993")],
+      ].map(([primaryId, amount]) => ({
+        ref: { objectTypeId: "Balance", primaryId },
+        properties: { id: primaryId, amount },
+      })),
+    })
 
     const query: ObjectQuery = {
       kind: "limit",
@@ -806,7 +829,10 @@ describe("object query planner and executor", () => {
         },
       },
     }
-    const result = await executeObjectQuery({ projectId: "p1", query }, { ontology, storage })
+    const result = await executeObjectQuery(
+      { projectId: "p1", query },
+      { ontology, storage: objects }
+    )
 
     expect(result.objects.map((row) => row.primaryId)).toEqual(["large-b"])
   })
@@ -891,8 +917,9 @@ describe("object query planner and executor", () => {
   })
 
   test("plans and executes full provider pushdown", async () => {
-    const storage = new CountingQueryStorage()
-    await seedCustomers(storage)
+    const testStorage = createTestStorage()
+    const { storage, calls } = countQueryCalls(testStorage.objects)
+    await seedCustomers(testStorage.fixture)
 
     const plan = planObjectQuery(boundedCustomerQuery, {
       capabilities: storage.queryCapabilities(),
@@ -905,19 +932,19 @@ describe("object query planner and executor", () => {
 
     expect(plan.mode).toBe("pushdown")
     expect(result.plan.mode).toBe("pushdown")
-    expect(storage.queryObjectCalls).toBe(1)
+    expect(calls.queryObjects).toBe(1)
     expect(result.objects.map((row) => row.primaryId)).toEqual(["cust-3", "cust-1"])
     expect(result.objects[0].properties).toEqual({ id: "cust-3", name: "Acme Co" })
   })
 
   test("executes bounded fallback when provider pushdown is unavailable", async () => {
-    const storage = new InMemoryObjectStorage()
-    await seedCustomers(storage)
-    const legacyStorage = disableQueryObjects(storage)
+    const { objects, fixture } = createTestStorage()
+    await seedCustomers(fixture)
+    const storageWithoutPushdown = disableQueryObjects(objects)
 
     const result = await executeObjectQuery(
       { projectId: "p1", query: boundedCustomerQuery },
-      { ontology, storage: legacyStorage, maxFallbackRows: 10 }
+      { ontology, storage: storageWithoutPushdown, maxFallbackRows: 10 }
     )
 
     expect(result.plan.mode).toBe("fallback")
@@ -1006,8 +1033,9 @@ describe("object query planner and executor", () => {
   })
 
   test("counts through provider pushdown without materializing rows", async () => {
-    const storage = new CountingQueryStorage()
-    await seedCustomers(storage)
+    const testStorage = createTestStorage()
+    const { storage, calls } = countQueryCalls(testStorage.objects)
+    await seedCustomers(testStorage.fixture)
 
     const result = await countObjects(
       {
@@ -1027,13 +1055,14 @@ describe("object query planner and executor", () => {
 
     expect(result.plan.mode).toBe("pushdown")
     expect(result.count).toBe(2)
-    expect(storage.countObjectCalls).toBe(1)
-    expect(storage.queryObjectCalls).toBe(0)
+    expect(calls.countObjects).toBe(1)
+    expect(calls.queryObjects).toBe(0)
   })
 
   test("checks existence through provider pushdown without materializing rows or counts", async () => {
-    const storage = new CountingQueryStorage()
-    await seedCustomers(storage)
+    const testStorage = createTestStorage()
+    const { storage, calls } = countQueryCalls(testStorage.objects)
+    await seedCustomers(testStorage.fixture)
 
     const result = await existsObjects(
       {
@@ -1053,14 +1082,15 @@ describe("object query planner and executor", () => {
 
     expect(result.plan.mode).toBe("pushdown")
     expect(result.exists).toBe(true)
-    expect(storage.existsObjectCalls).toBe(1)
-    expect(storage.countObjectCalls).toBe(0)
-    expect(storage.queryObjectCalls).toBe(0)
+    expect(calls.existsObjects).toBe(1)
+    expect(calls.countObjects).toBe(0)
+    expect(calls.queryObjects).toBe(0)
   })
 
   test("facets through provider pushdown without materializing rows or scalar counts", async () => {
-    const storage = new CountingQueryStorage()
-    await seedCustomers(storage)
+    const testStorage = createTestStorage()
+    const { storage, calls } = countQueryCalls(testStorage.objects)
+    await seedCustomers(testStorage.fixture)
 
     const result = await facetObjects(
       {
@@ -1083,14 +1113,14 @@ describe("object query planner and executor", () => {
     expect(result.facets).toEqual([
       { propertyId: "status", buckets: [{ value: "active", count: 2 }] },
     ])
-    expect(storage.facetObjectCalls).toBe(1)
-    expect(storage.queryObjectCalls).toBe(0)
-    expect(storage.countObjectCalls).toBe(0)
-    expect(storage.existsObjectCalls).toBe(0)
+    expect(calls.facetObjects).toBe(1)
+    expect(calls.queryObjects).toBe(0)
+    expect(calls.countObjects).toBe(0)
+    expect(calls.existsObjects).toBe(0)
   })
 
   test("rejects facet requests for properties not marked facetable", async () => {
-    const storage = new InMemoryObjectStorage()
+    const { objects: storage } = createTestStorage()
 
     await expect(
       facetObjects(
@@ -1200,13 +1230,19 @@ describe("object query planner and executor", () => {
       properties: [],
     })
     const subtypeOntology = new OntologyRegistry({ sources: [BaseAsset, LaptopAsset] })
-    const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpsert(
-      makeObjectMutationEvent("p1", "BaseAsset", "asset-1", { id: "asset-1" })
-    )
-    await storage.applyObjectUpsert(
-      makeObjectMutationEvent("p1", "LaptopAsset", "laptop-1", { id: "laptop-1" })
-    )
+    const { objects: storage, fixture } = createTestStorage(subtypeOntology)
+    await fixture.seed({
+      objects: [
+        {
+          ref: { objectTypeId: "BaseAsset", primaryId: "asset-1" },
+          properties: { id: "asset-1" },
+        },
+        {
+          ref: { objectTypeId: "LaptopAsset", primaryId: "laptop-1" },
+          properties: { id: "laptop-1" },
+        },
+      ],
+    })
 
     const result = await executeObjectQuery(
       {
@@ -1251,21 +1287,19 @@ describe("object query planner and executor", () => {
     const subtypeOntology = new OntologyRegistry({
       sources: [DefaultTextBase, DefaultTextChild],
     })
-    const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpsert(
-      makeObjectMutationEvent("p1", "DefaultTextBase", "base-1", {
-        id: "base-1",
-        name: "ordinary",
-        alias: "secret",
-      })
-    )
-    await storage.applyObjectUpsert(
-      makeObjectMutationEvent("p1", "DefaultTextChild", "child-1", {
-        id: "child-1",
-        name: "ordinary",
-        alias: "secret",
-      })
-    )
+    const { objects: storage, fixture } = createTestStorage(subtypeOntology)
+    await fixture.seed({
+      objects: [
+        {
+          ref: { objectTypeId: "DefaultTextBase", primaryId: "base-1" },
+          properties: { id: "base-1", name: "ordinary", alias: "secret" },
+        },
+        {
+          ref: { objectTypeId: "DefaultTextChild", primaryId: "child-1" },
+          properties: { id: "child-1", name: "ordinary", alias: "secret" },
+        },
+      ],
+    })
 
     const result = await executeObjectQuery(
       {
@@ -1295,13 +1329,19 @@ describe("object query planner and executor", () => {
       properties: [],
     })
     const subtypeOntology = new OntologyRegistry({ sources: [BaseAsset, LaptopAsset] })
-    const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpsert(
-      makeObjectMutationEvent("p1", "FallbackBaseAsset", "asset-1", { id: "asset-1" })
-    )
-    await storage.applyObjectUpsert(
-      makeObjectMutationEvent("p1", "FallbackLaptopAsset", "laptop-1", { id: "laptop-1" })
-    )
+    const { objects: storage, fixture } = createTestStorage(subtypeOntology)
+    await fixture.seed({
+      objects: [
+        {
+          ref: { objectTypeId: "FallbackBaseAsset", primaryId: "asset-1" },
+          properties: { id: "asset-1" },
+        },
+        {
+          ref: { objectTypeId: "FallbackLaptopAsset", primaryId: "laptop-1" },
+          properties: { id: "laptop-1" },
+        },
+      ],
+    })
 
     const result = await executeObjectQuery(
       {
@@ -1322,8 +1362,8 @@ describe("object query planner and executor", () => {
   })
 
   test("rejects fallback without an explicit result bound", async () => {
-    const storage = new InMemoryObjectStorage()
-    await seedCustomers(storage)
+    const { objects: storage, fixture } = createTestStorage()
+    await seedCustomers(fixture)
 
     await expect(
       executeObjectQuery(
@@ -1360,8 +1400,8 @@ describe("object query planner and executor", () => {
   })
 
   test("rejects fallback execution when the bounded scan cap is exceeded", async () => {
-    const storage = new InMemoryObjectStorage()
-    await seedCustomers(storage)
+    const { objects: storage, fixture } = createTestStorage()
+    await seedCustomers(fixture)
 
     await expect(
       executeObjectQuery(
@@ -1429,8 +1469,9 @@ describe("object query planner and executor", () => {
   })
 
   test("executes traversal and set operations through provider pushdown", async () => {
-    const storage = new CountingQueryStorage()
-    await seedCustomerOrders(storage)
+    const testStorage = createTestStorage()
+    const { storage, calls } = countQueryCalls(testStorage.objects)
+    await seedCustomerOrders(testStorage.fixture)
 
     const traversedOrders = await executeObjectQuery(
       {
@@ -1475,7 +1516,7 @@ describe("object query planner and executor", () => {
     expect(traversedOrders.objects.map((row) => row.primaryId)).toEqual(["order-1", "order-3"])
     expect(union.plan.mode).toBe("pushdown")
     expect(union.objects.map((row) => row.primaryId)).toEqual(["cust-1", "cust-3", "cust-2"])
-    expect(storage.queryObjectCalls).toBe(2)
+    expect(calls.queryObjects).toBe(2)
   })
 
   test("filters incoming traversal by source object type during execution", async () => {
@@ -1487,14 +1528,26 @@ describe("object query planner and executor", () => {
     })
     const sharedLinkOntology = new OntologyRegistry({ sources: [Customer, Reseller, Order] })
 
-    const storage = new CountingQueryStorage()
-    await seedCustomerOrders(storage)
-    await storage.applyObjectUpsert(
-      makeObjectMutationEvent("p1", "Reseller", "reseller-1", { id: "reseller-1" })
-    )
-    await storage.applyLinkUpsert(
-      makeLinkMutationEvent("p1", "Reseller", "reseller-1", "orders", "Order", "order-1")
-    )
+    const testStorage = createTestStorage(sharedLinkOntology)
+    const { storage } = countQueryCalls(testStorage.objects)
+    await seedCustomerOrders(testStorage.fixture)
+    await testStorage.fixture.seed({
+      objects: [
+        {
+          ref: { objectTypeId: "Reseller", primaryId: "reseller-1" },
+          properties: { id: "reseller-1" },
+        },
+      ],
+      links: [
+        {
+          ref: {
+            source: { objectTypeId: "Reseller", primaryId: "reseller-1" },
+            linkId: "orders",
+            target: { objectTypeId: "Order", primaryId: "order-1" },
+          },
+        },
+      ],
+    })
 
     const orderOneSources: ObjectQuery = {
       kind: "traverse",
@@ -1571,7 +1624,7 @@ describe("object query planner and executor", () => {
     ]
 
     for (const query of unsupportedQueries) {
-      const storage = new InMemoryObjectStorage()
+      const { objects: storage } = createTestStorage()
       await expect(
         executeObjectQuery(
           { projectId: "p1", query },

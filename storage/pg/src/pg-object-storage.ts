@@ -16,10 +16,6 @@ import type {
   ObjectStorage,
   QueryObjectsInput,
   QueryObjectsResult,
-  StoredLinkDeletedEvent,
-  StoredLinkMutationEvent,
-  StoredObjectMutationEvent,
-  StoredTelemetryAppendedEvent,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import {
@@ -29,7 +25,7 @@ import {
   compilePgObjectFacetQuery,
   compilePgObjectQuery,
 } from "./pg-object-query-compiler"
-import { type PgStoreClient, runPgTransaction } from "./transactions"
+import type { PgStoreClient } from "./transactions"
 
 const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   queryObjects: true,
@@ -222,360 +218,6 @@ export class PgObjectStorage implements ObjectStorage {
         }))
       ),
     }
-  }
-
-  async applyObjectUpsert(event: StoredObjectMutationEvent): Promise<ObjectRow> {
-    const occurredAt = new Date(event.occurredAt)
-
-    const row = await runPgTransaction(this.sql, async (tx) => {
-      // Idempotence check inside transaction to prevent race conditions
-      const [applied] = await tx`
-        SELECT 1 FROM applied_events_objects WHERE event_id = ${event.id}
-      `
-
-      if (applied) {
-        const [existing] = await tx<ObjectDatabaseRow[]>`
-          SELECT * FROM objects
-          WHERE project_id = ${event.projectId}
-            AND object_type_id = ${event.payload.objectTypeId}
-            AND primary_id = ${event.payload.primaryId}
-        `
-        return existing ? rowToObject(existing) : null
-      }
-
-      const [existing] = await tx<
-        { properties: Record<string, unknown>; created_at: Date; version: number }[]
-      >`
-        SELECT properties, created_at, version FROM objects
-        WHERE project_id = ${event.projectId}
-          AND object_type_id = ${event.payload.objectTypeId}
-          AND primary_id = ${event.payload.primaryId}
-      `
-
-      const existingProperties = existing ? existing.properties : {}
-      const mergedProperties = { ...existingProperties, ...event.payload.properties }
-      const createdAt = existing ? existing.created_at : occurredAt
-      const version = (existing?.version ?? 0) + 1
-
-      const [upserted] = await tx<ObjectDatabaseRow[]>`
-        INSERT INTO objects (
-          project_id, object_type_id, primary_id, properties, created_at, updated_at,
-          version, source_event_id
-        ) VALUES (
-          ${event.projectId}, ${event.payload.objectTypeId}, ${event.payload.primaryId},
-          ${JSON.stringify(mergedProperties)}::text::jsonb,
-          ${createdAt}, ${occurredAt},
-          ${version}, ${event.id}
-        )
-        ON CONFLICT (project_id, object_type_id, primary_id) DO UPDATE SET
-          properties = objects.properties || ${JSON.stringify(event.payload.properties)}::text::jsonb,
-          updated_at = EXCLUDED.updated_at,
-          version = objects.version + 1,
-          source_event_id = EXCLUDED.source_event_id
-        RETURNING *
-      `
-
-      await tx`
-        INSERT INTO applied_events_objects (event_id)
-        VALUES (${event.id})
-        ON CONFLICT DO NOTHING
-      `
-
-      return rowToObject(upserted)
-    })
-
-    return row!
-  }
-
-  async applyObjectUpsertBatch(
-    events: readonly StoredObjectMutationEvent[]
-  ): Promise<readonly ObjectRow[]> {
-    if (events.length === 0) return []
-    return runPgTransaction(this.sql, async (tx) => {
-      // 1. Bulk claim: single INSERT returns only the event_ids we now own.
-      const claimedRows = await tx<{ event_id: string }[]>`
-        INSERT INTO applied_events_objects
-        ${this.sql(events.map((e) => ({ event_id: e.id })))}
-        ON CONFLICT DO NOTHING
-        RETURNING event_id
-      `
-      const claimedSet = new Set(claimedRows.map((r: { event_id: string }) => r.event_id))
-
-      // 2. Bulk lookup for already-applied events (need to return their current row).
-      const alreadyApplied = events.filter((e) => !claimedSet.has(e.id))
-      const results: ObjectRow[] = []
-
-      if (alreadyApplied.length > 0) {
-        const existingRows = await valuesJoin<ObjectDatabaseRow>(
-          tx,
-          "SELECT o.* FROM objects o",
-          ["object_type_id", "primary_id"],
-          alreadyApplied.map((e) => [e.payload.objectTypeId, e.payload.primaryId]),
-          `WHERE o.project_id = $1`,
-          [events[0].projectId]
-        )
-
-        for (const row of existingRows) results.push(rowToObject(row))
-      }
-
-      // 3. Upsert claimed events. No pre-read needed — ON CONFLICT handles
-      //    property merge, version increment, and created_at preservation.
-      for (const event of events) {
-        if (!claimedSet.has(event.id)) continue
-
-        const occurredAt = new Date(event.occurredAt)
-
-        const [upserted] = await tx<ObjectDatabaseRow[]>`
-          INSERT INTO objects (
-            project_id, object_type_id, primary_id, properties, created_at, updated_at,
-            version, source_event_id
-          ) VALUES (
-            ${event.projectId}, ${event.payload.objectTypeId}, ${event.payload.primaryId},
-            ${JSON.stringify(event.payload.properties)}::text::jsonb,
-            ${occurredAt}, ${occurredAt},
-            1, ${event.id}
-          )
-          ON CONFLICT (project_id, object_type_id, primary_id) DO UPDATE SET
-            properties = objects.properties || EXCLUDED.properties,
-            updated_at = EXCLUDED.updated_at,
-            version = objects.version + 1,
-            source_event_id = EXCLUDED.source_event_id
-          RETURNING *
-        `
-
-        results.push(rowToObject(upserted))
-      }
-
-      return results
-    })
-  }
-
-  async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
-    await runPgTransaction(this.sql, async (tx) => {
-      // Idempotence check inside transaction to prevent race conditions
-      const [applied] = await tx`
-        SELECT 1 FROM applied_events_objects WHERE event_id = ${event.id}
-      `
-      if (applied) return
-
-      const [existing] = await tx<{ properties: Record<string, unknown> }[]>`
-        SELECT properties FROM objects
-        WHERE project_id = ${event.projectId}
-          AND object_type_id = ${event.payload.objectTypeId}
-          AND primary_id = ${event.payload.objectId}
-      `
-
-      if (!existing) return
-
-      const properties = { ...existing.properties }
-      properties[event.payload.propertyId] = event.payload.value
-
-      await tx`
-        UPDATE objects
-        SET properties = ${JSON.stringify(properties)}::text::jsonb,
-            updated_at = ${event.payload.at}::timestamptz,
-            version = version + 1,
-            source_event_id = ${event.id}
-        WHERE project_id = ${event.projectId}
-          AND object_type_id = ${event.payload.objectTypeId}
-          AND primary_id = ${event.payload.objectId}
-      `
-
-      await tx`
-        INSERT INTO applied_events_objects (event_id)
-        VALUES (${event.id})
-        ON CONFLICT DO NOTHING
-      `
-    })
-  }
-
-  async applyTelemetryAppendedBatch(
-    events: readonly StoredTelemetryAppendedEvent[]
-  ): Promise<void> {
-    if (events.length === 0) return
-    await runPgTransaction(this.sql, async (tx) => {
-      // Batch idempotence check: single query instead of N individual SELECTs
-      const allEventIds = events.map((e) => e.id)
-      const appliedRows = await tx<{ event_id: string }[]>`
-        SELECT event_id FROM applied_events_objects
-        WHERE event_id IN ${this.sql(allEventIds)}
-      `
-      const appliedSet = new Set(appliedRows.map((r) => r.event_id))
-
-      // Group non-applied events by unique object to minimize reads/writes
-      const objectGroups = new Map<
-        string,
-        {
-          events: StoredTelemetryAppendedEvent[]
-          projectId: string
-          objectTypeId: string
-          objectId: string
-        }
-      >()
-
-      for (const event of events) {
-        if (appliedSet.has(event.id)) continue
-
-        const groupKey = `${event.projectId}:${event.payload.objectTypeId}:${event.payload.objectId}`
-        let group = objectGroups.get(groupKey)
-        if (!group) {
-          group = {
-            events: [],
-            projectId: event.projectId,
-            objectTypeId: event.payload.objectTypeId,
-            objectId: event.payload.objectId,
-          }
-          objectGroups.set(groupKey, group)
-        }
-        group.events.push(event)
-      }
-
-      for (const group of objectGroups.values()) {
-        const [existing] = await tx<{ properties: Record<string, unknown> }[]>`
-          SELECT properties FROM objects
-          WHERE project_id = ${group.projectId}
-            AND object_type_id = ${group.objectTypeId}
-            AND primary_id = ${group.objectId}
-        `
-
-        if (!existing) continue
-
-        const properties = { ...existing.properties }
-        let latestAt = ""
-        let latestEventId = ""
-
-        const newEventIds: string[] = []
-
-        for (const event of group.events) {
-          properties[event.payload.propertyId] = event.payload.value
-          if (event.payload.at > latestAt) {
-            latestAt = event.payload.at
-            latestEventId = event.id
-          }
-          newEventIds.push(event.id)
-        }
-
-        // Batch insert applied events
-        await tx`
-          INSERT INTO applied_events_objects ${tx(newEventIds.map((id) => ({ event_id: id })))}
-          ON CONFLICT DO NOTHING
-        `
-
-        await tx`
-          UPDATE objects
-          SET properties = ${JSON.stringify(properties)}::text::jsonb,
-              updated_at = ${latestAt}::timestamptz,
-              version = version + ${group.events.length},
-              source_event_id = ${latestEventId}
-          WHERE project_id = ${group.projectId}
-            AND object_type_id = ${group.objectTypeId}
-            AND primary_id = ${group.objectId}
-        `
-      }
-    })
-  }
-
-  async applyLinkUpsert(event: StoredLinkMutationEvent): Promise<void> {
-    const occurredAt = new Date(event.occurredAt)
-    const linkProperties = event.payload.properties
-      ? JSON.stringify(event.payload.properties)
-      : null
-
-    await runPgTransaction(this.sql, async (tx) => {
-      // Idempotence check inside transaction to prevent race conditions
-      const [applied] = await tx`
-        SELECT 1 FROM applied_events_objects WHERE event_id = ${event.id}
-      `
-      if (applied) return
-
-      await tx`
-        INSERT INTO links (
-          project_id, source_type_id, source_id, link_id, target_type_id, target_id,
-          properties, created_at, updated_at, source_event_id
-        ) VALUES (
-          ${event.projectId}, ${event.payload.sourceTypeId}, ${event.payload.sourceId},
-          ${event.payload.linkId}, ${event.payload.targetTypeId}, ${event.payload.targetId},
-          ${linkProperties}::text::jsonb, ${occurredAt}, ${occurredAt}, ${event.id}
-        )
-        ON CONFLICT (project_id, source_type_id, source_id, link_id, target_type_id, target_id)
-        DO UPDATE SET
-          properties = EXCLUDED.properties,
-          updated_at = EXCLUDED.updated_at,
-          source_event_id = EXCLUDED.source_event_id
-      `
-
-      await tx`
-        INSERT INTO applied_events_objects (event_id)
-        VALUES (${event.id})
-        ON CONFLICT DO NOTHING
-      `
-    })
-  }
-
-  async applyLinkUpsertBatch(events: readonly StoredLinkMutationEvent[]): Promise<void> {
-    if (events.length === 0) return
-    await runPgTransaction(this.sql, async (tx) => {
-      // 1. Bulk claim: single INSERT returns only the event_ids we now own.
-      const claimedRows = await tx<{ event_id: string }[]>`
-        INSERT INTO applied_events_objects
-        ${this.sql(events.map((e) => ({ event_id: e.id })))}
-        ON CONFLICT DO NOTHING
-        RETURNING event_id
-      `
-      const claimedSet = new Set(claimedRows.map((r: { event_id: string }) => r.event_id))
-
-      // 2. Upsert only claimed events
-      for (const event of events) {
-        if (!claimedSet.has(event.id)) continue
-
-        const occurredAt = new Date(event.occurredAt)
-        const linkProperties = event.payload.properties
-          ? JSON.stringify(event.payload.properties)
-          : null
-
-        await tx`
-          INSERT INTO links (
-            project_id, source_type_id, source_id, link_id, target_type_id, target_id,
-            properties, created_at, updated_at, source_event_id
-          ) VALUES (
-            ${event.projectId}, ${event.payload.sourceTypeId}, ${event.payload.sourceId},
-            ${event.payload.linkId}, ${event.payload.targetTypeId}, ${event.payload.targetId},
-            ${linkProperties}::text::jsonb, ${occurredAt}, ${occurredAt}, ${event.id}
-          )
-          ON CONFLICT (project_id, source_type_id, source_id, link_id, target_type_id, target_id)
-          DO UPDATE SET
-            properties = EXCLUDED.properties,
-            updated_at = EXCLUDED.updated_at,
-            source_event_id = EXCLUDED.source_event_id
-        `
-      }
-    })
-  }
-
-  async applyLinkDelete(event: StoredLinkDeletedEvent): Promise<void> {
-    await runPgTransaction(this.sql, async (tx) => {
-      // Idempotence check inside transaction to prevent race conditions
-      const [applied] = await tx`
-        SELECT 1 FROM applied_events_objects WHERE event_id = ${event.id}
-      `
-      if (applied) return
-
-      await tx`
-        DELETE FROM links
-        WHERE project_id = ${event.projectId}
-          AND source_type_id = ${event.payload.sourceTypeId}
-          AND source_id = ${event.payload.sourceId}
-          AND link_id = ${event.payload.linkId}
-          AND target_type_id = ${event.payload.targetTypeId}
-          AND target_id = ${event.payload.targetId}
-      `
-
-      await tx`
-        INSERT INTO applied_events_objects (event_id)
-        VALUES (${event.id})
-        ON CONFLICT DO NOTHING
-      `
-    })
   }
 
   async getByPrimaryId(params: {
@@ -887,8 +529,7 @@ function rowToObject(row: ObjectDatabaseRow): ObjectRow {
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     version: row.version,
-    sourceEventId: row.source_event_id ?? undefined,
-    lastCommitId: row.last_commit_id ?? undefined,
+    lastCommitId: row.last_commit_id,
   }
 }
 
@@ -931,9 +572,8 @@ function reviveExpandedRow(value: unknown): ExpandedObjectRow {
     createdAt: new Date(row.createdAt as string),
     updatedAt: new Date(row.updatedAt as string),
     version: Number(row.version),
+    lastCommitId: String(row.lastCommitId),
   }
-  if (row.sourceEventId != null) expanded.sourceEventId = String(row.sourceEventId)
-  if (row.lastCommitId != null) expanded.lastCommitId = String(row.lastCommitId)
   if (isPlainRecord(row.linkProperties) && Object.keys(row.linkProperties).length > 0) {
     expanded.linkProperties = row.linkProperties
   }
@@ -957,8 +597,7 @@ function rowToLink(row: LinkDatabaseRow): ObjectLinkRow {
     properties: row.properties ? (row.properties as Record<string, unknown>) : undefined,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
-    sourceEventId: row.source_event_id ?? undefined,
-    lastCommitId: row.last_commit_id ?? undefined,
+    lastCommitId: row.last_commit_id,
   }
 }
 
@@ -970,8 +609,7 @@ interface ObjectDatabaseRow {
   created_at: Date | string
   updated_at: Date | string
   version: number
-  source_event_id: string | null
-  last_commit_id: string | null
+  last_commit_id: string
 }
 
 interface ObjectQueryDatabaseRow extends ObjectDatabaseRow {
@@ -996,6 +634,5 @@ interface LinkDatabaseRow {
   properties: unknown | null
   created_at: Date | string
   updated_at: Date | string
-  source_event_id: string | null
-  last_commit_id: string | null
+  last_commit_id: string
 }

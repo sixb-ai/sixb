@@ -16,26 +16,15 @@ const ref = (primaryId: string) => ({ objectTypeId: "Device", primaryId })
 describe("ontology materializer edits", () => {
   test("rejects an Action commit before mutation when strict run capabilities are absent", async () => {
     class StorageWithoutActionFence extends InMemoryStorage {
-      private readonly unfencedActionRuns: NonNullable<Storage["actionRuns"]>
+      private readonly missingActionRuns: Storage["actionRuns"] = undefined
 
       constructor() {
         super()
-        const runs = this.actionRuns
-        this.unfencedActionRuns = {
-          queue: runs.queue.bind(runs),
-          start: runs.start.bind(runs),
-          enterPhase: runs.enterPhase.bind(runs),
-          recordWriteback: runs.recordWriteback.bind(runs),
-          recordEffects: runs.recordEffects.bind(runs),
-          finish: runs.finish.bind(runs),
-          getById: runs.getById.bind(runs),
-          list: runs.list.bind(runs),
-        }
-        Object.defineProperty(this, "actionRuns", { value: this.unfencedActionRuns })
+        Object.defineProperty(this, "actionRuns", { value: this.missingActionRuns })
       }
 
       override transaction<T>(run: (tx: Storage) => Promise<T> | T): Promise<T> {
-        return super.transaction((tx) => run({ ...tx, actionRuns: this.unfencedActionRuns }))
+        return super.transaction((tx) => run({ ...tx, actionRuns: this.missingActionRuns }))
       }
     }
     const storage = new StorageWithoutActionFence()

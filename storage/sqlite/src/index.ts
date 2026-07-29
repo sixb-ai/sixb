@@ -71,7 +71,7 @@ export interface SqliteStorageOptions {
  * ```
  */
 export class SqliteStorage implements MigrationCapableStorage {
-  readonly objects: SqliteObjectStorage
+  readonly objects: Storage["objects"]
   readonly ontology: SqliteOntologyStorage
   readonly auth: SqliteAuthStorage
   readonly agents: SqliteAgentStorage
@@ -81,7 +81,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly projectionRuns: SqliteProjectionRunStorage
   readonly workflowRuns: SqliteWorkflowRunStorage
   readonly workflowInterventions: SqliteWorkflowInterventionStorage
-  readonly timeseries: SqliteTimeseriesStorage
+  readonly timeseries: Storage["timeseries"]
   readonly webhookDeliveries: SqliteWebhookDeliveryStorage
   readonly webhookRuns: SqliteWebhookRunStorage
   readonly rules: SqliteRulesStorage

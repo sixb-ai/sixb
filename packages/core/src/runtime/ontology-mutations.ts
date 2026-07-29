@@ -5,7 +5,6 @@ import type {
   ProjectionCommitResult,
   ProjectionRunFinishInput,
   ProjectionSourceReplacement,
-  ProjectionTelemetryInputCompletion,
   TelemetryAppend,
   TelemetryCommitResult,
 } from "../materialization/model"
@@ -13,7 +12,6 @@ import type {
 export interface OntologyMutationRuntime {
   commitEdits(input: OntologyEditCommit): Promise<EditCommitResult>
   replaceProjection(input: ProjectionSourceReplacement): Promise<ProjectionCommitResult>
-  completeProjectionTelemetryInput(input: ProjectionTelemetryInputCompletion): Promise<void>
   finishProjection(input: ProjectionRunFinishInput): Promise<void>
   appendTelemetry(input: TelemetryAppend): Promise<TelemetryCommitResult>
 }
@@ -63,8 +61,6 @@ export function createOntologyMutationRuntime(input: {
         () => input.materializer.projections.replace(command),
         input.notifyCommittedFacts
       ),
-    completeProjectionTelemetryInput: (command) =>
-      input.materializer.projections.completeTelemetryInput(command),
     finishProjection: (command) => input.materializer.projections.finishRun(command),
     appendTelemetry: (command) =>
       commitAndNotify(

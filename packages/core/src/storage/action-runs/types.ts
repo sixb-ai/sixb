@@ -157,7 +157,7 @@ export interface LockActionMaterializationRunInput {
 
 export interface ActionRunStorage {
   /** Transactional fence for Action identity and running state before a new ontology commit. */
-  lockForMaterialization?(input: LockActionMaterializationRunInput): Promise<ActionRunRecord>
+  lockForMaterialization(input: LockActionMaterializationRunInput): Promise<ActionRunRecord>
   queue(input: QueueActionRunInput): Promise<ActionRunRecord>
   start(input: StartActionRunInput): Promise<ActionRunRecord>
   enterPhase(input: EnterActionRunPhaseInput): Promise<ActionRunRecord>
@@ -166,20 +166,4 @@ export interface ActionRunStorage {
   finish(input: FinishActionRunInput): Promise<ActionRunRecord>
   getById(params: { projectId: string; id: string }): Promise<ActionRunRecord | null>
   list(input: ListActionRunsInput): Promise<ListActionRunsResult>
-}
-
-/**
- * Transitional required view used while ActionRunStorage supports legacy providers.
- *
- * TODO(ontology-materializer/phase-6): Make the assertion part of the required ActionRunStorage
- * contract and delete this interface and its type guard.
- */
-export interface ActionMaterializationRunStorage extends ActionRunStorage {
-  lockForMaterialization(input: LockActionMaterializationRunInput): Promise<ActionRunRecord>
-}
-
-export function isActionMaterializationRunStorage(
-  storage: ActionRunStorage | null | undefined
-): storage is ActionMaterializationRunStorage {
-  return storage != null && typeof storage.lockForMaterialization === "function"
 }

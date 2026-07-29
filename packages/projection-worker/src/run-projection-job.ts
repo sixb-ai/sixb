@@ -5,7 +5,7 @@ import {
   type ProjectionDefinition,
 } from "@sixb/core"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
-import type { ProjectionRunObjectTypes, ProjectionRunRecord } from "@sixb/core/storage"
+import type { ProjectionRunRecord, ProjectionRunTarget } from "@sixb/core/storage"
 import { ProjectionWorkerPermanentError } from "./errors"
 import {
   assertProjectionJobId,
@@ -29,7 +29,7 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
   if (terminal) return terminalResult(terminal)
 
   const validated = await validateProjectionJob(input.runtime, input.job)
-  const execution = await claimOrReplaySucceededRun(input, validated.objectTypes)
+  const execution = await claimOrReplaySucceededRun(input, validated.target)
   if ("replayedTerminal" in execution) return execution
   try {
     await materializeProjection(input, validated, execution, signal)
@@ -56,10 +56,10 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
 
 async function claimOrReplaySucceededRun(
   input: RunProjectionJobInput,
-  objectTypes: ProjectionRunObjectTypes
+  target: ProjectionRunTarget
 ): Promise<ClaimedProjectionExecution | ProjectionJobResult> {
   try {
-    return await claimExecution(input, objectTypes)
+    return await claimExecution(input, target)
   } catch (error) {
     // Another delivery may have finished after our initial terminal read but before the claim.
     const succeeded = await findSucceededRun(input)
@@ -86,26 +86,37 @@ async function findMatchingTerminalRun(
 
 async function claimExecution(
   input: RunProjectionJobInput,
-  objectTypes: ProjectionRunObjectTypes
+  target: ProjectionRunTarget
 ): Promise<ClaimedProjectionExecution> {
-  const fixedBatchSize = telemetryBatchSize(input)
-  const run = await input.runtime.projectionRunsStorage.startOrReclaimMaterialization({
-    projectId: input.runtime.projectId,
-    id: input.job.id,
-    identity: input.job,
-    ...objectTypes,
-    ...(fixedBatchSize === undefined ? {} : { fixedBatchSize }),
-  })
-  return {
-    run,
-    identity: input.job,
-    execution: { projectionRunId: run.id, executionToken: run.executionToken },
+  const common = { projectId: input.runtime.projectId, id: input.job.id }
+  if (input.job.projectionKind === "link") {
+    if (!("sourceObjectTypeId" in target)) throw invalidProjectionTarget(input.job.id)
+    return input.runtime.projectionRunsStorage.startOrReclaim({
+      ...common,
+      identity: input.job,
+      target,
+    })
   }
+  if (!("objectTypeId" in target)) throw invalidProjectionTarget(input.job.id)
+  if (input.job.projectionKind === "telemetry") {
+    return input.runtime.projectionRunsStorage.startOrReclaim({
+      ...common,
+      identity: input.job,
+      target,
+      fixedBatchSize: input.telemetryBatchSize ?? TELEMETRY_PROJECTION_BATCH_SIZE,
+    })
+  }
+  return input.runtime.projectionRunsStorage.startOrReclaim({
+    ...common,
+    identity: input.job,
+    target,
+  })
 }
 
-function telemetryBatchSize(input: RunProjectionJobInput): number | undefined {
-  if (input.job.protocol !== "telemetry") return undefined
-  return input.telemetryBatchSize ?? TELEMETRY_PROJECTION_BATCH_SIZE
+function invalidProjectionTarget(runId: string): ProjectionWorkerPermanentError {
+  return new ProjectionWorkerPermanentError(
+    `[SixbProjectionWorker] Projection run '${runId}' has an invalid target.`
+  )
 }
 
 async function materializeProjection(
@@ -123,11 +134,6 @@ async function materializeProjection(
       version: validated.version,
       execution,
       signal,
-    })
-    await getOntologyMutationRuntime(input.runtime).completeProjectionTelemetryInput({
-      source: { projectionId: projection.id },
-      datasetVersion: input.job.datasetVersion,
-      execution: execution.execution,
     })
     return
   }
@@ -237,15 +243,15 @@ async function requireRun(input: RunProjectionJobInput): Promise<ProjectionRunRe
 
 function assertRunMatchesJob(run: ProjectionRunRecord, job: ProjectionJob): void {
   const matches =
-    run.projectionId === job.projectionId &&
-    run.projectionKind === job.projectionKind &&
-    run.materializationProtocol === job.protocol &&
-    run.datasetId === job.datasetVersion.datasetId &&
-    run.datasetVersionId === job.datasetVersion.versionId &&
-    run.datasetVersionCreatedAt === job.datasetVersion.createdAt &&
-    run.ontologyRevision === job.ontologyRevision &&
-    run.projectionRevision === job.projectionRevision &&
-    run.ownershipHash === job.ownershipHash
+    run.identity.projectionId === job.projectionId &&
+    run.identity.projectionKind === job.projectionKind &&
+    run.identity.protocol === job.protocol &&
+    run.identity.datasetVersion.datasetId === job.datasetVersion.datasetId &&
+    run.identity.datasetVersion.versionId === job.datasetVersion.versionId &&
+    run.identity.datasetVersion.createdAt === job.datasetVersion.createdAt &&
+    run.identity.ontologyRevision === job.ontologyRevision &&
+    run.identity.projectionRevision === job.projectionRevision &&
+    run.identity.ownershipHash === job.ownershipHash
   if (matches) return
   throw new ProjectionWorkerPermanentError(
     `[SixbProjectionWorker] Projection run '${run.id}' has a different durable identity.`

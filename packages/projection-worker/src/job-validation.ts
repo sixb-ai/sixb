@@ -6,7 +6,7 @@ import {
   projectionObjectTypeIds,
 } from "@sixb/core/internal/projections"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import type { ProjectionRunObjectTypes } from "@sixb/core/storage"
+import type { ProjectionRunTarget } from "@sixb/core/storage"
 import { ProjectionWorkerPermanentError } from "./errors"
 import {
   assertDatasetVersionMatchesDefinition,
@@ -19,7 +19,7 @@ export interface ValidatedProjectionJob {
   readonly projection: ProjectionDefinition
   readonly dataset: DatasetDefinition
   readonly version: DatasetVersion
-  readonly objectTypes: ProjectionRunObjectTypes
+  readonly target: ProjectionRunTarget
 }
 
 export async function validateProjectionJob(
@@ -41,7 +41,7 @@ export async function validateProjectionJob(
     projection,
     dataset,
     version,
-    objectTypes: projectionObjectTypeIds(projection),
+    target: projectionObjectTypeIds(projection),
   }
 }
 

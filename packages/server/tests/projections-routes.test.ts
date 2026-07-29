@@ -9,6 +9,7 @@ import { emptyGrantIndex } from "@sixb/core"
 import type {
   ListLatestProjectionRunsInput,
   ListProjectionRunsInput,
+  ObjectProjectionRunRecord,
   ProjectionRunRecord,
   ProjectionRunStorage,
 } from "@sixb/core/storage"
@@ -33,21 +34,35 @@ const sensorsProjection: ObjectProjectionDefinition = {
   links: {},
 }
 
-function makeRun(overrides: Partial<ProjectionRunRecord>): ProjectionRunRecord {
+function makeRun(
+  input: {
+    readonly run?: Partial<ObjectProjectionRunRecord>
+    readonly projectionId?: string
+    readonly objectTypeId?: string
+  } = {}
+): ObjectProjectionRunRecord {
   return {
     id: "run-1",
     projectId: "my-app",
-    projectionId: "rooms",
-    projectionKind: "object",
-    datasetId: "ds.rooms",
-    datasetVersionId: "ver_1",
-    objectTypeId: "room",
+    identity: {
+      projectionId: input.projectionId ?? "rooms",
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetVersion: {
+        datasetId: "ds.rooms",
+        versionId: "ver_1",
+        createdAt: "2026-05-04T08:00:00.000Z",
+      },
+      ontologyRevision: "ontology-revision",
+      projectionRevision: "projection-revision",
+      ownershipHash: "ownership-hash",
+    },
+    target: { objectTypeId: input.objectTypeId ?? "room" },
     status: "succeeded",
     attempt: 2,
     startedAt: new Date("2026-05-04T09:00:00.000Z"),
-    sourceRowsRead: 0,
-    sourceRowsSkipped: 0,
-    ...overrides,
+    progress: { sourceRowsRead: 0, sourceRowsSkipped: 0 },
+    ...input.run,
   }
 }
 
@@ -87,7 +102,9 @@ describe("projection routes", () => {
     const sixb = createSixbStub({
       async listLatestByProjectionIds(input: ListLatestProjectionRunsInput) {
         requested.push([...input.projectionIds])
-        return { runs: [makeRun({ id: "run-rooms", projectionId: "rooms" })] }
+        return {
+          runs: [makeRun({ run: { id: "run-rooms" }, projectionId: "rooms" })],
+        }
       },
     })
 
@@ -111,7 +128,7 @@ describe("projection routes", () => {
     const sixb = createSixbStub({
       async list(input: ListProjectionRunsInput) {
         captured = input
-        return { runs: [makeRun({})], hasMore: false, total: 1 }
+        return { runs: [makeRun()], hasMore: false, total: 1 }
       },
     })
 
@@ -130,10 +147,9 @@ describe("projection routes", () => {
 
   test("serializes only the public run schema even if a provider returns internal fields", async () => {
     const internalRun = {
-      ...makeRun({ status: "running" }),
+      ...makeRun({ run: { status: "running" } }),
       executionToken: "secret-capability",
-      ontologyRevision: "internal-revision",
-    } as ProjectionRunRecord
+    } as unknown as ProjectionRunRecord
     const sixb = createSixbStub({
       async list() {
         return { runs: [internalRun], hasMore: false, total: 1 }
@@ -147,13 +163,13 @@ describe("projection routes", () => {
 
     expect(body.runs[0]).toMatchObject({ attempt: 2 })
     expect(body.runs[0]).not.toHaveProperty("executionToken")
-    expect(body.runs[0]).not.toHaveProperty("ontologyRevision")
+    expect(body.runs[0]).toHaveProperty("identity.ontologyRevision", "ontology-revision")
   })
 
   test("run detail is hidden when the run's object type is not viewable", async () => {
     const sixb = createSixbStub({
       async getById() {
-        return makeRun({ id: "run-x", objectTypeId: "sensor" })
+        return makeRun({ run: { id: "run-x" }, objectTypeId: "sensor" })
       },
     })
 

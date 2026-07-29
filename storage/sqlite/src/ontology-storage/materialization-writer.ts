@@ -186,8 +186,8 @@ export class SqliteMaterializationWriter {
             `
               INSERT INTO objects (
                 project_id, object_type_id, primary_id, properties, created_at,
-                updated_at, version, source_event_id, last_commit_id
-              ) VALUES (?, ?, ?, json(?), ?, ?, ?, NULL, ?)
+                updated_at, version, last_commit_id
+              ) VALUES (?, ?, ?, json(?), ?, ?, ?, ?)
             `
           )
           .run(
@@ -214,7 +214,7 @@ export class SqliteMaterializationWriter {
           `
             UPDATE objects
             SET properties = json(?), created_at = ?, updated_at = ?, version = ?,
-              source_event_id = NULL, last_commit_id = ?
+              last_commit_id = ?
             WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
               AND version = ? AND last_commit_id = ?
           `
@@ -245,8 +245,8 @@ export class SqliteMaterializationWriter {
             `
               INSERT INTO links (
                 project_id, source_type_id, source_id, link_id, target_type_id, target_id,
-                properties, created_at, updated_at, source_event_id, last_commit_id
-              ) VALUES (?, ?, ?, ?, ?, ?, json(?), ?, ?, NULL, ?)
+                properties, created_at, updated_at, last_commit_id
+              ) VALUES (?, ?, ?, ?, ?, ?, json(?), ?, ?, ?)
             `
           )
           .run(
@@ -275,7 +275,7 @@ export class SqliteMaterializationWriter {
           `
             UPDATE links
             SET properties = json(?), created_at = ?, updated_at = ?,
-              source_event_id = NULL, last_commit_id = ?
+              last_commit_id = ?
             WHERE project_id = ? AND source_type_id = ? AND source_id = ? AND link_id = ?
               AND target_type_id = ? AND target_id = ? AND last_commit_id = ?
           `
@@ -308,8 +308,8 @@ export class SqliteMaterializationWriter {
               `
                 INSERT INTO timeseries (
                   project_id, object_type_id, object_id, property_id,
-                  value, unit, at, source_event_id, last_commit_id
-                ) VALUES (?, ?, ?, ?, json(?), ?, ?, NULL, ?)
+                  value, unit, at, last_commit_id
+                ) VALUES (?, ?, ?, ?, json(?), ?, ?, ?)
               `
             )
             .run(
@@ -337,7 +337,7 @@ export class SqliteMaterializationWriter {
             .query(
               `
                 UPDATE timeseries
-                SET value = json(?), unit = ?, source_event_id = NULL, last_commit_id = ?
+                SET value = json(?), unit = ?, last_commit_id = ?
                 WHERE project_id = ? AND object_type_id = ? AND object_id = ?
                   AND property_id = ? AND at = ? AND last_commit_id = ?
               `

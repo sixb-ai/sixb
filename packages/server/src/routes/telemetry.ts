@@ -1,5 +1,6 @@
 import { isAllowed, type OntologySource, type Sixb } from "@sixb/core"
 import { getTelemetryHistoryBatch } from "@sixb/core/internal/objects"
+import type { TimeseriesPoint } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
@@ -16,18 +17,14 @@ import {
 } from "../schemas/telemetry"
 import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
 
-function serializeTelemetryPoint(point: {
-  projectId: string
-  objectTypeId: string
-  objectId: string
-  propertyId: string
-  value: unknown
-  unit?: string
-  at: Date
-  sourceEventId?: string
-}) {
+function serializeTelemetryPoint(point: TimeseriesPoint) {
   return {
-    ...point,
+    projectId: point.projectId,
+    objectTypeId: point.objectTypeId,
+    objectId: point.objectId,
+    propertyId: point.propertyId,
+    value: point.value,
+    ...(point.unit === undefined ? {} : { unit: point.unit }),
     at: toIsoString(point.at),
   }
 }

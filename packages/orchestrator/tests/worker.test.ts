@@ -612,11 +612,11 @@ describe("OrchestratorWorker", () => {
       ownershipHash: descriptor.ownershipHash,
     }
     const id = createProjectionRunId(PROJECT_ID, identity)
-    await projectionRuns.startOrReclaimMaterialization({
+    await projectionRuns.startOrReclaim({
       id,
       projectId: PROJECT_ID,
       identity,
-      objectTypeId: Invoice.id,
+      target: { objectTypeId: Invoice.id },
     })
 
     await reconcileProjectionDispatch({
