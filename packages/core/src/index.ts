@@ -606,15 +606,18 @@ export type {
   BatchSyncConfig,
   BatchSyncDefinitionConfig,
   DatasetSyncTarget,
+  RequestSyncRunInput,
   SyncBuilder,
   SyncDefinition,
   SyncReadBuilder,
   SyncReadContext,
   SyncReadHandler,
   SyncReadResult,
+  SyncRunRequestOptions,
+  SyncRunRequestResult,
   SyncTargetBuilder,
 } from "./syncs"
-export { defineSync } from "./syncs"
+export { defineSync, requestSyncRun } from "./syncs"
 
 // ── Schedules ───────────────────────────────────────────────
 
@@ -652,6 +655,8 @@ export type {
   PipelineBuilder,
   PipelineDefinition,
   PipelineGraph,
+  PipelineRunRequestOptions,
+  PipelineRunRequestResult,
   PipelineSequenceGraph,
   PipelineStepDefinition,
   PipelineStepExecutor,
@@ -664,6 +669,7 @@ export type {
   PipelineStepOutputOptions,
   PipelineStepRunContext,
   PipelineStepRunHandler,
+  RequestPipelineRunInput,
 } from "./pipelines"
 export {
   definePipeline,
@@ -671,6 +677,7 @@ export {
   isPipelineDefinition,
   isPipelineStepDefinition,
   PipelineError,
+  requestPipelineRun,
 } from "./pipelines"
 
 // ── Workflows ───────────────────────────────────────────────

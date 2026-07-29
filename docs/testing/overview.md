@@ -220,8 +220,8 @@ expect(await anonymous.list({})).toEqual({ objects: [], hasMore: false, total: 0
 There are nine grant kinds. `access:application` gates browser applications at the server
 boundary, and `observe:logs` gates reading captured [logs](../logging/overview.md). The scoped
 runtime gates the rest: `view:object` (`list`/`getObject`), `view:dataset` (`listDatasets`),
-`apply:action` (`requestAction`), `run:workflow` (`runWorkflow`), `run:sync`, `run:pipeline`, and
-`run:agent`. See [authorization](../auth/authorization.md) for how roles,
+`apply:action` (`requestAction`), `run:workflow` (`requestWorkflowRun`), `run:sync`
+(`requestSyncRun`), `run:pipeline` (`requestPipelineRun`), and `run:agent` (`requestAgentRun`). See [authorization](../auth/authorization.md) for how roles,
 grants, groups, and membership policies resolve; the full pattern lives in
 `examples/auth/tests/atlas-authorization.test.ts`.
 

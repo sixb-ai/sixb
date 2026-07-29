@@ -8,8 +8,17 @@
 
 import { resolve } from "node:path"
 import { ActionRegistry, ActionsRuntime } from "../actions"
+import type {
+  RequestActionAndWaitInput,
+  RequestActionInput,
+  RequestActionResult,
+} from "../actions/request"
+import {
+  requestAction as requestRuntimeAction,
+  requestActionAndWait as requestRuntimeActionAndWait,
+} from "../actions/request"
 import type { ActionDefinition } from "../actions/types"
-import type { AgentDefinition } from "../agents"
+import type { AgentDefinition, RequestAgentRunInput, RequestAgentRunResult } from "../agents"
 import { AgentsRuntime, validateAgentGroupReferences } from "../agents"
 import {
   AuthRuntime,
@@ -50,6 +59,12 @@ import {
   type ValueType,
 } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
+import { PipelineError } from "../pipelines"
+import {
+  type PipelineRunRequestResult,
+  type RequestPipelineRunInput,
+  requestPipelineRun,
+} from "../pipelines/request"
 import type { PipelineDefinition } from "../pipelines/types"
 import { registerProjectionRegistry } from "../projections/internal"
 import { ProjectionRegistry } from "../projections/registry"
@@ -73,11 +88,21 @@ import type {
   SecurityRegistry,
 } from "../security"
 import { createRuntimeSecurityRegistry } from "../security/runtime"
-import type { ObjectRow, Storage } from "../storage"
+import type { ActionRunRecord, ObjectRow, Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
+import { SyncValidationError } from "../syncs"
+import {
+  type RequestSyncRunInput,
+  requestSyncRun,
+  type SyncRunRequestResult,
+} from "../syncs/request"
 import type { RegisteredWebhook } from "../webhooks"
 import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webhooks"
-import type { WorkflowDefinition } from "../workflows"
+import type {
+  RequestWorkflowRunInput,
+  WorkflowDefinition,
+  WorkflowRunRequestResult,
+} from "../workflows"
 import { validateWorkflowsAtStartup, WorkflowsRuntime } from "../workflows"
 import { RuntimeError } from "./errors"
 import {
@@ -460,6 +485,42 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
   getPipelineById(pipelineId: string): PipelineDefinition | null {
     return this.pipelinesById.get(pipelineId) ?? null
+  }
+
+  // ── Starting work ─────────────────────────────────────────
+  // Every verb is `request*` because everything here is queued, never run inline. `requestActionAndWait`
+  // is the one that waits, and says so.
+
+  requestAction(input: RequestActionInput): Promise<RequestActionResult> {
+    return requestRuntimeAction(this.runtimeContext, input)
+  }
+
+  requestActionAndWait(input: RequestActionAndWaitInput): Promise<ActionRunRecord> {
+    return requestRuntimeActionAndWait(this.runtimeContext, input)
+  }
+
+  requestWorkflowRun(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult> {
+    return this.workflows.requestById(input)
+  }
+
+  async requestSyncRun(input: RequestSyncRunInput): Promise<SyncRunRequestResult> {
+    const sync = this.getSyncById(input.syncId)
+    if (!sync) {
+      throw new SyncValidationError(`[Sixb] Unknown sync '${input.syncId}'`)
+    }
+    return requestSyncRun(this.runtimeContext, sync, input)
+  }
+
+  async requestPipelineRun(input: RequestPipelineRunInput): Promise<PipelineRunRequestResult> {
+    const pipeline = this.getPipelineById(input.pipelineId)
+    if (!pipeline) {
+      throw new PipelineError(`[Sixb] Unknown pipeline '${input.pipelineId}'`)
+    }
+    return requestPipelineRun(this.runtimeContext, pipeline, input)
+  }
+
+  requestAgentRun(input: RequestAgentRunInput): Promise<RequestAgentRunResult> {
+    return this.agents.request(input)
   }
 
   listSchedules(): readonly ScheduleDefinition[] {

@@ -87,7 +87,7 @@ describe("auth example Atlas authorization", () => {
       })
     ).rejects.toThrow("not allowed to apply action 'resolve-access-request'")
     await expect(
-      teamMember.runWorkflow({
+      teamMember.requestWorkflowRun({
         workflowId: "run-access-review",
         input: {
           accessRequest: { objectTypeId: "access-request", primaryId: "access-request" },
@@ -120,7 +120,7 @@ describe("auth example Atlas authorization", () => {
       })
     ).resolves.toMatchObject({ runId: expect.any(String) })
     await expect(
-      admin.runWorkflow({
+      admin.requestWorkflowRun({
         workflowId: "run-access-review",
         input: {
           accessRequest: { objectTypeId: "access-request", primaryId: "access-request" },

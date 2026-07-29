@@ -261,9 +261,9 @@ To enforce a principal's grants, derive a scoped runtime with `sixb.as(context)`
 ```ts
 const scoped = sixb.as(authorizationContext)
 
-await scoped.objects(Invoice).list()   // only if view:object covers Invoice
+await scoped.objects(Invoice).list()      // only if view:object covers Invoice
 await scoped.requestAction(input)        // only if apply:action covers it
-await scoped.runWorkflow(input)          // only if run:workflow covers it
+await scoped.requestWorkflowRun(input)   // only if run:workflow covers it
 await scoped.readEvents()                // events whose subject is visible
 ```
 
@@ -280,7 +280,9 @@ auth administration stay on the privileged runtime.
 | --- | --- |
 | `objects(Type)`, `list`, `getObject` | `view:object` |
 | `requestAction`, `requestActionAndWait` | `apply:action` |
-| `runWorkflow` | `run:workflow` |
+| `requestWorkflowRun` | `run:workflow` |
+| `requestSyncRun` | `run:sync` |
+| `requestPipelineRun` | `run:pipeline` |
 | `listDatasets`, `getDatasetById` | `view:dataset` |
 | `listActions`, `getActionById` | `apply:action` |
 | `listWorkflows`, `getWorkflowById` | `run:workflow` |

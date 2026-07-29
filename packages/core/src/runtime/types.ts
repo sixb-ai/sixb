@@ -11,9 +11,11 @@ import type {
   ActionRegistry,
   ActionsRuntime,
   InferActionParams,
+  RequestActionAndWaitInput,
+  RequestActionInput,
   RequestActionResult,
 } from "../actions"
-import type { AgentsRuntime } from "../agents"
+import type { AgentsRuntime, RequestAgentRunInput, RequestAgentRunResult } from "../agents"
 import type { AuthRuntime } from "../auth"
 import type { AuthorizationContext } from "../authorization"
 import type { BlobStorage } from "../blob-storage"
@@ -50,6 +52,7 @@ import type {
 } from "../ontology/inference"
 import type { OntologyDocumentInput, OntologyRegistry, OntologySource } from "../ontology/registry"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../ontology/tokens"
+import type { PipelineRunRequestResult, RequestPipelineRunInput } from "../pipelines/request"
 import type { PipelineDefinition } from "../pipelines/types"
 import type {
   LinkProjectionDefinition,
@@ -63,9 +66,13 @@ import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition } from "../schedules"
 import type { SecurityRegistry } from "../security"
 import type { ActionRunRecord, ObjectLinkRow, ObjectRow, Storage } from "../storage"
-import type { SyncDefinition } from "../syncs"
+import type { RequestSyncRunInput, SyncDefinition, SyncRunRequestResult } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
-import type { WorkflowsRuntime } from "../workflows"
+import type {
+  RequestWorkflowRunInput,
+  WorkflowRunRequestResult,
+  WorkflowsRuntime,
+} from "../workflows"
 import type { ScopedSixb } from "./scoped"
 
 // ── Shared runtime context ──────────────────────────────────
@@ -1088,6 +1095,29 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
 
   /** Lookup a pipeline definition by id. */
   getPipelineById(pipelineId: string): PipelineDefinition | null
+
+  /**
+   * Request an action run by id. Queued, not run inline — see `requestActionAndWait`.
+   *
+   * Every start verb on this runtime is `request*` for that reason: `run*` implied inline execution
+   * that never happened.
+   */
+  requestAction(input: RequestActionInput): Promise<RequestActionResult>
+
+  /** Request an action run and wait for it to reach a terminal state. */
+  requestActionAndWait(input: RequestActionAndWaitInput): Promise<ActionRunRecord>
+
+  /** Queue a workflow run by id. */
+  requestWorkflowRun(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult>
+
+  /** Queue a sync run by id. */
+  requestSyncRun(input: RequestSyncRunInput): Promise<SyncRunRequestResult>
+
+  /** Queue a pipeline run by id. */
+  requestPipelineRun(input: RequestPipelineRunInput): Promise<PipelineRunRequestResult>
+
+  /** Queue an agent turn by id. */
+  requestAgentRun(input: RequestAgentRunInput): Promise<RequestAgentRunResult>
 
   /** All registered schedule definitions. */
   listSchedules(): readonly ScheduleDefinition[]

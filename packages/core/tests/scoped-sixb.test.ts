@@ -325,11 +325,11 @@ describe("sixb.as() operational access", () => {
     }
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    const result = await runner.runWorkflow(input)
+    const result = await runner.requestWorkflowRun(input)
     expect(result.runId).toBeString()
 
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
-    expect(operator.runWorkflow(input)).rejects.toThrow(AuthorizationError)
+    expect(operator.requestWorkflowRun(input)).rejects.toThrow(AuthorizationError)
   })
 
   test("event visibility is derived from grants", async () => {
@@ -384,6 +384,21 @@ describe("sixb.as() operational access", () => {
     ).rejects.toThrow(AuthorizationError)
   })
 
+  test("requestActionAndWait enforces the same grant as requestAction", async () => {
+    // It requests through `requestAction` and then only reads the run it just created, so the flat
+    // verb is safe to expose — but the assertion has to be pinned, not assumed from the call chain.
+    const sixb = createRuntime()
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+
+    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    await expect(
+      runner.requestActionAndWait({
+        actionId: "send-contract",
+        subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
+      })
+    ).rejects.toThrow(AuthorizationError)
+  })
+
   test("workflow catalog narrows to runnable workflows", () => {
     const sixb = createRuntime()
 
@@ -411,7 +426,7 @@ describe("sixb.as() operational access", () => {
       "agent-review-contract"
     )
 
-    const { runId } = await workflowOnlyPrincipal.runWorkflow({
+    const { runId } = await workflowOnlyPrincipal.requestWorkflowRun({
       workflowId: "agent-review-contract",
       input: { contract: { objectTypeId: "contract", primaryId: "c1" } },
     })
@@ -440,6 +455,26 @@ describe("sixb.as() operational access", () => {
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
     expect(operator.listSyncs()).toEqual([])
     expect(operator.getSyncById("sync-contracts")).toBeNull()
+  })
+
+  test("a listable sync or pipeline can actually be started, and only with can.run", async () => {
+    const sixb = createRuntime()
+    const runner = sixb.as(contextFor(sixb, ["operations"]))
+
+    // Before `request*`, `listSyncs()` advertised runnable syncs the caller had no way to start.
+    const sync = await runner.requestSyncRun({ syncId: "sync-contracts" })
+    expect(sync.syncId).toBe("sync-contracts")
+    expect(sync.runId).toStartWith("run_")
+
+    const pipeline = await runner.requestPipelineRun({ pipelineId: "contract-pipeline" })
+    expect(pipeline.pipelineId).toBe("contract-pipeline")
+    expect(pipeline.runId).toStartWith("run_")
+
+    // An existing definition the principal may not run is forbidden, not missing.
+    expect(runner.requestSyncRun({ syncId: "sync-invoices" })).rejects.toThrow(AuthorizationError)
+    expect(runner.requestPipelineRun({ pipelineId: "invoice-pipeline" })).rejects.toThrow(
+      AuthorizationError
+    )
   })
 
   test("pipeline catalog narrows to runnable pipelines", () => {
@@ -562,8 +597,11 @@ describe("ScopedSixb surface", () => {
         "objects",
         "readEvents",
         "requestAction",
+        "requestActionAndWait",
         "requestAgentRun",
-        "runWorkflow",
+        "requestPipelineRun",
+        "requestSyncRun",
+        "requestWorkflowRun",
       ].sort()
     )
   })
