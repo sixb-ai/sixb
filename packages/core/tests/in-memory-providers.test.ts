@@ -419,6 +419,32 @@ describe("InMemoryObjectStorage", () => {
     expect(page2.hasMore).toBe(false)
   })
 
+  test("listByPrimaryIdPage uses one stable order for mixed-case IDs", async () => {
+    const storage = new InMemoryObjectStorage()
+    const primaryIds = ["a", "Z", "b", "A"]
+    for (const [index, primaryId] of primaryIds.entries()) {
+      await storage.applyObjectUpsert(
+        makeObjectMutationEvent("p1", "Room", primaryId, {}, `${index + 1}`)
+      )
+    }
+
+    const listed: string[] = []
+    let afterPrimaryId: string | undefined
+    for (;;) {
+      const page = await storage.listByPrimaryIdPage({
+        projectId: "p1",
+        objectTypeId: "Room",
+        ...(afterPrimaryId ? { afterPrimaryId } : {}),
+        limit: 1,
+      })
+      listed.push(...page.objects.map((row) => row.primaryId))
+      if (!page.nextPrimaryId) break
+      afterPrimaryId = page.nextPrimaryId
+    }
+
+    expect(listed).toEqual(["A", "Z", "a", "b"])
+  })
+
   test("list with primaryIdPrefix filter", async () => {
     const storage = new InMemoryObjectStorage()
     await storage.applyObjectUpsert(makeObjectMutationEvent("p1", "Room", "room:a", {}, "1"))

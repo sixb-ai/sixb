@@ -27,6 +27,7 @@ import {
   Sixb,
   type StorageMigrator,
 } from "@sixb/core"
+import { reportEventDeliveryFailure } from "@sixb/core/internal/error-reporting"
 import {
   checkRuntimeLakeDefinitions,
   migrateRuntimeStorage,
@@ -726,6 +727,51 @@ describe("startSixbRuntime", () => {
       "logger:stop",
     ])
   })
+
+  test("flushes delivery failures reported during broker shutdown", async () => {
+    const calls: string[] = []
+    const handlerStarted = deferred<void>()
+    const releaseHandler = deferred<void>()
+    const sixb = new Sixb({
+      id: "cli-final-delivery-failure",
+      ontology: [Transaction],
+      broker: new InMemoryBroker(),
+      storage: new ClosableStorage(calls),
+      lakeStorage: createLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      onError: async (_error, context) => {
+        calls.push(`${context.type}:start`)
+        handlerStarted.resolve()
+        await releaseHandler.promise
+        calls.push(`${context.type}:done`)
+      },
+    })
+    sixb.closeBroker = async () => {
+      calls.push("broker:stop")
+      reportEventDeliveryFailure(sixb, new Error("final drain failed"), {
+        projectId: sixb.id,
+        occurredAt: "2026-01-02T03:04:05.000Z",
+        attempts: 2,
+        eventIds: ["event-final-drain"],
+      })
+    }
+
+    const stopping = stopSixbProviders(sixb)
+    await handlerStarted.promise
+    await Bun.sleep(0)
+
+    expect(calls).toEqual(["broker:stop", "event.delivery.failed:start"])
+
+    releaseHandler.resolve()
+    await stopping
+    expect(calls).toEqual([
+      "broker:stop",
+      "event.delivery.failed:start",
+      "event.delivery.failed:done",
+      "storage:stop",
+    ])
+  })
 })
 
 describe("split production runtime roles", () => {
@@ -923,6 +969,14 @@ describe("split runtime preparation", () => {
     await rules.stop()
   })
 })
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
 
 class LakeAccessTrackingStorage extends InMemoryLakeStorage {
   constructor(private readonly calls: string[]) {

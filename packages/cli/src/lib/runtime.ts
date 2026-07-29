@@ -86,6 +86,8 @@ export async function stopSixbProviders(sixb: LoadedSixb): Promise<void> {
   await stopQuietly(() => closeProvider(sixb.queues))
   // Stop tracked outbox publication before closing the storage it claims from.
   await stopQuietly(() => sixb.closeBroker())
+  // The final outbox drain can report delivery failures after the initial error flush.
+  await stopQuietly(() => flushSixbErrors(sixb))
   await stopQuietly(() => closeProvider(sixb.storage))
   await stopQuietly(() => closeProvider(sixb.lakeStorage))
   await stopQuietly(() => closeProvider(sixb.blobStorage))

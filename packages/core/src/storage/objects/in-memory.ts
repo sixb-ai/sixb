@@ -89,6 +89,12 @@ function objectRowKey(projectId: string, objectTypeId: string): string {
   return `${projectId}:${objectTypeId}`
 }
 
+function comparePrimaryIds(left: string, right: string): number {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
+}
+
 function sourceLinkBucketKey(projectId: string, sourceTypeId: string, sourceId: string): string {
   return `${projectId}:${sourceTypeId}:${sourceId}`
 }
@@ -809,8 +815,11 @@ export class InMemoryObjectStorage implements ObjectStorage {
     assertReconciliationPageLimit(params.limit)
     const bucket = this.rows.get(objectRowKey(params.projectId, params.objectTypeId))
     const rows = [...(bucket?.values() ?? [])]
-      .filter((row) => !params.afterPrimaryId || row.primaryId > params.afterPrimaryId)
-      .sort((left, right) => left.primaryId.localeCompare(right.primaryId))
+      .filter(
+        (row) =>
+          !params.afterPrimaryId || comparePrimaryIds(row.primaryId, params.afterPrimaryId) > 0
+      )
+      .sort((left, right) => comparePrimaryIds(left.primaryId, right.primaryId))
       .slice(0, params.limit + 1)
     const hasMore = rows.length > params.limit
     const objects = rows.slice(0, params.limit).map((row) => structuredClone(row))
