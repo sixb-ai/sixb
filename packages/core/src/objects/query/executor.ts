@@ -561,7 +561,7 @@ function expandIncludeSubtypes(query: ObjectQuery, ontology: OntologyRegistry): 
   switch (query.kind) {
     case "start": {
       if (query.includeSubtypes !== true) return query
-      const objectTypeIds = [query.objectTypeId, ...ontology.getSubTypes(query.objectTypeId)]
+      const objectTypeIds = [query.objectTypeId, ...ontology.listSubTypes(query.objectTypeId)]
       if (objectTypeIds.length === 1) return { kind: "start", objectTypeId: query.objectTypeId }
       return {
         kind: "set",
@@ -979,7 +979,7 @@ async function evaluateFallbackStart(
   maxRows: number
 ): Promise<FallbackEvaluation> {
   const objectTypeIds = query.includeSubtypes
-    ? [query.objectTypeId, ...options.ontology.getSubTypes(query.objectTypeId)]
+    ? [query.objectTypeId, ...options.ontology.listSubTypes(query.objectTypeId)]
     : [query.objectTypeId]
 
   const result = await options.storage.list({

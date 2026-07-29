@@ -19,7 +19,7 @@ export interface ActionWorkerSixb {
   readonly logs?: LogsRuntime
   readonly storage: Storage
   readonly queues: Queues
-  getActionDefinitions(): readonly ActionDefinition[]
+  listActions(): readonly ActionDefinition[]
   getActionById(actionId: string): ActionDefinition | null
 }
 
@@ -43,7 +43,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       idlePollMs: options.idlePollMs,
     })
 
-    const actions = sixb.getActionDefinitions()
+    const actions = sixb.listActions()
     if (actions.length === 0) {
       console.log("[SixbActionWorker] No action definitions registered; worker will idle.")
     }
@@ -179,7 +179,7 @@ function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
 
 const requiredFacadeMethods = [
   "connector",
-  "getActionsForType",
+  "listActionsForType",
   "getPrimaryPropertyId",
   "getValueTypesById",
   "isValidLinkTarget",

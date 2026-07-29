@@ -145,7 +145,7 @@ describe("PipelineWorker", () => {
         ...sixb.storage,
         pipelineRuns: undefined,
       },
-      getPipelineDefinitions: () => sixb.getPipelineDefinitions(),
+      listPipelines: () => sixb.listPipelines(),
       getPipelineById: (pipelineId: string) => sixb.getPipelineById(pipelineId),
       getDatasetById: (datasetId: string) => sixb.getDatasetById(datasetId),
     }

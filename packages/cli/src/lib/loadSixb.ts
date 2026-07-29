@@ -29,24 +29,24 @@ export interface LoadedSixb extends SixbRuntimeContext {
   readonly broker: Broker
   readonly auth: AuthRuntime
   listObjectTypes(): readonly unknown[]
-  getActionDefinitions(): readonly ActionDefinition[]
+  listActions(): readonly ActionDefinition[]
   getActionById(actionId: string): ActionDefinition | null
-  getSyncDefinitions(): readonly SyncDefinition[]
-  getPipelineDefinitions(): readonly PipelineDefinition[]
+  listSyncs(): readonly SyncDefinition[]
+  listPipelines(): readonly PipelineDefinition[]
   getPipelineById(pipelineId: string): PipelineDefinition | null
-  getScheduleDefinitions(): readonly ScheduleDefinition[]
+  listSchedules(): readonly ScheduleDefinition[]
   readonly workflows: WorkflowsRuntime
   readonly agents: AgentsRuntime
-  getObjectProjections(): readonly ObjectProjectionDefinition[]
-  getLinkProjections(): readonly LinkProjectionDefinition[]
-  getTelemetryProjections(): readonly TelemetryProjectionDefinition[]
-  getDatasetDefinitions(): readonly DatasetDefinition[]
-  getRuleDefinitions(): readonly RuleDefinition[]
+  listObjectProjections(): readonly ObjectProjectionDefinition[]
+  listLinkProjections(): readonly LinkProjectionDefinition[]
+  listTelemetryProjections(): readonly TelemetryProjectionDefinition[]
+  listDatasets(): readonly DatasetDefinition[]
+  listRules(): readonly RuleDefinition[]
   getDatasetById(datasetId: string): DatasetDefinition | null
   getProjectionById(projectionId: string): ProjectionDefinition | null
   getSyncById(syncId: string): SyncDefinition | null
   getRuleById(ruleId: string): RuleDefinition | null
-  getSubTypes(objectTypeId: string): string[]
+  listSubTypes(objectTypeId: string): string[]
   connector<TAdapter extends ConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>
   ): Promise<ConnectorClient<TAdapter>>
@@ -84,18 +84,18 @@ const REQUIRED_RUNTIME_PROPERTIES = [
 
 const REQUIRED_DEFINITION_METHODS = [
   "listObjectTypes",
-  "getSubTypes",
-  "getActionDefinitions",
+  "listSubTypes",
+  "listActions",
   "getActionById",
-  "getSyncDefinitions",
-  "getPipelineDefinitions",
+  "listSyncs",
+  "listPipelines",
   "getPipelineById",
-  "getScheduleDefinitions",
-  "getObjectProjections",
-  "getLinkProjections",
-  "getTelemetryProjections",
-  "getDatasetDefinitions",
-  "getRuleDefinitions",
+  "listSchedules",
+  "listObjectProjections",
+  "listLinkProjections",
+  "listTelemetryProjections",
+  "listDatasets",
+  "listRules",
   "getDatasetById",
   "getProjectionById",
   "getSyncById",

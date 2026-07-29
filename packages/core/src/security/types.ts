@@ -97,12 +97,12 @@ export interface RegisteredSecurityDefinitions {
 }
 
 export interface SecurityRegistry {
-  getGroupDefinitions(): readonly GroupDefinition[]
+  listGroups(): readonly GroupDefinition[]
   getGroupById(groupId: string): GroupDefinition | null
-  getRoleDefinitions(): readonly RoleDefinition[]
+  listRoles(): readonly RoleDefinition[]
   getRoleById(roleId: string): RoleDefinition | null
   /** Roles with their grants pre-expanded to concrete id sets for resolution. */
-  getResolvedRoles(): readonly ResolvedRole[]
-  getMembershipPolicyDefinitions(): readonly MembershipPolicyDefinition[]
+  listResolvedRoles(): readonly ResolvedRole[]
+  listMembershipPolicies(): readonly MembershipPolicyDefinition[]
   getMembershipPolicyById(policyId: string): MembershipPolicyDefinition | null
 }

@@ -413,9 +413,9 @@ describe("ProjectionWorker", () => {
       lakeStorage: sixb.lakeStorage,
       blobStorage: sixb.blobStorage,
       queues: sixb.queues,
-      getObjectProjections: () => sixb.getObjectProjections(),
-      getLinkProjections: () => sixb.getLinkProjections(),
-      getTelemetryProjections: () => sixb.getTelemetryProjections(),
+      listObjectProjections: () => sixb.listObjectProjections(),
+      listLinkProjections: () => sixb.listLinkProjections(),
+      listTelemetryProjections: () => sixb.listTelemetryProjections(),
       getDatasetById: (datasetId: string) => sixb.getDatasetById(datasetId),
       getProjectionById: (projectionId: string) => sixb.getProjectionById(projectionId),
     }

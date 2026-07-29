@@ -589,7 +589,7 @@ export class AuthRuntime {
       principal: session.principal,
       sessionId: session.credentialSource === "session" ? session.session.id : undefined,
       groupIds: session.groupIds,
-      roles: this.security.getResolvedRoles(),
+      roles: this.security.listResolvedRoles(),
     })
   }
 
@@ -1129,7 +1129,7 @@ export class AuthRuntime {
 
   private scopedGroupOptions(groupIds: ReadonlySet<string>): InvitationGroupOption[] {
     return this.security
-      .getGroupDefinitions()
+      .listGroups()
       .filter((group) => groupIds.has(group.id))
       .map((group) => ({
         id: group.id,
@@ -1349,7 +1349,7 @@ export class AuthRuntime {
 
   private resolveMembershipPolicyScopeForUser(callerGroupIds: readonly string[]) {
     return resolveMembershipPolicyScope({
-      membershipPolicies: this.security.getMembershipPolicyDefinitions(),
+      membershipPolicies: this.security.listMembershipPolicies(),
       callerGroupIds,
     })
   }
@@ -1374,7 +1374,7 @@ export class AuthRuntime {
   ): void {
     // Check only the groups this invitation assigns. Existing memberships may
     // be outside the caller's policy scope and must not affect this response.
-    const roles = this.security.getResolvedRoles()
+    const roles = this.security.listResolvedRoles()
     const authorization = resolveAuthorizationContext({
       principal: { type: "user", id: "invited-user" },
       groupIds,

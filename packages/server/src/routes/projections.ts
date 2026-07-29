@@ -72,13 +72,13 @@ function listViewableProjections(
 ): ViewableProjectionCatalog {
   return {
     objectProjections: sixb
-      .getObjectProjections()
+      .listObjectProjections()
       .filter((projection) => canViewProjection(authz, projection)),
     linkProjections: sixb
-      .getLinkProjections()
+      .listLinkProjections()
       .filter((projection) => canViewProjection(authz, projection)),
     telemetryProjections: sixb
-      .getTelemetryProjections()
+      .listTelemetryProjections()
       .filter((projection) => canViewProjection(authz, projection)),
   }
 }

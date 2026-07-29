@@ -88,11 +88,11 @@ function buildDatasetReferenceIndex(
     return references
   }
 
-  for (const sync of scoped ? scoped.listSyncs() : sixb.getSyncDefinitions()) {
+  for (const sync of scoped ? scoped.listSyncs() : sixb.listSyncs()) {
     referencesFor(sync.target.dataset.id).syncIds.push(sync.id)
   }
 
-  for (const pipeline of scoped ? scoped.listPipelines() : sixb.getPipelineDefinitions()) {
+  for (const pipeline of scoped ? scoped.listPipelines() : sixb.listPipelines()) {
     const sourceDatasetIds = new Set<string>()
     const targetDatasetIds = new Set<string>()
     for (const node of pipeline.graph.nodes) {
@@ -113,9 +113,9 @@ function buildDatasetReferenceIndex(
   // projection's lineage only when it can view the projection's source
   // dataset. Privileged callers (no scoped runtime) see them all.
   for (const projection of [
-    ...sixb.getObjectProjections(),
-    ...sixb.getLinkProjections(),
-    ...sixb.getTelemetryProjections(),
+    ...sixb.listObjectProjections(),
+    ...sixb.listLinkProjections(),
+    ...sixb.listTelemetryProjections(),
   ]) {
     if (!scoped || scoped.getDatasetById(projection.datasetId)) {
       referencesFor(projection.datasetId).projectionIds.push(projection.id)
@@ -223,7 +223,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
         const { set } = context
         const { scoped } = requestAuthState(context)
         try {
-          const definitions = scoped ? scoped.listDatasets() : sixb.getDatasetDefinitions()
+          const definitions = scoped ? scoped.listDatasets() : sixb.listDatasets()
           return await serializeDatasetCatalogItems(sixb, definitions, scoped)
         } catch (error) {
           set.status = 400

@@ -76,7 +76,7 @@ export async function migrateRuntimeStorage(sixb: LoadedSixb): Promise<void> {
 export async function checkRuntimeLakeDefinitions(sixb: LoadedSixb): Promise<void> {
   await assertLakeDatasetDefinitionsCompatible({
     lakeStorage: sixb.lakeStorage,
-    definitions: sixb.getDatasetDefinitions(),
+    definitions: sixb.listDatasets(),
   })
 }
 
@@ -97,7 +97,7 @@ export async function stopSixbProviders(sixb: LoadedSixb): Promise<void> {
 export async function startRulesRuntime(sixb: LoadedSixb): Promise<RunningRulesRuntime> {
   let rulesWorker: RulesWorker | null = null
 
-  if (sixb.getRuleDefinitions().length > 0) {
+  if (sixb.listRules().length > 0) {
     rulesWorker = new RulesWorker(sixb)
     await rulesWorker.start()
   }
@@ -125,9 +125,9 @@ export async function startOrchestratorRuntime(
 ): Promise<RunningOrchestratorRuntime> {
   const projections = getProjectionDispatchDescriptors(sixb)
   const { routes, diagnostics } = compileRoutesWithDiagnostics({
-    schedules: sixb.getScheduleDefinitions(),
-    syncs: sixb.getSyncDefinitions(),
-    pipelines: sixb.getPipelineDefinitions(),
+    schedules: sixb.listSchedules(),
+    syncs: sixb.listSyncs(),
+    pipelines: sixb.listPipelines(),
     projections,
     workflows: sixb.workflows.list(),
   })
@@ -228,7 +228,7 @@ export async function startSixbRuntime(
     rulesWorker = rulesRuntime.rulesWorker
 
     if (options.cohostWorkers) {
-      if (sixb.getActionDefinitions().length > 0) {
+      if (sixb.listActions().length > 0) {
         actionWorker = new ActionWorker(sixb)
         await actionWorker.start()
       }
@@ -241,15 +241,15 @@ export async function startSixbRuntime(
       }
 
       const projectionCount =
-        sixb.getObjectProjections().length +
-        sixb.getLinkProjections().length +
-        sixb.getTelemetryProjections().length
+        sixb.listObjectProjections().length +
+        sixb.listLinkProjections().length +
+        sixb.listTelemetryProjections().length
       if (projectionCount > 0) {
         projectionWorker = new ProjectionWorker(sixb)
         await projectionWorker.start()
       }
 
-      if (sixb.getPipelineDefinitions().length > 0) {
+      if (sixb.listPipelines().length > 0) {
         pipelineWorker = new PipelineWorker(sixb)
         await pipelineWorker.start()
       }
@@ -259,7 +259,7 @@ export async function startSixbRuntime(
         await workflowWorker.start()
       }
 
-      if (sixb.getSyncDefinitions().length > 0) {
+      if (sixb.listSyncs().length > 0) {
         syncWorker = new SyncWorker(sixb)
         await syncWorker.start()
       }

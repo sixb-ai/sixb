@@ -306,16 +306,16 @@ describe("Sixb extends validation", () => {
   })
 })
 
-// ── getSubTypes ─────────────────────────────────────────────
+// ── listSubTypes ─────────────────────────────────────────────
 
-describe("getSubTypes", () => {
+describe("listSubTypes", () => {
   test("returns direct and transitive sub-types", () => {
     const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
 
-    const subTypes = sixb.getSubTypes("Equipment")
+    const subTypes = sixb.listSubTypes("Equipment")
     expect(subTypes).toContain("HVACEquipment")
     expect(subTypes).toContain("AHU")
     expect(subTypes).not.toContain("Location")
@@ -327,8 +327,8 @@ describe("getSubTypes", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getSubTypes("AHU")).toEqual([])
-    expect(sixb.getSubTypes("Location")).toEqual([])
+    expect(sixb.listSubTypes("AHU")).toEqual([])
+    expect(sixb.listSubTypes("Location")).toEqual([])
   })
 })
 
@@ -374,17 +374,17 @@ describe("subclass-aware list", () => {
 // ── Multi-parent subtype queries ─────────────────────────────
 
 describe("multi-parent subtype queries", () => {
-  test("getSubTypes includes types registered via parents", () => {
+  test("listSubTypes includes types registered via parents", () => {
     const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location, WaterHeater, Boiler],
       ...createTestRuntimeDeps(),
     })
 
-    const waterHeaterSubs = sixb.getSubTypes("WaterHeater")
+    const waterHeaterSubs = sixb.listSubTypes("WaterHeater")
     expect(waterHeaterSubs).toContain("Boiler")
 
     // Also a sub-type of HVACEquipment via extends
-    const hvacSubs = sixb.getSubTypes("HVACEquipment")
+    const hvacSubs = sixb.listSubTypes("HVACEquipment")
     expect(hvacSubs).toContain("Boiler")
   })
 

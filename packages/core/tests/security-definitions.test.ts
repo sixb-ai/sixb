@@ -247,8 +247,8 @@ export const memberAdministration = defineMembershipPolicy("member-administratio
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.security.getGroupDefinitions()).toEqual([securityAdmins, commercial])
-    expect(sixb.security.getMembershipPolicyDefinitions()).toEqual([membershipPolicy])
+    expect(sixb.security.listGroups()).toEqual([securityAdmins, commercial])
+    expect(sixb.security.listMembershipPolicies()).toEqual([membershipPolicy])
   })
 
   test("runtime registration rejects duplicate group ids", () => {
@@ -334,9 +334,9 @@ export const memberAdministration = defineMembershipPolicy("member-administratio
   test("empty security definitions remain allowed at the definition layer", () => {
     const sixb = createRuntime()
 
-    expect(sixb.security.getGroupDefinitions()).toEqual([])
-    expect(sixb.security.getRoleDefinitions()).toEqual([])
-    expect(sixb.security.getMembershipPolicyDefinitions()).toEqual([])
+    expect(sixb.security.listGroups()).toEqual([])
+    expect(sixb.security.listRoles()).toEqual([])
+    expect(sixb.security.listMembershipPolicies()).toEqual([])
   })
 })
 
@@ -716,7 +716,7 @@ describe("role definitions", () => {
       actions: [reboot],
     })
 
-    expect(sixb.security.getRoleDefinitions()).toEqual([role])
+    expect(sixb.security.listRoles()).toEqual([role])
     expect(sixb.security.getRoleById("contract.operator")).toEqual(role)
     expect(sixb.security.getRoleById("missing")).toBeNull()
   })

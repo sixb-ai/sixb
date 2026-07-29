@@ -12,7 +12,7 @@ function serializeConnector(
     id: connector.id,
     type: connector.adapter.type,
     syncIds: sixb
-      .getSyncDefinitions()
+      .listSyncs()
       .filter((sync) => sync.connector.id === connector.id)
       .map((sync) => sync.id),
     webhooks: sixb

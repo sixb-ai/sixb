@@ -182,19 +182,19 @@ describe("ActionRegistry", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getActionDefinitions().map((action) => action.id)).toEqual([
+    expect(sixb.listActions().map((action) => action.id)).toEqual([
       "setTemperature",
       "reboot",
       "prepareSuite",
       "createRoom",
     ])
     expect(sixb.getActionById("reboot")?.id).toBe(reboot.id)
-    expect(sixb.getGlobalActions().map((action) => action.id)).toEqual(["createRoom"])
-    expect(sixb.getActionsForType(Room).map((action) => action.id)).toEqual([
+    expect(sixb.listGlobalActions().map((action) => action.id)).toEqual(["createRoom"])
+    expect(sixb.listActionsForType(Room).map((action) => action.id)).toEqual([
       "setTemperature",
       "reboot",
     ])
-    expect(sixb.getActionsForType(SuiteRoom).map((action) => action.id)).toEqual([
+    expect(sixb.listActionsForType(SuiteRoom).map((action) => action.id)).toEqual([
       "setTemperature",
       "reboot",
       "prepareSuite",

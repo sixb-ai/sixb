@@ -222,7 +222,7 @@ describe("Sixb sync registration", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getSyncDefinitions().map((definition) => definition.id)).toEqual(["sync-orders"])
+    expect(sixb.listSyncs().map((definition) => definition.id)).toEqual(["sync-orders"])
     expect(sixb.getSyncById("sync-orders")).toBe(sync)
     expect(sixb.getSyncById("missing-sync")).toBeNull()
   })

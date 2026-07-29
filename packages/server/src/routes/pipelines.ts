@@ -134,7 +134,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/pipelines",
       async (context) => {
         const { scoped } = requestAuthState(context)
-        const pipelines = scoped ? scoped.listPipelines() : sixb.getPipelineDefinitions()
+        const pipelines = scoped ? scoped.listPipelines() : sixb.listPipelines()
         const latestRuns = await getLatestPipelineRuns(
           sixb,
           pipelines.map((pipeline) => pipeline.id)

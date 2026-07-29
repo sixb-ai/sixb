@@ -209,9 +209,7 @@ export const transactionRequiresDocument = defineRule("transaction.requires-docu
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getRuleDefinitions().map((rule) => rule.id)).toEqual([
-      "transaction.requires-document",
-    ])
+    expect(sixb.listRules().map((rule) => rule.id)).toEqual(["transaction.requires-document"])
     expect(sixb.getRuleById("transaction.requires-document")?.predicate).toEqual({
       kind: "link",
       linkId: "document",

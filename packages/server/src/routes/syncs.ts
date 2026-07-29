@@ -98,7 +98,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/syncs",
       async (context) => {
         const { scoped } = requestAuthState(context)
-        const syncs = scoped ? scoped.listSyncs() : sixb.getSyncDefinitions()
+        const syncs = scoped ? scoped.listSyncs() : sixb.listSyncs()
         const latestRuns = await getLatestSyncRuns(
           sixb,
           syncs.map((sync) => sync.id)

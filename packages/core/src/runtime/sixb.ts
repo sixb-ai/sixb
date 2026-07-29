@@ -213,7 +213,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       syncIds: new Set((options.syncs ?? []).map((sync) => sync.id)),
       pipelineIds: new Set((options.pipelines ?? []).map((pipeline) => pipeline.id)),
       agentIds: new Set(agents.map((agent) => agent.id)),
-      getSubTypes: (objectTypeId) => this.ontology.getSubTypes(objectTypeId),
+      getSubTypes: (objectTypeId) => this.ontology.listSubTypes(objectTypeId),
     })
     this.auth = new AuthRuntime({
       projectId: this.projectId,
@@ -422,7 +422,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.ontology.getValueTypesById()
   }
 
-  getActionDefinitions(): readonly ActionDefinition[] {
+  listActions(): readonly ActionDefinition[] {
     return this.actionRegistry.list()
   }
 
@@ -430,15 +430,15 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.actionRegistry.getById(actionId)
   }
 
-  getGlobalActions(): readonly ActionDefinition[] {
+  listGlobalActions(): readonly ActionDefinition[] {
     return this.actionRegistry.getGlobalActions()
   }
 
-  getActionsForType(objectType: ObjectType): readonly ActionDefinition[] {
+  listActionsForType(objectType: ObjectType): readonly ActionDefinition[] {
     return this.actionRegistry.getActionsForType(objectType)
   }
 
-  getDatasetDefinitions(): readonly DatasetDefinition[] {
+  listDatasets(): readonly DatasetDefinition[] {
     return [...this.datasetsById.values()]
   }
 
@@ -446,7 +446,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.datasetsById.get(datasetId) ?? null
   }
 
-  getSyncDefinitions(): readonly SyncDefinition[] {
+  listSyncs(): readonly SyncDefinition[] {
     return [...this.syncsById.values()]
   }
 
@@ -454,7 +454,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.syncsById.get(syncId) ?? null
   }
 
-  getPipelineDefinitions(): readonly PipelineDefinition[] {
+  listPipelines(): readonly PipelineDefinition[] {
     return [...this.pipelinesById.values()]
   }
 
@@ -462,7 +462,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.pipelinesById.get(pipelineId) ?? null
   }
 
-  getScheduleDefinitions(): readonly ScheduleDefinition[] {
+  listSchedules(): readonly ScheduleDefinition[] {
     return [...this.schedulesById.values()]
   }
 
@@ -470,7 +470,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.schedulesById.get(scheduleId) ?? null
   }
 
-  getRuleDefinitions(): readonly RuleDefinition[] {
+  listRules(): readonly RuleDefinition[] {
     return [...this.rulesById.values()]
   }
 
@@ -514,7 +514,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     if (this.schedulerRuntime || this.schedulesById.size === 0) return
 
     const runtime = new SchedulerRuntime({
-      schedules: this.getScheduleDefinitions(),
+      schedules: this.listSchedules(),
       events: this.eventsRuntime,
     })
 
@@ -573,15 +573,15 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       { ...this.runtimeContext, authorization: context },
       {
         datasets: {
-          list: () => this.getDatasetDefinitions(),
+          list: () => this.listDatasets(),
           getById: (datasetId) => this.getDatasetById(datasetId),
         },
         syncs: {
-          list: () => this.getSyncDefinitions(),
+          list: () => this.listSyncs(),
           getById: (syncId) => this.getSyncById(syncId),
         },
         pipelines: {
-          list: () => this.getPipelineDefinitions(),
+          list: () => this.listPipelines(),
           getById: (pipelineId) => this.getPipelineById(pipelineId),
         },
         workflows: this.workflows,
@@ -660,16 +660,16 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.ontology.getPrimaryPropertyId(objectTypeId)
   }
 
-  getObjectProjections(): readonly ObjectProjectionDefinition[] {
-    return this.projectionRegistry.getObjectProjections()
+  listObjectProjections(): readonly ObjectProjectionDefinition[] {
+    return this.projectionRegistry.listObjectProjections()
   }
 
-  getLinkProjections(): readonly LinkProjectionDefinition[] {
-    return this.projectionRegistry.getLinkProjections()
+  listLinkProjections(): readonly LinkProjectionDefinition[] {
+    return this.projectionRegistry.listLinkProjections()
   }
 
-  getTelemetryProjections(): readonly TelemetryProjectionDefinition[] {
-    return this.projectionRegistry.getTelemetryProjections()
+  listTelemetryProjections(): readonly TelemetryProjectionDefinition[] {
+    return this.projectionRegistry.listTelemetryProjections()
   }
 
   getProjectionById(projectionId: string): ProjectionDefinition | null {
@@ -696,8 +696,8 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return objectService.listObjects(this.runtimeContext, params)
   }
 
-  getSubTypes(objectTypeId: string): string[] {
-    return this.ontology.getSubTypes(objectTypeId)
+  listSubTypes(objectTypeId: string): string[] {
+    return this.ontology.listSubTypes(objectTypeId)
   }
 
   isValidLinkTarget(expected: string | string[], actual: string): boolean {

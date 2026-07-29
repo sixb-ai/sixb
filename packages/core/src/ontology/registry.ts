@@ -216,7 +216,7 @@ export class OntologyRegistry {
   }
 
   /** Collect all transitive sub-types of the given object type id. */
-  getSubTypes(objectTypeId: string): string[] {
+  listSubTypes(objectTypeId: string): string[] {
     const result: string[] = []
     const collect = (typeId: string): void => {
       const children = this.subTypesById.get(typeId)
@@ -231,7 +231,7 @@ export class OntologyRegistry {
   }
 
   /** Get the structural extends chain from root ancestor to the provided type. */
-  getAncestorChain(objectType: ObjectType): readonly ObjectTypeWithPropertyTokens[] {
+  listAncestorChain(objectType: ObjectType): readonly ObjectTypeWithPropertyTokens[] {
     const chain: ObjectTypeWithPropertyTokens[] = []
     let current: ObjectTypeWithPropertyTokens | null = this.resolveObjectType(objectType.id)
     const seen = new Set<string>()
@@ -261,7 +261,7 @@ export class OntologyRegistry {
     const types = Array.isArray(expected) ? expected : [expected]
     if (types.includes("*")) return true
     for (const type of types) {
-      if (actual === type || this.getSubTypes(type).includes(actual)) return true
+      if (actual === type || this.listSubTypes(type).includes(actual)) return true
     }
     return false
   }

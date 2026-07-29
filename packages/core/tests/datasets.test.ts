@@ -146,7 +146,7 @@ describe("Sixb dataset registration", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getDatasetDefinitions().map((dataset) => dataset.id)).toEqual([
+    expect(sixb.listDatasets().map((dataset) => dataset.id)).toEqual([
       "raw.erp.orders",
       "canonical.orders",
     ])

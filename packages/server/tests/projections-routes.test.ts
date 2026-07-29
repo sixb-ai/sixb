@@ -66,9 +66,9 @@ function createSixbStub(
   return {
     id: "my-app",
     storage: { projectionRuns },
-    getObjectProjections: () => [roomsProjection, sensorsProjection],
-    getLinkProjections: () => [],
-    getTelemetryProjections: () => [],
+    listObjectProjections: () => [roomsProjection, sensorsProjection],
+    listLinkProjections: () => [],
+    listTelemetryProjections: () => [],
     getProjectionById: (id: string) =>
       [roomsProjection, sensorsProjection].find((p) => p.id === id) ?? null,
   } as unknown as Sixb<readonly OntologySource[]>

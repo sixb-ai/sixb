@@ -510,7 +510,7 @@ function createRuntime(
     id: projectId,
     events: options.events ?? createEventsRuntime(),
     storage: options.storage ?? new InMemoryStorage(),
-    getRuleDefinitions: () => rules,
+    listRules: () => rules,
     getRuleById: (ruleId) => rules.find((rule) => rule.id === ruleId) ?? null,
   }
 }

@@ -16,7 +16,7 @@ class RuntimeSecurityRegistry implements SecurityRegistry {
     private readonly resolvedRoles: readonly ResolvedRole[]
   ) {}
 
-  getGroupDefinitions(): readonly GroupDefinition[] {
+  listGroups(): readonly GroupDefinition[] {
     return [...this.groupsById.values()]
   }
 
@@ -24,7 +24,7 @@ class RuntimeSecurityRegistry implements SecurityRegistry {
     return this.groupsById.get(groupId) ?? null
   }
 
-  getRoleDefinitions(): readonly RoleDefinition[] {
+  listRoles(): readonly RoleDefinition[] {
     return [...this.rolesById.values()]
   }
 
@@ -32,11 +32,11 @@ class RuntimeSecurityRegistry implements SecurityRegistry {
     return this.rolesById.get(roleId) ?? null
   }
 
-  getResolvedRoles(): readonly ResolvedRole[] {
+  listResolvedRoles(): readonly ResolvedRole[] {
     return this.resolvedRoles
   }
 
-  getMembershipPolicyDefinitions(): readonly MembershipPolicyDefinition[] {
+  listMembershipPolicies(): readonly MembershipPolicyDefinition[] {
     return [...this.membershipPoliciesById.values()]
   }
 

@@ -36,7 +36,7 @@ function atlasContext(
   return resolveAuthorizationContext({
     principal: { type: "user", id: userId },
     groupIds,
-    roles: sixb.security.getResolvedRoles(),
+    roles: sixb.security.listResolvedRoles(),
   })
 }
 
@@ -45,7 +45,7 @@ describe("auth example Atlas authorization", () => {
     const sixb = await createAuthExampleRuntime()
     await seedAuthExampleObjects(sixb)
 
-    const roles = sixb.security.getResolvedRoles()
+    const roles = sixb.security.listResolvedRoles()
     const teamMemberContext = atlasContext(sixb, ["team-members"])
     const adminContext = atlasContext(sixb, ["security-admins"])
     const noGroupsContext = atlasContext(sixb, [])

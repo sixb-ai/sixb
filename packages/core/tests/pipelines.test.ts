@@ -227,7 +227,7 @@ describe("Sixb pipeline registration", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getPipelineDefinitions().map((d) => d.id)).toEqual(["normalize-orders"])
+    expect(sixb.listPipelines().map((d) => d.id)).toEqual(["normalize-orders"])
     expect(sixb.getPipelineById("normalize-orders")).toBe(pipeline)
     expect(sixb.getPipelineById("missing-pipeline")).toBeNull()
   })

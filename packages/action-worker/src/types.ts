@@ -21,7 +21,7 @@ export interface ActionWorkerSixbFacade
     | "blobStorage"
     | "connector"
     | "appendTelemetry"
-    | "getActionsForType"
+    | "listActionsForType"
     | "getPrimaryPropertyId"
     | "getValueTypesById"
     | "isValidLinkTarget"

@@ -103,15 +103,15 @@ export class ProjectionRegistry {
     }
   }
 
-  getObjectProjections(): readonly ObjectProjectionDefinition[] {
+  listObjectProjections(): readonly ObjectProjectionDefinition[] {
     return this.objectProjections
   }
 
-  getLinkProjections(): readonly LinkProjectionDefinition[] {
+  listLinkProjections(): readonly LinkProjectionDefinition[] {
     return this.linkProjections
   }
 
-  getTelemetryProjections(): readonly TelemetryProjectionDefinition[] {
+  listTelemetryProjections(): readonly TelemetryProjectionDefinition[] {
     return this.telemetryProjections
   }
 

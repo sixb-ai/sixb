@@ -29,7 +29,7 @@ export interface SyncWorkerSixb {
   readonly blobStorage: BlobStorage
   readonly queues: Queues
   readonly storage: Storage
-  getSyncDefinitions(): readonly SyncDefinition[]
+  listSyncs(): readonly SyncDefinition[]
   getSyncById(syncId: string): SyncDefinition | null
   getDatasetById(datasetId: string): DatasetDefinition | null
   connector<TAdapter extends ConnectorAdapter>(
@@ -42,7 +42,7 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
   private readonly sixb: SyncWorkerSixb
 
   constructor(sixb: SyncWorkerSixb) {
-    if (sixb.getSyncDefinitions().length === 0) {
+    if (sixb.listSyncs().length === 0) {
       throw new Error("[SixbSyncWorker] No sync definitions are registered.")
     }
 

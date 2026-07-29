@@ -54,7 +54,7 @@ interface TestSixb {
   readonly storage: InMemoryStorage
   readonly queues: InMemoryQueues
   upsertObject(objectTypeId: string, properties: Record<string, unknown>): Promise<ObjectRow>
-  getActionDefinitions(): readonly ActionDefinition[]
+  listActions(): readonly ActionDefinition[]
   getActionById(actionId: string): ActionDefinition | null
 }
 
@@ -87,7 +87,7 @@ describe("ActionWorker", () => {
       events: new EventsRuntime({ projectId: "idle-project", broker: new InMemoryBroker() }),
       storage,
       queues: new InMemoryQueues(),
-      getActionDefinitions() {
+      listActions() {
         return []
       },
       getActionById() {
@@ -116,7 +116,7 @@ describe("ActionWorker", () => {
           }),
           storage,
           queues: new InMemoryQueues(),
-          getActionDefinitions() {
+          listActions() {
             return [noop]
           },
           getActionById(actionId) {

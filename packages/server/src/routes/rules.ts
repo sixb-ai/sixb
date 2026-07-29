@@ -30,7 +30,7 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
     .get(
       "/api/rules",
       () => {
-        return sixb.getRuleDefinitions().map(serializeRule)
+        return sixb.listRules().map(serializeRule)
       },
       {
         response: { 200: RuleSchema.array() },

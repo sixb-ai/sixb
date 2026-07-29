@@ -165,7 +165,7 @@ async function resolveAgentRunAuthState(
   const authz = resolveAuthorizationContext({
     principal: run.executionPrincipal,
     groupIds: memberships.map((membership) => membership.groupId),
-    roles: sixb.security.getResolvedRoles(),
+    roles: sixb.security.listResolvedRoles(),
   })
 
   return {

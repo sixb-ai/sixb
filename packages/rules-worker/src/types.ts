@@ -36,7 +36,7 @@ export interface RulesWorkerSixb {
   readonly id: string
   readonly events: DomainEventLog
   readonly storage: Storage
-  getRuleDefinitions(): readonly RuleDefinition[]
+  listRules(): readonly RuleDefinition[]
   getRuleById(ruleId: string): RuleDefinition | null
 }
 

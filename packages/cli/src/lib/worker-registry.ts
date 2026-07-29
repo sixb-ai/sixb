@@ -70,24 +70,24 @@ export function resolveWorkerTypeToStart(requestedWorker?: string): string {
 export function resolveRegisteredWorkerTypes(sixb: LoadedSixb): readonly string[] {
   const workerTypes: string[] = []
 
-  if (sixb.getSyncDefinitions().length > 0) {
+  if (sixb.listSyncs().length > 0) {
     workerTypes.push("sync")
   }
 
-  if (sixb.getPipelineDefinitions().length > 0) {
+  if (sixb.listPipelines().length > 0) {
     workerTypes.push("pipeline")
   }
 
   if (
-    sixb.getObjectProjections().length +
-      sixb.getLinkProjections().length +
-      sixb.getTelemetryProjections().length >
+    sixb.listObjectProjections().length +
+      sixb.listLinkProjections().length +
+      sixb.listTelemetryProjections().length >
     0
   ) {
     workerTypes.push("projection")
   }
 
-  if (sixb.getActionDefinitions().length > 0) {
+  if (sixb.listActions().length > 0) {
     workerTypes.push("action")
   }
 

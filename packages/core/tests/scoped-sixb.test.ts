@@ -195,7 +195,7 @@ function contextFor(sixb: { security: SecurityRegistry }, groupIds: readonly str
   return resolveAuthorizationContext({
     principal,
     groupIds,
-    roles: sixb.security.getResolvedRoles(),
+    roles: sixb.security.listResolvedRoles(),
   })
 }
 

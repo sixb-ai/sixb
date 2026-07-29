@@ -177,7 +177,7 @@ function asUser(
   return resolveAuthorizationContext({
     principal: { type: "user", id: userId },
     groupIds,
-    roles: sixb.security.getResolvedRoles(),
+    roles: sixb.security.listResolvedRoles(),
   })
 }
 

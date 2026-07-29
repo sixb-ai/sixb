@@ -134,12 +134,12 @@ export const syncOrders = defineSync("sync-orders")
     await import(pathToFileURL(join(projectRoot, "ontology", "room.ts")).href)
     const client = await sixb.connector(erpDb)
 
-    expect(sixb.getActionDefinitions().map((action) => action.id)).toEqual(["setTemperature"])
+    expect(sixb.listActions().map((action) => action.id)).toEqual(["setTemperature"])
     expect(sixb.getActionsForType(sixb.listObjectTypes()[0]).map((action) => action.id)).toEqual([
       "setTemperature",
     ])
-    expect(sixb.getDatasetDefinitions().map((dataset) => dataset.id)).toEqual(["raw.erp.orders"])
-    expect(sixb.getSyncDefinitions().map((sync) => sync.id)).toEqual(["sync-orders"])
+    expect(sixb.listDatasets().map((dataset) => dataset.id)).toEqual(["raw.erp.orders"])
+    expect(sixb.listSyncs().map((sync) => sync.id)).toEqual(["sync-orders"])
     expect(sixb.getSyncById("sync-orders")?.target.dataset.id).toBe("raw.erp.orders")
     expect(sixb.listConnectors().map((connector) => connector.id)).toEqual(["erpDb"])
     expect(client).toEqual({ source: "discovered" })
@@ -204,7 +204,7 @@ export const syncOrders = defineSync("sync-orders")
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getScheduleDefinitions()).toEqual([schedule])
+    expect(sixb.listSchedules()).toEqual([schedule])
     expect(sixb.getScheduleById("transaction.high-value")).toBe(schedule)
   })
 
@@ -239,7 +239,7 @@ export const syncOrders = defineSync("sync-orders")
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getScheduleDefinitions()).toEqual(schedules)
+    expect(sixb.listSchedules()).toEqual(schedules)
   })
 
   test("discovers workflows from workflows directory", async () => {
@@ -401,9 +401,7 @@ export const reviewHighValueTransaction = defineWorkflow("review-high-value-tran
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getScheduleDefinitions().map((schedule) => schedule.id)).toEqual([
-      "transaction.high-value",
-    ])
+    expect(sixb.listSchedules().map((schedule) => schedule.id)).toEqual(["transaction.high-value"])
     expect(sixb.workflows.getById("review-high-value-transaction")?.triggers).toMatchObject([
       { type: "schedule", scheduleId: "transaction.high-value" },
     ])
@@ -536,8 +534,8 @@ export const Room = defineObjectType({
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getActionDefinitions()).toEqual([])
-    expect(sixb.getSyncDefinitions()).toEqual([])
+    expect(sixb.listActions()).toEqual([])
+    expect(sixb.listSyncs()).toEqual([])
     expect(sixb.listConnectors()).toEqual([])
   })
 
@@ -690,10 +688,7 @@ export const syncOrders = defineSync("sync-orders")
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getSyncDefinitions().map((sync) => sync.id)).toEqual([
-      "sync-hubspot",
-      "sync-orders",
-    ])
+    expect(sixb.listSyncs().map((sync) => sync.id)).toEqual(["sync-hubspot", "sync-orders"])
   })
 
   test("rejects duplicate sync ids across explicit and discovered syncs", async () => {
@@ -1026,12 +1021,12 @@ export const roomProjection = defineProjection("room-proj", Room)
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getObjectProjections()).toHaveLength(1)
-    expect(sixb.getObjectProjections()[0].id).toBe("room-proj")
-    expect(sixb.getObjectProjections()[0].objectTypeId).toBe("Room")
-    expect(sixb.getObjectProjections()[0].datasetId).toBe("canonical.rooms")
-    expect(sixb.getLinkProjections()).toHaveLength(0)
-    expect(sixb.getTelemetryProjections()).toHaveLength(0)
+    expect(sixb.listObjectProjections()).toHaveLength(1)
+    expect(sixb.listObjectProjections()[0].id).toBe("room-proj")
+    expect(sixb.listObjectProjections()[0].objectTypeId).toBe("Room")
+    expect(sixb.listObjectProjections()[0].datasetId).toBe("canonical.rooms")
+    expect(sixb.listLinkProjections()).toHaveLength(0)
+    expect(sixb.listTelemetryProjections()).toHaveLength(0)
   })
 
   test("discovers telemetry projections from projections/ directory", async () => {
@@ -1093,13 +1088,13 @@ export const roomTemperatureProjection = defineTelemetryProjection(
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getObjectProjections()).toHaveLength(0)
-    expect(sixb.getLinkProjections()).toHaveLength(0)
-    expect(sixb.getTelemetryProjections()).toHaveLength(1)
-    expect(sixb.getTelemetryProjections()[0].id).toBe("room-temperatures")
-    expect(sixb.getTelemetryProjections()[0].objectTypeId).toBe("Room")
-    expect(sixb.getTelemetryProjections()[0].propertyId).toBe("temperature")
-    expect(sixb.getTelemetryProjections()[0].datasetId).toBe("canonical.room-readings")
+    expect(sixb.listObjectProjections()).toHaveLength(0)
+    expect(sixb.listLinkProjections()).toHaveLength(0)
+    expect(sixb.listTelemetryProjections()).toHaveLength(1)
+    expect(sixb.listTelemetryProjections()[0].id).toBe("room-temperatures")
+    expect(sixb.listTelemetryProjections()[0].objectTypeId).toBe("Room")
+    expect(sixb.listTelemetryProjections()[0].propertyId).toBe("temperature")
+    expect(sixb.listTelemetryProjections()[0].datasetId).toBe("canonical.room-readings")
   })
 
   test("uses explicit projections when provided", async () => {
@@ -1123,8 +1118,8 @@ export const roomTemperatureProjection = defineTelemetryProjection(
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getObjectProjections()).toHaveLength(1)
-    expect(sixb.getObjectProjections()[0].id).toBe("room-proj")
+    expect(sixb.listObjectProjections()).toHaveLength(1)
+    expect(sixb.listObjectProjections()[0].id).toBe("room-proj")
   })
 
   test("uses explicit telemetry projections when provided", async () => {
@@ -1158,9 +1153,9 @@ export const roomTemperatureProjection = defineTelemetryProjection(
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getObjectProjections()).toHaveLength(0)
-    expect(sixb.getLinkProjections()).toHaveLength(0)
-    const registered = sixb.getTelemetryProjections()[0]
+    expect(sixb.listObjectProjections()).toHaveLength(0)
+    expect(sixb.listLinkProjections()).toHaveLength(0)
+    const registered = sixb.listTelemetryProjections()[0]
     expect(registered).toEqual(telemetryProjection)
     expect(registered).not.toBe(telemetryProjection)
     expect(Object.isFrozen(registered)).toBe(true)
@@ -1201,8 +1196,8 @@ export const roomTemperatureProjection = defineTelemetryProjection(
       ...createTestRuntimeDeps(),
     })
 
-    const registeredObjects = sixb.getObjectProjections()
-    const registeredLinks = sixb.getLinkProjections()
+    const registeredObjects = sixb.listObjectProjections()
+    const registeredLinks = sixb.listLinkProjections()
     expect(sixb.getProjectionById("room-proj")).toBe(registeredObjects[0])
     expect(sixb.getProjectionById("room-sensor-proj")).toBe(registeredLinks[0])
     expect(registeredObjects[0]).not.toBe(roomProjection)
@@ -1476,9 +1471,9 @@ export const Room = defineObjectType({
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getObjectProjections()).toEqual([])
-    expect(sixb.getLinkProjections()).toEqual([])
-    expect(sixb.getTelemetryProjections()).toEqual([])
+    expect(sixb.listObjectProjections()).toEqual([])
+    expect(sixb.listLinkProjections()).toEqual([])
+    expect(sixb.listTelemetryProjections()).toEqual([])
   })
 
   test("validates projection referencing unknown type", async () => {

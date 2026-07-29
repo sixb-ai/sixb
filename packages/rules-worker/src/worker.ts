@@ -35,7 +35,7 @@ export class RulesWorker extends Worker {
   private readonly reconciliationPageSize: number
 
   constructor(runtime: RulesWorkerSixb, options: RulesWorkerOptions = {}) {
-    const rules = runtime.getRuleDefinitions()
+    const rules = runtime.listRules()
     if (rules.length === 0) {
       throw new Error("[SixbRulesWorker] Rules workers require at least one registered rule.")
     }

@@ -1060,43 +1060,43 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   getValueTypesById(): ReadonlyMap<string, ValueType>
 
   /** All registered action definitions. */
-  getActionDefinitions(): readonly ActionDefinition[]
+  listActions(): readonly ActionDefinition[]
 
   /** Lookup an action definition by id. */
   getActionById(actionId: string): ActionDefinition | null
 
   /** All registered global actions. */
-  getGlobalActions(): readonly ActionDefinition[]
+  listGlobalActions(): readonly ActionDefinition[]
 
   /** All actions valid for an object type, including inherited actions. */
-  getActionsForType(objectType: ObjectType): readonly ActionDefinition[]
+  listActionsForType(objectType: ObjectType): readonly ActionDefinition[]
 
   /** All registered dataset definitions. */
-  getDatasetDefinitions(): readonly DatasetDefinition[]
+  listDatasets(): readonly DatasetDefinition[]
 
   /** Lookup a dataset definition by id. */
   getDatasetById(datasetId: string): DatasetDefinition | null
 
   /** All registered sync definitions. */
-  getSyncDefinitions(): readonly SyncDefinition[]
+  listSyncs(): readonly SyncDefinition[]
 
   /** Lookup a sync definition by id. */
   getSyncById(syncId: string): SyncDefinition | null
 
   /** All registered pipeline definitions. */
-  getPipelineDefinitions(): readonly PipelineDefinition[]
+  listPipelines(): readonly PipelineDefinition[]
 
   /** Lookup a pipeline definition by id. */
   getPipelineById(pipelineId: string): PipelineDefinition | null
 
   /** All registered schedule definitions. */
-  getScheduleDefinitions(): readonly ScheduleDefinition[]
+  listSchedules(): readonly ScheduleDefinition[]
 
   /** Lookup a schedule definition by id. */
   getScheduleById(scheduleId: string): ScheduleDefinition | null
 
   /** All registered rule definitions. */
-  getRuleDefinitions(): readonly RuleDefinition[]
+  listRules(): readonly RuleDefinition[]
 
   /** Lookup a rule definition by id. */
   getRuleById(ruleId: string): RuleDefinition | null
@@ -1217,16 +1217,16 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   }): Promise<ListResult<ObjectRow>>
 
   /** Collect all transitive sub-types of the given object type id. */
-  getSubTypes(objectTypeId: string): string[]
+  listSubTypes(objectTypeId: string): string[]
 
   /** All registered object projection definitions. */
-  getObjectProjections(): readonly ObjectProjectionDefinition[]
+  listObjectProjections(): readonly ObjectProjectionDefinition[]
 
   /** All registered link projection definitions. */
-  getLinkProjections(): readonly LinkProjectionDefinition[]
+  listLinkProjections(): readonly LinkProjectionDefinition[]
 
   /** All registered telemetry projection definitions. */
-  getTelemetryProjections(): readonly TelemetryProjectionDefinition[]
+  listTelemetryProjections(): readonly TelemetryProjectionDefinition[]
 
   /** Lookup a registered projection by id. */
   getProjectionById(projectionId: string): ProjectionDefinition | null

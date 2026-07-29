@@ -21,9 +21,9 @@ export interface ProjectionWorkerContext extends SixbRuntimeContext {
 
 export interface ProjectionWorkerSixb extends SixbRuntimeContext {
   readonly id: string
-  getObjectProjections(): readonly ObjectProjectionDefinition[]
-  getLinkProjections(): readonly LinkProjectionDefinition[]
-  getTelemetryProjections(): readonly TelemetryProjectionDefinition[]
+  listObjectProjections(): readonly ObjectProjectionDefinition[]
+  listLinkProjections(): readonly LinkProjectionDefinition[]
+  listTelemetryProjections(): readonly TelemetryProjectionDefinition[]
   getDatasetById(datasetId: string): DatasetDefinition | null
   getProjectionById(projectionId: string): ProjectionDefinition | null
 }
