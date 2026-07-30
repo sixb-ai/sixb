@@ -24,13 +24,6 @@ export {
   runLakeStorageContractSuite,
 } from "./lake-storage-contract"
 export {
-  createStoredLinkDeletedEvent,
-  createStoredLinkMutationEvent,
-  createStoredObjectDeletedEvent,
-  createStoredObjectMutationEvent,
-  createStoredTelemetryAppendedEvent,
-} from "./materialization-events"
-export {
   type MaterializationFailureBoundary,
   type MaterializationFailureContractSuiteOptions,
   runMaterializationFailureContractSuite,

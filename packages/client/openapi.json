@@ -22923,30 +22923,6 @@
                                     },
                                     "required": ["objectTypeId"],
                                     "additionalProperties": false
-                                  },
-                                  "telemetryCheckpoint": {
-                                    "type": "object",
-                                    "properties": {
-                                      "fixedBatchSize": {
-                                        "type": "number"
-                                      },
-                                      "nextBatchOrdinal": {
-                                        "type": "number"
-                                      },
-                                      "nextRowOffset": {
-                                        "type": "number"
-                                      },
-                                      "inputExhausted": {
-                                        "type": "boolean"
-                                      }
-                                    },
-                                    "required": [
-                                      "fixedBatchSize",
-                                      "nextBatchOrdinal",
-                                      "nextRowOffset",
-                                      "inputExhausted"
-                                    ],
-                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -22957,8 +22933,7 @@
                                   "progress",
                                   "startedAt",
                                   "identity",
-                                  "target",
-                                  "telemetryCheckpoint"
+                                  "target"
                                 ],
                                 "additionalProperties": false
                               }
@@ -23335,30 +23310,6 @@
                                     },
                                     "required": ["objectTypeId"],
                                     "additionalProperties": false
-                                  },
-                                  "telemetryCheckpoint": {
-                                    "type": "object",
-                                    "properties": {
-                                      "fixedBatchSize": {
-                                        "type": "number"
-                                      },
-                                      "nextBatchOrdinal": {
-                                        "type": "number"
-                                      },
-                                      "nextRowOffset": {
-                                        "type": "number"
-                                      },
-                                      "inputExhausted": {
-                                        "type": "boolean"
-                                      }
-                                    },
-                                    "required": [
-                                      "fixedBatchSize",
-                                      "nextBatchOrdinal",
-                                      "nextRowOffset",
-                                      "inputExhausted"
-                                    ],
-                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -23369,8 +23320,7 @@
                                   "progress",
                                   "startedAt",
                                   "identity",
-                                  "target",
-                                  "telemetryCheckpoint"
+                                  "target"
                                 ],
                                 "additionalProperties": false
                               }
@@ -23752,30 +23702,6 @@
                                     },
                                     "required": ["objectTypeId"],
                                     "additionalProperties": false
-                                  },
-                                  "telemetryCheckpoint": {
-                                    "type": "object",
-                                    "properties": {
-                                      "fixedBatchSize": {
-                                        "type": "number"
-                                      },
-                                      "nextBatchOrdinal": {
-                                        "type": "number"
-                                      },
-                                      "nextRowOffset": {
-                                        "type": "number"
-                                      },
-                                      "inputExhausted": {
-                                        "type": "boolean"
-                                      }
-                                    },
-                                    "required": [
-                                      "fixedBatchSize",
-                                      "nextBatchOrdinal",
-                                      "nextRowOffset",
-                                      "inputExhausted"
-                                    ],
-                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -23786,8 +23712,7 @@
                                   "progress",
                                   "startedAt",
                                   "identity",
-                                  "target",
-                                  "telemetryCheckpoint"
+                                  "target"
                                 ],
                                 "additionalProperties": false
                               }
@@ -24213,30 +24138,6 @@
                                   },
                                   "required": ["objectTypeId"],
                                   "additionalProperties": false
-                                },
-                                "telemetryCheckpoint": {
-                                  "type": "object",
-                                  "properties": {
-                                    "fixedBatchSize": {
-                                      "type": "number"
-                                    },
-                                    "nextBatchOrdinal": {
-                                      "type": "number"
-                                    },
-                                    "nextRowOffset": {
-                                      "type": "number"
-                                    },
-                                    "inputExhausted": {
-                                      "type": "boolean"
-                                    }
-                                  },
-                                  "required": [
-                                    "fixedBatchSize",
-                                    "nextBatchOrdinal",
-                                    "nextRowOffset",
-                                    "inputExhausted"
-                                  ],
-                                  "additionalProperties": false
                                 }
                               },
                               "required": [
@@ -24247,8 +24148,7 @@
                                 "progress",
                                 "startedAt",
                                 "identity",
-                                "target",
-                                "telemetryCheckpoint"
+                                "target"
                               ],
                               "additionalProperties": false
                             }
@@ -24622,30 +24522,6 @@
                                   },
                                   "required": ["objectTypeId"],
                                   "additionalProperties": false
-                                },
-                                "telemetryCheckpoint": {
-                                  "type": "object",
-                                  "properties": {
-                                    "fixedBatchSize": {
-                                      "type": "number"
-                                    },
-                                    "nextBatchOrdinal": {
-                                      "type": "number"
-                                    },
-                                    "nextRowOffset": {
-                                      "type": "number"
-                                    },
-                                    "inputExhausted": {
-                                      "type": "boolean"
-                                    }
-                                  },
-                                  "required": [
-                                    "fixedBatchSize",
-                                    "nextBatchOrdinal",
-                                    "nextRowOffset",
-                                    "inputExhausted"
-                                  ],
-                                  "additionalProperties": false
                                 }
                               },
                               "required": [
@@ -24656,8 +24532,7 @@
                                 "progress",
                                 "startedAt",
                                 "identity",
-                                "target",
-                                "telemetryCheckpoint"
+                                "target"
                               ],
                               "additionalProperties": false
                             }
@@ -25036,30 +24911,6 @@
                                   },
                                   "required": ["objectTypeId"],
                                   "additionalProperties": false
-                                },
-                                "telemetryCheckpoint": {
-                                  "type": "object",
-                                  "properties": {
-                                    "fixedBatchSize": {
-                                      "type": "number"
-                                    },
-                                    "nextBatchOrdinal": {
-                                      "type": "number"
-                                    },
-                                    "nextRowOffset": {
-                                      "type": "number"
-                                    },
-                                    "inputExhausted": {
-                                      "type": "boolean"
-                                    }
-                                  },
-                                  "required": [
-                                    "fixedBatchSize",
-                                    "nextBatchOrdinal",
-                                    "nextRowOffset",
-                                    "inputExhausted"
-                                  ],
-                                  "additionalProperties": false
                                 }
                               },
                               "required": [
@@ -25070,8 +24921,7 @@
                                 "progress",
                                 "startedAt",
                                 "identity",
-                                "target",
-                                "telemetryCheckpoint"
+                                "target"
                               ],
                               "additionalProperties": false
                             }
@@ -25544,30 +25394,6 @@
                                 },
                                 "required": ["objectTypeId"],
                                 "additionalProperties": false
-                              },
-                              "telemetryCheckpoint": {
-                                "type": "object",
-                                "properties": {
-                                  "fixedBatchSize": {
-                                    "type": "number"
-                                  },
-                                  "nextBatchOrdinal": {
-                                    "type": "number"
-                                  },
-                                  "nextRowOffset": {
-                                    "type": "number"
-                                  },
-                                  "inputExhausted": {
-                                    "type": "boolean"
-                                  }
-                                },
-                                "required": [
-                                  "fixedBatchSize",
-                                  "nextBatchOrdinal",
-                                  "nextRowOffset",
-                                  "inputExhausted"
-                                ],
-                                "additionalProperties": false
                               }
                             },
                             "required": [
@@ -25578,8 +25404,7 @@
                               "progress",
                               "startedAt",
                               "identity",
-                              "target",
-                              "telemetryCheckpoint"
+                              "target"
                             ],
                             "additionalProperties": false
                           }
@@ -25967,30 +25792,6 @@
                           },
                           "required": ["objectTypeId"],
                           "additionalProperties": false
-                        },
-                        "telemetryCheckpoint": {
-                          "type": "object",
-                          "properties": {
-                            "fixedBatchSize": {
-                              "type": "number"
-                            },
-                            "nextBatchOrdinal": {
-                              "type": "number"
-                            },
-                            "nextRowOffset": {
-                              "type": "number"
-                            },
-                            "inputExhausted": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "fixedBatchSize",
-                            "nextBatchOrdinal",
-                            "nextRowOffset",
-                            "inputExhausted"
-                          ],
-                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -26001,8 +25802,7 @@
                         "progress",
                         "startedAt",
                         "identity",
-                        "target",
-                        "telemetryCheckpoint"
+                        "target"
                       ],
                       "additionalProperties": false
                     }

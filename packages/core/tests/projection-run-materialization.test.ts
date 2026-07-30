@@ -110,6 +110,7 @@ describe("projection run materialization ownership", () => {
         projectId: "project",
         identity: telemetryIdentity,
         executionToken: "execution",
+        protocol: "telemetry",
         status: "failed",
         progress: { sourceRowsSkipped: 1 },
       })
@@ -203,7 +204,7 @@ describe("projection run materialization ownership", () => {
     ).rejects.toThrow("already exhausted")
   })
 
-  test("requires exhausted telemetry state before storage-level success", async () => {
+  test("requires explicit EOF before storage-level telemetry success", async () => {
     const storage = new InMemoryProjectionRunStorage({ executionToken: () => "execution" })
     await storage.startOrReclaim({
       id: "telemetry-run",
@@ -219,9 +220,25 @@ describe("projection run materialization ownership", () => {
         projectId: "project",
         identity: telemetryIdentity,
         executionToken: "execution",
+        protocol: "telemetry",
         status: "succeeded",
+      } as Parameters<typeof storage.finish>[0])
+    ).rejects.toThrow("cannot succeed before input exhaustion")
+
+    await expect(
+      storage.finish({
+        id: "telemetry-run",
+        projectId: "project",
+        identity: telemetryIdentity,
+        executionToken: "execution",
+        protocol: "telemetry",
+        status: "succeeded",
+        inputExhausted: true,
       })
-    ).resolves.toMatchObject({ status: "succeeded" })
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      telemetryCheckpoint: { inputExhausted: true },
+    })
   })
 })
 

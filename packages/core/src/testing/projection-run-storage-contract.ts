@@ -92,7 +92,11 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
           })
         ).rejects.toThrow("execution token is stale")
         await expect(
-          storage.finish({ ...executionInput(stale), status: "cancelled" })
+          storage.finish({
+            ...executionInput(stale),
+            protocol: "replacement",
+            status: "cancelled",
+          })
         ).rejects.toThrow("execution token is stale")
 
         await expect(
@@ -225,7 +229,7 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
       })
     })
 
-    test("records telemetry EOF atomically with terminal success", async () => {
+    test("requires and records explicit telemetry EOF with terminal success", async () => {
       await withStorage(async (storage) => {
         const claim = await storage.startOrReclaim({
           id: "empty-telemetry-run",
@@ -234,7 +238,25 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
           target: objectTarget,
           fixedBatchSize: 10,
         })
-        const finished = await storage.finish({ ...executionInput(claim), status: "succeeded" })
+
+        await expect(
+          storage.finish({
+            ...executionInput(claim),
+            protocol: "telemetry",
+            status: "succeeded",
+          } as Parameters<ProjectionRunStorage["finish"]>[0])
+        ).rejects.toThrow("cannot succeed before input exhaustion")
+        await expect(storage.getById({ projectId, id: claim.run.id })).resolves.toMatchObject({
+          status: "running",
+          telemetryCheckpoint: { inputExhausted: false },
+        })
+
+        const finished = await storage.finish({
+          ...executionInput(claim),
+          protocol: "telemetry",
+          status: "succeeded",
+          inputExhausted: true,
+        })
         expect(finished).toMatchObject({
           status: "succeeded",
           progress: { sourceRowsRead: 0 },

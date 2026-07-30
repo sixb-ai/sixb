@@ -149,6 +149,12 @@ describe("projection routes", () => {
     const internalRun = {
       ...makeRun({ run: { status: "running" } }),
       executionToken: "secret-capability",
+      telemetryCheckpoint: {
+        fixedBatchSize: 500,
+        nextBatchOrdinal: 2,
+        nextRowOffset: 1_000,
+        inputExhausted: false,
+      },
     } as unknown as ProjectionRunRecord
     const sixb = createSixbStub({
       async list() {
@@ -163,6 +169,7 @@ describe("projection routes", () => {
 
     expect(body.runs[0]).toMatchObject({ attempt: 2 })
     expect(body.runs[0]).not.toHaveProperty("executionToken")
+    expect(body.runs[0]).not.toHaveProperty("telemetryCheckpoint")
     expect(body.runs[0]).toHaveProperty("identity.ontologyRevision", "ontology-revision")
   })
 

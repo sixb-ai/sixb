@@ -21,7 +21,7 @@ export type {
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
-  ProjectionRunTarget,
+  ProjectionTarget,
   ProjectionTelemetryCheckpoint,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,
@@ -30,6 +30,5 @@ export type {
 export {
   PROJECTION_RUN_PROGRESS_KEYS,
   projectionRunObjectTypesVisible,
-  projectionTargetObjectTypesVisible,
   zeroProjectionRunProgress,
 } from "./types"

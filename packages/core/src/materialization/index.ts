@@ -47,6 +47,7 @@ export type {
   ProjectionMaterializationIdentity,
   ProjectionProtocolIdentity,
   ProjectionRunFinishInput,
+  ProjectionRunTerminalDecision,
   ProjectionSourceAssertion,
   ProjectionSourceEntry,
   ProjectionSourceRef,

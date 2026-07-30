@@ -237,12 +237,12 @@ describe("SQLite storage migrations", () => {
           value, unit, at, last_commit_id
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `)
-      insert.run("p", "Room", "r1", "temp", "70.5", null, "2026-06-01T12:00:00.000Z", "evt-1")
+      insert.run("p", "Room", "r1", "temp", "70.5", null, "2026-06-01T12:00:00.000Z", "commit-1")
 
       // A second row at the same (series, at) is rejected by the natural-key
       // PRIMARY KEY, even with a different commit — appends must upsert.
       expect(() =>
-        insert.run("p", "Room", "r1", "temp", "71", null, "2026-06-01T12:00:00.000Z", "evt-2")
+        insert.run("p", "Room", "r1", "temp", "71", null, "2026-06-01T12:00:00.000Z", "commit-2")
       ).toThrow()
     } finally {
       db.close()

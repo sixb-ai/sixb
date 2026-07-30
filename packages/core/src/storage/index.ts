@@ -1,20 +1,10 @@
-/** `@sixb/core/storage` is the provider contract, so the serialization a provider needs lives here. */
-
 /**
- * The stored events that appear in this contract's own method signatures.
+ * Stored rule events that appear in this provider contract's method signatures.
  *
  * A type in a public interface signature must be exported from the same subpath as the interface, or
- * the interface simply cannot be implemented from outside — which was the case for `ObjectStorage`
- * and `TimeseriesStorage` before these six were re-exported here.
+ * the interface cannot be implemented from outside the package.
  */
-export type {
-  StoredLinkDeletedEvent,
-  StoredLinkMutationEvent,
-  StoredObjectMutationEvent,
-  StoredRuleResolvedEvent,
-  StoredRuleTriggeredEvent,
-  StoredTelemetryAppendedEvent,
-} from "../events"
+export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
 export { stableJsonStringify } from "../json"
 export type {
   PinnedDatasetVersion,
@@ -360,7 +350,7 @@ export type {
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
-  ProjectionRunTarget,
+  ProjectionTarget,
   ProjectionTelemetryCheckpoint,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,
@@ -371,7 +361,6 @@ export {
   PROJECTION_RUN_PROGRESS_KEYS,
   ProjectionRunError,
   projectionRunObjectTypesVisible,
-  projectionTargetObjectTypesVisible,
   zeroProjectionRunProgress,
 } from "./projection-runs"
 export type {

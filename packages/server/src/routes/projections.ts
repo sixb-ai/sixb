@@ -32,7 +32,6 @@ function serializeProjectionRun(run: ProjectionRunRecord) {
     status: run.status,
     attempt: run.attempt,
     progress: run.progress,
-    telemetryCheckpoint: run.telemetryCheckpoint,
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
     errorMessage: run.errorMessage,

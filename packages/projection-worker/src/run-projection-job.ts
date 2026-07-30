@@ -4,8 +4,9 @@ import {
   MaterializationValidationError,
   type ProjectionDefinition,
 } from "@sixb/core"
+import type { ProjectionRunTerminalDecision } from "@sixb/core/internal/materialization"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
-import type { ProjectionRunRecord, ProjectionRunTarget } from "@sixb/core/storage"
+import type { ProjectionRunRecord } from "@sixb/core/storage"
 import { ProjectionWorkerPermanentError } from "./errors"
 import {
   assertProjectionJobId,
@@ -29,22 +30,30 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
   if (terminal) return terminalResult(terminal)
 
   const validated = await validateProjectionJob(input.runtime, input.job)
-  const execution = await claimOrReplaySucceededRun(input, validated.target)
+  const execution = await claimOrReplaySucceededRun(input, validated)
   if ("replayedTerminal" in execution) return execution
   try {
-    await materializeProjection(input, validated, execution, signal)
-    await finishProjection(input, execution, "succeeded")
+    const completion = await materializeProjection(input, validated, execution, signal)
+    await finishProjection(input, execution, { ...completion, status: "succeeded" })
     return { run: await requireRun(input), replayedTerminal: false }
   } catch (error) {
     const succeeded = await findSucceededRun(input)
     if (succeeded) return terminalResult(succeeded)
 
     if (isExplicitCancellation(error)) {
-      await finishProjection(input, execution, "cancelled", error.message)
+      await finishProjection(input, execution, {
+        protocol: input.job.protocol,
+        status: "cancelled",
+        errorMessage: error.message,
+      })
       throw error
     }
     if (isPermanentFailure(error) && !signal.aborted) {
-      await finishProjection(input, execution, "failed", errorMessage(error))
+      await finishProjection(input, execution, {
+        protocol: input.job.protocol,
+        status: "failed",
+        errorMessage: errorMessage(error),
+      })
       const run = await requireRun(input)
       input.onRunFailed?.(error, run)
     }
@@ -56,10 +65,10 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
 
 async function claimOrReplaySucceededRun(
   input: RunProjectionJobInput,
-  target: ProjectionRunTarget
+  validated: ValidatedProjectionJob
 ): Promise<ClaimedProjectionExecution | ProjectionJobResult> {
   try {
-    return await claimExecution(input, target)
+    return await claimExecution(input, validated)
   } catch (error) {
     // Another delivery may have finished after our initial terminal read but before the claim.
     const succeeded = await findSucceededRun(input)
@@ -86,37 +95,30 @@ async function findMatchingTerminalRun(
 
 async function claimExecution(
   input: RunProjectionJobInput,
-  target: ProjectionRunTarget
+  validated: ValidatedProjectionJob
 ): Promise<ClaimedProjectionExecution> {
   const common = { projectId: input.runtime.projectId, id: input.job.id }
-  if (input.job.projectionKind === "link") {
-    if (!("sourceObjectTypeId" in target)) throw invalidProjectionTarget(input.job.id)
-    return input.runtime.projectionRunsStorage.startOrReclaim({
-      ...common,
-      identity: input.job,
-      target,
-    })
+  switch (validated.kind) {
+    case "object":
+      return input.runtime.projectionRunsStorage.startOrReclaim({
+        ...common,
+        identity: validated.job,
+        target: validated.target,
+      })
+    case "link":
+      return input.runtime.projectionRunsStorage.startOrReclaim({
+        ...common,
+        identity: validated.job,
+        target: validated.target,
+      })
+    case "telemetry":
+      return input.runtime.projectionRunsStorage.startOrReclaim({
+        ...common,
+        identity: validated.job,
+        target: validated.target,
+        fixedBatchSize: input.telemetryBatchSize ?? TELEMETRY_PROJECTION_BATCH_SIZE,
+      })
   }
-  if (!("objectTypeId" in target)) throw invalidProjectionTarget(input.job.id)
-  if (input.job.projectionKind === "telemetry") {
-    return input.runtime.projectionRunsStorage.startOrReclaim({
-      ...common,
-      identity: input.job,
-      target,
-      fixedBatchSize: input.telemetryBatchSize ?? TELEMETRY_PROJECTION_BATCH_SIZE,
-    })
-  }
-  return input.runtime.projectionRunsStorage.startOrReclaim({
-    ...common,
-    identity: input.job,
-    target,
-  })
-}
-
-function invalidProjectionTarget(runId: string): ProjectionWorkerPermanentError {
-  return new ProjectionWorkerPermanentError(
-    `[SixbProjectionWorker] Projection run '${runId}' has an invalid target.`
-  )
 }
 
 async function materializeProjection(
@@ -124,35 +126,37 @@ async function materializeProjection(
   validated: ValidatedProjectionJob,
   execution: ClaimedProjectionExecution,
   signal: AbortSignal
-): Promise<void> {
-  const { projection, dataset } = validated
-  if (projection._tag === "TelemetryProjectionDefinition") {
-    await runTelemetryProjection({
-      runtime: input.runtime,
-      projection,
-      dataset,
-      version: validated.version,
-      execution,
-      signal,
-    })
-    return
+): Promise<ProjectionSuccessfulCompletion> {
+  switch (validated.kind) {
+    case "telemetry":
+      return runTelemetryProjection({
+        runtime: input.runtime,
+        projection: validated.projection,
+        dataset: validated.dataset,
+        version: validated.version,
+        execution,
+        signal,
+      })
+    case "object":
+    case "link": {
+      const entries = replacementEntries(
+        input,
+        validated.projection,
+        validated.dataset,
+        execution,
+        validated.version.rowCount,
+        signal
+      )
+      await getOntologyMutationRuntime(input.runtime).replaceProjection({
+        source: { projectionId: validated.projection.id },
+        datasetVersion: input.job.datasetVersion,
+        execution: execution.execution,
+        entries,
+        signal,
+      })
+      return { protocol: "replacement" }
+    }
   }
-
-  const entries = replacementEntries(
-    input,
-    projection,
-    dataset,
-    execution,
-    validated.version.rowCount,
-    signal
-  )
-  await getOntologyMutationRuntime(input.runtime).replaceProjection({
-    source: { projectionId: projection.id },
-    datasetVersion: input.job.datasetVersion,
-    execution: execution.execution,
-    entries,
-    signal,
-  })
 }
 
 function replacementEntries(
@@ -186,39 +190,22 @@ function replacementEntries(
 async function finishProjection(
   input: RunProjectionJobInput,
   execution: ClaimedProjectionExecution,
-  status: "succeeded" | "failed" | "cancelled",
-  errorMessage?: string
+  decision: ProjectionRunTerminalDecision
 ): Promise<void> {
   const common = {
     source: { projectionId: input.job.projectionId },
     datasetVersion: input.job.datasetVersion,
     execution: execution.execution,
   }
-  const mutations = getOntologyMutationRuntime(input.runtime)
-  if (input.job.protocol === "replacement") {
-    await mutations.finishProjection({
-      ...common,
-      protocol: "replacement",
-      status,
-      ...(status === "succeeded" ? {} : { errorMessage }),
-    })
-    return
-  }
-  if (status === "succeeded") {
-    await mutations.finishProjection({
-      ...common,
-      protocol: "telemetry",
-      status: "succeeded",
-    })
-    return
-  }
-  await mutations.finishProjection({
+  await getOntologyMutationRuntime(input.runtime).finishProjection({
     ...common,
-    protocol: "telemetry",
-    status,
-    errorMessage,
+    ...decision,
   })
 }
+
+type ProjectionSuccessfulCompletion =
+  | { readonly protocol: "replacement" }
+  | { readonly protocol: "telemetry"; readonly inputExhausted: true }
 
 async function findSucceededRun(input: RunProjectionJobInput): Promise<ProjectionRunRecord | null> {
   try {

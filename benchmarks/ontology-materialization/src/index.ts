@@ -180,18 +180,26 @@ function observeMaterialization(
       return ready
     },
   })
-  return {
-    objects: storage.objects,
-    timeseries: storage.timeseries,
-    ontology: { ...storage.ontology, sources },
-    projectionRuns: storage.projectionRuns,
-    ping: () => storage.ping(),
-    transaction: (run, options) =>
-      storage.transaction((tx) => {
-        observer.onFinalizationStarted()
-        return run(tx)
-      }, options),
-  }
+
+  const ontology = Object.create(storage.ontology) as Storage["ontology"]
+  Object.defineProperty(ontology, "sources", { enumerable: true, value: sources })
+
+  const observed = Object.create(storage) as Storage
+  Object.defineProperties(observed, {
+    ontology: { enumerable: true, value: ontology },
+    transaction: {
+      enumerable: true,
+      value: (
+        run: Parameters<Storage["transaction"]>[0],
+        options?: Parameters<Storage["transaction"]>[1]
+      ) =>
+        storage.transaction((tx) => {
+          observer.onFinalizationStarted()
+          return run(tx)
+        }, options),
+    },
+  })
+  return observed
 }
 
 function startPeakRssMonitor() {

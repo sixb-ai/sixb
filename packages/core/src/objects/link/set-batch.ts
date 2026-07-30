@@ -7,7 +7,6 @@
  *
  * The current target is read before the commit, so a concurrent assignment to the same scope reports
  * an item error rather than violating cardinality.
- *
  */
 
 import { assertPrivileged } from "../../authorization"

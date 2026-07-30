@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdir, readFile } from "node:fs/promises"
 import { join, relative } from "node:path"
+import ts from "typescript"
 
 const workspaceRoot = join(import.meta.dir, "../../..")
 const coreSource = join(workspaceRoot, "packages/core/src")
@@ -19,6 +20,61 @@ async function expectPatternAbsent(files: readonly string[], pattern: RegExp): P
   for (const file of files) {
     const contents = await readFile(file, "utf8")
     expect(contents, relative(workspaceRoot, file)).not.toMatch(pattern)
+  }
+}
+
+function reservedMutationEventTypes(source: string, fileName = "source.ts"): string[] {
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true)
+  const matches: string[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isObjectLiteralExpression(node)) {
+      for (const property of node.properties) {
+        if (
+          ts.isPropertyAssignment(property) &&
+          propertyName(property.name) === "type" &&
+          ts.isStringLiteralLike(property.initializer) &&
+          /^(?:object|link|telemetry)\./.test(property.initializer.text)
+        ) {
+          matches.push(property.initializer.text)
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+  return matches
+}
+
+function propertyName(name: ts.PropertyName): string | undefined {
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text
+  return undefined
+}
+
+function runtimeCompatibilityIdentifiers(source: string, fileName: string): string[] {
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true)
+  const matches = new Set<string>()
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && /(?:legacy|compatibility|shadow|dualWrite)/i.test(node.text)) {
+      matches.add(node.text)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+  return [...matches]
+}
+
+async function expectSqlWritesOwnedBy(
+  files: readonly string[],
+  pattern: RegExp,
+  allowedBasenames: readonly string[]
+): Promise<void> {
+  for (const file of files) {
+    const contents = await readFile(file, "utf8")
+    if (!pattern.test(contents)) continue
+    expect(
+      allowedBasenames.some((basename) => file.endsWith(`/${basename}`)),
+      relative(workspaceRoot, file)
+    ).toBe(true)
   }
 }
 
@@ -97,13 +153,65 @@ describe("ontology clean-break architecture", () => {
       join(workspaceRoot, "packages/projection-worker/src"),
     ]
     const files = (await Promise.all(mutationModules.map(typescriptFiles))).flat()
-    await expectPatternAbsent(
-      files,
-      /events\.append\([^)]*type:\s*["'](?:object\.|link\.|telemetry\.)/s
-    )
+    for (const file of files) {
+      const contents = await readFile(file, "utf8")
+      expect(reservedMutationEventTypes(contents, file), relative(workspaceRoot, file)).toEqual([])
+    }
 
     const eventsIndex = await readFile(join(coreSource, "events/index.ts"), "utf8")
     expect(eventsIndex).not.toMatch(/build(?:Object|Link)(?:Upsert|Deleted)Event/)
+  })
+
+  test("detects reserved event construction even after nested calls", () => {
+    expect(
+      reservedMutationEventTypes(`
+        events.append({ id: makeId(), type: "object.created" })
+        events.emit({ id: makeId(), type: "telemetry.appended" })
+      `)
+    ).toEqual(["object.created", "telemetry.appended"])
+  })
+
+  test("keeps ontology writes behind the materialization capability", async () => {
+    const providerFiles = (
+      await Promise.all(
+        ["storage/sqlite/src", "storage/pg/src"].map((root) =>
+          typescriptFiles(join(workspaceRoot, root))
+        )
+      )
+    ).flat()
+
+    await expectSqlWritesOwnedBy(providerFiles, /INSERT\s+INTO\s+ontology_(?:commits|outbox)\b/i, [
+      "materializations.ts",
+      "materialization-writer.ts",
+    ])
+    await expectSqlWritesOwnedBy(
+      providerFiles,
+      /(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:ontology_overrides|objects|links|timeseries|timeseries_latest)\b/i,
+      ["materialization-writer.ts"]
+    )
+    await expectSqlWritesOwnedBy(providerFiles, /SET\s+status\s*=\s*'active'/i, [
+      "materializations.ts",
+    ])
+  })
+
+  test("keeps compatibility runtime branches out of ontology mutation paths", async () => {
+    const roots = [
+      join(coreSource, "materialization"),
+      join(coreSource, "materializer"),
+      join(coreSource, "storage/ontology"),
+      join(workspaceRoot, "packages/action-worker/src"),
+      join(workspaceRoot, "packages/projection-worker/src"),
+      join(workspaceRoot, "storage/sqlite/src/ontology-storage"),
+      join(workspaceRoot, "storage/pg/src/ontology-storage"),
+    ]
+    const files = (await Promise.all(roots.map(typescriptFiles))).flat()
+    for (const file of files) {
+      const contents = await readFile(file, "utf8")
+      expect(
+        runtimeCompatibilityIdentifiers(contents, file),
+        relative(workspaceRoot, file)
+      ).toEqual([])
+    }
   })
 
   test("keeps deferred CDC and semantic total-size ceilings out of the implementation", async () => {

@@ -88,6 +88,7 @@ describe("ontology materializer telemetry", () => {
       datasetVersion,
       execution: emptyExecution,
       status: "succeeded" as const,
+      inputExhausted: true as const,
     }
 
     let rejectFinish = true
@@ -157,6 +158,7 @@ describe("ontology materializer telemetry", () => {
       datasetVersion,
       execution,
       status: "succeeded" as const,
+      inputExhausted: true as const,
     }
     await materializer.telemetry.append({
       source: source(1, true),

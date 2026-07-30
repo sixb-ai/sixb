@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { defineObjectType, link, OntologyRegistry, prop } from "../ontology"
 import type { Storage } from "../storage"
 import { createMaterializerTestFixture } from "./materializer-fixture"
@@ -25,108 +25,131 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
   name: string,
   provider: EffectiveStorageContractSuiteOptions<TStorage>
 ): void {
-  test(`${name} reads Materializer-owned effective state`, async () => {
+  const withStorage = async (body: (storage: TStorage) => Promise<void>): Promise<void> => {
     const storage = await provider.createStorage()
-    const fixture = createMaterializerTestFixture({ projectId, ontology, storage })
     try {
-      await fixture.seed({
-        objects: [device("a", "Alpha"), device("b", "Beta"), device("c", "Gamma")],
-        links: [peer("a", "b"), peer("a", "c")],
-        telemetry: [
-          temperature("a", 20, "2026-01-01T10:00:00.000Z"),
-          temperature("a", 22, "2026-01-01T12:00:00.000Z"),
-          temperature("b", 18, "2026-01-01T11:00:00.000Z"),
-        ],
-      })
-
-      const object = await storage.objects.getByPrimaryId({
-        projectId,
-        objectTypeId: Device.id,
-        primaryId: "a",
-      })
-      expect(object).toMatchObject({
-        properties: { id: "a", name: "Alpha", temperature: 22 },
-        version: 2,
-      })
-      expect(typeof object?.lastCommitId).toBe("string")
-
-      const batch = await storage.objects.getByPrimaryIdBatch({
-        projectId,
-        items: [
-          { objectTypeId: Device.id, primaryId: "a" },
-          { objectTypeId: Device.id, primaryId: "missing" },
-        ],
-      })
-      expect([...batch.keys()]).toEqual([`${Device.id}:a`])
-
-      const outgoing = await storage.objects.listLinks({
-        projectId,
-        objectTypeId: Device.id,
-        objectId: "a",
-      })
-      expect(outgoing.map((row) => row.targetId).sort()).toEqual(["b", "c"])
-      expect(outgoing.every((row) => row.lastCommitId.length > 0)).toBe(true)
-
-      const incoming = await storage.objects.listIncidentLinksBatch({
-        projectId,
-        items: [{ objectTypeId: Device.id, objectId: "b" }],
-      })
-      expect(incoming).toHaveLength(1)
-      expect(incoming[0]).toMatchObject({ sourceId: "a", targetId: "b" })
-
-      const linksByScope = await storage.objects.listLinksBatch({
-        projectId,
-        items: [{ objectTypeId: Device.id, objectId: "a", linkId: "peers" }],
-      })
-      expect(linksByScope.get(`${Device.id}:a:peers`)).toHaveLength(2)
-
-      const firstPage = await storage.objects.listByPrimaryIdPage({
-        projectId,
-        objectTypeId: Device.id,
-        limit: 2,
-      })
-      expect(firstPage.objects.map((row) => row.primaryId)).toEqual(["a", "b"])
-      expect(firstPage.nextPrimaryId).toBe("b")
-      const secondPage = await storage.objects.listByPrimaryIdPage({
-        projectId,
-        objectTypeId: Device.id,
-        afterPrimaryId: firstPage.nextPrimaryId,
-        limit: 2,
-      })
-      expect(secondPage.objects.map((row) => row.primaryId)).toEqual(["c"])
-
-      const descending = await storage.timeseries.getHistory({
-        projectId,
-        objectTypeId: Device.id,
-        objectId: "a",
-        propertyId: "temperature",
-        from: new Date("2026-01-01T10:30:00.000Z"),
-        order: "desc",
-      })
-      expect(descending.map((point) => point.value)).toEqual([22])
-      expect(typeof descending[0]?.lastCommitId).toBe("string")
-
-      const histories = await storage.timeseries.getHistoryBatch({
-        projectId,
-        series: [
-          { objectTypeId: Device.id, objectId: "a", propertyId: "temperature" },
-          { objectTypeId: Device.id, objectId: "b", propertyId: "temperature" },
-        ],
-        limitPerSeries: 1,
-        order: "desc",
-      })
-      expect(histories.map((series) => series.points[0]?.value)).toEqual([22, 18])
-
-      const latest = await storage.timeseries.getLatest({
-        projectId,
-        objectTypeId: Device.id,
-        objectId: "a",
-        propertyId: "temperature",
-      })
-      expect(latest).toMatchObject({ value: 22, at: new Date("2026-01-01T12:00:00.000Z") })
+      await seedEffectiveState(storage)
+      await body(storage)
     } finally {
       await provider.cleanup?.(storage)
     }
+  }
+
+  describe(name, () => {
+    test("reads Materializer-owned objects", async () => {
+      await withStorage(async (storage) => {
+        const object = await storage.objects.getByPrimaryId({
+          projectId,
+          objectTypeId: Device.id,
+          primaryId: "a",
+        })
+        expect(object).toMatchObject({
+          properties: { id: "a", name: "Alpha", temperature: 22 },
+          version: 2,
+        })
+        expect(typeof object?.lastCommitId).toBe("string")
+
+        const batch = await storage.objects.getByPrimaryIdBatch({
+          projectId,
+          items: [
+            { objectTypeId: Device.id, primaryId: "a" },
+            { objectTypeId: Device.id, primaryId: "missing" },
+          ],
+        })
+        expect([...batch.keys()]).toEqual([`${Device.id}:a`])
+      })
+    })
+
+    test("reads Materializer-owned links", async () => {
+      await withStorage(async (storage) => {
+        const outgoing = await storage.objects.listLinks({
+          projectId,
+          objectTypeId: Device.id,
+          objectId: "a",
+        })
+        expect(outgoing.map((row) => row.targetId).sort()).toEqual(["b", "c"])
+        expect(outgoing.every((row) => row.lastCommitId.length > 0)).toBe(true)
+
+        const incoming = await storage.objects.listIncidentLinksBatch({
+          projectId,
+          items: [{ objectTypeId: Device.id, objectId: "b" }],
+        })
+        expect(incoming).toHaveLength(1)
+        expect(incoming[0]).toMatchObject({ sourceId: "a", targetId: "b" })
+
+        const linksByScope = await storage.objects.listLinksBatch({
+          projectId,
+          items: [{ objectTypeId: Device.id, objectId: "a", linkId: "peers" }],
+        })
+        expect(linksByScope.get(`${Device.id}:a:peers`)).toHaveLength(2)
+      })
+    })
+
+    test("pages Materializer-owned objects with a stable cursor", async () => {
+      await withStorage(async (storage) => {
+        const firstPage = await storage.objects.listByPrimaryIdPage({
+          projectId,
+          objectTypeId: Device.id,
+          limit: 2,
+        })
+        expect(firstPage.objects.map((row) => row.primaryId)).toEqual(["a", "b"])
+        expect(firstPage.nextPrimaryId).toBe("b")
+        const secondPage = await storage.objects.listByPrimaryIdPage({
+          projectId,
+          objectTypeId: Device.id,
+          afterPrimaryId: firstPage.nextPrimaryId,
+          limit: 2,
+        })
+        expect(secondPage.objects.map((row) => row.primaryId)).toEqual(["c"])
+      })
+    })
+
+    test("reads Materializer-owned telemetry", async () => {
+      await withStorage(async (storage) => {
+        const descending = await storage.timeseries.getHistory({
+          projectId,
+          objectTypeId: Device.id,
+          objectId: "a",
+          propertyId: "temperature",
+          from: new Date("2026-01-01T10:30:00.000Z"),
+          order: "desc",
+        })
+        expect(descending.map((point) => point.value)).toEqual([22])
+        expect(typeof descending[0]?.lastCommitId).toBe("string")
+
+        const histories = await storage.timeseries.getHistoryBatch({
+          projectId,
+          series: [
+            { objectTypeId: Device.id, objectId: "a", propertyId: "temperature" },
+            { objectTypeId: Device.id, objectId: "b", propertyId: "temperature" },
+          ],
+          limitPerSeries: 1,
+          order: "desc",
+        })
+        expect(histories.map((series) => series.points[0]?.value)).toEqual([22, 18])
+
+        const latest = await storage.timeseries.getLatest({
+          projectId,
+          objectTypeId: Device.id,
+          objectId: "a",
+          propertyId: "temperature",
+        })
+        expect(latest).toMatchObject({ value: 22, at: new Date("2026-01-01T12:00:00.000Z") })
+      })
+    })
+  })
+}
+
+async function seedEffectiveState(storage: Storage): Promise<void> {
+  const fixture = createMaterializerTestFixture({ projectId, ontology, storage })
+  await fixture.seed({
+    objects: [device("a", "Alpha"), device("b", "Beta"), device("c", "Gamma")],
+    links: [peer("a", "b"), peer("a", "c")],
+    telemetry: [
+      temperature("a", 20, "2026-01-01T10:00:00.000Z"),
+      temperature("a", 22, "2026-01-01T12:00:00.000Z"),
+      temperature("b", 18, "2026-01-01T11:00:00.000Z"),
+    ],
   })
 }
 

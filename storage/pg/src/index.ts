@@ -20,6 +20,7 @@ import {
 } from "@sixb/core/internal/storage-operation-scope"
 import {
   createTransactionStorageProxy,
+  type ObjectStorage,
   StorageTransactionError,
   throwNestedStorageTransaction,
 } from "@sixb/core/storage"
@@ -124,7 +125,7 @@ export interface PostgresStorageOptions {
  * ```
  */
 export class PostgresStorage implements MigrationCapableStorage {
-  readonly objects: Storage["objects"]
+  readonly objects: ObjectStorage
   readonly ontology: PgOntologyStorage
   readonly auth: PgAuthStorage
   readonly agents: PgAgentStorage

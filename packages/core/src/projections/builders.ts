@@ -16,8 +16,11 @@ import { ProjectionValidationError } from "./errors"
 import type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
+  LinkProjectionTarget,
   ObjectProjectionDefinition,
+  ObjectProjectionTarget,
   ProjectionDefinition,
+  ProjectionTarget,
   TelemetryProjectionDefinition,
 } from "./types"
 import {
@@ -696,17 +699,17 @@ export function projectionKindOf(
   return "telemetry"
 }
 
-/** The object type id(s) a projection materializes. */
-export type ProjectionObjectTypeIds =
-  | { readonly objectTypeId: string }
-  | { readonly sourceObjectTypeId: string; readonly targetObjectTypeId: string }
-
 /**
  * Extracts the object type id(s) a projection targets, used to authorize run
  * visibility (`object.view`). Link projections require both ends; object and
  * telemetry projections target a single type.
  */
-export function projectionObjectTypeIds(projection: ProjectionDefinition): ProjectionObjectTypeIds {
+export function projectionTargetOf(projection: LinkProjectionDefinition): LinkProjectionTarget
+export function projectionTargetOf(
+  projection: ObjectProjectionDefinition | TelemetryProjectionDefinition
+): ObjectProjectionTarget
+export function projectionTargetOf(projection: ProjectionDefinition): ProjectionTarget
+export function projectionTargetOf(projection: ProjectionDefinition): ProjectionTarget {
   return projection._tag === "LinkProjectionDefinition"
     ? {
         sourceObjectTypeId: projection.sourceObjectTypeId,

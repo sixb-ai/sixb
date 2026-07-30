@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
+import { assertCliSucceeded, runCliToCompletion } from "./shared/cli-process"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
@@ -42,7 +43,7 @@ describe("sixb service-account command", () => {
     })
     servers.push(server)
 
-    const proc = Bun.spawn({
+    const result = await runCliToCompletion({
       cmd: [
         "bun",
         cliEntry,
@@ -59,20 +60,12 @@ describe("sixb service-account command", () => {
       ],
       cwd: repoRoot,
       env: {
-        ...process.env,
         SIXB_API_URL: `http://127.0.0.1:${server.port}/api`,
         SIXB_API_TOKEN: "sixb_pat_tok_cli.secret",
       },
-      stdout: "pipe",
-      stderr: "pipe",
     })
-    const [exitCode, stdout, stderr] = await Promise.all([
-      proc.exited,
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
+    assertCliSucceeded(result)
 
-    expect(exitCode).toBe(0)
     expect(requestedPath).toBe("/api/auth/service-accounts")
     expect(authorizationHeader).toBe("Bearer sixb_pat_tok_cli.secret")
     expect(requestBody).toEqual({
@@ -81,10 +74,10 @@ describe("sixb service-account command", () => {
       description: "Sandbox agents",
       groupIds: ["agents"],
     })
-    expect(stdout).toContain("Created service account")
-    expect(stdout).toContain("svc_agents")
-    expect(stderr).toBe("")
-  })
+    expect(result.stdout).toContain("Created service account")
+    expect(result.stdout).toContain("svc_agents")
+    expect(result.stderr).toBe("")
+  }, 15_000)
 
   test("creates service-account tokens under one service account", async () => {
     let authorizationHeader = null as string | null
@@ -119,7 +112,7 @@ describe("sixb service-account command", () => {
     })
     servers.push(server)
 
-    const proc = Bun.spawn({
+    const result = await runCliToCompletion({
       cmd: [
         "bun",
         cliEntry,
@@ -136,20 +129,12 @@ describe("sixb service-account command", () => {
       ],
       cwd: repoRoot,
       env: {
-        ...process.env,
         SIXB_API_URL: `http://127.0.0.1:${server.port}/api`,
         SIXB_API_TOKEN: "sixb_pat_tok_cli.secret",
       },
-      stdout: "pipe",
-      stderr: "pipe",
     })
-    const [exitCode, stdout, stderr] = await Promise.all([
-      proc.exited,
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
+    assertCliSucceeded(result)
 
-    expect(exitCode).toBe(0)
     expect(requestedPath).toBe("/api/auth/service-accounts/svc_agents/access-tokens")
     expect(authorizationHeader).toBe("Bearer sixb_pat_tok_cli.secret")
     expect(requestBody).toEqual({
@@ -157,8 +142,8 @@ describe("sixb service-account command", () => {
       expiresAt: "2099-01-01T00:00:00.000Z",
       groupIds: ["agents"],
     })
-    expect(stdout).toContain("Created service-account token")
-    expect(stdout).toContain("sixb_sat_tok_cli.secret")
-    expect(stderr).toBe("")
-  })
+    expect(result.stdout).toContain("Created service-account token")
+    expect(result.stdout).toContain("sixb_sat_tok_cli.secret")
+    expect(result.stderr).toBe("")
+  }, 15_000)
 })

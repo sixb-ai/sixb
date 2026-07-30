@@ -173,9 +173,24 @@ interface ProjectionRunFinishBase {
   readonly execution: ProjectionExecution
 }
 
-type ProjectionRunTerminalStatus =
-  | { readonly status: "succeeded" }
-  | { readonly status: "failed" | "cancelled"; readonly errorMessage?: string }
+export type ProjectionRunTerminalDecision =
+  | {
+      readonly protocol: "replacement"
+      readonly status: "succeeded"
+      readonly inputExhausted?: never
+    }
+  | {
+      readonly protocol: "telemetry"
+      readonly status: "succeeded"
+      /** Explicit proof that the worker observed EOF for the immutable input version. */
+      readonly inputExhausted: true
+    }
+  | {
+      readonly protocol: ProjectionProtocolIdentity["protocol"]
+      readonly status: "failed" | "cancelled"
+      readonly errorMessage?: string
+      readonly inputExhausted?: never
+    }
 
 /**
  * Queue-agnostic terminal decision for one fenced projection execution.
@@ -183,10 +198,7 @@ type ProjectionRunTerminalStatus =
  * For telemetry, terminal success is also the fenced acknowledgement that the worker observed
  * the pinned input's EOF.
  */
-export type ProjectionRunFinishInput = ProjectionRunFinishBase &
-  ProjectionRunTerminalStatus & {
-    readonly protocol: ProjectionProtocolIdentity["protocol"]
-  }
+export type ProjectionRunFinishInput = ProjectionRunFinishBase & ProjectionRunTerminalDecision
 
 export interface TelemetrySeriesRef {
   readonly object: OntologyObjectRef

@@ -2,9 +2,15 @@ import type {
   PinnedDatasetVersion,
   ProjectionExecution,
   ProjectionMaterializationIdentity,
+  ProjectionRunTerminalDecision,
 } from "../../materialization/model"
+import type {
+  LinkProjectionTarget,
+  ObjectProjectionTarget,
+  ProjectionKind,
+  ProjectionTarget,
+} from "../../projections/types"
 
-export type ProjectionKind = ProjectionMaterializationIdentity["projectionKind"]
 export type ProjectionRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 
 export interface ProjectionRunProgress {
@@ -52,17 +58,6 @@ type ProjectionIdentity<TKind extends ProjectionKind> = Extract<
   { readonly projectionKind: TKind }
 >
 
-export interface ObjectProjectionTarget {
-  readonly objectTypeId: string
-}
-
-export interface LinkProjectionTarget {
-  readonly sourceObjectTypeId: string
-  readonly targetObjectTypeId: string
-}
-
-export type ProjectionRunTarget = ObjectProjectionTarget | LinkProjectionTarget
-
 export type ObjectProjectionRunRecord = ProjectionRunRecordBase & {
   readonly identity: ProjectionIdentity<"object">
   readonly target: ObjectProjectionTarget
@@ -91,13 +86,7 @@ export function projectionRunObjectTypesVisible(
   run: ProjectionRunRecord,
   canView: (objectTypeId: string) => boolean
 ): boolean {
-  return projectionTargetObjectTypesVisible(run.target, canView)
-}
-
-export function projectionTargetObjectTypesVisible(
-  target: ProjectionRunTarget,
-  canView: (objectTypeId: string) => boolean
-): boolean {
+  const target: ProjectionTarget = run.target
   if ("sourceObjectTypeId" in target) {
     return canView(target.sourceObjectTypeId) && canView(target.targetObjectTypeId)
   }
@@ -107,8 +96,6 @@ export function projectionTargetObjectTypesVisible(
 interface StartOrReclaimProjectionRunBase {
   readonly id: string
   readonly projectId: string
-  /** Required for telemetry and forbidden for replacement. */
-  readonly fixedBatchSize?: number
   readonly startedAt?: Date
 }
 
@@ -116,10 +103,12 @@ export type StartOrReclaimProjectionRunInput =
   | (StartOrReclaimProjectionRunBase & {
       readonly identity: ProjectionIdentity<"object">
       readonly target: ObjectProjectionRunRecord["target"]
+      readonly fixedBatchSize?: never
     })
   | (StartOrReclaimProjectionRunBase & {
       readonly identity: ProjectionIdentity<"link">
       readonly target: LinkProjectionRunRecord["target"]
+      readonly fixedBatchSize?: never
     })
   | (StartOrReclaimProjectionRunBase & {
       readonly identity: ProjectionIdentity<"telemetry">
@@ -143,10 +132,7 @@ export interface UpdateProjectionRunInput extends LockProjectionRunForMaterializ
   readonly progress: Partial<ProjectionRunProgress>
 }
 
-export type FinishProjectionRunInput = (
-  | { readonly status: "succeeded" }
-  | { readonly status: "failed" | "cancelled"; readonly errorMessage?: string }
-) &
+export type FinishProjectionRunInput = ProjectionRunTerminalDecision &
   LockProjectionRunForMaterializationInput & {
     readonly finishedAt?: Date
     readonly progress?: Partial<ProjectionRunProgress>
@@ -219,4 +205,12 @@ export interface ProjectionRunStorage {
   ): Promise<ListLatestProjectionRunsResult>
 }
 
-export type { PinnedDatasetVersion, ProjectionExecution, ProjectionMaterializationIdentity }
+export type {
+  LinkProjectionTarget,
+  ObjectProjectionTarget,
+  PinnedDatasetVersion,
+  ProjectionExecution,
+  ProjectionKind,
+  ProjectionMaterializationIdentity,
+  ProjectionTarget,
+}

@@ -54,12 +54,6 @@ const TelemetryProjectionRunSchema = ProjectionRunBaseSchema.extend({
     protocol: z.literal("telemetry"),
   }),
   target: z.object({ objectTypeId: z.string() }),
-  telemetryCheckpoint: z.object({
-    fixedBatchSize: z.number(),
-    nextBatchOrdinal: z.number(),
-    nextRowOffset: z.number(),
-    inputExhausted: z.boolean(),
-  }),
 })
 
 export const ProjectionRunSchema = z.union([

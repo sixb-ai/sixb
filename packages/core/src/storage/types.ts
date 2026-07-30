@@ -153,7 +153,7 @@ export type {
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
-  ProjectionRunTarget,
+  ProjectionTarget,
   ProjectionTelemetryCheckpoint,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,

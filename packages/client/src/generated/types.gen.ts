@@ -7973,12 +7973,6 @@ export type ListProjectionsResponses = {
             target: {
               objectTypeId: string
             }
-            telemetryCheckpoint: {
-              fixedBatchSize: number
-              nextBatchOrdinal: number
-              nextRowOffset: number
-              inputExhausted: boolean
-            }
           }
         | null
     }>
@@ -8078,12 +8072,6 @@ export type ListProjectionsResponses = {
             }
             target: {
               objectTypeId: string
-            }
-            telemetryCheckpoint: {
-              fixedBatchSize: number
-              nextBatchOrdinal: number
-              nextRowOffset: number
-              inputExhausted: boolean
             }
           }
         | null
@@ -8185,12 +8173,6 @@ export type ListProjectionsResponses = {
             }
             target: {
               objectTypeId: string
-            }
-            telemetryCheckpoint: {
-              fixedBatchSize: number
-              nextBatchOrdinal: number
-              nextRowOffset: number
-              inputExhausted: boolean
             }
           }
         | null
@@ -8329,12 +8311,6 @@ export type GetProjectionResponses = {
               target: {
                 objectTypeId: string
               }
-              telemetryCheckpoint: {
-                fixedBatchSize: number
-                nextBatchOrdinal: number
-                nextRowOffset: number
-                inputExhausted: boolean
-              }
             }
           | null
       }
@@ -8434,12 +8410,6 @@ export type GetProjectionResponses = {
               }
               target: {
                 objectTypeId: string
-              }
-              telemetryCheckpoint: {
-                fixedBatchSize: number
-                nextBatchOrdinal: number
-                nextRowOffset: number
-                inputExhausted: boolean
               }
             }
           | null
@@ -8541,12 +8511,6 @@ export type GetProjectionResponses = {
               }
               target: {
                 objectTypeId: string
-              }
-              telemetryCheckpoint: {
-                fixedBatchSize: number
-                nextBatchOrdinal: number
-                nextRowOffset: number
-                inputExhausted: boolean
               }
             }
           | null
@@ -8677,12 +8641,6 @@ export type ListProjectionRunsResponses = {
           target: {
             objectTypeId: string
           }
-          telemetryCheckpoint: {
-            fixedBatchSize: number
-            nextBatchOrdinal: number
-            nextRowOffset: number
-            inputExhausted: boolean
-          }
         }
     >
     hasMore: boolean
@@ -8810,12 +8768,6 @@ export type GetProjectionRunResponses = {
         }
         target: {
           objectTypeId: string
-        }
-        telemetryCheckpoint: {
-          fixedBatchSize: number
-          nextBatchOrdinal: number
-          nextRowOffset: number
-          inputExhausted: boolean
         }
       }
 }

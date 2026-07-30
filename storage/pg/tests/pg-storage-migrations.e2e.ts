@@ -317,6 +317,7 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     projectId: "project-a",
     identity: projectionRun.run.identity,
     executionToken: projectionRun.execution.executionToken,
+    protocol: "replacement",
     status: "succeeded",
     finishedAt: new Date("2026-04-19T12:00:01.000Z"),
     progress: { sourceRowsRead: 4 },

@@ -879,9 +879,12 @@ export { CronValidationError } from "./schedules"
 export type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
+  LinkProjectionTarget,
   ObjectProjectionDefinition,
+  ObjectProjectionTarget,
   ProjectionDefinition,
-  ProjectionObjectTypeIds,
+  ProjectionTarget,
+  ProjectionTargetByKind,
   TelemetryProjectionDefinition,
 } from "./projections"
 

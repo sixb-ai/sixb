@@ -117,6 +117,27 @@ export type ProjectionProtocolIdentity =
   | { readonly projectionKind: "link"; readonly protocol: "replacement" }
   | { readonly projectionKind: "telemetry"; readonly protocol: "telemetry" }
 
+export type ProjectionKind = ProjectionProtocolIdentity["projectionKind"]
+
+export interface ObjectProjectionTarget {
+  readonly objectTypeId: string
+}
+
+export interface LinkProjectionTarget {
+  readonly sourceObjectTypeId: string
+  readonly targetObjectTypeId: string
+}
+
+export interface ProjectionTargetByKind {
+  readonly object: ObjectProjectionTarget
+  readonly link: LinkProjectionTarget
+  readonly telemetry: ObjectProjectionTarget
+}
+
+/** Object types affected by one projection, correlated with its projection kind. */
+export type ProjectionTarget<TKind extends ProjectionKind = ProjectionKind> =
+  ProjectionTargetByKind[TKind]
+
 /**
  * Frozen semantic identity used to dispatch one registered projection.
  *

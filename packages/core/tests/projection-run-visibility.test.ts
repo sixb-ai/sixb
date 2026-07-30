@@ -6,7 +6,7 @@ import type {
   TelemetryProjectionDefinition,
 } from "../src"
 import { canViewProjection, canViewProjectionRun, emptyGrantIndex } from "../src/authorization"
-import type { ProjectionRunTarget } from "../src/storage"
+import type { ProjectionTarget } from "../src/storage"
 
 function authzViewing(...objectTypeIds: string[]): AuthorizationContext {
   return {
@@ -68,8 +68,8 @@ describe("canViewProjection", () => {
 })
 
 describe("canViewProjectionRun", () => {
-  const objectRun: ProjectionRunTarget = { objectTypeId: "room" }
-  const linkRun: ProjectionRunTarget = {
+  const objectRun: ProjectionTarget = { objectTypeId: "room" }
+  const linkRun: ProjectionTarget = {
     sourceObjectTypeId: "room",
     targetObjectTypeId: "sensor",
   }

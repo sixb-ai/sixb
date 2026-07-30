@@ -25,9 +25,7 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
 
     const projectionRunsStorage = sixb.storage.projectionRuns
     if (!projectionRunsStorage) {
-      throw new Error(
-        "[SixbProjectionWorker] Projection workers require materialization-capable storage.projectionRuns."
-      )
+      throw new Error("[SixbProjectionWorker] Projection workers require storage.projectionRuns.")
     }
 
     super({

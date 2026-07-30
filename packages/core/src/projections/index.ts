@@ -1,6 +1,5 @@
 // ── Builders ─────────────────────────────────────────────────
 
-export type { ProjectionObjectTypeIds } from "./builders"
 export {
   categorizeProjections,
   defineLinkProjection,
@@ -12,7 +11,6 @@ export {
   isProjectionDefinition,
   isTelemetryProjectionDefinition,
   projectionKindOf,
-  projectionObjectTypeIds,
 } from "./builders"
 // ── Errors ──────────────────────────────────────────────────
 export { ProjectionValidationError } from "./errors"
@@ -20,8 +18,13 @@ export { ProjectionValidationError } from "./errors"
 export type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
+  LinkProjectionTarget,
   ObjectProjectionDefinition,
+  ObjectProjectionTarget,
   ProjectionDefinition,
+  ProjectionKind,
+  ProjectionTarget,
+  ProjectionTargetByKind,
   TelemetryProjectionDefinition,
 } from "./types"
 // ── Validation ───────────────────────────────────────────────
