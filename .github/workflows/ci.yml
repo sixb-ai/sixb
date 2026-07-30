@@ -146,7 +146,10 @@ jobs:
   test:
     name: Unit tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # A backstop, not the bound that matters. `test:ci` wraps the run in scripts/ci-guard.ts, which
+    # fails at the first 60s silence and prints where it stopped. Reaching this limit instead means
+    # the guard itself did not run.
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -168,8 +171,6 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Unit tests
-        # Bun otherwise schedules up to 20 tests concurrently. That oversubscribes
-        # hosted runners and has made subprocess-heavy tests intermittently stall.
         run: bun run test:ci
 
   lint:
@@ -202,12 +203,21 @@ jobs:
   e2e:
     name: E2E (${{ matrix.name }})
     runs-on: ubuntu-latest
+    # Without this the job inherits GitHub's 360-minute default, so a hang here burns six hours of
+    # runner time instead of failing.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: cli
             package: "@sixb/cli"
+          # Packs real tarballs and bundles what they ship. It runs here rather than with the unit
+          # tests because it builds three packages from cold, which is a third of that job's
+          # runtime, and because it drives the bundler — the one thing that has wedged a whole
+          # test process.
+          - name: publish
+            package: "@sixb/core"
           - name: blob-s3
             package: "@sixb/blob-s3"
           - name: ducklake

@@ -22,7 +22,7 @@
     "release:publish": "bun scripts/publish.ts",
     "dev": "bun sixb dev",
     "test": "bun test",
-    "test:ci": "bun test --max-concurrency 4",
+    "test:ci": "bun scripts/ci-guard.ts --stall 60 --max 420 bun test",
     "test:e2e": "bun run --workspaces --if-present test:e2e",
     "test:all": "bun run test && bun run test:e2e",
     "lint": "biome check auth/*/src packages/*/src connectors/*/src sandboxes/*/src",

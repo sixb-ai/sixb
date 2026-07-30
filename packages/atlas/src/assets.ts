@@ -28,6 +28,13 @@ export interface BuiltInUiShellConfig extends BuiltInUiRuntimeConfig {
   readonly stylesheetPath: string
 }
 
+/**
+ * How long the Atlas bundle build may take before it is killed and reported as failed. A healthy
+ * build is under a second, so this is not a performance allowance — it is the line past which the
+ * bundler is presumed stuck rather than slow.
+ */
+const BUNDLE_TIMEOUT_MS = 120_000
+
 let readyBundle: Promise<BuiltInUiBundle> | null = null
 const packageRoot = join(import.meta.dir, "..")
 const sourceDir = join(packageRoot, "src")
@@ -107,10 +114,36 @@ export async function buildBuiltInUiBundle(
     }
   )
 
-  const exitCode = await proc.exited
-  if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text()
-    throw new Error(`[SixbAtlas] Failed to build built-in UI bundle: ${stderr.trim()}`)
+  // Read stderr *while* the child runs. Reading only after `exited` leaves the pipe unread, and a
+  // child that fills its buffer blocks on write while this waits for the exit that write prevents.
+  const stderrText = new Response(proc.stderr).text()
+
+  // The bundler can wedge — Bun's has deadlocked on hosted runners — and an unbounded wait turns
+  // that into a caller that never returns: a `sixb build` with no output, or a CI job that dies at
+  // its own wall clock naming nothing. Killing the child is as much the point as the timer: a child
+  // left alive outlives this function and gets reaped as an orphan by whatever supervises the job.
+  let timedOut = false
+  const killTimer = setTimeout(() => {
+    timedOut = true
+    proc.kill()
+  }, BUNDLE_TIMEOUT_MS)
+
+  try {
+    const exitCode = await proc.exited
+    if (timedOut) {
+      throw new Error(
+        `[SixbAtlas] Built-in UI bundle did not finish within ${BUNDLE_TIMEOUT_MS}ms and was stopped.`
+      )
+    }
+    if (exitCode !== 0) {
+      throw new Error(
+        `[SixbAtlas] Failed to build built-in UI bundle: ${(await stderrText).trim()}`
+      )
+    }
+  } finally {
+    clearTimeout(killTimer)
+    // Settle the read either way, so a killed child leaves nothing pending.
+    await stderrText.catch(() => "")
   }
 
   return await resolveBuiltInUiBundle(outdir)

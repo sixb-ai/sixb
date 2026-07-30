@@ -59,9 +59,16 @@ CI runs these as independent parallel jobs (each does `bun install --frozen-lock
 - `typecheck`: `bun run typecheck`
 - `build`: `bun run build`, then `bun run test:publish`
 - `client`: `bun run generate:client`, then `git diff --exit-code`
-- `test`: `bun run test`
+- `test`: `bun run test:ci`
 - `lint`: `bun run check`
 - `e2e`: package-scoped matrix jobs for packages with `test:e2e`
+
+`test:ci` is `bun test` wrapped in `scripts/ci-guard.ts`, which fails the run at the first 60-second
+silence and prints the last test file, the process tree, and each thread's kernel wait state. The
+job's `timeout-minutes` is only a backstop: a job that dies at its own wall clock reports
+"cancelled" with the log ending mid-stream, which is indistinguishable from every other cause. The
+guard exists because a `Bun.build()` deadlock once cost five 15-minute runs before anyone found the
+one named failure buried in the log.
 
 `typecheck` uses the TypeScript project-reference graph: `bun run build:types` (`tsc -b
 tsconfig.build.json`) checks every package's `src` exactly once, `tsconfig.tests.json` checks
@@ -109,6 +116,16 @@ shared source (notably `@sixb/core`) once per dependent, which made the step the
 - Fast tests use `*.test.ts`.
 - E2e tests use `*.e2e.ts` and run through `bun run test:e2e`.
 - Prefer deterministic tests with temp directories, explicit cleanup, and fixed timestamps.
+- `bun test` prints only when a file finishes, so a test's runtime is a silence. The unit suite's
+  longest legitimate silence is a few seconds; `test:ci` fails at 60. A `*.test.ts` that can
+  legitimately go quiet for longer belongs in `*.e2e.ts` with its own bound, not in the unit suite.
+- Drive the bundler through a child process with a bound, not `Bun.build()` in the test process.
+  Bun's bundler has deadlocked on hosted runners, a wedged bundler stays wedged for the life of the
+  process, and the per-test timeout stops being a bound once it does — it fired for the deadlocked
+  build and then not at all for the next bundler call, which hung until the job's wall clock.
+  `packages/core/tests/published-artifacts.e2e.ts` shows the shape. The one in-process exception is
+  `atlas-app.test.ts`, which imports Bun's HTML entry because that import *is* the behavior under
+  test — it is why `test:ci` runs behind a guard at all.
 - Run targeted tests first, then broader checks when shared behavior changes.
 
 ## Contribution Flow
