@@ -25,6 +25,17 @@ export interface TailwindCssCompilerOptions {
   minify?: boolean
   /** Debounce for `schedule()` rebuilds, in milliseconds. */
   debounceMs?: number
+  /**
+   * How long one Tailwind CLI run may take before it is killed and the build
+   * reported as failed. Defaults to two minutes, generous enough for a cold
+   * build on a loaded CI runner.
+   *
+   * A bound is not optional here: the CLI runs as a child process, and a child
+   * that never exits makes `compile()` hang forever — outside any test runner's
+   * per-test timeout, so the whole job dies at its wall clock with no failing
+   * test named, leaving orphaned `bun` processes behind.
+   */
+  timeoutMs?: number
   /** Called when a `schedule()`d rebuild fails. Defaults to `console.error`. */
   onError?: (error: Error) => void
 }
@@ -71,6 +82,7 @@ export function createTailwindCssCompiler(
   const resolveFrom = options.resolveFrom ?? cwd
   const label = options.label ?? "[SixbTailwind]"
   const debounceMs = options.debounceMs ?? 50
+  const timeoutMs = options.timeoutMs ?? 120_000
   const onError = options.onError ?? ((error: Error) => console.error(`${label} ${error.message}`))
 
   let chain: Promise<void> = Promise.resolve()
@@ -98,10 +110,33 @@ export function createTailwindCssCompiler(
       stderr: "pipe",
     })
 
-    const exitCode = await proc.exited
-    if (exitCode !== 0) {
-      const stderr = await new Response(proc.stderr).text()
-      throw new Error(`${label} Tailwind CSS build failed: ${stderr.trim()}`)
+    // Read stderr *while* the child runs. Waiting for `exited` first leaves the pipe
+    // unread, and a child that fills its ~64 KB buffer blocks on write forever — a
+    // deadlock rather than a slow build.
+    const stderrText = new Response(proc.stderr).text()
+
+    // `proc.kill()` matters as much as the timer: without it the child outlives this
+    // function and the CI runner has to reap it as an orphan.
+    let timedOut = false
+    const killTimer = setTimeout(() => {
+      timedOut = true
+      proc.kill()
+    }, timeoutMs)
+
+    try {
+      const exitCode = await proc.exited
+      if (timedOut) {
+        throw new Error(
+          `${label} Tailwind CSS build did not finish within ${timeoutMs}ms and was stopped. Check that '${options.inputPath}' compiles, or raise 'timeoutMs'.`
+        )
+      }
+      if (exitCode !== 0) {
+        throw new Error(`${label} Tailwind CSS build failed: ${(await stderrText).trim()}`)
+      }
+    } finally {
+      clearTimeout(killTimer)
+      // Settle the read either way so a killed child leaves nothing pending.
+      await stderrText.catch(() => "")
     }
   }
 

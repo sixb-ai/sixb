@@ -164,6 +164,32 @@ describe("createTailwindCssCompiler", () => {
       await compiler.stop()
     }
   })
+
+  test("a CLI that never exits fails the build instead of hanging forever", async () => {
+    // `await proc.exited` used to be unbounded. A child that never exits then hung
+    // `compile()` outside any test runner's per-test timeout, so CI died at the job's
+    // wall clock with no failing test named and orphaned children to reap.
+    const inputPath = join(tempRoot, "app.css")
+    await writeFile(inputPath, ".initial { color: red; }\n")
+    await installFakeTailwindCli(tempRoot, ["await new Promise(() => {})"])
+
+    const compiler = createTailwindCssCompiler({
+      inputPath,
+      outputPath: join(tempRoot, "dist", "app.css"),
+      cwd: tempRoot,
+      resolveFrom: tempRoot,
+      timeoutMs: 200,
+      label: "[SixbTest]",
+    })
+
+    try {
+      await expect(compiler.compile()).rejects.toThrow(
+        "[SixbTest] Tailwind CSS build did not finish within 200ms and was stopped."
+      )
+    } finally {
+      await compiler.stop()
+    }
+  })
 })
 
 describe("custom app Tailwind build (e2e)", () => {
@@ -315,7 +341,10 @@ async function getFreePort(): Promise<number> {
   return port
 }
 
-async function installFakeTailwindCli(projectRoot: string): Promise<void> {
+async function installFakeTailwindCli(
+  projectRoot: string,
+  body?: readonly string[]
+): Promise<void> {
   const cliRoot = join(projectRoot, "node_modules", "@tailwindcss", "cli")
   await mkdir(join(cliRoot, "dist"), { recursive: true })
   await writeFile(
@@ -325,9 +354,11 @@ async function installFakeTailwindCli(projectRoot: string): Promise<void> {
   await writeFile(
     join(cliRoot, "dist", "index.mjs"),
     [
-      'const input = process.argv[process.argv.indexOf("-i") + 1]',
-      'const output = process.argv[process.argv.indexOf("-o") + 1]',
-      "await Bun.write(output, await Bun.file(input).text())",
+      ...(body ?? [
+        'const input = process.argv[process.argv.indexOf("-i") + 1]',
+        'const output = process.argv[process.argv.indexOf("-o") + 1]',
+        "await Bun.write(output, await Bun.file(input).text())",
+      ]),
       "",
     ].join("\n")
   )
