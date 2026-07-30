@@ -45,7 +45,16 @@ const interventionQuery = {
 
 const timelineStartHour = 8
 const timelineEndHour = 18
-const timelineHours = [8, 10, 12, 14, 16, 18]
+const timelineGuideStepMinutes = 2 * 60
+const timelineHourWidth = 120
+const timelineTechnicianColumnWidth = 250
+const timelineDefaultWorkDurationMinutes = 90
+
+interface TimelineRange {
+  startMinutes: number
+  endMinutes: number
+  hours: number[]
+}
 
 type TechnicianRow = NonNullable<Awaited<ReturnType<typeof techniciansQuery.first>>>
 type WorkOrderRow = NonNullable<Awaited<ReturnType<typeof workOrdersQuery.first>>>
@@ -573,20 +582,33 @@ function ScheduleTimeline({
   pending: Intervention[]
 }) {
   const now = new Date()
-  const nowPosition = isSameDay(date, now) ? timePosition(now) : undefined
+  const range = createTimelineRange(date, workOrders)
+  const nowPosition = isSameDay(date, now) ? timePosition(now, date, range) : undefined
+  const timelineWidth = ((range.endMinutes - range.startMinutes) / 60) * timelineHourWidth
+  const timelineCanvasStyle = {
+    width: timelineTechnicianColumnWidth + timelineWidth,
+  } satisfies CSSProperties
+  const timelineGridStyle = {
+    gridTemplateColumns: `${timelineTechnicianColumnWidth}px ${timelineWidth}px`,
+  } satisfies CSSProperties
 
   return (
-    <div className="overflow-x-auto border-t border-border/80">
-      <div className="min-w-[1040px]">
-        <div className="grid grid-cols-[250px_minmax(0,1fr)] border-b border-border/80">
-          <div className="border-r border-border/70" />
+    <div
+      className="overflow-x-auto overscroll-x-contain border-t border-border/80 [scrollbar-gutter:stable]"
+      role="region"
+      aria-label="Technician schedule timeline"
+      tabIndex={0}
+    >
+      <div style={timelineCanvasStyle}>
+        <div className="grid border-b border-border/80" style={timelineGridStyle}>
+          <div className="border-r border-border/70 bg-card md:sticky md:left-0 md:z-30" />
           <div className="relative h-11">
-            <TimelineGuides />
-            {timelineHours.map((hour) => (
+            <TimelineGuides range={range} />
+            {range.hours.map((hour) => (
               <span
                 key={hour}
                 className="absolute top-1/2 -translate-y-1/2 font-mono text-[10px] text-muted-foreground"
-                style={timeLabelStyle(hour)}
+                style={timeLabelStyle(hour, range)}
               >
                 {formatHour(hour)}
               </span>
@@ -610,11 +632,12 @@ function ScheduleTimeline({
           return (
             <div
               key={technician.primaryId}
-              className="grid min-h-[66px] grid-cols-[250px_minmax(0,1fr)] border-b border-border/70 last:border-b-0"
+              className="grid min-h-[66px] border-b border-border/70 last:border-b-0"
+              style={timelineGridStyle}
             >
               <Link
                 to={`/technicians/${encodeURIComponent(technician.primaryId)}`}
-                className="group flex items-center gap-3 border-r border-border/70 px-5 py-3 transition-colors hover:bg-accent/55"
+                className="group flex items-center gap-3 border-r border-border/70 bg-card px-5 py-3 transition-colors hover:bg-accent/55 md:sticky md:left-0 md:z-20"
               >
                 <span className="grid size-8 shrink-0 place-items-center rounded-full bg-muted font-mono text-[11px] font-medium text-foreground">
                   {initials(technician.properties.name)}
@@ -631,11 +654,11 @@ function ScheduleTimeline({
               </Link>
 
               <div className="relative min-h-[66px] overflow-hidden">
-                <TimelineGuides />
+                <TimelineGuides range={range} />
                 {availabilityStart && assignedWork.length === 0 ? (
                   <div
                     className="absolute top-3 h-10 rounded-lg border border-dashed border-[color:var(--success)]/55 bg-[color:var(--success)]/[0.025]"
-                    style={availabilityStyle(availabilityStart)}
+                    style={availabilityStyle(availabilityStart, date, range)}
                   >
                     <span className="absolute top-1/2 right-3 -translate-y-1/2 text-[10px] font-medium text-[color:var(--success)]">
                       Available
@@ -643,7 +666,12 @@ function ScheduleTimeline({
                   </div>
                 ) : null}
                 {assignedWork.map((workOrder) => (
-                  <ScheduleBlock key={workOrder.primaryId} workOrder={workOrder} />
+                  <ScheduleBlock
+                    key={workOrder.primaryId}
+                    workOrder={workOrder}
+                    date={date}
+                    range={range}
+                  />
                 ))}
                 {nowPosition !== undefined ? (
                   <span
@@ -671,11 +699,21 @@ function ScheduleTimeline({
   )
 }
 
-function ScheduleBlock({ workOrder }: { workOrder: WorkOrderRow }) {
+function ScheduleBlock({
+  workOrder,
+  date,
+  range,
+}: {
+  workOrder: WorkOrderRow
+  date: Date
+  range: TimelineRange
+}) {
   const href = `/service-cases/${encodeURIComponent(workOrder.links.serviceCase?.primaryId ?? "")}`
   const style = scheduleBlockStyle(
     workOrder.properties.scheduledStart,
-    workOrder.properties.scheduledEnd
+    workOrder.properties.scheduledEnd,
+    date,
+    range
   )
 
   return (
@@ -697,14 +735,14 @@ function ScheduleBlock({ workOrder }: { workOrder: WorkOrderRow }) {
   )
 }
 
-function TimelineGuides() {
+function TimelineGuides({ range }: { range: TimelineRange }) {
   return (
     <>
-      {timelineHours.map((hour) => (
+      {range.hours.map((hour) => (
         <span
           key={hour}
           className="pointer-events-none absolute inset-y-0 w-px bg-border/55"
-          style={{ left: `${hourPosition(hour)}%` }}
+          style={{ left: `${hourPosition(hour, range)}%` }}
           aria-hidden="true"
         />
       ))}
@@ -733,19 +771,25 @@ function scheduleTone(status: string): string {
 
 function scheduleBlockStyle(
   startValue: string | Date | undefined,
-  endValue: string | Date | undefined
+  endValue: string | Date | undefined,
+  date: Date,
+  range: TimelineRange
 ): CSSProperties {
-  if (!startValue) return { left: "0%", width: "14%" }
-  const left = timePosition(new Date(startValue))
-  const right = endValue ? timePosition(new Date(endValue)) : Math.min(100, left + 14)
+  const fallbackWidth =
+    (timelineDefaultWorkDurationMinutes / (range.endMinutes - range.startMinutes)) * 100
+  if (!startValue) return { left: "0%", width: `${fallbackWidth}%` }
+  const left = timePosition(new Date(startValue), date, range)
+  const right = endValue
+    ? timePosition(new Date(endValue), date, range)
+    : Math.min(100, left + fallbackWidth)
   return {
     left: `${left}%`,
     width: `${Math.max(8, right - left)}%`,
   }
 }
 
-function availabilityStyle(start: Date): CSSProperties {
-  const left = timePosition(start)
+function availabilityStyle(start: Date, date: Date, range: TimelineRange): CSSProperties {
+  const left = timePosition(start, date, range)
   return {
     left: `${left}%`,
     width: `${Math.max(0, 100 - left - 1)}%`,
@@ -792,19 +836,64 @@ function equipmentIllustration(equipmentName: string, equipmentType: string | un
   return undefined
 }
 
-function timePosition(value: Date): number {
-  const minutes = value.getHours() * 60 + value.getMinutes()
-  const start = timelineStartHour * 60
-  const end = timelineEndHour * 60
-  return Math.min(100, Math.max(0, ((minutes - start) / (end - start)) * 100))
+function createTimelineRange(date: Date, workOrders: WorkOrderRow[]): TimelineRange {
+  let startMinutes = timelineStartHour * 60
+  let endMinutes = timelineEndHour * 60
+
+  for (const workOrder of workOrders) {
+    const scheduledStart = minutesFromDayStart(workOrder.properties.scheduledStart, date)
+    const scheduledEnd = minutesFromDayStart(workOrder.properties.scheduledEnd, date)
+    if (scheduledStart !== undefined) {
+      startMinutes = Math.min(
+        startMinutes,
+        Math.floor(scheduledStart / timelineGuideStepMinutes) * timelineGuideStepMinutes
+      )
+      endMinutes = Math.max(
+        endMinutes,
+        Math.ceil(
+          (scheduledStart + timelineDefaultWorkDurationMinutes) / timelineGuideStepMinutes
+        ) * timelineGuideStepMinutes
+      )
+    }
+    if (scheduledEnd !== undefined) {
+      endMinutes = Math.max(
+        endMinutes,
+        Math.ceil(scheduledEnd / timelineGuideStepMinutes) * timelineGuideStepMinutes
+      )
+    }
+  }
+
+  startMinutes = Math.max(0, startMinutes)
+  endMinutes = Math.min(24 * 60, endMinutes)
+  const hours: number[] = []
+  for (let minutes = startMinutes; minutes <= endMinutes; minutes += timelineGuideStepMinutes) {
+    hours.push(minutes / 60)
+  }
+
+  return { startMinutes, endMinutes, hours }
 }
 
-function hourPosition(hour: number): number {
-  return ((hour - timelineStartHour) / (timelineEndHour - timelineStartHour)) * 100
+function minutesFromDayStart(value: string | Date | undefined, date: Date): number | undefined {
+  if (!value) return undefined
+  const timestamp = new Date(value)
+  if (Number.isNaN(timestamp.getTime())) return undefined
+  return (timestamp.getTime() - startOfDay(date).getTime()) / 60_000
 }
 
-function timeLabelStyle(hour: number): CSSProperties {
-  const position = hourPosition(hour)
+function timePosition(value: Date, date: Date, range: TimelineRange): number {
+  const minutes = minutesFromDayStart(value, date) ?? range.startMinutes
+  return Math.min(
+    100,
+    Math.max(0, ((minutes - range.startMinutes) / (range.endMinutes - range.startMinutes)) * 100)
+  )
+}
+
+function hourPosition(hour: number, range: TimelineRange): number {
+  return ((hour * 60 - range.startMinutes) / (range.endMinutes - range.startMinutes)) * 100
+}
+
+function timeLabelStyle(hour: number, range: TimelineRange): CSSProperties {
+  const position = hourPosition(hour, range)
   if (position === 0) return { left: 12 }
   if (position === 100) return { right: 12 }
   return { left: `${position}%`, transform: "translate(-50%, -50%)" }
