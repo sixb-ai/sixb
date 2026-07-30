@@ -168,7 +168,9 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Unit tests
-        run: bun run test
+        # Bun otherwise schedules up to 20 tests concurrently. That oversubscribes
+        # hosted runners and has made subprocess-heavy tests intermittently stall.
+        run: bun run test:ci
 
   lint:
     name: Lint and format
