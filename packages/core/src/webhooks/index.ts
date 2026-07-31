@@ -17,5 +17,5 @@ export type {
   WebhookResponse,
   WebhookVerifyContext,
 } from "./types"
-export type { UnverifiedWebhookWarning } from "./unverified"
-export { warnUnverifiedWebhook } from "./unverified"
+export type { WebhookVerificationRequirement } from "./unverified"
+export { requireWebhookVerification, UnverifiedWebhookError } from "./unverified"

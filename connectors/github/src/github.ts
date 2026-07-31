@@ -43,7 +43,13 @@ export function github(options: GitHubConnectorOptions): GitHubConnector {
   return {
     type: "github",
     webhooks: options.onEvent
-      ? [githubEventsWebhook({ secret: options.webhookSecret, onEvent: options.onEvent })]
+      ? [
+          githubEventsWebhook({
+            secret: options.webhookSecret,
+            allowUnsigned: options.webhookAllowUnsigned,
+            onEvent: options.onEvent,
+          }),
+        ]
       : undefined,
     async connect(context) {
       return createGitHubClient(await http.connect(context), apiBaseUrl)

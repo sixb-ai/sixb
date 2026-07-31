@@ -594,7 +594,6 @@ export { defineConnector } from "./connectors"
 
 export type {
   RegisteredWebhook,
-  UnverifiedWebhookWarning,
   WebhookBodyFormat,
   WebhookBodyParser,
   WebhookBodySchema,
@@ -606,12 +605,14 @@ export type {
   WebhookIdempotencyKeyResolver,
   WebhookMetadata,
   WebhookResponse,
+  WebhookVerificationRequirement,
   WebhookVerifyContext,
 } from "./webhooks"
 export {
   defineWebhook,
+  requireWebhookVerification,
+  UnverifiedWebhookError,
   WebhookValidationError,
-  warnUnverifiedWebhook,
   webhookConnector,
 } from "./webhooks"
 

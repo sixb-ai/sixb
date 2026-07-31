@@ -1,11 +1,17 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook, warnUnverifiedWebhook } from "@sixb/core"
+import { defineWebhook, requireWebhookVerification } from "@sixb/core"
 import type { CompanyCamClient } from "./client"
 import type { CompanyCamEventHandler, CompanyCamWebhookEvent } from "./types"
 
 interface CompanyCamEventsWebhookOptions {
+  /** Webhook signing secret. Required unless `allowUnsigned` is set. */
   readonly secret?: string
+  /**
+   * Accept deliveries this connector cannot verify. Without a secret the route accepts
+   * unsigned requests from anyone who can reach it, so it has to be asked for.
+   */
+  readonly allowUnsigned?: boolean
   readonly onEvent: CompanyCamEventHandler
 }
 
@@ -21,13 +27,13 @@ interface CompanyCamEventsWebhookOptions {
 export function companyCamEventsWebhook(
   options: CompanyCamEventsWebhookOptions
 ): WebhookDefinition<unknown, CompanyCamClient> {
-  if (!options.secret) {
-    warnUnverifiedWebhook({
-      connector: "SixbCompanyCam",
-      header: "X-CompanyCam-Signature",
-      secretOption: "`secret` on companyCamEventsWebhook",
-    })
-  }
+  requireWebhookVerification({
+    connector: "SixbCompanyCam",
+    header: "X-CompanyCam-Signature",
+    secretOption: "`secret` on companyCamEventsWebhook",
+    secret: options.secret,
+    allowUnsigned: options.allowUnsigned,
+  })
 
   return defineWebhook("events")
     .post()

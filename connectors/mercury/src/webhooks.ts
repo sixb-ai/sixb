@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook, warnUnverifiedWebhook } from "@sixb/core"
+import { defineWebhook, requireWebhookVerification } from "@sixb/core"
 import type {
   MercuryClient,
   MercuryEvent,
@@ -14,8 +14,16 @@ const DEFAULT_TOLERANCE_MS = 5 * 60 * 1000
 
 export interface MercuryEventsWebhookOptions {
   readonly onEvent: MercuryEventHandler
-  /** Endpoint signing secret. Verification is skipped when omitted. */
+  /** Endpoint signing secret. Required unless `allowUnsigned` is set. */
   readonly secret?: string
+  /**
+   * Accept deliveries this connector cannot verify.
+   *
+   * Without a secret the route accepts unsigned requests from anyone who can reach it,
+   * which for a banking connector is a decision and not a default. Omitted, a missing
+   * secret refuses to define the webhook at all.
+   */
+  readonly allowUnsigned?: boolean
   /** Maximum accepted signature age. Defaults to 5 minutes. */
   readonly toleranceMs?: number
 }
@@ -34,13 +42,13 @@ export function mercuryEventsWebhook(
   const toleranceMs = options.toleranceMs ?? DEFAULT_TOLERANCE_MS
   assertToleranceMs(toleranceMs)
 
-  if (!options.secret) {
-    warnUnverifiedWebhook({
-      connector: "Mercury",
-      header: "Mercury-Signature",
-      secretOption: "`secret` on mercuryEventsWebhook",
-    })
-  }
+  requireWebhookVerification({
+    connector: "Mercury",
+    header: "Mercury-Signature",
+    secretOption: "`secret` on mercuryEventsWebhook",
+    secret: options.secret,
+    allowUnsigned: options.allowUnsigned,
+  })
 
   return defineWebhook("events")
     .post()

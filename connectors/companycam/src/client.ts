@@ -14,6 +14,13 @@ export interface CompanyCamConnectorOptions {
   readonly baseUrl?: string
   /** Shared secret used both as the webhook `token` and the inbound HMAC verify key. */
   readonly webhookSecret?: string
+  /**
+   * Register the inbound webhook even though it cannot be verified.
+   *
+   * Without `webhookSecret` the route accepts unsigned requests from anyone who can
+   * reach it, so the connector refuses to build it unless this says otherwise.
+   */
+  readonly webhookAllowUnsigned?: boolean
   /** Invoked for each verified inbound webhook delivery. */
   readonly onEvent?: CompanyCamEventHandler
 }

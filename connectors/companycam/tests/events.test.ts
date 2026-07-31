@@ -13,7 +13,9 @@ const sign = (secret: string, body: string): string =>
 describe("companycam events webhook", () => {
   test("registers only when onEvent is set", () => {
     expect(companycam({ token: "t" }).webhooks).toBeUndefined()
-    expect(companycam({ token: "t", onEvent: () => {} }).webhooks).toHaveLength(1)
+    expect(
+      companycam({ token: "t", webhookAllowUnsigned: true, onEvent: () => {} }).webhooks
+    ).toHaveLength(1)
   })
 
   test("verifies the signature, dispatches the event, and responds 200", async () => {
@@ -74,7 +76,7 @@ describe("companycam events webhook", () => {
   })
 
   test("skips verification when no secret is configured", () => {
-    const webhook = companyCamEventsWebhook({ onEvent: () => {} })
+    const webhook = companyCamEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
     expect(() =>
       webhook.verify?.({
         request: new Request("https://x/hook", { method: "POST" }),
@@ -85,10 +87,17 @@ describe("companycam events webhook", () => {
 })
 
 describe("companyCamEventsWebhook without a secret", () => {
-  test("says out loud that it will accept unsigned requests", () => {
-    // `if (!options.secret) return` inside `.verify()` is a fine default for local
-    // development and an open door in production, and it said nothing either way.
-    const warnings = captureWarnings(() => companyCamEventsWebhook({ onEvent: () => {} }))
+  test("refuses to define a webhook that would accept unsigned requests", () => {
+    // `if (!options.secret) return` inside `.verify()` accepted anything that reached the
+    // route. It threw no error and, for a while, only warned — which a startup log buries.
+    // The definition now fails, so `createSixb()` fails and the API role never starts.
+    expect(() => companyCamEventsWebhook({ onEvent: () => {} })).toThrow(/X-CompanyCam-Signature/)
+  })
+
+  test("accepts unsigned deliveries when asked to, and says so", () => {
+    const warnings = captureWarnings(() =>
+      companyCamEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
+    )
 
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain("X-CompanyCam-Signature")

@@ -45,14 +45,17 @@ function verifyCtx(body: string, signature: string | null): VerifyCtx {
 describe("mercury events webhook", () => {
   test("registers only when onEvent is set", () => {
     expect(mercury({ accessToken: TOKEN }).webhooks).toBeUndefined()
-    expect(mercury({ accessToken: TOKEN, onEvent: () => {} }).webhooks).toHaveLength(1)
+    expect(
+      mercury({ accessToken: TOKEN, webhookAllowUnsigned: true, onEvent: () => {} }).webhooks
+    ).toHaveLength(1)
   })
 
   test("extra webhooks are registered alongside the built-in events route", () => {
     const connector = mercury({
       accessToken: TOKEN,
+      webhookAllowUnsigned: true,
       onEvent: () => {},
-      webhooks: [mercuryEventsWebhook({ onEvent: () => {} }) as never],
+      webhooks: [mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {} }) as never],
     })
 
     expect(connector.webhooks).toHaveLength(2)
@@ -144,19 +147,19 @@ describe("mercury events webhook", () => {
   })
 
   test("skips verification when no secret is configured", () => {
-    const webhook = mercuryEventsWebhook({ onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
 
     expect(() => webhook.verify?.(verifyCtx("{}", null))).not.toThrow()
   })
 
   test("reports the event id as the idempotency key for at-least-once delivery", () => {
-    const webhook = mercuryEventsWebhook({ onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
 
     expect(webhook.idempotencyKey?.({ body: EVENT } as unknown as IdempotencyCtx)).toBe(EVENT.id)
   })
 
   test("parses a balance event and defaults its optional fields", () => {
-    const webhook = mercuryEventsWebhook({ onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
 
     const parsed = webhook.body.parse({
       id: "ev-1",
@@ -173,7 +176,7 @@ describe("mercury events webhook", () => {
   })
 
   test("rejects payloads that are not Mercury events", () => {
-    const webhook = mercuryEventsWebhook({ onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
 
     expect(() => webhook.body.parse({})).toThrow("Unexpected webhook payload")
     expect(() => webhook.body.parse({ id: "ev-1", resourceType: "spaceship" })).toThrow(
@@ -192,10 +195,17 @@ describe("mercury events webhook", () => {
 })
 
 describe("mercuryEventsWebhook without a secret", () => {
-  test("says out loud that it will accept unsigned requests", () => {
-    // `if (!options.secret) return` inside `.verify()` is a fine default for local
-    // development and an open door in production, and it said nothing either way.
-    const warnings = captureWarnings(() => mercuryEventsWebhook({ onEvent: () => {} }))
+  test("refuses to define a webhook that would accept unsigned requests", () => {
+    // `if (!options.secret) return` inside `.verify()` accepted anything that reached the
+    // route. It threw no error and, for a while, only warned — which a startup log buries.
+    // The definition now fails, so `createSixb()` fails and the API role never starts.
+    expect(() => mercuryEventsWebhook({ onEvent: () => {} })).toThrow(/Mercury-Signature/)
+  })
+
+  test("accepts unsigned deliveries when asked to, and says so", () => {
+    const warnings = captureWarnings(() =>
+      mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
+    )
 
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain("Mercury-Signature")

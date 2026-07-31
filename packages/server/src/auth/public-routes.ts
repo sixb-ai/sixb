@@ -62,7 +62,11 @@ export function isPublicRoute(pathname: string, method: string): boolean {
     return true
   }
 
-  if (pathname.startsWith("/api/webhooks/")) {
+  // Public because a webhook cannot carry a session: the signature its connector
+  // verifies is the credential. POST only — `WebhookDefinition.method` is the literal
+  // `"POST"`, so nothing else is ever registered here, and the allow-list should not be
+  // wider than what it allows.
+  if (pathname.startsWith("/api/webhooks/") && normalizedMethod === "POST") {
     return true
   }
 

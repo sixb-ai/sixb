@@ -626,7 +626,9 @@ describe("github connector", () => {
 
     test("registers only when onEvent is set", () => {
       expect(github({ token: "t" }).webhooks).toBeUndefined()
-      expect(github({ token: "t", onEvent: () => {} }).webhooks).toHaveLength(1)
+      expect(
+        github({ token: "t", webhookAllowUnsigned: true, onEvent: () => {} }).webhooks
+      ).toHaveLength(1)
     })
 
     test("types payloads by narrowed webhook event name", () => {
@@ -689,6 +691,7 @@ describe("github connector", () => {
     test("dispatches non-issue events too", async () => {
       const names: string[] = []
       const webhook = githubEventsWebhook({
+        allowUnsigned: true,
         onEvent: (context) => {
           names.push(context.event.name)
         },
@@ -721,6 +724,7 @@ describe("github connector", () => {
     test("ignores deliveries without an event header", async () => {
       let called = false
       const webhook = githubEventsWebhook({
+        allowUnsigned: true,
         onEvent: () => {
           called = true
         },
@@ -737,10 +741,17 @@ describe("github connector", () => {
 })
 
 describe("githubEventsWebhook without a secret", () => {
-  test("says out loud that it will accept unsigned requests", () => {
-    // `if (!options.secret) return` inside `.verify()` is a fine default for local
-    // development and an open door in production, and it said nothing either way.
-    const warnings = captureWarnings(() => githubEventsWebhook({ onEvent: () => {} }))
+  test("refuses to define a webhook that would accept unsigned requests", () => {
+    // `if (!options.secret) return` inside `.verify()` accepted anything that reached the
+    // route. It threw no error and, for a while, only warned — which a startup log buries.
+    // The definition now fails, so `createSixb()` fails and the API role never starts.
+    expect(() => githubEventsWebhook({ onEvent: () => {} })).toThrow(/X-Hub-Signature-256/)
+  })
+
+  test("accepts unsigned deliveries when asked to, and says so", () => {
+    const warnings = captureWarnings(() =>
+      githubEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
+    )
 
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain("X-Hub-Signature-256")

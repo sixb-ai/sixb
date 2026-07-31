@@ -37,7 +37,13 @@ export function companycam(options: CompanyCamConnectorOptions): CompanyCamConne
   return {
     type: "companycam",
     webhooks: options.onEvent
-      ? [companyCamEventsWebhook({ secret: options.webhookSecret, onEvent: options.onEvent })]
+      ? [
+          companyCamEventsWebhook({
+            secret: options.webhookSecret,
+            allowUnsigned: options.webhookAllowUnsigned,
+            onEvent: options.onEvent,
+          }),
+        ]
       : undefined,
     async connect(context) {
       const http = createHttp(await restAdapter.connect(context))

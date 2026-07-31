@@ -62,6 +62,7 @@ function collectWebhooks(
       mercuryEventsWebhook({
         onEvent: options.onEvent,
         secret: options.webhookSecret,
+        allowUnsigned: options.webhookAllowUnsigned,
         toleranceMs: options.webhookToleranceMs,
       }) as WebhookDefinition<unknown, MercuryClient>
     )

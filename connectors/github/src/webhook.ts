@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook, warnUnverifiedWebhook } from "@sixb/core"
+import { defineWebhook, requireWebhookVerification } from "@sixb/core"
 import type { GitHubClient } from "./types/client"
 import type {
   GitHubEventHandler,
@@ -9,7 +9,13 @@ import type {
 } from "./types/webhook"
 
 interface GitHubWebhookOptions {
+  /** Webhook secret. Required unless `allowUnsigned` is set. */
   readonly secret?: string
+  /**
+   * Accept deliveries this connector cannot verify. Without a secret the route accepts
+   * unsigned requests from anyone who can reach it, so it has to be asked for.
+   */
+  readonly allowUnsigned?: boolean
   readonly onEvent: GitHubEventHandler
 }
 
@@ -24,13 +30,13 @@ interface GitHubWebhookOptions {
 export function githubEventsWebhook(
   options: GitHubWebhookOptions
 ): WebhookDefinition<unknown, GitHubClient> {
-  if (!options.secret) {
-    warnUnverifiedWebhook({
-      connector: "GitHub",
-      header: "X-Hub-Signature-256",
-      secretOption: "`secret` on githubEventsWebhook",
-    })
-  }
+  requireWebhookVerification({
+    connector: "GitHub",
+    header: "X-Hub-Signature-256",
+    secretOption: "`secret` on githubEventsWebhook",
+    secret: options.secret,
+    allowUnsigned: options.allowUnsigned,
+  })
 
   return defineWebhook("events")
     .post()

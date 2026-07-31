@@ -17,7 +17,6 @@ const PUBLIC: ReadonlyArray<readonly [string, string, string]> = [
   ["GET", "/health", "liveness probe"],
   ["GET", "/ready", "readiness probe"],
   ["POST", "/__sixb/agent-api/objects", "gateway authenticates with the run's own token"],
-  ["GET", "/api/webhooks/github/events", "third-party callers sign their payloads"],
   ["POST", "/api/webhooks/github/events", "third-party callers sign their payloads"],
   ["GET", "/api/auth/session", "answers whether a session exists"],
   ["POST", "/api/auth/sign-out", "must work with an expired session"],
@@ -42,6 +41,19 @@ describe("classifyRoute", () => {
     for (const path of ["/", "/admin", "/internal/metrics", "/.env", "/api-docs"]) {
       expect(classifyRoute(request("GET", path)).kind, `GET ${path}`).toBe("api")
       expect(classifyRoute(request("POST", path)).kind, `POST ${path}`).toBe("api")
+    }
+  })
+
+  test("a webhook path is public for POST alone", () => {
+    // `WebhookDefinition.method` is the literal "POST", so no other method is ever
+    // registered under this prefix and a wider allow-list allows nothing real. It was
+    // written method-blind, which made the entry read like a path-shaped hole.
+    expect(classifyRoute(request("POST", "/api/webhooks/github/events")).kind).toBe("public")
+    for (const method of ["GET", "PUT", "PATCH", "DELETE"]) {
+      expect(
+        classifyRoute(request(method, "/api/webhooks/github/events")).kind,
+        `${method} /api/webhooks/github/events`
+      ).toBe("api")
     }
   })
 
