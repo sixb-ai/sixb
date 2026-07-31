@@ -1,0 +1,23 @@
+{
+  // For workspace members that consume `@sixb/*` the way an installed user does: through each
+  // package's emitted declarations rather than its source.
+  //
+  // The root config maps every `@sixb/*` specifier to `packages/*/src`. That is right for the
+  // packages themselves and wrong for anything downstream, because it pulls the whole framework
+  // into each consumer's program — `@sixb/core` was type-checked once per example, five more times
+  // and in parallel, on top of the once `build:types` already does. It was 70% of the typecheck
+  // step and the reason that step was the slowest job in CI.
+  //
+  // Dropping the mapping lets `moduleResolution: "bundler"` resolve through `node_modules` and each
+  // package's `exports.types`, so a consumer checks its own files against `dist/*.d.ts`. No
+  // coverage is lost: `tsc -b tsconfig.build.json` still checks every package's source exactly
+  // once, and the declarations read here are emitted from that same source.
+  //
+  // The ordering this implies is the one `tsconfig.tests.json` already relies on — run
+  // `build:types` first. A consumer type-checked on its own without it fails on unresolved
+  // `@sixb/*` imports, which is why `typecheck` chains the two with `&&`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {}
+  }
+}

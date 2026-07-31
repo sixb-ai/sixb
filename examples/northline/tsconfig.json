@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../../tsconfig.consumer.json",
   "compilerOptions": {
     "jsx": "react-jsx",
     "types": ["bun", "node"],

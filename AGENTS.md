@@ -72,9 +72,16 @@ one named failure buried in the log.
 
 `typecheck` uses the TypeScript project-reference graph: `bun run build:types` (`tsc -b
 tsconfig.build.json`) checks every package's `src` exactly once, `tsconfig.tests.json` checks
-test files against the emitted `.d.ts`, and the example/docs/sandbox apps keep their own
+test files against the emitted `.d.ts`, and the example/docs apps keep their own
 `typegen && tsc` typecheck (`typecheck:examples`). The old per-package `tsc --noEmit` re-checked
 shared source (notably `@sixb/core`) once per dependent, which made the step the CI bottleneck.
+
+Nothing downstream of the packages reads their source. The root config maps `@sixb/*` to
+`packages/*/src`, which is right for the packages and wrong for their consumers, so the examples and
+`apps/docs` extend `tsconfig.consumer.json` instead — it clears that mapping, and resolution falls
+through to each package's `exports.types`. Add new consumers to that config, not the root one. This
+is why the steps are chained with `&&`: a consumer type-checked without a prior `build:types` fails
+on unresolved `@sixb/*` imports.
 
 ## Architecture
 

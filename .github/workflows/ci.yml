@@ -86,27 +86,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Cache tsc build graph
-        uses: actions/cache@v4
-        with:
-          path: |
-            .tsbuild
-            packages/*/.tsbuild
-            connectors/*/.tsbuild
-            storage/*/.tsbuild
-            broker/*/.tsbuild
-            queues/*/.tsbuild
-            auth/*/.tsbuild
-            packages/*/dist
-            connectors/*/dist
-            storage/*/dist
-            broker/*/dist
-            queues/*/dist
-            auth/*/dist
-          key: tsbuild-build-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
-          restore-keys: |
-            tsbuild-build-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
-
+      # No tsc build graph cache here on purpose: `bun run build` starts with `build:clean`, which
+      # `rm -rf`s every `<area>/*/{dist,.tsbuild}` — exactly what such a cache would restore. It
+      # only ever paid to download and re-upload state this job deletes before using it.
       - name: Build
         run: bun run build
 
