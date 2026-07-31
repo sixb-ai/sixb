@@ -317,7 +317,14 @@ async function missingTargetWaitedLongEnough(
   execution: ClaimedProjectionExecution,
   error: MaterializationObjectNotFoundError
 ): Promise<boolean> {
-  const run = await findRun(input)
+  // Read and write both propagate. A storage failure here is not a wait that has run out: it
+  // means the wait was never written down, and swallowing it would restart the window on every
+  // delivery and leave the run running forever. Thrown, it reaches `failureDecision`, which
+  // re-reads the run and redelivers.
+  const run = await input.runtime.projectionRunsStorage.getById({
+    projectId: input.runtime.projectId,
+    id: input.job.id,
+  })
   const checkpoint = run?.telemetryCheckpoint
   if (!run || run.status !== "running" || !checkpoint) return false
 
@@ -355,19 +362,14 @@ async function startMissingTargetWait(
         firstSeenAt: new Date(input.now?.() ?? Date.now()),
       },
     })
-  } catch {
-    // A lost execution or a batch that moved under us means this delivery no longer owns the
-    // wait. The run stays running either way, so the next one records it.
+  } catch (writeError) {
+    // One expected loss: another delivery reclaimed this run between the failure and this
+    // write, so it owns the wait now and will record its own. Everything else — an unreachable
+    // database, a rejected invariant, a provider bug — is a real failure and stays one.
+    if (!isLostExecution(writeError)) throw writeError
   }
 }
 
-async function findRun(input: RunProjectionJobInput): Promise<ProjectionRunRecord | null> {
-  try {
-    return await input.runtime.projectionRunsStorage.getById({
-      projectId: input.runtime.projectId,
-      id: input.job.id,
-    })
-  } catch {
-    return null
-  }
+function isLostExecution(error: unknown): boolean {
+  return isMaterializationConflictError(error) && error.kind === "execution-lost"
 }

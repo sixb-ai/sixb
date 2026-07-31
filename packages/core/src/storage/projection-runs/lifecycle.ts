@@ -709,6 +709,11 @@ function restoreMissingTarget(
       `[Sixb] Telemetry projection run '${row.id}' is waiting on a batch it has already passed.`
     )
   }
+  if (missingTarget.objectTypeId !== row.objectTypeId) {
+    throw new ProjectionRunError(
+      `[Sixb] Telemetry projection run '${row.id}' is waiting on an object type it does not write.`
+    )
+  }
   return missingTarget
 }
 
@@ -737,10 +742,12 @@ function invalidProjectionRunTarget(id: string): ProjectionRunError {
 }
 
 /**
- * Validates a wait before it is stored, so every adapter refuses the same shapes.
+ * Validates a wait before it is stored, so every adapter refuses the same shapes and the SQL
+ * `CHECK` behind them never has to be the thing that catches it.
  *
  * The ordinal has to be the batch the run is actually stuck on: anchored to a stale one, a wait
- * would survive the progress that resolved it and fail a run that is working.
+ * would survive the progress that resolved it and fail a run that is working. The object type
+ * has to be the one this run writes, since that is the only type its telemetry can reference.
  */
 export function assertProjectionMissingTarget(
   record: TelemetryProjectionRunRecord,
@@ -751,6 +758,11 @@ export function assertProjectionMissingTarget(
   assertProjectionRunCounter(missingTarget.batchOrdinal, "missingTarget.batchOrdinal")
   if (Number.isNaN(missingTarget.firstSeenAt.getTime())) {
     throw new ProjectionRunError("[Sixb] Projection run missingTarget.firstSeenAt is invalid.")
+  }
+  if (missingTarget.objectTypeId !== record.target.objectTypeId) {
+    throw new ProjectionRunError(
+      `[Sixb] Telemetry projection run '${record.id}' cannot wait on '${missingTarget.objectTypeId}'; it writes '${record.target.objectTypeId}'.`
+    )
   }
   if (missingTarget.batchOrdinal !== record.telemetryCheckpoint.nextBatchOrdinal) {
     throw new ProjectionRunError(

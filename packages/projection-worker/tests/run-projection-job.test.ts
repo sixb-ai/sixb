@@ -1191,6 +1191,46 @@ describe("runProjectionJob", () => {
     expect(run?.status).toBe("running")
   })
 
+  test("surfaces a storage failure instead of restarting the wait forever", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      { datasets: [roomReadingsDataset], projections: [roomTemperatureProjection] },
+      deps
+    )
+    const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
+      {
+        room_id: "missing-room",
+        observed_at: "2026-06-01T12:05:00.000Z",
+        temperature: 71,
+        sync_row_id: "reading-1",
+        unused: null,
+      },
+    ])
+
+    // An unreachable database is not a wait that has run out. Swallowed, it would leave no
+    // durable `firstSeenAt`, every delivery would start the window again, and the run would stay
+    // running for good.
+    // Patched in place rather than spread: the runtime carries a shared projection registry
+    // keyed by object identity, and a copy of it is not registered.
+    const runtime = createRuntime(sixb)
+    runtime.projectionRunsStorage.recordMissingTarget = () =>
+      Promise.reject(new Error("connection terminated unexpectedly"))
+
+    await expect(
+      runProjectionJob({
+        runtime,
+        batchSize: 10,
+        job: {
+          id: "projrun-telemetry-wait-write-fails",
+          projectionId: "room-temperature-proj",
+          projectionKind: "telemetry",
+          datasetId: roomReadingsDataset.id,
+          versionId: version.versionId,
+        },
+      })
+    ).rejects.toThrow("connection terminated unexpectedly")
+  })
+
   test("clears the wait and finishes when the target arrives between deliveries", async () => {
     const deps = createDeps()
     const sixb = createSixb(

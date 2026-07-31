@@ -241,8 +241,8 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
         const execution = executionInput(claim)
         const firstSeenAt = new Date("2026-06-01T12:00:00.000Z")
         const missingTarget = {
-          objectTypeId: "Room",
-          objectId: "missing-room",
+          objectTypeId: "Device",
+          objectId: "missing-device",
           batchOrdinal: 0,
           firstSeenAt,
         }
@@ -261,6 +261,30 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
             missingTarget: { ...missingTarget, batchOrdinal: 1 },
           })
         ).rejects.toThrow("cannot wait on batch 1")
+
+        // A run can only wait on the object type it writes: nothing else can appear in its
+        // telemetry. Refused here so an adapter never has to rely on its own CHECK for it.
+        await expect(
+          storage.recordMissingTarget({
+            ...execution,
+            missingTarget: { ...missingTarget, objectTypeId: "Building" },
+          })
+        ).rejects.toThrow("cannot wait on 'Building'")
+
+        // The whole wait or none of it. A half-written one reads as waiting since the epoch, or
+        // waiting for nothing, and both decide a run's fate.
+        for (const partial of [
+          { objectId: "" },
+          { objectTypeId: "" },
+          { firstSeenAt: new Date(Number.NaN) },
+        ]) {
+          await expect(
+            storage.recordMissingTarget({
+              ...execution,
+              missingTarget: { ...missingTarget, ...partial },
+            })
+          ).rejects.toThrow()
+        }
 
         // The write is last-wins; keeping the original start is the worker's rule, which only
         // records when the object or the batch changes. An adapter that merged instead would

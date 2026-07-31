@@ -151,6 +151,22 @@ CREATE TABLE projection_runs (
       AND input_exhausted IS NOT NULL
     )
   ),
+  CHECK (
+    (
+      missing_target_object_type_id IS NULL
+      AND missing_target_object_id IS NULL
+      AND missing_target_batch_ordinal IS NULL
+      AND missing_target_first_seen_at IS NULL
+    )
+    OR
+    (
+      projection_kind = 'telemetry'
+      AND missing_target_object_type_id = object_type_id
+      AND missing_target_object_id IS NOT NULL
+      AND missing_target_batch_ordinal = next_batch_ordinal
+      AND missing_target_first_seen_at IS NOT NULL
+    )
+  ),
   CHECK (projection_kind != 'telemetry' OR status != 'succeeded' OR input_exhausted = 1)
 );
 
