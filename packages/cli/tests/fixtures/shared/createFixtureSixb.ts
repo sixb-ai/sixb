@@ -48,9 +48,6 @@ function createFixtureStorage(logStorageMigrate: boolean) {
         state: "current" as const,
       }
     },
-    async plan() {
-      throw new Error("plan should not run")
-    },
     async migrate() {
       logFixtureEvent({ type: "storage.migrate" })
       return {

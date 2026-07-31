@@ -114,14 +114,10 @@ function loggingStorage() {
         state: "current",
       }
     },
-    // `plan()` runs DDL through `ensure()`, so nothing on a role's startup path may call
-    // it. This used to `throw` alone, and the throw was swallowed by a bare catch in
-    // StorageReadiness — the assertion below could not see the violation it was written
-    // to catch. Logging first makes it visible whether or not someone swallows it.
-    async plan(): Promise<never> {
-      logFixtureEvent({ type: "storage:plan" })
-      throw new Error("plan should not run")
-    },
+    // `migrate()` runs the DDL, through `ensure()`. It is logged so the e2e can assert
+    // that a boot migrates exactly once and that every later probe adds none — the
+    // read-only-probe rule, which used to be witnessed by a `plan()` that no longer
+    // exists on the contract.
     async migrate() {
       logFixtureEvent({ type: "storage:migrate" })
       return {

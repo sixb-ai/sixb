@@ -200,7 +200,10 @@ describe("Postgres storage migrations", () => {
 
   test("dirty migration history blocks storage migrations", async () => {
     await withStorage(false, async (storage, schemaName) => {
-      await storage.migrators[0]!.plan()
+      // Migrate first, then plant a started row above the applied ones: a dirty history
+      // has to block a schema that is otherwise current, which is the case an operator
+      // actually meets after a migration was interrupted.
+      await migrateStorage(storage)
       await writeStartedMigration(schemaName)
 
       await expect(migrateStorage(storage)).rejects.toThrow("started and never finished")
@@ -501,7 +504,7 @@ async function writeStartedMigration(schemaName: string): Promise<void> {
       `
         INSERT INTO ${quoteIdent(schemaName)}.sixb_migrations (
           adapter_id, version, id, checksum, status, started_at, finished_at
-        ) VALUES ($1, 1, '001-initial-schema', NULL, 'started', $2, NULL)
+        ) VALUES ($1, 9999, '9999-interrupted', NULL, 'started', $2, NULL)
       `,
       [POSTGRES_STORAGE_ADAPTER_ID, "2026-04-19T00:00:00.000Z"]
     )

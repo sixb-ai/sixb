@@ -30,10 +30,11 @@ export async function checkStorageSchema(storage: Storage): Promise<StorageSchem
   if (!isMigrationCapableStorage(storage)) return { ok: true, verified: false }
 
   try {
-    // `status()`, never `plan()`. `plan()` calls `ensure()` first, so it runs DDL —
-    // `CREATE SCHEMA`/`CREATE TABLE` on Postgres, creating the file on SQLite — and
-    // reserves a connection for an advisory lock. This runs on an unauthenticated
-    // `/ready`, so it has to be strictly read-only.
+    // `status()`, which is the only read-only member of the migrator contract.
+    // `migrate()` calls `ensure()` first, so it runs DDL — `CREATE SCHEMA`/`CREATE
+    // TABLE` on Postgres, creating the file on SQLite — and reserves a connection for an
+    // advisory lock. This runs on an unauthenticated `/ready`, so it has to be strictly
+    // read-only.
     const statuses = await Promise.all(storage.migrators.map((migrator) => migrator.status()))
     const unusable = statuses.filter((status) => status.state !== "current")
 

@@ -259,9 +259,6 @@ describe("migrateStorage", () => {
       async status() {
         throw new Error("status should not be called")
       },
-      async plan() {
-        throw new Error("plan should not be called")
-      },
       async migrate() {
         calls.push("storage")
         return {
@@ -333,20 +330,21 @@ describe("checkStorageSchema", () => {
     )
   })
 
-  test("never runs plan(), which would run DDL", async () => {
-    // `plan()` calls `ensure()`: CREATE SCHEMA / CREATE TABLE on Postgres, creating the
-    // file on SQLite. This answers an unauthenticated `/ready`.
-    let planCalls = 0
+  test("never runs migrate(), which would run DDL", async () => {
+    // `migrate()` calls `ensure()`: CREATE SCHEMA / CREATE TABLE on Postgres, creating the
+    // file on SQLite. This answers an unauthenticated `/ready`, so `status()` — the one
+    // read-only member of the contract — has to be enough.
+    let migrateCalls = 0
     const storage = storageWith({
       ...statusMigrator({ state: "current", appliedVersion: 1 }),
-      plan: async () => {
-        planCalls += 1
-        throw new Error("plan should not run")
+      migrate: async () => {
+        migrateCalls += 1
+        throw new Error("migrate should not run")
       },
     })
 
     await expect(checkStorageSchema(storage)).resolves.toMatchObject({ ok: true })
-    expect(planCalls).toBe(0)
+    expect(migrateCalls).toBe(0)
   })
 
   test("reports a migrator that throws rather than propagating it", async () => {
@@ -391,9 +389,6 @@ function statusMigrator(status: {
       state: status.state,
       ...(status.reason ? { reason: status.reason } : {}),
     }),
-    plan: async () => {
-      throw new Error("plan should not run")
-    },
     migrate: async () => ({
       adapterId,
       latestVersion: 1,
@@ -436,6 +431,29 @@ describe("describeMigrationHistory", () => {
       state: "uninitialized",
       appliedVersion: 0,
     })
+  })
+
+  test("reports an adapter with no migrations as current, not uninitialized", () => {
+    // Nothing to apply, so nothing for `sixb db migrate` to do. `uninitialized` sent an
+    // operator to run a command that would have applied nothing and reported the same
+    // state back — and on the `api` role it is the state that keeps /ready unready.
+    const empty = defineMigrations({ adapterId: "SixbFakeStorage", steps: [] })
+
+    expect(describeMigrationHistory({ migrations: empty, rows: null })).toEqual({
+      adapterId: "SixbFakeStorage",
+      latestVersion: 0,
+      appliedVersion: 0,
+      state: "current",
+    })
+    expect(describeMigrationHistory({ migrations: empty, rows: [] })).toMatchObject({
+      state: "current",
+    })
+
+    // A history it does not know is still `ahead`: "no migrations declared" is only
+    // current against a database that recorded none either.
+    expect(
+      describeMigrationHistory({ migrations: empty, rows: [applied(1, "001-first", "a")] })
+    ).toMatchObject({ state: "ahead" })
   })
 
   test("reports each state an operator has to act on differently", () => {

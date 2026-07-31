@@ -49,7 +49,7 @@ export function defineMigrations<TContext>(
   }
 }
 
-export async function planMigrationSet<TContext>(
+async function planMigrationSet<TContext>(
   params: PlanMigrationSetParams<TContext>
 ): Promise<MigrationPlan<TContext>> {
   await params.state.ensure()
@@ -142,13 +142,20 @@ export function describeMigrationHistory<TContext>(params: {
   const { migrations, rows } = params
   const base = { adapterId: migrations.adapterId, latestVersion: migrations.latestVersion }
 
+  // An adapter that declares no migrations and has recorded none is as current as it can
+  // be. Reading that as `uninitialized` sent an operator to run `sixb db migrate`, which
+  // would have applied nothing and reported the same state again. Only the empty history
+  // qualifies: an adapter with no steps whose database recorded some is `ahead`, which
+  // the walk below still finds.
   if (rows === null) {
-    return {
-      ...base,
-      appliedVersion: 0,
-      state: "uninitialized",
-      reason: "No migration history exists. Run `sixb db migrate`.",
-    }
+    return migrations.steps.length === 0
+      ? { ...base, appliedVersion: 0, state: "current" }
+      : {
+          ...base,
+          appliedVersion: 0,
+          state: "uninitialized",
+          reason: "No migration history exists. Run `sixb db migrate`.",
+        }
   }
 
   const applied = [...rows].sort((a, b) => a.version - b.version)
@@ -223,11 +230,13 @@ export function describeMigrationHistory<TContext>(params: {
   }
 
   if (applied.length === 0) {
-    return {
-      ...found,
-      state: "uninitialized",
-      reason: "Migration history is empty. Run `sixb db migrate`.",
-    }
+    return migrations.steps.length === 0
+      ? { ...found, state: "current" }
+      : {
+          ...found,
+          state: "uninitialized",
+          reason: "Migration history is empty. Run `sixb db migrate`.",
+        }
   }
 
   const pendingCount = migrations.steps.length - applied.length

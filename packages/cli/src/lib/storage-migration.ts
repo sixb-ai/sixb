@@ -50,9 +50,9 @@ export interface RoleStorageMigration {
  *
  * Concurrency across replicas is already handled below this call: Postgres serializes
  * migrators on a session advisory lock, and every adapter refuses to run against a
- * history it does not recognize (`ahead`, `dirty`, `incompatible`, `unreadable`).
- * Late replicas therefore no-op instead of racing. SQLite is the exception, and the
- * error it produces is translated rather than passed through raw.
+ * history it does not recognize (`ahead`, `dirty`, `incompatible`). Late replicas
+ * therefore no-op instead of racing. SQLite is the exception, and the error it produces
+ * is translated rather than passed through raw.
  *
  * Whoever calls this decides nothing: the role map does. `StorageSchemaRole` excludes
  * the roles that only serve a browser bundle, so `atlas` and `app` cannot call this at

@@ -209,9 +209,6 @@ function migrator(state: "current" | "pending"): StorageMigrator {
             state: "pending" as const,
             reason: "1 migration(s) are not applied. Run `sixb db migrate`.",
           },
-    plan: async () => {
-      throw new Error("plan should not run")
-    },
     migrate: async () => ({
       adapterId: "Fixture",
       latestVersion: 1,

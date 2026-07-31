@@ -10,7 +10,6 @@ import type {
 import {
   defineMigrations,
   describeMigrationHistory,
-  planMigrationSet,
   runMigrationSet,
   step,
 } from "@sixb/core/storage"
@@ -60,15 +59,6 @@ export function createPostgresMigrator(params: {
       return describeMigrationHistory({
         migrations: params.migrations,
         rows: await readPostgresHistory(params.sql, params.schemaName, params.migrations.adapterId),
-      })
-    },
-    plan() {
-      return withPostgresMigrationLock(params, async (sql) => {
-        const session = postgresMigrationSession(sql, params.schemaName)
-        return planMigrationSet({
-          migrations: params.migrations,
-          state: session.state,
-        })
       })
     },
     migrate() {
@@ -196,7 +186,7 @@ function postgresMigrationSession(
  * Reads migration history without DDL and without the advisory lock. `null` means the
  * history table does not exist, which is a state and not a failure.
  *
- * `plan()` cannot be used for this: it calls `ensure()` first, so it runs
+ * `migrate()` cannot be used for this: it calls `ensure()` first, so it runs
  * `CREATE SCHEMA`/`CREATE TABLE` and reserves a connection to hold
  * `pg_advisory_lock`. A probe must need no DDL grant — `/ready` is public and
  * unauthenticated — and must not serialize N replicas behind one lock.

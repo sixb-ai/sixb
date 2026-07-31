@@ -182,9 +182,6 @@ function migrator(adapterId: string, applied: readonly string[]): StorageMigrato
       appliedVersion: applied.length,
       state: "current",
     }),
-    plan: async () => {
-      throw new Error("plan should not run")
-    },
     migrate: async () => report(adapterId, applied),
   }
 }

@@ -63,6 +63,11 @@ export interface MigrationReport {
 /**
  * Grouped by what an operator has to do about it: nothing (`current`), run
  * `sixb db migrate` (`uninitialized`, `pending`), or intervene by hand (the rest).
+ *
+ * Every state here is one `describeMigrationHistory` returns. There is no state for "the
+ * history could not be read": an unreachable database, a missing grant or a corrupt
+ * table all throw out of the read, and the probe reports the thrown reason. A state
+ * nothing produces is a branch every caller writes and none of them exercises.
  */
 export type MigrationState =
   /** Every known migration is applied. The only state a host should serve traffic in. */
@@ -77,8 +82,6 @@ export type MigrationState =
   | "dirty"
   /** History contradicts the declared migrations: changed checksum, mismatched id, duplicate version, foreign adapter. */
   | "incompatible"
-  /** The history could not be read at all (unreachable, no permission, corrupt). */
-  | "unreadable"
 
 export interface MigrationStatus {
   readonly adapterId: string
@@ -97,18 +100,17 @@ export interface StorageMigrator {
   /**
    * Reports the schema state without touching it.
    *
-   * Strictly read-only, which `plan()` is not: `plan()` calls `ensure()` first, so on
-   * Postgres it runs `CREATE SCHEMA`/`CREATE TABLE` and on SQLite it creates the
-   * database file. That is correct on the way to a migration and wrong for a probe —
-   * `/ready` is public and unauthenticated, and a least-privilege deployment has no
-   * DDL grant to spend on a health check.
+   * Strictly read-only, unlike `migrate()`, which calls `ensure()` first: on Postgres
+   * that runs `CREATE SCHEMA`/`CREATE TABLE` and on SQLite it creates the database file.
+   * That is correct on the way to a migration and wrong for a probe — `/ready` is public
+   * and unauthenticated, and a least-privilege deployment has no DDL grant to spend on a
+   * health check.
    *
    * Reports the dangerous states (`ahead`, `dirty`) instead of throwing, because a
    * probe that throws tells an operator less than one that names the condition.
    */
   status(): Promise<MigrationStatus>
 
-  plan(): Promise<MigrationPlan<unknown>>
   migrate(): Promise<MigrationReport>
 }
 

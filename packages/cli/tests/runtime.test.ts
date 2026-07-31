@@ -156,9 +156,6 @@ describe("startSixbRuntime", () => {
           state: "current" as const,
         }
       },
-      async plan() {
-        throw new Error("plan should not run")
-      },
       async migrate() {
         calls.push("storage")
         return {
@@ -884,9 +881,6 @@ describe("split runtime preparation", () => {
           appliedVersion: 1,
           state: "current" as const,
         }
-      },
-      async plan() {
-        throw new Error("plan should not run")
       },
       async migrate() {
         calls.push("storage")

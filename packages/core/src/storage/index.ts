@@ -171,7 +171,6 @@ export type {
   DefineMigrationsOptions,
   MigrationCapableStorage,
   MigrationHistoryStore,
-  MigrationPlan,
   MigrationRecord,
   MigrationReport,
   MigrationSet,
@@ -190,7 +189,6 @@ export {
   describeMigrationHistory,
   isMigrationCapableStorage,
   migrateStorage,
-  planMigrationSet,
   runMigrationSet,
   step,
 } from "./migrations"

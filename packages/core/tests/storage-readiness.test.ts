@@ -123,24 +123,25 @@ describe("StorageReadiness", () => {
     expect(statusCalls).toBe(2)
   })
 
-  test("never calls plan(), which would run DDL", async () => {
-    // plan() calls ensure() first: CREATE SCHEMA / CREATE TABLE on Postgres, and creating
-    // the database file on SQLite. This runs on an unauthenticated GET /ready and at every
-    // api boot, so it has to be strictly read-only.
-    let planCalls = 0
+  test("never calls migrate(), which would run DDL", async () => {
+    // migrate() calls ensure() first: CREATE SCHEMA / CREATE TABLE on Postgres, and
+    // creating the database file on SQLite. This runs on an unauthenticated GET /ready and
+    // at every api boot, so it has to be strictly read-only. `status()` is the only member
+    // of the migrator contract that touches nothing.
+    let migrateCalls = 0
     const storage = new ReadinessStorage([
       {
         ...migrator(async () => currentStatus()),
-        plan: async () => {
-          planCalls += 1
-          throw new Error("plan should not run")
+        migrate: async (): Promise<MigrationReport> => {
+          migrateCalls += 1
+          throw new Error("migrate should not run")
         },
       },
     ])
     const readiness = new StorageReadiness(storage)
 
     await waitFor(async () => (await readiness.check()).status === "ready")
-    expect(planCalls).toBe(0)
+    expect(migrateCalls).toBe(0)
   })
 })
 
@@ -171,9 +172,6 @@ function migrator(status: StorageMigrator["status"]): StorageMigrator {
     adapterId: "test",
     latestVersion: 1,
     status,
-    plan: async () => {
-      throw new Error("plan should not run")
-    },
     migrate: async (): Promise<MigrationReport> => ({
       adapterId: "test",
       latestVersion: 1,

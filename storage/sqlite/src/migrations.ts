@@ -13,7 +13,6 @@ import type {
 import {
   defineMigrations,
   describeMigrationHistory,
-  planMigrationSet,
   runMigrationSet,
   step,
 } from "@sixb/core/storage"
@@ -94,14 +93,6 @@ export function createSqliteMigrator(params: {
         migrations: params.migrations,
         rows: await readSqliteHistory(params.path, params.migrations.adapterId),
       })
-    },
-    async plan() {
-      return withSqliteDatabase(params.path, (db) =>
-        planMigrationSet({
-          migrations: params.migrations,
-          state: sqliteMigrationHistoryStore(db),
-        })
-      )
     },
     async migrate() {
       return withSqliteDatabase(params.path, (db) =>
