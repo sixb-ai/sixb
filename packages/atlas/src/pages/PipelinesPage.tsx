@@ -69,6 +69,10 @@ import {
 } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import {
+  isUnconfiguredStorageError,
+  UnrecordedHistoryState,
+} from "../components/UnrecordedHistoryState"
 import { type DatasetGridColumnMeta, DatasetTableGrid } from "../features/datasets/DatasetTableGrid"
 import { usePipelineLiveUpdates } from "../features/pipelines/hooks/usePipelineLiveUpdates"
 import { formatBytes, isNumericColumnType } from "../lib/datasets"
@@ -906,6 +910,8 @@ function RunsListPanel({
             <Loader2 className="h-5 w-5 animate-spin" />
             <span className="text-sm">Loading runs...</span>
           </div>
+        ) : isUnconfiguredStorageError(runsQuery.error) ? (
+          <UnrecordedHistoryState what="Pipeline run history" className="px-4 py-8" />
         ) : runsQuery.isError ? (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">
             Could not load runs for this pipeline.

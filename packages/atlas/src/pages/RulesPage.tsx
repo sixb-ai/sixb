@@ -27,6 +27,10 @@ import { useQuery } from "@tanstack/react-query"
 import { BellRing, ChevronLeft, ChevronRight, ListChecks, Loader2, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import {
+  isUnconfiguredStorageError,
+  UnrecordedHistoryState,
+} from "../components/UnrecordedHistoryState"
 import { useRuleLiveUpdates } from "../features/rules/hooks/useRuleLiveUpdates"
 import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
@@ -179,7 +183,18 @@ function dependencyEventLabel(dependency: RuleSummary["dependencies"][number]): 
   }
 }
 
-function ActiveStateBadge({ count }: { count: number }) {
+// `null` is "the runtime does not record rule state", which is not the same claim as
+// zero active states. Rendering "None active" for it would report a clean sheet the
+// runtime has no way of knowing.
+function ActiveStateBadge({ count }: { count: number | null }) {
+  if (count === null) {
+    return (
+      <Badge variant="outline" className="rounded-md border-border text-muted-foreground">
+        Not recorded
+      </Badge>
+    )
+  }
+
   if (count === 0) {
     return (
       <Badge variant="outline" className="rounded-md border-border text-muted-foreground">
@@ -220,15 +235,16 @@ function RuleListItem({
   onSelect,
 }: {
   rule: ListRulesResponse[number]
-  activeCount: number
+  activeCount: number | null
   onSelect: () => void
 }) {
+  const active = (activeCount ?? 0) > 0
   return (
     <CollectionCardButton
       onClick={onSelect}
-      className={cn(activeCount > 0 && "border-amber-500/40 bg-amber-500/5")}
+      className={cn(active && "border-amber-500/40 bg-amber-500/5")}
     >
-      <RuleIcon active={activeCount > 0} />
+      <RuleIcon active={active} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <p className="truncate text-sm font-medium text-foreground">{ruleName(rule)}</p>
@@ -257,7 +273,7 @@ function RuleTableView({
   onSelect,
 }: {
   rules: ListRulesResponse
-  activeCountByRule: ReadonlyMap<string, number>
+  activeCountByRule: ReadonlyMap<string, number> | null
   onSelect: (ruleId: string) => void
 }) {
   return (
@@ -274,7 +290,7 @@ function RuleTableView({
         </TableHeader>
         <TableBody>
           {rules.map((rule) => {
-            const activeCount = activeCountByRule.get(rule.id) ?? 0
+            const activeCount = activeCountByRule ? (activeCountByRule.get(rule.id) ?? 0) : null
             return (
               <TableRow key={rule.id} onClick={() => onSelect(rule.id)} className="cursor-pointer">
                 <TableCell className="max-w-[260px]">
@@ -497,7 +513,7 @@ function RulesContent({
   rules: ListRulesResponse
   filteredRules: ListRulesResponse
   viewStyle: RulesListViewStyle
-  activeCountByRule: ReadonlyMap<string, number>
+  activeCountByRule: ReadonlyMap<string, number> | null
   onSelectRule: (ruleId: string) => void
 }) {
   if (rules.length === 0) {
@@ -537,7 +553,7 @@ function RulesContent({
         <RuleListItem
           key={rule.id}
           rule={rule}
-          activeCount={activeCountByRule.get(rule.id) ?? 0}
+          activeCount={activeCountByRule ? (activeCountByRule.get(rule.id) ?? 0) : null}
           onSelect={() => onSelectRule(rule.id)}
         />
       ))}
@@ -557,13 +573,17 @@ export function RulesPage() {
 
   const rules = rulesQuery.data ?? []
   const states = statesQuery.data?.states ?? []
+  // Null, not an empty map: this runtime records no rule state, so every per-rule
+  // count is unknown rather than zero.
+  const statesRecorded = !isUnconfiguredStorageError(statesQuery.error)
   const activeCountByRule = useMemo(() => {
+    if (!statesRecorded) return null
     const counts = new Map<string, number>()
     for (const state of states) {
       counts.set(state.ruleId, (counts.get(state.ruleId) ?? 0) + 1)
     }
     return counts
-  }, [states])
+  }, [states, statesRecorded])
 
   const filteredRules = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -777,6 +797,8 @@ export function RuleDetailPage() {
               <span className="text-sm">Loading states...</span>
             </div>
           </div>
+        ) : isUnconfiguredStorageError(statesQuery.error) ? (
+          <UnrecordedHistoryState what="Rule state" />
         ) : statesQuery.isError ? (
           <EmptyState
             icon={<BellRing className="h-10 w-10" />}

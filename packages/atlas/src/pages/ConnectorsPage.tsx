@@ -41,6 +41,10 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import {
+  isUnconfiguredStorageError,
+  UnrecordedHistoryState,
+} from "../components/UnrecordedHistoryState"
 import { formatBytes } from "../lib/datasets"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
@@ -430,6 +434,7 @@ function WebhookRunsSection({
   onSelectWebhook,
   isLoading,
   isError,
+  isUnrecorded,
 }: {
   connector: Connector
   runs: WebhookRun[]
@@ -438,6 +443,7 @@ function WebhookRunsSection({
   onSelectWebhook: (webhookId: string | null) => void
   isLoading: boolean
   isError: boolean
+  isUnrecorded: boolean
 }) {
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
@@ -465,6 +471,8 @@ function WebhookRunsSection({
             <span className="text-sm">Loading webhook runs...</span>
           </div>
         </div>
+      ) : isUnrecorded ? (
+        <UnrecordedHistoryState what="Webhook run history" />
       ) : isError ? (
         <EmptyState
           icon={<Clock3 className="h-10 w-10" />}
@@ -599,6 +607,7 @@ function ConnectorDetail({ connector }: { connector: Connector | null }) {
         onSelectWebhook={setSelectedWebhookId}
         isLoading={runsQuery.isLoading}
         isError={runsQuery.isError}
+        isUnrecorded={isUnconfiguredStorageError(runsQuery.error)}
       />
     </div>
   )

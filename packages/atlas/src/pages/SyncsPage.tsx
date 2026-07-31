@@ -40,6 +40,10 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import {
+  isUnconfiguredStorageError,
+  UnrecordedHistoryState,
+} from "../components/UnrecordedHistoryState"
 import { useSyncLiveUpdates } from "../features/syncs/hooks/useSyncLiveUpdates"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
@@ -806,6 +810,8 @@ export function SyncDetailPage() {
                   <span className="text-sm">Loading runs...</span>
                 </div>
               </div>
+            ) : isUnconfiguredStorageError(runsQuery.error) ? (
+              <UnrecordedHistoryState what="Sync run history" />
             ) : runsQuery.isError ? (
               <EmptyState
                 icon={<Clock3 className="h-10 w-10" />}
