@@ -1,5 +1,6 @@
 import type { JsonValue } from "../json"
 import type { ProjectionMaterializationIdentity } from "../materialization/model"
+import type { ProviderScope } from "../provider-scope"
 import type { WorkflowRunSource } from "../workflows/types"
 
 export interface QueueJobEnvelope {
@@ -205,15 +206,28 @@ export interface Queues {
   readonly agents: Queue<AgentQueueJob>
 
   /**
-   * Declares that this provider only works inside one process.
+   * Whether these queues can be shared across processes.
    *
-   * A production deployment runs the API, the orchestrator and the workers as
-   * separate processes: one enqueues, another claims. A process-local provider
-   * gives each of them its own private lane, so jobs are published where nobody
-   * can see them and the system looks alive while doing nothing. Production roles
-   * refuse to start against one. Set it on test doubles too.
+   * A `"process"` provider gives every role its own private lane, so jobs are
+   * enqueued where nobody claims them and the system looks alive while doing
+   * nothing. Production roles refuse to start against one. See
+   * {@link ProviderScope} for why it is required rather than inferred.
    */
-  readonly processLocal?: true
+  readonly scope: ProviderScope
+
+  /**
+   * Reports whether the backing service is reachable, without enqueueing or claiming.
+   *
+   * Optional because nothing else in this contract is read-only — `enqueue`, `claim`,
+   * `complete`, `retry` and `fail` all move work — so a provider with no cheap probe
+   * cannot fake one. A provider that omits it is reported as unverified rather than
+   * healthy: `sixb check` painted this row green against an unreachable Redis, which is
+   * exactly the reassurance the command exists to stop giving.
+   *
+   * Resolve when reachable, throw otherwise. The thrown message is shown to an
+   * operator, so it has to name the condition.
+   */
+  health?(): Promise<void>
 
   /** Release external resources. Optional: a provider that owns none omits it. */
   close?(): void | Promise<void>

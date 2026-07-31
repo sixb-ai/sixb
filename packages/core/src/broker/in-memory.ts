@@ -38,7 +38,7 @@ interface Subscription {
 }
 
 export class InMemoryBroker implements Broker {
-  readonly processLocal = true as const
+  readonly scope = "process" as const
   private readonly streams = new Map<string, StoredStream>()
   private readonly subscriptions = new Set<Subscription>()
 

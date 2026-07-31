@@ -1,4 +1,5 @@
 import type { JsonValue } from "../json"
+import type { ProviderScope } from "../provider-scope"
 
 /**
  * Opaque broker cursor.
@@ -110,11 +111,13 @@ export interface Broker {
   ): Promise<() => void>
 
   /**
-   * Declares that this provider only works inside one process. See the same field
-   * on {@link Queues}: a process-local broker means each role subscribes to its own
-   * private streams and no event ever crosses a process boundary.
+   * Whether this broker can be shared across processes.
+   *
+   * A `"process"` broker means each role subscribes to its own private streams and no
+   * event ever crosses a process boundary. Production roles refuse to start against
+   * one. See {@link ProviderScope} for why it is required rather than inferred.
    */
-  readonly processLocal?: true
+  readonly scope: ProviderScope
 
   /**
    * Release external resources. Optional: a provider that owns none omits it.

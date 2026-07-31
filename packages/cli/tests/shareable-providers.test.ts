@@ -13,14 +13,18 @@ function sixbWith(providers: { broker?: unknown; queues?: unknown }): LoadedSixb
   } as unknown as LoadedSixb
 }
 
-// Stand-ins that are shareable as far as the guard can tell: not `InMemory*`, no
-// `processLocal`. This is the same escape hatch the CLI's own role fixtures use.
-class SharedBroker {}
-class SharedQueues {}
+// Stand-ins that declare themselves shareable, which is all the guard reads. Same
+// declaration the CLI's own role fixtures make.
+class SharedBroker {
+  readonly scope = "shared" as const
+}
+class SharedQueues {
+  readonly scope = "shared" as const
+}
 
-/** A third-party provider that is honest about being process-local. */
-class DeclaredProcessLocalQueues {
-  readonly processLocal = true as const
+/** A third-party provider that only works inside one process. */
+class ProcessLocalQueues {
+  readonly scope = "process" as const
 }
 
 const EVENT_PLANE_ROLES: readonly ProductionRole[] = [
@@ -66,11 +70,14 @@ describe("assertShareableProviders", () => {
     expect(brokerFailure.remediation).toContain("@sixb/redis or @sixb/nats")
   })
 
-  test("honours the declared marker, for providers `instanceof` cannot see", () => {
-    // Two copies of @sixb/core in one dependency graph defeat `instanceof`, and a
-    // hand-written double never extends our class at all.
+  test("refuses a third-party provider on its own declaration", () => {
+    // No `instanceof` anywhere in the guard: `scope` is required on the contract, so a
+    // provider nobody here has heard of answers the same question `InMemoryQueues` does.
+    // The old optional marker made this the one case that got through — two copies of
+    // @sixb/core defeat `instanceof`, and a provider that forgot the marker read as
+    // shareable.
     expect(() =>
-      assertShareableProviders(sixbWith({ queues: new DeclaredProcessLocalQueues() }), "worker")
+      assertShareableProviders(sixbWith({ queues: new ProcessLocalQueues() }), "worker")
     ).toThrow(/requires a queues provider/)
   })
 

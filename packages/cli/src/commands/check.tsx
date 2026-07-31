@@ -20,8 +20,8 @@ export async function runCheck(options: CheckOptions = {}) {
 
     const projectValidation =
       objectTypes.length > 0
-        ? { ok: true, message: `${objectTypes.length} object type(s)` }
-        : { ok: false, message: "No object types loaded" }
+        ? { status: "ok" as const, message: `${objectTypes.length} object type(s)` }
+        : { status: "failed" as const, message: "No object types loaded" }
 
     await renderStatic(
       <CheckView
@@ -45,8 +45,11 @@ export async function runCheck(options: CheckOptions = {}) {
 
     // A failing probe exits non-zero so `sixb check` can gate a deploy. It used to exit
     // 0 for everything except an empty ontology, which made it useless in a pipeline.
-    const failed =
-      !health.storage.ok || !health.timeseries.ok || !health.broker.ok || !health.queues.ok
+    // `unverified` is not a failure: nothing is wrong with a provider that exposes no
+    // probe, and gating a deploy on it would punish the honest report.
+    const failed = [health.storage, health.timeseries, health.broker, health.queues].some(
+      (check) => check.status === "failed"
+    )
     if (objectTypes.length === 0 || failed) process.exit(1)
   } finally {
     // Tear down runtime providers (broker, queues, storage, connectors) so the

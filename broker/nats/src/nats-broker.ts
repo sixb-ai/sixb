@@ -55,6 +55,7 @@ export interface NatsBrokerOptions {
  * consumer identity and ack behavior if we need restart-safe consumers.
  */
 export class NatsBroker implements Broker {
+  readonly scope = "shared" as const
   private readonly connectionManager: NatsConnectionManager
   private readonly streamManager: StreamManager
   private readonly subscriptionRegistry = new SubscriptionRegistry()

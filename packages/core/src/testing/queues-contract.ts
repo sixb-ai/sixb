@@ -610,5 +610,17 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         })
       })
     })
+
+    describe("scope", () => {
+      // Asserted here rather than left to the type checker: the CLI refuses to start a
+      // production role against a `"process"` provider, so a provider that declares the
+      // wrong scope is a deployment that looks healthy and claims nothing. Every
+      // provider answers the question, including the in-memory one.
+      test("declares whether it can be shared across processes", async () => {
+        await withQueues(async (queues) => {
+          expect(["process", "shared"]).toContain(queues.scope)
+        })
+      })
+    })
   })
 }

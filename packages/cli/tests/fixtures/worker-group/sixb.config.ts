@@ -120,6 +120,7 @@ function claimLoggingQueue<T extends object>(queue: T, workerType: string): T {
 // Not an `InMemoryQueues` instance, so it passes the shared-queue guard while
 // still backed by real in-memory queues for the workers to poll.
 class SharedQueues implements Queues {
+  readonly scope = "shared" as const
   private readonly inner = new InMemoryQueues()
   readonly syncRuns = claimLoggingQueue(this.inner.syncRuns, "sync")
   readonly pipelines = claimLoggingQueue(this.inner.pipelines, "pipeline")

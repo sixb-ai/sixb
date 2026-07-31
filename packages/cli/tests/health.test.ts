@@ -16,9 +16,9 @@ describe("checkRuntimeHealth", () => {
     // Every row used to be the same `{ ok: true, message: "configured" }` literal, so the
     // panel could not tell an operator which implementation had answered — or whether
     // anything had.
-    expect(health.storage).toEqual({ ok: true, message: "ok · InMemoryStorage" })
-    expect(health.timeseries).toEqual({ ok: true, message: "ok · InMemoryStorage" })
-    expect(health.broker).toEqual({ ok: true, message: "ok · InMemoryBroker" })
+    expect(health.storage).toEqual({ status: "ok", message: "ok · InMemoryStorage" })
+    expect(health.timeseries).toEqual({ status: "ok", message: "ok · InMemoryStorage" })
+    expect(health.broker).toEqual({ status: "ok", message: "ok · InMemoryBroker" })
   })
 
   test("does not claim a current schema when there is no schema to check", async () => {
@@ -32,13 +32,16 @@ describe("checkRuntimeHealth", () => {
   test("reports a verified schema separately from a merely reachable one", async () => {
     const health = await checkRuntimeHealth(runtime({ migrators: [migrator("current")] }))
 
-    expect(health.storage).toEqual({ ok: true, message: "ok · InMemoryStorage · schema current" })
+    expect(health.storage).toEqual({
+      status: "ok",
+      message: "ok · InMemoryStorage · schema current",
+    })
   })
 
   test("carries the adapter's own remedy for a schema behind the build", async () => {
     const health = await checkRuntimeHealth(runtime({ migrators: [migrator("pending")] }))
 
-    expect(health.storage.ok).toBe(false)
+    expect(health.storage.status).toBe("failed")
     // Core owns this wording, and `/ready` prints the same string. The command adds the
     // configured class in front so one provider does not appear under two names — core
     // names the migration adapter, which is not what an author wrote in sixb.config.ts.
@@ -67,7 +70,7 @@ describe("checkRuntimeHealth", () => {
     const health = await checkRuntimeHealth({ ...runtime(), storage } as unknown as LoadedSixb)
 
     expect(health.storage).toEqual({
-      ok: false,
+      status: "failed",
       message: "InMemoryStorage · connect ECONNREFUSED 127.0.0.1:5432",
     })
     // Nothing to learn from a schema read against a host that will not answer, and it
@@ -86,16 +89,45 @@ describe("checkRuntimeHealth", () => {
 
     // An unreachable Postgres waits rather than refusing. Without a bound the command
     // hangs, which in a pipeline is indistinguishable from a slow database.
-    expect(health.storage).toEqual({ ok: false, message: "InMemoryStorage · timed out after 25ms" })
+    expect(health.storage).toEqual({
+      status: "failed",
+      message: "InMemoryStorage · timed out after 25ms",
+    })
   })
 
-  test("says the queues provider was named, not probed", async () => {
+  test("probes the queues provider through its own health check", async () => {
     const health = await checkRuntimeHealth(runtime())
 
-    // Every method on the queues contract claims, enqueues or completes work, so there is
-    // no read-only probe to run. Borrowing "ok" from the rows that were probed is the
-    // exact claim this command was making everywhere before.
-    expect(health.queues).toEqual({ ok: true, message: "configured · InMemoryQueues" })
+    // `Queues.health()` is the only read-only member of that contract; everything else
+    // enqueues, claims or completes. `InMemoryQueues` implements it, so this row is earned.
+    expect(health.queues).toEqual({ status: "ok", message: "ok · InMemoryQueues" })
+  })
+
+  test("reports a queues provider with no health check as unverified, never ok", async () => {
+    const health = await checkRuntimeHealth(runtime({ queues: unprobableQueues() }))
+
+    // The row this command used to print green against an unreachable Redis. `unverified`
+    // is neither a pass nor a failure: nothing was learned, and nothing is wrong.
+    expect(health.queues).toEqual({
+      status: "unverified",
+      message: "not probed · UnprobableQueues",
+    })
+    expect(health.warnings.join("\n")).toContain("queues was not probed")
+  })
+
+  test("fails the queues row when its health check throws", async () => {
+    const queues = Object.assign(new InMemoryQueues(), {
+      health: async () => {
+        throw new Error("connect ECONNREFUSED 127.0.0.1:6379")
+      },
+    })
+
+    const health = await checkRuntimeHealth(runtime({ queues }))
+
+    expect(health.queues).toEqual({
+      status: "failed",
+      message: "InMemoryQueues · connect ECONNREFUSED 127.0.0.1:6379",
+    })
   })
 
   test("warns before deployment about providers that cannot cross a process", async () => {
@@ -115,7 +147,7 @@ describe("checkRuntimeHealth", () => {
     )
 
     expect(health.warnings).toEqual([])
-    expect(health.broker.ok).toBe(true)
+    expect(health.broker.status).toBe("ok")
   })
 })
 
@@ -135,16 +167,28 @@ function runtime(
   } as unknown as LoadedSixb
 }
 
-/** A broker that implements the contract without declaring the process-local marker. */
+/** A broker that declares itself shareable, the way a real one does. */
 function sharedBroker() {
   const inner = new InMemoryBroker()
   return new (class SharedBroker {
+    scope = "shared" as const
     latestCursor = inner.latestCursor.bind(inner)
   })()
 }
 
 function sharedQueues() {
-  return new (class SharedQueues {})()
+  const inner = new InMemoryQueues()
+  return new (class SharedQueues {
+    scope = "shared" as const
+    health = inner.health.bind(inner)
+  })()
+}
+
+/** Shareable, and with no `health()` — the third-party provider `unverified` exists for. */
+function unprobableQueues() {
+  return new (class UnprobableQueues {
+    scope = "shared" as const
+  })()
 }
 
 function currentStatus(): MigrationStatus {

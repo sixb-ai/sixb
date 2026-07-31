@@ -344,7 +344,7 @@ class InMemoryQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob> {
 }
 
 export class InMemoryQueues implements Queues {
-  readonly processLocal = true as const
+  readonly scope = "process" as const
   private readonly store = new InMemoryQueueStore()
 
   readonly syncRuns = new InMemoryQueue<SyncRunRequestedQueueJob>(this.store, "sync.runs")
@@ -356,4 +356,13 @@ export class InMemoryQueues implements Queues {
   readonly workflows = new InMemoryQueue<WorkflowQueueJob>(this.store, "workflow.runs")
   readonly actions = new InMemoryQueue<ActionRunRequestedQueueJob>(this.store, "action.runs")
   readonly agents = new InMemoryQueue<AgentQueueJob>(this.store, "agent.runs")
+
+  /**
+   * The store is a field of this object, so holding a reference to it is the whole of
+   * being able to reach it. Implemented rather than omitted so the one row `sixb check`
+   * cannot probe is a provider that genuinely was not probed.
+   */
+  health(): Promise<void> {
+    return Promise.resolve()
+  }
 }

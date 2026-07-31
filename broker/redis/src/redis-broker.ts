@@ -74,6 +74,7 @@ export interface RedisBrokerOptions {
  * work-sharing primitives; the core Broker contract is retained fan-out.
  */
 export class RedisBroker implements Broker {
+  readonly scope = "shared" as const
   private readonly connectionManager: RedisConnectionManager
   private readonly streamManager: StreamManager
   private readonly subscriptionRegistry = new SubscriptionRegistry()

@@ -74,6 +74,7 @@ class TrackingLakeStorage extends InMemoryLakeStorage {
 }
 
 class SharedQueues implements Queues {
+  readonly scope = "shared" as const
   private readonly inner = new InMemoryQueues()
 
   get syncRuns() {
