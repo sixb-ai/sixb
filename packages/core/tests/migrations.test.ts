@@ -371,24 +371,33 @@ function storageWith(...migrators: readonly StorageMigrator[]) {
   return Object.assign(new InMemoryStorage(), { migrators })
 }
 
-function statusMigrator(status: {
-  state: MigrationState
-  appliedVersion: number
-  adapterId?: string
-  reason?: string
-}): StorageMigrator {
+// `MigrationStatus` is a union: a non-current state carries its reason, so the helper takes them
+// together.
+type FixtureStatus =
+  | { state: "current"; appliedVersion: number; adapterId?: string }
+  | {
+      state: Exclude<MigrationState, "current">
+      appliedVersion: number
+      adapterId?: string
+      reason: string
+    }
+
+function statusMigrator(status: FixtureStatus): StorageMigrator {
   const adapterId = status.adapterId ?? "SixbFakeStorage"
 
   return {
     adapterId,
     latestVersion: 1,
-    status: async () => ({
-      adapterId,
-      latestVersion: 1,
-      appliedVersion: status.appliedVersion,
-      state: status.state,
-      ...(status.reason ? { reason: status.reason } : {}),
-    }),
+    status: async () =>
+      status.state === "current"
+        ? { adapterId, latestVersion: 1, appliedVersion: status.appliedVersion, state: "current" }
+        : {
+            adapterId,
+            latestVersion: 1,
+            appliedVersion: status.appliedVersion,
+            state: status.state,
+            reason: status.reason,
+          },
     migrate: async () => ({
       adapterId,
       latestVersion: 1,

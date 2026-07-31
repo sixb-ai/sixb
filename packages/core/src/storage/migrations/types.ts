@@ -83,15 +83,27 @@ export type MigrationState =
   /** History contradicts the declared migrations: changed checksum, mismatched id, duplicate version, foreign adapter. */
   | "incompatible"
 
-export interface MigrationStatus {
+interface MigrationStatusBase {
   readonly adapterId: string
   readonly latestVersion: number
   /** Highest applied version; 0 when no history exists. */
   readonly appliedVersion: number
-  readonly state: MigrationState
-  /** Absent only when `current`. Says what an operator has to do about it. */
-  readonly reason?: string
 }
+
+/**
+ * A state, and the reason for it when there is one to give.
+ *
+ * A union rather than an optional field: "absent only when `current`" was a comment enforced by
+ * nothing, and the type accepted `current` with a reason and `dirty` without one. Every other
+ * state exists because an operator has to act, so each owes them a sentence.
+ */
+export type MigrationStatus =
+  | (MigrationStatusBase & { readonly state: "current"; readonly reason?: never })
+  | (MigrationStatusBase & {
+      readonly state: Exclude<MigrationState, "current">
+      /** What an operator has to do about it. */
+      readonly reason: string
+    })
 
 export interface StorageMigrator {
   readonly adapterId: string
