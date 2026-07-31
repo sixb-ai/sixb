@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage, migrateStorage, type StorageMigrator } from "../src"
+import {
+  checkStorageSchema,
+  InMemoryStorage,
+  type MigrationState,
+  migrateStorage,
+  type StorageMigrator,
+} from "../src"
 import {
   defineMigrations,
   describeMigrationHistory,
@@ -292,6 +298,111 @@ describe("migrateStorage", () => {
     expect(result).toEqual({ status: "skipped", reports: [] })
   })
 })
+
+describe("checkStorageSchema", () => {
+  test("distinguishes a verified schema from having no schema at all", async () => {
+    // Both are usable, and a caller that prints "schema current" for the second one is
+    // reporting a check it never ran. `/ready` treats them the same; `sixb check` does not.
+    await expect(checkStorageSchema(new InMemoryStorage())).resolves.toEqual({
+      ok: true,
+      verified: false,
+    })
+    await expect(
+      checkStorageSchema(storageWith(statusMigrator({ state: "current", appliedVersion: 1 })))
+    ).resolves.toEqual({ ok: true, verified: true })
+  })
+
+  test("names the adapter and the state of every unusable migrator", async () => {
+    const result = await checkStorageSchema(
+      storageWith(
+        statusMigrator({ state: "current", appliedVersion: 1 }),
+        statusMigrator({
+          state: "dirty",
+          appliedVersion: 0,
+          adapterId: "SixbLakeStorage",
+          reason: "Migration 001-first started and never finished.",
+        })
+      )
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.verified).toBe(true)
+    // The current migrator is not mentioned; only what an operator has to act on is.
+    expect(result.reason).toBe(
+      "SixbLakeStorage: dirty — Migration 001-first started and never finished."
+    )
+  })
+
+  test("never runs plan(), which would run DDL", async () => {
+    // `plan()` calls `ensure()`: CREATE SCHEMA / CREATE TABLE on Postgres, creating the
+    // file on SQLite. This answers an unauthenticated `/ready`.
+    let planCalls = 0
+    const storage = storageWith({
+      ...statusMigrator({ state: "current", appliedVersion: 1 }),
+      plan: async () => {
+        planCalls += 1
+        throw new Error("plan should not run")
+      },
+    })
+
+    await expect(checkStorageSchema(storage)).resolves.toMatchObject({ ok: true })
+    expect(planCalls).toBe(0)
+  })
+
+  test("reports a migrator that throws rather than propagating it", async () => {
+    // `/ready` has to answer, and `sixb check` has to print a panel. Neither can be an
+    // unhandled rejection because a database refused a connection.
+    const result = await checkStorageSchema(
+      storageWith({
+        ...statusMigrator({ state: "current", appliedVersion: 1 }),
+        status: async () => {
+          throw new Error("connection terminated unexpectedly")
+        },
+      })
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      verified: false,
+      reason: "Storage schema could not be verified: connection terminated unexpectedly",
+    })
+  })
+})
+
+function storageWith(...migrators: readonly StorageMigrator[]) {
+  return Object.assign(new InMemoryStorage(), { migrators })
+}
+
+function statusMigrator(status: {
+  state: MigrationState
+  appliedVersion: number
+  adapterId?: string
+  reason?: string
+}): StorageMigrator {
+  const adapterId = status.adapterId ?? "SixbFakeStorage"
+
+  return {
+    adapterId,
+    latestVersion: 1,
+    status: async () => ({
+      adapterId,
+      latestVersion: 1,
+      appliedVersion: status.appliedVersion,
+      state: status.state,
+      ...(status.reason ? { reason: status.reason } : {}),
+    }),
+    plan: async () => {
+      throw new Error("plan should not run")
+    },
+    migrate: async () => ({
+      adapterId,
+      latestVersion: 1,
+      status: "current" as const,
+      applied: [],
+      skipped: [],
+    }),
+  }
+}
 
 describe("describeMigrationHistory", () => {
   const migrations = defineMigrations({

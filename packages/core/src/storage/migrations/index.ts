@@ -1,3 +1,4 @@
+export { checkStorageSchema, type StorageSchemaCheck } from "./check-schema"
 export { isMigrationCapableStorage, migrateStorage } from "./migrate-storage"
 export {
   defineMigrations,

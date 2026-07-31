@@ -468,9 +468,11 @@ export type {
   Storage,
   StorageMigrationResult,
   StorageMigrator,
+  StorageSchemaCheck,
   StorageTransactionOptions,
 } from "./storage"
 export {
+  checkStorageSchema,
   InMemoryFileUploadSessions,
   InMemoryStorage,
   isMigrationCapableStorage,

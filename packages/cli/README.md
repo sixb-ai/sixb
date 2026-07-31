@@ -179,6 +179,7 @@ process at once (e.g. with PM2) does not stampede a Postgres-backed DuckLake cat
 
 ```bash
 sixb build        # bundle runtime and UI/app assets
+sixb check        # probe the configured providers and the storage schema
 sixb lake check   # verify lake dataset definitions are compatible with the catalog
 pm2 start ecosystem.config.cjs
 ```
@@ -187,6 +188,14 @@ pm2 start ecosystem.config.cjs
 definition during deploy. Service commands (`api`, `scheduler`, `orchestrator`, `rules`, `worker`,
 `worker-group`) do not open the lake catalog at startup, so starting them together does not
 stampede shared infrastructure.
+
+`sixb check` exits non-zero when a probe fails, so it works as a deploy gate. It opens a read-only
+round trip to the storage, its telemetry table, and the broker, reads the storage schema state
+without touching it, and warns when the broker or queues provider only works inside one process —
+the configuration that makes a production role refuse to start. Each probe is bounded at five
+seconds, so an unreachable host is reported rather than waited on. The queues provider is named but
+not probed: every operation in that contract claims or enqueues work, so there is nothing read-only
+to call.
 
 ### Storage migrations
 

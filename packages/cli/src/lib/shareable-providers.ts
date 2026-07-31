@@ -38,6 +38,29 @@ function isProcessLocal(slot: (typeof SLOTS)[number], sixb: LoadedSixb): boolean
   )
 }
 
+export interface ProcessLocalProvider {
+  /** The config slot: `broker` or `queues`. */
+  readonly slot: string
+  /** The configured class, so an operator can find it in `sixb.config.ts`. */
+  readonly configured: string
+  readonly replacements: string
+}
+
+/**
+ * The same detection as {@link assertShareableProviders}, without the refusal.
+ *
+ * `sixb check` runs before anything is deployed, which is the useful moment to learn
+ * this — a role refusing to start is correct but late. Both callers read one list so
+ * they cannot disagree about what counts as process-local.
+ */
+export function findProcessLocalProviders(sixb: LoadedSixb): readonly ProcessLocalProvider[] {
+  return SLOTS.filter((slot) => isProcessLocal(slot, sixb)).map((slot) => ({
+    slot: slot.name,
+    configured: slot.get(sixb)?.constructor?.name ?? "a process-local provider",
+    replacements: slot.replacements,
+  }))
+}
+
 /**
  * Refuses to start a production role whose broker or queues cannot cross a process
  * boundary.
@@ -57,18 +80,12 @@ function isProcessLocal(slot: (typeof SLOTS)[number], sixb: LoadedSixb): boolean
 export function assertShareableProviders(sixb: LoadedSixb, role: ProductionRole): void {
   if (!productionRoleFacts(role).onEventPlane) return
 
-  for (const slot of SLOTS) {
-    if (!isProcessLocal(slot, sixb)) continue
-
-    // Name the offending class, not just the slot: "you configured InMemoryQueues" is
-    // something an operator can go find in sixb.config.ts.
-    const configured = slot.get(sixb)?.constructor?.name ?? "a process-local provider"
-
+  for (const offender of findProcessLocalProviders(sixb)) {
     throw new Error(
-      `[SixbCLI] \`sixb ${role}\` requires a ${slot.name} provider that can be shared across ` +
-        `processes, but this project configures ${configured}, which only works inside one ` +
-        `process. Jobs and events published here would be invisible to every other role. Use ` +
-        `${slot.replacements}, or keep the in-memory provider for \`sixb dev\` only.`
+      `[SixbCLI] \`sixb ${role}\` requires a ${offender.slot} provider that can be shared across ` +
+        `processes, but this project configures ${offender.configured}, which only works inside ` +
+        `one process. Jobs and events published here would be invisible to every other role. Use ` +
+        `${offender.replacements}, or keep the in-memory provider for \`sixb dev\` only.`
     )
   }
 }

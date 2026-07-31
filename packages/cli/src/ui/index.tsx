@@ -685,30 +685,33 @@ export function RoleView({
 
 export function CheckView({
   projectId,
-  events,
   storage,
   timeseries,
   broker,
+  queues,
   projectValidation,
   ontology,
   warnings,
 }: {
   projectId: string
-  events: { ok: boolean; message?: string }
   storage: { ok: boolean; message?: string }
   timeseries: { ok: boolean; message?: string }
   broker: { ok: boolean; message?: string }
+  queues: { ok: boolean; message?: string }
   projectValidation?: { ok: boolean; message?: string }
   ontology?: { enabled: boolean; source: string; errors: number; warnings: number }
-  warnings: string[]
+  warnings: readonly string[]
 }) {
   const validation = projectValidation ?? { ok: true, message: "ok" }
   const ontologyOk = (ontology?.errors ?? 0) === 0
-  const allOk = events.ok && storage.ok && timeseries.ok && broker.ok && validation.ok && ontologyOk
+  const allOk = storage.ok && timeseries.ok && broker.ok && queues.ok && validation.ok && ontologyOk
 
+  // The message wins when there is one, pass or fail. A probe that succeeded still has
+  // something to say — which provider answered, and whether its schema is current —
+  // and collapsing that to "ok" is how this command came to report a healthy runtime
+  // against a database that was not there.
   function statusText(provider: { ok: boolean; message?: string }): string {
-    if (provider.ok) return "ok"
-    return provider.message ?? "failed"
+    return provider.message ?? (provider.ok ? "ok" : "failed")
   }
 
   function statusColor(ok: boolean): string {
@@ -725,10 +728,6 @@ export function CheckView({
       <SectionTitle>Providers</SectionTitle>
       <Box flexDirection="column">
         <Text>
-          <Text dimColor>{padLabel("Events", 14)}</Text>
-          <Text color={statusColor(events.ok)}>{statusText(events)}</Text>
-        </Text>
-        <Text>
           <Text dimColor>{padLabel("Storage", 14)}</Text>
           <Text color={statusColor(storage.ok)}>{statusText(storage)}</Text>
         </Text>
@@ -739,6 +738,10 @@ export function CheckView({
         <Text>
           <Text dimColor>{padLabel("Broker", 14)}</Text>
           <Text color={statusColor(broker.ok)}>{statusText(broker)}</Text>
+        </Text>
+        <Text>
+          <Text dimColor>{padLabel("Queues", 14)}</Text>
+          <Text color={statusColor(queues.ok)}>{statusText(queues)}</Text>
         </Text>
         <Text>
           <Text dimColor>{padLabel("Project", 14)}</Text>

@@ -182,8 +182,10 @@ export type {
   MigrationStepOptions,
   StorageMigrationResult,
   StorageMigrator,
+  StorageSchemaCheck,
 } from "./migrations"
 export {
+  checkStorageSchema,
   defineMigrations,
   describeMigrationHistory,
   isMigrationCapableStorage,

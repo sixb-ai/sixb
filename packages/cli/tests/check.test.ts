@@ -62,6 +62,17 @@ describe("sixb check", () => {
     expect(result.stderr).toBe("")
   })
 
+  test("fails the command when a provider probe fails", () => {
+    // The old command exited 0 for everything but an empty ontology, because its four
+    // provider rows were one hardcoded `{ ok: true }`. That made it useless as a deploy
+    // gate: a missing database passed.
+    const result = runCheckFixture("unreachable-storage")
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("Sixb has issues")
+    expect(result.stdout).toContain("UnreachableStorage")
+  })
+
   test("exits instead of hanging when a provider holds the event loop open", async () => {
     // Without provider teardown, a ref'd handle (redis/pg connection, here a
     // setInterval) keeps the process alive forever after rendering. A timeout
