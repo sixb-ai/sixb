@@ -69,8 +69,9 @@ describe("sixb worker-group (e2e)", () => {
       expect(claimed.has("pipeline")).toBe(true)
       expect(claimed.has("projection")).toBe(true)
       expect(claimed.has("agent")).toBe(true)
-      // Does not migrate storage at startup.
-      expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
+      // Brings the storage schema up to date at startup, like every other role that reads
+      // or writes through it. Co-hosting workers in one process does not change that.
+      expect(logEntries).toContainEqual({ type: "storage:migrate" })
       // Clean shutdown stops queues and lake storage.
       expect(logEntries).toContainEqual({ type: "queues:close" })
       expect(logEntries).toContainEqual({ type: "lake-storage:close" })

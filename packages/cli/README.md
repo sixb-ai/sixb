@@ -33,7 +33,7 @@ bun add @sixb/cli
 | `sixb worker-group [types...]` | Co-host several queue workers in one process (constrained resources) |
 | `sixb check` | Validate project configuration and provider health |
 | `sixb build` | Bundle the project runtime, custom app, and Atlas assets |
-| `sixb db migrate` | Run adapter-owned database migrations for the configured storage |
+| `sixb db migrate` | Run adapter-owned database migrations ahead of, or instead of, role startup |
 | `sixb lake check` | Check lake dataset definitions for drift against the lake catalog |
 | `sixb lake cleanup` | Run provider-supported lake maintenance cleanup |
 | `sixb init [dir]` | Initialize a new sixb project in a directory |
@@ -49,6 +49,7 @@ CLI is installed, use `sixb create <name>`.
 | Flag | Applies to | Default | Description |
 |---|---|---|---|
 | `--entry <path>` | all | `sixb.config.ts` | Path to the sixb config module |
+| `--no-migrate` | production roles | false | Start without migrating storage. Also `SIXB_SKIP_MIGRATION=1`. |
 | `--port <port>` | serving commands | role default | Role bind port. For `dev`, this is the Atlas base port. |
 | `--host <host>` | browser serving commands | `0.0.0.0` | Browser app bind host |
 | `--api-port <port>` | `dev`, `api` | `port + 2` | API/auth/docs/WebSocket port |
@@ -178,16 +179,30 @@ process at once (e.g. with PM2) does not stampede a Postgres-backed DuckLake cat
 
 ```bash
 sixb build        # bundle runtime and UI/app assets
-sixb db migrate   # run adapter-owned storage migrations
 sixb lake check   # verify lake dataset definitions are compatible with the catalog
 pm2 start ecosystem.config.cjs
 ```
 
 `sixb lake check` is the single place that attaches the lake and validates every dataset
 definition during deploy. Service commands (`api`, `scheduler`, `orchestrator`, `rules`, `worker`,
-`worker-group`) no longer run lake checks or storage migrations at startup, so
-starting them together does not stampede shared infrastructure. Run `sixb db migrate` as a
-required release step before starting roles — `sixb dev` still migrates in-process for local use.
+`worker-group`) do not open the lake catalog at startup, so starting them together does not
+stampede shared infrastructure.
+
+### Storage migrations
+
+Roles that read or write through the storage schema (`api`, `scheduler`, `orchestrator`, `rules`,
+`worker`, `worker-group`) bring it up to date themselves at startup, and print the migration steps
+they applied. `atlas` and `app` do not: they serve a browser bundle and hold no DDL grant.
+
+`sixb db migrate` is no longer a required release step. It stays useful when you want the schema
+change to be its own deploy stage — run it first, then start the roles with `--no-migrate` (or
+`SIXB_SKIP_MIGRATION=1`), which reports the skip instead of staying silent about it.
+
+Concurrent replicas are safe on Postgres: migrators serialize on a session advisory lock, so late
+starters find the schema current and no-op. Every adapter also refuses to run against a history it
+does not recognize — a changed checksum, a version newer than the build, an interrupted run — and
+names the condition instead of migrating over it. SQLite has no cross-process lock, so roles
+starting together on one file can collide; migrate it as its own step and pass `--no-migrate`.
 
 The lake is opened only when a role actually does lake work — API dataset routes, sync jobs,
 pipeline jobs, and projection jobs. Write paths re-validate their target dataset through the lake

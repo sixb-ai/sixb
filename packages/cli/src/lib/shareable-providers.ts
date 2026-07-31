@@ -1,31 +1,6 @@
 import { InMemoryBroker, InMemoryQueues } from "@sixb/core"
 import type { LoadedSixb } from "./loadSixb"
-
-/**
- * Every long-running production role, and whether it publishes to or claims from the
- * event plane.
- *
- * `atlas` and `app` only serve a browser bundle: they read `auth.isEnabled()` and the
- * project id off the runtime and never touch the broker or the queues, so a
- * process-local provider cannot hurt them and refusing to boot would block a valid
- * UI-only container.
- *
- * This is a total map over the role union on purpose. A new role does not compile
- * until it appears here, which forces the question to be answered once rather than
- * discovered in production.
- */
-const ROLES = {
-  api: { onEventPlane: true },
-  rules: { onEventPlane: true },
-  scheduler: { onEventPlane: true },
-  orchestrator: { onEventPlane: true },
-  worker: { onEventPlane: true },
-  "worker-group": { onEventPlane: true },
-  atlas: { onEventPlane: false },
-  app: { onEventPlane: false },
-} as const satisfies Record<string, { readonly onEventPlane: boolean }>
-
-export type ProductionRole = keyof typeof ROLES
+import { type ProductionRole, productionRoleFacts } from "./production-roles"
 
 /**
  * The two provider slots that only work inside one process.
@@ -80,7 +55,7 @@ function isProcessLocal(slot: (typeof SLOTS)[number], sixb: LoadedSixb): boolean
  * role fixtures do.
  */
 export function assertShareableProviders(sixb: LoadedSixb, role: ProductionRole): void {
-  if (!ROLES[role].onEventPlane) return
+  if (!productionRoleFacts(role).onEventPlane) return
 
   for (const slot of SLOTS) {
     if (!isProcessLocal(slot, sixb)) continue

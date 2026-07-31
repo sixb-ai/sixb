@@ -226,6 +226,22 @@ function ServicePanel({ name, items }: { name: string; items: KeyValueItem[] }) 
   )
 }
 
+/**
+ * What the role did to the storage schema at startup, worded the same way by every
+ * role. Absent when there was nothing to report, so a runtime without migrators does
+ * not grow a panel that says nothing.
+ */
+function StoragePanel({ summary }: { summary?: string | null }) {
+  if (!summary) return null
+
+  return (
+    <>
+      <Spacer />
+      <ServicePanel name="Storage" items={[{ label: "Schema", value: summary }]} />
+    </>
+  )
+}
+
 function BulletList({ items, dim = false }: { items: readonly string[]; dim?: boolean }) {
   return (
     <Box flexDirection="column">
@@ -332,7 +348,7 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           { label: "check", value: "Validate project configuration and health" },
           { label: "typegen", value: "Generate ontology types for client query inference" },
           { label: "build", value: "Build runtime and production UI/app assets" },
-          { label: "db migrate", value: "Run adapter-owned database migrations" },
+          { label: "db migrate", value: "Run adapter-owned database migrations ahead of a role" },
           { label: "lake check", value: "Check lake dataset definitions for drift" },
           { label: "lake cleanup", value: "Run lake storage maintenance cleanup" },
           { label: "init [dir]", value: "Initialize sixb project in directory" },
@@ -345,6 +361,10 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
         labelWidth={22}
         items={[
           { label: "--entry <path>", value: "Entry file (default: sixb.config.ts)" },
+          {
+            label: "--no-migrate",
+            value: "Start a role without migrating storage (or SIXB_SKIP_MIGRATION=1)",
+          },
           { label: "--port <port>", value: "Role port; dev uses Atlas base port" },
           { label: "--host <host>", value: "Browser app bind host (default: 0.0.0.0)" },
           { label: "--api-port <port>", value: "API port (default: Atlas port + 2)" },
@@ -560,10 +580,12 @@ export function StartView({
 export function WorkerView({
   name,
   workerId,
+  storage,
   warnings = [],
 }: {
   name: string
   workerId: string
+  storage?: string | null
   warnings?: readonly string[]
 }) {
   return (
@@ -574,6 +596,7 @@ export function WorkerView({
       <Text dimColor>{name}</Text>
       <Spacer />
       <ServicePanel name="Worker" items={[{ label: "ID", value: workerId }]} />
+      <StoragePanel summary={storage} />
       {warnings.length > 0 ? (
         <>
           <Spacer />
@@ -590,10 +613,12 @@ export function WorkerView({
 export function WorkerGroupView({
   name,
   workerTypes,
+  storage,
   warnings = [],
 }: {
   name: string
   workerTypes: readonly string[]
+  storage?: string | null
   warnings?: readonly string[]
 }) {
   return (
@@ -607,6 +632,7 @@ export function WorkerGroupView({
         name="Workers"
         items={workerTypes.map((workerType) => ({ label: workerType, value: "running" }))}
       />
+      <StoragePanel summary={storage} />
       {warnings.length > 0 ? (
         <>
           <Spacer />
@@ -625,12 +651,14 @@ export function RoleView({
   name,
   serviceName,
   items,
+  storage,
   warnings = [],
 }: {
   title: string
   name: string
   serviceName: string
   items: KeyValueItem[]
+  storage?: string | null
   warnings?: readonly string[]
 }) {
   return (
@@ -641,6 +669,7 @@ export function RoleView({
       <Text dimColor>{name}</Text>
       <Spacer />
       <ServicePanel name={serviceName} items={items} />
+      <StoragePanel summary={storage} />
       {warnings.length > 0 ? (
         <>
           <Spacer />
@@ -787,9 +816,12 @@ export function TypegenView({
 export function DbMigrateView({
   projectId,
   status,
+  applied = [],
 }: {
   projectId: string
   status: "migrated" | "current" | "skipped"
+  /** Migration step ids this run applied, named so the output can be checked. */
+  applied?: readonly string[]
 }) {
   return (
     <Box flexDirection="column">
@@ -799,6 +831,13 @@ export function DbMigrateView({
       <Text dimColor>{projectId}</Text>
       <Spacer />
       <KeyValueList items={[{ label: "Storage", value: status }]} />
+      {applied.length > 0 ? (
+        <>
+          <Spacer />
+          <SectionTitle>Applied</SectionTitle>
+          <BulletList items={applied} />
+        </>
+      ) : null}
     </Box>
   )
 }

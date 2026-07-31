@@ -8,10 +8,12 @@ import {
   stopSixbProviders,
   waitForWorkerFailure,
 } from "../lib/runtime"
+import { migrateStorageForRole } from "../lib/storage-migration"
 import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
 
 export interface OrchestratorOptions {
   entry?: string
+  noMigrate?: boolean
 }
 
 export async function runOrchestrator(options: OrchestratorOptions = {}) {
@@ -30,6 +32,19 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
   let runtime: RunningOrchestratorRuntime | null = null
 
   try {
+    const migration = await migrateStorageForRole(sixb, {
+      role: "orchestrator",
+      noMigrate: options.noMigrate,
+      onStart: () =>
+        app.rerender(
+          <LoadingView
+            title="Starting sixb orchestrator"
+            subtitle={loaded.entry}
+            status="Migrating storage"
+          />
+        ),
+    })
+
     runtime = await startOrchestratorRuntime(sixb)
 
     const warnings = [...runtime.warnings]
@@ -43,6 +58,7 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
         name={sixb.id}
         serviceName="Orchestrator"
         items={[{ label: "Role", value: "event-to-queue dispatcher" }]}
+        storage={migration.summary}
         warnings={warnings}
       />
     )

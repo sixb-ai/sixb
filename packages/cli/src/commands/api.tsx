@@ -5,10 +5,12 @@ import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib
 import type { LoadedSixb } from "../lib/loadSixb"
 import { builtAppOutdir, loadProductionSixb } from "../lib/production"
 import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
+import { migrateStorageForRole } from "../lib/storage-migration"
 import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
 
 export interface ApiOptions {
   entry?: string
+  noMigrate?: boolean
   port?: string
   host?: string
   apiPort?: string
@@ -31,6 +33,22 @@ export async function runApi(options: ApiOptions = {}) {
   let server: SixbServer | null = null
 
   try {
+    // Ahead of `server.start()`, which is what kicks off the read-only schema probe
+    // behind `/ready`. Migrating after it would leave the probe racing the change it
+    // reports on, and the first `/ready` answer would be stale by construction.
+    const migration = await migrateStorageForRole(sixb, {
+      role: "api",
+      noMigrate: options.noMigrate,
+      onStart: () =>
+        app.rerender(
+          <LoadingView
+            title="Starting sixb api"
+            subtitle={loaded.entry}
+            status="Migrating storage"
+          />
+        ),
+    })
+
     const appOutdir = builtAppOutdir(loaded.buildOutdir)
     const hasBuiltCustomApp = await stat(resolve(appOutdir, "index.html"))
       .then(() => true)
@@ -69,6 +87,7 @@ export async function runApi(options: ApiOptions = {}) {
           { label: "API docs", value: apiDocsUrl(topology) },
           { label: "Events", value: apiEventsUrl(topology) },
         ]}
+        storage={migration.summary}
       />
     )
 

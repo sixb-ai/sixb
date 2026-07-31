@@ -1,7 +1,8 @@
 import { stat } from "node:fs/promises"
 import { basename, dirname, resolve, sep } from "node:path"
 import { type LoadedSixb, loadSixbFromEntry } from "./loadSixb"
-import { assertShareableProviders, type ProductionRole } from "./shareable-providers"
+import type { ProductionRole } from "./production-roles"
+import { assertShareableProviders } from "./shareable-providers"
 
 export interface RuntimeEntryOptions {
   readonly entry?: string

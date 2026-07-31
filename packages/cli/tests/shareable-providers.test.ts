@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker, InMemoryQueues } from "@sixb/core"
 import type { LoadedSixb } from "../src/lib/loadSixb"
-import { assertShareableProviders, type ProductionRole } from "../src/lib/shareable-providers"
+import type { ProductionRole } from "../src/lib/production-roles"
+import { assertShareableProviders } from "../src/lib/shareable-providers"
 
 function sixbWith(providers: { broker?: unknown; queues?: unknown }): LoadedSixb {
   return {

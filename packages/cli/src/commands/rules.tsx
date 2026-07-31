@@ -8,10 +8,12 @@ import {
   stopSixbProviders,
   waitForWorkerFailure,
 } from "../lib/runtime"
+import { migrateStorageForRole } from "../lib/storage-migration"
 import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
 
 export interface RulesOptions {
   entry?: string
+  noMigrate?: boolean
 }
 
 export async function runRules(options: RulesOptions = {}) {
@@ -26,6 +28,19 @@ export async function runRules(options: RulesOptions = {}) {
   let runtime: RunningRulesRuntime | null = null
 
   try {
+    const migration = await migrateStorageForRole(sixb, {
+      role: "rules",
+      noMigrate: options.noMigrate,
+      onStart: () =>
+        app.rerender(
+          <LoadingView
+            title="Starting sixb rules"
+            subtitle={loaded.entry}
+            status="Migrating storage"
+          />
+        ),
+    })
+
     runtime = await startRulesRuntime(sixb)
 
     const warnings =
@@ -37,6 +52,7 @@ export async function runRules(options: RulesOptions = {}) {
         name={sixb.id}
         serviceName="Rules"
         items={[{ label: "Role", value: "rules evaluation" }]}
+        storage={migration.summary}
         warnings={warnings}
       />
     )

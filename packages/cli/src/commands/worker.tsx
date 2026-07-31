@@ -8,11 +8,13 @@ import {
   waitForWorkerFailure,
 } from "../lib/runtime"
 import { assertShareableProviders } from "../lib/shareable-providers"
+import { migrateStorageForRole } from "../lib/storage-migration"
 import { createWorkerForType, resolveWorkerTypeToStart } from "../lib/worker-registry"
 import { ErrorView, LoadingView, renderPersistent, renderStatic, WorkerView } from "../ui"
 
 export interface WorkerOptions {
   entry?: string
+  noMigrate?: boolean
   workerType?: string
   apiPublicOrigin?: string
 }
@@ -35,6 +37,15 @@ export async function runWorker(options: WorkerOptions = {}) {
 
     assertShareableProviders(sixb, "worker")
 
+    const migration = await migrateStorageForRole(sixb, {
+      role: "worker",
+      noMigrate: options.noMigrate,
+      onStart: () =>
+        app.rerender(
+          <LoadingView title="Starting sixb worker" subtitle={entry} status="Migrating storage" />
+        ),
+    })
+
     app.rerender(
       <LoadingView title="Starting sixb worker" subtitle={entry} status="Starting worker" />
     )
@@ -45,7 +56,7 @@ export async function runWorker(options: WorkerOptions = {}) {
     await worker.start()
 
     const workerId = `${workerType}-worker-${sixb.id}`
-    app.rerender(<WorkerView name={sixb.id} workerId={workerId} />)
+    app.rerender(<WorkerView name={sixb.id} workerId={workerId} storage={migration.summary} />)
 
     await Promise.race([
       runUntilSignal(async () => {

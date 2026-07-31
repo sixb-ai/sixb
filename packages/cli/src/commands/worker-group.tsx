@@ -8,6 +8,7 @@ import {
   waitForWorkerFailure,
 } from "../lib/runtime"
 import { assertShareableProviders } from "../lib/shareable-providers"
+import { migrateStorageForRole } from "../lib/storage-migration"
 import {
   createWorkerForType,
   resolveRegisteredWorkerTypes,
@@ -17,6 +18,7 @@ import { ErrorView, LoadingView, renderPersistent, renderStatic, WorkerGroupView
 
 export interface WorkerGroupOptions {
   entry?: string
+  noMigrate?: boolean
   workerTypes?: readonly string[]
   apiPublicOrigin?: string
 }
@@ -48,6 +50,19 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
 
     assertShareableProviders(sixb, "worker-group")
 
+    const migration = await migrateStorageForRole(sixb, {
+      role: "worker-group",
+      noMigrate: options.noMigrate,
+      onStart: () =>
+        app.rerender(
+          <LoadingView
+            title="Starting sixb worker group"
+            subtitle={entry}
+            status="Migrating storage"
+          />
+        ),
+    })
+
     const workerTypes =
       requestedTypes.length > 0 ? requestedTypes : resolveRegisteredWorkerTypes(sixb)
 
@@ -67,7 +82,14 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
         ? ["No queue worker types are registered; the worker group process is idle."]
         : []
 
-    app.rerender(<WorkerGroupView name={sixb.id} workerTypes={workerTypes} warnings={warnings} />)
+    app.rerender(
+      <WorkerGroupView
+        name={sixb.id}
+        workerTypes={workerTypes}
+        storage={migration.summary}
+        warnings={warnings}
+      />
+    )
 
     await Promise.race([
       runUntilSignal(async () => {

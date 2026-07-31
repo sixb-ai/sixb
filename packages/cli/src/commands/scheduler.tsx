@@ -7,10 +7,12 @@ import {
   stopQuietly,
   stopSixbProviders,
 } from "../lib/runtime"
+import { migrateStorageForRole } from "../lib/storage-migration"
 import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
 
 export interface SchedulerOptions {
   entry?: string
+  noMigrate?: boolean
 }
 
 export async function runScheduler(options: SchedulerOptions = {}) {
@@ -29,6 +31,19 @@ export async function runScheduler(options: SchedulerOptions = {}) {
   let runtime: RunningSchedulerRuntime | null = null
 
   try {
+    const migration = await migrateStorageForRole(sixb, {
+      role: "scheduler",
+      noMigrate: options.noMigrate,
+      onStart: () =>
+        app.rerender(
+          <LoadingView
+            title="Starting sixb scheduler"
+            subtitle={loaded.entry}
+            status="Migrating storage"
+          />
+        ),
+    })
+
     runtime = await startSchedulerRuntime(sixb)
 
     app.rerender(
@@ -37,6 +52,7 @@ export async function runScheduler(options: SchedulerOptions = {}) {
         name={sixb.id}
         serviceName="Scheduler"
         items={[{ label: "Role", value: "schedule event producer" }]}
+        storage={migration.summary}
       />
     )
 

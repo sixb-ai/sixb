@@ -111,14 +111,16 @@ const backgroundRoles: Array<{
 describe("role startup connection budget", () => {
   for (const role of backgroundRoles) {
     test(
-      `sixb ${role.name} starts without migrating storage or touching lake storage`,
+      `sixb ${role.name} migrates storage at startup without touching lake storage`,
       async () => {
         const { ready, logEntries } = await startRole(role.command)
 
         expect(ready).toBe(true)
-        // Production roles do not stampede storage migrations at startup; that is a
-        // dedicated `sixb db migrate` release step.
-        expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
+        // A role brings the storage schema up to date before it serves. `sixb db migrate`
+        // used to be a release step an operator had to remember, and forgetting it surfaced
+        // as a missing column on the first request — far from the cause. Replicas do not
+        // stampede: Postgres serializes migrators on an advisory lock and late ones no-op.
+        expect(logEntries).toContainEqual({ type: "storage:migrate" })
         // No `storage:plan` assertion here: these roles never probe the schema at all
         // (startSchemaValidation hangs off SixbServer.start), so it would pass whatever
         // the probe does. It lives in the `api` test below, where it bites.
@@ -141,7 +143,7 @@ describe("role startup connection budget", () => {
   }
 
   test(
-    "sixb api starts without migrating storage or touching lake storage",
+    "sixb api migrates storage before probing the schema, without touching lake storage",
     async () => {
       const [atlasPort, apiPort] = await getFreePorts(2)
       const { ready, logEntries } = await startRole([
@@ -161,7 +163,6 @@ describe("role startup connection budget", () => {
       ])
 
       expect(ready).toBe(true)
-      expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
       expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
 
       // `api` is the only role that probes the schema at boot: startSchemaValidation()
@@ -172,6 +173,24 @@ describe("role startup connection budget", () => {
       // `plan()` runs CREATE SCHEMA / CREATE TABLE through ensure(). A public,
       // unauthenticated /ready and every api boot go through this path.
       expect(logEntries.some((entry) => entry.type === "storage:plan")).toBe(false)
+
+      // Order, not just presence. The probe answers an unauthenticated /ready, so it has
+      // to observe the schema the migration left behind rather than race it — otherwise
+      // the first /ready of a freshly migrated deployment reports a stale state.
+      const types = eventTypes(logEntries)
+      expect(types.indexOf("storage:migrate")).toBeGreaterThanOrEqual(0)
+      expect(types.indexOf("storage:migrate")).toBeLessThan(types.indexOf("storage:status"))
+    },
+    ROLE_TIMEOUT_MS
+  )
+
+  test(
+    "sixb rules --no-migrate starts without migrating storage",
+    async () => {
+      const { ready, logEntries } = await startRole(["rules", "--no-migrate"])
+
+      expect(ready).toBe(true)
+      expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
     },
     ROLE_TIMEOUT_MS
   )
