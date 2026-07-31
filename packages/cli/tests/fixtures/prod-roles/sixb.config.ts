@@ -121,7 +121,15 @@ function loggingStorage() {
     },
   }
 
-  return Object.assign(new InMemoryStorage(), { migrators: [migrator] })
+  // `close` is logged so the role tests can assert the shutdown ORDER, not just that
+  // shutdown happened: storage must close after the broker has drained the outbox it
+  // reads from, or the final publication loses rows.
+  return Object.assign(new InMemoryStorage(), {
+    migrators: [migrator],
+    close() {
+      logFixtureEvent({ type: "storage:close" })
+    },
+  })
 }
 
 export const sixb = new Sixb({

@@ -203,4 +203,7 @@ export interface Queues {
   readonly workflows: Queue<WorkflowQueueJob>
   readonly actions: Queue<ActionRunRequestedQueueJob>
   readonly agents: Queue<AgentQueueJob>
+
+  /** Release external resources. Optional: a provider that owns none omits it. */
+  close?(): void | Promise<void>
 }

@@ -119,6 +119,15 @@ describe("role startup connection budget", () => {
         if (role.expectProviderClose) {
           expect(logEntries).toContainEqual({ type: "queues:close" })
           expect(logEntries).toContainEqual({ type: "lake-storage:close" })
+          expect(logEntries).toContainEqual({ type: "storage:close" })
+
+          // Order, not just presence. Storage closes last of the three because the
+          // broker's final outbox drain reads from it; closing storage first would
+          // lose whatever that drain had left to publish.
+          const closes = logEntries
+            .map((entry) => entry.type)
+            .filter((type) => type.endsWith(":close"))
+          expect(closes.indexOf("queues:close")).toBeLessThan(closes.indexOf("storage:close"))
         }
       },
       ROLE_TIMEOUT_MS

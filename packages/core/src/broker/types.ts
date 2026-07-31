@@ -109,5 +109,11 @@ export interface Broker {
     handler: (records: readonly BrokerRecord[]) => void
   ): Promise<() => void>
 
-  close?(): Promise<void>
+  /**
+   * Release external resources. Optional: a provider that owns none omits it.
+   *
+   * Widened from `Promise<void>` so every provider slot declares the same shape —
+   * `SqliteStorage.close()` is synchronous, and callers `await` either way.
+   */
+  close?(): void | Promise<void>
 }
