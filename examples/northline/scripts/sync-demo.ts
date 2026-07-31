@@ -4,13 +4,8 @@ const syncPlan = [
   ["sync-business-customers", "CustomerAccount", 5],
   ["sync-business-facilities", "Facility", 6],
   ["sync-business-contracts", "ServiceContract", 5],
-  // The wait gates the *next* sync, so it belongs on the row that produces what the next
-  // one needs. The readings feed telemetry projections onto Equipment, and appending
-  // telemetry to an object that does not exist yet fails the whole projection run — so
-  // the Equipment objects have to be materialized before the readings sync is requested,
-  // not after.
-  ["sync-controls-equipment", "Equipment", 10],
-  ["sync-controls-readings", null, 0],
+  ["sync-controls-equipment", null, 0],
+  ["sync-controls-readings", "Equipment", 10],
   ["sync-controls-alarms", "ServiceCase", 5],
   ["sync-business-quotes", "Quote", 3],
   ["sync-field-technicians", "Technician", 7],
