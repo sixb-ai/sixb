@@ -134,10 +134,14 @@ export function assertWorkerInputs(input: WorkerGroupInputs): void {
     ready.length > 0
       ? ` No worker started, including the ${ready.length} that were ready (${ready.join(", ")}).`
       : ""
-  const remediation = input.autoSelected
-    ? `These were selected automatically from what the project registers. Fix the above, or ` +
-      `name the workers you want: \`sixb worker-group ${ready.join(" ")}\`.`
-    : undefined
+  // Only when there is something to name. With every auto-selected worker blocked, `ready`
+  // is empty and this offered `sixb worker-group` with no arguments — the command that had
+  // just failed, printed as the way out of its own failure.
+  const remediation =
+    input.autoSelected && ready.length > 0
+      ? `These were selected automatically from what the project registers. Fix the above, or ` +
+        `name the workers you want: \`sixb worker-group ${ready.join(" ")}\`.`
+      : undefined
 
   throw new SixbCliError(`[SixbCLI] \`sixb worker-group\` cannot start: ${blocked}.${readyNote}`, {
     remediation,
