@@ -1,4 +1,5 @@
 import type { Worker } from "@sixb/core/internal/workers"
+import { SixbCliError } from "../lib/errors"
 import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
 import {
@@ -9,7 +10,11 @@ import {
 } from "../lib/runtime"
 import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
-import { createWorkerForType, resolveWorkerTypeToStart } from "../lib/worker-registry"
+import {
+  createWorkerForType,
+  resolveWorkerTypeToStart,
+  unmetWorkerRequirement,
+} from "../lib/worker-registry"
 import { LoadingView, renderCliError, renderPersistent, WorkerView } from "../ui"
 
 export interface WorkerOptions {
@@ -36,6 +41,17 @@ export async function runWorker(options: WorkerOptions = {}) {
     sixb = await loadSixbFromEntry(entry)
 
     assertShareableProviders(sixb, "worker")
+
+    // Before the migration, which is the first thing here that changes something. `sixb
+    // worker agent` without an API origin cannot start, and it used to find that out
+    // after bringing the schema up to date — a failed command that left a migration
+    // behind.
+    const unmet = unmetWorkerRequirement(workerType, {
+      agentApiBaseUrl: options.apiPublicOrigin,
+    })
+    if (unmet) {
+      throw new SixbCliError(`[SixbCLI] \`sixb worker ${workerType}\` cannot start: it ${unmet}.`)
+    }
 
     const migration = await migrateStorageForRole(sixb, {
       role: "worker",

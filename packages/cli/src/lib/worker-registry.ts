@@ -80,6 +80,20 @@ export function resolveWorkerTypeToStart(requestedWorker?: string): string {
   return requestedWorker
 }
 
+/**
+ * Why this worker cannot be constructed with these options, or `null` when it can.
+ *
+ * The same question {@link assertWorkerInputs} asks about a whole group, exported for
+ * `sixb worker`: that command has one worker to answer for, and it has to answer before
+ * it migrates storage.
+ */
+export function unmetWorkerRequirement(
+  workerType: string,
+  options: WorkerCreationOptions
+): string | null {
+  return workerFactories[workerType]?.unmetRequirement?.(options) ?? null
+}
+
 export interface WorkerGroupInputs {
   readonly workerTypes: readonly string[]
   readonly options: WorkerCreationOptions
@@ -106,7 +120,7 @@ export function assertWorkerInputs(input: WorkerGroupInputs): void {
   const unmet = input.workerTypes
     .map((workerType) => ({
       workerType,
-      reason: workerFactories[workerType]?.unmetRequirement?.(input.options) ?? null,
+      reason: unmetWorkerRequirement(workerType, input.options),
     }))
     .filter((entry): entry is { workerType: string; reason: string } => entry.reason !== null)
 

@@ -33,7 +33,7 @@ async function readLogEntries(logPath: string): Promise<Array<Record<string, unk
 function runWorkerFixture(
   fixtureName: string,
   args: readonly string[] = [],
-  options: { logPath?: string } = {}
+  options: { logPath?: string; env?: Record<string, string | undefined> } = {}
 ): {
   exitCode: number
   stdout: string
@@ -49,9 +49,10 @@ function runWorkerFixture(
     env: options.logPath
       ? {
           ...process.env,
+          ...options.env,
           SIXB_CLI_TEST_LOG: options.logPath,
         }
-      : process.env,
+      : { ...process.env, ...options.env },
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -127,6 +128,23 @@ describe("sixb worker", () => {
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Use `sixb worker <type>`")
     expect(result.stderr).toBe("")
+  })
+
+  test("refuses without migrating, so a bad command leaves no schema behind", async () => {
+    // `sixb worker agent` cannot start without an API origin. It used to find that out
+    // after bringing the schema up to date, which is a schema change performed by a
+    // command that then refused to run.
+    const logPath = await tempLogPath()
+    const result = runWorkerFixture("prod-roles", ["agent"], {
+      logPath,
+      env: { SIXB_API_PUBLIC_ORIGIN: undefined },
+    })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("requires --api-public-origin")
+
+    const logEntries = await readLogEntries(logPath)
+    expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
   })
 
   test("closes runtime providers when startup fails after loading the runtime", async () => {
