@@ -71,12 +71,29 @@ export class StorageReadiness {
     }
 
     try {
-      const plans = await Promise.all(this.storage.migrators.map((migrator) => migrator.plan()))
-      this.schema = plans.every((plan) => plan.pending.length === 0)
-        ? { status: "valid" }
-        : this.invalidSchema("Storage schema has pending migrations.")
-    } catch {
-      this.schema = this.invalidSchema("Storage schema could not be verified.")
+      // `status()`, never `plan()`. `plan()` calls `ensure()` first, so it runs DDL —
+      // `CREATE SCHEMA`/`CREATE TABLE` on Postgres, creating the file on SQLite — and
+      // reserves a connection for an advisory lock. This runs on an unauthenticated
+      // `/ready` and at every role's boot, so it has to be strictly read-only.
+      const statuses = await Promise.all(
+        this.storage.migrators.map((migrator) => migrator.status())
+      )
+      const unusable = statuses.filter((status) => status.state !== "current")
+
+      this.schema =
+        unusable.length === 0
+          ? { status: "valid" }
+          : // Name the adapter and the state. The previous message said only "could not
+            // be verified", which left an operator to guess between a missing migration,
+            // a schema newer than the build, and no database at all.
+            this.invalidSchema(
+              unusable
+                .map((status) => `${status.adapterId}: ${status.state} — ${status.reason ?? ""}`)
+                .join("; ")
+            )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.schema = this.invalidSchema(`Storage schema could not be verified: ${message}`)
     }
   }
 

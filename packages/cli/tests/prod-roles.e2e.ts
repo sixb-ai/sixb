@@ -114,6 +114,9 @@ describe("role startup connection budget", () => {
         // Production roles do not stampede storage migrations at startup; that is a
         // dedicated `sixb db migrate` release step.
         expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
+        // No `storage:plan` assertion here: these roles never probe the schema at all
+        // (startSchemaValidation hangs off SixbServer.start), so it would pass whatever
+        // the probe does. It lives in the `api` test below, where it bites.
         // Roles do not open the lake catalog at startup either.
         expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
         if (role.expectProviderClose) {
@@ -157,6 +160,15 @@ describe("role startup connection budget", () => {
       expect(ready).toBe(true)
       expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
       expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
+
+      // `api` is the only role that probes the schema at boot: startSchemaValidation()
+      // hangs off SixbServer.start(), so the four background roles never reach it. That
+      // makes this the one place the read-only-probe rule can be enforced, and asserting
+      // it in the shared loop above would have been vacuous.
+      expect(logEntries).toContainEqual({ type: "storage:status" })
+      // `plan()` runs CREATE SCHEMA / CREATE TABLE through ensure(). A public,
+      // unauthenticated /ready and every api boot go through this path.
+      expect(logEntries.some((entry) => entry.type === "storage:plan")).toBe(false)
     },
     ROLE_TIMEOUT_MS
   )

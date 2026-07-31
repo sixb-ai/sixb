@@ -175,6 +175,8 @@ export type {
   MigrationRecord,
   MigrationReport,
   MigrationSet,
+  MigrationState,
+  MigrationStatus,
   MigrationStep,
   MigrationStepInfo,
   MigrationStepOptions,
@@ -183,6 +185,7 @@ export type {
 } from "./migrations"
 export {
   defineMigrations,
+  describeMigrationHistory,
   isMigrationCapableStorage,
   migrateStorage,
   planMigrationSet,

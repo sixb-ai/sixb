@@ -1,6 +1,7 @@
 export { isMigrationCapableStorage, migrateStorage } from "./migrate-storage"
 export {
   defineMigrations,
+  describeMigrationHistory,
   planMigrationSet,
   runMigrationSet,
   step,
@@ -13,6 +14,8 @@ export type {
   MigrationRecord,
   MigrationReport,
   MigrationSet,
+  MigrationState,
+  MigrationStatus,
   MigrationStep,
   MigrationStepInfo,
   MigrationStepOptions,

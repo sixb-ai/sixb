@@ -1,11 +1,13 @@
 import { Database } from "bun:sqlite"
 import { afterEach, describe, expect, test } from "bun:test"
+import { existsSync, statSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { migrateStorage } from "@sixb/core"
 import { SqliteStorage } from "../src"
 import {
+  createSqliteStorageMigrators,
   SQLITE_STORAGE_ADAPTER_ID,
   sqliteStorageMigrations,
   sqliteStoragePath,
@@ -221,7 +223,7 @@ describe("SQLite storage migrations", () => {
 
     const storage = new SqliteStorage({ path: tempDir })
 
-    await expect(migrateStorage(storage)).rejects.toThrow("dirty migration state")
+    await expect(migrateStorage(storage)).rejects.toThrow("started and never finished")
 
     closeStorage(storage)
   })
@@ -367,3 +369,63 @@ function writeStartedMigration(path: string): void {
 function closeStorage(storage: SqliteStorage): void {
   storage.close()
 }
+
+describe("SQLite migration status is read-only", () => {
+  // The teeth of C1.6. `plan()` cannot be used as a probe on SQLite: withSqliteDatabase
+  // mkdirs the parent and `new Database(path)` creates the file, so asking "is the schema
+  // current?" used to answer by bringing a database into existence. An unauthenticated
+  // GET /ready reached this path.
+  test("reports an absent database without creating one", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-status-absent-"))
+    tempDirs.push(tempDir)
+    const nested = join(tempDir, "does", "not", "exist")
+    const path = sqliteStoragePath(nested)
+
+    const [migrator] = createSqliteStorageMigrators(nested)
+    const status = await migrator?.status()
+
+    expect(status).toMatchObject({ state: "uninitialized", appliedVersion: 0 })
+    expect(status?.reason).toBeTruthy()
+    // Nothing was brought into existence: not the file, not its parent directories.
+    expect(existsSync(path)).toBe(false)
+    expect(existsSync(nested)).toBe(false)
+  })
+
+  test("reports current after a migration, and touches nothing doing it", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-status-current-"))
+    tempDirs.push(tempDir)
+
+    const storage = new SqliteStorage({ path: tempDir })
+    await migrateStorage(storage)
+    closeStorage(storage)
+
+    const path = sqliteStoragePath(tempDir)
+    const before = statSync(path).mtimeMs
+
+    const [migrator] = createSqliteStorageMigrators(tempDir)
+    expect(await migrator?.status()).toMatchObject({
+      adapterId: SQLITE_STORAGE_ADAPTER_ID,
+      state: "current",
+      appliedVersion: 1,
+    })
+
+    expect(statSync(path).mtimeMs).toBe(before)
+  })
+
+  test("reports pending when history exists but a migration is missing", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-status-pending-"))
+    tempDirs.push(tempDir)
+
+    const storage = new SqliteStorage({ path: tempDir })
+    await migrateStorage(storage)
+    closeStorage(storage)
+
+    const path = sqliteStoragePath(tempDir)
+    const db = new Database(path)
+    db.query("DELETE FROM sixb_migrations WHERE adapter_id = ?").run(SQLITE_STORAGE_ADAPTER_ID)
+    db.close()
+
+    const [migrator] = createSqliteStorageMigrators(tempDir)
+    expect(await migrator?.status()).toMatchObject({ state: "uninitialized" })
+  })
+})

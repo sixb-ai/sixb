@@ -3,33 +3,22 @@ import {
   InMemoryStorage,
   type MigrationCapableStorage,
   type MigrationReport,
+  type MigrationStatus,
   type Storage,
   type StorageMigrator,
   type StorageTransactionOptions,
 } from "../src"
 import { StorageReadiness } from "../src/runtime/storage-readiness"
-import type { MigrationPlan } from "../src/storage"
 
 describe("StorageReadiness", () => {
   test("caches schema validation and keeps probes out of transactions", async () => {
-    const plan = deferred<MigrationPlan<unknown>>()
-    let planCalls = 0
+    const probe = deferred<MigrationStatus>()
+    let statusCalls = 0
     const storage = new ReadinessStorage([
-      {
-        adapterId: "test",
-        latestVersion: 1,
-        plan: () => {
-          planCalls += 1
-          return plan.promise
-        },
-        migrate: async (): Promise<MigrationReport> => ({
-          adapterId: "test",
-          latestVersion: 1,
-          status: "current",
-          applied: [],
-          skipped: [],
-        }),
-      },
+      migrator(() => {
+        statusCalls += 1
+        return probe.promise
+      }),
     ])
     const readiness = new StorageReadiness(storage)
 
@@ -40,13 +29,13 @@ describe("StorageReadiness", () => {
       reason: "Storage schema validation is in progress.",
     })
 
-    plan.resolve({ adapterId: "test", latestVersion: 1, applied: [], pending: [] })
+    probe.resolve(currentStatus())
     await waitFor(async () => (await readiness.check()).status === "ready")
     expect(await readiness.check()).toEqual({
       status: "ready",
       storage: { reachable: true, schemaValid: true },
     })
-    expect(planCalls).toBe(1)
+    expect(statusCalls).toBe(1)
     expect(storage.transactionCalls).toBe(0)
   })
 
@@ -63,12 +52,12 @@ describe("StorageReadiness", () => {
 
   test("retries transient schema validation failures only after the cooldown", async () => {
     let now = new Date("2026-01-02T03:04:05.000Z")
-    let planCalls = 0
+    let statusCalls = 0
     const storage = new ReadinessStorage([
       migrator(async () => {
-        planCalls += 1
-        if (planCalls === 1) throw new Error("temporary connection failure")
-        return currentPlan()
+        statusCalls += 1
+        if (statusCalls === 1) throw new Error("temporary connection failure")
+        return currentStatus()
       }),
     ])
     const readiness = new StorageReadiness(storage, {
@@ -77,37 +66,41 @@ describe("StorageReadiness", () => {
     })
 
     expect(await readiness.check()).toMatchObject({ status: "unready" })
-    await waitFor(() => Promise.resolve(planCalls === 1))
+    await waitFor(() => Promise.resolve(statusCalls === 1))
+    // The thrown cause is carried through instead of being flattened to "could not be
+    // verified" — that message left an operator guessing between a missing migration, a
+    // schema newer than the build, and an unreachable database.
     expect(await readiness.check()).toMatchObject({
       status: "unready",
-      reason: "Storage schema could not be verified.",
+      reason: "Storage schema could not be verified: temporary connection failure",
     })
-    expect(planCalls).toBe(1)
+    expect(statusCalls).toBe(1)
 
     now = new Date(now.getTime() + 59_999)
     await readiness.check()
-    expect(planCalls).toBe(1)
+    expect(statusCalls).toBe(1)
 
     now = new Date(now.getTime() + 1)
     expect(await readiness.check()).toMatchObject({ status: "unready" })
     await waitFor(async () => (await readiness.check()).status === "ready")
-    expect(planCalls).toBe(2)
+    expect(statusCalls).toBe(2)
   })
 
   test("becomes ready after pending migrations are applied", async () => {
     let now = new Date("2026-01-02T03:04:05.000Z")
     let migrated = false
-    let planCalls = 0
+    let statusCalls = 0
     const storage = new ReadinessStorage([
       migrator(async () => {
-        planCalls += 1
+        statusCalls += 1
         return migrated
-          ? currentPlan()
+          ? currentStatus()
           : {
               adapterId: "test",
               latestVersion: 1,
-              applied: [],
-              pending: [{ id: "001", version: 1, name: "initial", up: () => undefined }],
+              appliedVersion: 0,
+              state: "pending" as const,
+              reason: "1 migration(s) are not applied. Run `sixb db migrate`.",
             }
       }),
     ])
@@ -116,16 +109,38 @@ describe("StorageReadiness", () => {
       now: () => now,
     })
 
+    // The reason names the adapter and the state, so an operator reading /ready knows
+    // whether `sixb db migrate` will fix it.
     await waitFor(async () => {
       const result = await readiness.check()
-      return result.reason === "Storage schema has pending migrations."
+      return result.reason?.includes("test: pending") === true
     })
-    expect(planCalls).toBe(1)
+    expect(statusCalls).toBe(1)
 
     migrated = true
     now = new Date(now.getTime() + 60_000)
     await waitFor(async () => (await readiness.check()).status === "ready")
-    expect(planCalls).toBe(2)
+    expect(statusCalls).toBe(2)
+  })
+
+  test("never calls plan(), which would run DDL", async () => {
+    // plan() calls ensure() first: CREATE SCHEMA / CREATE TABLE on Postgres, and creating
+    // the database file on SQLite. This runs on an unauthenticated GET /ready and at every
+    // api boot, so it has to be strictly read-only.
+    let planCalls = 0
+    const storage = new ReadinessStorage([
+      {
+        ...migrator(async () => currentStatus()),
+        plan: async () => {
+          planCalls += 1
+          throw new Error("plan should not run")
+        },
+      },
+    ])
+    const readiness = new StorageReadiness(storage)
+
+    await waitFor(async () => (await readiness.check()).status === "ready")
+    expect(planCalls).toBe(0)
   })
 })
 
@@ -151,11 +166,14 @@ class UnreachableStorage extends InMemoryStorage {
   }
 }
 
-function migrator(plan: StorageMigrator["plan"]): StorageMigrator {
+function migrator(status: StorageMigrator["status"]): StorageMigrator {
   return {
     adapterId: "test",
     latestVersion: 1,
-    plan,
+    status,
+    plan: async () => {
+      throw new Error("plan should not run")
+    },
     migrate: async (): Promise<MigrationReport> => ({
       adapterId: "test",
       latestVersion: 1,
@@ -166,8 +184,8 @@ function migrator(plan: StorageMigrator["plan"]): StorageMigrator {
   }
 }
 
-function currentPlan(): MigrationPlan<unknown> {
-  return { adapterId: "test", latestVersion: 1, applied: [], pending: [] }
+function currentStatus(): MigrationStatus {
+  return { adapterId: "test", latestVersion: 1, appliedVersion: 1, state: "current" }
 }
 
 function deferred<T>() {

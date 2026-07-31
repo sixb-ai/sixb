@@ -104,7 +104,21 @@ function loggingStorage() {
   const migrator: StorageMigrator = {
     adapterId: "FixtureStorage",
     latestVersion: 1,
-    async plan() {
+    async status() {
+      logFixtureEvent({ type: "storage:status" })
+      return {
+        adapterId: "FixtureStorage",
+        latestVersion: 1,
+        appliedVersion: 1,
+        state: "current",
+      }
+    },
+    // `plan()` runs DDL through `ensure()`, so nothing on a role's startup path may call
+    // it. This used to `throw` alone, and the throw was swallowed by a bare catch in
+    // StorageReadiness — the assertion below could not see the violation it was written
+    // to catch. Logging first makes it visible whether or not someone swallows it.
+    async plan(): Promise<never> {
+      logFixtureEvent({ type: "storage:plan" })
       throw new Error("plan should not run")
     },
     async migrate() {

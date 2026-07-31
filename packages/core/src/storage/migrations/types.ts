@@ -60,9 +60,54 @@ export interface MigrationReport {
   readonly skipped: readonly string[]
 }
 
+/**
+ * Grouped by what an operator has to do about it: nothing (`current`), run
+ * `sixb db migrate` (`uninitialized`, `pending`), or intervene by hand (the rest).
+ */
+export type MigrationState =
+  /** Every known migration is applied. The only state a host should serve traffic in. */
+  | "current"
+  /** No migration history exists yet: an empty database, or one never migrated. */
+  | "uninitialized"
+  /** History is a valid prefix of this build's migrations, but incomplete. */
+  | "pending"
+  /** The database has versions this build does not know — usually an app rolled back without its schema. */
+  | "ahead"
+  /** A migration recorded a start and never an end. */
+  | "dirty"
+  /** History contradicts the declared migrations: changed checksum, mismatched id, duplicate version, foreign adapter. */
+  | "incompatible"
+  /** The history could not be read at all (unreachable, no permission, corrupt). */
+  | "unreadable"
+
+export interface MigrationStatus {
+  readonly adapterId: string
+  readonly latestVersion: number
+  /** Highest applied version; 0 when no history exists. */
+  readonly appliedVersion: number
+  readonly state: MigrationState
+  /** Absent only when `current`. Says what an operator has to do about it. */
+  readonly reason?: string
+}
+
 export interface StorageMigrator {
   readonly adapterId: string
   readonly latestVersion: number
+
+  /**
+   * Reports the schema state without touching it.
+   *
+   * Strictly read-only, which `plan()` is not: `plan()` calls `ensure()` first, so on
+   * Postgres it runs `CREATE SCHEMA`/`CREATE TABLE` and on SQLite it creates the
+   * database file. That is correct on the way to a migration and wrong for a probe —
+   * `/ready` is public and unauthenticated, and a least-privilege deployment has no
+   * DDL grant to spend on a health check.
+   *
+   * Reports the dangerous states (`ahead`, `dirty`) instead of throwing, because a
+   * probe that throws tells an operator less than one that names the condition.
+   */
+  status(): Promise<MigrationStatus>
+
   plan(): Promise<MigrationPlan<unknown>>
   migrate(): Promise<MigrationReport>
 }
