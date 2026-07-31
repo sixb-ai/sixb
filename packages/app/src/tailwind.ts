@@ -25,6 +25,14 @@ export interface TailwindCssCompilerOptions {
   minify?: boolean
   /** Debounce for `schedule()` rebuilds, in milliseconds. */
   debounceMs?: number
+  /**
+   * Upper bound on one Tailwind build, in milliseconds. Defaults to 60s.
+   *
+   * A bound on a hang, not a performance budget: a v4 build is normally well under a
+   * second. Without one, a wedged CLI held `sixb dev` open forever and `stop()` waited on
+   * it, so shutdown hung too.
+   */
+  timeoutMs?: number
   /** Called when a `schedule()`d rebuild fails. Defaults to `console.error`. */
   onError?: (error: Error) => void
 }
@@ -71,13 +79,20 @@ export function createTailwindCssCompiler(
   const resolveFrom = options.resolveFrom ?? cwd
   const label = options.label ?? "[SixbTailwind]"
   const debounceMs = options.debounceMs ?? 50
+  const timeoutMs = options.timeoutMs ?? 60_000
   const onError = options.onError ?? ((error: Error) => console.error(`${label} ${error.message}`))
 
   let chain: Promise<void> = Promise.resolve()
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
+  let activeProcess: { kill: (signal?: number | NodeJS.Signals) => void } | null = null
 
   async function runCompile(): Promise<void> {
+    // `compile()` queues this behind the current chain, so a `stop()` can land before the
+    // child is ever spawned. Without this the build started anyway and there was nothing
+    // for `stop()` to kill, so shutdown waited out the full timeout.
+    if (stopped) return
+
     const cliEntry = resolveTailwindCliEntry(resolveFrom)
     if (!cliEntry) {
       throw new Error(
@@ -86,6 +101,8 @@ export function createTailwindCssCompiler(
     }
 
     await mkdir(dirname(options.outputPath), { recursive: true })
+    // The only await before the spawn, so the only other window a `stop()` can land in.
+    if (stopped) return
 
     const args = [process.execPath, cliEntry, "-i", options.inputPath, "-o", options.outputPath]
     if (options.minify) {
@@ -97,11 +114,41 @@ export function createTailwindCssCompiler(
       stdout: "ignore",
       stderr: "pipe",
     })
+    activeProcess = proc
 
-    const exitCode = await proc.exited
-    if (exitCode !== 0) {
-      const stderr = await new Response(proc.stderr).text()
-      throw new Error(`${label} Tailwind CSS build failed: ${stderr.trim()}`)
+    // Start draining stderr while the child runs rather than after it exits. Bun buffers
+    // this pipe today, so reading afterwards does not block the child — measured, not
+    // assumed — but that is Bun's choice and not something this code should depend on. The
+    // catch keeps a stream torn down by `kill()` from surfacing as an unhandled rejection.
+    const stderr = new Response(proc.stderr).text().catch(() => "")
+
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const timedOut = new Promise<"timeout">((resolve) => {
+      timeout = setTimeout(() => resolve("timeout"), timeoutMs)
+    })
+
+    try {
+      const outcome = await Promise.race([proc.exited, timedOut])
+
+      // `stop()` kills the child on purpose. Reporting that as a build failure would put
+      // an error in the log for every shutdown that happened to catch a rebuild.
+      if (stopped) return
+
+      if (outcome === "timeout") {
+        proc.kill("SIGKILL")
+        await proc.exited
+        throw new Error(
+          `${label} Tailwind CSS build did not finish within ${timeoutMs}ms and was killed. ` +
+            `Check ${options.inputPath} and the sources Tailwind scans from ${cwd}.`
+        )
+      }
+
+      if (outcome !== 0) {
+        throw new Error(`${label} Tailwind CSS build failed: ${(await stderr).trim()}`)
+      }
+    } finally {
+      clearTimeout(timeout)
+      activeProcess = null
     }
   }
 
@@ -140,6 +187,9 @@ export function createTailwindCssCompiler(
         clearTimeout(timer)
         timer = null
       }
+      // Kill rather than wait. A build in flight would otherwise hold shutdown for up to
+      // the whole timeout, and the output it is writing is about to be discarded anyway.
+      activeProcess?.kill("SIGKILL")
       await chain
     },
   }
