@@ -3,19 +3,18 @@ const RETRY_MAX_DELAY_MS = 5 * 60_000
 const MAX_EXPONENT = Math.ceil(Math.log2(RETRY_MAX_DELAY_MS / RETRY_BASE_DELAY_MS))
 
 /**
- * How many deliveries a telemetry run gets while the objects it appends to are missing.
+ * How long a telemetry run waits for the objects it appends to before failing.
  *
- * A telemetry projection reads a dataset that can name objects a sibling object projection has
- * not materialized yet: both are queued from their own dataset version, and on a cold start the
- * objects land milliseconds to seconds after the points that reference them. That is a wait, not
- * a fault, and the run must not be failed for it.
+ * Measured from `run.startedAt`, not counted in deliveries: the queue increments `attempt` for
+ * every redelivery, including ones caused by an unreachable Redis, so a delivery budget was spent
+ * by trouble that had nothing to do with a missing object.
  *
- * The budget is what separates "not there yet" from "not there at all". With the backoff above,
- * six deliveries spend roughly a minute (1+2+4+8+16+32s) before the run is failed for naming an
- * object that is not coming — long enough to outlast any seeding, short enough that a bad source
- * id is reported while someone is still watching.
+ * Still a bound on time, and time is a proxy for a dependency nobody declared. The real answer is
+ * for the orchestrator to hold a telemetry projection until the projection that owns its target
+ * type's existence has succeeded — `validateProjectionOwnership` already computes that owner and
+ * guarantees it is unique, so the dependency is derivable and does not belong in a retry policy.
  */
-export const MISSING_TARGET_ATTEMPT_BUDGET = 6
+export const MISSING_TARGET_GRACE_MS = 2 * 60_000
 
 /** Deterministic per-job jitter avoids synchronized retries while keeping tests reproducible. */
 export function projectionRetryAvailableAt(input: {

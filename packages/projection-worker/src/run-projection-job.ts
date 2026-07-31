@@ -16,7 +16,7 @@ import {
   type ValidatedProjectionJob,
   validateProjectionJob,
 } from "./job-validation"
-import { MISSING_TARGET_ATTEMPT_BUDGET } from "./retry-backoff"
+import { MISSING_TARGET_GRACE_MS } from "./retry-backoff"
 import { mapLinkProjectionEntries } from "./run-link-projection"
 import { mapObjectProjectionEntries } from "./run-object-projection"
 import { runTelemetryProjection, TELEMETRY_PROJECTION_BATCH_SIZE } from "./run-telemetry-projection"
@@ -52,7 +52,10 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
       })
       throw error
     }
-    if (isPermanentFailure(error, input.attempt ?? 1) && !signal.aborted) {
+    if (
+      isPermanentFailure(error, execution.run.startedAt, input.now?.() ?? Date.now()) &&
+      !signal.aborted
+    ) {
       await finishProjection(input, execution, {
         protocol: input.job.protocol,
         status: "failed",
@@ -253,8 +256,8 @@ function terminalResult(run: ProjectionRunRecord): ProjectionJobResult {
   return { run, replayedTerminal: true }
 }
 
-function isPermanentFailure(error: unknown, attempt: number): boolean {
-  if (isMissingTargetWorthRetrying(error, attempt)) return false
+function isPermanentFailure(error: unknown, startedAt: Date, now: number): boolean {
+  if (isMissingTargetWorthRetrying(error, startedAt, now)) return false
   if (
     error instanceof ProjectionWorkerPermanentError ||
     error instanceof MaterializationValidationError
@@ -277,26 +280,31 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export function isPermanentProjectionFailure(error: unknown, attempt = 1): boolean {
-  return isPermanentFailure(error, attempt) || isExplicitCancellation(error)
+/**
+ * The worker's read, on the one path where no run exists — `failureDecision` reads the run first
+ * and retries whatever it left `running`. A target cannot be missing from a run that never
+ * started, so there is no window to measure.
+ */
+export function isPermanentProjectionFailure(error: unknown): boolean {
+  return (
+    (!(error instanceof MaterializationObjectNotFoundError) &&
+      isPermanentFailure(error, new Date(0), 0)) ||
+    isExplicitCancellation(error)
+  )
 }
 
 /**
  * A telemetry target that does not exist *yet*.
  *
  * `MaterializationObjectNotFoundError` extends `MaterializationValidationError`, which is the
- * right reading for a caller appending telemetry by hand: an id that names no object is a bad
- * request. It is the wrong reading for a projection, whose dataset can legitimately be
- * materialized before the objects it references — the two are queued from separate dataset
- * versions and nothing sequences them. Failing the run on the first delivery turned a wait of
- * milliseconds into a permanent hole: nothing retries a failed run, and re-running the sync
- * produces no new version when the source has not changed.
- *
- * So it stays retryable while the budget lasts and becomes permanent after, which is what makes
- * a source id that names nothing distinguishable from one that is merely early.
+ * right reading for a caller appending telemetry by hand and the wrong one for a projection: its
+ * dataset can legitimately be materialized before the objects it references. Failing on the first
+ * delivery turned a wait of milliseconds into a permanent hole — nothing retries a failed run, and
+ * re-running the sync produces no new version when the source has not changed.
  */
-function isMissingTargetWorthRetrying(error: unknown, attempt: number): boolean {
+function isMissingTargetWorthRetrying(error: unknown, startedAt: Date, now: number): boolean {
   return (
-    error instanceof MaterializationObjectNotFoundError && attempt < MISSING_TARGET_ATTEMPT_BUDGET
+    error instanceof MaterializationObjectNotFoundError &&
+    now - startedAt.getTime() < MISSING_TARGET_GRACE_MS
   )
 }

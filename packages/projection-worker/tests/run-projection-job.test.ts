@@ -41,7 +41,7 @@ import type {
   ProjectionRunStorage,
   ReclaimSourceMaterializationInput,
 } from "@sixb/core/storage"
-import { MISSING_TARGET_ATTEMPT_BUDGET } from "../src/retry-backoff"
+import { MISSING_TARGET_GRACE_MS } from "../src/retry-backoff"
 import {
   isPermanentProjectionFailure,
   runProjectionJob as runCanonicalProjectionJob,
@@ -1048,9 +1048,10 @@ describe("runProjectionJob", () => {
       runProjectionJob({
         runtime: createRuntime(sixb),
         batchSize: 10,
-        // The last delivery this run gets: a target that is still absent here is one the
-        // source names and the ontology does not have, not one that is merely early.
-        attempt: MISSING_TARGET_ATTEMPT_BUDGET,
+        // Past the grace window: a target still absent here is one the source names and the
+        // ontology does not have, not one that is merely early. The clock is injected rather
+        // than waited out — two minutes of real time is not a unit test.
+        now: () => Date.now() + MISSING_TARGET_GRACE_MS + 1,
         job: {
           id: "projrun-telemetry-partial-failure",
           projectionId: "room-temperature-proj",

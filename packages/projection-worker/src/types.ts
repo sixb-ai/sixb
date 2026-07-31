@@ -38,13 +38,12 @@ export interface RunProjectionJobInput {
   readonly job: ProjectionJob
   readonly signal?: AbortSignal
   /**
-   * Which delivery of this job is running, from the queue's claim counter.
+   * Clock for the missing-target grace window, measured from the run's own `startedAt`.
    *
-   * Only a missing telemetry target reads it: that failure is retryable until the attempt
-   * budget is spent, and terminal after. Defaults to the first delivery, so a caller that
-   * does not track deliveries gets the retryable reading rather than a premature failure.
+   * A test seam: production reads `Date.now()`. Nothing else here needs a clock, so it is
+   * not a general injection point.
    */
-  readonly attempt?: number
+  readonly now?: () => number
   /** Test seam only. Production always uses the protocol constant (500 physical rows). */
   readonly telemetryBatchSize?: number
   readonly onRunFailed?: ProjectionRunFailedHandler
