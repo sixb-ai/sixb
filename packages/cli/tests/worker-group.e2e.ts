@@ -84,6 +84,10 @@ describe("sixb worker-group (e2e)", () => {
       // Brings the storage schema up to date at startup, like every other role that reads
       // or writes through it. Co-hosting workers in one process does not change that.
       expect(logEntries).toContainEqual({ type: "storage:migrate" })
+      // Same startup budget the single-purpose roles are held to: co-hosting several
+      // workers in one process must not make that process attach the lake catalog at boot,
+      // which is what made starting every role at once stampede a shared DuckLake.
+      expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
       // Clean shutdown stops queues and lake storage.
       expect(logEntries).toContainEqual({ type: "queues:close" })
       expect(logEntries).toContainEqual({ type: "lake-storage:close" })

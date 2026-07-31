@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { startRoleUntilReadyThenStop } from "./shared/cli-process"
 
 // These boot a full production role (a long-running bun runtime) and wait for it
@@ -15,6 +15,44 @@ const fixtureEntry = resolve(import.meta.dir, "fixtures", "prod-roles", "sixb.co
 
 const ROLE_TIMEOUT_MS = 30_000
 
+/**
+ * `atlas` and `app` refuse to serve without the assets `sixb build` produces, so they
+ * need a build output to point at.
+ *
+ * These are stand-ins, not a real build. What these tests measure is a role's startup
+ * budget — which connections it opens and which it does not — and bundling Atlas to
+ * measure that would add tens of seconds and put Bun's bundler on the path of a test
+ * that has nothing to do with bundling. Atlas only requires the directory to exist with
+ * exactly one `atlas-*.js` and one `atlas-*.css`; the custom app only requires an
+ * `index.html`.
+ */
+const buildOutdir = resolve(dirname(fixtureEntry), ".sixb", "dist")
+
+const PREBUILT_ATLAS = [
+  join(buildOutdir, "atlas", "atlas-e2e.js"),
+  join(buildOutdir, "atlas", "atlas-e2e.css"),
+] as const
+
+const PREBUILT_APP = [join(buildOutdir, "app", "index.html")] as const
+
+/**
+ * Each test writes only what its own role needs, and the output goes away afterwards.
+ *
+ * Writing both up front coupled tests that should know nothing about each other: `sixb
+ * api` probes for a built custom app and serves it when one is present, so an
+ * `app/index.html` left in place for the `app` test made the `api` test start demanding
+ * `--app-public-origin`.
+ */
+async function writePrebuiltAssets(paths: readonly string[]): Promise<void> {
+  for (const path of paths) {
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(
+      path,
+      path.endsWith(".html") ? "<!doctype html><title>e2e</title>" : "/* e2e */"
+    )
+  }
+}
+
 const tempDirs: string[] = []
 
 interface PortReservation {
@@ -23,6 +61,8 @@ interface PortReservation {
 }
 
 afterEach(async () => {
+  await rm(buildOutdir, { recursive: true, force: true })
+
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()
     if (dir) {
@@ -180,6 +220,64 @@ describe("role startup connection budget", () => {
       const types = eventTypes(logEntries)
       expect(types.indexOf("storage:migrate")).toBeGreaterThanOrEqual(0)
       expect(types.indexOf("storage:migrate")).toBeLessThan(types.indexOf("storage:status"))
+    },
+    ROLE_TIMEOUT_MS
+  )
+
+  test(
+    "sixb atlas serves the built UI without touching storage or the lake",
+    async () => {
+      await writePrebuiltAssets(PREBUILT_ATLAS)
+      const [atlasPort, apiPort] = await getFreePorts(2)
+      const { ready, logEntries } = await startRole([
+        "atlas",
+        "--port",
+        String(atlasPort),
+        "--host",
+        "127.0.0.1",
+        "--api-public-origin",
+        `http://localhost:${apiPort}`,
+        "--atlas-public-origin",
+        `http://localhost:${atlasPort}`,
+      ])
+
+      expect(ready).toBe(true)
+      // The counterpart of every other role's assertion, and the reason `atlas` is off the
+      // `StorageSchemaRole` union: it serves a browser bundle, it is the tier that faces the
+      // internet, and a container shipping assets has no business holding a DDL grant. Until
+      // now that exclusion rested only on a compile error.
+      expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
+      expect(logEntries.some((entry) => entry.type === "storage:status")).toBe(false)
+      expect(logEntries.some((entry) => entry.type === "storage:plan")).toBe(false)
+      expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
+      // It still shuts its providers down: the runtime is loaded even though unused.
+      expect(logEntries).toContainEqual({ type: "storage:close" })
+    },
+    ROLE_TIMEOUT_MS
+  )
+
+  test(
+    "sixb app serves the built custom app without touching storage or the lake",
+    async () => {
+      await writePrebuiltAssets(PREBUILT_APP)
+      const [appPort, apiPort] = await getFreePorts(2)
+      const { ready, logEntries } = await startRole([
+        "app",
+        "--port",
+        String(appPort),
+        "--host",
+        "127.0.0.1",
+        "--api-public-origin",
+        `http://localhost:${apiPort}`,
+        "--app-public-origin",
+        `http://localhost:${appPort}`,
+      ])
+
+      expect(ready).toBe(true)
+      expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
+      expect(logEntries.some((entry) => entry.type === "storage:status")).toBe(false)
+      expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
+      expect(logEntries).toContainEqual({ type: "storage:close" })
     },
     ROLE_TIMEOUT_MS
   )
