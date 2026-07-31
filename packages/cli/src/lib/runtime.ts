@@ -29,12 +29,6 @@ export async function stopQuietly(stopFn: (() => Promise<void>) | undefined | nu
   await stopFn().catch(() => {})
 }
 
-/**
- * `close` is optional on every provider contract, so the call is conditional but no
- * longer a guess: the type says which providers may own resources, and a slot that
- * silently stopped exposing one would fail here at compile time instead of leaking a
- * connection pool per restart.
- */
 async function closeProvider(provider: { close?(): void | Promise<void> }): Promise<void> {
   await provider.close?.()
 }
