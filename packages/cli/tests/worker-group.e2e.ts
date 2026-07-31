@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { startRoleUntilReadyThenStop } from "./shared/cli-process"
+import { runCliToCompletion, startRoleUntilReadyThenStop } from "./shared/cli-process"
 
 // These boot worker processes and wait for them to start, so they live as e2e
 // tests: `bun test` skips `*.e2e.ts`, keeping them out of the heavily parallel
@@ -51,6 +51,21 @@ async function startThenStop(args: readonly string[], fixture: string) {
   })
 }
 
+/**
+ * Ink wraps a failure in a bordered box, so the message arrives split across lines by
+ * `│` and padding. Asserting on a phrase requires putting it back together first.
+ */
+function flattenTerminalOutput(output: string): string {
+  return (
+    output
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
+      .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
+      .replace(/[\u2500-\u257f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  )
+}
+
 function claimedWorkerTypes(logEntries: Array<Record<string, unknown>>): Set<string> {
   return new Set(
     logEntries.filter((entry) => entry.type === "claim").map((entry) => entry.workerType as string)
@@ -75,6 +90,30 @@ describe("sixb worker-group (e2e)", () => {
       // Clean shutdown stops queues and lake storage.
       expect(logEntries).toContainEqual({ type: "queues:close" })
       expect(logEntries).toContainEqual({ type: "lake-storage:close" })
+    },
+    WORKER_GROUP_TIMEOUT_MS
+  )
+
+  test(
+    "refuses the whole group and says which workers it took down",
+    async () => {
+      // The fixture registers agents, so auto-discovery selects the `agent` worker. Its
+      // construction needs an API origin, and it used to throw from inside the `map()`
+      // that builds every worker — so the operator saw one line about agents and had no
+      // way to know that sync, pipeline and projection had never been attempted.
+      const result = await runCliToCompletion({
+        cmd: ["bun", cliEntry, "worker-group", "--entry", fixtureEntry("worker-group")],
+        cwd: repoRoot,
+        env: { SIXB_API_PUBLIC_ORIGIN: undefined },
+        timeoutMs: WORKER_GROUP_TIMEOUT_MS,
+      })
+
+      expect(result.exitCode).toBe(1)
+      const output = flattenTerminalOutput(`${result.stdout}${result.stderr}`)
+      expect(output).toContain("agent requires --api-public-origin")
+      // The three facts an operator needs: what blocked, what it cost, and the way out.
+      expect(output).toContain("3 that were ready (sync, pipeline, projection)")
+      expect(output).toContain("sixb worker-group sync pipeline projection")
     },
     WORKER_GROUP_TIMEOUT_MS
   )

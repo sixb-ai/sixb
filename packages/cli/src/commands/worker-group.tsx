@@ -10,6 +10,7 @@ import {
 import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
 import {
+  assertWorkerInputs,
   createWorkerForType,
   resolveRegisteredWorkerTypes,
   resolveWorkerTypeToStart,
@@ -65,6 +66,18 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
 
     const workerTypes =
       requestedTypes.length > 0 ? requestedTypes : resolveRegisteredWorkerTypes(sixb)
+
+    // Before the `map()` below, which constructs them. One unconstructable type used to
+    // throw from inside that map, so the operator heard about the first problem only and
+    // never learned that it had taken every other worker down with it.
+    // Before the `map()` below, which constructs them. One unconstructable type used to
+    // throw from inside that map, so the operator heard about the first problem only and
+    // never learned that it had taken every other worker down with it.
+    assertWorkerInputs({
+      workerTypes,
+      options: { agentApiBaseUrl: options.apiPublicOrigin },
+      autoSelected: requestedTypes.length === 0,
+    })
 
     app.rerender(
       <LoadingView title="Starting sixb worker group" subtitle={entry} status="Starting workers" />
