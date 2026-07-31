@@ -64,7 +64,7 @@ describe("mercury events webhook", () => {
   test("verifies the signature, dispatches the event, and responds 200", async () => {
     const received: MercuryEventContext[] = []
     const webhook = mercuryEventsWebhook({
-      secret: SECRET,
+      credential: SECRET,
       onEvent: (context) => {
         received.push(context)
       },
@@ -93,7 +93,7 @@ describe("mercury events webhook", () => {
   })
 
   test("rejects a tampered body under a valid-looking signature", () => {
-    const webhook = mercuryEventsWebhook({ secret: SECRET, onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} })
     const signed = JSON.stringify(EVENT)
     const tampered = JSON.stringify({ ...EVENT, resourceId: "attacker-controlled" })
 
@@ -103,7 +103,7 @@ describe("mercury events webhook", () => {
   })
 
   test("rejects a signature produced with the wrong secret", () => {
-    const webhook = mercuryEventsWebhook({ secret: SECRET, onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} })
     const body = JSON.stringify(EVENT)
 
     expect(() => webhook.verify?.(verifyCtx(body, sign("whsec_other", body)))).toThrow(
@@ -112,7 +112,7 @@ describe("mercury events webhook", () => {
   })
 
   test("rejects a stale timestamp to block replays", () => {
-    const webhook = mercuryEventsWebhook({ secret: SECRET, onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} })
     const body = JSON.stringify(EVENT)
     const sixMinutesAgo = Date.now() - 6 * 60 * 1000
 
@@ -123,7 +123,7 @@ describe("mercury events webhook", () => {
 
   test("accepts a stale timestamp when the tolerance is widened", () => {
     const webhook = mercuryEventsWebhook({
-      secret: SECRET,
+      credential: SECRET,
       onEvent: () => {},
       toleranceMs: 60 * 60 * 1000,
     })
@@ -134,7 +134,7 @@ describe("mercury events webhook", () => {
   })
 
   test("rejects a missing or malformed signature header", () => {
-    const webhook = mercuryEventsWebhook({ secret: SECRET, onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} })
     const body = JSON.stringify(EVENT)
 
     expect(() => webhook.verify?.(verifyCtx(body, null))).toThrow("Missing Mercury-Signature")
@@ -198,7 +198,7 @@ describe("mercuryEventsWebhook without a secret", () => {
   test("cannot be written without a secret or an explicit opt-in", () => {
     // The first guarantee is the type: `WebhookVerification` has no shape that carries
     // neither, so this line does not compile.
-    // @ts-expect-error - neither `secret` nor `allowUnverified`
+    // @ts-expect-error - neither `credential` nor `allowUnverified`
     const missing: Parameters<typeof mercuryEventsWebhook>[0] = { onEvent: () => {} }
 
     // The second is the throw, for the caller the type cannot reach — plain JS, or one who
@@ -220,7 +220,7 @@ describe("mercuryEventsWebhook without a secret", () => {
 
   test("stays quiet when a secret is configured", () => {
     const warnings = captureWarnings(() =>
-      mercuryEventsWebhook({ secret: "whsec_test", onEvent: () => {} })
+      mercuryEventsWebhook({ credential: "whsec_test", onEvent: () => {} })
     )
 
     expect(warnings).toEqual([])

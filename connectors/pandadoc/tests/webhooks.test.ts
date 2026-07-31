@@ -76,7 +76,7 @@ describe("pandadoc inbound events webhook", () => {
   test("verifies signature, dispatches each event, and responds 200", async () => {
     const received: PandaDocWebhookEventContext[] = []
     const webhook = pandaDocEventsWebhook({
-      secret: "shared",
+      credential: "shared",
       onEvent: (context) => {
         received.push(context)
       },
@@ -117,7 +117,7 @@ describe("pandadoc inbound events webhook", () => {
   })
 
   test("rejects invalid signature when shared key is configured", async () => {
-    const webhook = pandaDocEventsWebhook({ secret: "shared", onEvent: () => {} })
+    const webhook = pandaDocEventsWebhook({ credential: "shared", onEvent: () => {} })
 
     await expect(
       webhook.verify?.({
@@ -128,7 +128,7 @@ describe("pandadoc inbound events webhook", () => {
   })
 
   test("cannot be written without a shared key or an explicit opt-in", () => {
-    // @ts-expect-error - neither `secret` nor `allowUnverified`
+    // @ts-expect-error - neither `credential` nor `allowUnverified`
     const missing: Parameters<typeof pandaDocEventsWebhook>[0] = { onEvent: () => {} }
 
     // This route used to skip verification entirely when no shared key was set, and a test
@@ -147,7 +147,7 @@ describe("pandadoc inbound events webhook", () => {
   })
 
   test("rejects an unexpected payload shape", () => {
-    const webhook = pandaDocEventsWebhook({ secret: "shared", onEvent: () => {} })
+    const webhook = pandaDocEventsWebhook({ credential: "shared", onEvent: () => {} })
     expect(() => webhook.body.parse({ event: "document_state_changed" })).toThrow(
       "Unexpected webhook payload"
     )

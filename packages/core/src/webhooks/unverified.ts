@@ -3,30 +3,39 @@
  *
  * A union, so a webhook that verifies nothing cannot be written by accident: no value carries
  * neither branch. `resolveWebhookVerification` covers the path where the credential arrives as
- * `TSecret | undefined` from the environment, which no type can narrow.
+ * `TCredential | undefined` from the environment, which no type can narrow.
  *
  * Generic because a credential is not always a signing secret: PandaDoc resolves a shared key,
- * Pipedrive compares HTTP basic auth.
+ * Pipedrive compares a username and password.
  */
-export type WebhookVerification<TSecret = string> =
-  | { readonly secret: TSecret; readonly allowUnverified?: never }
+export type WebhookVerification<TCredential = string> =
+  | { readonly credential: TCredential; readonly allowUnverified?: never }
   | {
-      readonly secret?: never
+      readonly credential?: never
       /**
-       * Accept deliveries this webhook cannot verify. Without a secret the route accepts
+       * Accept deliveries this webhook cannot verify. Without a credential the route accepts
        * requests from anyone who can reach it, so it has to be asked for.
        */
       readonly allowUnverified: true
     }
 
-/** How to name a webhook in a message about its verification. */
+/**
+ * How to name a webhook, and its options, in a message about its verification.
+ *
+ * The options are part of the subject because a connector has two entry points with different
+ * names for the same thing — `pipedrive({ webhookAuth })` and `pipedriveEventsWebhook({
+ * credential })`. A message fixed to one of them sends half the callers to an option their API
+ * does not have, so each entry point carries its own.
+ */
 export interface WebhookVerificationSubject {
   /** The connector, as it appears in its own message prefix — `SixbGitHub`, `SixbMercury`. */
   readonly connector: string
-  /** What this webhook checks when a secret is configured, as a noun phrase. */
+  /** What this webhook checks when a credential is configured, as a noun phrase. */
   readonly verifies: string
-  /** How to configure the secret, in the words the connector's own options use. */
-  readonly secretOption: string
+  /** The option carrying the credential, written as the caller would type it. */
+  readonly credentialOption: string
+  /** The option that accepts unverified deliveries, written as the caller would type it. */
+  readonly allowOption: string
 }
 
 export class UnverifiedWebhookError extends Error {
@@ -44,17 +53,17 @@ export class UnverifiedWebhookError extends Error {
  * any request that reached it. A console warning was not enough: one of them is a banking
  * connector. Throwing here means `createSixb()` fails and the API role never starts open.
  */
-export function resolveWebhookVerification<TSecret>(
+export function resolveWebhookVerification<TCredential>(
   subject: WebhookVerificationSubject,
-  options: { readonly secret?: TSecret; readonly allowUnverified?: boolean }
-): WebhookVerification<TSecret> {
-  if (options.secret) return { secret: options.secret }
+  options: { readonly credential?: TCredential; readonly allowUnverified?: boolean }
+): WebhookVerification<TCredential> {
+  if (options.credential) return { credential: options.credential }
 
   if (!options.allowUnverified) {
     throw new UnverifiedWebhookError(
-      `[${subject.connector}] This webhook has no secret, so ${subject.verifies} cannot be ` +
+      `[${subject.connector}] This webhook has no credential, so ${subject.verifies} cannot be ` +
         `checked and the route would accept unverified requests from anyone who can reach it. ` +
-        `Set ${subject.secretOption}, or pass \`allowUnverified: true\` to accept that.`
+        `Set ${subject.credentialOption}, or pass ${subject.allowOption} to accept that.`
     )
   }
 
@@ -65,15 +74,15 @@ export function resolveWebhookVerification<TSecret>(
  * Announces a webhook whose author chose to accept unverified deliveries. Called where the webhook
  * is defined, not inside `verify()`: once per boot is a fact, once per request is noise.
  */
-export function warnUnverifiedWebhook<TSecret>(
+export function warnUnverifiedWebhook<TCredential>(
   subject: WebhookVerificationSubject,
-  verification: WebhookVerification<TSecret>
+  verification: WebhookVerification<TCredential>
 ): void {
-  if (verification.secret) return
+  if (verification.credential) return
 
   console.warn(
-    `[${subject.connector}] \`allowUnverified: true\`, so ${subject.verifies} is not checked ` +
+    `[${subject.connector}] ${subject.allowOption}, so ${subject.verifies} is not checked ` +
       `and this route accepts unverified requests from anyone who can reach it. ` +
-      `Set ${subject.secretOption} before exposing it.`
+      `Set ${subject.credentialOption} before exposing it.`
   )
 }

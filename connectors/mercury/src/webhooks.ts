@@ -15,7 +15,15 @@ const DEFAULT_TOLERANCE_MS = 5 * 60 * 1000
 export const MERCURY_WEBHOOK: WebhookVerificationSubject = {
   connector: "SixbMercury",
   verifies: "the Mercury-Signature HMAC",
-  secretOption: "`secret` on mercuryEventsWebhook",
+  credentialOption: "`credential` on `mercuryEventsWebhook()`",
+  allowOption: "`allowUnverified: true`",
+}
+
+/** The same subject, in the words `mercury()` uses for the same two options. */
+export const MERCURY_CONNECTOR_WEBHOOK: WebhookVerificationSubject = {
+  ...MERCURY_WEBHOOK,
+  credentialOption: "`webhookSecret` on `mercury()`",
+  allowOption: "`webhookAllowUnverified: true`",
 }
 
 /**
@@ -38,25 +46,26 @@ export type MercuryEventsWebhookOptions = WebhookVerification & {
  * at-least-once, so the runtime uses that to drop duplicates.
  */
 export function mercuryEventsWebhook(
-  options: MercuryEventsWebhookOptions
+  options: MercuryEventsWebhookOptions,
+  subject: WebhookVerificationSubject = MERCURY_WEBHOOK
 ): WebhookDefinition<MercuryEvent, MercuryClient> {
   const toleranceMs = options.toleranceMs ?? DEFAULT_TOLERANCE_MS
   assertToleranceMs(toleranceMs)
 
   // Resolved, not just warned about: the union makes this unreachable from TypeScript,
   // and a caller without types still gets the refusal rather than an open route.
-  warnUnverifiedWebhook(MERCURY_WEBHOOK, resolveWebhookVerification(MERCURY_WEBHOOK, options))
+  warnUnverifiedWebhook(subject, resolveWebhookVerification(subject, options))
 
   return defineWebhook("events")
     .post()
     .json({ parse: parseMercuryEvent })
     .verify(({ request, rawBody }) => {
-      if (!options.secret) {
+      if (!options.credential) {
         return
       }
 
       verifySignature(
-        options.secret,
+        options.credential,
         rawBody,
         request.headers.get("mercury-signature"),
         toleranceMs

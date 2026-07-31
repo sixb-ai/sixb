@@ -7,7 +7,7 @@ import {
 import { createMercuryClient } from "./client"
 import { createMercuryHttp } from "./http"
 import type { MercuryAccessTokenResolver, MercuryClient, MercuryConnectorOptions } from "./types"
-import { MERCURY_WEBHOOK, mercuryEventsWebhook } from "./webhooks"
+import { MERCURY_CONNECTOR_WEBHOOK, mercuryEventsWebhook } from "./webhooks"
 
 const DEFAULT_BASE_URL = "https://api.mercury.com/api/v1/"
 
@@ -63,16 +63,19 @@ function collectWebhooks(
 
   if (options.onEvent) {
     webhooks.push(
-      mercuryEventsWebhook({
-        onEvent: options.onEvent,
-        // The secret usually arrives from the environment, so the decision is made here
-        // rather than by the type: a secret, an explicit opt-in, or no webhook.
-        ...resolveWebhookVerification(MERCURY_WEBHOOK, {
-          secret: options.webhookSecret,
-          allowUnverified: options.webhookAllowUnverified,
-        }),
-        toleranceMs: options.webhookToleranceMs,
-      }) as WebhookDefinition<unknown, MercuryClient>
+      mercuryEventsWebhook(
+        {
+          onEvent: options.onEvent,
+          // The secret usually arrives from the environment, so the decision is made here
+          // rather than by the type: a secret, an explicit opt-in, or no webhook.
+          ...resolveWebhookVerification(MERCURY_CONNECTOR_WEBHOOK, {
+            credential: options.webhookSecret,
+            allowUnverified: options.webhookAllowUnverified,
+          }),
+          toleranceMs: options.webhookToleranceMs,
+        },
+        MERCURY_CONNECTOR_WEBHOOK
+      ) as WebhookDefinition<unknown, MercuryClient>
     )
   }
 

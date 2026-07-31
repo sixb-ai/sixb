@@ -4,7 +4,7 @@ import { createGitHubClient } from "./client"
 import { assertNonEmpty } from "./http"
 import type { GitHubClient } from "./types/client"
 import type { GitHubConnectorOptions } from "./types/options"
-import { GITHUB_WEBHOOK, githubEventsWebhook } from "./webhook"
+import { GITHUB_CONNECTOR_WEBHOOK, githubEventsWebhook } from "./webhook"
 
 const GITHUB_API_BASE = "https://api.github.com/"
 const GITHUB_API_VERSION = "2022-11-28"
@@ -44,15 +44,18 @@ export function github(options: GitHubConnectorOptions): GitHubConnector {
     type: "github",
     webhooks: options.onEvent
       ? [
-          githubEventsWebhook({
-            // The secret usually arrives from the environment, so the decision is made
-            // here rather than by the type: a secret, an explicit opt-in, or no webhook.
-            ...resolveWebhookVerification(GITHUB_WEBHOOK, {
-              secret: options.webhookSecret,
-              allowUnverified: options.webhookAllowUnverified,
-            }),
-            onEvent: options.onEvent,
-          }),
+          githubEventsWebhook(
+            {
+              // The secret usually arrives from the environment, so the decision is made
+              // here rather than by the type: a secret, an explicit opt-in, or no webhook.
+              ...resolveWebhookVerification(GITHUB_CONNECTOR_WEBHOOK, {
+                credential: options.webhookSecret,
+                allowUnverified: options.webhookAllowUnverified,
+              }),
+              onEvent: options.onEvent,
+            },
+            GITHUB_CONNECTOR_WEBHOOK
+          ),
         ]
       : undefined,
     async connect(context) {

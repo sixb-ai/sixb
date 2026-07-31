@@ -7,7 +7,15 @@ import type { CompanyCamEventHandler, CompanyCamWebhookEvent } from "./types"
 export const COMPANYCAM_WEBHOOK: WebhookVerificationSubject = {
   connector: "SixbCompanyCam",
   verifies: "the X-CompanyCam-Signature HMAC",
-  secretOption: "`secret` on companyCamEventsWebhook",
+  credentialOption: "`credential` on `companyCamEventsWebhook()`",
+  allowOption: "`allowUnverified: true`",
+}
+
+/** The same subject, in the words `companycam()` uses for the same two options. */
+export const COMPANYCAM_CONNECTOR_WEBHOOK: WebhookVerificationSubject = {
+  ...COMPANYCAM_WEBHOOK,
+  credentialOption: "`webhookSecret` on `companycam()`",
+  allowOption: "`webhookAllowUnverified: true`",
 }
 
 /** Either a signing secret or an explicit decision to do without one. */
@@ -25,20 +33,21 @@ type CompanyCamEventsWebhookOptions = WebhookVerification & {
  * on any other status).
  */
 export function companyCamEventsWebhook(
-  options: CompanyCamEventsWebhookOptions
+  options: CompanyCamEventsWebhookOptions,
+  subject: WebhookVerificationSubject = COMPANYCAM_WEBHOOK
 ): WebhookDefinition<unknown, CompanyCamClient> {
   // Resolved, not just warned about: the union makes this unreachable from TypeScript,
   // and a caller without types still gets the refusal rather than an open route.
-  warnUnverifiedWebhook(COMPANYCAM_WEBHOOK, resolveWebhookVerification(COMPANYCAM_WEBHOOK, options))
+  warnUnverifiedWebhook(subject, resolveWebhookVerification(subject, options))
 
   return defineWebhook("events")
     .post()
     .json()
     .verify(({ request, rawBody }) => {
-      if (!options.secret) {
+      if (!options.credential) {
         return
       }
-      verifySignature(options.secret, rawBody, request.headers.get("x-companycam-signature"))
+      verifySignature(options.credential, rawBody, request.headers.get("x-companycam-signature"))
     })
     .handle<CompanyCamClient>(async ({ body, sixb, logger, client }) => {
       await options.onEvent({ event: toEvent(body), sixb, logger, client })

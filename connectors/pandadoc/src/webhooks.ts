@@ -13,7 +13,15 @@ import type {
 export const PANDADOC_WEBHOOK: WebhookVerificationSubject = {
   connector: "SixbPandaDoc",
   verifies: "the `signature` query parameter",
-  secretOption: "`secret` on pandaDocEventsWebhook",
+  credentialOption: "`credential` on `pandaDocEventsWebhook()`",
+  allowOption: "`allowUnverified: true`",
+}
+
+/** The same subject, in the words `pandadoc()` uses for the same two options. */
+export const PANDADOC_CONNECTOR_WEBHOOK: WebhookVerificationSubject = {
+  ...PANDADOC_WEBHOOK,
+  credentialOption: "`webhookSharedKey` on `pandadoc()`",
+  allowOption: "`webhookAllowUnverified: true`",
 }
 
 /** Either a shared key or an explicit decision to do without one. */
@@ -22,20 +30,21 @@ type PandaDocEventsWebhookOptions = WebhookVerification<PandaDocWebhookSharedKey
 }
 
 export function pandaDocEventsWebhook(
-  options: PandaDocEventsWebhookOptions
+  options: PandaDocEventsWebhookOptions,
+  subject: WebhookVerificationSubject = PANDADOC_WEBHOOK
 ): WebhookDefinition<readonly PandaDocWebhookEvent[], PandaDocClient> {
-  warnUnverifiedWebhook(PANDADOC_WEBHOOK, resolveWebhookVerification(PANDADOC_WEBHOOK, options))
+  warnUnverifiedWebhook(subject, resolveWebhookVerification(subject, options))
 
   return defineWebhook("events")
     .post()
     .json({ parse: parsePandaDocWebhookEvents })
     .verify(async ({ request, rawBody }) => {
-      if (!options.secret) {
+      if (!options.credential) {
         return
       }
 
       verifySignature(
-        await resolveSharedKey(options.secret),
+        await resolveSharedKey(options.credential),
         rawBody,
         new URL(request.url).searchParams.get("signature")
       )

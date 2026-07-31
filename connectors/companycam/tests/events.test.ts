@@ -21,7 +21,7 @@ describe("companycam events webhook", () => {
   test("verifies the signature, dispatches the event, and responds 200", async () => {
     const received: CompanyCamEventContext[] = []
     const webhook = companyCamEventsWebhook({
-      secret: "s",
+      credential: "s",
       onEvent: (context) => {
         received.push(context)
       },
@@ -63,7 +63,7 @@ describe("companycam events webhook", () => {
   })
 
   test("rejects an invalid signature", () => {
-    const webhook = companyCamEventsWebhook({ secret: "s", onEvent: () => {} })
+    const webhook = companyCamEventsWebhook({ credential: "s", onEvent: () => {} })
     expect(() =>
       webhook.verify?.({
         request: new Request("https://x/hook", {
@@ -90,7 +90,7 @@ describe("companyCamEventsWebhook without a secret", () => {
   test("cannot be written without a secret or an explicit opt-in", () => {
     // The first guarantee is the type: `WebhookVerification` has no shape that carries
     // neither, so this line does not compile.
-    // @ts-expect-error - neither `secret` nor `allowUnverified`
+    // @ts-expect-error - neither `credential` nor `allowUnverified`
     const missing: Parameters<typeof companyCamEventsWebhook>[0] = { onEvent: () => {} }
 
     // The second is the throw, for the caller the type cannot reach — plain JS, or one who
@@ -112,7 +112,7 @@ describe("companyCamEventsWebhook without a secret", () => {
 
   test("stays quiet when a secret is configured", () => {
     const warnings = captureWarnings(() =>
-      companyCamEventsWebhook({ secret: "whsec_test", onEvent: () => {} })
+      companyCamEventsWebhook({ credential: "whsec_test", onEvent: () => {} })
     )
 
     expect(warnings).toEqual([])

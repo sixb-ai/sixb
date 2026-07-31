@@ -650,7 +650,7 @@ describe("github connector", () => {
     test("verifies the signature and forwards event + runtime to onEvent", async () => {
       const received: GitHubEventContext[] = []
       const webhook = githubEventsWebhook({
-        secret: "shh",
+        credential: "shh",
         onEvent: (context) => {
           received.push(context)
         },
@@ -709,7 +709,7 @@ describe("github connector", () => {
     })
 
     test("rejects an invalid signature", () => {
-      const webhook = githubEventsWebhook({ secret: "shh", onEvent: () => {} })
+      const webhook = githubEventsWebhook({ credential: "shh", onEvent: () => {} })
       expect(() =>
         webhook.verify?.({
           request: new Request("https://x/hook", {
@@ -744,7 +744,7 @@ describe("githubEventsWebhook without a secret", () => {
   test("cannot be written without a secret or an explicit opt-in", () => {
     // The first guarantee is the type: `WebhookVerification` has no shape that carries
     // neither, so this line does not compile.
-    // @ts-expect-error - neither `secret` nor `allowUnverified`
+    // @ts-expect-error - neither `credential` nor `allowUnverified`
     const missing: Parameters<typeof githubEventsWebhook>[0] = { onEvent: () => {} }
 
     // The second is the throw, for the caller the type cannot reach — plain JS, or one who
@@ -766,7 +766,7 @@ describe("githubEventsWebhook without a secret", () => {
 
   test("stays quiet when a secret is configured", () => {
     const warnings = captureWarnings(() =>
-      githubEventsWebhook({ secret: "whsec_test", onEvent: () => {} })
+      githubEventsWebhook({ credential: "whsec_test", onEvent: () => {} })
     )
 
     expect(warnings).toEqual([])

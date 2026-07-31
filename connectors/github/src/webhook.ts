@@ -11,7 +11,15 @@ import type {
 export const GITHUB_WEBHOOK: WebhookVerificationSubject = {
   connector: "SixbGitHub",
   verifies: "the X-Hub-Signature-256 HMAC",
-  secretOption: "`secret` on githubEventsWebhook",
+  credentialOption: "`credential` on `githubEventsWebhook()`",
+  allowOption: "`allowUnverified: true`",
+}
+
+/** The same subject, in the words `github()` uses for the same two options. */
+export const GITHUB_CONNECTOR_WEBHOOK: WebhookVerificationSubject = {
+  ...GITHUB_WEBHOOK,
+  credentialOption: "`webhookSecret` on `github()`",
+  allowOption: "`webhookAllowUnverified: true`",
 }
 
 /** Either a signing secret or an explicit decision to do without one. */
@@ -28,20 +36,21 @@ type GitHubWebhookOptions = WebhookVerification & {
  * `onEvent` with the event name taken from the `X-GitHub-Event` header.
  */
 export function githubEventsWebhook(
-  options: GitHubWebhookOptions
+  options: GitHubWebhookOptions,
+  subject: WebhookVerificationSubject = GITHUB_WEBHOOK
 ): WebhookDefinition<unknown, GitHubClient> {
   // Resolved, not just warned about: the union makes this unreachable from TypeScript,
   // and a caller without types still gets the refusal rather than an open route.
-  warnUnverifiedWebhook(GITHUB_WEBHOOK, resolveWebhookVerification(GITHUB_WEBHOOK, options))
+  warnUnverifiedWebhook(subject, resolveWebhookVerification(subject, options))
 
   return defineWebhook("events")
     .post()
     .json()
     .verify(({ request, rawBody }) => {
-      if (!options.secret) {
+      if (!options.credential) {
         return
       }
-      verifySignature(options.secret, rawBody, request.headers.get("x-hub-signature-256"))
+      verifySignature(options.credential, rawBody, request.headers.get("x-hub-signature-256"))
     })
     .idempotencyKey(({ request }) => request.headers.get("x-github-delivery"))
     .handle<GitHubClient>(async ({ request, body, sixb, logger, client }) => {

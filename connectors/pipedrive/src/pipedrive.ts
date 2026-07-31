@@ -3,7 +3,7 @@ import { type ConnectorAdapter, resolveWebhookVerification } from "@sixb/core"
 import { createPipedriveClient } from "./client"
 import { createPipedriveHttp } from "./http"
 import type { PipedriveClient, PipedriveConnectorOptions, PipedriveTokenResolver } from "./types"
-import { PIPEDRIVE_WEBHOOK, pipedriveEventsWebhook } from "./webhooks"
+import { PIPEDRIVE_CONNECTOR_WEBHOOK, pipedriveEventsWebhook } from "./webhooks"
 
 const DEFAULT_V2_BASE_URL = "https://api.pipedrive.com/api/v2/"
 const DEFAULT_V1_BASE_URL = "https://api.pipedrive.com/v1/"
@@ -36,13 +36,16 @@ export function pipedrive(options: PipedriveConnectorOptions): PipedriveConnecto
     type: "pipedrive",
     webhooks: options.onEvent
       ? [
-          pipedriveEventsWebhook({
-            ...resolveWebhookVerification(PIPEDRIVE_WEBHOOK, {
-              secret: options.webhookAuth,
-              allowUnverified: options.webhookAllowUnverified,
-            }),
-            onEvent: options.onEvent,
-          }),
+          pipedriveEventsWebhook(
+            {
+              ...resolveWebhookVerification(PIPEDRIVE_CONNECTOR_WEBHOOK, {
+                credential: options.webhookAuth,
+                allowUnverified: options.webhookAllowUnverified,
+              }),
+              onEvent: options.onEvent,
+            },
+            PIPEDRIVE_CONNECTOR_WEBHOOK
+          ),
         ]
       : undefined,
     async connect(context) {
