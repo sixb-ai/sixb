@@ -229,6 +229,59 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
       })
     })
 
+    test("keeps a missing target until the batch it blocks commits", async () => {
+      await withStorage(async (storage) => {
+        const claim = await storage.startOrReclaim({
+          id: "telemetry-missing-target-run",
+          projectId,
+          identity: telemetryIdentity,
+          target: objectTarget,
+          fixedBatchSize: 2,
+        })
+        const execution = executionInput(claim)
+        const firstSeenAt = new Date("2026-06-01T12:00:00.000Z")
+        const missingTarget = {
+          objectTypeId: "Room",
+          objectId: "missing-room",
+          batchOrdinal: 0,
+          firstSeenAt,
+        }
+
+        const waiting = await storage.recordMissingTarget({ ...execution, missingTarget })
+        expect(waiting.missingTarget).toEqual(missingTarget)
+        expect(
+          (await storage.getById({ projectId, id: "telemetry-missing-target-run" }))?.missingTarget
+        ).toEqual(missingTarget)
+
+        // A wait anchored to a batch the run has already passed would outlive the progress that
+        // resolved it, so it is refused rather than stored.
+        await expect(
+          storage.recordMissingTarget({
+            ...execution,
+            missingTarget: { ...missingTarget, batchOrdinal: 1 },
+          })
+        ).rejects.toThrow("cannot wait on batch 1")
+
+        // The write is last-wins; keeping the original start is the worker's rule, which only
+        // records when the object or the batch changes. An adapter that merged instead would
+        // make that rule unenforceable.
+        const rerecorded = await storage.recordMissingTarget({
+          ...execution,
+          missingTarget: { ...missingTarget, firstSeenAt: new Date("2026-06-01T12:01:00.000Z") },
+        })
+        expect(rerecorded.missingTarget?.firstSeenAt).toEqual(new Date("2026-06-01T12:01:00.000Z"))
+
+        const advanced = await storage.advanceTelemetryCheckpoint({
+          ...execution,
+          batchOrdinal: 0,
+          batchRowCount: 2,
+          batchRowsSkipped: 0,
+          inputExhausted: true,
+        })
+        expect(advanced.missingTarget).toBeUndefined()
+      })
+    })
+
     test("requires and records explicit telemetry EOF with terminal success", async () => {
       await withStorage(async (storage) => {
         const claim = await storage.startOrReclaim({

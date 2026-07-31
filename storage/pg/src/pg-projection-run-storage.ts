@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import {
   advanceProjectionTelemetry,
   assertGenericProgressDoesNotAdvanceTelemetry,
+  assertProjectionMissingTarget,
   assertProjectionRunExecution,
   assertProjectionRunListWindow,
   assertProjectionRunNonEmpty,
@@ -34,6 +35,7 @@ import type {
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
+  RecordProjectionMissingTargetInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
@@ -223,13 +225,43 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           next_row_offset = ${advance.checkpoint.nextRowOffset},
           input_exhausted = ${advance.checkpoint.inputExhausted},
           source_rows_read = ${advance.progress.sourceRowsRead},
-          source_rows_skipped = ${advance.progress.sourceRowsSkipped}
+          source_rows_skipped = ${advance.progress.sourceRowsSkipped},
+          missing_target_object_type_id = ${null},
+          missing_target_object_id = ${null},
+          missing_target_batch_ordinal = ${null},
+          missing_target_first_seen_at = ${null}
         WHERE project_id = ${input.projectId}
           AND id = ${input.id}
           AND status = ${"running"}
           AND execution_token = ${input.executionToken}
           AND next_batch_ordinal = ${input.batchOrdinal}
           AND input_exhausted = ${false}
+        RETURNING *
+      `
+      if (!updated) throw staleProjectionRunExecution(input.id)
+      return rowToTelemetryProjectionRunRecord(updated)
+    })
+  }
+
+  async recordMissingTarget(
+    input: RecordProjectionMissingTargetInput
+  ): Promise<TelemetryProjectionRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const existingRow = await requireMaterializationExecution(tx, input)
+      const existing = requireTelemetryProjectionRun(restoreProjectionRunRow(existingRow))
+      const missingTarget = assertProjectionMissingTarget(existing, input.missingTarget)
+      const [updated] = await tx<DatabaseRow[]>`
+        UPDATE projection_runs
+        SET
+          missing_target_object_type_id = ${missingTarget.objectTypeId},
+          missing_target_object_id = ${missingTarget.objectId},
+          missing_target_batch_ordinal = ${missingTarget.batchOrdinal},
+          missing_target_first_seen_at = ${missingTarget.firstSeenAt}
+        WHERE project_id = ${input.projectId}
+          AND id = ${input.id}
+          AND status = ${"running"}
+          AND execution_token = ${input.executionToken}
+          AND next_batch_ordinal = ${missingTarget.batchOrdinal}
         RETURNING *
       `
       if (!updated) throw staleProjectionRunExecution(input.id)
@@ -425,6 +457,15 @@ function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
     nextBatchOrdinal: optionalDatabaseSafeInteger(row.next_batch_ordinal, "nextBatchOrdinal"),
     nextRowOffset: optionalDatabaseSafeInteger(row.next_row_offset, "nextRowOffset"),
     inputExhausted: row.input_exhausted ?? undefined,
+    missingTargetObjectTypeId: row.missing_target_object_type_id ?? undefined,
+    missingTargetObjectId: row.missing_target_object_id ?? undefined,
+    missingTargetBatchOrdinal: optionalDatabaseSafeInteger(
+      row.missing_target_batch_ordinal,
+      "missingTargetBatchOrdinal"
+    ),
+    missingTargetFirstSeenAt: row.missing_target_first_seen_at
+      ? new Date(row.missing_target_first_seen_at)
+      : undefined,
     progress: {
       sourceRowsRead: databaseSafeInteger(row.source_rows_read, "sourceRowsRead"),
       sourceRowsSkipped: databaseSafeInteger(row.source_rows_skipped, "sourceRowsSkipped"),
@@ -475,6 +516,10 @@ interface DatabaseRow {
   next_batch_ordinal: number | string | null
   next_row_offset: number | string | null
   input_exhausted: boolean | null
+  missing_target_object_type_id: string | null
+  missing_target_object_id: string | null
+  missing_target_batch_ordinal: number | string | null
+  missing_target_first_seen_at: Date | string | null
   source_rows_read: number | string
   source_rows_skipped: number | string
   error_message: string | null

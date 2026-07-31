@@ -5,6 +5,7 @@ import { ProjectionRunError } from "./errors"
 import {
   advanceProjectionTelemetry,
   assertGenericProgressDoesNotAdvanceTelemetry,
+  assertProjectionMissingTarget,
   assertProjectionRunExecution,
   assertProjectionRunIdentityMatches,
   assertProjectionRunListWindow,
@@ -35,6 +36,7 @@ import {
   type ProjectionRunRecord,
   type ProjectionRunStorage,
   projectionRunObjectTypesVisible,
+  type RecordProjectionMissingTargetInput,
   type StartOrReclaimProjectionRunInput,
   type TelemetryProjectionRunRecord,
   type UpdateProjectionRunInput,
@@ -159,6 +161,21 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
         ...existing,
         progress: advance.progress,
         telemetryCheckpoint: advance.checkpoint,
+        missingTarget: undefined,
+      }
+      this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
+      return publicProjectionRunRecord(next) as TelemetryProjectionRunRecord
+    })
+  }
+
+  async recordMissingTarget(
+    input: RecordProjectionMissingTargetInput
+  ): Promise<TelemetryProjectionRunRecord> {
+    return this.runRootOperation(() => {
+      const existing = this.requireTelemetryExecution(input)
+      const next: TelemetryProjectionRunRecord & { readonly executionToken: string } = {
+        ...existing,
+        missingTarget: assertProjectionMissingTarget(existing, input.missingTarget),
       }
       this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
       return publicProjectionRunRecord(next) as TelemetryProjectionRunRecord

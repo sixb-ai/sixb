@@ -52,10 +52,7 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
       })
       throw error
     }
-    if (
-      isPermanentFailure(error, execution.run.startedAt, input.now?.() ?? Date.now()) &&
-      !signal.aborted
-    ) {
+    if ((await isPermanentFailure(input, execution, error)) && !signal.aborted) {
       await finishProjection(input, execution, {
         protocol: input.job.protocol,
         status: "failed",
@@ -256,8 +253,18 @@ function terminalResult(run: ProjectionRunRecord): ProjectionJobResult {
   return { run, replayedTerminal: true }
 }
 
-function isPermanentFailure(error: unknown, startedAt: Date, now: number): boolean {
-  if (isMissingTargetWorthRetrying(error, startedAt, now)) return false
+async function isPermanentFailure(
+  input: RunProjectionJobInput,
+  execution: ClaimedProjectionExecution,
+  error: unknown
+): Promise<boolean> {
+  if (error instanceof MaterializationObjectNotFoundError) {
+    return missingTargetWaitedLongEnough(input, execution, error)
+  }
+  return isPermanentSyncFailure(error)
+}
+
+function isPermanentSyncFailure(error: unknown): boolean {
   if (
     error instanceof ProjectionWorkerPermanentError ||
     error instanceof MaterializationValidationError
@@ -283,28 +290,84 @@ function errorMessage(error: unknown): string {
 /**
  * The worker's read, on the one path where no run exists — `failureDecision` reads the run first
  * and retries whatever it left `running`. A target cannot be missing from a run that never
- * started, so there is no window to measure.
+ * started, so there is no wait to measure.
  */
 export function isPermanentProjectionFailure(error: unknown): boolean {
   return (
-    (!(error instanceof MaterializationObjectNotFoundError) &&
-      isPermanentFailure(error, new Date(0), 0)) ||
+    (!(error instanceof MaterializationObjectNotFoundError) && isPermanentSyncFailure(error)) ||
     isExplicitCancellation(error)
   )
 }
 
 /**
- * A telemetry target that does not exist *yet*.
+ * Whether a telemetry target has been missing long enough to give up on.
  *
  * `MaterializationObjectNotFoundError` extends `MaterializationValidationError`, which is the
  * right reading for a caller appending telemetry by hand and the wrong one for a projection: its
  * dataset can legitimately be materialized before the objects it references. Failing on the first
  * delivery turned a wait of milliseconds into a permanent hole — nothing retries a failed run, and
  * re-running the sync produces no new version when the source has not changed.
+ *
+ * The first delivery to find this object missing records the wait; later ones read it back and
+ * compare. The batch it names is the run's own next ordinal, because the batch that failed is by
+ * definition the one that did not commit.
  */
-function isMissingTargetWorthRetrying(error: unknown, startedAt: Date, now: number): boolean {
-  return (
-    error instanceof MaterializationObjectNotFoundError &&
-    now - startedAt.getTime() < MISSING_TARGET_GRACE_MS
-  )
+async function missingTargetWaitedLongEnough(
+  input: RunProjectionJobInput,
+  execution: ClaimedProjectionExecution,
+  error: MaterializationObjectNotFoundError
+): Promise<boolean> {
+  const run = await findRun(input)
+  const checkpoint = run?.telemetryCheckpoint
+  if (!run || run.status !== "running" || !checkpoint) return false
+
+  const waiting = run.missingTarget
+  if (
+    waiting &&
+    waiting.objectTypeId === error.objectTypeId &&
+    waiting.objectId === error.primaryId &&
+    waiting.batchOrdinal === checkpoint.nextBatchOrdinal
+  ) {
+    const now = input.now?.() ?? Date.now()
+    return now - waiting.firstSeenAt.getTime() >= MISSING_TARGET_GRACE_MS
+  }
+
+  await startMissingTargetWait(input, execution, error, checkpoint.nextBatchOrdinal)
+  return false
+}
+
+async function startMissingTargetWait(
+  input: RunProjectionJobInput,
+  execution: ClaimedProjectionExecution,
+  error: MaterializationObjectNotFoundError,
+  batchOrdinal: number
+): Promise<void> {
+  try {
+    await input.runtime.projectionRunsStorage.recordMissingTarget({
+      projectId: input.runtime.projectId,
+      id: input.job.id,
+      executionToken: execution.execution.executionToken,
+      identity: input.job,
+      missingTarget: {
+        objectTypeId: error.objectTypeId,
+        objectId: error.primaryId,
+        batchOrdinal,
+        firstSeenAt: new Date(input.now?.() ?? Date.now()),
+      },
+    })
+  } catch {
+    // A lost execution or a batch that moved under us means this delivery no longer owns the
+    // wait. The run stays running either way, so the next one records it.
+  }
+}
+
+async function findRun(input: RunProjectionJobInput): Promise<ProjectionRunRecord | null> {
+  try {
+    return await input.runtime.projectionRunsStorage.getById({
+      projectId: input.runtime.projectId,
+      id: input.job.id,
+    })
+  } catch {
+    return null
+  }
 }

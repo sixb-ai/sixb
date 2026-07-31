@@ -162,6 +162,12 @@ CREATE TABLE projection_runs (
   next_batch_ordinal BIGINT CHECK (next_batch_ordinal IS NULL OR next_batch_ordinal >= 0),
   next_row_offset BIGINT CHECK (next_row_offset IS NULL OR next_row_offset >= 0),
   input_exhausted BOOLEAN,
+  missing_target_object_type_id TEXT,
+  missing_target_object_id TEXT,
+  missing_target_batch_ordinal BIGINT CHECK (
+    missing_target_batch_ordinal IS NULL OR missing_target_batch_ordinal >= 0
+  ),
+  missing_target_first_seen_at TIMESTAMPTZ,
   source_rows_read BIGINT NOT NULL DEFAULT 0 CHECK (source_rows_read >= 0),
   source_rows_skipped BIGINT NOT NULL DEFAULT 0 CHECK (source_rows_skipped >= 0),
   error_message TEXT,
