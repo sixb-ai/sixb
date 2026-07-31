@@ -190,3 +190,38 @@ describe("mercury events webhook", () => {
     )
   })
 })
+
+describe("mercuryEventsWebhook without a secret", () => {
+  test("says out loud that it will accept unsigned requests", () => {
+    // `if (!options.secret) return` inside `.verify()` is a fine default for local
+    // development and an open door in production, and it said nothing either way.
+    const warnings = captureWarnings(() => mercuryEventsWebhook({ onEvent: () => {} }))
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain("Mercury-Signature")
+    expect(warnings[0]).toContain("accepts unsigned requests")
+  })
+
+  test("stays quiet when a secret is configured", () => {
+    const warnings = captureWarnings(() =>
+      mercuryEventsWebhook({ secret: "whsec_test", onEvent: () => {} })
+    )
+
+    expect(warnings).toEqual([])
+  })
+})
+
+/** Captures `console.warn` for the duration of one call. */
+function captureWarnings(run: () => void): string[] {
+  const warnings: string[] = []
+  const original = console.warn
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "))
+  }
+  try {
+    run()
+  } finally {
+    console.warn = original
+  }
+  return warnings
+}

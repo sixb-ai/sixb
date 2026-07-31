@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook } from "@sixb/core"
+import { defineWebhook, warnUnverifiedWebhook } from "@sixb/core"
 import type { CompanyCamClient } from "./client"
 import type { CompanyCamEventHandler, CompanyCamWebhookEvent } from "./types"
 
@@ -21,6 +21,14 @@ interface CompanyCamEventsWebhookOptions {
 export function companyCamEventsWebhook(
   options: CompanyCamEventsWebhookOptions
 ): WebhookDefinition<unknown, CompanyCamClient> {
+  if (!options.secret) {
+    warnUnverifiedWebhook({
+      connector: "SixbCompanyCam",
+      header: "X-CompanyCam-Signature",
+      secretOption: "`secret` on companyCamEventsWebhook",
+    })
+  }
+
   return defineWebhook("events")
     .post()
     .json()

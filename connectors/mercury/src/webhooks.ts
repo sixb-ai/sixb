@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook } from "@sixb/core"
+import { defineWebhook, warnUnverifiedWebhook } from "@sixb/core"
 import type {
   MercuryClient,
   MercuryEvent,
@@ -33,6 +33,14 @@ export function mercuryEventsWebhook(
 ): WebhookDefinition<MercuryEvent, MercuryClient> {
   const toleranceMs = options.toleranceMs ?? DEFAULT_TOLERANCE_MS
   assertToleranceMs(toleranceMs)
+
+  if (!options.secret) {
+    warnUnverifiedWebhook({
+      connector: "Mercury",
+      header: "Mercury-Signature",
+      secretOption: "`secret` on mercuryEventsWebhook",
+    })
+  }
 
   return defineWebhook("events")
     .post()

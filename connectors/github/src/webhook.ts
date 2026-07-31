@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook } from "@sixb/core"
+import { defineWebhook, warnUnverifiedWebhook } from "@sixb/core"
 import type { GitHubClient } from "./types/client"
 import type {
   GitHubEventHandler,
@@ -24,6 +24,14 @@ interface GitHubWebhookOptions {
 export function githubEventsWebhook(
   options: GitHubWebhookOptions
 ): WebhookDefinition<unknown, GitHubClient> {
+  if (!options.secret) {
+    warnUnverifiedWebhook({
+      connector: "GitHub",
+      header: "X-Hub-Signature-256",
+      secretOption: "`secret` on githubEventsWebhook",
+    })
+  }
+
   return defineWebhook("events")
     .post()
     .json()

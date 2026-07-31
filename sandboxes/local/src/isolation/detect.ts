@@ -80,3 +80,25 @@ function canRunSeatbelt(): boolean {
     return false
   }
 }
+
+/**
+ * Announces an `auto` resolution that ended up with no isolation at all.
+ *
+ * `auto` accepts whatever the host offers, and on a Linux box without `bwrap` or a macOS
+ * one without `sandbox-exec` that is nothing: every command an agent runs executes
+ * directly on the host. The probe already worded the reason; it was simply never said out
+ * loud, so `auto` isolating and `auto` not isolating looked identical from the outside.
+ *
+ * Per-sandbox rather than once, for the same reason the network downgrade warns
+ * per-sandbox: a module-level flag silences every later sandbox and leaks across tests.
+ */
+export function warnIfUnisolated(probe: IsolationProbe): void {
+  if (probe.backend !== "none") {
+    return
+  }
+  console.warn(
+    `[Sandbox] no isolation backend is available, so commands run unisolated on the host ` +
+      `(${probe.message}). Set isolation: "none" to make that explicit, or install the backend ` +
+      `for this platform.`
+  )
+}
