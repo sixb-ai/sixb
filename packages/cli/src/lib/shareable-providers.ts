@@ -6,10 +6,9 @@ import { type ProductionRole, productionRoleFacts } from "./production-roles"
 /**
  * The two provider slots that declare whether they cross a process boundary.
  *
- * Storage, lake storage and blob storage are left out on purpose: whether a directory is a shared
- * mount is not something the runtime can know, and a guess would either block a legitimate
- * single-node deployment or give false confidence about a multi-replica one. `scope` is required on
- * the broker and queues contracts, so this reads an answer instead of inferring one.
+ * The storage slots are left out because whether a directory is a shared mount is not something
+ * the runtime can know, and a guess would either block a single-node deployment or give false
+ * confidence about a multi-replica one.
  */
 const SLOTS = [
   {
@@ -24,8 +23,6 @@ const SLOTS = [
   },
 ] as const
 
-// A required field, so no `instanceof` and no fallback — both were symptoms of an optional
-// marker, and neither question survives a provider that answers for itself.
 function isProcessLocal(slot: (typeof SLOTS)[number], sixb: LoadedSixb): boolean {
   return slot.get(sixb).scope === "process"
 }
@@ -38,13 +35,7 @@ export interface ProcessLocalProvider {
   readonly replacements: string
 }
 
-/**
- * The same detection as {@link assertShareableProviders}, without the refusal.
- *
- * `sixb check` runs before anything is deployed, which is the useful moment to learn
- * this — a role refusing to start is correct but late. Both callers read one list so
- * they cannot disagree about what counts as process-local.
- */
+/** The same detection as {@link assertShareableProviders}, without the refusal. */
 export function findProcessLocalProviders(sixb: LoadedSixb): readonly ProcessLocalProvider[] {
   return SLOTS.filter((slot) => isProcessLocal(slot, sixb)).map((slot) => ({
     slot: slot.name,
@@ -54,19 +45,11 @@ export function findProcessLocalProviders(sixb: LoadedSixb): readonly ProcessLoc
 }
 
 /**
- * Refuses to start a production role whose broker or queues cannot cross a process
- * boundary.
+ * Refuses to start a production role whose broker or queues cannot cross a process boundary.
  *
- * The scaffolded config ships `InMemoryBroker` and `InMemoryQueues` because
- * `sixb dev` runs everything in one process. Deploy it unchanged and the API, the
- * orchestrator and the workers each get a private set of lanes: the orchestrator
- * enqueues, the worker polls an empty queue, and nothing reports a problem. Only
- * `sixb worker` and `sixb worker-group` used to catch it, and only for queues.
- *
- * Throws rather than warns, matching what those two already did — a warning in a
- * startup log is not read, and an inert deployment is indistinguishable from an idle
- * one. There is no environment-variable escape hatch: a provider that genuinely crosses
- * processes says `scope: "shared"`, the way the CLI's own role fixtures do.
+ * Deployed unchanged, the scaffolded in-memory providers give each role a private set of lanes:
+ * the orchestrator enqueues, the worker polls an empty queue, and nothing reports a problem.
+ * Throws rather than warns, because an inert deployment is indistinguishable from an idle one.
  */
 export function assertShareableProviders(sixb: LoadedSixb, role: ProductionRole): void {
   if (!productionRoleFacts(role).onEventPlane) return

@@ -19,13 +19,8 @@ export function renderPersistent(view: React.ReactNode) {
 }
 
 /**
- * Renders a caught failure the one way the CLI renders failures.
- *
- * Every command's catch block wrote the same three lines — narrow `unknown` to a
- * message, render `ErrorView`, exit — which is three chances per command to word it
- * differently, and eleven copies of the `instanceof Error` narrowing. It also means a
- * remediation carried on the error reaches the terminal without each caller
- * remembering to pass it through.
+ * Renders a caught failure the one way the CLI renders failures, so a remediation carried on
+ * the error reaches the terminal without each caller remembering to pass it through.
  */
 export async function renderCliError(
   error: unknown,
@@ -741,15 +736,11 @@ export function CheckView({
 }) {
   const validation = projectValidation ?? { ok: true, message: "ok" }
   const ontologyOk = (ontology?.errors ?? 0) === 0
-  // Every row is a probe that ran, so "healthy" is a claim this panel can make — which it could
-  // not while the queues row was a literal.
   const allOk = [storage, timeseries, broker, queues, validation].every((row) => row.ok)
   const healthy = allOk && ontologyOk
 
-  // The message wins when there is one, pass or fail. A probe that succeeded still has
-  // something to say — which provider answered, and whether its schema is current —
-  // and collapsing that to "ok" is how this command came to report a healthy runtime
-  // against a database that was not there.
+  // The message wins when there is one, pass or fail: a probe that succeeded still says which
+  // provider answered and whether its schema is current.
   function statusText(row: { ok: boolean; message?: string }): string {
     return row.message ?? (row.ok ? "ok" : "failed")
   }

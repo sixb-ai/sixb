@@ -64,10 +64,8 @@ export interface MigrationReport {
  * Grouped by what an operator has to do about it: nothing (`current`), run
  * `sixb db migrate` (`uninitialized`, `pending`), or intervene by hand (the rest).
  *
- * Every state here is one `describeMigrationHistory` returns. There is no state for "the
- * history could not be read": an unreachable database, a missing grant or a corrupt
- * table all throw out of the read, and the probe reports the thrown reason. A state
- * nothing produces is a branch every caller writes and none of them exercises.
+ * There is no state for "the history could not be read": an unreachable database, a missing
+ * grant or a corrupt table all throw out of the read, and the probe reports that reason.
  */
 export type MigrationState =
   /** Every known migration is applied. The only state a host should serve traffic in. */
@@ -93,9 +91,8 @@ interface MigrationStatusBase {
 /**
  * A state, and the reason for it when there is one to give.
  *
- * A union rather than an optional field: "absent only when `current`" was a comment enforced by
- * nothing, and the type accepted `current` with a reason and `dirty` without one. Every other
- * state exists because an operator has to act, so each owes them a sentence.
+ * A union rather than an optional field, which accepted `current` with a reason and `dirty`
+ * without one. Every state but `current` exists because an operator has to act.
  */
 export type MigrationStatus =
   | (MigrationStatusBase & { readonly state: "current"; readonly reason?: never })
@@ -112,14 +109,9 @@ export interface StorageMigrator {
   /**
    * Reports the schema state without touching it.
    *
-   * Strictly read-only, unlike `migrate()`, which calls `ensure()` first: on Postgres
-   * that runs `CREATE SCHEMA`/`CREATE TABLE` and on SQLite it creates the database file.
-   * That is correct on the way to a migration and wrong for a probe — `/ready` is public
-   * and unauthenticated, and a least-privilege deployment has no DDL grant to spend on a
-   * health check.
-   *
-   * Reports the dangerous states (`ahead`, `dirty`) instead of throwing, because a
-   * probe that throws tells an operator less than one that names the condition.
+   * Strictly read-only, unlike `migrate()`, which calls `ensure()` first and so runs DDL.
+   * `/ready` is unauthenticated, and a least-privilege deployment has no DDL grant to spend on
+   * a health check. Reports the dangerous states (`ahead`, `dirty`) rather than throwing.
    */
   status(): Promise<MigrationStatus>
 

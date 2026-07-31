@@ -28,9 +28,8 @@ export interface TailwindCssCompilerOptions {
   /**
    * Upper bound on one Tailwind build, in milliseconds. Defaults to 60s.
    *
-   * A bound on a hang, not a performance budget: a v4 build is normally well under a
-   * second. Without one, a wedged CLI held `sixb dev` open forever and `stop()` waited on
-   * it, so shutdown hung too.
+   * A bound on a hang, not a performance budget: a wedged CLI otherwise held `sixb dev` open
+   * forever, and `stop()` waited on it.
    */
   timeoutMs?: number
   /** Called when a `schedule()`d rebuild fails. Defaults to `console.error`. */

@@ -156,10 +156,8 @@ describe("role startup connection budget", () => {
         const { ready, logEntries } = await startRole(role.command)
 
         expect(ready).toBe(true)
-        // A role brings the storage schema up to date before it serves. `sixb db migrate`
-        // used to be a release step an operator had to remember, and forgetting it surfaced
-        // as a missing column on the first request — far from the cause. Replicas do not
-        // stampede: Postgres serializes migrators on an advisory lock and late ones no-op.
+        // A role brings the schema up to date before it serves, so a forgotten `sixb db
+        // migrate` cannot surface as a missing column on the first request.
         expect(logEntries).toContainEqual({ type: "storage:migrate" })
         // No read-only-probe assertion here: these roles never probe the schema at all
         // (startSchemaValidation hangs off SixbServer.start), so it would pass whatever

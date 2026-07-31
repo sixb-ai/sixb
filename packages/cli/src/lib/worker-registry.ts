@@ -16,10 +16,7 @@ interface WorkerFactory {
   readonly create: (sixb: LoadedSixb, options: WorkerCreationOptions) => Worker
   /**
    * Why this worker cannot be constructed with the given options, or `null` when it can.
-   *
-   * Lets a caller find out before constructing anything. `sixb worker-group` builds its
-   * workers in one `map()`, so without this the first unconstructable type threw and the
-   * rest were never even attempted — the operator learned about one problem at a time.
+   * Asked before anything is constructed, so a group names every reason at once.
    */
   readonly unmetRequirement?: (options: WorkerCreationOptions) => string | null
 }
@@ -81,11 +78,8 @@ export function resolveWorkerTypeToStart(requestedWorker?: string): string {
 }
 
 /**
- * Why this worker cannot be constructed with these options, or `null` when it can.
- *
- * The same question {@link assertWorkerInputs} asks about a whole group, exported for
- * `sixb worker`: that command has one worker to answer for, and it has to answer before
- * it migrates storage.
+ * Why this worker cannot be constructed with these options, or `null` when it can. Exported
+ * for `sixb worker`, which has to answer this before it migrates storage.
  */
 export function unmetWorkerRequirement(
   workerType: string,
@@ -98,9 +92,8 @@ export interface WorkerGroupInputs {
   readonly workerTypes: readonly string[]
   readonly options: WorkerCreationOptions
   /**
-   * Whether the types came from `resolveRegisteredWorkerTypes` rather than from the
-   * command line. It changes the remedy, not the outcome: a type the operator asked for
-   * has to be fixed, while an auto-selected one can also be dropped by naming the rest.
+   * Whether the types were auto-selected rather than named on the command line. It changes the
+   * remedy only: an auto-selected type can also be dropped by naming the rest.
    */
   readonly autoSelected: boolean
 }
@@ -108,13 +101,8 @@ export interface WorkerGroupInputs {
 /**
  * Refuses a worker group that cannot start whole, naming every reason at once.
  *
- * Refusing is right, and stayed right: an operator who deploys a group and gets five of
- * six workers has agent jobs piling up in a queue nobody claims, which looks exactly
- * like an idle system. What was wrong was the report. `sixb worker-group` on a project
- * with agents and no `--api-public-origin` started nothing and said only "Agent workers
- * require --api-public-origin" — no mention that this is why sync, pipeline and the rest
- * never came up, and none that the operator had never asked for an agent worker in the
- * first place.
+ * Five of six workers means jobs piling up in a queue nobody claims, which looks exactly like
+ * an idle system — so the refusal is right, and it has to say which workers it took down.
  */
 export function assertWorkerInputs(input: WorkerGroupInputs): void {
   const unmet = input.workerTypes
@@ -134,9 +122,8 @@ export function assertWorkerInputs(input: WorkerGroupInputs): void {
     ready.length > 0
       ? ` No worker started, including the ${ready.length} that were ready (${ready.join(", ")}).`
       : ""
-  // Only when there is something to name. With every auto-selected worker blocked, `ready`
-  // is empty and this offered `sixb worker-group` with no arguments — the command that had
-  // just failed, printed as the way out of its own failure.
+  // Only when there is something to name: with every auto-selected worker blocked, this
+  // offered the command that had just failed as the way out of its own failure.
   const remediation =
     input.autoSelected && ready.length > 0
       ? `These were selected automatically from what the project registers. Fix the above, or ` +

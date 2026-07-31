@@ -1,11 +1,7 @@
 export interface SixbCliErrorOptions extends ErrorOptions {
   /**
-   * What the operator should do next, kept out of the message on purpose.
-   *
-   * Remedies used to be appended to the message, which made a failure one long
-   * paragraph where the diagnosis and the instruction had equal weight. Separating them
-   * lets the terminal give the instruction its own place, and lets a caller that only
-   * wants to log the diagnosis do that.
+   * What the operator should do next, kept out of the message so the terminal can give the
+   * instruction its own place and a caller can log the diagnosis alone.
    */
   readonly remediation?: string
 }
@@ -26,10 +22,8 @@ export function errorMessage(error: unknown): string {
 }
 
 /**
- * Reads a remediation off an error, including through a wrapper's `cause`.
- *
- * Wrapping is how the CLI adds context to a provider's failure, and a remedy that
- * survives only until the first wrap would be lost exactly where it is most needed.
+ * Reads a remediation off an error, including through a wrapper's `cause` — wrapping is how the
+ * CLI adds context to a provider's failure.
  */
 export function errorRemediation(error: unknown): string | undefined {
   let current: unknown = error

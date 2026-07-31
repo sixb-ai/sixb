@@ -17,7 +17,7 @@ export const PANDADOC_WEBHOOK: WebhookVerificationSubject = {
   allowOption: "`allowUnverified: true`",
 }
 
-/** The same subject, in the words `pandadoc()` uses for the same two options. */
+/** In the words `pandadoc()` uses for the same two options. */
 export const PANDADOC_CONNECTOR_WEBHOOK: WebhookVerificationSubject = {
   ...PANDADOC_WEBHOOK,
   credentialOption: "`webhookSharedKey` on `pandadoc()`",
@@ -35,11 +35,7 @@ export function pandaDocEventsWebhook(
   return createPandaDocEventsWebhook(options, PANDADOC_WEBHOOK)
 }
 
-/**
- * Package-internal: the connector factory passes its own subject so the refusal and the warning
- * name the options that factory has, not the ones this builder has. Not on the public builder,
- * where it would be a parameter nobody calling it can meaningfully set.
- */
+/** Package-internal: the connector factory passes the subject written in its own vocabulary. */
 export function createPandaDocEventsWebhook(
   options: PandaDocEventsWebhookOptions,
   subject: WebhookVerificationSubject

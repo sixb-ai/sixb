@@ -23,7 +23,7 @@ export const PIPEDRIVE_WEBHOOK: WebhookVerificationSubject = {
   allowOption: "`allowUnverified: true`",
 }
 
-/** The same subject, in the words `pipedrive()` uses for the same two options. */
+/** In the words `pipedrive()` uses for the same two options. */
 export const PIPEDRIVE_CONNECTOR_WEBHOOK: WebhookVerificationSubject = {
   ...PIPEDRIVE_WEBHOOK,
   credentialOption: "`webhookAuth` on `pipedrive()`",
@@ -41,11 +41,7 @@ export function pipedriveEventsWebhook(
   return createPipedriveEventsWebhook(options, PIPEDRIVE_WEBHOOK)
 }
 
-/**
- * Package-internal: the connector factory passes its own subject so the refusal and the warning
- * name the options that factory has, not the ones this builder has. Not on the public builder,
- * where it would be a parameter nobody calling it can meaningfully set.
- */
+/** Package-internal: the connector factory passes the subject written in its own vocabulary. */
 export function createPipedriveEventsWebhook(
   options: PipedriveEventsWebhookOptions,
   subject: WebhookVerificationSubject

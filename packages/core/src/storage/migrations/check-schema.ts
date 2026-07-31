@@ -4,37 +4,26 @@ import { isMigrationCapableStorage } from "./migrate-storage"
 export interface StorageSchemaCheck {
   readonly ok: boolean
   /**
-   * Whether anything was actually read. False when the storage exposes no migrators:
-   * usable, but on the strength of having no schema rather than of a verified one. A
-   * caller that reports "schema current" has to know the difference.
+   * Whether anything was read. False when the storage exposes no migrators: usable on the
+   * strength of having no schema rather than of a verified one.
    */
   readonly verified: boolean
-  /**
-   * Absent only when `ok`. Names the adapter, the state, and what to do about it —
-   * a caller can print this without adding anything.
-   */
+  /** Absent only when `ok`. Names the adapter, the state, and what to do about it. */
   readonly reason?: string
 }
 
 /**
  * Reports whether the configured storage's schema is usable, without touching it.
  *
- * The read-only counterpart of {@link migrateStorage}: every migrator's `status()`,
- * classified once. Storage with no migrators is usable by definition — there is no
- * schema to be behind.
- *
- * Failures are returned, not thrown, because both callers want to report rather than
- * abort: `/ready` answers a probe and `sixb check` prints a panel.
+ * Storage with no migrators is usable by definition. Failures are returned rather than thrown,
+ * because both callers report instead of aborting: `/ready` and `sixb check`.
  */
 export async function checkStorageSchema(storage: Storage): Promise<StorageSchemaCheck> {
   if (!isMigrationCapableStorage(storage)) return { ok: true, verified: false }
 
   try {
-    // `status()`, which is the only read-only member of the migrator contract.
-    // `migrate()` calls `ensure()` first, so it runs DDL — `CREATE SCHEMA`/`CREATE
-    // TABLE` on Postgres, creating the file on SQLite — and reserves a connection for an
-    // advisory lock. This runs on an unauthenticated `/ready`, so it has to be strictly
-    // read-only.
+    // `status()` is the only read-only member of the migrator contract: `migrate()` calls
+    // `ensure()` first, so it runs DDL and takes an advisory lock. This serves `/ready`.
     const statuses = await Promise.all(storage.migrators.map((migrator) => migrator.status()))
     const unusable = statuses.filter((status) => status.state !== "current")
 
@@ -43,9 +32,8 @@ export async function checkStorageSchema(storage: Storage): Promise<StorageSchem
     return {
       ok: false,
       verified: true,
-      // Name the adapter and the state. Saying only "could not be verified" left an
-      // operator to guess between a missing migration, a schema newer than the build,
-      // and no database at all.
+      // Named, because "could not be verified" leaves an operator guessing between a missing
+      // migration, a schema newer than the build, and no database at all.
       reason: unusable
         .map((status) => `${status.adapterId}: ${status.state} — ${status.reason ?? ""}`)
         .join("; "),

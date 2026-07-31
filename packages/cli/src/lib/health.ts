@@ -2,11 +2,7 @@ import { checkStorageSchema } from "@sixb/core"
 import type { LoadedSixb } from "./loadSixb"
 import { findProcessLocalProviders } from "./shareable-providers"
 
-/**
- * Every probe is bounded. An unreachable Postgres does not refuse a connection, it
- * waits, and `sixb check` hanging on a dead host tells an operator less than "timed
- * out" does.
- */
+/** An unreachable Postgres waits rather than refusing, so every probe is bounded. */
 const PROBE_TIMEOUT_MS = 5_000
 
 export interface ProviderCheck {
@@ -31,15 +27,8 @@ export interface RuntimeCheck {
 /**
  * Probes the configured providers with read-only round trips.
  *
- * Every row used to be the same literal `{ ok: true, message: "configured" }` — the
- * command reported a healthy runtime against a database that was not there. A check
- * that cannot fail is worse than no check: it is read as evidence.
- *
- * There is no `events` row because there is no events provider: `EventsRuntime` is
- * built over the broker, so probing "events" and probing "the broker" were always the
- * same round trip reported twice. `queues` takes its place — a real config slot that
- * this command never mentioned, and the one where a process-local provider quietly
- * breaks a deployment.
+ * There is no `events` row because there is no events provider: `EventsRuntime` is built over
+ * the broker, so probing both was one round trip reported twice.
  */
 export async function checkRuntimeHealth(
   sixb: LoadedSixb,
@@ -67,13 +56,9 @@ async function probeStorage(sixb: LoadedSixb, timeoutMs: number): Promise<Provid
   const reachable = await probe(() => sixb.storage.ping(), name, timeoutMs)
   if (!reachable.ok) return reachable
 
-  // Reachable is not usable. A schema behind this build's migrations is the failure an
-  // author is most likely to hit and the one they can act on, so it is worth the second
-  // round trip. Shared with `/ready` so both agree on what "usable" means, and bounded
-  // for the same reason the connection probe is.
-  // `verified: false` means the storage exposes no migrators — usable, but for want of a
-  // schema rather than by having a current one. Claiming "schema current" there would be
-  // the same empty reassurance this command was built on.
+  // Reachable is not usable, so a second round trip checks the schema — shared with `/ready`
+  // so both agree on what usable means. `verified: false` means the storage exposes no
+  // migrators: usable for want of a schema rather than by having a current one.
   let verified = false
   const schema = await probe(
     async () => {
@@ -107,12 +92,6 @@ async function probeBroker(sixb: LoadedSixb): Promise<void> {
   await sixb.events.latestCursor()
 }
 
-/**
- * `Queues.health()` is the only read-only member of that contract — everything else
- * enqueues, claims or completes — which is why this row used to be a literal `ok` with no
- * round trip behind it. It is required on the contract, so there is no longer a provider
- * this command cannot ask.
- */
 function probeQueues(sixb: LoadedSixb, timeoutMs: number): Promise<ProviderCheck> {
   // Bound to the provider: `probe` calls it as a bare function, and a queues provider
   // that reads its own connection off `this` would see `undefined`.
@@ -127,11 +106,7 @@ function processLocalWarnings(sixb: LoadedSixb): readonly string[] {
   )
 }
 
-/**
- * `?.constructor` rather than a plain read: a provider is a class instance in every
- * configuration we ship, but the contracts are structural, so an object built with
- * `Object.create(null)` satisfies them and has no prototype to name.
- */
+/** `?.constructor`: the contracts are structural, so a prototype-less object satisfies them. */
 function providerName(provider: object): string {
   return provider.constructor?.name ?? "unknown"
 }
@@ -152,15 +127,12 @@ async function probe(
     ])
     return { ok: true, message: `ok · ${detail}` }
   } catch (error) {
-    // Lead a failure with the same provider name the success case shows. Core's reason
-    // names the migration *adapter* (`SixbSqliteStorage`), which is not the class an
-    // author configured (`SqliteStorage`) — without this the column showed two names for
-    // one provider and read like two of them were misconfigured.
+    // Led by the configured class, because core's reason names the migration adapter
+    // (`SixbSqliteStorage`) rather than what the author wrote (`SqliteStorage`).
     const message = error instanceof Error ? error.message : String(error)
     return { ok: false, message: `${detail} · ${message}` }
   } finally {
-    // Without this the pending timer keeps the event loop alive and the command hangs
-    // after printing its panel.
+    // A pending timer keeps the event loop alive and hangs the command after it prints.
     if (timer) clearTimeout(timer)
   }
 }

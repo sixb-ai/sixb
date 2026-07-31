@@ -12,9 +12,8 @@ export interface RoleStorageMigrationOptions {
   readonly noMigrate?: boolean
   readonly env?: Record<string, string | undefined>
   /**
-   * Called once, only when a migration is actually about to run. Roles use it to move
-   * their startup spinner off "Starting …" — a schema change can take minutes, and a
-   * process that looks stuck is a process an operator restarts.
+   * Called once, only when a migration is about to run. A schema change can take minutes, and
+   * a process that looks stuck is a process an operator restarts.
    */
   readonly onStart?: () => void
 }
@@ -33,31 +32,18 @@ export interface RoleStorageMigration {
   readonly outcome: RoleStorageMigrationOutcome
   /** Migration step ids that this process applied, in order. */
   readonly applied: readonly string[]
-  /**
-   * One line for the role's startup panel, or `null` when there is nothing an operator
-   * would want to read. Never a bare "ok": a migration that ran names what it applied.
-   */
+  /** One line for the role's startup panel, naming what ran, or `null` when nothing did. */
   readonly summary: string | null
 }
 
 /**
- * Brings the storage schema up to date before a production role starts serving.
+ * Brings the storage schema up to date before a production role starts serving, so a forgotten
+ * `sixb db migrate` cannot surface as a missing column on the first request.
  *
- * Until now every role booted against whatever schema it found and `sixb db migrate`
- * was a release step an operator had to remember. Forgetting it produced failures far
- * from the cause — a missing column surfacing as a query error on the first request —
- * so the schema is now the runtime's own precondition.
- *
- * Concurrency across replicas is already handled below this call: Postgres serializes
- * migrators on a session advisory lock, and every adapter refuses to run against a
- * history it does not recognize (`ahead`, `dirty`, `incompatible`). Late replicas
- * therefore no-op instead of racing. SQLite is the exception, and the error it produces
- * is translated rather than passed through raw.
- *
- * Whoever calls this decides nothing: the role map does. `StorageSchemaRole` excludes
- * the roles that only serve a browser bundle, so `atlas` and `app` cannot call this at
- * all — a new role copied from either one has to answer the question in the map before
- * it compiles.
+ * Concurrent replicas are handled below this call: Postgres serializes migrators on a session
+ * advisory lock, and every adapter refuses a history it does not recognize, so late replicas
+ * no-op instead of racing. SQLite is the exception, and its error is translated rather than
+ * passed through raw.
  */
 export async function migrateStorageForRole(
   sixb: LoadedSixb,

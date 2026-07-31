@@ -28,17 +28,9 @@ export function classifyRoute(request: Request): RouteAccess {
     return { kind: "html", csrfProtected: !isCsrfExemptMethod(request.method) }
   }
 
-  // Anything else requires authentication.
-  //
-  // Nothing reaches here today: every registered route is under /api, /ws, /docs or
-  // the allow-list above, and the API server has no static mount or catch-all. An
-  // unregistered path 404s in the router before these hooks run, so the old "public"
-  // default was never a live hole either.
-  //
-  // What it was is a trap for the next route mounted outside those prefixes — it
-  // would have been served to anyone until someone noticed it needed classifying.
-  // Defaulting to `api` inverts that: a new route is protected unless it is
-  // deliberately added to the allow-list above.
+  // Unreachable today — every registered route matches a branch above, and an unregistered
+  // path 404s before these hooks run. It defaults to `api` so the next route mounted outside
+  // those prefixes is protected until someone puts it on the allow-list, not the reverse.
   return { kind: "api", csrfProtected: !isCsrfExemptMethod(request.method) }
 }
 
