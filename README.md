@@ -1,10 +1,12 @@
 <div align="center">
 
-<!-- Absolute `main` URLs rather than relative paths, so the file still renders when it is read
-     outside a branch checkout. The cost is that a new image 404s until its commit reaches `main`.
+<!-- Relative paths, not absolute `main` URLs: GitHub resolves them against the ref being viewed, so
+     the images render on a branch and in a pull request instead of 404ing until the commit lands on
+     `main`. This file is never published to npm — the root package is private and every package
+     carries its own README — so npm's inability to resolve relative paths does not apply here.
      The alt text carries the name and the tagline, which live inside the image and are otherwise
      invisible to search engines and screen readers. -->
-<img alt="Sixb — the open-source operational layer for enterprise AI" src="https://raw.githubusercontent.com/sixb-ai/sixb/main/docs/brand/sixb-banner.png" width="100%">
+<img alt="Sixb — the open-source operational layer for enterprise AI" src="docs/brand/sixb-banner.png" width="100%">
 
 **Build internal apps shared by teams and AI agents.**
 
@@ -28,7 +30,7 @@ governed environment.
 ## See Sixb in action
 
 <div align="center">
-<img alt="People, tools, approvals, documents, knowledge, and data on the left become concepts, rules, processes, permissions, and actions in the Sixb operational layer, which becomes the Northline Operations app on the right" src="https://raw.githubusercontent.com/sixb-ai/sixb/main/docs/brand/sixb-in-action.gif" width="100%">
+<img alt="People, tools, approvals, documents, knowledge, and data on the left become concepts, rules, processes, permissions, and actions in the Sixb operational layer, which becomes the Northline Operations app on the right" src="docs/brand/sixb-in-action.gif" width="100%">
 </div>
 
 ## Why Sixb
@@ -78,7 +80,7 @@ Northline is a fictional commercial building-services company that connects its 
 its field-service platform, and its building-controls data through Sixb.
 
 <div align="center">
-<img alt="The Quotes page in Northline Operations: three repair quotes awaiting an internal review, a customer decision, and a recorded approval" src="https://raw.githubusercontent.com/sixb-ai/sixb/main/docs/brand/northline-operations.png" width="100%">
+<img alt="The Quotes page in Northline Operations: three repair quotes awaiting an internal review, a customer decision, and a recorded approval" src="docs/brand/northline-operations.png" width="100%">
 </div>
 
 One service case carries the whole journey:
