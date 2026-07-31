@@ -80,6 +80,11 @@ async function getFreePorts(count: number): Promise<readonly number[]> {
   }
 }
 
+/** The fixture logs `{ type }` objects; the reader hands them back untyped. */
+function eventTypes(logEntries: readonly Record<string, unknown>[]): string[] {
+  return logEntries.map((entry) => String(entry.type))
+}
+
 async function startRole(args: readonly string[]) {
   const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-roles-"))
   const logPath = join(tempDir, "operations.log")
@@ -127,9 +132,7 @@ describe("role startup connection budget", () => {
           // Order, not just presence. Storage closes last of the three because the
           // broker's final outbox drain reads from it; closing storage first would
           // lose whatever that drain had left to publish.
-          const closes = logEntries
-            .map((entry) => entry.type)
-            .filter((type) => type.endsWith(":close"))
+          const closes = eventTypes(logEntries).filter((type) => type.endsWith(":close"))
           expect(closes.indexOf("queues:close")).toBeLessThan(closes.indexOf("storage:close"))
         }
       },

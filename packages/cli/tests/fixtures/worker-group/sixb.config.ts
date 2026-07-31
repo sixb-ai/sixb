@@ -124,6 +124,14 @@ function loggingStorage() {
   const migrator: StorageMigrator = {
     adapterId: "FixtureStorage",
     latestVersion: 1,
+    async status() {
+      return {
+        adapterId: "FixtureStorage",
+        latestVersion: 1,
+        appliedVersion: 1,
+        state: "current" as const,
+      }
+    },
     async plan() {
       throw new Error("plan should not run")
     },

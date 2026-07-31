@@ -461,6 +461,10 @@ export {
 export type {
   MigrationCapableStorage,
   MigrationReport,
+  // `status()` returns these, so reading a migrator from here needs them; without them
+  // the operator API on this subpath cannot be consumed, only called and discarded.
+  MigrationState,
+  MigrationStatus,
   Storage,
   StorageMigrationResult,
   StorageMigrator,
