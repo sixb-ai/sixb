@@ -42,10 +42,8 @@ export async function runWorker(options: WorkerOptions = {}) {
 
     assertShareableProviders(sixb, "worker")
 
-    // Before the migration, which is the first thing here that changes something. `sixb
-    // worker agent` without an API origin cannot start, and it used to find that out
-    // after bringing the schema up to date — a failed command that left a migration
-    // behind.
+    // Before the migration, which is the first thing here that changes something: this used to
+    // bring the schema up to date and then refuse to run.
     const unmet = unmetWorkerRequirement(workerType, {
       agentApiBaseUrl: options.apiPublicOrigin,
     })

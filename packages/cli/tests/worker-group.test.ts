@@ -70,9 +70,8 @@ describe("sixb worker-group", () => {
   })
 
   test("refuses without migrating, so a bad command leaves no schema behind", async () => {
-    // The fixture registers agents, so auto-selection picks the `agent` worker, whose
-    // construction needs an API origin. The refusal is right; running a schema change
-    // first was not. A migration can take minutes and is not undone by the exit code.
+    // The fixture registers agents, so auto-selection picks the `agent` worker, whose construction
+    // needs an API origin. The refusal is right; running a schema change first was not.
     const result = await runOnce(["worker-group"], "worker-group", {
       SIXB_API_PUBLIC_ORIGIN: undefined,
     })

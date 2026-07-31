@@ -71,11 +71,8 @@ describe("assertShareableProviders", () => {
   })
 
   test("refuses a third-party provider on its own declaration", () => {
-    // No `instanceof` anywhere in the guard: `scope` is required on the contract, so a
-    // provider nobody here has heard of answers the same question `InMemoryQueues` does.
-    // The old optional marker made this the one case that got through — two copies of
-    // @sixb/core defeat `instanceof`, and a provider that forgot the marker read as
-    // shareable.
+    // The case the old optional marker let through: no `instanceof` in the guard, so a provider
+    // nobody here has heard of answers the same question `InMemoryQueues` does.
     expect(() =>
       assertShareableProviders(sixbWith({ queues: new ProcessLocalQueues() }), "worker")
     ).toThrow(/requires a queues provider/)

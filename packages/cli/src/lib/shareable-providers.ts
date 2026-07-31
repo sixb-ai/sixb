@@ -6,12 +6,10 @@ import { type ProductionRole, productionRoleFacts } from "./production-roles"
 /**
  * The two provider slots that declare whether they cross a process boundary.
  *
- * Storage, lake storage and blob storage are left out on purpose. Local files and
- * SQLite survive a restart, and whether a directory is a shared mount is not
- * something the runtime can know — a guess there would either block a legitimate
- * single-node deployment or give false confidence about a multi-replica one. Brokers
- * and queues are different: `scope` is required on both contracts, so this reads an
- * answer instead of inferring one.
+ * Storage, lake storage and blob storage are left out on purpose: whether a directory is a shared
+ * mount is not something the runtime can know, and a guess would either block a legitimate
+ * single-node deployment or give false confidence about a multi-replica one. `scope` is required on
+ * the broker and queues contracts, so this reads an answer instead of inferring one.
  */
 const SLOTS = [
   {
@@ -26,10 +24,8 @@ const SLOTS = [
   },
 ] as const
 
-// A required field, so no `instanceof` and no fallback. Both were symptoms of an
-// optional marker: `instanceof` because two copies of @sixb/core in one dependency
-// graph defeat it, the marker because a test double does not extend our class. Neither
-// question survives a provider that has to answer for itself.
+// A required field, so no `instanceof` and no fallback — both were symptoms of an optional
+// marker, and neither question survives a provider that answers for itself.
 function isProcessLocal(slot: (typeof SLOTS)[number], sixb: LoadedSixb): boolean {
   return slot.get(sixb).scope === "process"
 }

@@ -186,11 +186,8 @@ function dependencyEventLabel(dependency: RuleSummary["dependencies"][number]): 
 /**
  * What the badge is allowed to claim.
  *
- * An empty `states` array is only a count of zero once the query has answered. While it
- * is loading it is empty because nothing came back yet; when it fails it is empty
- * because the request did; when the runtime records no rule state it is empty because
- * nothing is ever written. "None active" is a claim about the rule, and only one of
- * those four supports it.
+ * An empty `states` array is only a count of zero once the query has answered — loading, failed
+ * and unrecorded are all empty for reasons that say nothing about the rule.
  */
 export type ActiveStateCount =
   | { readonly kind: "known"; readonly count: number }
@@ -199,10 +196,8 @@ export type ActiveStateCount =
   | { readonly kind: "error" }
 
 /**
- * The reason a rule-state query cannot support a count, or `null` when it can.
- *
- * Read once per query and shared by every row, so a list cannot show one rule as
- * unrecorded and the next as zero.
+ * The reason a rule-state query cannot support a count, or `null` when it can. Read once per query
+ * and shared by every row, so a list cannot show one rule as unrecorded and the next as zero.
  */
 export function unknownActiveStates(query: {
   isLoading: boolean
@@ -218,8 +213,7 @@ export function unknownActiveStates(query: {
 }
 
 function ActiveStateBadge({ count }: { count: ActiveStateCount }) {
-  // Nothing at all while loading. A badge that appears saying one thing and then
-  // changes is worse than a badge that arrives late.
+  // A badge that appears saying one thing and then changes is worse than one that arrives late.
   if (count.kind === "loading") {
     return null
   }
@@ -619,9 +613,8 @@ export function RulesPage() {
     }
     return counts
   }, [states])
-  // The map is only consulted when the query supports a count. A rule absent from it is
-  // then genuinely at zero, which is a different statement from the query having no
-  // answer to give.
+  // Only consulted when the query supports a count, so a rule absent from the map is genuinely
+  // at zero rather than unknown.
   const activeCount = (ruleId: string): ActiveStateCount =>
     unknownStates ?? { kind: "known", count: activeCountByRule.get(ruleId) ?? 0 }
 
@@ -777,9 +770,8 @@ export function RuleDetailPage() {
     )
   }
 
-  // `total` is only a total when the query answered. The panel below already draws the
-  // distinction between an unrecorded history and an empty one; the badge used to
-  // contradict it, reading "None active" directly above "Rule state is not recorded".
+  // The panel below already distinguishes an unrecorded history from an empty one; the badge used
+  // to contradict it, reading "None active" directly above "Rule state is not recorded".
   const activeTotal: ActiveStateCount = unknownActiveStates(statesQuery) ?? {
     kind: "known",
     count: statesQuery.data?.total ?? states.length,

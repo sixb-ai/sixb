@@ -54,14 +54,10 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
     const workerTypes =
       requestedTypes.length > 0 ? requestedTypes : resolveRegisteredWorkerTypes(sixb)
 
-    // Before the `map()` below, which constructs them. One unconstructable type used to
-    // throw from inside that map, so the operator heard about the first problem only and
-    // never learned that it had taken every other worker down with it.
-    //
-    // And before the migration, which is the first thing here that changes something. A
-    // group that cannot start every worker it was asked for is a bad command, and a bad
-    // command must not leave a schema behind: `--worker-type nonsense` used to migrate
-    // storage and then refuse to run.
+    // Before the `map()` below, which constructs them: one unconstructable type used to throw
+    // from inside that map, so the operator heard about the first problem and never learned it
+    // had taken every other worker down. And before the migration, which used to run first and
+    // leave a schema behind on a command that then refused.
     assertWorkerInputs({
       workerTypes,
       options: { agentApiBaseUrl: options.apiPublicOrigin },

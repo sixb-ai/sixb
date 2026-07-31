@@ -99,12 +99,7 @@ export class BullMqQueues implements Queues {
     this.agents = new BullMqQueue<AgentRunRequestedQueueJob>(shared, "agent.runs")
   }
 
-  /**
-   * `PING` on the non-blocking handle: the one Redis command that proves the server is
-   * answering without touching a lane. The worker connection is deliberately left alone
-   * — it is the one BullMQ blocks on, and a probe has no business queueing behind a
-   * blocking fetch.
-   */
+  /** The non-blocking handle: a probe has no business queueing behind BullMQ's fetch loop. */
   async health(): Promise<void> {
     await this.connections.queueConnection.ping()
   }

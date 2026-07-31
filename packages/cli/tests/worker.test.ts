@@ -131,9 +131,8 @@ describe("sixb worker", () => {
   })
 
   test("refuses without migrating, so a bad command leaves no schema behind", async () => {
-    // `sixb worker agent` cannot start without an API origin. It used to find that out
-    // after bringing the schema up to date, which is a schema change performed by a
-    // command that then refused to run.
+    // `sixb worker agent` cannot start without an API origin, and used to find that out after
+    // bringing the schema up to date.
     const logPath = await tempLogPath()
     const result = runWorkerFixture("prod-roles", ["agent"], {
       logPath,
