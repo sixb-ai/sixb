@@ -12,7 +12,7 @@ import {
   RuleStateSchema,
   RuleStatesQuerySchema,
 } from "../schemas/rules"
-import { handleRouteError, parseOptionalInt } from "../utils/http"
+import { handleRouteError, parseOptionalInt, unconfiguredStorageResponse } from "../utils/http"
 
 function serializeRule(rule: RuleDefinition): ReturnType<typeof RuleSchema.parse> {
   return RuleSchema.parse({
@@ -71,11 +71,7 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           const parsed = RuleStatesQuerySchema.parse(query)
           const storage = sixb.storage.rules
           if (!storage) {
-            return {
-              states: [],
-              hasMore: false,
-              total: 0,
-            }
+            return unconfiguredStorageResponse(set, "Rule state storage")
           }
 
           const objectTypeIds = authz ? [...authz.grants["view:object"]] : undefined
@@ -113,7 +109,11 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       },
       {
         query: RuleStatesQuerySchema,
-        response: { 200: RuleStateListResponseSchema, 400: ErrorResponseSchema },
+        response: {
+          200: RuleStateListResponseSchema,
+          400: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
         detail: {
           summary: "List active rule states",
           tags: [OPENAPI_TAGS.ruleStates.name],

@@ -21,7 +21,13 @@ import {
   ProjectionRunSchema,
   ProjectionRunsQuerySchema,
 } from "../schemas/projections"
-import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
+import {
+  handleRouteError,
+  parseDate,
+  parseOptionalInt,
+  toIsoString,
+  unconfiguredStorageResponse,
+} from "../utils/http"
 
 function serializeProjectionRun(run: ProjectionRunRecord) {
   return ProjectionRunSchema.parse({
@@ -163,8 +169,7 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
         try {
           const storage = sixb.storage.projectionRuns
           if (!storage) {
-            set.status = 400
-            return { error: "Projection run storage is not configured" }
+            return unconfiguredStorageResponse(set, "Projection run storage")
           }
 
           const parsed = ProjectionRunsQuerySchema.parse(query)
@@ -194,7 +199,11 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
       },
       {
         query: ProjectionRunsQuerySchema,
-        response: { 200: ProjectionRunListResponseSchema, 400: ErrorResponseSchema },
+        response: {
+          200: ProjectionRunListResponseSchema,
+          400: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
         detail: {
           summary: "List projection run history",
           tags: [OPENAPI_TAGS.projectionRuns.name],
@@ -210,8 +219,7 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
         try {
           const storage = sixb.storage.projectionRuns
           if (!storage) {
-            set.status = 400
-            return { error: "Projection run storage is not configured" }
+            return unconfiguredStorageResponse(set, "Projection run storage")
           }
 
           const run = await storage.getById({ projectId: sixb.id, id: params.runId })
@@ -231,6 +239,7 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
           200: ProjectionRunSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Get a projection run by id",

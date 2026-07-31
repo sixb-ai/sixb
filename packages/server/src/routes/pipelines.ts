@@ -15,7 +15,13 @@ import {
   PipelineSchema,
   RequestPipelineRunResponseSchema,
 } from "../schemas/pipelines"
-import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
+import {
+  handleRouteError,
+  parseDate,
+  parseOptionalInt,
+  toIsoString,
+  unconfiguredStorageResponse,
+} from "../utils/http"
 
 function serializePipelineRun(run: PipelineRunRecord) {
   return {
@@ -186,11 +192,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           const parsed = PipelineRunsQuerySchema.parse(query)
           const storage = sixb.storage.pipelineRuns
           if (!storage) {
-            return {
-              runs: [],
-              hasMore: false,
-              total: 0,
-            }
+            return unconfiguredStorageResponse(set, "Pipeline run storage")
           }
 
           // Scope to runnable pipelines the same way workflow run history does:
@@ -221,7 +223,11 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       },
       {
         query: PipelineRunsQuerySchema,
-        response: { 200: PipelineRunListResponseSchema, 400: ErrorResponseSchema },
+        response: {
+          200: PipelineRunListResponseSchema,
+          400: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
         detail: {
           summary: "List pipeline run history",
           tags: [OPENAPI_TAGS.pipelineRuns.name],
@@ -237,8 +243,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         try {
           const storage = sixb.storage.pipelineRuns
           if (!storage) {
-            set.status = 400
-            return { error: "Pipeline run storage is not configured" }
+            return unconfiguredStorageResponse(set, "Pipeline run storage")
           }
 
           const run = await storage.getById({
@@ -272,6 +277,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           200: PipelineRunDetailResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Get pipeline run detail",

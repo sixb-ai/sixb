@@ -30,7 +30,30 @@ export interface ContextualFileContentResponseInput<TQuery extends FileContentQu
   readonly invalidQueryMessage?: string
 }
 
-export function fileContentGetResponses() {
+/**
+ * Declared only by routes whose content lives behind an optional storage role
+ * (action runs, workflow runs, agent messages). Object file content is not one of
+ * them — object storage is mandatory — so this stays opt-in rather than being
+ * folded into the shared shape, or the schema would promise a status those routes
+ * can never return.
+ */
+const unconfiguredStorageResponse = {
+  501: {
+    description: "The storage role backing this content is not configured",
+    content: {
+      "application/json": {
+        schema: { $ref: "#/components/schemas/ErrorResponse" },
+      },
+    },
+  },
+} as const
+
+export interface FileContentResponsesOptions {
+  /** Add the 501 the route returns when its storage role is absent. */
+  readonly optionalStorage?: boolean
+}
+
+export function fileContentGetResponses(options: FileContentResponsesOptions = {}) {
   return {
     200: {
       description: "File content",
@@ -67,10 +90,11 @@ export function fileContentGetResponses() {
     416: {
       description: "Requested byte range is not satisfiable",
     },
+    ...(options.optionalStorage ? unconfiguredStorageResponse : {}),
   } as const
 }
 
-export function fileContentHeadResponses() {
+export function fileContentHeadResponses(options: FileContentResponsesOptions = {}) {
   return {
     200: {
       description: "File content headers",
@@ -97,6 +121,7 @@ export function fileContentHeadResponses() {
     416: {
       description: "Requested byte range is not satisfiable",
     },
+    ...(options.optionalStorage ? unconfiguredStorageResponse : {}),
   } as const
 }
 

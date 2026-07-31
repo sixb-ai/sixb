@@ -62,7 +62,12 @@ import {
 } from "../schemas/agents"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
-import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
+import {
+  handleRouteError,
+  parseOptionalInt,
+  toIsoString,
+  unconfiguredStorageResponse,
+} from "../utils/http"
 
 const AgentMessageFileContentQuerySchema = FileContentQuerySchema.extend({
   path: z
@@ -232,8 +237,7 @@ function handleAgentRouteError(
 }
 
 function missingAgentStorageResponse(set: { status?: number | string }): { error: string } {
-  set.status = 400
-  return { error: "Agent storage is not configured" }
+  return unconfiguredStorageResponse(set, "Agent storage")
 }
 
 async function agentMessageFileContentResponse(
@@ -383,7 +387,11 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       },
       {
         query: AgentThreadListQuerySchema,
-        response: { 200: AgentThreadListResponseSchema, 400: ErrorResponseSchema },
+        response: {
+          200: AgentThreadListResponseSchema,
+          400: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
         detail: {
           summary: "List agent threads",
           tags: [OPENAPI_TAGS.agentThreads.name],
@@ -436,6 +444,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           // response never discloses that a forbidden id exists.
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Create an agent thread",
@@ -474,7 +483,12 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       },
       {
         params: AgentThreadParamsSchema,
-        response: { 200: AgentThreadSchema, 400: ErrorResponseSchema, 404: ErrorResponseSchema },
+        response: {
+          200: AgentThreadSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
         detail: {
           summary: "Get agent thread",
           tags: [OPENAPI_TAGS.agentThreads.name],
@@ -544,6 +558,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           200: AgentMessageListResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "List agent thread messages",
@@ -564,7 +579,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           tags: ["Agents"],
           operationId: "getAgentMessageFileContent",
           security: bearerSecurityRequirement("getAgentMessageFileContent"),
-          responses: fileContentGetResponses(),
+          responses: fileContentGetResponses({ optionalStorage: true }),
         },
       }
     )
@@ -579,7 +594,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           tags: ["Agents"],
           operationId: "headAgentMessageFileContent",
           security: bearerSecurityRequirement("headAgentMessageFileContent"),
-          responses: fileContentHeadResponses(),
+          responses: fileContentHeadResponses({ optionalStorage: true }),
         },
       }
     )
@@ -634,6 +649,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Post an agent thread message",
@@ -722,6 +738,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Cancel an agent thread's active run",
@@ -808,6 +825,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Retry a failed agent run",
@@ -865,6 +883,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           200: AgentRunListResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "List an agent thread's runs",
@@ -908,7 +927,12 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       },
       {
         params: AgentRunParamsSchema,
-        response: { 200: AgentRunSchema, 400: ErrorResponseSchema, 404: ErrorResponseSchema },
+        response: {
+          200: AgentRunSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
         detail: {
           summary: "Get agent run",
           tags: [OPENAPI_TAGS.agentRuns.name],

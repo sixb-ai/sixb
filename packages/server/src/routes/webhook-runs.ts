@@ -4,7 +4,13 @@ import type { Elysia } from "elysia"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { WebhookRunListResponseSchema, WebhookRunsQuerySchema } from "../schemas/webhook-runs"
-import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
+import {
+  handleRouteError,
+  parseDate,
+  parseOptionalInt,
+  toIsoString,
+  unconfiguredStorageResponse,
+} from "../utils/http"
 
 function serializeWebhookRun(run: WebhookRunRecord) {
   return {
@@ -33,11 +39,7 @@ export function registerWebhookRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
         const parsed = WebhookRunsQuerySchema.parse(query)
         const storage = sixb.storage.webhookRuns
         if (!storage) {
-          return {
-            runs: [],
-            hasMore: false,
-            total: 0,
-          }
+          return unconfiguredStorageResponse(set, "Webhook run storage")
         }
 
         const result = await storage.list({
@@ -64,7 +66,11 @@ export function registerWebhookRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
     },
     {
       query: WebhookRunsQuerySchema,
-      response: { 200: WebhookRunListResponseSchema, 400: ErrorResponseSchema },
+      response: {
+        200: WebhookRunListResponseSchema,
+        400: ErrorResponseSchema,
+        501: ErrorResponseSchema,
+      },
       detail: {
         summary: "List webhook run history",
         tags: [OPENAPI_TAGS.webhooks.name],

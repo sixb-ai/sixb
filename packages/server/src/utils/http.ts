@@ -32,6 +32,23 @@ export function parseOptionalInt(value: string | undefined): number | undefined 
   return parsed
 }
 
+/**
+ * A storage role the runtime was not configured with.
+ *
+ * 501 and not 400: the request was well-formed and the caller can do nothing
+ * about it. It is not 404 either — that would claim the resource is absent when
+ * what is absent is the store that would have recorded it. Callers that treat
+ * "no rows" and "not recorded" the same way silently report an empty history as
+ * a healthy one.
+ */
+export function unconfiguredStorageResponse(
+  set: { status?: number | string },
+  role: string
+): { error: string } {
+  set.status = 501
+  return { error: `[SixbServer] ${role} is not configured on this runtime.` }
+}
+
 export function handleRouteError(
   error: unknown,
   set: { status?: number | string }
