@@ -1,4 +1,5 @@
 import { InMemoryBroker, InMemoryQueues } from "@sixb/core"
+import { SixbCliError } from "./errors"
 import type { LoadedSixb } from "./loadSixb"
 import { type ProductionRole, productionRoleFacts } from "./production-roles"
 
@@ -81,11 +82,13 @@ export function assertShareableProviders(sixb: LoadedSixb, role: ProductionRole)
   if (!productionRoleFacts(role).onEventPlane) return
 
   for (const offender of findProcessLocalProviders(sixb)) {
-    throw new Error(
+    throw new SixbCliError(
       `[SixbCLI] \`sixb ${role}\` requires a ${offender.slot} provider that can be shared across ` +
         `processes, but this project configures ${offender.configured}, which only works inside ` +
-        `one process. Jobs and events published here would be invisible to every other role. Use ` +
-        `${offender.replacements}, or keep the in-memory provider for \`sixb dev\` only.`
+        `one process. Jobs and events published here would be invisible to every other role.`,
+      {
+        remediation: `Use ${offender.replacements}, or keep the in-memory provider for \`sixb dev\` only.`,
+      }
     )
   }
 }

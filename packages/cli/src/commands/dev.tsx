@@ -6,7 +6,7 @@ import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib
 import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
 import { runUntilSignal, startSixbRuntime, stopQuietly } from "../lib/runtime"
 import { generateProjectTypes } from "../lib/typegen"
-import { DevView, ErrorView, LoadingView, renderPersistent, renderStatic } from "../ui"
+import { DevView, LoadingView, renderCliError, renderPersistent } from "../ui"
 
 export interface DevOptions {
   entry?: string
@@ -135,8 +135,7 @@ export async function runDev(options: DevOptions = {}) {
     await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
     await stopQuietly(() => server?.stop() ?? Promise.resolve())
     await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
-    const message = error instanceof Error ? error.message : String(error)
-    await renderStatic(<ErrorView message={message} />)
+    await renderCliError(error)
     process.exit(1)
   }
 }

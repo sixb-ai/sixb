@@ -1,6 +1,7 @@
 import { Box, render, Text } from "ink"
 import type React from "react"
 import { useEffect, useMemo, useState } from "react"
+import { errorMessage, errorRemediation } from "../lib/errors"
 
 // ─── Primitives ──────────────────────────────────────────────────────────────
 
@@ -15,6 +16,29 @@ export async function renderStatic(view: React.ReactNode) {
 
 export function renderPersistent(view: React.ReactNode) {
   return render(view, { exitOnCtrlC: false })
+}
+
+/**
+ * Renders a caught failure the one way the CLI renders failures.
+ *
+ * Every command's catch block wrote the same three lines — narrow `unknown` to a
+ * message, render `ErrorView`, exit — which is three chances per command to word it
+ * differently, and eleven copies of the `instanceof Error` narrowing. It also means a
+ * remediation carried on the error reaches the terminal without each caller
+ * remembering to pass it through.
+ */
+export async function renderCliError(
+  error: unknown,
+  options: { readonly title?: string; readonly details?: readonly string[] } = {}
+): Promise<void> {
+  await renderStatic(
+    <ErrorView
+      {...(options.title ? { title: options.title } : {})}
+      message={errorMessage(error)}
+      {...(errorRemediation(error) ? { remediation: errorRemediation(error) } : {})}
+      {...(options.details ? { details: options.details } : {})}
+    />
+  )
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
@@ -432,11 +456,14 @@ export function VersionView({ version }: { version: string }) {
 export function ErrorView({
   title = "Error",
   message,
+  remediation,
   details = [],
 }: {
   title?: string
   message: string
-  details?: string[]
+  /** What to do next. Rendered apart from the diagnosis, not appended to it. */
+  remediation?: string
+  details?: readonly string[]
 }) {
   return (
     <Box flexDirection="column">
@@ -447,6 +474,13 @@ export function ErrorView({
       <Panel title="Failure" borderColor="red">
         <Text>{message}</Text>
       </Panel>
+      {remediation ? (
+        <>
+          <Spacer />
+          <SectionTitle>Try this</SectionTitle>
+          <Text>{remediation}</Text>
+        </>
+      ) : null}
       {details.length > 0 ? (
         <>
           <Spacer />

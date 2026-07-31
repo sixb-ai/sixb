@@ -1,4 +1,5 @@
 import { migrateStorage } from "@sixb/core"
+import { SixbCliError } from "./errors"
 import type { LoadedSixb } from "./loadSixb"
 import type { StorageSchemaRole } from "./production-roles"
 
@@ -113,13 +114,17 @@ async function runMigration(sixb: LoadedSixb, role: StorageSchemaRole) {
 function concurrentMigrationError(error: unknown, role: StorageSchemaRole): Error {
   const detail = error instanceof Error ? error.message : String(error)
 
-  return new Error(
+  return new SixbCliError(
     `[SixbCLI] \`sixb ${role}\` could not migrate storage because the database was locked ` +
       `by another process: ${detail}. SQLite has no cross-process migration lock, so roles ` +
-      `starting together on the same file collide. Run \`sixb db migrate\` once before ` +
-      `starting the roles and start them with \`--no-migrate\`, or move to a storage ` +
-      `provider that serializes migrations across processes.`,
-    { cause: error }
+      `starting together on the same file collide.`,
+    {
+      cause: error,
+      remediation:
+        "Run `sixb db migrate` once before starting the roles and start them with " +
+        "`--no-migrate`, or move to a storage provider that serializes migrations across " +
+        "processes.",
+    }
   )
 }
 

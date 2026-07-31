@@ -15,7 +15,7 @@ import {
   resolveRegisteredWorkerTypes,
   resolveWorkerTypeToStart,
 } from "../lib/worker-registry"
-import { ErrorView, LoadingView, renderPersistent, renderStatic, WorkerGroupView } from "../ui"
+import { LoadingView, renderCliError, renderPersistent, WorkerGroupView } from "../ui"
 
 export interface WorkerGroupOptions {
   entry?: string
@@ -116,8 +116,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
   } catch (error) {
     app.unmount()
     await stopWorkersAndProviders()
-    const message = error instanceof Error ? error.message : String(error)
-    await renderStatic(<ErrorView message={message} />)
+    await renderCliError(error)
     process.exit(1)
   }
 }

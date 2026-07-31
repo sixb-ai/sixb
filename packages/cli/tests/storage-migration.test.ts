@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage, type MigrationReport, type StorageMigrator } from "@sixb/core"
+import { errorRemediation } from "../src/lib/errors"
 import type { LoadedSixb } from "../src/lib/loadSixb"
 import { migrateStorageForRole } from "../src/lib/storage-migration"
 
@@ -121,10 +122,11 @@ describe("migrateStorageForRole", () => {
 
     expect(failure.message).toContain("`sixb worker`")
     expect(failure.message).toContain("no cross-process migration lock")
-    expect(failure.message).toContain("--no-migrate")
     // The driver's own words are kept: they are what an operator will search for.
     expect(failure.message).toContain("SQLITE_BUSY")
     expect(failure.cause).toBeInstanceOf(Error)
+    // What to do is a remediation, not part of the diagnosis.
+    expect(errorRemediation(failure)).toContain("--no-migrate")
   })
 
   test("passes an unrelated migration failure through untouched", async () => {

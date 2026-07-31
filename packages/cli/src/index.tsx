@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { join } from "node:path"
-import { ErrorView, HelpView, renderStatic, VersionView } from "./ui"
+import { HelpView, renderCliError, renderStatic, VersionView } from "./ui"
 
 const args = process.argv.slice(2)
 
@@ -385,7 +385,6 @@ async function main(): Promise<void> {
 }
 
 main().catch(async (error) => {
-  const message = error instanceof Error ? error.message : String(error)
-  await renderStatic(<ErrorView message={message} />)
+  await renderCliError(error)
   process.exit(1)
 })

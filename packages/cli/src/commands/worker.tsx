@@ -10,7 +10,7 @@ import {
 import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
 import { createWorkerForType, resolveWorkerTypeToStart } from "../lib/worker-registry"
-import { ErrorView, LoadingView, renderPersistent, renderStatic, WorkerView } from "../ui"
+import { LoadingView, renderCliError, renderPersistent, WorkerView } from "../ui"
 
 export interface WorkerOptions {
   entry?: string
@@ -76,8 +76,7 @@ export async function runWorker(options: WorkerOptions = {}) {
     if (sixb) {
       await stopSixbProviders(sixb)
     }
-    const message = error instanceof Error ? error.message : String(error)
-    await renderStatic(<ErrorView message={message} />)
+    await renderCliError(error)
     process.exit(1)
   }
 }

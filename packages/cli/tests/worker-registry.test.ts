@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { SixbCliError } from "../src/lib/errors"
 import { assertWorkerInputs } from "../src/lib/worker-registry"
 
 describe("assertWorkerInputs", () => {
@@ -49,7 +50,8 @@ describe("assertWorkerInputs", () => {
     expect(failure.message).toContain("agent requires --api-public-origin")
     expect(failure.message).toContain("No worker started, including the 2 that were ready")
     expect(failure.message).toContain("(sync, pipeline)")
-    expect(failure.message).toContain("`sixb worker-group sync pipeline`")
+    // The way forward is a remediation, so the terminal can give it its own place.
+    expect(failure.remediation).toContain("`sixb worker-group sync pipeline`")
   })
 
   test("offers no escape hatch when the operator named the workers", () => {
@@ -60,8 +62,7 @@ describe("assertWorkerInputs", () => {
     expect(failure.message).toContain("agent requires --api-public-origin")
     // Someone who typed `sixb worker-group sync agent` asked for the agent worker.
     // Suggesting they drop it would be answering a question they did not ask.
-    expect(failure.message).not.toContain("selected automatically")
-    expect(failure.message).not.toContain("name the workers you want")
+    expect(failure.remediation).toBeUndefined()
   })
 
   test("ignores an unknown worker type, which the type resolver already rejects", () => {
@@ -73,12 +74,12 @@ describe("assertWorkerInputs", () => {
   })
 })
 
-function expectFailure(run: () => void): Error {
+function expectFailure(run: () => void): SixbCliError {
   try {
     run()
   } catch (error) {
-    if (error instanceof Error) return error
+    if (error instanceof SixbCliError) return error
     throw error
   }
-  throw new Error("Expected the call to throw.")
+  throw new Error("Expected the call to throw a SixbCliError.")
 }

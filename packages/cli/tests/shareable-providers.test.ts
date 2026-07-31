@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker, InMemoryQueues } from "@sixb/core"
+import { SixbCliError } from "../src/lib/errors"
 import type { LoadedSixb } from "../src/lib/loadSixb"
 import type { ProductionRole } from "../src/lib/production-roles"
 import { assertShareableProviders } from "../src/lib/shareable-providers"
@@ -50,13 +51,19 @@ describe("assertShareableProviders", () => {
     }
   })
 
-  test("names the replacement so the message is actionable", () => {
-    expect(() =>
+  test("carries the replacement as a remediation, not buried in the diagnosis", () => {
+    // The terminal gives a remediation its own place, so a reader is not left to find the
+    // instruction inside a paragraph that also explains the failure.
+    const queuesFailure = expectSixbCliError(() =>
       assertShareableProviders(sixbWith({ queues: new InMemoryQueues() }), "worker")
-    ).toThrow(/@sixb\/bullmq/)
-    expect(() =>
+    )
+    expect(queuesFailure.remediation).toContain("@sixb/bullmq")
+    expect(queuesFailure.message).not.toContain("@sixb/bullmq")
+
+    const brokerFailure = expectSixbCliError(() =>
       assertShareableProviders(sixbWith({ broker: new InMemoryBroker() }), "api")
-    ).toThrow(/@sixb\/redis or @sixb\/nats/)
+    )
+    expect(brokerFailure.remediation).toContain("@sixb/redis or @sixb/nats")
   })
 
   test("honours the declared marker, for providers `instanceof` cannot see", () => {
@@ -86,3 +93,13 @@ describe("assertShareableProviders", () => {
     }
   })
 })
+
+function expectSixbCliError(run: () => void): SixbCliError {
+  try {
+    run()
+  } catch (error) {
+    if (error instanceof SixbCliError) return error
+    throw error
+  }
+  throw new Error("Expected the call to throw a SixbCliError.")
+}

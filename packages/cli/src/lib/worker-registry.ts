@@ -5,6 +5,7 @@ import { PipelineWorker } from "@sixb/pipeline-worker"
 import { ProjectionWorker } from "@sixb/projection-worker"
 import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
+import { SixbCliError } from "./errors"
 import type { LoadedSixb } from "./loadSixb"
 
 export interface WorkerCreationOptions {
@@ -119,12 +120,14 @@ export function assertWorkerInputs(input: WorkerGroupInputs): void {
     ready.length > 0
       ? ` No worker started, including the ${ready.length} that were ready (${ready.join(", ")}).`
       : ""
-  const remedy = input.autoSelected
-    ? ` These were selected automatically from what the project registers. Fix the above, or ` +
+  const remediation = input.autoSelected
+    ? `These were selected automatically from what the project registers. Fix the above, or ` +
       `name the workers you want: \`sixb worker-group ${ready.join(" ")}\`.`
-    : ""
+    : undefined
 
-  throw new Error(`[SixbCLI] \`sixb worker-group\` cannot start: ${blocked}.${readyNote}${remedy}`)
+  throw new SixbCliError(`[SixbCLI] \`sixb worker-group\` cannot start: ${blocked}.${readyNote}`, {
+    remediation,
+  })
 }
 
 export function resolveRegisteredWorkerTypes(sixb: LoadedSixb): readonly string[] {

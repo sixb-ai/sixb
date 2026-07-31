@@ -56,14 +56,11 @@ async function startThenStop(args: readonly string[], fixture: string) {
  * `│` and padding. Asserting on a phrase requires putting it back together first.
  */
 function flattenTerminalOutput(output: string): string {
-  return (
-    output
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
-      .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
-      .replace(/[\u2500-\u257f]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  )
+  return output
+    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
+    .replace(/[\u2500-\u257f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
 }
 
 function claimedWorkerTypes(logEntries: Array<Record<string, unknown>>): Set<string> {
@@ -113,6 +110,9 @@ describe("sixb worker-group (e2e)", () => {
       expect(output).toContain("agent requires --api-public-origin")
       // The three facts an operator needs: what blocked, what it cost, and the way out.
       expect(output).toContain("3 that were ready (sync, pipeline, projection)")
+      // The way out arrives as a remediation, rendered in its own section rather than
+      // appended to the diagnosis — this is what proves it survives the terminal path.
+      expect(output).toContain("Try this")
       expect(output).toContain("sixb worker-group sync pipeline projection")
     },
     WORKER_GROUP_TIMEOUT_MS

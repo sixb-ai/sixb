@@ -9,7 +9,7 @@ import {
   waitForWorkerFailure,
 } from "../lib/runtime"
 import { migrateStorageForRole } from "../lib/storage-migration"
-import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
+import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
 
 export interface OrchestratorOptions {
   entry?: string
@@ -81,8 +81,7 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
     if (sixb) {
       await stopSixbProviders(sixb)
     }
-    const message = error instanceof Error ? error.message : String(error)
-    await renderStatic(<ErrorView message={message} />)
+    await renderCliError(error)
     process.exit(1)
   }
 }
