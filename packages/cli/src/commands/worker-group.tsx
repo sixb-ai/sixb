@@ -7,11 +7,11 @@ import {
   stopSixbProviders,
   waitForWorkerFailure,
 } from "../lib/runtime"
+import { assertShareableProviders } from "../lib/shareable-providers"
 import {
   createWorkerForType,
   resolveRegisteredWorkerTypes,
   resolveWorkerTypeToStart,
-  usesInMemoryQueues,
 } from "../lib/worker-registry"
 import { ErrorView, LoadingView, renderPersistent, renderStatic, WorkerGroupView } from "../ui"
 
@@ -46,11 +46,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
   try {
     sixb = await loadSixbFromEntry(entry)
 
-    if (usesInMemoryQueues(sixb)) {
-      throw new Error(
-        "[SixbWorkerGroup] `sixb worker-group` requires a queue provider that can be shared across processes. `InMemoryQueues` is for `sixb dev` only."
-      )
-    }
+    assertShareableProviders(sixb, "worker-group")
 
     const workerTypes =
       requestedTypes.length > 0 ? requestedTypes : resolveRegisteredWorkerTypes(sixb)

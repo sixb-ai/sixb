@@ -17,7 +17,7 @@ export interface OrchestratorOptions {
 export async function runOrchestrator(options: OrchestratorOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionSixb({ entry: options.entry })
+  const loaded = await loadProductionSixb({ entry: options.entry, role: "orchestrator" })
   const app = renderPersistent(
     <LoadingView
       title="Starting sixb orchestrator"

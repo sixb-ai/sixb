@@ -18,7 +18,7 @@ export interface AppOptions {
 export async function runApp(options: AppOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionSixb({ entry: options.entry })
+  const loaded = await loadProductionSixb({ entry: options.entry, role: "app" })
   const host = options.host ?? "0.0.0.0"
   const app = renderPersistent(
     <LoadingView title="Starting sixb app" subtitle={loaded.entry} status="Starting app" />

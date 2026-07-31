@@ -8,7 +8,6 @@ import {
   defineSchedule,
   defineSync,
   InMemoryBlobStorage,
-  InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
@@ -18,6 +17,7 @@ import {
   Sixb,
   type StorageMigrator,
 } from "@sixb/core"
+import { SharedBroker } from "../shared/sharedBroker"
 
 const Transaction = defineObjectType({
   id: "Transaction",
@@ -73,8 +73,6 @@ class TrackingLakeStorage extends InMemoryLakeStorage {
   }
 }
 
-// Not an `InMemoryQueues` instance and without an in-memory `provider` tag, so it
-// passes the `sixb worker` shared-queue guard while still backed by real queues.
 class SharedQueues implements Queues {
   private readonly inner = new InMemoryQueues()
 
@@ -138,7 +136,7 @@ export const sixb = new Sixb({
   auth: { id: "disabled", kind: "disabled", allowDisabledInProduction: true },
   ontology: [Transaction],
   connectors: [erpDb],
-  broker: new InMemoryBroker(),
+  broker: new SharedBroker(),
   storage: loggingStorage(),
   lakeStorage: new TrackingLakeStorage(),
   blobStorage: new InMemoryBlobStorage(),

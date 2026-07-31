@@ -86,7 +86,7 @@ describe("sixb worker", () => {
     const result = runWorkerFixture("valid-project", ["sync"])
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("requires a queue provider")
+    expect(result.stdout).toContain("requires a queues provider")
     expect(result.stdout).toContain("InMemoryQueues")
     expect(result.stderr).toBe("")
   })
@@ -98,7 +98,7 @@ describe("sixb worker", () => {
     expect(result.stdout).toContain("Unknown worker 'missing'")
     expect(result.stdout).toContain("sync, action, agent")
     expect(result.stdout).toContain("pipeline, projection, workflow")
-    expect(result.stdout).not.toContain("requires a queue provider")
+    expect(result.stdout).not.toContain("requires a queues provider")
     expect(result.stderr).toBe("")
   })
 
@@ -106,7 +106,7 @@ describe("sixb worker", () => {
     const result = runWorkerFixture("valid-project", ["workflow"])
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("requires a queue provider")
+    expect(result.stdout).toContain("requires a queues provider")
     expect(result.stdout).toContain("InMemoryQueues")
     expect(result.stdout).not.toContain("Unknown worker")
     expect(result.stderr).toBe("")

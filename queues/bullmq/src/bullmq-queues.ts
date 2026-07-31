@@ -68,7 +68,6 @@ export interface BullMqQueuesOptions {
  * (BullMQ requires `maxRetriesPerRequest: null` on the worker connection for blocking fetches).
  */
 export class BullMqQueues implements Queues {
-  readonly provider = "bullmq"
   readonly syncRuns: BullMqQueue<SyncRunRequestedQueueJob>
   readonly pipelines: BullMqQueue<PipelineRunRequestedQueueJob>
   readonly projections: BullMqQueue<ProjectionRunRequestedQueueJob>

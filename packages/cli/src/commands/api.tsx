@@ -21,7 +21,7 @@ export interface ApiOptions {
 export async function runApi(options: ApiOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionSixb({ entry: options.entry })
+  const loaded = await loadProductionSixb({ entry: options.entry, role: "api" })
   const host = options.host ?? "0.0.0.0"
   const app = renderPersistent(
     <LoadingView title="Starting sixb api" subtitle={loaded.entry} status="Preparing runtime" />

@@ -10,7 +10,6 @@ import {
   defineProjection,
   defineSync,
   InMemoryBlobStorage,
-  InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
@@ -20,6 +19,7 @@ import {
   Sixb,
   type StorageMigrator,
 } from "@sixb/core"
+import { SharedBroker } from "../shared/sharedBroker"
 
 const assistant = defineAgent("assistant", {
   name: "Assistant",
@@ -146,7 +146,7 @@ export const sixb = new Sixb({
   id: "cli-worker-group",
   ontology: [Order],
   connectors: [erpDb],
-  broker: new InMemoryBroker(),
+  broker: new SharedBroker(),
   storage: loggingStorage(),
   lakeStorage: new TrackingLakeStorage(),
   blobStorage: new InMemoryBlobStorage(),

@@ -1,9 +1,19 @@
 import { stat } from "node:fs/promises"
 import { basename, dirname, resolve, sep } from "node:path"
 import { type LoadedSixb, loadSixbFromEntry } from "./loadSixb"
+import { assertShareableProviders, type ProductionRole } from "./shareable-providers"
 
 export interface RuntimeEntryOptions {
   readonly entry?: string
+}
+
+export interface ProductionRuntimeOptions extends RuntimeEntryOptions {
+  /**
+   * The role being started. Required so the provider guard cannot be skipped by
+   * forgetting to call it: every production role goes through this loader, and the
+   * role union in `shareable-providers` decides whether the guard applies.
+   */
+  readonly role: ProductionRole
 }
 
 export interface ProductionPaths {
@@ -24,10 +34,11 @@ export async function resolveRuntimeEntry(options: RuntimeEntryOptions = {}): Pr
 }
 
 export async function loadProductionSixb(
-  options: RuntimeEntryOptions = {}
+  options: ProductionRuntimeOptions
 ): Promise<{ entry: string; sixb: LoadedSixb; projectRoot: string; buildOutdir: string }> {
   const entry = await resolveRuntimeEntry(options)
   const sixb = await loadSixbFromEntry(entry)
+  assertShareableProviders(sixb, options.role)
   const paths = await resolveProductionPaths(entry)
 
   return {

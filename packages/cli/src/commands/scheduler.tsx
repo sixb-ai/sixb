@@ -16,7 +16,7 @@ export interface SchedulerOptions {
 export async function runScheduler(options: SchedulerOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionSixb({ entry: options.entry })
+  const loaded = await loadProductionSixb({ entry: options.entry, role: "scheduler" })
   const app = renderPersistent(
     <LoadingView
       title="Starting sixb scheduler"

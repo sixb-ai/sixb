@@ -7,11 +7,8 @@ import {
   stopSixbProviders,
   waitForWorkerFailure,
 } from "../lib/runtime"
-import {
-  createWorkerForType,
-  resolveWorkerTypeToStart,
-  usesInMemoryQueues,
-} from "../lib/worker-registry"
+import { assertShareableProviders } from "../lib/shareable-providers"
+import { createWorkerForType, resolveWorkerTypeToStart } from "../lib/worker-registry"
 import { ErrorView, LoadingView, renderPersistent, renderStatic, WorkerView } from "../ui"
 
 export interface WorkerOptions {
@@ -36,11 +33,7 @@ export async function runWorker(options: WorkerOptions = {}) {
   try {
     sixb = await loadSixbFromEntry(entry)
 
-    if (usesInMemoryQueues(sixb)) {
-      throw new Error(
-        "[SixbWorker] `sixb worker` requires a queue provider that can be shared across processes. `InMemoryQueues` is for `sixb dev` only."
-      )
-    }
+    assertShareableProviders(sixb, "worker")
 
     app.rerender(
       <LoadingView title="Starting sixb worker" subtitle={entry} status="Starting worker" />

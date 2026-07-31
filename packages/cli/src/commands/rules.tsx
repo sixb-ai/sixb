@@ -17,7 +17,7 @@ export interface RulesOptions {
 export async function runRules(options: RulesOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionSixb({ entry: options.entry })
+  const loaded = await loadProductionSixb({ entry: options.entry, role: "rules" })
   const app = renderPersistent(
     <LoadingView title="Starting sixb rules" subtitle={loaded.entry} status="Starting rules" />
   )

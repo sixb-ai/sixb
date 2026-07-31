@@ -110,6 +110,13 @@ export interface Broker {
   ): Promise<() => void>
 
   /**
+   * Declares that this provider only works inside one process. See the same field
+   * on {@link Queues}: a process-local broker means each role subscribes to its own
+   * private streams and no event ever crosses a process boundary.
+   */
+  readonly processLocal?: true
+
+  /**
    * Release external resources. Optional: a provider that owns none omits it.
    *
    * Widened from `Promise<void>` so every provider slot declares the same shape —

@@ -204,6 +204,17 @@ export interface Queues {
   readonly actions: Queue<ActionRunRequestedQueueJob>
   readonly agents: Queue<AgentQueueJob>
 
+  /**
+   * Declares that this provider only works inside one process.
+   *
+   * A production deployment runs the API, the orchestrator and the workers as
+   * separate processes: one enqueues, another claims. A process-local provider
+   * gives each of them its own private lane, so jobs are published where nobody
+   * can see them and the system looks alive while doing nothing. Production roles
+   * refuse to start against one. Set it on test doubles too.
+   */
+  readonly processLocal?: true
+
   /** Release external resources. Optional: a provider that owns none omits it. */
   close?(): void | Promise<void>
 }

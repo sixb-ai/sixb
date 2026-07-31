@@ -344,7 +344,7 @@ class InMemoryQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob> {
 }
 
 export class InMemoryQueues implements Queues {
-  readonly provider = "in-memory"
+  readonly processLocal = true as const
   private readonly store = new InMemoryQueueStore()
 
   readonly syncRuns = new InMemoryQueue<SyncRunRequestedQueueJob>(this.store, "sync.runs")

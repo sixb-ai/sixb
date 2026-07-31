@@ -64,7 +64,7 @@ describe("sixb worker-group", () => {
     const result = await runOnce(["worker-group"], "valid-project")
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("requires a queue provider")
+    expect(result.stdout).toContain("requires a queues provider")
     expect(result.stdout).toContain("InMemoryQueues")
   })
 
