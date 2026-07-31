@@ -605,14 +605,16 @@ export type {
   WebhookIdempotencyKeyResolver,
   WebhookMetadata,
   WebhookResponse,
-  WebhookVerificationRequirement,
+  WebhookVerification,
+  WebhookVerificationSubject,
   WebhookVerifyContext,
 } from "./webhooks"
 export {
   defineWebhook,
-  requireWebhookVerification,
+  resolveWebhookVerification,
   UnverifiedWebhookError,
   WebhookValidationError,
+  warnUnsignedWebhook,
   webhookConnector,
 } from "./webhooks"
 

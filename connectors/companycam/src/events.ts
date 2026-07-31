@@ -1,17 +1,17 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
-import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook, requireWebhookVerification } from "@sixb/core"
+import type { WebhookDefinition, WebhookVerification, WebhookVerificationSubject } from "@sixb/core"
+import { defineWebhook, resolveWebhookVerification, warnUnsignedWebhook } from "@sixb/core"
 import type { CompanyCamClient } from "./client"
 import type { CompanyCamEventHandler, CompanyCamWebhookEvent } from "./types"
 
-interface CompanyCamEventsWebhookOptions {
-  /** Webhook signing secret. Required unless `allowUnsigned` is set. */
-  readonly secret?: string
-  /**
-   * Accept deliveries this connector cannot verify. Without a secret the route accepts
-   * unsigned requests from anyone who can reach it, so it has to be asked for.
-   */
-  readonly allowUnsigned?: boolean
+export const COMPANYCAM_WEBHOOK: WebhookVerificationSubject = {
+  connector: "SixbCompanyCam",
+  header: "X-CompanyCam-Signature",
+  secretOption: "`secret` on companyCamEventsWebhook",
+}
+
+/** Either a signing secret or an explicit decision to do without one. */
+type CompanyCamEventsWebhookOptions = WebhookVerification & {
   readonly onEvent: CompanyCamEventHandler
 }
 
@@ -27,13 +27,9 @@ interface CompanyCamEventsWebhookOptions {
 export function companyCamEventsWebhook(
   options: CompanyCamEventsWebhookOptions
 ): WebhookDefinition<unknown, CompanyCamClient> {
-  requireWebhookVerification({
-    connector: "SixbCompanyCam",
-    header: "X-CompanyCam-Signature",
-    secretOption: "`secret` on companyCamEventsWebhook",
-    secret: options.secret,
-    allowUnsigned: options.allowUnsigned,
-  })
+  // Resolved, not just warned about: the union makes this unreachable from TypeScript,
+  // and a caller without types still gets the refusal rather than an open route.
+  warnUnsignedWebhook(COMPANYCAM_WEBHOOK, resolveWebhookVerification(COMPANYCAM_WEBHOOK, options))
 
   return defineWebhook("events")
     .post()

@@ -1,14 +1,29 @@
-export interface WebhookVerificationRequirement {
+/**
+ * How a webhook is allowed to treat the signature its provider sends.
+ *
+ * A union, so a webhook that verifies nothing cannot be written by accident: no value carries
+ * neither branch. `resolveWebhookVerification` covers the path where the secret arrives as
+ * `string | undefined` from the environment, which no type can narrow.
+ */
+export type WebhookVerification =
+  | { readonly secret: string; readonly allowUnsigned?: never }
+  | {
+      readonly secret?: never
+      /**
+       * Accept deliveries this webhook cannot verify. Without a secret the route accepts
+       * unsigned requests from anyone who can reach it, so it has to be asked for.
+       */
+      readonly allowUnsigned: true
+    }
+
+/** How to name a webhook in a message about its verification. */
+export interface WebhookVerificationSubject {
   /** The connector, as it appears in its own message prefix — `GitHub`, `Mercury`. */
   readonly connector: string
   /** The signature header this webhook verifies when a secret is configured. */
   readonly header: string
   /** How to configure the secret, in the words the connector's own options use. */
   readonly secretOption: string
-  /** The configured secret, if any. */
-  readonly secret: string | undefined
-  /** The caller's explicit decision to accept unsigned requests. */
-  readonly allowUnsigned: boolean | undefined
 }
 
 export class UnverifiedWebhookError extends Error {
@@ -16,36 +31,46 @@ export class UnverifiedWebhookError extends Error {
 }
 
 /**
- * Refuses a webhook that would accept unsigned requests without being asked to.
+ * Narrows a secret that may be absent into a {@link WebhookVerification}, or refuses.
  *
- * Every connector with an optional secret used to do the same thing when it was
- * missing: `if (!options.secret) return` inside `.verify()`, and the route then
- * accepted any request that reached it. A console warning was not enough — one of the
- * three is a banking connector, and a warning in a startup log is read by nobody.
+ * Returns the union so a caller spreads the result into the builder instead of deciding again,
+ * which keeps one rule and one message across three connectors.
  *
- * So the default is closed. No secret and no `allowUnsigned: true` throws where the
- * webhook is defined, which is inside `createSixb()`: the config fails to load, so the
- * API role never starts rather than starting open. Accepting unsigned deliveries stays
- * possible — a provider that cannot sign, a captured payload replayed locally — but it
- * is now a sentence someone wrote on purpose.
- *
- * Called at definition time, not inside `verify()`: once per boot is a fact about the
- * deployment, once per request is noise that gets filtered.
+ * Refusing is the point. Every connector with an optional secret used to do the same thing when it
+ * was missing — `if (!options.secret) return` inside `.verify()` — and the route then accepted any
+ * request that reached it. A console warning was not enough: one of the three is a banking
+ * connector. Throwing here means `createSixb()` fails and the API role never starts open.
  */
-export function requireWebhookVerification(requirement: WebhookVerificationRequirement): void {
-  if (requirement.secret) return
+export function resolveWebhookVerification(
+  subject: WebhookVerificationSubject,
+  options: { readonly secret?: string; readonly allowUnsigned?: boolean }
+): WebhookVerification {
+  if (options.secret) return { secret: options.secret }
 
-  if (!requirement.allowUnsigned) {
+  if (!options.allowUnsigned) {
     throw new UnverifiedWebhookError(
-      `[${requirement.connector}] This webhook has no secret, so ${requirement.header} cannot be ` +
+      `[${subject.connector}] This webhook has no secret, so ${subject.header} cannot be ` +
         `verified and the route would accept unsigned requests from anyone who can reach it. Set ` +
-        `${requirement.secretOption}, or pass \`allowUnsigned: true\` to accept that.`
+        `${subject.secretOption}, or pass \`allowUnsigned: true\` to accept that.`
     )
   }
 
+  return { allowUnsigned: true }
+}
+
+/**
+ * Announces a webhook whose author chose to accept unsigned deliveries. Called where the webhook
+ * is defined, not inside `verify()`: once per boot is a fact, once per request is noise.
+ */
+export function warnUnsignedWebhook(
+  subject: WebhookVerificationSubject,
+  verification: WebhookVerification
+): void {
+  if (verification.secret) return
+
   console.warn(
-    `[${requirement.connector}] \`allowUnsigned: true\`, so ${requirement.header} is not verified ` +
+    `[${subject.connector}] \`allowUnsigned: true\`, so ${subject.header} is not verified ` +
       `and this route accepts unsigned requests from anyone who can reach it. Set ` +
-      `${requirement.secretOption} before exposing it.`
+      `${subject.secretOption} before exposing it.`
   )
 }

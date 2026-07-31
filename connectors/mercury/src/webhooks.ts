@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
-import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook, requireWebhookVerification } from "@sixb/core"
+import type { WebhookDefinition, WebhookVerification, WebhookVerificationSubject } from "@sixb/core"
+import { defineWebhook, resolveWebhookVerification, warnUnsignedWebhook } from "@sixb/core"
 import type {
   MercuryClient,
   MercuryEvent,
@@ -12,18 +12,19 @@ import type {
 /** Mercury's recommended replay window for webhook signature timestamps. */
 const DEFAULT_TOLERANCE_MS = 5 * 60 * 1000
 
-export interface MercuryEventsWebhookOptions {
+export const MERCURY_WEBHOOK: WebhookVerificationSubject = {
+  connector: "Mercury",
+  header: "Mercury-Signature",
+  secretOption: "`secret` on mercuryEventsWebhook",
+}
+
+/**
+ * Either a signing secret or an explicit decision to do without one. For a banking
+ * connector especially, an unverified route is a decision and not a default — so the type
+ * has no shape that expresses neither.
+ */
+export type MercuryEventsWebhookOptions = WebhookVerification & {
   readonly onEvent: MercuryEventHandler
-  /** Endpoint signing secret. Required unless `allowUnsigned` is set. */
-  readonly secret?: string
-  /**
-   * Accept deliveries this connector cannot verify.
-   *
-   * Without a secret the route accepts unsigned requests from anyone who can reach it,
-   * which for a banking connector is a decision and not a default. Omitted, a missing
-   * secret refuses to define the webhook at all.
-   */
-  readonly allowUnsigned?: boolean
   /** Maximum accepted signature age. Defaults to 5 minutes. */
   readonly toleranceMs?: number
 }
@@ -42,13 +43,9 @@ export function mercuryEventsWebhook(
   const toleranceMs = options.toleranceMs ?? DEFAULT_TOLERANCE_MS
   assertToleranceMs(toleranceMs)
 
-  requireWebhookVerification({
-    connector: "Mercury",
-    header: "Mercury-Signature",
-    secretOption: "`secret` on mercuryEventsWebhook",
-    secret: options.secret,
-    allowUnsigned: options.allowUnsigned,
-  })
+  // Resolved, not just warned about: the union makes this unreachable from TypeScript,
+  // and a caller without types still gets the refusal rather than an open route.
+  warnUnsignedWebhook(MERCURY_WEBHOOK, resolveWebhookVerification(MERCURY_WEBHOOK, options))
 
   return defineWebhook("events")
     .post()

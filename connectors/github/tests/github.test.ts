@@ -741,11 +741,17 @@ describe("github connector", () => {
 })
 
 describe("githubEventsWebhook without a secret", () => {
-  test("refuses to define a webhook that would accept unsigned requests", () => {
-    // `if (!options.secret) return` inside `.verify()` accepted anything that reached the
-    // route. It threw no error and, for a while, only warned — which a startup log buries.
-    // The definition now fails, so `createSixb()` fails and the API role never starts.
-    expect(() => githubEventsWebhook({ onEvent: () => {} })).toThrow(/X-Hub-Signature-256/)
+  test("cannot be written without a secret or an explicit opt-in", () => {
+    // The first guarantee is the type: `WebhookVerification` has no shape that carries
+    // neither, so this line does not compile.
+    // @ts-expect-error - neither `secret` nor `allowUnsigned`
+    const missing: Parameters<typeof githubEventsWebhook>[0] = { onEvent: () => {} }
+
+    // The second is the throw, for the caller the type cannot reach — plain JS, or one who
+    // widened to `any`. `if (!options.secret) return` inside `.verify()` used to accept
+    // anything that reached the route, and for a while it only warned, which a startup log
+    // buries. Now `createSixb()` fails and the API role never starts.
+    expect(() => githubEventsWebhook(missing)).toThrow(/X-Hub-Signature-256/)
   })
 
   test("accepts unsigned deliveries when asked to, and says so", () => {
