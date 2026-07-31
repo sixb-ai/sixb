@@ -36,8 +36,19 @@ type PipedriveEventsWebhookOptions = WebhookVerification<PipedriveWebhookBasicAu
 }
 
 export function pipedriveEventsWebhook(
+  options: PipedriveEventsWebhookOptions
+): WebhookDefinition<PipedriveWebhookEvent, PipedriveClient> {
+  return createPipedriveEventsWebhook(options, PIPEDRIVE_WEBHOOK)
+}
+
+/**
+ * Package-internal: the connector factory passes its own subject so the refusal and the warning
+ * name the options that factory has, not the ones this builder has. Not on the public builder,
+ * where it would be a parameter nobody calling it can meaningfully set.
+ */
+export function createPipedriveEventsWebhook(
   options: PipedriveEventsWebhookOptions,
-  subject: WebhookVerificationSubject = PIPEDRIVE_WEBHOOK
+  subject: WebhookVerificationSubject
 ): WebhookDefinition<PipedriveWebhookEvent, PipedriveClient> {
   const verification = resolveWebhookVerification(subject, options)
   warnUnverifiedWebhook(subject, verification)

@@ -3,7 +3,7 @@ import { type ConnectorAdapter, resolveWebhookVerification } from "@sixb/core"
 import { createPandaDocClient } from "./client"
 import { createPandaDocHttp } from "./http"
 import type { PandaDocClient, PandaDocConnectorOptions, PandaDocKeyResolver } from "./types"
-import { PANDADOC_CONNECTOR_WEBHOOK, pandaDocEventsWebhook } from "./webhooks"
+import { createPandaDocEventsWebhook, PANDADOC_CONNECTOR_WEBHOOK } from "./webhooks"
 
 const DEFAULT_BASE_URL = "https://api.pandadoc.com/"
 
@@ -28,7 +28,7 @@ export function pandadoc(options: PandaDocConnectorOptions): PandaDocConnector {
     type: "pandadoc",
     webhooks: options.onEvent
       ? [
-          pandaDocEventsWebhook(
+          createPandaDocEventsWebhook(
             {
               ...resolveWebhookVerification(PANDADOC_CONNECTOR_WEBHOOK, {
                 credential: options.webhookSharedKey,

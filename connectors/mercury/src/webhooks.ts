@@ -46,8 +46,19 @@ export type MercuryEventsWebhookOptions = WebhookVerification & {
  * at-least-once, so the runtime uses that to drop duplicates.
  */
 export function mercuryEventsWebhook(
+  options: MercuryEventsWebhookOptions
+): WebhookDefinition<MercuryEvent, MercuryClient> {
+  return createMercuryEventsWebhook(options, MERCURY_WEBHOOK)
+}
+
+/**
+ * Package-internal: the connector factory passes its own subject so the refusal and the warning
+ * name the options that factory has, not the ones this builder has. Not on the public builder,
+ * where it would be a parameter nobody calling it can meaningfully set.
+ */
+export function createMercuryEventsWebhook(
   options: MercuryEventsWebhookOptions,
-  subject: WebhookVerificationSubject = MERCURY_WEBHOOK
+  subject: WebhookVerificationSubject
 ): WebhookDefinition<MercuryEvent, MercuryClient> {
   const toleranceMs = options.toleranceMs ?? DEFAULT_TOLERANCE_MS
   assertToleranceMs(toleranceMs)

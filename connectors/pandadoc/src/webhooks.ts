@@ -30,8 +30,19 @@ type PandaDocEventsWebhookOptions = WebhookVerification<PandaDocWebhookSharedKey
 }
 
 export function pandaDocEventsWebhook(
+  options: PandaDocEventsWebhookOptions
+): WebhookDefinition<readonly PandaDocWebhookEvent[], PandaDocClient> {
+  return createPandaDocEventsWebhook(options, PANDADOC_WEBHOOK)
+}
+
+/**
+ * Package-internal: the connector factory passes its own subject so the refusal and the warning
+ * name the options that factory has, not the ones this builder has. Not on the public builder,
+ * where it would be a parameter nobody calling it can meaningfully set.
+ */
+export function createPandaDocEventsWebhook(
   options: PandaDocEventsWebhookOptions,
-  subject: WebhookVerificationSubject = PANDADOC_WEBHOOK
+  subject: WebhookVerificationSubject
 ): WebhookDefinition<readonly PandaDocWebhookEvent[], PandaDocClient> {
   warnUnverifiedWebhook(subject, resolveWebhookVerification(subject, options))
 

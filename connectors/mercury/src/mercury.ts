@@ -7,7 +7,7 @@ import {
 import { createMercuryClient } from "./client"
 import { createMercuryHttp } from "./http"
 import type { MercuryAccessTokenResolver, MercuryClient, MercuryConnectorOptions } from "./types"
-import { MERCURY_CONNECTOR_WEBHOOK, mercuryEventsWebhook } from "./webhooks"
+import { createMercuryEventsWebhook, MERCURY_CONNECTOR_WEBHOOK } from "./webhooks"
 
 const DEFAULT_BASE_URL = "https://api.mercury.com/api/v1/"
 
@@ -63,7 +63,7 @@ function collectWebhooks(
 
   if (options.onEvent) {
     webhooks.push(
-      mercuryEventsWebhook(
+      createMercuryEventsWebhook(
         {
           onEvent: options.onEvent,
           // The secret usually arrives from the environment, so the decision is made here

@@ -33,8 +33,19 @@ type CompanyCamEventsWebhookOptions = WebhookVerification & {
  * on any other status).
  */
 export function companyCamEventsWebhook(
+  options: CompanyCamEventsWebhookOptions
+): WebhookDefinition<unknown, CompanyCamClient> {
+  return createCompanyCamEventsWebhook(options, COMPANYCAM_WEBHOOK)
+}
+
+/**
+ * Package-internal: the connector factory passes its own subject so the refusal and the warning
+ * name the options that factory has, not the ones this builder has. Not on the public builder,
+ * where it would be a parameter nobody calling it can meaningfully set.
+ */
+export function createCompanyCamEventsWebhook(
   options: CompanyCamEventsWebhookOptions,
-  subject: WebhookVerificationSubject = COMPANYCAM_WEBHOOK
+  subject: WebhookVerificationSubject
 ): WebhookDefinition<unknown, CompanyCamClient> {
   // Resolved, not just warned about: the union makes this unreachable from TypeScript,
   // and a caller without types still gets the refusal rather than an open route.

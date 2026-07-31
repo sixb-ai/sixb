@@ -4,7 +4,7 @@ import { createGitHubClient } from "./client"
 import { assertNonEmpty } from "./http"
 import type { GitHubClient } from "./types/client"
 import type { GitHubConnectorOptions } from "./types/options"
-import { GITHUB_CONNECTOR_WEBHOOK, githubEventsWebhook } from "./webhook"
+import { createGitHubEventsWebhook, GITHUB_CONNECTOR_WEBHOOK } from "./webhook"
 
 const GITHUB_API_BASE = "https://api.github.com/"
 const GITHUB_API_VERSION = "2022-11-28"
@@ -44,7 +44,7 @@ export function github(options: GitHubConnectorOptions): GitHubConnector {
     type: "github",
     webhooks: options.onEvent
       ? [
-          githubEventsWebhook(
+          createGitHubEventsWebhook(
             {
               // The secret usually arrives from the environment, so the decision is made
               // here rather than by the type: a secret, an explicit opt-in, or no webhook.
