@@ -627,7 +627,7 @@ describe("github connector", () => {
     test("registers only when onEvent is set", () => {
       expect(github({ token: "t" }).webhooks).toBeUndefined()
       expect(
-        github({ token: "t", webhookAllowUnsigned: true, onEvent: () => {} }).webhooks
+        github({ token: "t", webhookAllowUnverified: true, onEvent: () => {} }).webhooks
       ).toHaveLength(1)
     })
 
@@ -691,7 +691,7 @@ describe("github connector", () => {
     test("dispatches non-issue events too", async () => {
       const names: string[] = []
       const webhook = githubEventsWebhook({
-        allowUnsigned: true,
+        allowUnverified: true,
         onEvent: (context) => {
           names.push(context.event.name)
         },
@@ -724,7 +724,7 @@ describe("github connector", () => {
     test("ignores deliveries without an event header", async () => {
       let called = false
       const webhook = githubEventsWebhook({
-        allowUnsigned: true,
+        allowUnverified: true,
         onEvent: () => {
           called = true
         },
@@ -744,7 +744,7 @@ describe("githubEventsWebhook without a secret", () => {
   test("cannot be written without a secret or an explicit opt-in", () => {
     // The first guarantee is the type: `WebhookVerification` has no shape that carries
     // neither, so this line does not compile.
-    // @ts-expect-error - neither `secret` nor `allowUnsigned`
+    // @ts-expect-error - neither `secret` nor `allowUnverified`
     const missing: Parameters<typeof githubEventsWebhook>[0] = { onEvent: () => {} }
 
     // The second is the throw, for the caller the type cannot reach — plain JS, or one who
@@ -754,14 +754,14 @@ describe("githubEventsWebhook without a secret", () => {
     expect(() => githubEventsWebhook(missing)).toThrow(/X-Hub-Signature-256/)
   })
 
-  test("accepts unsigned deliveries when asked to, and says so", () => {
+  test("accepts unverified deliveries when asked to, and says so", () => {
     const warnings = captureWarnings(() =>
-      githubEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
+      githubEventsWebhook({ allowUnverified: true, onEvent: () => {} })
     )
 
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain("X-Hub-Signature-256")
-    expect(warnings[0]).toContain("accepts unsigned requests")
+    expect(warnings[0]).toContain("accepts unverified requests")
   })
 
   test("stays quiet when a secret is configured", () => {

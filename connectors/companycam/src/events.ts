@@ -1,12 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { WebhookDefinition, WebhookVerification, WebhookVerificationSubject } from "@sixb/core"
-import { defineWebhook, resolveWebhookVerification, warnUnsignedWebhook } from "@sixb/core"
+import { defineWebhook, resolveWebhookVerification, warnUnverifiedWebhook } from "@sixb/core"
 import type { CompanyCamClient } from "./client"
 import type { CompanyCamEventHandler, CompanyCamWebhookEvent } from "./types"
 
 export const COMPANYCAM_WEBHOOK: WebhookVerificationSubject = {
   connector: "SixbCompanyCam",
-  header: "X-CompanyCam-Signature",
+  verifies: "the X-CompanyCam-Signature HMAC",
   secretOption: "`secret` on companyCamEventsWebhook",
 }
 
@@ -29,7 +29,7 @@ export function companyCamEventsWebhook(
 ): WebhookDefinition<unknown, CompanyCamClient> {
   // Resolved, not just warned about: the union makes this unreachable from TypeScript,
   // and a caller without types still gets the refusal rather than an open route.
-  warnUnsignedWebhook(COMPANYCAM_WEBHOOK, resolveWebhookVerification(COMPANYCAM_WEBHOOK, options))
+  warnUnverifiedWebhook(COMPANYCAM_WEBHOOK, resolveWebhookVerification(COMPANYCAM_WEBHOOK, options))
 
   return defineWebhook("events")
     .post()

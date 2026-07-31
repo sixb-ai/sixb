@@ -43,7 +43,7 @@ export function companycam(options: CompanyCamConnectorOptions): CompanyCamConne
             // here rather than by the type: a secret, an explicit opt-in, or no webhook.
             ...resolveWebhookVerification(COMPANYCAM_WEBHOOK, {
               secret: options.webhookSecret,
-              allowUnsigned: options.webhookAllowUnsigned,
+              allowUnverified: options.webhookAllowUnverified,
             }),
             onEvent: options.onEvent,
           }),

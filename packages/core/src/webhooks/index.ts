@@ -21,5 +21,5 @@ export type { WebhookVerification, WebhookVerificationSubject } from "./unverifi
 export {
   resolveWebhookVerification,
   UnverifiedWebhookError,
-  warnUnsignedWebhook,
+  warnUnverifiedWebhook,
 } from "./unverified"

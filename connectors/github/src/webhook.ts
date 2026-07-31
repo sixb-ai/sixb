@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { WebhookDefinition, WebhookVerification, WebhookVerificationSubject } from "@sixb/core"
-import { defineWebhook, resolveWebhookVerification, warnUnsignedWebhook } from "@sixb/core"
+import { defineWebhook, resolveWebhookVerification, warnUnverifiedWebhook } from "@sixb/core"
 import type { GitHubClient } from "./types/client"
 import type {
   GitHubEventHandler,
@@ -9,8 +9,8 @@ import type {
 } from "./types/webhook"
 
 export const GITHUB_WEBHOOK: WebhookVerificationSubject = {
-  connector: "GitHub",
-  header: "X-Hub-Signature-256",
+  connector: "SixbGitHub",
+  verifies: "the X-Hub-Signature-256 HMAC",
   secretOption: "`secret` on githubEventsWebhook",
 }
 
@@ -32,7 +32,7 @@ export function githubEventsWebhook(
 ): WebhookDefinition<unknown, GitHubClient> {
   // Resolved, not just warned about: the union makes this unreachable from TypeScript,
   // and a caller without types still gets the refusal rather than an open route.
-  warnUnsignedWebhook(GITHUB_WEBHOOK, resolveWebhookVerification(GITHUB_WEBHOOK, options))
+  warnUnverifiedWebhook(GITHUB_WEBHOOK, resolveWebhookVerification(GITHUB_WEBHOOK, options))
 
   return defineWebhook("events")
     .post()

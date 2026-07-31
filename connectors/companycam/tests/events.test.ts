@@ -14,7 +14,7 @@ describe("companycam events webhook", () => {
   test("registers only when onEvent is set", () => {
     expect(companycam({ token: "t" }).webhooks).toBeUndefined()
     expect(
-      companycam({ token: "t", webhookAllowUnsigned: true, onEvent: () => {} }).webhooks
+      companycam({ token: "t", webhookAllowUnverified: true, onEvent: () => {} }).webhooks
     ).toHaveLength(1)
   })
 
@@ -76,7 +76,7 @@ describe("companycam events webhook", () => {
   })
 
   test("skips verification when no secret is configured", () => {
-    const webhook = companyCamEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
+    const webhook = companyCamEventsWebhook({ allowUnverified: true, onEvent: () => {} })
     expect(() =>
       webhook.verify?.({
         request: new Request("https://x/hook", { method: "POST" }),
@@ -90,7 +90,7 @@ describe("companyCamEventsWebhook without a secret", () => {
   test("cannot be written without a secret or an explicit opt-in", () => {
     // The first guarantee is the type: `WebhookVerification` has no shape that carries
     // neither, so this line does not compile.
-    // @ts-expect-error - neither `secret` nor `allowUnsigned`
+    // @ts-expect-error - neither `secret` nor `allowUnverified`
     const missing: Parameters<typeof companyCamEventsWebhook>[0] = { onEvent: () => {} }
 
     // The second is the throw, for the caller the type cannot reach — plain JS, or one who
@@ -100,14 +100,14 @@ describe("companyCamEventsWebhook without a secret", () => {
     expect(() => companyCamEventsWebhook(missing)).toThrow(/X-CompanyCam-Signature/)
   })
 
-  test("accepts unsigned deliveries when asked to, and says so", () => {
+  test("accepts unverified deliveries when asked to, and says so", () => {
     const warnings = captureWarnings(() =>
-      companyCamEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
+      companyCamEventsWebhook({ allowUnverified: true, onEvent: () => {} })
     )
 
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain("X-CompanyCam-Signature")
-    expect(warnings[0]).toContain("accepts unsigned requests")
+    expect(warnings[0]).toContain("accepts unverified requests")
   })
 
   test("stays quiet when a secret is configured", () => {

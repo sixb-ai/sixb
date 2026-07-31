@@ -614,7 +614,7 @@ export {
   resolveWebhookVerification,
   UnverifiedWebhookError,
   WebhookValidationError,
-  warnUnsignedWebhook,
+  warnUnverifiedWebhook,
   webhookConnector,
 } from "./webhooks"
 

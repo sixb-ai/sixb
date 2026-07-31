@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
-import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook } from "@sixb/core"
+import type { WebhookDefinition, WebhookVerification, WebhookVerificationSubject } from "@sixb/core"
+import { defineWebhook, resolveWebhookVerification, warnUnverifiedWebhook } from "@sixb/core"
 import type {
   PandaDocClient,
   PandaDocJsonObject,
@@ -10,24 +10,32 @@ import type {
   PandaDocWebhookSharedKeyResolver,
 } from "./types"
 
-interface PandaDocEventsWebhookOptions {
-  readonly sharedKey?: PandaDocWebhookSharedKeyResolver
+export const PANDADOC_WEBHOOK: WebhookVerificationSubject = {
+  connector: "SixbPandaDoc",
+  verifies: "the `signature` query parameter",
+  secretOption: "`secret` on pandaDocEventsWebhook",
+}
+
+/** Either a shared key or an explicit decision to do without one. */
+type PandaDocEventsWebhookOptions = WebhookVerification<PandaDocWebhookSharedKeyResolver> & {
   readonly onEvent: PandaDocWebhookEventHandler
 }
 
 export function pandaDocEventsWebhook(
   options: PandaDocEventsWebhookOptions
 ): WebhookDefinition<readonly PandaDocWebhookEvent[], PandaDocClient> {
+  warnUnverifiedWebhook(PANDADOC_WEBHOOK, resolveWebhookVerification(PANDADOC_WEBHOOK, options))
+
   return defineWebhook("events")
     .post()
     .json({ parse: parsePandaDocWebhookEvents })
     .verify(async ({ request, rawBody }) => {
-      if (!options.sharedKey) {
+      if (!options.secret) {
         return
       }
 
       verifySignature(
-        await resolveSharedKey(options.sharedKey),
+        await resolveSharedKey(options.secret),
         rawBody,
         new URL(request.url).searchParams.get("signature")
       )

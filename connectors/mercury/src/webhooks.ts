@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { WebhookDefinition, WebhookVerification, WebhookVerificationSubject } from "@sixb/core"
-import { defineWebhook, resolveWebhookVerification, warnUnsignedWebhook } from "@sixb/core"
+import { defineWebhook, resolveWebhookVerification, warnUnverifiedWebhook } from "@sixb/core"
 import type {
   MercuryClient,
   MercuryEvent,
@@ -13,8 +13,8 @@ import type {
 const DEFAULT_TOLERANCE_MS = 5 * 60 * 1000
 
 export const MERCURY_WEBHOOK: WebhookVerificationSubject = {
-  connector: "Mercury",
-  header: "Mercury-Signature",
+  connector: "SixbMercury",
+  verifies: "the Mercury-Signature HMAC",
   secretOption: "`secret` on mercuryEventsWebhook",
 }
 
@@ -45,7 +45,7 @@ export function mercuryEventsWebhook(
 
   // Resolved, not just warned about: the union makes this unreachable from TypeScript,
   // and a caller without types still gets the refusal rather than an open route.
-  warnUnsignedWebhook(MERCURY_WEBHOOK, resolveWebhookVerification(MERCURY_WEBHOOK, options))
+  warnUnverifiedWebhook(MERCURY_WEBHOOK, resolveWebhookVerification(MERCURY_WEBHOOK, options))
 
   return defineWebhook("events")
     .post()

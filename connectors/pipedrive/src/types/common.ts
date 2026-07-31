@@ -18,7 +18,15 @@ export interface PipedriveConnectorOptions {
   readonly timeoutMs?: number
   readonly minDelayMs?: number
   readonly retry?: RestRetryPolicy
+  /** Basic-auth credentials used to verify inbound webhook deliveries. */
   readonly webhookAuth?: PipedriveWebhookBasicAuth
+  /**
+   * Register the inbound webhook even though it cannot be verified.
+   *
+   * Without `webhookAuth` the route accepts unverified requests from anyone who can
+   * reach it, so the connector refuses to build it unless this says otherwise.
+   */
+  readonly webhookAllowUnverified?: boolean
   readonly onEvent?: PipedriveEventHandler
 }
 

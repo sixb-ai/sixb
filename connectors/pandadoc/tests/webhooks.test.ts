@@ -16,7 +16,9 @@ describe("pandadoc webhook resources", () => {
 
   test("registers inbound webhook only when onEvent is set", () => {
     expect(pandadoc({ apiKey: "pd-key" }).webhooks).toBeUndefined()
-    expect(pandadoc({ apiKey: "pd-key", onEvent: () => {} }).webhooks).toHaveLength(1)
+    expect(
+      pandadoc({ apiKey: "pd-key", webhookSharedKey: "shared", onEvent: () => {} }).webhooks
+    ).toHaveLength(1)
   })
 
   test("subscription and event resources hit exact paths", async () => {
@@ -74,7 +76,7 @@ describe("pandadoc inbound events webhook", () => {
   test("verifies signature, dispatches each event, and responds 200", async () => {
     const received: PandaDocWebhookEventContext[] = []
     const webhook = pandaDocEventsWebhook({
-      sharedKey: "shared",
+      secret: "shared",
       onEvent: (context) => {
         received.push(context)
       },
@@ -115,7 +117,7 @@ describe("pandadoc inbound events webhook", () => {
   })
 
   test("rejects invalid signature when shared key is configured", async () => {
-    const webhook = pandaDocEventsWebhook({ sharedKey: "shared", onEvent: () => {} })
+    const webhook = pandaDocEventsWebhook({ secret: "shared", onEvent: () => {} })
 
     await expect(
       webhook.verify?.({
@@ -125,21 +127,44 @@ describe("pandadoc inbound events webhook", () => {
     ).rejects.toThrow("Invalid webhook signature")
   })
 
-  test("skips verification without a shared key", () => {
-    const webhook = pandaDocEventsWebhook({ onEvent: () => {} })
+  test("cannot be written without a shared key or an explicit opt-in", () => {
+    // @ts-expect-error - neither `secret` nor `allowUnverified`
+    const missing: Parameters<typeof pandaDocEventsWebhook>[0] = { onEvent: () => {} }
 
-    expect(() =>
-      webhook.verify?.({
-        request: new Request("https://x/hook"),
-        rawBody: new TextEncoder().encode("[]"),
-      } as unknown as VerifyCtx)
-    ).not.toThrow()
+    // This route used to skip verification entirely when no shared key was set, and a test
+    // asserted that as the contract. PandaDoc signs with a `signature` query parameter, so
+    // without the key anyone who knows the URL could post a document state change.
+    expect(() => pandaDocEventsWebhook(missing)).toThrow(/signature/)
+  })
+
+  test("accepts unverified deliveries when asked to, and says so", () => {
+    const warnings = captureWarnings(() =>
+      pandaDocEventsWebhook({ allowUnverified: true, onEvent: () => {} })
+    )
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain("accepts unverified requests")
   })
 
   test("rejects an unexpected payload shape", () => {
-    const webhook = pandaDocEventsWebhook({ onEvent: () => {} })
+    const webhook = pandaDocEventsWebhook({ secret: "shared", onEvent: () => {} })
     expect(() => webhook.body.parse({ event: "document_state_changed" })).toThrow(
       "Unexpected webhook payload"
     )
   })
 })
+
+/** Captures `console.warn` for the duration of one call. */
+function captureWarnings(run: () => void): string[] {
+  const warnings: string[] = []
+  const original = console.warn
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "))
+  }
+  try {
+    run()
+  } finally {
+    console.warn = original
+  }
+  return warnings
+}

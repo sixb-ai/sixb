@@ -46,16 +46,16 @@ describe("mercury events webhook", () => {
   test("registers only when onEvent is set", () => {
     expect(mercury({ accessToken: TOKEN }).webhooks).toBeUndefined()
     expect(
-      mercury({ accessToken: TOKEN, webhookAllowUnsigned: true, onEvent: () => {} }).webhooks
+      mercury({ accessToken: TOKEN, webhookAllowUnverified: true, onEvent: () => {} }).webhooks
     ).toHaveLength(1)
   })
 
   test("extra webhooks are registered alongside the built-in events route", () => {
     const connector = mercury({
       accessToken: TOKEN,
-      webhookAllowUnsigned: true,
+      webhookAllowUnverified: true,
       onEvent: () => {},
-      webhooks: [mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {} }) as never],
+      webhooks: [mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} }) as never],
     })
 
     expect(connector.webhooks).toHaveLength(2)
@@ -147,19 +147,19 @@ describe("mercury events webhook", () => {
   })
 
   test("skips verification when no secret is configured", () => {
-    const webhook = mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} })
 
     expect(() => webhook.verify?.(verifyCtx("{}", null))).not.toThrow()
   })
 
   test("reports the event id as the idempotency key for at-least-once delivery", () => {
-    const webhook = mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} })
 
     expect(webhook.idempotencyKey?.({ body: EVENT } as unknown as IdempotencyCtx)).toBe(EVENT.id)
   })
 
   test("parses a balance event and defaults its optional fields", () => {
-    const webhook = mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} })
 
     const parsed = webhook.body.parse({
       id: "ev-1",
@@ -176,7 +176,7 @@ describe("mercury events webhook", () => {
   })
 
   test("rejects payloads that are not Mercury events", () => {
-    const webhook = mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} })
 
     expect(() => webhook.body.parse({})).toThrow("Unexpected webhook payload")
     expect(() => webhook.body.parse({ id: "ev-1", resourceType: "spaceship" })).toThrow(
@@ -189,7 +189,7 @@ describe("mercury events webhook", () => {
 
   test("rejects a non-positive tolerance at construction", () => {
     expect(() =>
-      mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {}, toleranceMs: 0 })
+      mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {}, toleranceMs: 0 })
     ).toThrow("webhookToleranceMs must be a positive finite number")
   })
 })
@@ -198,7 +198,7 @@ describe("mercuryEventsWebhook without a secret", () => {
   test("cannot be written without a secret or an explicit opt-in", () => {
     // The first guarantee is the type: `WebhookVerification` has no shape that carries
     // neither, so this line does not compile.
-    // @ts-expect-error - neither `secret` nor `allowUnsigned`
+    // @ts-expect-error - neither `secret` nor `allowUnverified`
     const missing: Parameters<typeof mercuryEventsWebhook>[0] = { onEvent: () => {} }
 
     // The second is the throw, for the caller the type cannot reach — plain JS, or one who
@@ -208,14 +208,14 @@ describe("mercuryEventsWebhook without a secret", () => {
     expect(() => mercuryEventsWebhook(missing)).toThrow(/Mercury-Signature/)
   })
 
-  test("accepts unsigned deliveries when asked to, and says so", () => {
+  test("accepts unverified deliveries when asked to, and says so", () => {
     const warnings = captureWarnings(() =>
-      mercuryEventsWebhook({ allowUnsigned: true, onEvent: () => {} })
+      mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} })
     )
 
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain("Mercury-Signature")
-    expect(warnings[0]).toContain("accepts unsigned requests")
+    expect(warnings[0]).toContain("accepts unverified requests")
   })
 
   test("stays quiet when a secret is configured", () => {

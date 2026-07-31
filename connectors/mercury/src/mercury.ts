@@ -69,7 +69,7 @@ function collectWebhooks(
         // rather than by the type: a secret, an explicit opt-in, or no webhook.
         ...resolveWebhookVerification(MERCURY_WEBHOOK, {
           secret: options.webhookSecret,
-          allowUnsigned: options.webhookAllowUnsigned,
+          allowUnverified: options.webhookAllowUnverified,
         }),
         toleranceMs: options.webhookToleranceMs,
       }) as WebhookDefinition<unknown, MercuryClient>

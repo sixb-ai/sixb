@@ -49,7 +49,7 @@ export function github(options: GitHubConnectorOptions): GitHubConnector {
             // here rather than by the type: a secret, an explicit opt-in, or no webhook.
             ...resolveWebhookVerification(GITHUB_WEBHOOK, {
               secret: options.webhookSecret,
-              allowUnsigned: options.webhookAllowUnsigned,
+              allowUnverified: options.webhookAllowUnverified,
             }),
             onEvent: options.onEvent,
           }),

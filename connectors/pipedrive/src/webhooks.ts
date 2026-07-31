@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto"
-import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook } from "@sixb/core"
+import type { WebhookDefinition, WebhookVerification, WebhookVerificationSubject } from "@sixb/core"
+import { defineWebhook, resolveWebhookVerification, warnUnverifiedWebhook } from "@sixb/core"
 import type {
   PipedriveClient,
   PipedriveEventHandler,
@@ -11,19 +11,30 @@ import type {
   PipedriveWebhookMeta,
 } from "./types"
 
-interface PipedriveEventsWebhookOptions {
-  readonly auth?: PipedriveWebhookBasicAuth
+export const PIPEDRIVE_WEBHOOK: WebhookVerificationSubject = {
+  connector: "SixbPipedrive",
+  verifies: "the Authorization basic-auth credentials",
+  secretOption: "`secret` on pipedriveEventsWebhook",
+}
+
+/** Either basic-auth credentials or an explicit decision to do without them. */
+type PipedriveEventsWebhookOptions = WebhookVerification<PipedriveWebhookBasicAuth> & {
   readonly onEvent: PipedriveEventHandler
 }
 
 export function pipedriveEventsWebhook(
   options: PipedriveEventsWebhookOptions
 ): WebhookDefinition<PipedriveWebhookEvent, PipedriveClient> {
+  warnUnverifiedWebhook(PIPEDRIVE_WEBHOOK, resolveWebhookVerification(PIPEDRIVE_WEBHOOK, options))
+
   return defineWebhook("events")
     .post()
     .json({ parse: parsePipedriveWebhookEvent })
     .verify(({ request }) => {
-      verifyBasicAuth(options.auth, request.headers.get("authorization"))
+      if (!options.secret) {
+        return
+      }
+      verifyBasicAuth(options.secret, request.headers.get("authorization"))
     })
     .idempotencyKey(({ body }) => body.meta.id ?? body.meta.correlation_id)
     .handle<PipedriveClient>(async ({ body, sixb, logger, client }) => {
@@ -52,11 +63,7 @@ function parsePipedriveWebhookEvent(value: unknown): PipedriveWebhookEvent {
   }
 }
 
-function verifyBasicAuth(auth: PipedriveWebhookBasicAuth | undefined, header: string | null): void {
-  if (!auth) {
-    return
-  }
-
+function verifyBasicAuth(auth: PipedriveWebhookBasicAuth, header: string | null): void {
   if (!header?.startsWith("Basic ")) {
     throw new Error("[SixbPipedrive] Missing webhook basic auth.")
   }

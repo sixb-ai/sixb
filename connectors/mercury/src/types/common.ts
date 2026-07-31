@@ -49,10 +49,10 @@ export interface MercuryConnectorOptions {
   /**
    * Register the inbound webhook even though it cannot be verified.
    *
-   * Without `webhookSecret` the route accepts unsigned requests from anyone who can
+   * Without `webhookSecret` the route accepts unverified requests from anyone who can
    * reach it, so the connector refuses to build it unless this says otherwise.
    */
-  readonly webhookAllowUnsigned?: boolean
+  readonly webhookAllowUnverified?: boolean
   /** Maximum accepted age of a webhook signature timestamp. Defaults to 5 minutes. */
   readonly webhookToleranceMs?: number
   /** Extra inbound webhooks to register alongside the built-in `events` route. */
