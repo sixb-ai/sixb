@@ -1,4 +1,4 @@
-import { InMemoryBroker, InMemoryQueues } from "@sixb/core"
+import { type Broker, InMemoryBroker, InMemoryQueues, type Queues } from "@sixb/core"
 import { SixbCliError } from "./errors"
 import type { LoadedSixb } from "./loadSixb"
 import { type ProductionRole, productionRoleFacts } from "./production-roles"
@@ -16,14 +16,14 @@ import { type ProductionRole, productionRoleFacts } from "./production-roles"
 const SLOTS = [
   {
     name: "queues",
-    get: (sixb: LoadedSixb) => sixb.queues as unknown,
-    isKnownProcessLocal: (value: unknown) => value instanceof InMemoryQueues,
+    get: (sixb: LoadedSixb): Broker | Queues => sixb.queues,
+    isKnownProcessLocal: (value: Broker | Queues) => value instanceof InMemoryQueues,
     replacements: "@sixb/bullmq",
   },
   {
     name: "broker",
-    get: (sixb: LoadedSixb) => sixb.broker as unknown,
-    isKnownProcessLocal: (value: unknown) => value instanceof InMemoryBroker,
+    get: (sixb: LoadedSixb): Broker | Queues => sixb.broker,
+    isKnownProcessLocal: (value: Broker | Queues) => value instanceof InMemoryBroker,
     replacements: "@sixb/redis or @sixb/nats",
   },
 ] as const
@@ -33,10 +33,7 @@ function isProcessLocal(slot: (typeof SLOTS)[number], sixb: LoadedSixb): boolean
   // `instanceof` first, then the declared marker. Two copies of @sixb/core in one
   // dependency graph defeat `instanceof`, and a hand-written test double declares the
   // marker without extending our class.
-  return (
-    slot.isKnownProcessLocal(provider) ||
-    (provider as { processLocal?: unknown } | null | undefined)?.processLocal === true
-  )
+  return slot.isKnownProcessLocal(provider) || provider.processLocal === true
 }
 
 export interface ProcessLocalProvider {
@@ -57,7 +54,7 @@ export interface ProcessLocalProvider {
 export function findProcessLocalProviders(sixb: LoadedSixb): readonly ProcessLocalProvider[] {
   return SLOTS.filter((slot) => isProcessLocal(slot, sixb)).map((slot) => ({
     slot: slot.name,
-    configured: slot.get(sixb)?.constructor?.name ?? "a process-local provider",
+    configured: slot.get(sixb).constructor?.name ?? "a process-local provider",
     replacements: slot.replacements,
   }))
 }

@@ -123,8 +123,13 @@ function processLocalWarnings(sixb: LoadedSixb): readonly string[] {
   )
 }
 
-function providerName(provider: unknown): string {
-  return (provider as { constructor?: { name?: string } } | null)?.constructor?.name ?? "unknown"
+/**
+ * `?.constructor` rather than a plain read: a provider is a class instance in every
+ * configuration we ship, but the contracts are structural, so an object built with
+ * `Object.create(null)` satisfies them and has no prototype to name.
+ */
+function providerName(provider: object): string {
+  return provider.constructor?.name ?? "unknown"
 }
 
 async function probe(
