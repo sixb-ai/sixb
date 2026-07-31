@@ -5,7 +5,6 @@ import {
   defineDataset,
   defineObjectType,
   defineProjection,
-  defineTelemetryProjection,
   link,
   OntologyRegistry,
   prop,
@@ -59,7 +58,7 @@ const deviceProjection = defineProjection("storage_contract_devices", Device)
       target: Device,
     },
   })
-const temperatureProjection = defineTelemetryProjection(
+const temperatureProjection = defineProjection(
   "storage_contract_temperatures",
   Device.p.temperature
 )

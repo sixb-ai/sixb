@@ -1,5 +1,5 @@
 export { requestAction, requestActionAndWait } from "./action-service"
-export { removeLink, setLinkBatch, upsertLink, upsertLinkBatch } from "./link-service"
+export { removeLink, upsertLink, upsertLinkBatch } from "./link-service"
 export type { ListObjectsParams } from "./list-service"
 export { listObjects } from "./list-service"
 export { upsertObject, upsertObjectBatch } from "./object-service"

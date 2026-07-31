@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import {
   col,
   defineDataset,
-  defineLinkProjection,
   defineObjectType,
   defineProjection,
   InMemoryStorage,
@@ -1218,7 +1217,7 @@ describe("ontology materializer projection replacement", () => {
     const joins = defineDataset("device-peers", {
       schema: [col("source_id", "string"), col("target_id", "string")],
     })
-    const definition = defineLinkProjection("device-peers", Device.l.peers)
+    const definition = defineProjection("device-peers", Device.l.peers)
       .fromDataset(joins)
       .sourceField("source_id")
       .targetField("target_id")

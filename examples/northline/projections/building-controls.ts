@@ -1,4 +1,4 @@
-import { defineProjection, defineTelemetryProjection } from "@sixb/core"
+import { defineProjection } from "@sixb/core"
 import {
   controlsAlarms,
   controlsEquipmentHealth,
@@ -93,7 +93,7 @@ export const serviceCasesProjection = defineProjection("northline-service-cases"
     },
   })
 
-export const supplyAirTelemetry = defineTelemetryProjection(
+export const supplyAirTelemetry = defineProjection(
   "controls-supply-air-temperature",
   Equipment.p.supplyAirTemperature
 )
@@ -105,7 +105,7 @@ export const supplyAirTelemetry = defineTelemetryProjection(
     unit: "temperature_unit",
   })
 
-export const returnAirTelemetry = defineTelemetryProjection(
+export const returnAirTelemetry = defineProjection(
   "controls-return-air-temperature",
   Equipment.p.returnAirTemperature
 )
@@ -117,7 +117,7 @@ export const returnAirTelemetry = defineTelemetryProjection(
     unit: "temperature_unit",
   })
 
-export const compressorCurrentTelemetry = defineTelemetryProjection(
+export const compressorCurrentTelemetry = defineProjection(
   "controls-compressor-current",
   Equipment.p.compressorCurrent
 )

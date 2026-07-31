@@ -11,7 +11,6 @@ import {
   Sixb,
 } from "../src"
 import { type EventsRuntime, OntologyOutboxDispatcher } from "../src/events"
-import { objectService } from "../src/objects"
 import { getOntologyMutationRuntime } from "../src/runtime/internal"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -380,39 +379,6 @@ describe("runtime link batches", () => {
     )
     expect((await listSensorLinks(sixb, "sensors")).map((row) => row.properties?.role)).toEqual([
       "primary",
-    ])
-  })
-
-  test("reassigns a cardinality-one link and reports missing endpoints per item", async () => {
-    const { sixb } = createRuntime()
-    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
-    for (const sensorId of ["s1", "s2"]) {
-      await sixb.upsertObject("sensor", { id: sensorId, name: sensorId })
-    }
-    await sixb.upsertLink("room", "r1", "primarySensor", {
-      targetTypeId: "sensor",
-      targetId: "s1",
-    })
-
-    const results = await objectService.setLinkBatch(sixb, [
-      {
-        objectTypeId: "room",
-        sourceId: "r1",
-        linkId: "primarySensor",
-        target: { targetTypeId: "sensor", targetId: "s2" },
-      },
-      {
-        objectTypeId: "room",
-        sourceId: "r1",
-        linkId: "primarySensor",
-        target: { targetTypeId: "sensor", targetId: "missing" },
-      },
-    ])
-
-    expect(results[0]).toEqual({ ok: true, value: undefined })
-    expect(results[1].ok === false && results[1].error).toBeInstanceOf(ObjectNotFoundError)
-    expect((await listSensorLinks(sixb, "primarySensor")).map((row) => row.targetId)).toEqual([
-      "s2",
     ])
   })
 })

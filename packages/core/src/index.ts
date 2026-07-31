@@ -889,9 +889,7 @@ export type {
 } from "./projections"
 
 export {
-  defineLinkProjection,
   defineProjection,
-  defineTelemetryProjection,
   fromForeignKey,
   isLinkProjectionDefinition,
   isObjectProjectionDefinition,

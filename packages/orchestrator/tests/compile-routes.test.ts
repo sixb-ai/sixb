@@ -4,7 +4,6 @@ import {
   defineAction,
   defineConnector,
   defineDataset,
-  defineLinkProjection,
   defineObjectType,
   definePipeline,
   definePipelineStep,
@@ -12,7 +11,6 @@ import {
   defineRule,
   defineSchedule,
   defineSync,
-  defineTelemetryProjection,
   defineWorkflow,
   defineWorkflowStep,
   events,
@@ -308,11 +306,11 @@ describe("compileRoutes", () => {
         col("temperature", "float64"),
       ],
     })
-    const linkProjection = defineLinkProjection("room-sensors", Room.l.hasSensors)
+    const linkProjection = defineProjection("room-sensors", Room.l.hasSensors)
       .fromDataset(joins)
       .sourceField("room_id")
       .targetField("sensor_id")
-    const telemetryProjection = defineTelemetryProjection("room-temperature", Room.p.temperature)
+    const telemetryProjection = defineProjection("room-temperature", Room.p.temperature)
       .fromDataset(telemetry)
       .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 

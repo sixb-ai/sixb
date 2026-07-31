@@ -2,9 +2,7 @@
 
 export {
   categorizeProjections,
-  defineLinkProjection,
   defineProjection,
-  defineTelemetryProjection,
   fromForeignKey,
   isLinkProjectionDefinition,
   isObjectProjectionDefinition,

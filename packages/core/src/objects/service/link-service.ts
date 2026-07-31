@@ -8,7 +8,6 @@ import type { ResolvedLinkBatchItem } from "../context"
 import { requireLinkDefinition, resolveLinkContext, resolveObjectContext } from "../context"
 import {
   removeLink as removeLinkLeaf,
-  setLinkBatch as setLinkBatchLeaf,
   upsertLinkBatch as upsertLinkBatchLeaf,
   upsertLink as upsertLinkLeaf,
 } from "../link"
@@ -55,31 +54,6 @@ export async function upsertLinkBatch(
   })
 
   return upsertLinkBatchLeaf(runtime, resolvedItems)
-}
-
-export async function setLinkBatch(
-  runtime: SixbRuntimeContext,
-  items: readonly {
-    objectTypeId: string
-    sourceId: string
-    linkId: string
-    target: { targetTypeId: string; targetId: string }
-  }[]
-): Promise<readonly BatchItemResult<void>[]> {
-  const resolvedItems: ResolvedLinkBatchItem[] = items.map((item) => {
-    const objectType = runtime.ontology.resolveObjectType(item.objectTypeId)
-    const linkDefinition = requireLinkDefinition(objectType, item.linkId)
-    return {
-      objectType,
-      linkDefinition,
-      sourceId: item.sourceId,
-      linkId: item.linkId,
-      targetTypeId: item.target.targetTypeId,
-      targetId: item.target.targetId,
-    }
-  })
-
-  return setLinkBatchLeaf(runtime, resolvedItems)
 }
 
 export async function removeLink(

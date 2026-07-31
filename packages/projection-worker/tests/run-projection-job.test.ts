@@ -4,10 +4,8 @@ import {
   type DatasetDefinition,
   type DatasetRow,
   defineDataset,
-  defineLinkProjection,
   defineObjectType,
   defineProjection,
-  defineTelemetryProjection,
   defineValueType,
   fromForeignKey,
   InMemoryBlobStorage,
@@ -139,15 +137,12 @@ const roomProjectionWithDatasetFieldFk = defineProjection("room-dataset-field-fk
     }),
   })
 
-const roomSensorProjection = defineLinkProjection("room-sensor-proj", Room.l.hasSensors)
+const roomSensorProjection = defineProjection("room-sensor-proj", Room.l.hasSensors)
   .fromDataset(roomSensorsDataset)
   .sourceField("room_id")
   .targetField("sensor_id")
 
-const roomTemperatureProjection = defineTelemetryProjection(
-  "room-temperature-proj",
-  Room.p.temperature
-)
+const roomTemperatureProjection = defineProjection("room-temperature-proj", Room.p.temperature)
   .fromDataset(roomReadingsDataset)
   .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 
@@ -160,7 +155,7 @@ const roomTargetsDataset = defineDataset("canonical.room-targets", {
   ],
 })
 
-const roomTargetProjection = defineTelemetryProjection("room-target-proj", Room.p.targetTemperature)
+const roomTargetProjection = defineProjection("room-target-proj", Room.p.targetTemperature)
   .fromDataset(roomTargetsDataset)
   .points({ objectId: "room_id", at: "observed_at", value: "target", unit: "target_unit" })
 
@@ -1743,10 +1738,7 @@ describe("runProjectionJob", () => {
         col("unused_weight", "float64", { nullable: true }),
       ],
     })
-    const wideRoomSensorProjection = defineLinkProjection(
-      "wide-room-sensor-proj",
-      Room.l.hasSensors
-    )
+    const wideRoomSensorProjection = defineProjection("wide-room-sensor-proj", Room.l.hasSensors)
       .fromDataset(wideRoomSensorsDataset)
       .sourceField("room_id")
       .targetField("sensor_id")
@@ -1788,7 +1780,7 @@ describe("runProjectionJob", () => {
         col("relationship_weight", "float64"),
       ],
     })
-    const requiredExtraRoomSensorProjection = defineLinkProjection(
+    const requiredExtraRoomSensorProjection = defineProjection(
       "required-extra-room-sensor-proj",
       Room.l.hasSensors
     )

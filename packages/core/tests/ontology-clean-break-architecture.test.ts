@@ -145,6 +145,17 @@ describe("ontology clean-break architecture", () => {
     )
   })
 
+  test("keeps one projection authoring entrypoint and no retired link assignment batch", async () => {
+    await expectPatternAbsent(
+      await typescriptFiles(join(coreSource, "projections")),
+      /\bdefine(?:Link|Telemetry)Projection\b/
+    )
+    await expectPatternAbsent(
+      await typescriptFiles(join(coreSource, "objects")),
+      /\bsetLinkBatch\b/
+    )
+  })
+
   test("keeps reserved mutation events owned by the Materializer", async () => {
     const mutationModules = [
       join(coreSource, "objects"),

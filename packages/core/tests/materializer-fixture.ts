@@ -4,7 +4,6 @@ import {
   defineDataset,
   defineObjectType,
   defineProjection,
-  defineTelemetryProjection,
   InMemoryStorage,
   link,
   OntologyRegistry,
@@ -54,7 +53,7 @@ const deviceProjection = defineProjection("devices", Device)
       target: Device,
     },
   })
-const temperatureProjection = defineTelemetryProjection("temperatures", Device.p.temperature)
+const temperatureProjection = defineProjection("temperatures", Device.p.temperature)
   .fromDataset(readings)
   .points({ objectId: "device_id", at: "at", value: "value" })
 
