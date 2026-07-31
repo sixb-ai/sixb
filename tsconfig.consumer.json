@@ -4,9 +4,13 @@
   //
   // The root config maps every `@sixb/*` specifier to `packages/*/src`. That is right for the
   // packages themselves and wrong for anything downstream, because it pulls the whole framework
-  // into each consumer's program — `@sixb/core` was type-checked once per example, five more times
-  // and in parallel, on top of the once `build:types` already does. It was 70% of the typecheck
-  // step and the reason that step was the slowest job in CI.
+  // into each consumer's program — `@sixb/core` was type-checked once per example, several more
+  // times and in parallel, on top of the once `build:types` already does. It was 70% of the
+  // typecheck step and the reason that step was the slowest job in CI.
+  //
+  // Only for consumers that always run behind `build:types`. `apps/docs` deliberately does not use
+  // this: Vercel deploys it with `prepare:docs && next build` and never emits declarations, so it
+  // stays on the root config and reads package source.
   //
   // Dropping the mapping lets `moduleResolution: "bundler"` resolve through `node_modules` and each
   // package's `exports.types`, so a consumer checks its own files against `dist/*.d.ts`. No

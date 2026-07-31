@@ -76,12 +76,16 @@ test files against the emitted `.d.ts`, and the example/docs apps keep their own
 `typegen && tsc` typecheck (`typecheck:examples`). The old per-package `tsc --noEmit` re-checked
 shared source (notably `@sixb/core`) once per dependent, which made the step the CI bottleneck.
 
-Nothing downstream of the packages reads their source. The root config maps `@sixb/*` to
-`packages/*/src`, which is right for the packages and wrong for their consumers, so the examples and
-`apps/docs` extend `tsconfig.consumer.json` instead — it clears that mapping, and resolution falls
-through to each package's `exports.types`. Add new consumers to that config, not the root one. This
-is why the steps are chained with `&&`: a consumer type-checked without a prior `build:types` fails
-on unresolved `@sixb/*` imports.
+The root config maps `@sixb/*` to `packages/*/src`, which is right for the packages and wrong for
+their consumers: it pulls the whole framework into each consumer's program. The examples extend
+`tsconfig.consumer.json` instead — it clears that mapping, and resolution falls through to each
+package's `exports.types`. This is why the steps are chained with `&&`: a consumer type-checked
+without a prior `build:types` fails on unresolved `@sixb/*` imports.
+
+That ordering is also the limit of where the consumer config applies. `apps/docs` stays on the root
+config on purpose, because Vercel deploys it with `prepare:docs && next build` and never emits
+declarations — pointing it at `dist` broke the deployment once already. Anything built outside this
+repo's `typecheck` chain reads source.
 
 ## Architecture
 
