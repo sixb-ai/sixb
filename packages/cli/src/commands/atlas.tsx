@@ -17,7 +17,6 @@ export async function runAtlas(options: AtlasOptions = {}) {
   process.env.NODE_ENV = "production"
 
   const loaded = await loadProductionSixb({ entry: options.entry, role: "atlas" })
-  const host = options.host ?? "0.0.0.0"
   const app = renderPersistent(
     <LoadingView title="Starting sixb atlas" subtitle={loaded.entry} status="Starting Atlas" />
   )
@@ -28,7 +27,7 @@ export async function runAtlas(options: AtlasOptions = {}) {
   try {
     const topology = resolveBrowserTopology({
       mode: "production",
-      host,
+      host: options.host,
       port: options.port,
       apiPublicOrigin: options.apiPublicOrigin,
       atlasPublicOrigin: options.atlasPublicOrigin,

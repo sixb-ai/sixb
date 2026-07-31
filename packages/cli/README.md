@@ -51,7 +51,7 @@ CLI is installed, use `sixb create <name>`.
 | `--entry <path>` | all | `sixb.config.ts` | Path to the sixb config module |
 | `--no-migrate` | production roles | false | Start without migrating storage. Also `SIXB_SKIP_MIGRATION=1`. |
 | `--port <port>` | serving commands | role default | Role bind port. For `dev`, this is the Atlas base port. |
-| `--host <host>` | browser serving commands | `0.0.0.0` | Browser app bind host |
+| `--host <host>` | serving commands | dev: `127.0.0.1`, roles: `0.0.0.0` | Bind host. `sixb dev` stays on loopback unless you opt in. |
 | `--api-port <port>` | `dev`, `api` | `port + 2` | API/auth/docs/WebSocket port |
 | `--api-host <host>` | `dev`, `api` | `--host` | API bind host |
 | `--api-public-origin <origin>` | browser/API commands | dev: `http://localhost:<api-port>` | Public API origin |

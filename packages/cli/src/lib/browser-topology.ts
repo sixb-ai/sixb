@@ -43,7 +43,14 @@ interface BrowserPublicOrigins {
   readonly appPublicOrigin: string | null
 }
 
-const DEFAULT_BROWSER_HOST = "0.0.0.0"
+/**
+ * A production role sits behind a load balancer and has to accept its traffic. A dev
+ * server does not: binding every interface put the project's data — and an API that is
+ * usually running with auth disabled — on the local network, which on a café or office
+ * network means anyone on it. `--host 0.0.0.0` opts back in.
+ */
+const DEFAULT_PRODUCTION_HOST = "0.0.0.0"
+const DEFAULT_DEVELOPMENT_HOST = "127.0.0.1"
 const DEFAULT_ATLAS_PORT = 3000
 const DEFAULT_APP_PORT_OFFSET = 1
 const DEFAULT_API_PORT_OFFSET = 2
@@ -62,7 +69,9 @@ export function resolveBrowserTopology(options: BrowserTopologyOptions): Browser
 }
 
 function resolveBrowserHosts(options: BrowserTopologyOptions): BrowserHosts {
-  const host = options.host ?? DEFAULT_BROWSER_HOST
+  const host =
+    options.host ??
+    (options.mode === "development" ? DEFAULT_DEVELOPMENT_HOST : DEFAULT_PRODUCTION_HOST)
   return {
     host,
     apiHost: options.apiHost ?? host,

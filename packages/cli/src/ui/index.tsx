@@ -366,7 +366,10 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
             value: "Start a role without migrating storage (or SIXB_SKIP_MIGRATION=1)",
           },
           { label: "--port <port>", value: "Role port; dev uses Atlas base port" },
-          { label: "--host <host>", value: "Browser app bind host (default: 0.0.0.0)" },
+          {
+            label: "--host <host>",
+            value: "Bind host (dev: 127.0.0.1, production roles: 0.0.0.0)",
+          },
           { label: "--api-port <port>", value: "API port (default: Atlas port + 2)" },
           { label: "--api-host <host>", value: "API bind host (default: --host)" },
           { label: "--api-public-origin <origin>", value: "Public API origin" },

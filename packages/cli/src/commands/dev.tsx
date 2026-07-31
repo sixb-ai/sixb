@@ -23,7 +23,6 @@ export async function runDev(options: DevOptions = {}) {
   process.env.NODE_ENV = "development"
 
   const entry = resolve(options.entry ?? "sixb.config.ts")
-  const host = options.host ?? "0.0.0.0"
 
   const app = renderPersistent(
     <LoadingView title="Starting sixb" subtitle={entry} status="Loading runtime" />
@@ -44,7 +43,7 @@ export async function runDev(options: DevOptions = {}) {
     const hasCustomApp = await customAppProbe.hasRoutes()
     const topology = resolveBrowserTopology({
       mode: "development",
-      host,
+      host: options.host,
       apiHost: options.apiHost,
       port: options.port,
       apiPort: options.apiPort,

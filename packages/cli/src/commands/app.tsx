@@ -19,7 +19,6 @@ export async function runApp(options: AppOptions = {}) {
   process.env.NODE_ENV = "production"
 
   const loaded = await loadProductionSixb({ entry: options.entry, role: "app" })
-  const host = options.host ?? "0.0.0.0"
   const app = renderPersistent(
     <LoadingView title="Starting sixb app" subtitle={loaded.entry} status="Starting app" />
   )
@@ -41,7 +40,7 @@ export async function runApp(options: AppOptions = {}) {
 
     const topology = resolveBrowserTopology({
       mode: "production",
-      host,
+      host: options.host,
       appPort: options.port,
       apiPublicOrigin: options.apiPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
