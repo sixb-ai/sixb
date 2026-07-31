@@ -28,7 +28,18 @@ export function classifyRoute(request: Request): RouteAccess {
     return { kind: "html", csrfProtected: !isCsrfExemptMethod(request.method) }
   }
 
-  return { kind: "public", csrfProtected: false }
+  // Anything else requires authentication.
+  //
+  // Nothing reaches here today: every registered route is under /api, /ws, /docs or
+  // the allow-list above, and the API server has no static mount or catch-all. An
+  // unregistered path 404s in the router before these hooks run, so the old "public"
+  // default was never a live hole either.
+  //
+  // What it was is a trap for the next route mounted outside those prefixes — it
+  // would have been served to anyone until someone noticed it needed classifying.
+  // Defaulting to `api` inverts that: a new route is protected unless it is
+  // deliberately added to the allow-list above.
+  return { kind: "api", csrfProtected: !isCsrfExemptMethod(request.method) }
 }
 
 export function isPublicRoute(pathname: string, method: string): boolean {
@@ -46,11 +57,8 @@ export function isPublicRoute(pathname: string, method: string): boolean {
     return true
   }
 
+  // The gateway authenticates each request with the run's own execution token.
   if (pathname.startsWith(`${AGENT_API_GATEWAY_PREFIX}/`)) {
-    return true
-  }
-
-  if (pathname.startsWith("/__sixb/") && normalizedMethod === "GET") {
     return true
   }
 

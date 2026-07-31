@@ -37,7 +37,12 @@ jobs:
 
       # Incremental tsc -b state: both the buildinfo AND the emitted .d.ts in
       # dist must be cached, otherwise tsc -b treats outputs as missing and
-      # rebuilds every project from cold.
+      # rebuilds every project from cold. `sandboxes` and `loggers` are in the
+      # tsconfig.build.json reference graph like the rest, so they belong here too.
+      #
+      # The consumer projects below only keep a buildinfo — they emit nothing. Their
+      # inputs are the emitted .d.ts rather than package source, so the buildinfo
+      # survives any source edit that leaves the public type surface unchanged.
       - name: Cache tsc build graph
         uses: actions/cache@v4
         with:
@@ -49,12 +54,19 @@ jobs:
             broker/*/.tsbuild
             queues/*/.tsbuild
             auth/*/.tsbuild
+            sandboxes/*/.tsbuild
+            loggers/*/.tsbuild
             packages/*/dist
             connectors/*/dist
             storage/*/dist
             broker/*/dist
             queues/*/dist
             auth/*/dist
+            sandboxes/*/dist
+            loggers/*/dist
+            apps/*/.tsbuild
+            examples/*/.tsbuild
+            benchmarks/*/.tsbuild
           key: tsbuild-typecheck-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
           restore-keys: |
             tsbuild-typecheck-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
