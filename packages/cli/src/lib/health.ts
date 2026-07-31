@@ -10,15 +10,7 @@ import { findProcessLocalProviders } from "./shareable-providers"
 const PROBE_TIMEOUT_MS = 5_000
 
 export interface ProviderCheck {
-  /**
-   * Three states, not a boolean.
-   *
-   * `unverified` is a provider that exposes no read-only probe, so nothing was learned
-   * about it. It cannot be `ok`: reporting a provider green because it was never asked
-   * is the exact reassurance this command exists to stop giving. It cannot be `failed`
-   * either — nothing is wrong — so it does not fail a deploy gate.
-   */
-  readonly status: "ok" | "failed" | "unverified"
+  readonly ok: boolean
   /** What was found. Shown as-is, so it has to read as an answer on its own. */
   readonly message: string
 }
@@ -66,14 +58,14 @@ export async function checkRuntimeHealth(
     timeseries,
     broker,
     queues,
-    warnings: runtimeWarnings(sixb, queues),
+    warnings: processLocalWarnings(sixb),
   }
 }
 
 async function probeStorage(sixb: LoadedSixb, timeoutMs: number): Promise<ProviderCheck> {
   const name = providerName(sixb.storage)
   const reachable = await probe(() => sixb.storage.ping(), name, timeoutMs)
-  if (reachable.status !== "ok") return reachable
+  if (!reachable.ok) return reachable
 
   // Reachable is not usable. A schema behind this build's migrations is the failure an
   // author is most likely to hit and the one they can act on, so it is worth the second
@@ -93,8 +85,8 @@ async function probeStorage(sixb: LoadedSixb, timeoutMs: number): Promise<Provid
     timeoutMs
   )
 
-  return schema.status === "ok" && verified
-    ? { status: "ok", message: `${schema.message} · schema current` }
+  return schema.ok && verified
+    ? { ok: true, message: `${schema.message} · schema current` }
     : schema
 }
 
@@ -116,39 +108,23 @@ async function probeBroker(sixb: LoadedSixb): Promise<void> {
 }
 
 /**
- * `Queues.health()` is optional because nothing else in that contract is read-only —
- * `enqueue`, `claim`, `complete`, `retry` and `fail` all move work. A provider that
- * implements it gets the same round trip as the other rows; one that does not is
- * reported unverified, which is what the row used to claim was "ok".
+ * `Queues.health()` is the only read-only member of that contract — everything else
+ * enqueues, claims or completes — which is why this row used to be a literal `ok` with no
+ * round trip behind it. It is required on the contract, so there is no longer a provider
+ * this command cannot ask.
  */
-async function probeQueues(sixb: LoadedSixb, timeoutMs: number): Promise<ProviderCheck> {
-  const name = providerName(sixb.queues)
+function probeQueues(sixb: LoadedSixb, timeoutMs: number): Promise<ProviderCheck> {
   // Bound to the provider: `probe` calls it as a bare function, and a queues provider
   // that reads its own connection off `this` would see `undefined`.
-  const health = sixb.queues.health?.bind(sixb.queues)
-  if (!health) return { status: "unverified", message: `not probed · ${name}` }
-
-  return probe(health, name, timeoutMs)
+  return probe(sixb.queues.health.bind(sixb.queues), providerName(sixb.queues), timeoutMs)
 }
 
-function runtimeWarnings(sixb: LoadedSixb, queues: ProviderCheck): readonly string[] {
-  const warnings = findProcessLocalProviders(sixb).map(
+function processLocalWarnings(sixb: LoadedSixb): readonly string[] {
+  return findProcessLocalProviders(sixb).map(
     (offender) =>
       `${offender.slot} is ${offender.configured}, which only works inside one process. ` +
       `\`sixb dev\` is fine; production roles will refuse to start. Use ${offender.replacements}.`
   )
-
-  // The yellow row says nothing was learned; this says what to do about it. An operator
-  // reading only the warnings block would otherwise take four rows for four probes.
-  if (queues.status === "unverified") {
-    warnings.push(
-      `queues was not probed: ${providerName(sixb.queues)} implements no \`health()\`, so this ` +
-        `command cannot tell a reachable backend from an unreachable one. Everything else here ` +
-        `was probed.`
-    )
-  }
-
-  return warnings
 }
 
 /**
@@ -174,14 +150,14 @@ async function probe(
         timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs)
       }),
     ])
-    return { status: "ok", message: `ok · ${detail}` }
+    return { ok: true, message: `ok · ${detail}` }
   } catch (error) {
     // Lead a failure with the same provider name the success case shows. Core's reason
     // names the migration *adapter* (`SixbSqliteStorage`), which is not the class an
     // author configured (`SqliteStorage`) — without this the column showed two names for
     // one provider and read like two of them were misconfigured.
     const message = error instanceof Error ? error.message : String(error)
-    return { status: "failed", message: `${detail} · ${message}` }
+    return { ok: false, message: `${detail} · ${message}` }
   } finally {
     // Without this the pending timer keeps the event loop alive and the command hangs
     // after printing its panel.

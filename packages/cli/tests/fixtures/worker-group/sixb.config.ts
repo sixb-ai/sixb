@@ -122,6 +122,11 @@ function claimLoggingQueue<T extends object>(queue: T, workerType: string): T {
 class SharedQueues implements Queues {
   readonly scope = "shared" as const
   private readonly inner = new InMemoryQueues()
+
+  health(): Promise<void> {
+    return this.inner.health()
+  }
+
   readonly syncRuns = claimLoggingQueue(this.inner.syncRuns, "sync")
   readonly pipelines = claimLoggingQueue(this.inner.pipelines, "pipeline")
   readonly projections = claimLoggingQueue(this.inner.projections, "projection")

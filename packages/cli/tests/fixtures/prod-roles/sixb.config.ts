@@ -77,6 +77,10 @@ class SharedQueues implements Queues {
   readonly scope = "shared" as const
   private readonly inner = new InMemoryQueues()
 
+  health(): Promise<void> {
+    return this.inner.health()
+  }
+
   get syncRuns() {
     return this.inner.syncRuns
   }

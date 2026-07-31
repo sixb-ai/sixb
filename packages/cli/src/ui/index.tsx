@@ -720,15 +720,6 @@ export function RoleView({
   )
 }
 
-/**
- * One row of the provider panel. Structurally `ProviderCheck` from `lib/health`, kept
- * as a shape here so the views stay independent of where a check came from.
- */
-interface CheckRow {
-  readonly status: "ok" | "failed" | "unverified"
-  readonly message?: string
-}
-
 export function CheckView({
   projectId,
   storage,
@@ -740,50 +731,37 @@ export function CheckView({
   warnings,
 }: {
   projectId: string
-  storage: CheckRow
-  timeseries: CheckRow
-  broker: CheckRow
-  queues: CheckRow
-  projectValidation?: CheckRow
+  storage: { ok: boolean; message?: string }
+  timeseries: { ok: boolean; message?: string }
+  broker: { ok: boolean; message?: string }
+  queues: { ok: boolean; message?: string }
+  projectValidation?: { ok: boolean; message?: string }
   ontology?: { enabled: boolean; source: string; errors: number; warnings: number }
   warnings: readonly string[]
 }) {
-  const validation = projectValidation ?? { status: "ok" as const, message: "ok" }
+  const validation = projectValidation ?? { ok: true, message: "ok" }
   const ontologyOk = (ontology?.errors ?? 0) === 0
-  const rows = [storage, timeseries, broker, queues, validation]
-  // Nothing failed, so nothing blocks a deploy: this decides the colour and the exit
-  // code, and an unprobed provider is not a broken one.
-  const nothingFailed = rows.every((row) => row.status !== "failed") && ontologyOk
-  // But the headline still has to be true. A bare green "Sixb is healthy" over a row
-  // nobody probed is the same overclaim in one line that this command used to make in
-  // five, so it counts what it could not check and says so.
-  const unprobed = rows.filter((row) => row.status === "unverified").length
-  const verdict = !nothingFailed
-    ? "Sixb has issues"
-    : unprobed === 0
-      ? "Sixb is healthy"
-      : `Sixb is healthy · ${unprobed} provider${unprobed === 1 ? "" : "s"} not probed`
-  const verdictColor = !nothingFailed ? "red" : unprobed === 0 ? "green" : "yellow"
+  // Every row is a probe that ran, so "healthy" is a claim this panel can make — which it could
+  // not while the queues row was a literal.
+  const allOk = [storage, timeseries, broker, queues, validation].every((row) => row.ok)
+  const healthy = allOk && ontologyOk
 
   // The message wins when there is one, pass or fail. A probe that succeeded still has
   // something to say — which provider answered, and whether its schema is current —
   // and collapsing that to "ok" is how this command came to report a healthy runtime
   // against a database that was not there.
-  function statusText(row: CheckRow): string {
-    return row.message ?? row.status
+  function statusText(row: { ok: boolean; message?: string }): string {
+    return row.message ?? (row.ok ? "ok" : "failed")
   }
 
-  function statusColor(status: CheckRow["status"]): string {
-    if (status === "ok") return "green"
-    // Yellow, never green: the row was not probed, and green is the one thing it must
-    // not say. Never red either — an unprobed provider is not a broken one.
-    return status === "unverified" ? "yellow" : "red"
+  function statusColor(ok: boolean): string {
+    return ok ? "green" : "red"
   }
 
   return (
     <Box flexDirection="column">
-      <Text color={verdictColor} bold>
-        {verdict}
+      <Text color={healthy ? "green" : "red"} bold>
+        {healthy ? "Sixb is healthy" : "Sixb has issues"}
       </Text>
       <Text dimColor>{projectId}</Text>
       <Spacer />
@@ -791,23 +769,23 @@ export function CheckView({
       <Box flexDirection="column">
         <Text>
           <Text dimColor>{padLabel("Storage", 14)}</Text>
-          <Text color={statusColor(storage.status)}>{statusText(storage)}</Text>
+          <Text color={statusColor(storage.ok)}>{statusText(storage)}</Text>
         </Text>
         <Text>
           <Text dimColor>{padLabel("Timeseries", 14)}</Text>
-          <Text color={statusColor(timeseries.status)}>{statusText(timeseries)}</Text>
+          <Text color={statusColor(timeseries.ok)}>{statusText(timeseries)}</Text>
         </Text>
         <Text>
           <Text dimColor>{padLabel("Broker", 14)}</Text>
-          <Text color={statusColor(broker.status)}>{statusText(broker)}</Text>
+          <Text color={statusColor(broker.ok)}>{statusText(broker)}</Text>
         </Text>
         <Text>
           <Text dimColor>{padLabel("Queues", 14)}</Text>
-          <Text color={statusColor(queues.status)}>{statusText(queues)}</Text>
+          <Text color={statusColor(queues.ok)}>{statusText(queues)}</Text>
         </Text>
         <Text>
           <Text dimColor>{padLabel("Project", 14)}</Text>
-          <Text color={statusColor(validation.status)}>{statusText(validation)}</Text>
+          <Text color={statusColor(validation.ok)}>{statusText(validation)}</Text>
         </Text>
       </Box>
       {ontology ? (

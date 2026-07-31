@@ -20,8 +20,8 @@ export async function runCheck(options: CheckOptions = {}) {
 
     const projectValidation =
       objectTypes.length > 0
-        ? { status: "ok" as const, message: `${objectTypes.length} object type(s)` }
-        : { status: "failed" as const, message: "No object types loaded" }
+        ? { ok: true, message: `${objectTypes.length} object type(s)` }
+        : { ok: false, message: "No object types loaded" }
 
     await renderStatic(
       <CheckView
@@ -43,14 +43,13 @@ export async function runCheck(options: CheckOptions = {}) {
       />
     )
 
-    // A failing probe exits non-zero so `sixb check` can gate a deploy. It used to exit
-    // 0 for everything except an empty ontology, which made it useless in a pipeline.
-    // `unverified` is not a failure: nothing is wrong with a provider that exposes no
-    // probe, and gating a deploy on it would punish the honest report.
+    // A failing probe exits non-zero so `sixb check` can gate a deploy. `exitCode`, not
+    // `exit()`: `process.exit()` terminates immediately and the `finally` below never runs, so
+    // the providers this command opened were left unclosed on the one path where that matters.
     const failed = [health.storage, health.timeseries, health.broker, health.queues].some(
-      (check) => check.status === "failed"
+      (check) => !check.ok
     )
-    if (objectTypes.length === 0 || failed) process.exit(1)
+    if (objectTypes.length === 0 || failed) process.exitCode = 1
   } finally {
     // Tear down runtime providers (broker, queues, storage, connectors) so the
     // process can exit instead of hanging on open connections. Mirrors lake-check.

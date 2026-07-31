@@ -16,9 +16,9 @@ describe("checkRuntimeHealth", () => {
     // Every row used to be the same `{ ok: true, message: "configured" }` literal, so the
     // panel could not tell an operator which implementation had answered — or whether
     // anything had.
-    expect(health.storage).toEqual({ status: "ok", message: "ok · InMemoryStorage" })
-    expect(health.timeseries).toEqual({ status: "ok", message: "ok · InMemoryStorage" })
-    expect(health.broker).toEqual({ status: "ok", message: "ok · InMemoryBroker" })
+    expect(health.storage).toEqual({ ok: true, message: "ok · InMemoryStorage" })
+    expect(health.timeseries).toEqual({ ok: true, message: "ok · InMemoryStorage" })
+    expect(health.broker).toEqual({ ok: true, message: "ok · InMemoryBroker" })
   })
 
   test("does not claim a current schema when there is no schema to check", async () => {
@@ -32,16 +32,13 @@ describe("checkRuntimeHealth", () => {
   test("reports a verified schema separately from a merely reachable one", async () => {
     const health = await checkRuntimeHealth(runtime({ migrators: [migrator("current")] }))
 
-    expect(health.storage).toEqual({
-      status: "ok",
-      message: "ok · InMemoryStorage · schema current",
-    })
+    expect(health.storage).toEqual({ ok: true, message: "ok · InMemoryStorage · schema current" })
   })
 
   test("carries the adapter's own remedy for a schema behind the build", async () => {
     const health = await checkRuntimeHealth(runtime({ migrators: [migrator("pending")] }))
 
-    expect(health.storage.status).toBe("failed")
+    expect(health.storage.ok).toBe(false)
     // Core owns this wording, and `/ready` prints the same string. The command adds the
     // configured class in front so one provider does not appear under two names — core
     // names the migration adapter, which is not what an author wrote in sixb.config.ts.
@@ -70,7 +67,7 @@ describe("checkRuntimeHealth", () => {
     const health = await checkRuntimeHealth({ ...runtime(), storage } as unknown as LoadedSixb)
 
     expect(health.storage).toEqual({
-      status: "failed",
+      ok: false,
       message: "InMemoryStorage · connect ECONNREFUSED 127.0.0.1:5432",
     })
     // Nothing to learn from a schema read against a host that will not answer, and it
@@ -89,10 +86,7 @@ describe("checkRuntimeHealth", () => {
 
     // An unreachable Postgres waits rather than refusing. Without a bound the command
     // hangs, which in a pipeline is indistinguishable from a slow database.
-    expect(health.storage).toEqual({
-      status: "failed",
-      message: "InMemoryStorage · timed out after 25ms",
-    })
+    expect(health.storage).toEqual({ ok: false, message: "InMemoryStorage · timed out after 25ms" })
   })
 
   test("probes the queues provider through its own health check", async () => {
@@ -100,19 +94,7 @@ describe("checkRuntimeHealth", () => {
 
     // `Queues.health()` is the only read-only member of that contract; everything else
     // enqueues, claims or completes. `InMemoryQueues` implements it, so this row is earned.
-    expect(health.queues).toEqual({ status: "ok", message: "ok · InMemoryQueues" })
-  })
-
-  test("reports a queues provider with no health check as unverified, never ok", async () => {
-    const health = await checkRuntimeHealth(runtime({ queues: unprobableQueues() }))
-
-    // The row this command used to print green against an unreachable Redis. `unverified`
-    // is neither a pass nor a failure: nothing was learned, and nothing is wrong.
-    expect(health.queues).toEqual({
-      status: "unverified",
-      message: "not probed · UnprobableQueues",
-    })
-    expect(health.warnings.join("\n")).toContain("queues was not probed")
+    expect(health.queues).toEqual({ ok: true, message: "ok · InMemoryQueues" })
   })
 
   test("fails the queues row when its health check throws", async () => {
@@ -125,7 +107,7 @@ describe("checkRuntimeHealth", () => {
     const health = await checkRuntimeHealth(runtime({ queues }))
 
     expect(health.queues).toEqual({
-      status: "failed",
+      ok: false,
       message: "InMemoryQueues · connect ECONNREFUSED 127.0.0.1:6379",
     })
   })
@@ -147,7 +129,7 @@ describe("checkRuntimeHealth", () => {
     )
 
     expect(health.warnings).toEqual([])
-    expect(health.broker.status).toBe("ok")
+    expect(health.broker.ok).toBe(true)
   })
 })
 
@@ -181,13 +163,6 @@ function sharedQueues() {
   return new (class SharedQueues {
     scope = "shared" as const
     health = inner.health.bind(inner)
-  })()
-}
-
-/** Shareable, and with no `health()` — the third-party provider `unverified` exists for. */
-function unprobableQueues() {
-  return new (class UnprobableQueues {
-    scope = "shared" as const
   })()
 }
 

@@ -218,16 +218,12 @@ export interface Queues {
   /**
    * Reports whether the backing service is reachable, without enqueueing or claiming.
    *
-   * Optional because nothing else in this contract is read-only — `enqueue`, `claim`,
-   * `complete`, `retry` and `fail` all move work — so a provider with no cheap probe
-   * cannot fake one. A provider that omits it is reported as unverified rather than
-   * healthy: `sixb check` painted this row green against an unreachable Redis, which is
-   * exactly the reassurance the command exists to stop giving.
-   *
-   * Resolve when reachable, throw otherwise. The thrown message is shown to an
-   * operator, so it has to name the condition.
+   * The only read-only member of this contract, and required for that reason: `sixb check`
+   * used to paint its queues row green without a round trip, and an optional probe would
+   * have left the same hole open for anyone who skipped it. Resolve when reachable, throw
+   * otherwise — the message reaches an operator, so it has to name the condition.
    */
-  health?(): Promise<void>
+  health(): Promise<void>
 
   /** Release external resources. Optional: a provider that owns none omits it. */
   close?(): void | Promise<void>
