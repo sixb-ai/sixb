@@ -4,7 +4,10 @@ import {
   MaterializationValidationError,
   type ProjectionDefinition,
 } from "@sixb/core"
-import type { ProjectionRunTerminalDecision } from "@sixb/core/internal/materialization"
+import {
+  MaterializationObjectNotFoundError,
+  type ProjectionRunTerminalDecision,
+} from "@sixb/core/internal/materialization"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { ProjectionRunRecord } from "@sixb/core/storage"
 import { ProjectionWorkerPermanentError } from "./errors"
@@ -13,6 +16,7 @@ import {
   type ValidatedProjectionJob,
   validateProjectionJob,
 } from "./job-validation"
+import { MISSING_TARGET_ATTEMPT_BUDGET } from "./retry-backoff"
 import { mapLinkProjectionEntries } from "./run-link-projection"
 import { mapObjectProjectionEntries } from "./run-object-projection"
 import { runTelemetryProjection, TELEMETRY_PROJECTION_BATCH_SIZE } from "./run-telemetry-projection"
@@ -48,7 +52,7 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
       })
       throw error
     }
-    if (isPermanentFailure(error) && !signal.aborted) {
+    if (isPermanentFailure(error, input.attempt ?? 1) && !signal.aborted) {
       await finishProjection(input, execution, {
         protocol: input.job.protocol,
         status: "failed",
@@ -249,7 +253,8 @@ function terminalResult(run: ProjectionRunRecord): ProjectionJobResult {
   return { run, replayedTerminal: true }
 }
 
-function isPermanentFailure(error: unknown): boolean {
+function isPermanentFailure(error: unknown, attempt: number): boolean {
+  if (isMissingTargetWorthRetrying(error, attempt)) return false
   if (
     error instanceof ProjectionWorkerPermanentError ||
     error instanceof MaterializationValidationError
@@ -272,6 +277,26 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export function isPermanentProjectionFailure(error: unknown): boolean {
-  return isPermanentFailure(error) || isExplicitCancellation(error)
+export function isPermanentProjectionFailure(error: unknown, attempt = 1): boolean {
+  return isPermanentFailure(error, attempt) || isExplicitCancellation(error)
+}
+
+/**
+ * A telemetry target that does not exist *yet*.
+ *
+ * `MaterializationObjectNotFoundError` extends `MaterializationValidationError`, which is the
+ * right reading for a caller appending telemetry by hand: an id that names no object is a bad
+ * request. It is the wrong reading for a projection, whose dataset can legitimately be
+ * materialized before the objects it references — the two are queued from separate dataset
+ * versions and nothing sequences them. Failing the run on the first delivery turned a wait of
+ * milliseconds into a permanent hole: nothing retries a failed run, and re-running the sync
+ * produces no new version when the source has not changed.
+ *
+ * So it stays retryable while the budget lasts and becomes permanent after, which is what makes
+ * a source id that names nothing distinguishable from one that is merely early.
+ */
+function isMissingTargetWorthRetrying(error: unknown, attempt: number): boolean {
+  return (
+    error instanceof MaterializationObjectNotFoundError && attempt < MISSING_TARGET_ATTEMPT_BUDGET
+  )
 }

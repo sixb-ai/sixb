@@ -46,6 +46,7 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
       runtime: this.context,
       job: { id: job.id, ...job.payload },
       signal,
+      attempt: job.attempt,
       onRunFailed: (error, run) => {
         reportRunFailure(this.sixb, error, {
           projectId: this.sixb.projectId,
@@ -89,7 +90,9 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
     })
     if (run?.status === "running") return retryWithBackoff(claimed)
     if (run) return { kind: "fail" }
-    return isPermanentProjectionFailure(error) ? { kind: "fail" } : retryWithBackoff(claimed)
+    return isPermanentProjectionFailure(error, claimed.job.attempt)
+      ? { kind: "fail" }
+      : retryWithBackoff(claimed)
   }
 }
 

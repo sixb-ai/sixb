@@ -41,6 +41,7 @@ import type {
   ProjectionRunStorage,
   ReclaimSourceMaterializationInput,
 } from "@sixb/core/storage"
+import { MISSING_TARGET_ATTEMPT_BUDGET } from "../src/retry-backoff"
 import {
   isPermanentProjectionFailure,
   runProjectionJob as runCanonicalProjectionJob,
@@ -1014,7 +1015,7 @@ describe("runProjectionJob", () => {
     expect(history.map((point) => point.value)).toEqual([71])
   })
 
-  test("fails one telemetry batch atomically when a referenced object is missing", async () => {
+  test("fails one telemetry batch atomically once a missing object outlives its retries", async () => {
     const deps = createDeps()
     const sixb = createSixb(
       {
@@ -1047,6 +1048,9 @@ describe("runProjectionJob", () => {
       runProjectionJob({
         runtime: createRuntime(sixb),
         batchSize: 10,
+        // The last delivery this run gets: a target that is still absent here is one the
+        // source names and the ontology does not have, not one that is merely early.
+        attempt: MISSING_TARGET_ATTEMPT_BUDGET,
         job: {
           id: "projrun-telemetry-partial-failure",
           projectionId: "room-temperature-proj",
@@ -1073,6 +1077,53 @@ describe("runProjectionJob", () => {
       propertyId: "temperature",
     })
     expect(history).toEqual([])
+  })
+
+  test("leaves the run retryable while a missing object may still be arriving", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomReadingsDataset],
+        projections: [roomTemperatureProjection],
+      },
+      deps
+    )
+    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
+      {
+        room_id: "missing-room",
+        observed_at: "2026-06-01T12:05:00.000Z",
+        temperature: 71,
+        sync_row_id: "reading-1",
+        unused: null,
+      },
+    ])
+
+    await expect(
+      runProjectionJob({
+        runtime: createRuntime(sixb),
+        batchSize: 10,
+        job: {
+          id: "projrun-telemetry-missing-target-early",
+          projectionId: "room-temperature-proj",
+          projectionKind: "telemetry",
+          datasetId: roomReadingsDataset.id,
+          versionId: version.versionId,
+        },
+      })
+    ).rejects.toThrow("missing object")
+
+    const run = await deps.storage.projectionRuns.getById({
+      projectId: sixb.id,
+      id: canonicalRunId("projrun-telemetry-missing-target-early"),
+    })
+    // Left running, which is what the queue reads as "redeliver me": the worker retries a run it
+    // finds still running and refuses to retry one recorded as failed. A telemetry projection and
+    // the object projection feeding it are queued from separate dataset versions and nothing
+    // sequences them, so failing on the first delivery turned a wait of milliseconds into a
+    // permanent hole — nothing retries a failed run, and an unchanged source produces no new
+    // version to run against.
+    expect(run?.status).toBe("running")
   })
 
   test("telemetry projections parse zone-less timestamps as UTC", async () => {

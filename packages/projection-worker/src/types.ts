@@ -37,6 +37,14 @@ export interface RunProjectionJobInput {
   readonly runtime: ProjectionWorkerContext
   readonly job: ProjectionJob
   readonly signal?: AbortSignal
+  /**
+   * Which delivery of this job is running, from the queue's claim counter.
+   *
+   * Only a missing telemetry target reads it: that failure is retryable until the attempt
+   * budget is spent, and terminal after. Defaults to the first delivery, so a caller that
+   * does not track deliveries gets the retryable reading rather than a premature failure.
+   */
+  readonly attempt?: number
   /** Test seam only. Production always uses the protocol constant (500 physical rows). */
   readonly telemetryBatchSize?: number
   readonly onRunFailed?: ProjectionRunFailedHandler
