@@ -24,6 +24,7 @@ import {
   resolveAuthorizationContext,
   type SecurityRegistry,
   Sixb,
+  type StoredDomainEvent,
   type WorkflowDefinition,
 } from "../src"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
@@ -753,6 +754,64 @@ describe("sixb.as() telemetry appends", () => {
         at: new Date(),
       })
     ).rejects.toThrow(AuthorizationError)
+  })
+})
+
+describe("direct writes are attributable", () => {
+  // Takes the event log, not the runtime: naming `ReturnType<typeof createRuntime>` in a type
+  // position is exactly the TS2589 trap the note above `createRuntime` describes.
+  async function objectCreatedEvent(
+    events: { read(): Promise<readonly StoredDomainEvent[]> },
+    primaryId: string
+  ) {
+    const isMatch = (event: StoredDomainEvent) =>
+      event.type === "object.created" && event.partitionKey.endsWith(primaryId)
+
+    return (
+      await waitFor(
+        () => events.read(),
+        (published) => published.some(isMatch)
+      )
+    ).find(isMatch)
+  }
+
+  test("a scoped write names its principal, a privileged one names nobody", async () => {
+    const sixb = createRuntime()
+
+    // Privileged: no authorization context, so no actor. The absence is the signal — this write
+    // came from the system, not a caller.
+    await sixb.objects(Contract).upsert({ properties: { id: "system-write" } })
+    const systemEvent = await objectCreatedEvent(sixb.events, "system-write")
+    expect(systemEvent?.origin).toMatchObject({ kind: "runtime" })
+    expect(systemEvent?.actor).toBeUndefined()
+
+    // Scoped: the principal travels onto the event, while `origin` still says the write bypassed an
+    // action. Governed and direct writes stay distinguishable, and a direct write is now traceable.
+    const editor = sixb.as(contextFor(sixb, ["editors"]))
+    await editor.objects(Contract).upsert({ properties: { id: "user-write" } })
+    const userEvent = await objectCreatedEvent(sixb.events, "user-write")
+    expect(userEvent?.origin).toMatchObject({ kind: "runtime" })
+    expect(userEvent?.actor).toEqual({ type: "user", id: "adam" })
+  })
+
+  test("a service account is recorded as a service actor", async () => {
+    const sixb = createRuntime()
+    const serviceContext = resolveAuthorizationContext({
+      principal: { type: "serviceAccount", id: "svc_ingest" },
+      groupIds: ["editors"],
+      roles: sixb.security.listResolvedRoles(),
+    })
+
+    await sixb
+      .as(serviceContext)
+      .objects(Contract)
+      .upsert({ properties: { id: "svc-write" } })
+
+    // The actor literals are `Principal["type"]`, so no translation happens on the way in.
+    expect((await objectCreatedEvent(sixb.events, "svc-write"))?.actor).toEqual({
+      type: "serviceAccount",
+      id: "svc_ingest",
+    })
   })
 })
 

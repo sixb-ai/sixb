@@ -8,6 +8,7 @@
  */
 
 import { randomUUID } from "node:crypto"
+import type { EventActor } from "../events/envelope"
 import type { JsonValue } from "../json"
 import type {
   EditCommitResult,
@@ -36,7 +37,12 @@ import type { ObjectRow } from "../storage"
 import { ObjectError } from "./errors"
 
 /** The runtime pieces one commit needs. */
-export type RuntimeMaterializerContext = Pick<SixbRuntimeContext, "projectId" | "storage">
+// `authorization` is here only so a commit can name its actor; it stays optional, so every existing
+// privileged caller still satisfies the type.
+export type RuntimeMaterializerContext = Pick<
+  SixbRuntimeContext,
+  "projectId" | "storage" | "authorization"
+>
 
 /** One caller-supplied batch item, lowered to the operations it contributes. */
 export interface RuntimeBatchGroup {
@@ -49,6 +55,20 @@ export interface RuntimeBatchCommit {
   readonly commit: EditCommitResult | null
   /** Outcomes per input position, in the order the item's operations were submitted. */
   readonly outcomes: ReadonlyMap<number, readonly OntologyOperationOutcome[]>
+}
+
+/**
+ * The principal behind a runtime write, when there is one.
+ *
+ * `origin: { kind: "runtime" }` already says a write bypassed an Action; this says who made it.
+ * Absent on a privileged caller (workers, syncs, tests), which is what makes the field's absence
+ * meaningful rather than merely unset: an event with no actor was written by the system itself.
+ *
+ * A `Principal` is an `EventActor` — same literals, no translation.
+ */
+function runtimeActor(ctx: RuntimeMaterializerContext): { readonly actor?: EventActor } {
+  const principal = ctx.authorization?.principal
+  return principal === undefined ? {} : { actor: principal }
 }
 
 /**
@@ -65,6 +85,7 @@ export async function commitRuntimeOperations(
   const commit = await mutations.commitEdits({
     mode: "atomic",
     source: { kind: "runtime", requestId: randomUUID() },
+    ...runtimeActor(ctx),
     operations,
     expectedObjects: [],
     expectedLinks: [],
@@ -99,6 +120,7 @@ export async function commitRuntimeBatch(
   const commit = await mutations.commitEdits({
     mode: "continue",
     source: { kind: "runtime", requestId: randomUUID() },
+    ...runtimeActor(ctx),
     operations,
     ...(operationGroups.length > 0 ? { operationGroups } : {}),
   })

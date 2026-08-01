@@ -7092,7 +7092,7 @@ export type ListEventsResponses = {
           projectId: string
           occurredAt: string
           actor?: {
-            type: "user" | "service" | "system"
+            type: "user" | "serviceAccount" | "system"
             id: string
           }
           partitionKey: string
@@ -7217,7 +7217,7 @@ export type ListEventsResponses = {
           projectId: string
           occurredAt: string
           actor?: {
-            type: "user" | "service" | "system"
+            type: "user" | "serviceAccount" | "system"
             id: string
           }
           partitionKey: string
@@ -7342,7 +7342,7 @@ export type ListEventsResponses = {
           projectId: string
           occurredAt: string
           actor?: {
-            type: "user" | "service" | "system"
+            type: "user" | "serviceAccount" | "system"
             id: string
           }
           partitionKey: string
@@ -7456,7 +7456,7 @@ export type ListEventsResponses = {
           projectId: string
           occurredAt: string
           actor?: {
-            type: "user" | "service" | "system"
+            type: "user" | "serviceAccount" | "system"
             id: string
           }
           partitionKey: string
@@ -7524,7 +7524,7 @@ export type ListEventsResponses = {
           projectId: string
           occurredAt: string
           actor?: {
-            type: "user" | "service" | "system"
+            type: "user" | "serviceAccount" | "system"
             id: string
           }
           partitionKey: string
@@ -7652,7 +7652,7 @@ export type ListEventsResponses = {
           projectId: string
           occurredAt: string
           actor?: {
-            type: "user" | "service" | "system"
+            type: "user" | "serviceAccount" | "system"
             id: string
           }
           partitionKey: string
@@ -7780,7 +7780,7 @@ export type ListEventsResponses = {
           projectId: string
           occurredAt: string
           actor?: {
-            type: "user" | "service" | "system"
+            type: "user" | "serviceAccount" | "system"
             id: string
           }
           partitionKey: string
@@ -7897,7 +7897,7 @@ export type ListEventsResponses = {
           projectId: string
           occurredAt: string
           actor?: {
-            type: "user" | "service" | "system"
+            type: "user" | "serviceAccount" | "system"
             id: string
           }
           partitionKey: string

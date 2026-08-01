@@ -62,7 +62,7 @@ const StoredEventBaseSchema = z.object({
   occurredAt: z.string(),
   actor: z
     .object({
-      type: z.enum(["user", "service", "system"]),
+      type: z.enum(["user", "serviceAccount", "system"]),
       id: z.string(),
     })
     .optional(),
