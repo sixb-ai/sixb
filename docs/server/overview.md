@@ -86,6 +86,9 @@ All JSON routes are prefixed with `/api` and mirror the runtime's typed APIs; se
 | Auth           | `/api/auth/session`, `/auth/sign-in`, `/auth/callback`, `/api/auth/...`              | [Auth](../auth/overview.md)                     |
 | Project/Status | `GET /api/project`, `GET /api/status`, `GET /health`, `GET /ready`                   | —                                               |
 
+The object, link, and telemetry **writes are not grant-checked in 0.1.0**: any authenticated session
+can call them. Reads are filtered. See [Authorization](../auth/authorization.md).
+
 Status endpoints have distinct meanings:
 
 | Endpoint | Meaning | Failure behavior |
