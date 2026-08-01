@@ -64,9 +64,9 @@ function normalizeEventActor(actor: EventActor): EventActor {
   if (typeof actor !== "object" || actor === null || Array.isArray(actor)) {
     throw new MaterializationValidationError("Event actor must be an object.")
   }
-  if (actor.type !== "user" && actor.type !== "service" && actor.type !== "system") {
+  if (actor.type !== "user" && actor.type !== "serviceAccount" && actor.type !== "system") {
     throw new MaterializationValidationError(
-      "Event actor type must be 'user', 'service', or 'system'."
+      "Event actor type must be 'user', 'serviceAccount', or 'system'."
     )
   }
   return Object.freeze({

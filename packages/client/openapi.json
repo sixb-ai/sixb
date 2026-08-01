@@ -20155,7 +20155,7 @@
                                     "properties": {
                                       "type": {
                                         "type": "string",
-                                        "enum": ["user", "service", "system"]
+                                        "enum": ["user", "serviceAccount", "system"]
                                       },
                                       "id": {
                                         "type": "string"
@@ -20529,7 +20529,7 @@
                                     "properties": {
                                       "type": {
                                         "type": "string",
-                                        "enum": ["user", "service", "system"]
+                                        "enum": ["user", "serviceAccount", "system"]
                                       },
                                       "id": {
                                         "type": "string"
@@ -20903,7 +20903,7 @@
                                     "properties": {
                                       "type": {
                                         "type": "string",
-                                        "enum": ["user", "service", "system"]
+                                        "enum": ["user", "serviceAccount", "system"]
                                       },
                                       "id": {
                                         "type": "string"
@@ -21246,7 +21246,7 @@
                                     "properties": {
                                       "type": {
                                         "type": "string",
-                                        "enum": ["user", "service", "system"]
+                                        "enum": ["user", "serviceAccount", "system"]
                                       },
                                       "id": {
                                         "type": "string"
@@ -21491,7 +21491,7 @@
                                     "properties": {
                                       "type": {
                                         "type": "string",
-                                        "enum": ["user", "service", "system"]
+                                        "enum": ["user", "serviceAccount", "system"]
                                       },
                                       "id": {
                                         "type": "string"
@@ -21876,7 +21876,7 @@
                                     "properties": {
                                       "type": {
                                         "type": "string",
-                                        "enum": ["user", "service", "system"]
+                                        "enum": ["user", "serviceAccount", "system"]
                                       },
                                       "id": {
                                         "type": "string"
@@ -22261,7 +22261,7 @@
                                     "properties": {
                                       "type": {
                                         "type": "string",
-                                        "enum": ["user", "service", "system"]
+                                        "enum": ["user", "serviceAccount", "system"]
                                       },
                                       "id": {
                                         "type": "string"
@@ -22622,7 +22622,7 @@
                                 "properties": {
                                   "type": {
                                     "type": "string",
-                                    "enum": ["user", "service", "system"]
+                                    "enum": ["user", "serviceAccount", "system"]
                                   },
                                   "id": {
                                     "type": "string"

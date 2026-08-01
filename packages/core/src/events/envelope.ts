@@ -1,7 +1,14 @@
 import type { JsonValue } from "../json"
 
+/**
+ * Who made a change.
+ *
+ * The type literals are exactly `Principal["type"]` from `auth/types`, on purpose: an actor *is* a
+ * principal recorded on an event, and two spellings of the same concept meant a translation layer
+ * between them, which is one more place for the two to drift.
+ */
 export interface EventActor {
-  type: "user" | "service" | "system"
+  type: "user" | "serviceAccount" | "system"
   id: string
 }
 

@@ -58,7 +58,7 @@ event's `type`, `topic`, `partitionKey`, `payload`, and a broker `cursor`.
 | `correlationId` | `string?` | Groups related events |
 | `causationId` | `string?` | The event that caused this one |
 | `idempotencyKey` | `string?` | De-duplicates appends |
-| `actor` | `{ type, id }?` | `user`, `service`, or `system` |
+| `actor` | `{ type, id }?` | Who made the write: `user`, `service`, or `system`. Absent when a privileged caller wrote it — a worker, a sync, or startup code |
 | `metadata` | `Record<string, JsonValue>?` | Free-form context |
 | `origin` | `{ kind, ... }?` | What produced the event: an `action`, a `runtime` write, a `projection`, or a `telemetry` append |
 | `commitId` | `string?` | Groups every object, link, and telemetry event that came from the same write |
@@ -68,6 +68,15 @@ event's `type`, `topic`, `partitionKey`, `payload`, and a broker `cursor`.
 Object, link, and telemetry events are recorded as part of the write that changed the data, so a
 broker outage delays delivery but never drops them. Their `id` is stable across redelivery, so a
 consumer that may see an event twice can de-duplicate on it.
+
+`origin` and `actor` answer different questions, and together they tell you how a change happened:
+
+| `origin.kind` | `actor` | The write was |
+| --- | --- | --- |
+| `action` | the requester | governed — validated, and recorded as a run |
+| `runtime` | the principal | a direct write through `edit:object` or `append:telemetry` |
+| `runtime` | absent | system code: a worker, a sync, startup |
+| `projection` | absent | derived from a dataset |
 
 By default events are kept as a short recent log (the built-in stream retains the last two
 days), not a permanent history. A custom broker stream can change the retention window.

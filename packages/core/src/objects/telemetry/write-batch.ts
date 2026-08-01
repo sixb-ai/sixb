@@ -34,6 +34,8 @@ export async function writeTelemetryBatch(
   try {
     commit = await getOntologyMutationRuntime(ctx).appendTelemetry({
       source: { kind: "runtime", requestId: randomUUID() },
+      // A `Principal` is an `EventActor` — same literals, no translation.
+      ...(ctx.authorization === undefined ? {} : { actor: ctx.authorization.principal }),
       points,
     })
   } catch (error) {

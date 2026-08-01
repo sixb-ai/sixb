@@ -291,12 +291,12 @@ describe("materializer canonical contracts", () => {
     const normalized = normalizeOntologyEditCommit({
       mode: "continue",
       source: { kind: "runtime", requestId: "request-1" },
-      actor: { type: "service", id: "service-1", ignored: true },
+      actor: { type: "serviceAccount", id: "service-1", ignored: true },
       operations: [],
     } as Parameters<typeof normalizeOntologyEditCommit>[0] & {
-      actor: { type: "service"; id: string; ignored: boolean }
+      actor: { type: "serviceAccount"; id: string; ignored: boolean }
     })
-    expect(normalized.actor).toEqual({ type: "service", id: "service-1" })
+    expect(normalized.actor).toEqual({ type: "serviceAccount", id: "service-1" })
     expect(Object.keys(normalized.actor ?? {})).toEqual(["type", "id"])
 
     expect(() =>
