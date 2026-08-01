@@ -1,7 +1,7 @@
 /**
  * Leaf operation: batch telemetry append for multiple objects of a single type.
  */
-import { assertPrivileged } from "../../authorization"
+import { assertCanAppendTelemetry } from "../../authorization"
 import type { TelemetryPointWrite } from "../../materialization/model"
 import { telemetryPointKey } from "../../materialization/refs"
 import { OntologyValidationError } from "../../ontology/errors"
@@ -34,7 +34,10 @@ export async function appendTelemetryBatch(
     at?: Date
   }[]
 ): Promise<void> {
-  assertPrivileged(ctx, "appendTelemetry")
+  // `writeTelemetryBatch` asserts again from the points it receives. Asserting here as well is not
+  // redundant: it reports the type by name before any property is resolved, and it still refuses an
+  // empty batch, which produces no points to assert over.
+  assertCanAppendTelemetry(ctx, ctx.objectType.id)
   const { objectType } = ctx
   // Telemetry identity is `(series, at)`, so a repeated instant inside one call is an upsert: the
   // last value wins rather than failing the whole batch.

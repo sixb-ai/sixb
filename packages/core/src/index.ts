@@ -420,6 +420,7 @@ export {
 
 export type {
   AccessGrant,
+  AppendGrant,
   ApplicationDefinition,
   ApplyGrant,
   BreadthSelector,
@@ -427,6 +428,7 @@ export type {
   DefineGroupOptions,
   DefineMembershipPolicyOptions,
   DefineRoleOptions,
+  EditGrant,
   GrantCapability,
   GrantDefinition,
   GroupDefinition,

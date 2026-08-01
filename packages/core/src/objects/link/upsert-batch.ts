@@ -6,7 +6,6 @@
  * continue-mode commit.
  */
 
-import { assertPrivileged } from "../../authorization"
 import { stableJsonStringify } from "../../json"
 import { linkRefKey } from "../../materialization/refs"
 import type { BatchItemResult, SixbRuntimeContext } from "../../runtime/types"
@@ -17,15 +16,26 @@ import {
   runtimeOperationId,
 } from "../materializer-adapter"
 import { runRuntimeItemBatch } from "../runtime-batch"
+import { assertCanWriteLink } from "./authorization"
 import { collectEndpointLookups, loadEndpointExistence, requireEndpoints } from "./endpoints"
 
 export async function upsertLinkBatch(
   ctx: SixbRuntimeContext,
   items: readonly ResolvedLinkBatchItem[]
 ): Promise<readonly BatchItemResult<void>[]> {
-  assertPrivileged(ctx, "upsertLinkBatch")
   const { ontology } = ctx
   if (items.length === 0) return []
+
+  // Every item, up front, and before the endpoint lookup below. Authorization is a precondition, not
+  // a per-item validation: a refused item must not become one failed `BatchItemResult` while the
+  // rest of the batch commits. Asserting inside `plan` would do exactly that, and would also let the
+  // existence lookup answer for targets the principal cannot see.
+  for (const item of items) {
+    assertCanWriteLink(ctx, {
+      sourceTypeId: item.objectType.id,
+      targetTypeId: item.targetTypeId,
+    })
+  }
 
   const existing = await loadEndpointExistence(ctx, collectEndpointLookups(items))
   const valueTypesById = ontology.getValueTypesById()

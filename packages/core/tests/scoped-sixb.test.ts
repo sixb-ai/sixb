@@ -31,7 +31,12 @@ import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 const Contract = defineObjectType({
   id: "contract",
   name: "Contract",
-  properties: [prop("id", "string", { required: true, primary: true })],
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    // A real telemetry property: an append with an empty `properties` produces no points at all, so
+    // the append tests below would pass without asserting anything.
+    prop("temperature", "double", { mode: "telemetry", semanticType: "Temperature" }),
+  ],
 })
 
 const SignedContract = defineObjectType({
@@ -138,6 +143,11 @@ const finance = defineGroup("finance")
 const ops = defineGroup("ops")
 const operations = defineGroup("operations")
 const workflowOnly = defineGroup("workflow-only")
+const editors = defineGroup("editors")
+const blindWriters = defineGroup("blind-writers")
+const ingest = defineGroup("ingest")
+const linkers = defineGroup("linkers")
+const blindLinkers = defineGroup("blind-linkers")
 
 const contractOperator = defineRole("contract.operator", {
   grantedTo: [commercial],
@@ -171,6 +181,34 @@ const workflowOnlyRunner = defineRole("workflow-only.runner", {
   grants: [can.run(agentReviewContract)],
 })
 
+const contractEditor = defineRole("contract.editor", {
+  grantedTo: [editors],
+  grants: [can.view(Contract), can.edit(Contract)],
+})
+
+// Edit without view: an upsert answers with the merged row, so this must not be enough.
+const blindContractWriter = defineRole("contract.blind-writer", {
+  grantedTo: [blindWriters],
+  grants: [can.edit(Contract)],
+})
+
+// Append with neither view nor edit — the write-only ingest principal.
+const contractIngestor = defineRole("contract.ingestor", {
+  grantedTo: [ingest],
+  grants: [can.append(Contract)],
+})
+
+// Writing a link needs edit on the source and view on the target.
+const invoiceLinker = defineRole("invoice.linker", {
+  grantedTo: [linkers],
+  grants: [can.view(Invoice), can.edit(Invoice), can.view(Contract)],
+})
+
+const blindInvoiceLinker = defineRole("invoice.blind-linker", {
+  grantedTo: [blindLinkers],
+  grants: [can.view(Invoice), can.edit(Invoice)],
+})
+
 const principal = { type: "user", id: "adam" } as const
 
 // No explicit instance annotations anywhere in this file: naming
@@ -185,8 +223,30 @@ function createRuntime() {
     pipelines: [contractPipeline, invoicePipeline],
     workflows: [renewContract, agentReviewContract],
     agents: [contractAgent, invoiceAgent],
-    groups: [commercial, finance, ops, operations, workflowOnly],
-    roles: [contractOperator, invoiceViewer, contractSender, operationsRunner, workflowOnlyRunner],
+    groups: [
+      commercial,
+      finance,
+      ops,
+      operations,
+      workflowOnly,
+      editors,
+      blindWriters,
+      ingest,
+      linkers,
+      blindLinkers,
+    ],
+    roles: [
+      contractOperator,
+      invoiceViewer,
+      contractSender,
+      operationsRunner,
+      workflowOnlyRunner,
+      contractEditor,
+      blindContractWriter,
+      contractIngestor,
+      invoiceLinker,
+      blindInvoiceLinker,
+    ],
     ...createTestRuntimeDeps(),
   })
 }
@@ -523,36 +583,188 @@ describe("sixb.as() operational access", () => {
   })
 })
 
-describe("sixb.as() fails closed on ungranted surfaces", () => {
-  test("writes, links, telemetry, and listLinks deny even when reached at runtime", async () => {
+describe("sixb.as() object writes", () => {
+  test("a viewer cannot write: view alone grants no edit", async () => {
     const sixb = createRuntime()
-    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     const scoped = sixb.as(contextFor(sixb, ["commercial"]))
 
-    // The scoped types hide these members; the casts simulate a scoped runtime
-    // context leaking into an unexposed code path.
-    const objectSet = scoped.objects(Contract) as unknown as {
-      upsert(input: { properties: Record<string, unknown> }): Promise<unknown>
-      appendTelemetryBatch(items: readonly Record<string, unknown>[]): Promise<void>
-    }
+    expect(scoped.objects(Contract).upsert({ properties: { id: "c2" } })).rejects.toThrow(
+      AuthorizationError
+    )
+    expect(scoped.upsertObject("contract", { id: "c2" })).rejects.toThrow(AuthorizationError)
+  })
 
-    expect(objectSet.upsert({ properties: { id: "c2" } })).rejects.toThrow(AuthorizationError)
-    expect(
-      objectSet.appendTelemetryBatch([{ id: "c1", properties: {}, at: new Date() }])
-    ).rejects.toThrow(AuthorizationError)
+  test("view plus edit writes, and the write is readable back", async () => {
+    const sixb = createRuntime()
+    const scoped = sixb.as(contextFor(sixb, ["editors"]))
 
-    const invoiceSet = scoped.objects(Invoice) as unknown as {
-      upsertLink(input: Record<string, unknown>): Promise<void>
-    }
+    await scoped.objects(Contract).upsert({ properties: { id: "c1" } })
+    expect(await scoped.objects(Contract).byId("c1").get()).not.toBeNull()
+  })
+
+  test("edit without view is refused — an upsert answers with the merged row", async () => {
+    const sixb = createRuntime()
+    const scoped = sixb.as(contextFor(sixb, ["blind-writers"]))
+
+    expect(scoped.objects(Contract).upsert({ properties: { id: "c2" } })).rejects.toThrow(
+      AuthorizationError
+    )
+  })
+
+  test("delete and restore ride on the same edit grant", async () => {
+    const sixb = createRuntime()
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+
+    const viewer = sixb.as(contextFor(sixb, ["commercial"]))
+    expect(viewer.objects(Contract).byId("c1").delete()).rejects.toThrow(AuthorizationError)
+
+    const editor = sixb.as(contextFor(sixb, ["editors"]))
+    await editor.objects(Contract).byId("c1").delete()
+    expect(await editor.objects(Contract).byId("c1").get()).toBeNull()
+    await editor.objects(Contract).byId("c1").restore()
+  })
+
+  test("ungranted types stay unwritable for a principal that can edit another type", async () => {
+    const sixb = createRuntime()
+    const scoped = sixb.as(contextFor(sixb, ["editors"]))
+
+    expect(scoped.upsertObject("invoice", { id: "i1" })).rejects.toThrow(AuthorizationError)
+  })
+
+  test("edit does not expand to subtypes", async () => {
+    const sixb = createRuntime()
+    const scoped = sixb.as(contextFor(sixb, ["editors"]))
+
+    // `can.view(Contract)` covers `signed-contract` (view expands); `can.edit(Contract)` must not.
+    expect(await scoped.objects(SignedContract).byId("s1").get()).toBeNull()
+    expect(scoped.upsertObject("signed-contract", { id: "s1" })).rejects.toThrow(AuthorizationError)
+  })
+})
+
+describe("sixb.as() link writes", () => {
+  test("edit on the source and view on the target links", async () => {
+    const sixb = createRuntime()
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+    await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
+    const scoped = sixb.as(contextFor(sixb, ["linkers"]))
+
+    await scoped.objects(Invoice).upsertLink({
+      sourceId: "i1",
+      linkId: "contract",
+      targetTypeId: "contract",
+      targetId: "c1",
+    })
+    await scoped.objects(Invoice).removeLink({
+      sourceId: "i1",
+      linkId: "contract",
+      targetTypeId: "contract",
+      targetId: "c1",
+    })
+  })
+
+  test("edit on the source is not enough without view on the target", async () => {
+    const sixb = createRuntime()
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+    await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
+    const scoped = sixb.as(contextFor(sixb, ["blind-linkers"]))
+
     expect(
-      invoiceSet.upsertLink({
+      scoped.objects(Invoice).upsertLink({
         sourceId: "i1",
         linkId: "contract",
         targetTypeId: "contract",
         targetId: "c1",
       })
     ).rejects.toThrow(AuthorizationError)
+  })
 
+  test("a refused item denies the whole link batch, before anything commits", async () => {
+    const sixb = createRuntime()
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+    await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
+    const scoped = sixb.as(contextFor(sixb, ["blind-linkers"]))
+
+    expect(
+      scoped.upsertLinkBatch([
+        {
+          objectTypeId: "invoice",
+          sourceId: "i1",
+          linkId: "contract",
+          target: { targetTypeId: "contract", targetId: "c1" },
+        },
+      ])
+    ).rejects.toThrow(AuthorizationError)
+
+    expect(await sixb.objects(Invoice).byId("i1").listLinks()).toHaveLength(0)
+  })
+})
+
+describe("sixb.as() telemetry appends", () => {
+  test("append needs its own grant: an editor cannot append", async () => {
+    const sixb = createRuntime()
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+    const scoped = sixb.as(contextFor(sixb, ["editors"]))
+
+    expect(
+      scoped.appendTelemetry("contract", [
+        {
+          id: "c1",
+          properties: { temperature: { value: 21, unit: "degreeCelsius" } },
+          at: new Date(),
+        },
+      ])
+    ).rejects.toThrow(AuthorizationError)
+  })
+
+  test("append works without view — the write-only ingest principal", async () => {
+    const sixb = createRuntime()
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+    const scoped = sixb.as(contextFor(sixb, ["ingest"]))
+
+    await scoped.appendTelemetry("contract", [
+      {
+        id: "c1",
+        properties: { temperature: { value: 21, unit: "degreeCelsius" } },
+        at: new Date(),
+      },
+    ])
+
+    // Read back through the privileged runtime: this principal holds no view grant, which is the
+    // whole point of the append/edit split.
+    const stored = await sixb.storage.timeseries.getHistory({
+      projectId: sixb.id,
+      objectTypeId: "contract",
+      objectId: "c1",
+      propertyId: "temperature",
+    })
+    expect(stored).toHaveLength(1)
+    expect(scoped.objects(Contract).byId("c1").get()).rejects.toThrow(AuthorizationError)
+  })
+
+  test("the per-property channel enforces the same grant as the batch", async () => {
+    const sixb = createRuntime()
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+    const editor = sixb.as(contextFor(sixb, ["editors"]))
+
+    expect(
+      editor.objects(Contract).byId("c1").telemetry(Contract.p.temperature).append({
+        value: 21,
+        unit: "degreeCelsius",
+        at: new Date(),
+      })
+    ).rejects.toThrow(AuthorizationError)
+  })
+})
+
+describe("sixb.as() fails closed on ungranted surfaces", () => {
+  test("listLinks denies even when reached at runtime", async () => {
+    const sixb = createRuntime()
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+    const scoped = sixb.as(contextFor(sixb, ["editors"]))
+
+    // The scoped types hide this member; the cast simulates a scoped runtime context leaking into an
+    // unexposed code path. Link rows name target types no read grant covers, so it stays privileged
+    // even for a principal that may edit the source type.
     const handle = scoped.objects(Contract).byId("c1") as unknown as {
       listLinks(): Promise<unknown>
     }
@@ -602,6 +814,12 @@ describe("ScopedSixb surface", () => {
         "requestPipelineRun",
         "requestSyncRun",
         "requestWorkflowRun",
+        "appendTelemetry",
+        "removeLink",
+        "upsertLink",
+        "upsertLinkBatch",
+        "upsertObject",
+        "upsertObjectBatch",
       ].sort()
     )
   })

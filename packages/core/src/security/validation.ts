@@ -2,6 +2,7 @@ import { GRANT_KINDS, type GrantUniverseKey, grantKindOf } from "../authorizatio
 import { SecurityValidationError } from "./errors"
 import { isMembershipOperation } from "./membership-policies"
 import type {
+  GrantCapability,
   GrantDefinition,
   GroupDefinition,
   MembershipPolicyDefinition,
@@ -11,6 +12,31 @@ import type {
 
 /** Registered id universes keyed as the grant-kind table expects them. */
 type RegisteredUniverses = Partial<Record<GrantUniverseKey, ReadonlySet<string>>>
+
+/**
+ * Every grant capability, for validating grants that arrive from untyped code.
+ *
+ * Written as a total `Record<GrantCapability, true>` rather than a bare array so a capability added
+ * to `GrantDefinition` is a compile error here — the same discipline `GRANT_KINDS` uses. The
+ * hand-written `capability !== "access" && …` chain this replaces would have accepted the new
+ * capability at startup and then died on `GRANT_KINDS[kind].universeKey`.
+ */
+const GRANT_CAPABILITIES = Object.keys({
+  access: true,
+  view: true,
+  edit: true,
+  append: true,
+  apply: true,
+  run: true,
+  observe: true,
+} satisfies Record<GrantCapability, true>) as readonly GrantCapability[]
+
+/** "'a', 'b', or 'c'" — the shape the security errors already use. */
+function formatAlternatives(values: readonly string[]): string {
+  const quoted = values.map((value) => `'${value}'`)
+  const last = quoted.at(-1)
+  return quoted.length < 2 ? (last ?? "") : `${quoted.slice(0, -1).join(", ")}, or ${last}`
+}
 
 export type CreateSecurityError = (message: string) => Error
 
@@ -167,15 +193,9 @@ export function assertGrantDefinition(
     throw createError(`[Sixb] ${field} must contain only grant definitions from 'can'.`)
   }
 
-  if (
-    value.capability !== "access" &&
-    value.capability !== "view" &&
-    value.capability !== "apply" &&
-    value.capability !== "run" &&
-    value.capability !== "observe"
-  ) {
+  if (!GRANT_CAPABILITIES.includes(value.capability as GrantCapability)) {
     throw createError(
-      `[Sixb] ${field} grant capability must be 'access', 'view', 'apply', 'run', or 'observe'.`
+      `[Sixb] ${field} grant capability must be ${formatAlternatives(GRANT_CAPABILITIES)}.`
     )
   }
 

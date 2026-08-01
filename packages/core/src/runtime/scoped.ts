@@ -69,6 +69,7 @@ import type {
   OntologySource,
   RegisteredObjectType,
   RegisteredValueTypes,
+  SixbInstance,
   SixbRuntimeContext,
 } from "./types"
 
@@ -83,6 +84,17 @@ export interface ScopedObjectByIdHandle<
   get: ObjectByIdHandle<TObjectType, TValueTypes>["get"]
   requestAction: ObjectByIdHandle<TObjectType, TValueTypes>["requestAction"]
   requestActionAndWait: ObjectByIdHandle<TObjectType, TValueTypes>["requestActionAndWait"]
+  /** Requires `edit:object` on this type and `view:object` on the link target. */
+  link: ObjectByIdHandle<TObjectType, TValueTypes>["link"]
+  /** Requires `edit:object` on this type and `view:object` on the link target. */
+  unlink: ObjectByIdHandle<TObjectType, TValueTypes>["unlink"]
+  /** Requires `edit:object`. */
+  delete: ObjectByIdHandle<TObjectType, TValueTypes>["delete"]
+  /** Requires `edit:object`. */
+  restore: ObjectByIdHandle<TObjectType, TValueTypes>["restore"]
+  /** `append()` requires `append:telemetry`; `history()` requires `view:object`. */
+  telemetry: ObjectByIdHandle<TObjectType, TValueTypes>["telemetry"]
+  // `listLinks` stays off this surface: its rows name target types that no read grant covers.
 }
 
 export interface ScopedObjectSet<
@@ -99,17 +111,29 @@ export interface ScopedObjectSet<
     TValueTypes,
     TRegisteredObjectTypes
   >["requestActionAndWait"]
+  /** Requires `view:object` and `edit:object`. */
+  upsert: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["upsert"]
+  /** Requires `edit:object` on this type and `view:object` on the link target. */
+  upsertLink: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["upsertLink"]
+  /** Requires `edit:object` on this type and `view:object` on the link target. */
+  removeLink: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["removeLink"]
+  /** Requires `append:telemetry` — and notably not `view:object`. */
+  appendTelemetryBatch: ObjectSet<
+    TObjectType,
+    TValueTypes,
+    TRegisteredObjectTypes
+  >["appendTelemetryBatch"]
 
-  /** Bind read and action operations to a specific object id. */
+  /** Bind read, write, and action operations to a specific object id. */
   byId(id: string): ScopedObjectByIdHandle<TObjectType, TValueTypes>
 }
 
 /**
  * Principal-scoped runtime surface.
  *
- * Exposes only operations whose grants are enforceable end to end
- * (`can.view`, `can.apply`, `can.run`). Everything else — writes, links, telemetry,
- * infra handles, lifecycle, auth — stays on the privileged runtime.
+ * Exposes only operations whose grants are enforceable end to end (`can.view`, `can.edit`,
+ * `can.append`, `can.apply`, `can.run`, `can.observe`). Infra handles, lifecycle, auth
+ * administration, and `listLinks` stay on the privileged runtime.
  */
 export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> {
   /** The authorization context this SDK instance enforces. */
@@ -129,6 +153,21 @@ export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> 
 
   /** Get an object by type id and primary id (server / dynamic contexts). */
   getObject(objectTypeId: string, primaryId: string): Promise<ObjectRow | null>
+
+  // The string-based write entry points, indexed off the full runtime rather than restated, so the
+  // surface that now carries authorization cannot drift from the one it delegates to.
+  /** Upsert an object by type id. Requires `view:object` and `edit:object`. */
+  upsertObject: SixbInstance<TOntologySources>["upsertObject"]
+  /** Batch upsert objects of one type. Requires `view:object` and `edit:object`. */
+  upsertObjectBatch: SixbInstance<TOntologySources>["upsertObjectBatch"]
+  /** Create or update a link. Requires `edit:object` on the source, `view:object` on the target. */
+  upsertLink: SixbInstance<TOntologySources>["upsertLink"]
+  /** Batch upsert links. Asserted for every item before anything commits. */
+  upsertLinkBatch: SixbInstance<TOntologySources>["upsertLinkBatch"]
+  /** Remove a link. Requires `edit:object` on the source, `view:object` on the target. */
+  removeLink: SixbInstance<TOntologySources>["removeLink"]
+  /** Append telemetry. Requires `append:telemetry` — and notably not `view:object`. */
+  appendTelemetry: SixbInstance<TOntologySources>["appendTelemetry"]
 
   /** Dataset definitions the principal may view. */
   listDatasets(): readonly DatasetDefinition[]
@@ -277,6 +316,44 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
         primaryId,
       })
     },
+
+    // Same delegation as the privileged runtime's own methods; the leaves assert the grants off
+    // `runtime.authorization`, which is present here by construction.
+    upsertObject: (objectTypeId: string, properties: Record<string, unknown>) =>
+      objectService.upsertObject(runtime, objectTypeId, properties),
+
+    upsertObjectBatch: (
+      objectTypeId: string,
+      items: readonly { properties: Record<string, unknown> }[]
+    ) => objectService.upsertObjectBatch(runtime, objectTypeId, items),
+
+    upsertLink: (
+      objectTypeId: string,
+      sourceId: string,
+      linkId: string,
+      target: { targetTypeId: string; targetId: string; properties?: Record<string, unknown> }
+    ) => objectService.upsertLink(runtime, objectTypeId, sourceId, linkId, target),
+
+    upsertLinkBatch: (
+      items: readonly {
+        objectTypeId: string
+        sourceId: string
+        linkId: string
+        target: { targetTypeId: string; targetId: string; properties?: Record<string, unknown> }
+      }[]
+    ) => objectService.upsertLinkBatch(runtime, items),
+
+    removeLink: (
+      objectTypeId: string,
+      sourceId: string,
+      linkId: string,
+      target: { targetTypeId: string; targetId: string }
+    ) => objectService.removeLink(runtime, objectTypeId, sourceId, linkId, target),
+
+    appendTelemetry: (
+      objectTypeId: string,
+      items: readonly { id: string; properties: Record<string, unknown>; at?: Date }[]
+    ) => objectService.appendTelemetry(runtime, objectTypeId, items),
 
     listDatasets: datasets.list,
     getDatasetById: datasets.getById,

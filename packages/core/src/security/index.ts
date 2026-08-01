@@ -18,8 +18,10 @@ export {
 } from "./membership-policies"
 export type {
   AccessGrant,
+  AppendGrant,
   ApplicationDefinition,
   ApplyGrant,
+  EditGrant,
   GrantCapability,
   GrantDefinition,
   GroupDefinition,

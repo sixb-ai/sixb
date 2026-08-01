@@ -1,7 +1,6 @@
 /**
  * Leaf operation: upsert a single link through the ontology Materializer.
  */
-import { assertPrivileged } from "../../authorization"
 import type { ResolvedLinkContext } from "../context"
 import {
   commitRuntimeOperations,
@@ -9,6 +8,7 @@ import {
   normalizeRuntimeLink,
   runtimeOperationId,
 } from "../materializer-adapter"
+import { assertCanWriteLink } from "./authorization"
 import { collectEndpointLookups, loadEndpointExistence, requireEndpoints } from "./endpoints"
 
 export async function upsertLink(
@@ -21,9 +21,9 @@ export async function upsertLink(
     properties?: Record<string, unknown>
   }
 ): Promise<void> {
-  assertPrivileged(ctx, "upsertLink")
   const { objectType, linkDefinition, ontology } = ctx
   const { sourceId, linkId, targetTypeId, targetId, properties } = params
+  assertCanWriteLink(ctx, { sourceTypeId: objectType.id, targetTypeId })
   const endpoints = { objectType, sourceId, targetTypeId, targetId }
 
   // Endpoint reads keep the public `ObjectNotFoundError` contract; the Materializer independently

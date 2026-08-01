@@ -1,7 +1,6 @@
 /**
  * Leaf operation: remove a single link through the ontology Materializer.
  */
-import { assertPrivileged } from "../../authorization"
 import { assertLinkTargetType } from "../../ontology/validation"
 import type { ResolvedLinkContext } from "../context"
 import {
@@ -9,6 +8,7 @@ import {
   linkDeleteOperation,
   runtimeOperationId,
 } from "../materializer-adapter"
+import { assertCanWriteLink } from "./authorization"
 
 export async function removeLink(
   ctx: ResolvedLinkContext,
@@ -19,9 +19,9 @@ export async function removeLink(
     targetId: string
   }
 ): Promise<void> {
-  assertPrivileged(ctx, "removeLink")
   const { objectType, linkDefinition, ontology } = ctx
   const { sourceId, linkId, targetTypeId, targetId } = params
+  assertCanWriteLink(ctx, { sourceTypeId: objectType.id, targetTypeId })
 
   assertLinkTargetType(objectType.id, linkId, linkDefinition, targetTypeId, (expected, actual) =>
     ontology.isValidLinkTarget(expected, actual)

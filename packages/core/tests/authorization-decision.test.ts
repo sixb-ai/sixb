@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { type AuthorizationContext, emptyGrantIndex, isAllowed } from "../src"
-import { canViewEvent, evaluate } from "../src/authorization"
+import {
+  assertCanAppendTelemetry,
+  assertCanEdit,
+  canViewEvent,
+  evaluate,
+} from "../src/authorization"
 import type {
   StoredActionRequestedEvent,
   StoredDatasetVersionCommittedEvent,
@@ -18,6 +23,8 @@ function context(grants: {
   applications?: readonly string[]
   view?: readonly string[]
   datasets?: readonly string[]
+  edit?: readonly string[]
+  append?: readonly string[]
   apply?: readonly string[]
   run?: readonly string[]
   syncs?: readonly string[]
@@ -34,6 +41,8 @@ function context(grants: {
       "access:application": new Set(grants.applications ?? []),
       "view:object": new Set(grants.view ?? []),
       "view:dataset": new Set(grants.datasets ?? []),
+      "edit:object": new Set(grants.edit ?? []),
+      "append:telemetry": new Set(grants.append ?? []),
       "apply:action": new Set(grants.apply ?? []),
       "run:workflow": new Set(grants.run ?? []),
       "run:sync": new Set(grants.syncs ?? []),
@@ -102,6 +111,43 @@ describe("evaluate", () => {
     })
   })
 
+  test("object.edit checks edit grants, independently of view", () => {
+    expect(
+      evaluate(context({ edit: ["quote"] }), { kind: "object.edit", objectTypeId: "quote" })
+    ).toEqual({ allowed: true, requirements: ["edit:object:quote"], missing: [] })
+
+    // A viewer holds no edit grant, and an editor's `object.edit` atom does not consult view. The
+    // pairing the write leaves require lives in `assertCanEdit`, not in the atom.
+    expect(
+      evaluate(context({ view: ["quote"] }), { kind: "object.edit", objectTypeId: "quote" })
+    ).toEqual({
+      allowed: false,
+      requirements: ["edit:object:quote"],
+      missing: ["edit:object:quote"],
+    })
+  })
+
+  test("telemetry.append checks append grants and nothing else", () => {
+    expect(
+      evaluate(context({ append: ["sensor"] }), {
+        kind: "telemetry.append",
+        objectTypeId: "sensor",
+      })
+    ).toEqual({ allowed: true, requirements: ["append:telemetry:sensor"], missing: [] })
+
+    // Editing a type does not carry the right to push points at it.
+    expect(
+      evaluate(context({ view: ["sensor"], edit: ["sensor"] }), {
+        kind: "telemetry.append",
+        objectTypeId: "sensor",
+      })
+    ).toEqual({
+      allowed: false,
+      requirements: ["append:telemetry:sensor"],
+      missing: ["append:telemetry:sensor"],
+    })
+  })
+
   test("object.query requires every touched type and lists only the unviewable ones", () => {
     const decision = evaluate(context({ view: ["quote"] }), {
       kind: "object.query",
@@ -162,6 +208,38 @@ describe("evaluate", () => {
       missing: [],
     })
     expect(isAllowed(undefined, { kind: "workflow.run", workflowId: "w" })).toBe(true)
+  })
+})
+
+describe("write asserts", () => {
+  test("assertCanEdit demands view as well as edit, and names the missing one", () => {
+    const both = { authorization: context({ view: ["quote"], edit: ["quote"] }) }
+    expect(() => assertCanEdit(both, "quote")).not.toThrow()
+
+    // Edit alone: refused, because an upsert answers with the merged row.
+    expect(() => assertCanEdit({ authorization: context({ edit: ["quote"] }) }, "quote")).toThrow(
+      /not allowed to view object type 'quote'/
+    )
+
+    // View alone: refused with the write message, so the operator knows which grant to add.
+    expect(() => assertCanEdit({ authorization: context({ view: ["quote"] }) }, "quote")).toThrow(
+      /not allowed to write object type 'quote'/
+    )
+  })
+
+  test("assertCanAppendTelemetry needs no view grant", () => {
+    expect(() =>
+      assertCanAppendTelemetry({ authorization: context({ append: ["sensor"] }) }, "sensor")
+    ).not.toThrow()
+
+    expect(() =>
+      assertCanAppendTelemetry({ authorization: context({ view: ["sensor"] }) }, "sensor")
+    ).toThrow(/not allowed to append telemetry for object type 'sensor'/)
+  })
+
+  test("both asserts are inert for a privileged caller", () => {
+    expect(() => assertCanEdit({}, "quote")).not.toThrow()
+    expect(() => assertCanAppendTelemetry({}, "sensor")).not.toThrow()
   })
 })
 
