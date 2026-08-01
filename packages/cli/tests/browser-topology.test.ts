@@ -4,6 +4,7 @@ import {
   apiEventsUrl,
   apiUrl,
   resolveBrowserTopology,
+  servedUrl,
 } from "../src/lib/browser-topology"
 
 const PUBLIC_ORIGIN_ENV = [
@@ -115,6 +116,54 @@ describe("browser topology", () => {
       { origin: "https://app.example.com", audience: "app" },
     ])
     expect(apiEventsUrl(topology)).toBe("wss://api.example.com/ws/events")
+  })
+
+  test("still requires the origin a surface's own role does not serve", () => {
+    process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
+
+    // The API role serves neither surface: these origins are its CORS allowlist, and an
+    // allowlist assembled from guesses is a hole. It is the one role that must refuse.
+    expect(() => resolveBrowserTopology({ mode: "production", includeCustomApp: false })).toThrow(
+      "SIXB_ATLAS_PUBLIC_ORIGIN"
+    )
+  })
+
+  test("serves a surface without its own public origin, and prints where it bound", () => {
+    process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
+
+    const topology = resolveBrowserTopology({
+      mode: "production",
+      host: "127.0.0.1",
+      port: "8080",
+      includeCustomApp: false,
+      serves: "atlas",
+    })
+
+    // Atlas passes its own origin to nothing but the startup panel, so demanding one only
+    // bought an operator a crash on their first production command.
+    expect(topology.atlasPublicOrigin).toBeNull()
+    expect(servedUrl(topology, "atlas")).toBe("http://127.0.0.1:8080")
+  })
+
+  test("prefers a configured origin over the bound address", () => {
+    process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
+    process.env.SIXB_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
+
+    const topology = resolveBrowserTopology({
+      mode: "production",
+      includeCustomApp: false,
+      serves: "atlas",
+    })
+
+    expect(servedUrl(topology, "atlas")).toBe("https://atlas.example.com")
+  })
+
+  test("keeps the API origin required on the role that only displays a surface", () => {
+    // `sixb atlas` ships a bundle that calls the API. Guessing that address serves a UI
+    // that cannot talk to anything, which is worse than not starting.
+    expect(() =>
+      resolveBrowserTopology({ mode: "production", includeCustomApp: false, serves: "atlas" })
+    ).toThrow("SIXB_API_PUBLIC_ORIGIN")
   })
 
   test("rejects full URLs where public origins are expected", () => {

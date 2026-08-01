@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
-import { resolveBrowserTopology } from "../lib/browser-topology"
+import { resolveBrowserTopology, servedUrl } from "../lib/browser-topology"
 import type { LoadedSixb } from "../lib/loadSixb"
 import { builtAppOutdir, loadProductionSixb } from "../lib/production"
 import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
@@ -46,10 +46,8 @@ export async function runApp(options: AppOptions = {}) {
       appPublicOrigin: options.appPublicOrigin,
       includeAtlas: false,
       includeCustomApp: true,
+      serves: "app",
     })
-    if (!topology.appPublicOrigin) {
-      throw new Error("[SixbCLI] Custom app public origin was not resolved.")
-    }
 
     const customApp = await createCustomApp({
       rootDir: loaded.projectRoot,
@@ -71,7 +69,7 @@ export async function runApp(options: AppOptions = {}) {
         title="Sixb app started"
         name={sixb.id}
         serviceName="Custom app"
-        items={[{ label: "URL", value: topology.appPublicOrigin }]}
+        items={[{ label: "URL", value: servedUrl(topology, "app") }]}
       />
     )
 

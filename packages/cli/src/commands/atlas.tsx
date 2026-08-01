@@ -1,5 +1,5 @@
 import { type AtlasAppServer, createAtlasApp } from "@sixb/atlas"
-import { resolveBrowserTopology } from "../lib/browser-topology"
+import { resolveBrowserTopology, servedUrl } from "../lib/browser-topology"
 import type { LoadedSixb } from "../lib/loadSixb"
 import { builtAtlasOutdir, loadProductionSixb } from "../lib/production"
 import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
@@ -33,10 +33,8 @@ export async function runAtlas(options: AtlasOptions = {}) {
       atlasPublicOrigin: options.atlasPublicOrigin,
       includeAtlas: true,
       includeCustomApp: false,
+      serves: "atlas",
     })
-    if (!topology.atlasPublicOrigin) {
-      throw new Error("[SixbCLI] Atlas public origin was not resolved.")
-    }
 
     const atlas = createAtlasApp({
       apiBaseUrl: topology.apiPublicOrigin,
@@ -55,7 +53,7 @@ export async function runAtlas(options: AtlasOptions = {}) {
         title="Sixb Atlas started"
         name={sixb.id}
         serviceName="Atlas"
-        items={[{ label: "URL", value: topology.atlasPublicOrigin }]}
+        items={[{ label: "URL", value: servedUrl(topology, "atlas") }]}
       />
     )
 

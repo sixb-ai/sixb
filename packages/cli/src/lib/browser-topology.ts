@@ -12,6 +12,13 @@ export interface BrowserTopologyOptions {
   readonly appPublicOrigin?: string
   readonly includeAtlas?: boolean
   readonly includeCustomApp: boolean
+
+  /**
+   * The browser surface this process serves itself, if any. That role only prints the surface's
+   * public origin, so it starts without one. The API role names nothing here: the same origins are
+   * its CORS allowlist, where a guessed entry is a hole rather than a cosmetic default.
+   */
+  readonly serves?: "atlas" | "app"
 }
 
 export interface BrowserTopology {
@@ -94,30 +101,27 @@ function resolveBrowserPublicOrigins(
   options: BrowserTopologyOptions,
   ports: BrowserPorts
 ): BrowserPublicOrigins {
-  const apiPublicOrigin = resolvePublicOrigin({
-    value: options.apiPublicOrigin,
-    envName: "SIXB_API_PUBLIC_ORIGIN",
-    label: "API public origin",
-    localDefault: `http://localhost:${ports.apiPort}`,
-    mode: options.mode,
-  })
-  const includeAtlas = options.includeAtlas ?? true
-  const atlasPublicOrigin = includeAtlas
-    ? resolvePublicOrigin({
-        value: options.atlasPublicOrigin,
-        envName: "SIXB_ATLAS_PUBLIC_ORIGIN",
-        label: "Atlas public origin",
-        localDefault: `http://localhost:${ports.atlasPort}`,
-        mode: options.mode,
-      })
-    : null
+  // Every browser surface sends its requests here, so this one is never inferred in production.
+  const apiPublicOrigin =
+    configuredOrigin(options.apiPublicOrigin, "SIXB_API_PUBLIC_ORIGIN", "API public origin") ??
+    localOrigin(options, ports.apiPort) ??
+    refusePublicOrigin("SIXB_API_PUBLIC_ORIGIN")
+
+  const atlasPublicOrigin =
+    (options.includeAtlas ?? true)
+      ? resolveSurfaceOrigin(options, "atlas", {
+          value: options.atlasPublicOrigin,
+          envName: "SIXB_ATLAS_PUBLIC_ORIGIN",
+          label: "Atlas public origin",
+          port: ports.atlasPort,
+        })
+      : null
   const appPublicOrigin = options.includeCustomApp
-    ? resolvePublicOrigin({
+    ? resolveSurfaceOrigin(options, "app", {
         value: options.appPublicOrigin,
         envName: "SIXB_APP_PUBLIC_ORIGIN",
         label: "custom app public origin",
-        localDefault: `http://localhost:${ports.appPort}`,
-        mode: options.mode,
+        port: ports.appPort,
       })
     : null
 
@@ -126,6 +130,30 @@ function resolveBrowserPublicOrigins(
     atlasPublicOrigin,
     appPublicOrigin,
   }
+}
+
+/**
+ * A browser surface's own public origin. Required wherever it feeds the API's CORS allowlist, and
+ * optional on the role that serves the surface, which only prints it — refusing to start over a
+ * label is a startup an operator has to debug for nothing.
+ */
+function resolveSurfaceOrigin(
+  options: BrowserTopologyOptions,
+  surface: "atlas" | "app",
+  input: {
+    readonly value: string | undefined
+    readonly envName: string
+    readonly label: string
+    readonly port: number
+  }
+): string | null {
+  const configured = configuredOrigin(input.value, input.envName, input.label)
+  if (configured) return configured
+
+  const local = localOrigin(options, input.port)
+  if (local) return local
+
+  return options.serves === surface ? null : refusePublicOrigin(input.envName)
 }
 
 function createAllowedBrowserOrigins(origins: BrowserPublicOrigins): readonly SixbBrowserOrigin[] {
@@ -142,6 +170,20 @@ function createAllowedBrowserOrigins(origins: BrowserPublicOrigins): readonly Si
   return allowedOrigins
 }
 
+/**
+ * What a browser-serving role shows as its own address. The public origin when one is configured,
+ * and otherwise the address it actually bound — which is all the process knows, and better than a
+ * startup panel with no URL on it.
+ */
+export function servedUrl(topology: BrowserTopology, surface: "atlas" | "app"): string {
+  const [origin, port] =
+    surface === "atlas"
+      ? ([topology.atlasPublicOrigin, topology.atlasPort] as const)
+      : ([topology.appPublicOrigin, topology.appPort] as const)
+
+  return origin ?? `http://${topology.host}:${port}`
+}
+
 export function apiUrl(topology: BrowserTopology): string {
   return new URL("/api", topology.apiPublicOrigin).toString().replace(/\/$/, "")
 }
@@ -156,24 +198,24 @@ export function apiEventsUrl(topology: BrowserTopology): string {
   return url.toString()
 }
 
-function resolvePublicOrigin(input: {
-  readonly value: string | undefined
-  readonly envName: string
-  readonly label: string
-  readonly localDefault: string
-  readonly mode: "development" | "production"
-}): string {
-  const configured = input.value ?? process.env[input.envName]
-  if (configured) {
-    return normalizeOrigin(configured, input.label)
-  }
+/** The origin the flag or the environment set, normalized. `null` when neither did. */
+function configuredOrigin(
+  value: string | undefined,
+  envName: string,
+  label: string
+): string | null {
+  const configured = value ?? process.env[envName]
+  return configured ? normalizeOrigin(configured, label) : null
+}
 
-  if (input.mode === "development") {
-    return input.localDefault
-  }
+/** The local default, or `null` in production, where an origin behind a proxy cannot be guessed. */
+function localOrigin(options: BrowserTopologyOptions, port: number): string | null {
+  return options.mode === "development" ? `http://localhost:${port}` : null
+}
 
+function refusePublicOrigin(envName: string): never {
   throw new Error(
-    `[SixbCLI] Production serving requires ${input.envName} or --${toKebabCase(input.envName.replace(/^SIXB_/, "").toLowerCase())}.`
+    `[SixbCLI] Production serving requires ${envName} or --${toKebabCase(envName.replace(/^SIXB_/, "").toLowerCase())}.`
   )
 }
 
