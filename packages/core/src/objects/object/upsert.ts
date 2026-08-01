@@ -2,7 +2,7 @@
  * Leaf operation: upsert a single object through the ontology Materializer.
  */
 
-import { assertPrivileged } from "../../authorization"
+import { assertCanEdit } from "../../authorization"
 import type { ObjectRow } from "../../storage"
 import type { ResolvedObjectContext } from "../context"
 import {
@@ -18,7 +18,7 @@ export async function upsertObject(
   ctx: ResolvedObjectContext,
   properties: Record<string, unknown>
 ): Promise<ObjectRow> {
-  assertPrivileged(ctx, "upsertObject")
+  assertCanEdit(ctx, ctx.objectType.id)
   const { objectType, primaryPropertyId, ontology } = ctx
 
   const normalized = normalizeRuntimeObject({

@@ -26,6 +26,8 @@ export type AuthzRequest =
   | { readonly kind: "application.access"; readonly audience: AuthSessionAudience }
   | { readonly kind: "object.view"; readonly objectTypeId: string }
   | { readonly kind: "dataset.view"; readonly datasetId: string }
+  | { readonly kind: "object.edit"; readonly objectTypeId: string }
+  | { readonly kind: "telemetry.append"; readonly objectTypeId: string }
   | { readonly kind: "action.apply"; readonly actionId: string }
   | { readonly kind: "workflow.run"; readonly workflowId: string }
   | { readonly kind: "sync.run"; readonly syncId: string }
@@ -63,6 +65,10 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
       return [{ kind: "view:object", id: request.objectTypeId }]
     case "dataset.view":
       return [{ kind: "view:dataset", id: request.datasetId }]
+    case "object.edit":
+      return [{ kind: "edit:object", id: request.objectTypeId }]
+    case "telemetry.append":
+      return [{ kind: "append:telemetry", id: request.objectTypeId }]
     case "action.apply":
       return [{ kind: "apply:action", id: request.actionId }]
     case "workflow.run":
@@ -122,9 +128,42 @@ export function assertAuthorized(runtime: AuthorizedRuntime, request: AuthzReque
 }
 
 /**
- * Fail closed for operations that have no grant semantics yet (writes, links,
- * telemetry). Keeps unsupported surfaces denied even if a scoped runtime
- * context reaches a code path the scoped SDK does not expose.
+ * Assert a principal may write objects of this type.
+ *
+ * Requires `view:object` as well as `edit:object`, and that is not belt-and-braces: an upsert
+ * returns the *merged* row, which the Materializer reconciles against source authority, so the
+ * response can carry properties the caller never sent. Granting the write without the read would
+ * leak them.
+ *
+ * The pairing is asserted here rather than implied during resolution: `resolveRoleGrants` has no
+ * notion of one grant entailing another, and giving it one would put ids in the resolved index that
+ * no role granted — an index that no longer answers "what was actually granted".
+ *
+ * Telemetry append is deliberately *not* paired this way; see {@link assertCanAppendTelemetry}.
+ */
+export function assertCanEdit(runtime: AuthorizedRuntime, objectTypeId: string): void {
+  assertAuthorized(runtime, { kind: "object.view", objectTypeId })
+  assertAuthorized(runtime, { kind: "object.edit", objectTypeId })
+}
+
+/**
+ * Assert a principal may append telemetry points to objects of this type.
+ *
+ * No `view:object` requirement, unlike {@link assertCanEdit}: an append answers with no object
+ * state, so there is nothing to leak. That is what makes a write-only principal — a device, an
+ * ingestion service — expressible at all, and it is the reason telemetry has its own grant.
+ */
+export function assertCanAppendTelemetry(runtime: AuthorizedRuntime, objectTypeId: string): void {
+  assertAuthorized(runtime, { kind: "telemetry.append", objectTypeId })
+}
+
+/**
+ * Fail closed for operations that have no grant semantics yet.
+ *
+ * One caller left — `listLinks`, whose rows reveal target types that no read grant covers. Object,
+ * link, and telemetry writes moved to {@link assertCanEdit} / {@link assertCanAppendTelemetry}.
+ * Keeps unsupported surfaces denied even if a scoped runtime context reaches a code path the scoped
+ * SDK does not expose.
  */
 export function assertPrivileged(runtime: AuthorizedRuntime, operation: string): void {
   if (!runtime.authorization) {
@@ -149,6 +188,10 @@ function deniedMessage(
       return `[Sixb] Principal '${principalId}' is not allowed to view object type '${request.objectTypeId}'.`
     case "dataset.view":
       return `[Sixb] Principal '${principalId}' is not allowed to view dataset '${request.datasetId}'.`
+    case "object.edit":
+      return `[Sixb] Principal '${principalId}' is not allowed to write object type '${request.objectTypeId}'.`
+    case "telemetry.append":
+      return `[Sixb] Principal '${principalId}' is not allowed to append telemetry for object type '${request.objectTypeId}'.`
     case "action.apply":
       return `[Sixb] Principal '${principalId}' is not allowed to apply action '${request.actionId}'.`
     case "workflow.run":

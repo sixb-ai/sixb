@@ -7,7 +7,7 @@
  */
 import { randomUUID } from "node:crypto"
 import type { AuthorizationContext } from "../../authorization"
-import { assertPrivileged } from "../../authorization"
+import { assertCanAppendTelemetry } from "../../authorization"
 import { MaterializationObjectNotFoundError } from "../../materialization/errors"
 import type { TelemetryCommitResult, TelemetryPointWrite } from "../../materialization/model"
 import { getOntologyMutationRuntime } from "../../runtime/ontology-mutations"
@@ -22,7 +22,12 @@ export async function writeTelemetryBatch(
   ctx: TelemetryWriteContext,
   points: readonly TelemetryPointWrite[]
 ): Promise<TelemetryCommitResult | null> {
-  assertPrivileged(ctx, "appendTelemetry")
+  // Asserted from the points rather than a resolved context: this leaf is the low-level choke point
+  // for both `appendTelemetryBatch` and the per-property `TelemetryChannel`, and only the points know
+  // which object types the call actually touches.
+  for (const objectTypeId of new Set(points.map((point) => point.series.object.objectTypeId))) {
+    assertCanAppendTelemetry(ctx, objectTypeId)
+  }
   if (points.length === 0) return null
 
   let commit: TelemetryCommitResult

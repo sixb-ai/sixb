@@ -245,6 +245,48 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["run:agent"]).toEqual(new Set(["contract-agent", "invoice-agent"]))
   })
 
+  test("edit and append expand to the whole type universe but never to subtypes", () => {
+    const writer = defineRole("everything.writer", {
+      grantedTo: [admins],
+      grants: [can.edit(every.object()), can.append(every.object())],
+    })
+
+    const context = resolve(["admins"], [writer])
+
+    // `every.object()` is the registered universe, so subtypes are in it on their own account.
+    expect(context.grants["edit:object"]).toEqual(
+      new Set(["contract", "signed-contract", "invoice"])
+    )
+    expect(context.grants["append:telemetry"]).toEqual(
+      new Set(["contract", "signed-contract", "invoice"])
+    )
+
+    // Naming the parent is the case that must NOT reach the child: a type added under Contract
+    // later would otherwise become writable without anyone granting it.
+    const parentWriter = defineRole("contract.writer", {
+      grantedTo: [admins],
+      grants: [can.view(Contract), can.edit(Contract), can.append(Contract)],
+    })
+
+    const narrow = resolve(["admins"], [parentWriter])
+
+    expect(narrow.grants["view:object"]).toEqual(new Set(["contract", "signed-contract"]))
+    expect(narrow.grants["edit:object"]).toEqual(new Set(["contract"]))
+    expect(narrow.grants["append:telemetry"]).toEqual(new Set(["contract"]))
+  })
+
+  test("except() on a write grant carves out the named types", () => {
+    const mostWritable = defineRole("most.writable", {
+      grantedTo: [admins],
+      grants: [can.edit(every.object().except([Invoice]))],
+    })
+
+    const context = resolve(["admins"], [mostWritable])
+
+    expect(context.grants["edit:object"]).toEqual(new Set(["contract", "signed-contract"]))
+    expect(context.grants["edit:object"].has("invoice")).toBe(false)
+  })
+
   test("except() excludes named datasets and keeps the rest of the dataset universe", () => {
     const mostDatasets = defineRole("most.datasets", {
       grantedTo: [admins],

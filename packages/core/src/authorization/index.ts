@@ -1,6 +1,13 @@
 export { canAccessApplication, isApplicationAccessControlled } from "./application-access"
 export type { AuthzDecision, AuthzRequest } from "./decision"
-export { assertAuthorized, assertPrivileged, evaluate, isAllowed } from "./decision"
+export {
+  assertAuthorized,
+  assertCanAppendTelemetry,
+  assertCanEdit,
+  assertPrivileged,
+  evaluate,
+  isAllowed,
+} from "./decision"
 export { AuthorizationError } from "./errors"
 export { canViewEvent } from "./event-visibility"
 export type { GrantKind, GrantUniverse } from "./grant-kinds"

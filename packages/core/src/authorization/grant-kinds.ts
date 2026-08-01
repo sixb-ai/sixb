@@ -14,6 +14,8 @@ export type GrantKind =
   | "access:application"
   | "view:object"
   | "view:dataset"
+  | "edit:object"
+  | "append:telemetry"
   | "apply:action"
   | "run:workflow"
   | "run:sync"
@@ -70,6 +72,19 @@ export const GRANT_KINDS: Record<GrantKind, GrantKindSpec> = {
     subject: "dataset",
     fix: "Add it to 'datasets/' or pass it to createSixb({ datasets }).",
   },
+  // Deliberately no `expandsSubtypes`: granting writes on a parent type must not
+  // silently extend to types added under it later. `view:object` expands because
+  // a read of a subtype reveals nothing the parent's grant did not already cover.
+  "edit:object": {
+    universeKey: "objectTypeIds",
+    subject: "object type",
+    fix: "Register it in 'ontology/' or pass it to createSixb({ ontologies }).",
+  },
+  "append:telemetry": {
+    universeKey: "objectTypeIds",
+    subject: "object type",
+    fix: "Register it in 'ontology/' or pass it to createSixb({ ontologies }).",
+  },
   "apply:action": {
     universeKey: "actionIds",
     subject: "action",
@@ -111,6 +126,10 @@ export function grantKindOf(grant: GrantDefinition): GrantKind {
       return "access:application"
     case "view":
       return `view:${grant.target}`
+    case "edit":
+      return "edit:object"
+    case "append":
+      return "append:telemetry"
     case "apply":
       return "apply:action"
     case "run":

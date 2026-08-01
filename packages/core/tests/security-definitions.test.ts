@@ -456,6 +456,43 @@ describe("role definitions", () => {
     })
   })
 
+  test("can.edit and can.append build object-type write grants without a target field", () => {
+    // No `target`, like `can.apply`: the capability names its one target family, so the builder
+    // resolves against `["object"]` and discards the result rather than storing a redundant field.
+    expect(can.edit(Account)).toEqual({
+      kind: "grant",
+      capability: "edit",
+      selection: { all: false, ids: ["account"] },
+    })
+    expect(can.append(Account)).toEqual({
+      kind: "grant",
+      capability: "append",
+      selection: { all: false, ids: ["account"] },
+    })
+
+    expect(can.edit(every.object()).selection).toEqual({ all: true, except: [] })
+    expect(can.edit(every.object().except([Account])).selection).toEqual({
+      all: true,
+      except: ["account"],
+    })
+    expect(can.append(every.object()).selection).toEqual({ all: true, except: [] })
+  })
+
+  test("the write builders reject the wrong target family", () => {
+    expect(() => can.edit(every.dataset() as never)).toThrow(
+      "[Sixb] can.edit accepts object selectors, but received every.dataset()."
+    )
+    expect(() => can.append(every.action() as never)).toThrow(
+      "[Sixb] can.append accepts object selectors, but received every.action()."
+    )
+    expect(() => can.edit(syncAccounts as never)).toThrow(
+      "[Sixb] can.edit accepts object definitions, but received one targeting sync."
+    )
+    expect(() => can.append(AccountSnapshot as never)).toThrow(
+      "[Sixb] can.append accepts object definitions, but received one targeting dataset."
+    )
+  })
+
   test("scopes select the whole universe, with optional exclusions", () => {
     expect(can.view(every.object()).selection).toEqual({ all: true, except: [] })
     expect(can.view(every.object().except([Account])).selection).toEqual({
@@ -628,6 +665,48 @@ describe("role definitions", () => {
 
     expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
       "unknown dataset 'missing'"
+    )
+  })
+
+  test("runtime registration rejects write grants on unknown object types", () => {
+    const editRole: RoleDefinition = {
+      kind: "role",
+      id: "contract.editor",
+      grantedToGroupIds: ["commercial"],
+      grants: [{ kind: "grant", capability: "edit", selection: { all: false, ids: ["missing"] } }],
+    }
+    const appendRole: RoleDefinition = {
+      kind: "role",
+      id: "contract.ingestor",
+      grantedToGroupIds: ["commercial"],
+      grants: [
+        { kind: "grant", capability: "append", selection: { all: false, ids: ["missing"] } },
+      ],
+    }
+
+    expect(() => createRuntime({ groups: [commercial], roles: [editRole] })).toThrow(
+      "unknown object type 'missing'"
+    )
+    expect(() => createRuntime({ groups: [commercial], roles: [appendRole] })).toThrow(
+      "unknown object type 'missing'"
+    )
+  })
+
+  test("an unregistered capability is named in the error, and the list is derived", () => {
+    // The list used to be a hand-written `capability !== "access" && …` chain, so a new capability
+    // passed validation and then died on `GRANT_KINDS[kind].universeKey` with a `TypeError` that
+    // named neither the role nor the grant.
+    const role: RoleDefinition = {
+      kind: "role",
+      id: "bogus",
+      grantedToGroupIds: ["commercial"],
+      grants: [
+        { kind: "grant", capability: "destroy", selection: { all: false, ids: ["account"] } },
+      ] as unknown as RoleDefinition["grants"],
+    }
+
+    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
+      "grant capability must be 'access', 'view', 'edit', 'append', 'apply', 'run', or 'observe'."
     )
   })
 

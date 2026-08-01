@@ -4,7 +4,7 @@
  * Everything that survives local normalization is submitted as one ordered continue-mode commit, so
  * later items observe earlier ones and a provider failure rolls the whole batch back.
  */
-import { assertPrivileged } from "../../authorization"
+import { assertCanEdit } from "../../authorization"
 import { stableJsonStringify } from "../../json"
 import type { BatchItemResult } from "../../runtime/types"
 import type { ObjectRow } from "../../storage"
@@ -22,7 +22,7 @@ export async function upsertObjectBatch(
   ctx: ResolvedObjectContext,
   items: readonly { properties: Record<string, unknown> }[]
 ): Promise<readonly BatchItemResult<ObjectRow>[]> {
-  assertPrivileged(ctx, "upsertObjectBatch")
+  assertCanEdit(ctx, ctx.objectType.id)
   const { objectType, primaryPropertyId, ontology } = ctx
   const valueTypesById = ontology.getValueTypesById()
 

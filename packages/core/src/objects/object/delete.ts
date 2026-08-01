@@ -4,7 +4,7 @@
  * Both are thin wrappers over one materializer operation, exactly like `removeLink` — the cascade
  * over links and the effective-state bookkeeping happen inside the commit.
  */
-import { assertPrivileged } from "../../authorization"
+import { assertCanEdit } from "../../authorization"
 import type { ResolvedObjectContext } from "../context"
 import {
   commitRuntimeOperations,
@@ -21,7 +21,7 @@ import {
  * stays hidden even while the projection keeps asserting it — `restore()` is what reveals it again.
  */
 export async function deleteObject(ctx: ResolvedObjectContext, primaryId: string): Promise<void> {
-  assertPrivileged(ctx, "delete")
+  assertCanEdit(ctx, ctx.objectType.id)
   await commitRuntimeOperations(ctx, [
     objectDeleteOperation({
       id: runtimeOperationId(0),
@@ -37,7 +37,7 @@ export async function deleteObject(ctx: ResolvedObjectContext, primaryId: string
  * again instead. For an object a projection also writes, it makes the projected state visible again.
  */
 export async function restoreObject(ctx: ResolvedObjectContext, primaryId: string): Promise<void> {
-  assertPrivileged(ctx, "restore")
+  assertCanEdit(ctx, ctx.objectType.id)
   await commitRuntimeOperations(ctx, [
     objectRestoreOperation({
       id: runtimeOperationId(0),

@@ -49,6 +49,38 @@ export interface ViewGrant<TTarget extends ViewGrantTarget = ViewGrantTarget> {
   readonly selection: Selection
 }
 
+/**
+ * Write objects of the selected types: properties, links, delete, and restore.
+ *
+ * Carries no `target` — like {@link ApplyGrant}, the capability names its one target family, so
+ * `grantKindOf` stays a constant and the selection cannot disagree with a redundant field.
+ *
+ * Takes effect alongside `view:object`: an upsert returns the *merged* row, which the Materializer
+ * reconciles against source authority, so a write can surface properties the caller never sent.
+ * Enforced explicitly at the write leaves rather than implied here — the resolved index holds only
+ * ids somebody granted.
+ */
+export interface EditGrant {
+  readonly kind: "grant"
+  readonly capability: "edit"
+  readonly selection: Selection
+}
+
+/**
+ * Append telemetry points to objects of the selected types. Append-only: it cannot change a
+ * property, delete anything, or violate a state machine.
+ *
+ * Separate from {@link EditGrant} because it serves a different class of principal — a device or an
+ * ingestion service pushes points and must never reach properties. It is also the only write that
+ * needs no `view:object`, since the response carries no object state; that is what makes a
+ * genuinely write-only principal expressible.
+ */
+export interface AppendGrant {
+  readonly kind: "grant"
+  readonly capability: "append"
+  readonly selection: Selection
+}
+
 export interface ApplyGrant {
   readonly kind: "grant"
   readonly capability: "apply"
@@ -73,7 +105,14 @@ export interface ObserveGrant {
   readonly selection: Selection
 }
 
-export type GrantDefinition = AccessGrant | ViewGrant | ApplyGrant | RunGrant | ObserveGrant
+export type GrantDefinition =
+  | AccessGrant
+  | ViewGrant
+  | EditGrant
+  | AppendGrant
+  | ApplyGrant
+  | RunGrant
+  | ObserveGrant
 
 export type GrantCapability = GrantDefinition["capability"]
 

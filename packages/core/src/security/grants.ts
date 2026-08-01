@@ -23,8 +23,10 @@ import {
 } from "./every"
 import type {
   AccessGrant,
+  AppendGrant,
   ApplicationDefinition,
   ApplyGrant,
+  EditGrant,
   ObserveGrant,
   RunGrant,
   Selection,
@@ -155,6 +157,22 @@ function view(input: GrantInput<ObjectType | DatasetDefinition, "object" | "data
   return { kind: "grant", capability: "view", target, selection }
 }
 
+function edit(input: GrantInput<ObjectType, "object">): EditGrant {
+  return {
+    kind: "grant",
+    capability: "edit",
+    selection: resolveGrant(input, "can.edit", ["object"]).selection,
+  }
+}
+
+function append(input: GrantInput<ObjectType, "object">): AppendGrant {
+  return {
+    kind: "grant",
+    capability: "append",
+    selection: resolveGrant(input, "can.append", ["object"]).selection,
+  }
+}
+
 function apply(input: GrantInput<ActionDefinition, "action">): ApplyGrant {
   return {
     kind: "grant",
@@ -189,6 +207,8 @@ function observe(target: "logs"): ObserveGrant {
 export const can = {
   access,
   view,
+  edit,
+  append,
   apply,
   run,
   observe,
