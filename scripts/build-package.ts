@@ -6,6 +6,9 @@ type PackageJson = {
   name?: string
   types?: string
   exports?: ExportsMap
+  dependencies?: Record<string, string>
+  peerDependencies?: Record<string, string>
+  optionalDependencies?: Record<string, string>
   sixbBuild?: {
     entrypoints?: string[]
     assets?: Array<{
@@ -36,6 +39,7 @@ const buildConfigDir = join(packageRoot, ".tsbuild")
 
 const packageJson = (await Bun.file(packageJsonPath).json()) as PackageJson
 const packageName = packageJson.name ?? relative(process.cwd(), packageRoot)
+const workspaceExternals = resolveWorkspaceExternals(packageJson)
 
 // Root builds remove dist before TypeScript emits declarations. Package-scoped builds and
 // prepack runs preserve those declarations but remove every runtime artifact so stale chunks,
@@ -60,6 +64,11 @@ if (entrypoints.length > 0) {
     target: "bun",
     format: "esm",
     packages: "external",
+    // `packages: "external"` still follows Bun workspace links resolved through the `bun`
+    // export condition. Preserve every workspace package boundary explicitly: a package artifact
+    // may import a sibling, but it must never absorb that sibling's source and orphan its
+    // third-party imports under the wrong node_modules owner.
+    ...(workspaceExternals.length > 0 ? { external: workspaceExternals } : {}),
     sourcemap: "external",
     // Share modules between entrypoints via chunks. Without splitting, each
     // subpath entry bundles its own copy of shared modules, so stateful
@@ -221,6 +230,26 @@ async function writeBundleTsconfig(): Promise<string> {
     )}\n`
   )
   return bundleTsconfigPath
+}
+
+function resolveWorkspaceExternals(manifest: PackageJson): string[] {
+  const patterns = new Set<string>()
+  for (const field of [
+    manifest.dependencies,
+    manifest.peerDependencies,
+    manifest.optionalDependencies,
+  ]) {
+    for (const [dependency, range] of Object.entries(field ?? {})) {
+      if (!range.startsWith("workspace:")) continue
+
+      // The trailing wildcard covers the package root and every subpath with one pattern.
+      // Separate exact-root and `/*` patterns let Bun inline re-export barrels despite marking
+      // ordinary imports external.
+      patterns.add(`${dependency}*`)
+    }
+  }
+
+  return [...patterns].sort((a, b) => a.localeCompare(b))
 }
 
 async function resolveEntrypoints(
