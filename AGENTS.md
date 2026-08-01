@@ -17,7 +17,6 @@ Repo-wide agent instructions for `sixb`.
 - `packages/cli`: CLI entrypoint for `sixb`
 - `packages/create-sixb`: zero-dependency project scaffolder and template
 - `packages/app`: custom app integration
-- `benchmarks/`: private manual performance harnesses; never published
 - `connectors/`, `storage/`, `broker/`: integrations and infrastructure providers
 - `examples/`: runnable sample projects
 

@@ -102,21 +102,6 @@ freeze writers and drain jobs
 
 Project-specific mappings and migration scripts stay outside the framework.
 
-## Materialization benchmark
-
-Repository contributors can exercise a one-million-row replacement against either SQL provider:
-
-```bash
-bun run benchmark:ontology-materialization --provider sqlite
-DATABASE_URL=postgres://... bun run benchmark:ontology-materialization --provider postgres
-```
-
-The command uses an isolated temporary database/schema, verifies the effective object count, then
-removes its data. Its JSON report separates candidate staging, semantic finalization, run
-finalization, peak RSS, database/WAL growth, and the wait observed by a competing writer. Results
-are measurements to record with the machine and database configuration, not universal pass/fail
-timing thresholds.
-
 ## Provider matrix
 
 Pick a real provider class for each slot. `InMemory*` providers come from `@sixb/core` and
