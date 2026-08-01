@@ -30,7 +30,6 @@ import {
   fileContentGetResponses,
   fileContentHeadResponses,
 } from "../files/content"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
@@ -47,7 +46,7 @@ import {
   TwinObjectSchema,
   UpsertObjectBodySchema,
 } from "../schemas/objects"
-import { parseOptionalInt, toIsoString } from "../utils/http"
+import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
 
 const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
   path: z
@@ -797,28 +796,38 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
     )
     .put(
       "/api/objects/:objectTypeId/:objectId",
-      async ({ params, body, set }) => {
+      async (context) => {
+        const { params, body, set } = context
+        const { scoped } = requestAuthState(context)
         try {
           const parsedBody = UpsertObjectBodySchema.parse(body)
           const primaryPropertyId = sixb.getPrimaryPropertyId(params.objectTypeId)
           const properties = { ...parsedBody.properties, [primaryPropertyId]: params.objectId }
-          const object = await sixb.upsertObject(params.objectTypeId, properties)
+          // Scoped when a principal is attached, privileged only when auth is off or the request is
+          // public — the same fallback the read routes use.
+          const object = await (scoped ?? sixb).upsertObject(params.objectTypeId, properties)
           return serializeObject(object)
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          set.status = message.includes("Unknown object type") ? 404 : 400
-          return { error: message }
+          // Was a local catch mapping every error to 404/400, which turned a missing grant into
+          // "bad request". `handleRouteError` answers 403 for AuthorizationError, like the link and
+          // telemetry writes already did.
+          return handleRouteError(error, set)
         }
       },
       {
         params: ObjectParamsSchema,
         body: UpsertObjectBodySchema,
-        response: { 200: TwinObjectSchema, 400: ErrorResponseSchema, 404: ErrorResponseSchema },
+        response: {
+          200: TwinObjectSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
         detail: {
           summary: "Create or update object",
           tags: [OPENAPI_TAGS.objects.name],
           operationId: "upsertObject",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("upsertObject"),
         },
       }
     )

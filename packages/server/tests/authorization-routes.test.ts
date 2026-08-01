@@ -126,6 +126,8 @@ const renewContract: WorkflowDefinition = defineWorkflow("renew-contract")
 const commercial = defineGroup("commercial")
 const operations = defineGroup("operations")
 const admins = defineGroup("admins")
+const writers = defineGroup("writers")
+const ingest = defineGroup("ingest")
 
 const contractOperator = defineRole("contract.operator", {
   grantedTo: [commercial],
@@ -149,6 +151,18 @@ const adminOperator = defineRole("admin.operator", {
   ],
 })
 
+// Writes Contract only, and links from it: `view` on Invoice is what lets it name a link target.
+const contractWriter = defineRole("contract.writer", {
+  grantedTo: [writers],
+  grants: [can.view(Contract), can.edit(Contract), can.view(Invoice)],
+})
+
+// Telemetry only, with no view grant at all: the ingest principal.
+const contractIngestor = defineRole("contract.ingestor", {
+  grantedTo: [ingest],
+  grants: [can.append(Contract)],
+})
+
 async function createRuntime(options: { readonly auth?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const sixb = new Sixb<readonly OntologySource[]>({
@@ -169,8 +183,8 @@ async function createRuntime(options: { readonly auth?: boolean } = {}) {
     queues: new InMemoryQueues(),
     actions: [sendContract],
     workflows: [renewContract],
-    groups: [commercial, operations, admins],
-    roles: [contractOperator, operationsRunner, adminOperator],
+    groups: [commercial, operations, admins, writers, ingest],
+    roles: [contractOperator, operationsRunner, adminOperator, contractWriter, contractIngestor],
     auth: options.auth === false ? undefined : { id: "test", kind: "dev" as const },
   })
 
@@ -543,6 +557,127 @@ describe("authorized object routes", () => {
         },
       ],
     })
+  })
+
+  test("object writes require edit, not just view", async () => {
+    const { app, storage } = await createApp()
+    const viewer = await seedSession(storage, ["commercial"], "usr_view")
+    const writer = await seedSession(storage, ["writers"], "usr_write")
+
+    const body = JSON.stringify({ properties: { id: "c1" } })
+
+    const denied = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c1", {
+        method: "PUT",
+        headers: viewer.csrfHeaders,
+        body,
+      })
+    )
+    expect(denied.status).toBe(403)
+
+    const allowed = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c1", {
+        method: "PUT",
+        headers: writer.csrfHeaders,
+        body,
+      })
+    )
+    expect(allowed.status).toBe(200)
+
+    // The writer's grant names Contract only, so Invoice stays closed.
+    const otherType = await app.fetch(
+      new Request("http://localhost/api/objects/invoice/i2", {
+        method: "PUT",
+        headers: writer.csrfHeaders,
+        body: JSON.stringify({ properties: { id: "i2" } }),
+      })
+    )
+    expect(otherType.status).toBe(403)
+  })
+
+  test("link writes require edit on the source and view on the target", async () => {
+    const { app, storage } = await createApp()
+    const viewer = await seedSession(storage, ["commercial"], "usr_view")
+    const writer = await seedSession(storage, ["writers"], "usr_write")
+
+    const linkUrl = "http://localhost/api/objects/contract/c1/links/invoice"
+    const body = JSON.stringify({ targetTypeId: "invoice", targetId: "i1" })
+
+    // `commercial` views Contract but neither edits it nor views Invoice.
+    const denied = await app.fetch(
+      new Request(linkUrl, { method: "PUT", headers: viewer.csrfHeaders, body })
+    )
+    expect(denied.status).toBe(403)
+
+    const allowed = await app.fetch(
+      new Request(linkUrl, { method: "PUT", headers: writer.csrfHeaders, body })
+    )
+    expect(allowed.status).toBe(200)
+
+    const removedByViewer = await app.fetch(
+      new Request(`${linkUrl}?targetTypeId=invoice&targetId=i1`, {
+        method: "DELETE",
+        headers: viewer.csrfHeaders,
+      })
+    )
+    expect(removedByViewer.status).toBe(403)
+
+    const removed = await app.fetch(
+      new Request(`${linkUrl}?targetTypeId=invoice&targetId=i1`, {
+        method: "DELETE",
+        headers: writer.csrfHeaders,
+      })
+    )
+    expect(removed.status).toBe(200)
+  })
+
+  test("telemetry appends need the append grant, and it needs no view grant", async () => {
+    const { app, storage } = await createApp()
+    const writer = await seedSession(storage, ["writers"], "usr_write")
+    const ingestor = await seedSession(storage, ["ingest"], "usr_ingest")
+
+    const url = "http://localhost/api/objects/contract/c1/telemetry/temperature"
+    const body = JSON.stringify({ value: 21, at: "2026-05-16T11:00:00.000Z" })
+
+    // Editing Contract does not carry the right to push points at it.
+    const denied = await app.fetch(
+      new Request(url, { method: "POST", headers: writer.csrfHeaders, body })
+    )
+    expect(denied.status).toBe(403)
+
+    // The ingest principal holds `append` and nothing else — no view grant at all.
+    const allowed = await app.fetch(
+      new Request(url, { method: "POST", headers: ingestor.csrfHeaders, body })
+    )
+    expect(allowed.status).toBe(200)
+
+    // And it still cannot read the object it just wrote to.
+    const read = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c1", { headers: ingestor.headers })
+    )
+    expect(read.status).toBe(404)
+  })
+
+  test("disabled auth keeps the write routes privileged", async () => {
+    const { app } = await createApp({ auth: false })
+
+    const upsert = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c2", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ properties: { id: "c2" } }),
+      })
+    )
+    expect(upsert.status).toBe(200)
+
+    const append = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c2/telemetry/temperature", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ value: 30, at: "2026-05-16T11:00:00.000Z" }),
+      })
+    )
+    expect(append.status).toBe(200)
   })
 
   test("dataset routes narrow to viewable datasets and hide forbidden identities", async () => {

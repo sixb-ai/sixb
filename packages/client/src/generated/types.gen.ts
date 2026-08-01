@@ -4720,6 +4720,12 @@ export type UpsertObjectErrors = {
     error: string
   }
   /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
    * Response for status 404
    */
   404: {
@@ -6719,6 +6725,12 @@ export type RemoveObjectLinkErrors = {
     error: string
   }
   /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
    * Response for status 404
    */
   404: {
@@ -6764,6 +6776,12 @@ export type UpsertObjectLinkErrors = {
     error: string
   }
   /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
    * Response for status 404
    */
   404: {
@@ -6804,6 +6822,12 @@ export type AppendTelemetryErrors = {
    * Response for status 400
    */
   400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
     error: string
   }
   /**

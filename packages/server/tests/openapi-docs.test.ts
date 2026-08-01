@@ -131,10 +131,8 @@ describe("OpenAPI docs", () => {
       ["post", "/api/workflow-interventions/{interventionId}/cancel"],
       ["post", "/api/agent-threads"],
       ["post", "/api/agent-threads/{threadId}/messages"],
-      ["put", "/api/objects/{objectTypeId}/{objectId}"],
-      ["put", "/api/objects/{objectTypeId}/{objectId}/links/{linkId}"],
-      ["delete", "/api/objects/{objectTypeId}/{objectId}/links/{linkId}"],
-      ["post", "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}"],
+      // The object, link, and telemetry writes are CSRF-*or*-bearer now that they enforce
+      // `edit:object` / `append:telemetry`. The derived ACCESS_TOKEN_ROUTES loop below covers them.
     ] as const
 
     for (const [method, path] of csrfOnlyRoutes) {
