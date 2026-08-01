@@ -3,20 +3,26 @@ import { initializeDemoSources } from "../lib/sources/source-state"
 import { apiBaseUrl, apiRequest, isRecord, waitUntil } from "./api"
 import { synchronizeDemo } from "./sync-demo"
 
+export function createRuntimeCommand(args: readonly string[]): string[] {
+  return [
+    process.execPath,
+    resolve(import.meta.dir, "../../../packages/cli/src/index.tsx"),
+    "dev",
+    ...args,
+  ]
+}
+
 async function main(): Promise<void> {
   const initialized = await initializeDemoSources()
   if (initialized) console.log("[Northline] Initialized deterministic demo sources.")
 
-  const child = Bun.spawn(
-    [process.execPath, resolve(import.meta.dir, "../../../packages/cli/src/index.tsx"), "dev"],
-    {
-      cwd: resolve(import.meta.dir, ".."),
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-      env: process.env,
-    }
-  )
+  const child = Bun.spawn(createRuntimeCommand(process.argv.slice(2)), {
+    cwd: resolve(import.meta.dir, ".."),
+    stdin: "inherit",
+    stdout: "inherit",
+    stderr: "inherit",
+    env: process.env,
+  })
 
   const stop = () => child.kill("SIGTERM")
   process.once("SIGINT", stop)
@@ -66,7 +72,9 @@ async function main(): Promise<void> {
   process.exitCode = exitCode
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error))
-  process.exit(1)
-})
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  })
+}
