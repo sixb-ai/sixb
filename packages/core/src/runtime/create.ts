@@ -113,8 +113,8 @@ export async function createSixb(
     membershipPolicies,
     agents,
   ] = await Promise.all([
-    options.actions ?? discoverActions(projectRoot),
-    options.projections ?? discoverProjections(projectRoot),
+    discoverActions(projectRoot),
+    discoverProjections(projectRoot),
     discoverSchedules(projectRoot),
     discoverSyncs(projectRoot),
     discoverConnectors(projectRoot),
@@ -128,8 +128,9 @@ export async function createSixb(
     discoverAgents(projectRoot),
   ])
 
-  // Explicit definitions come first so local setup can override ordering while
-  // duplicate ids are still rejected by the Sixb constructor.
+  // Explicit definitions come first so local setup can override ordering while duplicate ids are
+  // still rejected by the Sixb constructor. Every family merges — `actions` and `projections` used to
+  // *replace* discovery instead, silently and undocumented.
   return new Sixb<readonly OntologySource[]>({
     id: options.id,
     ontology: allSources,
@@ -144,13 +145,13 @@ export async function createSixb(
     onError: options.onError,
     ontologyMaintenance: options.ontologyMaintenance,
     projectRoot,
-    actions,
+    actions: [...(options.actions ?? []), ...actions],
     datasets: [...(options.datasets ?? []), ...datasets],
     connectors: [...(options.connectors ?? []), ...connectors],
     schedules: [...(options.schedules ?? []), ...schedules],
     syncs: [...(options.syncs ?? []), ...syncs],
     pipelines: [...(options.pipelines ?? []), ...pipelines],
-    projections,
+    projections: [...(options.projections ?? []), ...projections],
     rules: [...(options.rules ?? []), ...rules],
     workflows: [...(options.workflows ?? []), ...workflows],
     groups: [...(options.groups ?? []), ...groups],

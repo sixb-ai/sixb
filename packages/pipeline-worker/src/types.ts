@@ -32,7 +32,7 @@ export interface PipelineWorkerSixb {
   readonly lakeStorage: LakeStorage
   readonly queues: Queues
   readonly storage: Storage
-  getPipelineDefinitions(): readonly PipelineDefinition[]
+  listPipelines(): readonly PipelineDefinition[]
   getPipelineById(pipelineId: string): PipelineDefinition | null
   getDatasetById(datasetId: string): DatasetDefinition | null
 }

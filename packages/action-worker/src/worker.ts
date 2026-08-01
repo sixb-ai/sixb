@@ -19,7 +19,7 @@ export interface ActionWorkerSixb {
   readonly logs?: LogsRuntime
   readonly storage: Storage
   readonly queues: Queues
-  getActionDefinitions(): readonly ActionDefinition[]
+  listActions(): readonly ActionDefinition[]
   getActionById(actionId: string): ActionDefinition | null
 }
 
@@ -43,7 +43,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       idlePollMs: options.idlePollMs,
     })
 
-    const actions = sixb.getActionDefinitions()
+    const actions = sixb.listActions()
     if (actions.length === 0) {
       console.log("[SixbActionWorker] No action definitions registered; worker will idle.")
     }
@@ -120,45 +120,40 @@ async function emitActionTerminalEvent(
   sixb: ActionWorkerSixb,
   result: Exclude<ActionRunResult, { skipped: true }>
 ): Promise<void> {
-  try {
-    const finishedAt = result.finishedAt.toISOString()
+  const finishedAt = result.finishedAt.toISOString()
 
-    if (result.status === "succeeded") {
-      await sixb.events.append({
-        events: [
-          {
-            type: "action.completed",
-            idempotencyKey: `action.completed:${result.id}`,
-            payload: {
-              actionId: result.actionId,
-              runId: result.id,
-              subject: result.subject,
-              finishedAt,
-            },
-          },
-        ],
-      })
-      return
-    }
-
-    await sixb.events.append({
-      events: [
-        {
-          type: "action.failed",
-          idempotencyKey: `action.failed:${result.id}`,
-          payload: {
-            actionId: result.actionId,
-            runId: result.id,
-            subject: result.subject,
-            error: result.error,
-            finishedAt,
-          },
-        },
-      ],
-    })
-  } catch (error) {
-    console.error("[SixbActionWorker] Failed to emit action terminal event:", error)
-  }
+  await sixb.events.emit(
+    {
+      events:
+        result.status === "succeeded"
+          ? [
+              {
+                type: "action.completed",
+                idempotencyKey: `action.completed:${result.id}`,
+                payload: {
+                  actionId: result.actionId,
+                  runId: result.id,
+                  subject: result.subject,
+                  finishedAt,
+                },
+              },
+            ]
+          : [
+              {
+                type: "action.failed",
+                idempotencyKey: `action.failed:${result.id}`,
+                payload: {
+                  actionId: result.actionId,
+                  runId: result.id,
+                  subject: result.subject,
+                  error: result.error,
+                  finishedAt,
+                },
+              },
+            ],
+    },
+    { source: "SixbActionWorker" }
+  )
 }
 
 function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
@@ -184,7 +179,7 @@ function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
 
 const requiredFacadeMethods = [
   "connector",
-  "getActionsForType",
+  "listActionsForType",
   "getPrimaryPropertyId",
   "getValueTypesById",
   "isValidLinkTarget",

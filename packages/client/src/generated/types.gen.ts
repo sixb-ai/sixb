@@ -7798,7 +7798,7 @@ export type ListLogsData = {
   body?: never
   path?: never
   query?: {
-    kind?: "sync" | "pipeline" | "workflow" | "action" | "webhook"
+    kind?: "action" | "agent" | "pipeline" | "projection" | "sync" | "webhook" | "workflow"
     runId?: string
     level?: "debug" | "info" | "warn" | "error"
     direction?: "forward" | "backward"
@@ -7841,7 +7841,7 @@ export type ListLogsResponses = {
       at: string
       context: {
         run: {
-          kind: "sync" | "pipeline" | "workflow" | "action" | "webhook"
+          kind: "action" | "agent" | "pipeline" | "projection" | "sync" | "webhook" | "workflow"
           id: string
         }
         stepId?: string

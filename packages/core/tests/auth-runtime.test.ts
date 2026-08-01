@@ -1653,6 +1653,14 @@ describe("Sixb auth member management", () => {
       groupIds: ["commercial"],
     })
 
+    // Coverage is not authorization, and this is the case that proves it: the caller's policy scope
+    // reaches its own group, so the capability query answers `true`, and the operation still refuses.
+    // That gap is why the query is named `covers` rather than `can`.
+    const capabilities = sixb.auth.getMembershipCapabilities({ callerGroups: [commercial] })
+    expect(capabilities.covers("suspend", [commercial])).toBe(true)
+    // A session hands ids, not definitions, so both forms have to answer the same thing.
+    expect(capabilities.covers("suspend", [commercial.id])).toBe(true)
+
     await expect(sixb.auth.suspendMember(request, { userId: "usr_self" })).rejects.toThrow(
       "cannot suspend themselves"
     )

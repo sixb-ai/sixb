@@ -12,5 +12,5 @@ export function sessionCanAccessApplication(
   audience: AuthSessionAudience
 ): boolean {
   const authorization = sixb.auth.contextFromSession(session)
-  return canAccessApplication(authorization, sixb.security.getResolvedRoles(), audience)
+  return canAccessApplication(authorization, sixb.security.listResolvedRoles(), audience)
 }

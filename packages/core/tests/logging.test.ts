@@ -7,7 +7,6 @@ import {
   isLogRecord,
   isStoredLogLine,
   LOG_LEVELS,
-  LOG_RUN_KINDS,
   LOGS_STREAM,
   type LogEntry,
   type LoggerProvider,
@@ -17,6 +16,7 @@ import {
   logLevelsAtOrAbove,
   noopLoggerProvider,
   resolveLogsRuntime,
+  SIXB_RUN_KINDS,
 } from "../src/logging"
 import { type RunLogCaptureOptions, RunLogSession } from "../src/logging/run-logger"
 import {
@@ -442,7 +442,17 @@ describe("log metadata", () => {
   })
 
   test("exposes the canonical run kinds", () => {
-    expect(LOG_RUN_KINDS).toEqual(["sync", "pipeline", "workflow", "action", "webhook"])
+    // Everything here has a run record with an id. Rules do not — they are evaluated live per
+    // subject — which is why they are absent and report as `rule.evaluation.failed` instead.
+    expect(SIXB_RUN_KINDS).toEqual([
+      "action",
+      "agent",
+      "pipeline",
+      "projection",
+      "sync",
+      "webhook",
+      "workflow",
+    ])
   })
 
   test("validates complete log records and stored lines", () => {
@@ -464,7 +474,7 @@ describe("log metadata", () => {
     expect(isStoredLogLine(valid)).toBe(false)
     expect(isLogRecord({ ...valid, level: "fatal" })).toBe(false)
     expect(
-      isLogRecord({ ...valid, context: { ...valid.context, run: { kind: "agent", id: "a1" } } })
+      isLogRecord({ ...valid, context: { ...valid.context, run: { kind: "dataset", id: "d1" } } })
     ).toBe(false)
     expect(isLogRecord({ ...valid, fields: [] })).toBe(false)
     expect(isLogRecord({ ...valid, fields: { invalid: new Date() } })).toBe(false)

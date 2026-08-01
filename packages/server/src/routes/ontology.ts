@@ -66,7 +66,7 @@ function serializeObjectType(
       properties: link.properties?.map(serializeProperty),
     })),
     actions: sixb
-      .getActionsForType(objectType)
+      .listActionsForType(objectType)
       .filter((action) => isAllowed(authorization, { kind: "action.apply", actionId: action.id }))
       .map((action) => ({
         id: action.id,

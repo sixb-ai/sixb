@@ -21,10 +21,10 @@ import {
   InMemoryBlobStorage,
   InMemoryLakeStorage,
   InMemoryStorage,
-  InMemorySyncRunStorage,
 } from "@sixb/core"
 import type { LakeWriteSession } from "@sixb/core/lake-storage"
 import type { SyncRunStorage } from "@sixb/core/storage"
+import { InMemorySyncRunStorage } from "@sixb/core/storage"
 import { LocalLakeStorage } from "@sixb/lake-local"
 import { runSyncJob } from "../src/run-sync-job"
 import type { SyncWorkerContext } from "../src/types"

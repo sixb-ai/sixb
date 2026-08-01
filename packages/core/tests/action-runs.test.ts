@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryActionRunStorage } from "../src"
-import { ActionRunError } from "../src/storage"
+import { ActionRunError, InMemoryActionRunStorage } from "../src/storage"
 
 describe("InMemoryActionRunStorage", () => {
   test("queues, starts, and finishes a successful action run", async () => {

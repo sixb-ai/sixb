@@ -410,7 +410,7 @@ export function registerAuthRoutes(
           return jsonResponse(
             {
               groups: sixb.security
-                .getGroupDefinitions()
+                .listGroups()
                 // V1 avoids privilege escalation by only offering groups the
                 // current session already has. Runtime token auth still
                 // intersects groups at request time as a second boundary.

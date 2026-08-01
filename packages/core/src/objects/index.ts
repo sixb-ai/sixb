@@ -17,7 +17,7 @@ export type {
 export { requireLinkDefinition, resolveLinkContext, resolveObjectContext } from "./context"
 export { ObjectError } from "./errors"
 export { removeLink, setLinkBatch, upsertLink, upsertLinkBatch } from "./link"
-export { upsertObject, upsertObjectBatch } from "./object"
+export { deleteObject, restoreObject, upsertObject, upsertObjectBatch } from "./object"
 // SDK adapters (typed ObjectSet / ObjectByIdHandle)
 export { createObjectSet } from "./sdk"
 // Service layer (resolve objectTypeId → delegate to leaf)

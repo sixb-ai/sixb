@@ -111,23 +111,9 @@ describe("runtime object writes", () => {
     const { sixb } = createRuntime()
     const created = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
 
-    await getOntologyMutationRuntime(sixb).commitEdits({
-      mode: "atomic",
-      source: { kind: "runtime", requestId: "delete-room" },
-      operations: [
-        { id: "op:0", kind: "object.delete", ref: { objectTypeId: "room", primaryId: "r1" } },
-      ],
-      expectedObjects: [],
-      expectedLinks: [],
-      expectedLinkScopes: [],
-    })
-    expect(
-      await sixb.storage.objects.getByPrimaryId({
-        projectId: sixb.id,
-        objectTypeId: "room",
-        primaryId: "r1",
-      })
-    ).toBeNull()
+    // The runtime verb, not a hand-built commit: proving that the gap `delete()` closes was real.
+    await sixb.objects(Room).byId("r1").delete()
+    expect(await sixb.objects(Room).byId("r1").get()).toBeNull()
 
     // Restoring replaces the tombstone with independent create authority, so the effective object is
     // materialized fresh rather than resuming the deleted row's revision.
@@ -135,6 +121,31 @@ describe("runtime object writes", () => {
     expect(restored.properties).toEqual({ id: "r1", name: "Kitchen" })
     expect(restored.version).toBe(1)
     expect(restored.lastCommitId).not.toBe(created.lastCommitId)
+  })
+
+  test("delete cascades over links and restore is a no-op for code-owned objects", async () => {
+    const { sixb } = createRuntime()
+    await sixb.upsertObject("sensor", { id: "s1", name: "Thermostat" })
+    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    await sixb.objects(Room).byId("r1").link(Room.l.primarySensor, {
+      objectTypeId: "sensor",
+      primaryId: "s1",
+    })
+    expect(await sixb.objects(Room).byId("r1").listLinks()).toHaveLength(1)
+
+    await sixb.objects(Room).byId("r1").delete()
+    expect(await sixb.objects(Room).byId("r1").get()).toBeNull()
+    // The cascade is part of the same commit, so no dangling edge survives the delete.
+    expect(await sixb.objects(Room).byId("r1").listLinks()).toEqual([])
+    // The link target itself is untouched.
+    expect(await sixb.objects(Sensor).byId("s1").get()).not.toBeNull()
+
+    // Nothing else asserts this object, so there is nothing left to reveal.
+    await sixb.objects(Room).byId("r1").restore()
+    expect(await sixb.objects(Room).byId("r1").get()).toBeNull()
+
+    // Deleting an identity that does not exist is a no-op rather than an error.
+    await sixb.objects(Room).byId("never-existed").delete()
   })
 
   test("keeps a same-value upsert an effective no-op", async () => {

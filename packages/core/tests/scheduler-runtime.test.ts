@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
+import type { SixbErrorContext } from "../src"
 import { InMemoryBroker } from "../src"
+import { attachSixbErrorReporter, flushSixbErrors } from "../src/error-reporting/internal"
 import type { StoredScheduleTriggeredEvent } from "../src/events"
 import { EventsRuntime } from "../src/events"
 import { SchedulerRuntime, SchedulerValidationError } from "../src/scheduler"
 import { defineSchedule } from "../src/schedules"
 
-function createEvents() {
-  return new EventsRuntime({ projectId: "test", broker: new InMemoryBroker() })
+const PROJECT = "test"
+
+function createEvents(host?: object) {
+  return new EventsRuntime({ projectId: PROJECT, broker: new InMemoryBroker(), host })
 }
 
 function createTestClock(initial: Date) {
@@ -283,5 +287,49 @@ describe("SchedulerRuntime", () => {
     expect(events.length).toBeGreaterThanOrEqual(1)
 
     await runtime.stop()
+  })
+
+  test("a lost trigger reaches onError instead of vanishing", async () => {
+    const originalError = console.error
+    console.error = () => {}
+
+    try {
+      const reports: { error: Error; context: SixbErrorContext }[] = []
+      const host = {}
+      attachSixbErrorReporter(host, (error, context) => {
+        reports.push({ error, context })
+      })
+
+      // The scheduler reports lost triggers through its events runtime, so the host is attached there.
+      const eventsRuntime = createEvents(host)
+      const appendFailure = new Error("broker unavailable")
+      eventsRuntime.append = () => Promise.reject(appendFailure)
+
+      const clock = createTestClock(new Date("2026-01-01T10:30:00Z"))
+      const runtime = new SchedulerRuntime({
+        schedules: [defineSchedule("hourly").cron("0 * * * *")],
+        events: eventsRuntime,
+        now: clock.now,
+      })
+
+      await runtime.start()
+      clock.advance(30 * MINUTE)
+      jest.advanceTimersByTime(30 * MINUTE)
+      // `stop()` drains the emit the tick started, so the rejection is observed before we assert.
+      await runtime.stop()
+      await flushSixbErrors(host)
+
+      expect(reports).toHaveLength(1)
+      expect(reports[0]?.error).toBe(appendFailure)
+      const context = reports[0]?.context
+      expect(context?.type).toBe("event.delivery.failed")
+      if (context?.type !== "event.delivery.failed") throw new Error("expected a delivery failure")
+      expect(context.eventTypes).toEqual(["schedule.triggered"])
+      expect(context.attempts).toBe(1)
+      expect(context.eventIds).toBeUndefined()
+      expect(context.projectId).toBe(PROJECT)
+    } finally {
+      console.error = originalError
+    }
   })
 })

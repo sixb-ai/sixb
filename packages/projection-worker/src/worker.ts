@@ -19,9 +19,9 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
 
   constructor(sixb: ProjectionWorkerSixb) {
     const projectionCount =
-      sixb.getObjectProjections().length +
-      sixb.getLinkProjections().length +
-      sixb.getTelemetryProjections().length
+      sixb.listObjectProjections().length +
+      sixb.listLinkProjections().length +
+      sixb.listTelemetryProjections().length
     if (projectionCount === 0) {
       throw new Error("[SixbProjectionWorker] No projection definitions are registered.")
     }

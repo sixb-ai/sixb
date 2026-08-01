@@ -44,7 +44,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       "/api/actions",
       async (context) => {
         const { scoped } = requestAuthState(context)
-        const actions = scoped ? scoped.listActions() : sixb.getActionDefinitions()
+        const actions = scoped ? scoped.listActions() : sixb.listActions()
         return actions.map(serializeAction)
       },
       {

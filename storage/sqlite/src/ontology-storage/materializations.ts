@@ -1,5 +1,4 @@
 import type { Database } from "bun:sqlite"
-import { stableJsonStringify } from "@sixb/core"
 import type {
   EffectiveChangeCounts,
   ExpectedLinkRevision,
@@ -49,6 +48,7 @@ import type {
   StreamMaterializationWorkInput,
   StreamSourceReplacementStateInput,
 } from "@sixb/core/storage"
+import { stableJsonStringify } from "@sixb/core/storage"
 import {
   type SqliteMaterializationSessionState,
   SqliteMaterializationSessions,

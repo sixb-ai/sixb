@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { createServer } from "node:net"
 import {
-  actions,
   can,
   col,
-  datasets,
   defineAction,
   defineConnector,
   defineDataset,
@@ -18,6 +16,7 @@ import {
   defineSync,
   defineWorkflow,
   defineWorkflowStep,
+  every,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -25,15 +24,11 @@ import {
   InMemoryStorage,
   link,
   type OntologySource,
-  ontology,
   type PipelineDefinition,
-  pipelines,
   prop,
   ref,
   Sixb,
-  syncs,
   type WorkflowDefinition,
-  workflows,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
@@ -146,12 +141,12 @@ const operationsRunner = defineRole("operations.runner", {
 const adminOperator = defineRole("admin.operator", {
   grantedTo: [admins],
   grants: [
-    can.view(ontology.objects()),
-    can.view(datasets()),
-    can.apply(actions()),
-    can.run(workflows()),
-    can.run(syncs()),
-    can.run(pipelines()),
+    can.view(every.object()),
+    can.view(every.dataset()),
+    can.apply(every.action()),
+    can.run(every.workflow()),
+    can.run(every.sync()),
+    can.run(every.pipeline()),
   ],
 })
 

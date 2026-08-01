@@ -145,7 +145,7 @@ const sixb = await createSixb({
 })
 ```
 
-Inspect registered rules at runtime with `sixb.getRuleDefinitions()` and
+Inspect registered rules at runtime with `sixb.listRules()` and
 `sixb.getRuleById(ruleId)`.
 
 ## Rule vs workflow

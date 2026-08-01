@@ -1,9 +1,9 @@
 import type {
   LogLevel,
-  LogRunKind,
   LogRunRef,
   OntologySource,
   Sixb,
+  SixbRunKind,
   StoredLogLine,
 } from "@sixb/core"
 import { BrokerCursorExpiredError } from "@sixb/core/broker"
@@ -22,7 +22,7 @@ interface LogSocket {
 }
 
 export interface LogSubscriptionFilter {
-  readonly kinds?: readonly LogRunKind[]
+  readonly kinds?: readonly SixbRunKind[]
   readonly levels?: readonly LogLevel[]
   readonly run?: LogRunRef
   readonly afterCursor?: string

@@ -76,6 +76,5 @@ export {
   stringEnum,
   valueTypeRef,
 } from "./builders"
-export { createLinkTokenMap, createPropertyTokenMap } from "./tokens"
 export * from "./units"
 export * from "./validation"

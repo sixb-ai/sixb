@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  buildEventSelectorPredicate,
   col,
   type DomainEvent,
   defineAction,
@@ -8,10 +7,10 @@ import {
   defineDataset,
   definePipeline,
   defineSync,
-  eventSelectorSpec,
   events,
   param,
 } from "../src"
+import { buildEventSelectorPredicate, eventSelectorSpec } from "../src/events"
 import { defineObjectType, link, prop } from "../src/ontology"
 import { defineRule } from "../src/rules"
 

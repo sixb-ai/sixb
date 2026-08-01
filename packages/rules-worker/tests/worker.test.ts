@@ -1,15 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type { DomainEvent, RuleDefinition, SixbErrorContext, Storage } from "@sixb/core"
-import {
-  InMemoryBroker,
-  InMemoryObjectStorage,
-  InMemoryRulesStorage,
-  InMemoryStorage,
-} from "@sixb/core"
+import { InMemoryBroker, InMemoryStorage } from "@sixb/core"
 import { attachSixbErrorReporter, flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import type { StoredDomainEvent, StoredObjectUpdatedEvent } from "@sixb/core/internal/events"
 import { EventsRuntime } from "@sixb/core/internal/events"
 import type { ObjectStorage, RulesStorage, TimeseriesStorage } from "@sixb/core/storage"
+import { InMemoryObjectStorage, InMemoryRulesStorage } from "@sixb/core/storage"
 import type { RulesWorkerSixb } from "../src"
 import { RulesWorker } from "../src"
 
@@ -167,12 +163,18 @@ describe("RulesWorker", () => {
       await worker.stop()
       await flushSixbErrors(runtime)
 
-      expect(String(errors[0]?.[0])).toContain("[SixbRulesWorker] Evaluation failed:")
+      // The candidate is isolated, so the report names the rule and subject that actually failed
+      // instead of only the batch it belonged to.
+      expect(String(errors[0]?.[0])).toContain(
+        "[SixbRulesWorker] Rule 'transaction.posted' on transaction:tx-1 failed:"
+      )
       expect(reports).toHaveLength(1)
       expect(reports[0]?.context).toMatchObject({
         type: "rule.evaluation.failed",
         source: "live",
         eventIds: ["event-tx-1-posted"],
+        ruleId: "transaction.posted",
+        subject: { objectTypeId: "transaction", primaryId: "tx-1" },
       })
       expect(await ruleEventTypes(events)).toEqual(["rule.triggered", "rule.triggered"])
     } finally {
@@ -298,6 +300,64 @@ describe("RulesWorker", () => {
 
     expect(objects.directReads).toBe(0)
   })
+
+  test("one failing candidate does not cancel the rest of its batch", async () => {
+    const originalError = console.error
+    console.error = () => {}
+
+    try {
+      const reports: { error: Error; context: SixbErrorContext }[] = []
+      const events = createEventsRuntime()
+      const objects = new FailOneSubjectObjectStorage("tx-1")
+      const storage = createStorage({ objects })
+      await seedCurrentObject(storage, "posted")
+      await seedCurrentObject(storage, "posted", "tx-2")
+
+      const runtime = createRuntime({ events, storage })
+      attachSixbErrorReporter(runtime, (error, context) => {
+        reports.push({ error, context })
+      })
+      const worker = track(new RulesWorker(runtime))
+      await worker.start()
+
+      // Both subjects are in the SAME batch. The first one throws in object storage.
+      await events.publishEnvelopes([
+        objectUpdatedEvent("posted"),
+        objectUpdatedEvent("posted", "tx-2"),
+      ])
+      await waitFor(() => liveFailures(reports).length === 1)
+      await worker.stop()
+      await flushSixbErrors(runtime)
+
+      // The claim: tx-2 was still evaluated even though tx-1, ahead of it in the batch, threw.
+      // Asserting the read rather than the resulting event is deliberate — reconciliation repairs a
+      // dropped candidate within one interval, so an event assertion cannot tell isolation apart
+      // from the safety net having done the work.
+      expect(objects.subjectReads).toContain("tx-2")
+
+      // Exactly one live failure, and it names the candidate rather than just the batch.
+      const live = liveFailures(reports)
+      expect(live).toHaveLength(1)
+      expect(live[0]).toMatchObject({
+        type: "rule.evaluation.failed",
+        source: "live",
+        ruleId: "transaction.posted",
+        subject: { objectTypeId: "transaction", primaryId: "tx-1" },
+      })
+
+      // A permanently broken subject also breaks the repair path, and that is reported separately —
+      // which is the whole point of `source`: a failing reconciliation means state stops converging.
+      expect(
+        reports.some(
+          (report) =>
+            report.context.type === "rule.evaluation.failed" &&
+            report.context.source === "reconciliation"
+        )
+      ).toBe(true)
+    } finally {
+      console.error = originalError
+    }
+  })
 })
 
 class RecordingEventsRuntime extends EventsRuntime {
@@ -349,6 +409,31 @@ class ThrowOnceObjectStorage extends InMemoryObjectStorage {
   ): ReturnType<ObjectStorage["getByPrimaryId"]> {
     if (this.shouldThrow) {
       this.shouldThrow = false
+      throw new Error("Object storage failed.")
+    }
+
+    return super.getByPrimaryId(params)
+  }
+}
+
+/**
+ * Fails one subject deterministically and records which subjects were read individually.
+ *
+ * Reconciliation pages through `listByPrimaryIdPage`, so a `getByPrimaryId` for a given subject can
+ * only come from live evaluation — which is what makes the read a usable isolation signal.
+ */
+class FailOneSubjectObjectStorage extends InMemoryObjectStorage {
+  readonly subjectReads: string[] = []
+
+  constructor(private readonly failingPrimaryId: string) {
+    super()
+  }
+
+  override async getByPrimaryId(
+    params: Parameters<ObjectStorage["getByPrimaryId"]>[0]
+  ): ReturnType<ObjectStorage["getByPrimaryId"]> {
+    this.subjectReads.push(params.primaryId)
+    if (params.primaryId === this.failingPrimaryId) {
       throw new Error("Object storage failed.")
     }
 
@@ -425,7 +510,7 @@ function createRuntime(
     id: projectId,
     events: options.events ?? createEventsRuntime(),
     storage: options.storage ?? new InMemoryStorage(),
-    getRuleDefinitions: () => rules,
+    listRules: () => rules,
     getRuleById: (ruleId) => rules.find((rule) => rule.id === ruleId) ?? null,
   }
 }
@@ -521,4 +606,14 @@ function createDeferred<T>() {
 function track(worker: RulesWorker): RulesWorker {
   workers.push(worker)
   return worker
+}
+
+function liveFailures(
+  reports: readonly { readonly context: SixbErrorContext }[]
+): readonly Extract<SixbErrorContext, { type: "rule.evaluation.failed" }>[] {
+  return reports.flatMap((report) =>
+    report.context.type === "rule.evaluation.failed" && report.context.source === "live"
+      ? [report.context]
+      : []
+  )
 }

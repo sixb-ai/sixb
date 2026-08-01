@@ -1,12 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import {
-  actions,
-  agents,
   applications,
   can,
   canAccessApplication,
   col,
-  datasets,
   defineAction,
   defineAgent,
   defineConnector,
@@ -17,15 +14,12 @@ import {
   definePipelineStep,
   defineRole,
   defineSync,
+  every,
   isApplicationAccessControlled,
-  ontology,
-  pipelines,
   prop,
   type RoleDefinition,
   resolveAuthorizationContext,
   Sixb,
-  syncs,
-  workflows,
 } from "../src"
 import { createSessionCredential } from "../src/auth"
 import { resolveRoleGrants } from "../src/authorization"
@@ -129,13 +123,13 @@ const invoiceViewer = defineRole("invoice.viewer", {
 const adminOperator = defineRole("admin.operator", {
   grantedTo: [admins],
   grants: [
-    can.view(ontology.objects()),
-    can.view(datasets()),
-    can.apply(actions()),
-    can.run(workflows()),
-    can.run(syncs()),
-    can.run(pipelines()),
-    can.run(agents()),
+    can.view(every.object()),
+    can.view(every.dataset()),
+    can.apply(every.action()),
+    can.run(every.workflow()),
+    can.run(every.sync()),
+    can.run(every.pipeline()),
+    can.run(every.agent()),
   ],
 })
 
@@ -254,7 +248,7 @@ describe("resolveAuthorizationContext", () => {
   test("except() excludes named datasets and keeps the rest of the dataset universe", () => {
     const mostDatasets = defineRole("most.datasets", {
       grantedTo: [admins],
-      grants: [can.view(datasets().except([InvoicesDataset]))],
+      grants: [can.view(every.dataset().except([InvoicesDataset]))],
     })
 
     const context = resolve(["admins"], [mostDatasets])
@@ -266,7 +260,7 @@ describe("resolveAuthorizationContext", () => {
   test("except() excludes named syncs and keeps the rest of the sync universe", () => {
     const mostSyncs = defineRole("most.syncs", {
       grantedTo: [admins],
-      grants: [can.run(syncs().except([syncInvoices]))],
+      grants: [can.run(every.sync().except([syncInvoices]))],
     })
 
     const context = resolve(["admins"], [mostSyncs])
@@ -278,7 +272,7 @@ describe("resolveAuthorizationContext", () => {
   test("except() excludes named pipelines and keeps the rest of the pipeline universe", () => {
     const mostPipelines = defineRole("most.pipelines", {
       grantedTo: [admins],
-      grants: [can.run(pipelines().except([invoicesPipeline]))],
+      grants: [can.run(every.pipeline().except([invoicesPipeline]))],
     })
 
     const context = resolve(["admins"], [mostPipelines])
@@ -290,7 +284,7 @@ describe("resolveAuthorizationContext", () => {
   test("except() excludes named agents and keeps the rest of the agent universe", () => {
     const mostAgents = defineRole("most.agents", {
       grantedTo: [admins],
-      grants: [can.run(agents().except([invoiceAgent]))],
+      grants: [can.run(every.agent().except([invoiceAgent]))],
     })
 
     const context = resolve(["admins"], [mostAgents])
@@ -302,7 +296,7 @@ describe("resolveAuthorizationContext", () => {
   test("except() excludes the named types and keeps the rest of the universe", () => {
     const mostObjects = defineRole("most.objects", {
       grantedTo: [admins],
-      grants: [can.view(ontology.objects().except([Invoice]))],
+      grants: [can.view(every.object().except([Invoice]))],
     })
 
     const context = resolve(["admins"], [mostObjects])
@@ -314,7 +308,7 @@ describe("resolveAuthorizationContext", () => {
   test("except is per-grant: another role can re-grant an excluded type", () => {
     const allButInvoice = defineRole("all.but.invoice", {
       grantedTo: [admins],
-      grants: [can.view(ontology.objects().except([Invoice]))],
+      grants: [can.view(every.object().except([Invoice]))],
     })
     const invoiceOnly = defineRole("invoice.only", {
       grantedTo: [finance],

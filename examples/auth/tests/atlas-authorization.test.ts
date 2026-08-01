@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
 import {
   canAccessApplication,
-  canPerformMembershipOperation,
   createSixb,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -12,10 +11,11 @@ import {
   isAllowed,
   type OntologySource,
   resolveAuthorizationContext,
-  resolveMembershipPolicyScope,
   type Sixb,
 } from "@sixb/core"
 import { adminAuditDataset, teamNotesDataset } from "../datasets/auth-data"
+import { securityAdmins } from "../security/groups/security-admins"
+import { teamMembers } from "../security/groups/team-members"
 import { seedAuthExampleObjects } from "../seed"
 
 async function createAuthExampleRuntime() {
@@ -38,7 +38,7 @@ function atlasContext(
   return resolveAuthorizationContext({
     principal: { type: "user", id: userId },
     groupIds,
-    roles: sixb.security.getResolvedRoles(),
+    roles: sixb.security.listResolvedRoles(),
   })
 }
 
@@ -47,9 +47,9 @@ describe("auth example Atlas authorization", () => {
     const sixb = await createAuthExampleRuntime()
     await seedAuthExampleObjects(sixb)
 
-    const roles = sixb.security.getResolvedRoles()
-    const teamMemberContext = atlasContext(sixb, ["team-members"])
-    const adminContext = atlasContext(sixb, ["security-admins"])
+    const roles = sixb.security.listResolvedRoles()
+    const teamMemberContext = atlasContext(sixb, [teamMembers.id])
+    const adminContext = atlasContext(sixb, [securityAdmins.id])
     const noGroupsContext = atlasContext(sixb, [])
     const teamMember = sixb.as(teamMemberContext)
     const admin = sixb.as(adminContext)
@@ -89,7 +89,7 @@ describe("auth example Atlas authorization", () => {
       })
     ).rejects.toThrow("not allowed to apply action 'resolve-access-request'")
     await expect(
-      teamMember.runWorkflow({
+      teamMember.requestWorkflowRun({
         workflowId: "run-access-review",
         input: {
           accessRequest: { objectTypeId: "access-request", primaryId: "access-request" },
@@ -122,7 +122,7 @@ describe("auth example Atlas authorization", () => {
       })
     ).resolves.toMatchObject({ runId: expect.any(String) })
     await expect(
-      admin.runWorkflow({
+      admin.requestWorkflowRun({
         workflowId: "run-access-review",
         input: {
           accessRequest: { objectTypeId: "access-request", primaryId: "access-request" },
@@ -130,8 +130,8 @@ describe("auth example Atlas authorization", () => {
       })
     ).resolves.toMatchObject({ runId: expect.any(String) })
     expect((await admin.readEvents()).map((event) => event.type)).toContain("object.created")
-    expect(isAllowed(atlasContext(sixb, ["security-admins"]), { kind: "logs.observe" })).toBe(true)
-    expect(isAllowed(atlasContext(sixb, ["team-members"]), { kind: "logs.observe" })).toBe(false)
+    expect(isAllowed(atlasContext(sixb, [securityAdmins.id]), { kind: "logs.observe" })).toBe(true)
+    expect(isAllowed(atlasContext(sixb, [teamMembers.id]), { kind: "logs.observe" })).toBe(false)
 
     expect(await noGroups.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
     expect(noGroups.listActions()).toEqual([])
@@ -140,23 +140,20 @@ describe("auth example Atlas authorization", () => {
 
   test("security admins can administer members while team members cannot", async () => {
     const sixb = await createAuthExampleRuntime()
-    const membershipPolicies = sixb.security.getMembershipPolicyDefinitions()
-    const adminScope = resolveMembershipPolicyScope({
-      membershipPolicies,
-      callerGroupIds: ["security-admins"],
-    })
-    const teamMemberScope = resolveMembershipPolicyScope({
-      membershipPolicies,
-      callerGroupIds: ["team-members"],
-    })
+    const admin = sixb.auth.getMembershipCapabilities({ callerGroups: [securityAdmins] })
+    const teamMember = sixb.auth.getMembershipCapabilities({ callerGroups: [teamMembers] })
+
+    // The scope of `member-administration` is both example groups, so an admin reaches either one.
+    expect([...admin.assignableGroupIds].sort()).toEqual([securityAdmins.id, teamMembers.id])
 
     for (const operation of ["invite", "assignGroups", "suspend"] as const) {
-      expect(canPerformMembershipOperation(adminScope, operation, [])).toBe(true)
-      expect(canPerformMembershipOperation(adminScope, operation, ["team-members"])).toBe(true)
-      expect(canPerformMembershipOperation(adminScope, operation, ["security-admins"])).toBe(true)
-      expect(canPerformMembershipOperation(teamMemberScope, operation, ["team-members"])).toBe(
-        false
-      )
+      expect(admin.holds[operation]).toBe(true)
+      expect(admin.covers(operation, [])).toBe(true)
+      expect(admin.covers(operation, [teamMembers])).toBe(true)
+      expect(admin.covers(operation, [securityAdmins])).toBe(true)
+
+      expect(teamMember.holds[operation]).toBe(false)
+      expect(teamMember.covers(operation, [teamMembers])).toBe(false)
     }
   })
 })

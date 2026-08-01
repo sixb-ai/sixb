@@ -5,7 +5,7 @@ import { useSearchParams } from "react-router-dom"
 import { PageFrame } from "../components/common"
 import { LogConsole } from "../features/logging/LogConsole"
 
-const KIND_FILTERS = ["all", "sync", "pipeline", "workflow", "action"] as const
+const KIND_FILTERS = ["all", "sync", "pipeline", "workflow", "action", "webhook"] as const
 type KindFilter = (typeof KIND_FILTERS)[number]
 
 const LEVEL_FILTERS = ["all", "debug", "info", "warn", "error"] as const
@@ -17,6 +17,7 @@ const kindLabels: Record<KindFilter, string> = {
   pipeline: "Pipelines",
   workflow: "Workflows",
   action: "Actions",
+  webhook: "Webhooks",
 }
 
 const levelLabels: Record<LevelFilter, string> = {
@@ -128,6 +129,8 @@ function kindBuilder(kind: KindFilter) {
       return logs.workflows()
     case "action":
       return logs.actions()
+    case "webhook":
+      return logs.webhooks()
     default:
       return logs.all()
   }

@@ -164,7 +164,7 @@ describe("log transport", () => {
     for (const invalid of [
       { ...valid, level: "fatal" },
       { ...valid, fields: [] },
-      { ...valid, context: { ...valid.context, run: { kind: "agent", id: "agent-1" } } },
+      { ...valid, context: { ...valid.context, run: { kind: "dataset", id: "ds-1" } } },
       { ...valid, context: { ...valid.context, attempt: "1" } },
     ]) {
       expect(parseLogStreamMessage(JSON.stringify({ type: "logs", logs: [invalid] }))).toBeNull()

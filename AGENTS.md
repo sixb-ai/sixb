@@ -59,15 +59,33 @@ CI runs these as independent parallel jobs (each does `bun install --frozen-lock
 - `typecheck`: `bun run typecheck`
 - `build`: `bun run build`, then `bun run test:publish`
 - `client`: `bun run generate:client`, then `git diff --exit-code`
-- `test`: `bun run test`
+- `test`: `bun run test:ci`
 - `lint`: `bun run check`
 - `e2e`: package-scoped matrix jobs for packages with `test:e2e`
 
+`test:ci` is `bun test` wrapped in `scripts/ci-guard.ts`, which fails the run at the first 60-second
+silence and prints the last test file, the process tree, and each thread's kernel wait state. The
+job's `timeout-minutes` is only a backstop: a job that dies at its own wall clock reports
+"cancelled" with the log ending mid-stream, which is indistinguishable from every other cause. The
+guard exists because a `Bun.build()` deadlock once cost five 15-minute runs before anyone found the
+one named failure buried in the log.
+
 `typecheck` uses the TypeScript project-reference graph: `bun run build:types` (`tsc -b
 tsconfig.build.json`) checks every package's `src` exactly once, `tsconfig.tests.json` checks
-test files against the emitted `.d.ts`, and the example/docs/sandbox apps keep their own
+test files against the emitted `.d.ts`, and the example/docs apps keep their own
 `typegen && tsc` typecheck (`typecheck:examples`). The old per-package `tsc --noEmit` re-checked
 shared source (notably `@sixb/core`) once per dependent, which made the step the CI bottleneck.
+
+The root config maps `@sixb/*` to `packages/*/src`, which is right for the packages and wrong for
+their consumers: it pulls the whole framework into each consumer's program. The examples extend
+`tsconfig.consumer.json` instead — it clears that mapping, and resolution falls through to each
+package's `exports.types`. This is why the steps are chained with `&&`: a consumer type-checked
+without a prior `build:types` fails on unresolved `@sixb/*` imports.
+
+That ordering is also the limit of where the consumer config applies. `apps/docs` stays on the root
+config on purpose, because Vercel deploys it with `prepare:docs && next build` and never emits
+declarations — pointing it at `dist` broke the deployment once already. Anything built outside this
+repo's `typecheck` chain reads source.
 
 ## Architecture
 
@@ -82,10 +100,12 @@ shared source (notably `@sixb/core`) once per dependent, which made the step the
 
 ## Export Surfaces
 
-- Exports are curated — never re-export something from a barrel just because it exists.
-- A package root (`.`) is for app authors: `@sixb/core` exports the authoring API (`define*`, `createSixb`, config types, `InMemory*` providers); other packages export only what consumers call (workers export just their `*Worker` class).
-- `@sixb/core/{storage,broker,queues,sandboxes,lake-storage,blob-storage/server,auth/strategy}` are the public contracts that providers implement.
-- `@sixb/core/internal/*` is for this repo's packages only — no compatibility promise.
+- Exports are curated — never re-export something from a barrel just because it exists. If nothing imports it, it does not belong on a public surface; a selector or helper that can only return nothing is dead API.
+- A package root (`.`) is for app authors: `@sixb/core` exports the authoring API (`define*`, `createSixb`, config types, and the `InMemory*` providers that fill a `createSixb` slot); other packages export only what consumers call (workers export just their `*Worker` class).
+- These six are the provider contracts a third party implements: `@sixb/core/{broker,queues,sandboxes,lake-storage,blob-storage/server,auth/strategy}`.
+- `@sixb/core/storage` is broader: it is both the read/run-history contract and where the in-memory storage implementations live. A third-party storage provider is not supported in 0.1.x — the materialization contract is still moving.
+- A type that appears in a public interface signature must be exported from the same subpath as the interface, or the interface cannot be implemented from outside.
+- `@sixb/core/internal/*` is for this repo's packages only — no compatibility promise. Nothing in `docs/`, `examples/`, `templates/`, or `apps/` may import from it.
 - Export types freely (users need them to annotate their own code); keep runtime values minimal. Connectors export all their wire types on purpose.
 
 ## Code Style
@@ -96,6 +116,7 @@ shared source (notably `@sixb/core`) once per dependent, which made the step the
 - Avoid `any`; narrow `unknown` instead of unchecked casts.
 - Validate inputs early and throw clear, actionable errors.
 - Package-prefixed error messages such as `[Sixb] ...`, `[SixbServer] ...`, or `[RokuTV] ...` are preferred.
+- The framework never speaks in the user's logger. Report terminal failures through `onError` and write everything else to a prefixed `console.*`. A swallowed `events.append()` is a lost trigger edge: emit through `events.emit(input, { source })` when the work that produced the events has already succeeded, and `events.append(input)` when the caller owns the outcome. Never write a bare `catch` around an append.
 - Keep builders and definitions declarative; avoid unnecessary indirection around ontology setup.
 - Preserve the existing visual language in `packages/atlas` (and `packages/ui`) and keep both desktop and mobile behavior working.
 
@@ -106,6 +127,16 @@ shared source (notably `@sixb/core`) once per dependent, which made the step the
 - Fast tests use `*.test.ts`.
 - E2e tests use `*.e2e.ts` and run through `bun run test:e2e`.
 - Prefer deterministic tests with temp directories, explicit cleanup, and fixed timestamps.
+- `bun test` prints only when a file finishes, so a test's runtime is a silence. The unit suite's
+  longest legitimate silence is a few seconds; `test:ci` fails at 60. A `*.test.ts` that can
+  legitimately go quiet for longer belongs in `*.e2e.ts` with its own bound, not in the unit suite.
+- Drive the bundler through a child process with a bound, not `Bun.build()` in the test process.
+  Bun's bundler has deadlocked on hosted runners, a wedged bundler stays wedged for the life of the
+  process, and the per-test timeout stops being a bound once it does — it fired for the deadlocked
+  build and then not at all for the next bundler call, which hung until the job's wall clock.
+  `packages/core/tests/published-artifacts.e2e.ts` shows the shape. The one in-process exception is
+  `atlas-app.test.ts`, which imports Bun's HTML entry because that import *is* the behavior under
+  test — it is why `test:ci` runs behind a guard at all.
 - Run targeted tests first, then broader checks when shared behavior changes.
 
 ## Contribution Flow

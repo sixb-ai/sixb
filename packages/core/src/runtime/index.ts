@@ -59,8 +59,9 @@ export type {
   RegisteredValueTypes,
   SixbInstance,
   SixbRuntimeContext,
-  TelemetryAppender,
   TelemetryAppendInput,
+  TelemetryChannel,
+  TelemetryHistoryInput,
   TelemetryPropertyToken,
   TwinObject,
 } from "./types"

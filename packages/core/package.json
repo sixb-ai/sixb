@@ -119,17 +119,17 @@
       "import": "./dist/edits/index.js",
       "default": "./dist/edits/index.js"
     },
-    "./internal/events": {
-      "types": "./dist/events/index.d.ts",
-      "bun": "./src/events/index.ts",
-      "import": "./dist/events/index.js",
-      "default": "./dist/events/index.js"
-    },
     "./internal/error-reporting": {
       "types": "./dist/error-reporting/internal.d.ts",
       "bun": "./src/error-reporting/internal.ts",
       "import": "./dist/error-reporting/internal.js",
       "default": "./dist/error-reporting/internal.js"
+    },
+    "./internal/events": {
+      "types": "./dist/events/index.d.ts",
+      "bun": "./src/events/index.ts",
+      "import": "./dist/events/index.js",
+      "default": "./dist/events/index.js"
     },
     "./internal/http": {
       "types": "./dist/http/index.d.ts",
@@ -143,29 +143,17 @@
       "import": "./dist/logging/index.js",
       "default": "./dist/logging/index.js"
     },
-    "./internal/materializer": {
-      "types": "./dist/materializer/index.d.ts",
-      "bun": "./src/materializer/index.ts",
-      "import": "./dist/materializer/index.js",
-      "default": "./dist/materializer/index.js"
-    },
     "./internal/materialization": {
       "types": "./dist/materialization/index.d.ts",
       "bun": "./src/materialization/index.ts",
       "import": "./dist/materialization/index.js",
       "default": "./dist/materialization/index.js"
     },
-    "./internal/ontology-storage-provider": {
-      "types": "./dist/storage/ontology/provider.d.ts",
-      "bun": "./src/storage/ontology/provider.ts",
-      "import": "./dist/storage/ontology/provider.js",
-      "default": "./dist/storage/ontology/provider.js"
-    },
-    "./internal/storage-operation-scope": {
-      "types": "./dist/storage/operation-scope.d.ts",
-      "bun": "./src/storage/operation-scope.ts",
-      "import": "./dist/storage/operation-scope.js",
-      "default": "./dist/storage/operation-scope.js"
+    "./internal/materializer": {
+      "types": "./dist/materializer/index.d.ts",
+      "bun": "./src/materializer/index.ts",
+      "import": "./dist/materializer/index.js",
+      "default": "./dist/materializer/index.js"
     },
     "./internal/objects": {
       "types": "./dist/objects/index.d.ts",
@@ -179,23 +167,35 @@
       "import": "./dist/ontology/internal.js",
       "default": "./dist/ontology/internal.js"
     },
+    "./internal/ontology-storage-provider": {
+      "types": "./dist/storage/ontology/provider.d.ts",
+      "bun": "./src/storage/ontology/provider.ts",
+      "import": "./dist/storage/ontology/provider.js",
+      "default": "./dist/storage/ontology/provider.js"
+    },
     "./internal/projections": {
       "types": "./dist/projections/internal.d.ts",
       "bun": "./src/projections/internal.ts",
       "import": "./dist/projections/internal.js",
       "default": "./dist/projections/internal.js"
     },
-    "./internal/runtime": {
-      "types": "./dist/runtime/internal.d.ts",
-      "bun": "./src/runtime/internal.ts",
-      "import": "./dist/runtime/internal.js",
-      "default": "./dist/runtime/internal.js"
-    },
     "./internal/query": {
       "types": "./dist/objects/query/index.d.ts",
       "bun": "./src/objects/query/index.ts",
       "import": "./dist/objects/query/index.js",
       "default": "./dist/objects/query/index.js"
+    },
+    "./internal/rules": {
+      "types": "./dist/rules/internal.d.ts",
+      "bun": "./src/rules/internal.ts",
+      "import": "./dist/rules/internal.js",
+      "default": "./dist/rules/internal.js"
+    },
+    "./internal/runtime": {
+      "types": "./dist/runtime/internal.d.ts",
+      "bun": "./src/runtime/internal.ts",
+      "import": "./dist/runtime/internal.js",
+      "default": "./dist/runtime/internal.js"
     },
     "./internal/scheduler": {
       "types": "./dist/scheduler/index.d.ts",
@@ -208,6 +208,12 @@
       "bun": "./src/schedules/index.ts",
       "import": "./dist/schedules/index.js",
       "default": "./dist/schedules/index.js"
+    },
+    "./internal/storage-operation-scope": {
+      "types": "./dist/storage/operation-scope.d.ts",
+      "bun": "./src/storage/operation-scope.ts",
+      "import": "./dist/storage/operation-scope.js",
+      "default": "./dist/storage/operation-scope.js"
     },
     "./internal/workers": {
       "types": "./dist/workers/index.d.ts",
@@ -274,6 +280,7 @@
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 120 --max 600 bun test ./tests/published-artifacts.e2e.ts",
     "prepack": "bun run build"
   },
   "dependencies": {

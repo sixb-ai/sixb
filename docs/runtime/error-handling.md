@@ -14,7 +14,7 @@ export const sixb = await createSixb({
       context.type === "run.failed"
         ? `${context.run.kind} run ${context.run.runId}`
         : context.type === "event.delivery.failed"
-          ? `${context.eventIds.length} event delivery`
+          ? `delivery of ${context.eventTypes.join(", ")}`
           : `${context.source} rule evaluation`
     await sendToSlack({
       deduplicationKey: context.notificationId,
@@ -49,7 +49,8 @@ interface SixbEventDeliveryFailedContext {
   readonly projectId: string
   readonly occurredAt: string
   readonly attempts: number
-  readonly eventIds: readonly string[]
+  readonly eventTypes: readonly string[]
+  readonly eventIds?: readonly string[]
 }
 
 interface SixbRuleEvaluationFailedContext {
@@ -59,20 +60,53 @@ interface SixbRuleEvaluationFailedContext {
   readonly occurredAt: string
   readonly source: "live" | "reconciliation"
   readonly eventIds: readonly string[]
+  readonly ruleId?: string
+  readonly subject?: { readonly objectTypeId: string; readonly primaryId: string }
 }
 ```
+
+`SixbFailedRun` has one variant per run kind — action, agent, pipeline, projection, sync, workflow,
+webhook — and every one carries a `runId`. Rules are the exception and are absent from it: they are
+evaluated live, per subject, with no run record, so they report as `rule.evaluation.failed` rather
+than being handed an id nothing can resolve.
+
+### Lost events
+
+`event.delivery.failed` means a batch of domain events never reached its subscribers. That matters
+because every event Sixb publishes can be a trigger edge — a rule's `.when()`, an event schedule, a
+workflow wait node — so a lost batch is a handler that silently never runs.
+
+Two paths report it, which is why `eventIds` is optional:
+
+| Path | `eventIds` | `attempts` |
+| --- | --- | --- |
+| Ontology outbox publication | present — the envelopes were persisted first | rises as Sixb retries |
+| A rejected framework emit | absent — nothing was persisted | always `1`; the failure is terminal |
+
+`eventTypes` is filled on both paths, so it is the field to read first. Payloads are never included.
+
+### Rule evaluations
+
+`source` is the field to alert on. A failing `live` evaluation is recoverable: the periodic
+reconciliation pass rebuilds rule state from committed objects, so affected subjects are re-evaluated
+within one interval. A failing `reconciliation` pass is not — it *is* the repair path, so while it
+keeps failing, rule state stops converging.
+
+`ruleId` and `subject` are present when the failure was attributed to a single candidate. They are
+absent when a whole batch or pass died before any one rule could be blamed, which is the more serious
+case rather than the vaguer one.
 
 Narrow `context.run.kind` to access the definition identifier for that run:
 
 ```ts
 onError(error, context) {
   if (context.type === "event.delivery.failed") {
-    console.error(`Outbox delivery attempt ${context.attempts} failed`, context.eventIds, error)
+    console.error(`Delivery attempt ${context.attempts} failed`, context.eventTypes, error)
     return
   }
 
   if (context.type === "rule.evaluation.failed") {
-    console.error(`Rules ${context.source} evaluation failed`, context.eventIds, error)
+    console.error(`Rules ${context.source} evaluation failed`, context.ruleId ?? "", error)
     return
   }
 

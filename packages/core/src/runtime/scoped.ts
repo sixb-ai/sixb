@@ -8,8 +8,16 @@
  * context; leaf asserts and query planning enforce the grants.
  */
 
-import type { ActionDefinition, RequestActionInput, RequestActionResult } from "../actions"
-import { requestAction as requestRuntimeAction } from "../actions/request"
+import type {
+  ActionDefinition,
+  RequestActionAndWaitInput,
+  RequestActionInput,
+  RequestActionResult,
+} from "../actions"
+import {
+  requestAction as requestRuntimeAction,
+  requestActionAndWait as requestRuntimeActionAndWait,
+} from "../actions/request"
 import type {
   AgentDefinition,
   AgentsRuntime,
@@ -32,9 +40,22 @@ import type { ValueType } from "../ontology"
 import { assertObjectTypeRegistered } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { PipelineDefinition } from "../pipelines"
+import { PipelineError } from "../pipelines"
+import {
+  type PipelineRunRequestResult,
+  type RequestPipelineRunInput,
+  requestPipelineRun,
+} from "../pipelines/request"
 import type { ObjectRow } from "../storage"
+import type { ActionRunRecord } from "../storage/action-runs"
 import type { AgentThreadRecord, ListAgentThreadsResult } from "../storage/agents"
 import type { SyncDefinition } from "../syncs"
+import { SyncValidationError } from "../syncs"
+import {
+  type RequestSyncRunInput,
+  requestSyncRun,
+  type SyncRunRequestResult,
+} from "../syncs/request"
 import type {
   RequestWorkflowRunInput,
   WorkflowDefinition,
@@ -124,8 +145,8 @@ export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> 
   /** Request an action by id (server / dynamic contexts). Requires `can.apply`. */
   requestAction(input: RequestActionInput): Promise<RequestActionResult>
 
-  /** Start a workflow run. Requires `can.run`. */
-  runWorkflow(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult>
+  /** Request an action by id and wait for the run to settle. Requires `can.apply`. */
+  requestActionAndWait(input: RequestActionAndWaitInput): Promise<ActionRunRecord>
 
   /** Workflow definitions the principal may run. */
   listWorkflows(): readonly WorkflowDefinition[]
@@ -133,17 +154,26 @@ export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> 
   /** Look up a runnable workflow definition; null hides workflows the principal cannot run. */
   getWorkflowById(workflowId: string): WorkflowDefinition | null
 
+  /** Queue a workflow run. Requires `can.run`. */
+  requestWorkflowRun(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult>
+
   /** Sync definitions the principal may run. */
   listSyncs(): readonly SyncDefinition[]
 
   /** Look up a runnable sync definition; null hides syncs the principal cannot run. */
   getSyncById(syncId: string): SyncDefinition | null
 
+  /** Queue a sync run. Requires `can.run`. */
+  requestSyncRun(input: RequestSyncRunInput): Promise<SyncRunRequestResult>
+
   /** Pipeline definitions the principal may run. */
   listPipelines(): readonly PipelineDefinition[]
 
   /** Look up a runnable pipeline definition; null hides pipelines the principal cannot run. */
   getPipelineById(pipelineId: string): PipelineDefinition | null
+
+  /** Queue a pipeline run. Requires `can.run`. */
+  requestPipelineRun(input: RequestPipelineRunInput): Promise<PipelineRunRequestResult>
 
   /** Agent definitions the principal may run. */
   listAgents(): readonly AgentDefinition[]
@@ -260,16 +290,35 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
 
     requestAction: (input: RequestActionInput) => requestRuntimeAction(runtime, input),
 
-    runWorkflow: (input: RequestWorkflowRunInput) => deps.workflows.requestByIdAs(runtime, input),
+    // Gated by the same `can.apply` assertion: `requestActionAndWait` requests through
+    // `requestAction` and then only reads the run it just created.
+    requestActionAndWait: (input: RequestActionAndWaitInput) =>
+      requestRuntimeActionAndWait(runtime, input),
 
     listWorkflows: workflows.list,
     getWorkflowById: workflows.getById,
 
+    requestWorkflowRun: (input: RequestWorkflowRunInput) =>
+      deps.workflows.requestByIdAs(runtime, input),
+
     listSyncs: syncs.list,
     getSyncById: syncs.getById,
+    requestSyncRun: async (input: RequestSyncRunInput) => {
+      // Resolve against the full registry, not the grant-filtered one: an existing sync the caller
+      // may not run has to report "forbidden", the same as `requestAction`. Only a genuinely unknown
+      // id is "unknown". `requestSyncRun` asserts the grant.
+      const sync = deps.syncs.getById(input.syncId)
+      if (!sync) throw new SyncValidationError(`[Sixb] Unknown sync '${input.syncId}'`)
+      return requestSyncRun(runtime, sync, input)
+    },
 
     listPipelines: pipelines.list,
     getPipelineById: pipelines.getById,
+    requestPipelineRun: async (input: RequestPipelineRunInput) => {
+      const pipeline = deps.pipelines.getById(input.pipelineId)
+      if (!pipeline) throw new PipelineError(`[Sixb] Unknown pipeline '${input.pipelineId}'`)
+      return requestPipelineRun(runtime, pipeline, input)
+    },
 
     listAgents: agents.list,
     getAgentById: agents.getById,

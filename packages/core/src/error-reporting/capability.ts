@@ -1,5 +1,11 @@
+import { randomUUID } from "node:crypto"
 import { SixbErrorReporter } from "./reporter"
 import type { SixbErrorHandler, SixbFailedRun } from "./types"
+
+function resolveOccurredAt(occurredAt?: Date | string): string {
+  if (occurredAt instanceof Date) return occurredAt.toISOString()
+  return occurredAt ?? new Date().toISOString()
+}
 
 const ERROR_REPORTER = Symbol("sixb.error-reporter")
 
@@ -43,10 +49,7 @@ export function reportRunFailure(
   const reporter = asHost(host)?.[ERROR_REPORTER]
   if (!reporter) return
 
-  const occurredAt =
-    input.occurredAt instanceof Date
-      ? input.occurredAt.toISOString()
-      : (input.occurredAt ?? new Date().toISOString())
+  const occurredAt = resolveOccurredAt(input.occurredAt)
   reporter.report(error, {
     type: "run.failed",
     notificationId: `project:${input.projectId}:run:${input.run.kind}:${input.run.runId}:failed:${occurredAt}`,
@@ -59,27 +62,58 @@ export function reportRunFailure(
 
 export interface ReportEventDeliveryFailureInput {
   readonly projectId: string
-  readonly occurredAt: string
-  readonly attempts: number
-  readonly eventIds: readonly string[]
+  /** Event types that never reached subscribers. Payloads must not be passed in. */
+  readonly eventTypes: readonly string[]
+  readonly occurredAt?: Date | string
+  /** Delivery attempts so far. Defaults to 1, which is right for a rejected emit. */
+  readonly attempts?: number
+  /** Envelope ids, when the events were persisted before delivery failed. */
+  readonly eventIds?: readonly string[]
+  /**
+   * Identity of this loss, used only when nothing was persisted. Defaults to a fresh id; pass one to
+   * make a report reproducible in a test.
+   */
+  readonly occurrenceId?: string
 }
 
+/**
+ * Report that domain events were lost.
+ *
+ * Both delivery paths land here: the outbox dispatcher, which has persisted envelope ids and retries,
+ * and a rejected `events.emit()`, which has only the types. Reporting must work for both — an earlier
+ * version returned early on an empty `eventIds`, which silently dropped exactly the case this exists
+ * to surface.
+ *
+ * Each path keys on the strongest identity it has. The outbox persisted its envelopes, so the ids plus
+ * the attempt number name the loss exactly and stay stable if one report is delivered twice. A rejected
+ * emit persisted nothing and is always terminal at attempt 1, so the type list alone was its whole
+ * correlation — and two schedules losing `schedule.triggered` in the same broker outage are dispatched
+ * concurrently, land in the same millisecond, and were therefore one notification. A timestamp does not
+ * fix that; an identity does.
+ */
 export function reportEventDeliveryFailure(
   host: unknown,
   error: unknown,
   input: ReportEventDeliveryFailureInput
 ): void {
   const reporter = asHost(host)?.[ERROR_REPORTER]
-  if (!reporter || input.eventIds.length === 0) return
+  if (!reporter) return
 
-  const eventIds = [...input.eventIds].sort()
+  const occurredAt = resolveOccurredAt(input.occurredAt)
+  const attempts = input.attempts ?? 1
+  const eventIds = input.eventIds === undefined ? undefined : [...input.eventIds].sort()
+  const firstEventId = eventIds?.[0]
+  const occurrence = firstEventId
+    ? `events:${firstEventId}:attempt:${attempts}`
+    : `emit:${input.occurrenceId ?? randomUUID()}`
   reporter.report(error, {
     type: "event.delivery.failed",
-    notificationId: `project:${input.projectId}:event-delivery:${eventIds[0]}:attempt:${input.attempts}`,
+    notificationId: `project:${input.projectId}:event-delivery:${occurrence}`,
     projectId: input.projectId,
-    occurredAt: input.occurredAt,
-    attempts: input.attempts,
-    eventIds,
+    occurredAt,
+    attempts,
+    eventTypes: input.eventTypes,
+    ...(eventIds === undefined ? {} : { eventIds }),
   })
 }
 
@@ -88,6 +122,9 @@ export interface ReportRuleEvaluationFailureInput {
   readonly source: "live" | "reconciliation"
   readonly eventIds?: readonly string[]
   readonly occurredAt?: Date | string
+  /** Set when the failure could be attributed to one rule/subject candidate. */
+  readonly ruleId?: string
+  readonly subject?: { readonly objectTypeId: string; readonly primaryId: string }
 }
 
 export function reportRuleEvaluationFailure(
@@ -98,12 +135,14 @@ export function reportRuleEvaluationFailure(
   const reporter = asHost(host)?.[ERROR_REPORTER]
   if (!reporter) return
 
-  const occurredAt =
-    input.occurredAt instanceof Date
-      ? input.occurredAt.toISOString()
-      : (input.occurredAt ?? new Date().toISOString())
+  const occurredAt = resolveOccurredAt(input.occurredAt)
   const eventIds = [...(input.eventIds ?? [])].sort()
-  const occurrence = eventIds[0] ?? "current-state"
+  // A candidate-level failure keys on the candidate, so two rules failing over the same batch stay
+  // two notifications rather than collapsing into one.
+  const occurrence =
+    input.ruleId && input.subject
+      ? `${input.ruleId}:${input.subject.objectTypeId}:${input.subject.primaryId}`
+      : (eventIds[0] ?? "current-state")
   reporter.report(error, {
     type: "rule.evaluation.failed",
     notificationId: `project:${input.projectId}:rule-evaluation:${input.source}:${occurrence}:failed:${occurredAt}`,
@@ -111,6 +150,8 @@ export function reportRuleEvaluationFailure(
     occurredAt,
     source: input.source,
     eventIds,
+    ...(input.ruleId === undefined ? {} : { ruleId: input.ruleId }),
+    ...(input.subject === undefined ? {} : { subject: input.subject }),
   })
 }
 

@@ -1,9 +1,9 @@
 import type { DatasetDefinition, ProjectionDefinition } from "@sixb/core"
-import { projectionObjectTypeIds } from "@sixb/core"
 import {
   createProjectionRunId,
   getProjectionRegistry,
   type ProjectionDispatchDescriptor,
+  projectionObjectTypeIds,
 } from "@sixb/core/internal/projections"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { ProjectionRunObjectTypes } from "@sixb/core/storage"

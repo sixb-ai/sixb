@@ -1,11 +1,5 @@
 import type { ObjectQuery } from "@sixb/core"
 import type {
-  StoredLinkDeletedEvent,
-  StoredLinkMutationEvent,
-  StoredObjectMutationEvent,
-  StoredTelemetryAppendedEvent,
-} from "@sixb/core/internal/events"
-import type {
   CountObjectsInput,
   CountObjectsResult,
   ExistsObjectsInput,
@@ -22,6 +16,10 @@ import type {
   ObjectStorage,
   QueryObjectsInput,
   QueryObjectsResult,
+  StoredLinkDeletedEvent,
+  StoredLinkMutationEvent,
+  StoredObjectMutationEvent,
+  StoredTelemetryAppendedEvent,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import {

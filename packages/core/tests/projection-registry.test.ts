@@ -75,11 +75,11 @@ describe("projection registry", () => {
     })
 
     const resolved = projectionRegistry.resolveSource("rooms")
-    const objectProjections = projectionRegistry.getObjectProjections()
-    const telemetryProjections = projectionRegistry.getTelemetryProjections()
+    const objectProjections = projectionRegistry.listObjectProjections()
+    const telemetryProjections = projectionRegistry.listTelemetryProjections()
     expect(Object.isFrozen(objectProjections)).toBe(true)
     expect(Object.isFrozen(telemetryProjections)).toBe(true)
-    expect(projectionRegistry.getLinkProjections()).toEqual([])
+    expect(projectionRegistry.listLinkProjections()).toEqual([])
     expect(projectionRegistry.getProjectionById("rooms")).toBe(objectProjections[0])
     expect(projectionRegistry.getProjectionById("temperatures")).toBe(telemetryProjections[0])
     expect(resolved.definition).toBe(objectProjections[0])
@@ -324,8 +324,8 @@ describe("projection registry", () => {
 
     const resolvedObject = projectionRegistry.resolveSource("rooms").definition
     if (resolvedObject._tag !== "ObjectProjectionDefinition") throw new Error("unexpected kind")
-    expect(projectionRegistry.getObjectProjections()[0]).toBe(resolvedObject)
-    expect(projectionRegistry.getTelemetryProjections()[0]).toBe(
+    expect(projectionRegistry.listObjectProjections()[0]).toBe(resolvedObject)
+    expect(projectionRegistry.listTelemetryProjections()[0]).toBe(
       projectionRegistry.resolveTelemetry("temperatures").definition
     )
     expect(Object.keys(resolvedObject)).toEqual([

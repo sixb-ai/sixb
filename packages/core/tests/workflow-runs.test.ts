@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage, InMemoryWorkflowRunStorage } from "../src"
-import { WorkflowRunError } from "../src/storage"
+import { InMemoryStorage } from "../src"
+import { InMemoryWorkflowRunStorage, WorkflowRunError } from "../src/storage"
 
 describe("InMemoryWorkflowRunStorage", () => {
   test("starts and finishes a successful workflow run", async () => {

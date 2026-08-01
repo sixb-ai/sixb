@@ -6,6 +6,7 @@ import {
 } from "../authorization"
 import {
   canPerformMembershipOperation,
+  type GroupReference,
   type MembershipOperation,
   type MembershipPolicyScope,
   missingMembershipGroupIds,
@@ -74,6 +75,7 @@ import type {
   ListServiceAccountAccessTokensResult,
   ListServiceAccountsResult,
   MemberSummary,
+  MembershipCapabilities,
   Principal,
   ReactivateMemberInput,
   ReactivateMemberResult,
@@ -589,7 +591,7 @@ export class AuthRuntime {
       principal: session.principal,
       sessionId: session.credentialSource === "session" ? session.session.id : undefined,
       groupIds: session.groupIds,
-      roles: this.security.getResolvedRoles(),
+      roles: this.security.listResolvedRoles(),
     })
   }
 
@@ -931,6 +933,22 @@ export class AuthRuntime {
     }
   }
 
+  /**
+   * Resolve what a caller's membership policies let it do, from its groups alone.
+   *
+   * This is the public form of the question the member-admin routes ask internally. It takes groups
+   * rather than a `Request` so project code and tests can ask it without a session — an
+   * `AuthorizationContext` carries `groupIds` for exactly this. Definitions and ids are both accepted,
+   * because a session hands you ids and your own code has the definition.
+   */
+  getMembershipCapabilities(input: {
+    readonly callerGroups: readonly GroupReference[]
+  }): MembershipCapabilities {
+    return membershipCapabilities(
+      this.resolveMembershipPolicyScopeForUser(groupIdsOf(input.callerGroups))
+    )
+  }
+
   async getMembershipOptions(
     request: Request,
     options: AuthSessionResolutionOptions = {}
@@ -941,11 +959,7 @@ export class AuthRuntime {
     return {
       // The member-admin edit-groups dialog assigns from the `assignGroups` scope.
       groups: this.scopedGroupOptions(scope.operations.assignGroups.groupIds),
-      capabilities: {
-        invite: scope.operations.invite.policyIds.length > 0,
-        assignGroups: scope.operations.assignGroups.policyIds.length > 0,
-        suspend: scope.operations.suspend.policyIds.length > 0,
-      },
+      capabilities: membershipCapabilities(scope).holds,
     }
   }
 
@@ -1129,7 +1143,7 @@ export class AuthRuntime {
 
   private scopedGroupOptions(groupIds: ReadonlySet<string>): InvitationGroupOption[] {
     return this.security
-      .getGroupDefinitions()
+      .listGroups()
       .filter((group) => groupIds.has(group.id))
       .map((group) => ({
         id: group.id,
@@ -1349,7 +1363,7 @@ export class AuthRuntime {
 
   private resolveMembershipPolicyScopeForUser(callerGroupIds: readonly string[]) {
     return resolveMembershipPolicyScope({
-      membershipPolicies: this.security.getMembershipPolicyDefinitions(),
+      membershipPolicies: this.security.listMembershipPolicies(),
       callerGroupIds,
     })
   }
@@ -1374,7 +1388,7 @@ export class AuthRuntime {
   ): void {
     // Check only the groups this invitation assigns. Existing memberships may
     // be outside the caller's policy scope and must not affect this response.
-    const roles = this.security.getResolvedRoles()
+    const roles = this.security.listResolvedRoles()
     const authorization = resolveAuthorizationContext({
       principal: { type: "user", id: "invited-user" },
       groupIds,
@@ -1594,4 +1608,35 @@ function createInvitationRecipientError(
     "invalid_auth_input",
     `[Sixb] Invitation email '${email}' belongs to a suspended user.`
   )
+}
+
+/**
+ * The public shape of a resolved membership policy scope.
+ *
+ * `holds` answers "does any policy grant this at all", which is what a UI needs to enable a control;
+ * `covers` answers the scoped question for one member. Neither is the authorization decision — the
+ * runtime methods add rules on top, which is why the third is named for coverage and not for permission.
+ */
+function membershipCapabilities(scope: MembershipPolicyScope): MembershipCapabilities {
+  return {
+    holds: {
+      invite: scope.operations.invite.policyIds.length > 0,
+      assignGroups: scope.operations.assignGroups.policyIds.length > 0,
+      suspend: scope.operations.suspend.policyIds.length > 0,
+    },
+    assignableGroupIds: [...scope.operations.assignGroups.groupIds],
+    covers: (operation, memberGroups) =>
+      canPerformMembershipOperation(scope, operation, groupIdsOf(memberGroups)),
+  }
+}
+
+/**
+ * Normalize the two ways a caller can name a group.
+ *
+ * Ids come from sessions and stored memberships, definitions come from code. Every entry point that
+ * takes `GroupReference` funnels through here, so nothing downstream ever sees a definition where an
+ * id belongs.
+ */
+function groupIdsOf(groups: readonly GroupReference[]): readonly string[] {
+  return groups.map((group) => (typeof group === "string" ? group : group.id))
 }

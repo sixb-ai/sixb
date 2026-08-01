@@ -102,7 +102,7 @@ export async function loadObjectTarget(input: {
   const subject = requireObjectSubject(input.run.subject, input.action.id)
   const subjectObjectType = input.runtime.sixb.resolveObjectType(subject.objectTypeId)
   const actionAppliesToSubject = input.runtime.sixb
-    .getActionsForType(subjectObjectType)
+    .listActionsForType(subjectObjectType)
     .some((candidate) => candidate.id === input.action.id)
   if (!actionAppliesToSubject) {
     throw new ActionWorkerError(

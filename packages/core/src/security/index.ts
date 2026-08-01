@@ -6,6 +6,8 @@ export type {
 } from "./builders"
 export { defineGroup, defineMembershipPolicy, defineRole } from "./builders"
 export { SecurityValidationError } from "./errors"
+export type { BreadthSelector, BreadthTarget } from "./every"
+export { every } from "./every"
 export { can } from "./grants"
 export type { MembershipOperationScope, MembershipPolicyScope } from "./membership-policies"
 export {
@@ -14,8 +16,6 @@ export {
   missingMembershipGroupIds,
   resolveMembershipPolicyScope,
 } from "./membership-policies"
-export type { Scope, ScopeTarget } from "./scopes"
-export { actions, agents, datasets, ontology, pipelines, syncs, workflows } from "./scopes"
 export type {
   AccessGrant,
   ApplicationDefinition,
@@ -23,6 +23,7 @@ export type {
   GrantCapability,
   GrantDefinition,
   GroupDefinition,
+  GroupReference,
   MembershipOperation,
   MembershipPolicyDefinition,
   ObserveGrant,

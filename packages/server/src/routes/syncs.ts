@@ -1,6 +1,4 @@
-import { randomUUID } from "node:crypto"
 import type { OntologySource, Sixb, SyncDefinition } from "@sixb/core"
-import { assertAuthorized } from "@sixb/core/internal/authorization"
 import type { SyncRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
@@ -98,7 +96,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/syncs",
       async (context) => {
         const { scoped } = requestAuthState(context)
-        const syncs = scoped ? scoped.listSyncs() : sixb.getSyncDefinitions()
+        const syncs = scoped ? scoped.listSyncs() : sixb.listSyncs()
         const latestRuns = await getLatestSyncRuns(
           sixb,
           syncs.map((sync) => sync.id)
@@ -195,7 +193,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/syncs/:syncId/runs",
       async (context) => {
         const { params, body, set } = context
-        const { authz } = requestAuthState(context)
+        const { scoped } = requestAuthState(context)
         try {
           const sync = sixb.getSyncById(params.syncId)
           if (!sync) {
@@ -203,40 +201,17 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             return { error: "Sync not found" }
           }
 
-          if (!sixb.storage.syncRuns) {
-            set.status = 400
-            return { error: "Sync run storage is not configured" }
-          }
-
-          assertAuthorized(
-            { authorization: authz ?? undefined },
-            { kind: "sync.run", syncId: sync.id }
-          )
-
           const parsedBody = RequestSyncRunBodySchema.parse(body)
-          const runId = `run_${randomUUID()}`
-          const queuedAt = new Date().toISOString()
-          const [job] = await sixb.queues.syncRuns.enqueue({
-            projectId: sixb.id,
-            jobs: [
-              {
-                type: "sync.run.requested",
-                payload: {
-                  syncId: sync.id,
-                  runId,
-                  expectedLatestVersionId: parsedBody.expectedLatestVersionId,
-                  commitMessage: parsedBody.commitMessage,
-                },
-              },
-            ],
-          })
+          const result = scoped
+            ? await scoped.requestSyncRun({ syncId: sync.id, ...parsedBody })
+            : await sixb.requestSyncRun({ syncId: sync.id, ...parsedBody })
 
           set.status = 202
           return {
-            runId,
-            jobId: job?.id ?? "",
-            syncId: sync.id,
-            queuedAt,
+            runId: result.runId,
+            jobId: result.jobId ?? "",
+            syncId: result.syncId,
+            queuedAt: result.queuedAt,
           }
         } catch (error) {
           return handleRouteError(error, set)

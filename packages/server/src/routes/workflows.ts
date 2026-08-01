@@ -1288,8 +1288,8 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             source: { type: "manual" } as const,
           }
           const result = scoped
-            ? await scoped.runWorkflow(input)
-            : await sixb.workflows.requestById(input)
+            ? await scoped.requestWorkflowRun(input)
+            : await sixb.requestWorkflowRun(input)
 
           set.status = 202
           return RequestWorkflowRunResponseSchema.parse({

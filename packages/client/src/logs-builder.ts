@@ -1,8 +1,8 @@
 import {
   type LogLevel,
-  type LogRunKind,
   type LogRunRef,
   logLevelsAtOrAbove,
+  type SixbRunKind,
   type StoredLogLine,
 } from "@sixb/core/logging"
 import { listLogs } from "./generated"
@@ -10,7 +10,7 @@ import type { Client } from "./generated/client"
 import { createLogSocket, type LogSocketState } from "./logs-transport"
 
 export interface LogsFilterIR {
-  readonly kinds?: readonly LogRunKind[]
+  readonly kinds?: readonly SixbRunKind[]
   readonly run?: LogRunRef
   readonly level?: LogLevel
 }
@@ -147,12 +147,18 @@ function createBuilder(ir: LogsFilterIR, options?: SixbLogsClientOptions): LogsB
   return new LogsBuilderImpl(ir, options)
 }
 
+/**
+ * A selector exists here only once a primitive actually writes logs. `SIXB_RUN_KINDS` is the list of
+ * valid kinds, not the list of selectors — a selector that can only ever return nothing is dead API,
+ * and adding one later is additive.
+ */
 export interface SixbLogsApi {
   all(options?: SixbLogsClientOptions): LogsBuilder
   syncs(options?: SixbLogsClientOptions): RunScopedLogsBuilder
   pipelines(options?: SixbLogsClientOptions): RunScopedLogsBuilder
   workflows(options?: SixbLogsClientOptions): RunScopedLogsBuilder
   actions(options?: SixbLogsClientOptions): RunScopedLogsBuilder
+  webhooks(options?: SixbLogsClientOptions): RunScopedLogsBuilder
 }
 
 export const logs: SixbLogsApi = {
@@ -161,4 +167,5 @@ export const logs: SixbLogsApi = {
   pipelines: (options) => createBuilder({ kinds: ["pipeline"] }, options),
   workflows: (options) => createBuilder({ kinds: ["workflow"] }, options),
   actions: (options) => createBuilder({ kinds: ["action"] }, options),
+  webhooks: (options) => createBuilder({ kinds: ["webhook"] }, options),
 }

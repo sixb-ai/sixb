@@ -1,3 +1,21 @@
+/** `@sixb/core/storage` is the provider contract, so the serialization a provider needs lives here. */
+
+/**
+ * The stored events that appear in this contract's own method signatures.
+ *
+ * A type in a public interface signature must be exported from the same subpath as the interface, or
+ * the interface simply cannot be implemented from outside — which was the case for `ObjectStorage`
+ * and `TimeseriesStorage` before these six were re-exported here.
+ */
+export type {
+  StoredLinkDeletedEvent,
+  StoredLinkMutationEvent,
+  StoredObjectMutationEvent,
+  StoredRuleResolvedEvent,
+  StoredRuleTriggeredEvent,
+  StoredTelemetryAppendedEvent,
+} from "../events"
+export { stableJsonStringify } from "../json"
 export type {
   ProjectionExecution,
   ProjectionMaterializationIdentity,

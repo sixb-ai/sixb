@@ -45,6 +45,7 @@ export {
   type DomainEventLog,
   EVENTS_STREAM,
   type EventsAppendInput,
+  type EventsEmitOptions,
   type EventsReadInput,
   EventsRuntime,
   type EventsRuntimeOptions,

@@ -30,9 +30,9 @@ import { compileRoutesWithDiagnostics, OrchestratorWorker } from "@sixb/orchestr
 
 const projectionDispatchDescriptors = getProjectionDispatchDescriptors(sixb)
 const { routes } = compileRoutesWithDiagnostics({
-  schedules: sixb.getScheduleDefinitions(),
-  syncs: sixb.getSyncDefinitions(),
-  pipelines: sixb.getPipelineDefinitions(),
+  schedules: sixb.listSchedules(),
+  syncs: sixb.listSyncs(),
+  pipelines: sixb.listPipelines(),
   projections: projectionDispatchDescriptors,
 })
 

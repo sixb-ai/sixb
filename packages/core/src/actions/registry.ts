@@ -86,7 +86,7 @@ export class ActionRegistry {
     const seen = new Set<string>()
     const result: ObjectActionDefinition[] = []
 
-    for (const ancestor of this.ontology.getAncestorChain(type)) {
+    for (const ancestor of this.ontology.listAncestorChain(type)) {
       for (const action of this.byTargetId.get(ancestor.id) ?? []) {
         if (seen.has(action.id)) continue
         seen.add(action.id)
@@ -112,7 +112,7 @@ export class ActionRegistry {
       return null
     }
 
-    const actionChain = this.ontology.getAncestorChain(actionObjectType)
+    const actionChain = this.ontology.listAncestorChain(actionObjectType)
     if (actionChain.some((ancestor) => ancestor.id === previousObjectType.id)) {
       return {
         objectTypeId: actionObjectType.id,
@@ -121,7 +121,7 @@ export class ActionRegistry {
       }
     }
 
-    const previousChain = this.ontology.getAncestorChain(previousObjectType)
+    const previousChain = this.ontology.listAncestorChain(previousObjectType)
     if (previousChain.some((ancestor) => ancestor.id === actionObjectType.id)) {
       return {
         objectTypeId: previousObjectType.id,

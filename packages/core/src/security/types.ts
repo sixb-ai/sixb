@@ -9,8 +9,17 @@ export interface GroupDefinition<TId extends string = string> {
 }
 
 /**
+ * A group named either by its definition or by its id.
+ *
+ * Both forms are unavoidable. Sessions and stored memberships hand you ids, so a runtime caller has
+ * nothing else to pass; code that knows the group at authoring time has the definition, and naming it
+ * makes a rename a compile error instead of a silent miss. Runtime entry points normalize to ids.
+ */
+export type GroupReference = GroupDefinition | string
+
+/**
  * A capability's reach over its target's id space. Either the whole registered
- * universe minus an exclusion list (`ontology.objects().except([...])`) or an
+ * universe minus an exclusion list (`every.object().except([...])`) or an
  * explicit set of ids (`can.view([A, B])`). Both forms expand to a concrete set
  * of ids at startup, so the resolved index only ever holds plain `Set`s.
  */
@@ -97,12 +106,12 @@ export interface RegisteredSecurityDefinitions {
 }
 
 export interface SecurityRegistry {
-  getGroupDefinitions(): readonly GroupDefinition[]
+  listGroups(): readonly GroupDefinition[]
   getGroupById(groupId: string): GroupDefinition | null
-  getRoleDefinitions(): readonly RoleDefinition[]
+  listRoles(): readonly RoleDefinition[]
   getRoleById(roleId: string): RoleDefinition | null
   /** Roles with their grants pre-expanded to concrete id sets for resolution. */
-  getResolvedRoles(): readonly ResolvedRole[]
-  getMembershipPolicyDefinitions(): readonly MembershipPolicyDefinition[]
+  listResolvedRoles(): readonly ResolvedRole[]
+  listMembershipPolicies(): readonly MembershipPolicyDefinition[]
   getMembershipPolicyById(policyId: string): MembershipPolicyDefinition | null
 }

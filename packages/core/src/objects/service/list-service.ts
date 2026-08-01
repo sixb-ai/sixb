@@ -67,7 +67,7 @@ function resolveAuthorizedTypeFilter(
   }
 
   const expanded = requested
-    ? [...new Set(requested.flatMap((id) => [id, ...runtime.ontology.getSubTypes(id)]))]
+    ? [...new Set(requested.flatMap((id) => [id, ...runtime.ontology.listSubTypes(id)]))]
     : undefined
 
   if (!runtime.authorization) {

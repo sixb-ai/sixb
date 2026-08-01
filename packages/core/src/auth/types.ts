@@ -1,4 +1,4 @@
-import type { GroupDefinition } from "../security"
+import type { GroupDefinition, GroupReference, MembershipOperation } from "../security"
 import type {
   AccessTokenRecord,
   AuthStorage,
@@ -271,6 +271,33 @@ export interface GetMembershipOptionsResult {
   /** Groups the caller may assign to a member (the `assignGroups` scope). */
   readonly groups: readonly InvitationGroupOption[]
   readonly capabilities: MembershipOperationCapabilities
+}
+
+/**
+ * What a caller's membership policies let it do — the answer to "may this principal invite?".
+ *
+ * Resolved from group ids alone, with no HTTP request involved, so project code and tests can ask the
+ * question the same way the member-admin routes do.
+ */
+export interface MembershipCapabilities {
+  /** True when at least one policy grants the operation, ignoring which groups it covers. */
+  readonly holds: MembershipOperationCapabilities
+  /** Group ids the caller may assign to a member. */
+  readonly assignableGroupIds: readonly string[]
+  /**
+   * Whether the caller's policy scope reaches a member currently holding exactly `memberGroups`.
+   *
+   * Pass definitions when your code knows the groups (`covers("suspend", [teamMembers])`) and ids when
+   * they came from a session or a member's stored memberships. An empty list asks the group-less case —
+   * inviting someone who joins no group — which any holder of the operation may do.
+   *
+   * Coverage is not authorization. It is the group boundary the membership policies draw, which is what
+   * a UI needs to decide whether to offer a control for a given member. The operation itself applies
+   * rules this question cannot see: `suspendMember` refuses the current user, `assignGroups` also checks
+   * the groups being assigned against `assignableGroupIds`, and a member's status can rule it out. Ask
+   * the runtime method for the decision; ask this for the boundary.
+   */
+  covers(operation: MembershipOperation, memberGroups: readonly GroupReference[]): boolean
 }
 
 export interface ListMembersInput {

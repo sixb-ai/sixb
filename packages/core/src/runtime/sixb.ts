@@ -8,8 +8,17 @@
 
 import { resolve } from "node:path"
 import { ActionRegistry, ActionsRuntime } from "../actions"
+import type {
+  RequestActionAndWaitInput,
+  RequestActionInput,
+  RequestActionResult,
+} from "../actions/request"
+import {
+  requestAction as requestRuntimeAction,
+  requestActionAndWait as requestRuntimeActionAndWait,
+} from "../actions/request"
 import type { ActionDefinition } from "../actions/types"
-import type { AgentDefinition } from "../agents"
+import type { AgentDefinition, RequestAgentRunInput, RequestAgentRunResult } from "../agents"
 import { AgentsRuntime, validateAgentGroupReferences } from "../agents"
 import {
   AuthRuntime,
@@ -50,6 +59,12 @@ import {
   type ValueType,
 } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
+import { PipelineError } from "../pipelines"
+import {
+  type PipelineRunRequestResult,
+  type RequestPipelineRunInput,
+  requestPipelineRun,
+} from "../pipelines/request"
 import type { PipelineDefinition } from "../pipelines/types"
 import { registerProjectionRegistry } from "../projections/internal"
 import { ProjectionRegistry } from "../projections/registry"
@@ -73,11 +88,21 @@ import type {
   SecurityRegistry,
 } from "../security"
 import { createRuntimeSecurityRegistry } from "../security/runtime"
-import type { ObjectRow, Storage } from "../storage"
+import type { ActionRunRecord, ObjectRow, Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
+import { SyncValidationError } from "../syncs"
+import {
+  type RequestSyncRunInput,
+  requestSyncRun,
+  type SyncRunRequestResult,
+} from "../syncs/request"
 import type { RegisteredWebhook } from "../webhooks"
 import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webhooks"
-import type { WorkflowDefinition } from "../workflows"
+import type {
+  RequestWorkflowRunInput,
+  WorkflowDefinition,
+  WorkflowRunRequestResult,
+} from "../workflows"
 import { validateWorkflowsAtStartup, WorkflowsRuntime } from "../workflows"
 import { RuntimeError } from "./errors"
 import {
@@ -175,7 +200,12 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.projectId = options.id ?? "default"
     this.ontologySources = options.ontology
     this.broker = options.broker
-    this.eventsRuntime = new EventsRuntime({ projectId: this.projectId, broker: this.broker })
+    // `host: this` is how `events.emit()` reaches the reporter attached at the top of this constructor.
+    this.eventsRuntime = new EventsRuntime({
+      projectId: this.projectId,
+      broker: this.broker,
+      host: this,
+    })
     this.events = this.eventsRuntime
     this.logs = new LogsRuntime({
       projectId: this.projectId,
@@ -208,7 +238,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       syncIds: new Set((options.syncs ?? []).map((sync) => sync.id)),
       pipelineIds: new Set((options.pipelines ?? []).map((pipeline) => pipeline.id)),
       agentIds: new Set(agents.map((agent) => agent.id)),
-      getSubTypes: (objectTypeId) => this.ontology.getSubTypes(objectTypeId),
+      getSubTypes: (objectTypeId) => this.ontology.listSubTypes(objectTypeId),
     })
     this.auth = new AuthRuntime({
       projectId: this.projectId,
@@ -417,7 +447,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.ontology.getValueTypesById()
   }
 
-  getActionDefinitions(): readonly ActionDefinition[] {
+  listActions(): readonly ActionDefinition[] {
     return this.actionRegistry.list()
   }
 
@@ -425,15 +455,15 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.actionRegistry.getById(actionId)
   }
 
-  getGlobalActions(): readonly ActionDefinition[] {
+  listGlobalActions(): readonly ActionDefinition[] {
     return this.actionRegistry.getGlobalActions()
   }
 
-  getActionsForType(objectType: ObjectType): readonly ActionDefinition[] {
+  listActionsForType(objectType: ObjectType): readonly ActionDefinition[] {
     return this.actionRegistry.getActionsForType(objectType)
   }
 
-  getDatasetDefinitions(): readonly DatasetDefinition[] {
+  listDatasets(): readonly DatasetDefinition[] {
     return [...this.datasetsById.values()]
   }
 
@@ -441,7 +471,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.datasetsById.get(datasetId) ?? null
   }
 
-  getSyncDefinitions(): readonly SyncDefinition[] {
+  listSyncs(): readonly SyncDefinition[] {
     return [...this.syncsById.values()]
   }
 
@@ -449,7 +479,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.syncsById.get(syncId) ?? null
   }
 
-  getPipelineDefinitions(): readonly PipelineDefinition[] {
+  listPipelines(): readonly PipelineDefinition[] {
     return [...this.pipelinesById.values()]
   }
 
@@ -457,7 +487,43 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.pipelinesById.get(pipelineId) ?? null
   }
 
-  getScheduleDefinitions(): readonly ScheduleDefinition[] {
+  // ── Starting work ─────────────────────────────────────────
+  // Every verb is `request*` because everything here is queued, never run inline. `requestActionAndWait`
+  // is the one that waits, and says so.
+
+  requestAction(input: RequestActionInput): Promise<RequestActionResult> {
+    return requestRuntimeAction(this.runtimeContext, input)
+  }
+
+  requestActionAndWait(input: RequestActionAndWaitInput): Promise<ActionRunRecord> {
+    return requestRuntimeActionAndWait(this.runtimeContext, input)
+  }
+
+  requestWorkflowRun(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult> {
+    return this.workflows.requestById(input)
+  }
+
+  async requestSyncRun(input: RequestSyncRunInput): Promise<SyncRunRequestResult> {
+    const sync = this.getSyncById(input.syncId)
+    if (!sync) {
+      throw new SyncValidationError(`[Sixb] Unknown sync '${input.syncId}'`)
+    }
+    return requestSyncRun(this.runtimeContext, sync, input)
+  }
+
+  async requestPipelineRun(input: RequestPipelineRunInput): Promise<PipelineRunRequestResult> {
+    const pipeline = this.getPipelineById(input.pipelineId)
+    if (!pipeline) {
+      throw new PipelineError(`[Sixb] Unknown pipeline '${input.pipelineId}'`)
+    }
+    return requestPipelineRun(this.runtimeContext, pipeline, input)
+  }
+
+  requestAgentRun(input: RequestAgentRunInput): Promise<RequestAgentRunResult> {
+    return this.agents.request(input)
+  }
+
+  listSchedules(): readonly ScheduleDefinition[] {
     return [...this.schedulesById.values()]
   }
 
@@ -465,7 +531,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.schedulesById.get(scheduleId) ?? null
   }
 
-  getRuleDefinitions(): readonly RuleDefinition[] {
+  listRules(): readonly RuleDefinition[] {
     return [...this.rulesById.values()]
   }
 
@@ -509,7 +575,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     if (this.schedulerRuntime || this.schedulesById.size === 0) return
 
     const runtime = new SchedulerRuntime({
-      schedules: this.getScheduleDefinitions(),
+      schedules: this.listSchedules(),
       events: this.eventsRuntime,
     })
 
@@ -568,15 +634,15 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       { ...this.runtimeContext, authorization: context },
       {
         datasets: {
-          list: () => this.getDatasetDefinitions(),
+          list: () => this.listDatasets(),
           getById: (datasetId) => this.getDatasetById(datasetId),
         },
         syncs: {
-          list: () => this.getSyncDefinitions(),
+          list: () => this.listSyncs(),
           getById: (syncId) => this.getSyncById(syncId),
         },
         pipelines: {
-          list: () => this.getPipelineDefinitions(),
+          list: () => this.listPipelines(),
           getById: (pipelineId) => this.getPipelineById(pipelineId),
         },
         workflows: this.workflows,
@@ -655,16 +721,16 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return this.ontology.getPrimaryPropertyId(objectTypeId)
   }
 
-  getObjectProjections(): readonly ObjectProjectionDefinition[] {
-    return this.projectionRegistry.getObjectProjections()
+  listObjectProjections(): readonly ObjectProjectionDefinition[] {
+    return this.projectionRegistry.listObjectProjections()
   }
 
-  getLinkProjections(): readonly LinkProjectionDefinition[] {
-    return this.projectionRegistry.getLinkProjections()
+  listLinkProjections(): readonly LinkProjectionDefinition[] {
+    return this.projectionRegistry.listLinkProjections()
   }
 
-  getTelemetryProjections(): readonly TelemetryProjectionDefinition[] {
-    return this.projectionRegistry.getTelemetryProjections()
+  listTelemetryProjections(): readonly TelemetryProjectionDefinition[] {
+    return this.projectionRegistry.listTelemetryProjections()
   }
 
   getProjectionById(projectionId: string): ProjectionDefinition | null {
@@ -691,8 +757,8 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     return objectService.listObjects(this.runtimeContext, params)
   }
 
-  getSubTypes(objectTypeId: string): string[] {
-    return this.ontology.getSubTypes(objectTypeId)
+  listSubTypes(objectTypeId: string): string[] {
+    return this.ontology.listSubTypes(objectTypeId)
   }
 
   isValidLinkTarget(expected: string | string[], actual: string): boolean {

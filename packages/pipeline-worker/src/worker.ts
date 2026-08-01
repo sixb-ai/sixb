@@ -23,7 +23,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
   private readonly sixb: PipelineWorkerSixb
 
   constructor(sixb: PipelineWorkerSixb) {
-    if (sixb.getPipelineDefinitions().length === 0) {
+    if (sixb.listPipelines().length === 0) {
       throw new Error("[SixbPipelineWorker] No pipeline definitions are registered.")
     }
 
@@ -75,7 +75,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
           emitPipelineRunStepStarted(this.sixb.events, step, context),
         onStepFinished: (step, context) =>
           emitPipelineRunStepFinished(this.sixb.events, step, context),
-        onStepCommitted: (step) => emitDatasetVersionCommitted(this.sixb, pipelineJob, step),
+        onStepCommitted: (step) => emitDatasetVersionCommitted(this.sixb.events, pipelineJob, step),
       })
     } catch (error) {
       if (error instanceof PipelineRunAlreadyStartedError) return

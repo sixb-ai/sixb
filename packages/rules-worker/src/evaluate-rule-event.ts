@@ -1,10 +1,10 @@
 import type { RuleDefinition, RuleEventSubject } from "@sixb/core"
-import { deriveRuleEventDependencies } from "@sixb/core"
 import type {
   StoredDomainEvent,
   StoredRuleResolvedEvent,
   StoredRuleTriggeredEvent,
 } from "@sixb/core/internal/events"
+import { deriveRuleEventDependencies } from "@sixb/core/internal/rules"
 import type { ObjectLinkRow, RulesStorage } from "@sixb/core/storage"
 import { evaluateRulePredicate } from "./evaluate-predicate"
 import type {
@@ -14,6 +14,7 @@ import type {
   EvaluateRuleForSubjectInput,
   EvaluateRuleForSubjectResult,
   OntologyRuleEvent,
+  RuleCandidateFailure,
   RuleDependencyIndex,
   RuleEventEvaluationCandidate,
 } from "./types"
@@ -109,19 +110,26 @@ export async function evaluateRuleEvents(
 ): Promise<EvaluateRuleEventResult> {
   const evaluatedAt = input.evaluatedAt ?? new Date().toISOString()
   const evaluations: EvaluateRuleForSubjectResult[] = []
+  const failures: RuleCandidateFailure[] = []
 
   for (const candidate of matchRuleEvents({ index: input.index, events: input.events })) {
-    evaluations.push(
-      await evaluateRuleForSubject({
-        runtime: input.runtime,
-        rule: candidate.rule,
-        subject: candidate.subject,
-        evaluatedAt,
-      })
-    )
+    try {
+      evaluations.push(
+        await evaluateRuleForSubject({
+          runtime: input.runtime,
+          rule: candidate.rule,
+          subject: candidate.subject,
+          evaluatedAt,
+        })
+      )
+    } catch (error) {
+      // Candidates are independent. One failing rule must not cancel the rest of the batch, and the
+      // caller needs the rule and subject to report the failure at all.
+      failures.push({ ruleId: candidate.rule.id, subject: candidate.subject, error })
+    }
   }
 
-  return { evaluations }
+  return { evaluations, failures }
 }
 
 /**

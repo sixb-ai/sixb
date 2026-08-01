@@ -198,6 +198,20 @@ export function objectUpsertOperation(input: {
   return { id: input.id, kind: "object.upsert", ref: input.ref, properties: input.properties }
 }
 
+export function objectDeleteOperation(input: {
+  readonly id: string
+  readonly ref: OntologyObjectRef
+}): OntologyEditOperation {
+  return { id: input.id, kind: "object.delete", ref: input.ref }
+}
+
+export function objectRestoreOperation(input: {
+  readonly id: string
+  readonly ref: OntologyObjectRef
+}): OntologyEditOperation {
+  return { id: input.id, kind: "object.restore", ref: input.ref }
+}
+
 export function linkUpsertOperation(input: {
   readonly id: string
   readonly ref: OntologyLinkRef

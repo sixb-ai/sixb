@@ -21,13 +21,31 @@ export interface Logger {
   child(bindings: LogFields): Logger
 }
 
-/** The primitive whose execution produced a log line. */
-export const LOG_RUN_KINDS = ["sync", "pipeline", "workflow", "action", "webhook"] as const
-export type LogRunKind = (typeof LOG_RUN_KINDS)[number]
+/**
+ * Every kind of run Sixb records on a project's behalf.
+ *
+ * This is the one list: log lines, failed-run reports, and log stream selectors all name their
+ * producer from here. A kind is listed as soon as the run record exists, even when nothing writes logs
+ * for it yet — adding a writer later is additive, widening this union is not.
+ *
+ * The test is whether the thing has a run with an id. Rules do not: they are evaluated live, per
+ * subject, and Sixb keeps no record of an evaluation, which is why they are absent here and report
+ * through `SixbRuleEvaluationFailedContext` instead.
+ */
+export const SIXB_RUN_KINDS = [
+  "action",
+  "agent",
+  "pipeline",
+  "projection",
+  "sync",
+  "webhook",
+  "workflow",
+] as const
+export type SixbRunKind = (typeof SIXB_RUN_KINDS)[number]
 
 /** Points a log line back at the run that produced it. */
 export interface LogRunRef {
-  readonly kind: LogRunKind
+  readonly kind: SixbRunKind
   readonly id: string
 }
 
@@ -82,8 +100,8 @@ export function isLogLevel(value: unknown): value is LogLevel {
   return typeof value === "string" && (LOG_LEVELS as readonly string[]).includes(value)
 }
 
-export function isLogRunKind(value: unknown): value is LogRunKind {
-  return typeof value === "string" && (LOG_RUN_KINDS as readonly string[]).includes(value)
+export function isSixbRunKind(value: unknown): value is SixbRunKind {
+  return typeof value === "string" && (SIXB_RUN_KINDS as readonly string[]).includes(value)
 }
 
 export function isLogRecord(value: unknown): value is LogRecord {
@@ -109,7 +127,7 @@ function isLogContext(value: unknown): value is LogContext {
   return (
     isRecord(value) &&
     isRecord(value.run) &&
-    isLogRunKind(value.run.kind) &&
+    isSixbRunKind(value.run.kind) &&
     typeof value.run.id === "string" &&
     (value.stepId === undefined || typeof value.stepId === "string") &&
     (value.phase === undefined || typeof value.phase === "string") &&

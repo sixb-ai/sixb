@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  blobIdFromDigest,
   DEFAULT_SIMPLE_FILE_UPLOAD_BYTES,
   defineObjectType,
   type FileRef,
@@ -16,6 +15,7 @@ import {
 import {
   type AbortBlobUploadInput,
   type BlobUploadSession,
+  blobIdFromDigest,
   type CompleteBlobUploadInput,
   type CreateBlobUploadInput,
   computeBlobDigest,

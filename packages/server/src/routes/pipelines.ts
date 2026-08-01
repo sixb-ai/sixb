@@ -1,6 +1,5 @@
-import { randomUUID } from "node:crypto"
 import type { OntologySource, PipelineDefinition, PipelineStepExecutor, Sixb } from "@sixb/core"
-import { assertAuthorized, canViewPipelineRun } from "@sixb/core/internal/authorization"
+import { canViewPipelineRun } from "@sixb/core/internal/authorization"
 import type { PipelineRunRecord, PipelineStepRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
@@ -134,7 +133,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/pipelines",
       async (context) => {
         const { scoped } = requestAuthState(context)
-        const pipelines = scoped ? scoped.listPipelines() : sixb.getPipelineDefinitions()
+        const pipelines = scoped ? scoped.listPipelines() : sixb.listPipelines()
         const latestRuns = await getLatestPipelineRuns(
           sixb,
           pipelines.map((pipeline) => pipeline.id)
@@ -285,7 +284,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/pipelines/:pipelineId/runs",
       async (context) => {
         const { params, set } = context
-        const { authz } = requestAuthState(context)
+        const { scoped } = requestAuthState(context)
         try {
           const pipeline = sixb.getPipelineById(params.pipelineId)
           if (!pipeline) {
@@ -293,37 +292,16 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             return { error: "Pipeline not found" }
           }
 
-          if (!sixb.storage.pipelineRuns) {
-            set.status = 400
-            return { error: "Pipeline run storage is not configured" }
-          }
-
-          assertAuthorized(
-            { authorization: authz ?? undefined },
-            { kind: "pipeline.run", pipelineId: pipeline.id }
-          )
-
-          const runId = `run_${randomUUID()}`
-          const queuedAt = new Date().toISOString()
-          const [job] = await sixb.queues.pipelines.enqueue({
-            projectId: sixb.id,
-            jobs: [
-              {
-                type: "pipeline.run.requested",
-                payload: {
-                  pipelineId: pipeline.id,
-                  runId,
-                },
-              },
-            ],
-          })
+          const result = scoped
+            ? await scoped.requestPipelineRun({ pipelineId: pipeline.id })
+            : await sixb.requestPipelineRun({ pipelineId: pipeline.id })
 
           set.status = 202
           return {
-            runId,
-            jobId: job?.id ?? "",
-            pipelineId: pipeline.id,
-            queuedAt,
+            runId: result.runId,
+            jobId: result.jobId ?? "",
+            pipelineId: result.pipelineId,
+            queuedAt: result.queuedAt,
           }
         } catch (error) {
           return handleRouteError(error, set)

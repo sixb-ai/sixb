@@ -11,9 +11,11 @@ import type {
   ActionRegistry,
   ActionsRuntime,
   InferActionParams,
+  RequestActionAndWaitInput,
+  RequestActionInput,
   RequestActionResult,
 } from "../actions"
-import type { AgentsRuntime } from "../agents"
+import type { AgentsRuntime, RequestAgentRunInput, RequestAgentRunResult } from "../agents"
 import type { AuthRuntime } from "../auth"
 import type { AuthorizationContext } from "../authorization"
 import type { BlobStorage } from "../blob-storage"
@@ -50,6 +52,7 @@ import type {
 } from "../ontology/inference"
 import type { OntologyDocumentInput, OntologyRegistry, OntologySource } from "../ontology/registry"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../ontology/tokens"
+import type { PipelineRunRequestResult, RequestPipelineRunInput } from "../pipelines/request"
 import type { PipelineDefinition } from "../pipelines/types"
 import type {
   LinkProjectionDefinition,
@@ -63,9 +66,13 @@ import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition } from "../schedules"
 import type { SecurityRegistry } from "../security"
 import type { ActionRunRecord, ObjectLinkRow, ObjectRow, Storage } from "../storage"
-import type { SyncDefinition } from "../syncs"
+import type { RequestSyncRunInput, SyncDefinition, SyncRunRequestResult } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
-import type { WorkflowsRuntime } from "../workflows"
+import type {
+  RequestWorkflowRunInput,
+  WorkflowRunRequestResult,
+  WorkflowsRuntime,
+} from "../workflows"
 import type { ScopedSixb } from "./scoped"
 
 // ── Shared runtime context ──────────────────────────────────
@@ -390,11 +397,48 @@ export type TelemetryAppendInput<
   at: Date
 } & TelemetryUnitField<TToken, TValueTypes>
 
-export interface TelemetryAppender<
+export interface TelemetryHistoryInput {
+  readonly from?: Date
+  readonly to?: Date
+  readonly limit?: number
+  readonly order?: "asc" | "desc"
+}
+
+/**
+ * One object's telemetry for one property, readable and writable.
+ *
+ * Named a channel rather than an appender because telemetry is not write-only: `history()` reads the
+ * same series back, typed through the same token, instead of sending the caller under the typed
+ * surface to `sixb.storage.timeseries`.
+ */
+// A type alias for the same reason as `TwinObject` above: `history()` puts
+// `InferPropertyValue` in an output position, and probing a generic interface's variance there
+// overflows TS's recursion limits (TS2589) in consumers as ordinary as `points.map(...)`.
+export type TelemetryChannel<
   TToken extends AnyPropertyToken,
   TValueTypes extends readonly ValueType[],
-> {
+> = {
   append(input: TelemetryAppendInput<TToken, TValueTypes>): Promise<void>
+  /**
+   * Points for this series, oldest first unless `order: "desc"`.
+   *
+   * The default matches `storage.timeseries.getHistoryBatch`, deliberately: a typed read that ordered
+   * differently from the contract underneath it would be its own trap.
+   *
+   * The point shape is written inline rather than extracted into a named alias. One more level of
+   * alias indirection around `InferPropertyValue` in this output position overflows TS's instantiation
+   * depth (TS2589) in consumers as ordinary as `points.map(...)` — the same budget the note on
+   * `TwinObject` describes. `unit` is inferred through the same token as `append` writes it, rather
+   * than widened to `string`: a read that kept `value` precise and gave up on `unit` would be an
+   * arbitrary line, and both are the current ontology's view of a series it validated on write.
+   */
+  history(input?: TelemetryHistoryInput): Promise<
+    readonly {
+      readonly value: InferPropertyValue<TToken["property"], TValueTypes>
+      readonly at: Date
+      readonly unit?: InferPropertyUnit<TToken["property"], TValueTypes>
+    }[]
+  >
 }
 
 type TypedActionReference<TParams extends ActionParamsConfig = ActionParamsConfig> = {
@@ -1014,10 +1058,25 @@ export interface ObjectByIdHandle<
     signal?: AbortSignal
   }): Promise<ActionRunRecord>
 
-  /** Append telemetry to a telemetry-mode property token. */
+  /**
+   * Delete this object, cascading over its links in the same commit.
+   *
+   * For an object written only from code this is not reversible — the identity ceases to exist, and
+   * `restore()` has nothing to bring back. For an object a projection also writes, the delete records
+   * a managed override: the object stays hidden even while the projection keeps asserting it, until
+   * `restore()` withdraws the override.
+   *
+   * Deleting a missing object is a no-op.
+   */
+  delete(): Promise<void>
+
+  /** Withdraw a previous `delete()`. A no-op unless a projection still asserts this object. */
+  restore(): Promise<void>
+
+  /** Read and write telemetry for one telemetry-mode property token. */
   telemetry<TToken extends TelemetryPropertyToken<TObjectType>>(
     property: TToken
-  ): TelemetryAppender<TToken, TValueTypes>
+  ): TelemetryChannel<TToken, TValueTypes>
 }
 
 /**
@@ -1060,43 +1119,66 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   getValueTypesById(): ReadonlyMap<string, ValueType>
 
   /** All registered action definitions. */
-  getActionDefinitions(): readonly ActionDefinition[]
+  listActions(): readonly ActionDefinition[]
 
   /** Lookup an action definition by id. */
   getActionById(actionId: string): ActionDefinition | null
 
   /** All registered global actions. */
-  getGlobalActions(): readonly ActionDefinition[]
+  listGlobalActions(): readonly ActionDefinition[]
 
   /** All actions valid for an object type, including inherited actions. */
-  getActionsForType(objectType: ObjectType): readonly ActionDefinition[]
+  listActionsForType(objectType: ObjectType): readonly ActionDefinition[]
 
   /** All registered dataset definitions. */
-  getDatasetDefinitions(): readonly DatasetDefinition[]
+  listDatasets(): readonly DatasetDefinition[]
 
   /** Lookup a dataset definition by id. */
   getDatasetById(datasetId: string): DatasetDefinition | null
 
   /** All registered sync definitions. */
-  getSyncDefinitions(): readonly SyncDefinition[]
+  listSyncs(): readonly SyncDefinition[]
 
   /** Lookup a sync definition by id. */
   getSyncById(syncId: string): SyncDefinition | null
 
   /** All registered pipeline definitions. */
-  getPipelineDefinitions(): readonly PipelineDefinition[]
+  listPipelines(): readonly PipelineDefinition[]
 
   /** Lookup a pipeline definition by id. */
   getPipelineById(pipelineId: string): PipelineDefinition | null
 
+  /**
+   * Request an action run by id. Queued, not run inline — see `requestActionAndWait`.
+   *
+   * Every start verb on this runtime is `request*` for that reason: `run*` implied inline execution
+   * that never happened.
+   */
+  requestAction(input: RequestActionInput): Promise<RequestActionResult>
+
+  /** Request an action run and wait for it to reach a terminal state. */
+  requestActionAndWait(input: RequestActionAndWaitInput): Promise<ActionRunRecord>
+
+  /** Queue a workflow run by id. */
+  requestWorkflowRun(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult>
+
+  /** Queue a sync run by id. */
+  requestSyncRun(input: RequestSyncRunInput): Promise<SyncRunRequestResult>
+
+  /** Queue a pipeline run by id. */
+  requestPipelineRun(input: RequestPipelineRunInput): Promise<PipelineRunRequestResult>
+
+  /** Queue an agent turn by id. */
+  requestAgentRun(input: RequestAgentRunInput): Promise<RequestAgentRunResult>
+
   /** All registered schedule definitions. */
-  getScheduleDefinitions(): readonly ScheduleDefinition[]
+  listSchedules(): readonly ScheduleDefinition[]
 
   /** Lookup a schedule definition by id. */
   getScheduleById(scheduleId: string): ScheduleDefinition | null
 
   /** All registered rule definitions. */
-  getRuleDefinitions(): readonly RuleDefinition[]
+  listRules(): readonly RuleDefinition[]
 
   /** Lookup a rule definition by id. */
   getRuleById(ruleId: string): RuleDefinition | null
@@ -1217,16 +1299,16 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   }): Promise<ListResult<ObjectRow>>
 
   /** Collect all transitive sub-types of the given object type id. */
-  getSubTypes(objectTypeId: string): string[]
+  listSubTypes(objectTypeId: string): string[]
 
   /** All registered object projection definitions. */
-  getObjectProjections(): readonly ObjectProjectionDefinition[]
+  listObjectProjections(): readonly ObjectProjectionDefinition[]
 
   /** All registered link projection definitions. */
-  getLinkProjections(): readonly LinkProjectionDefinition[]
+  listLinkProjections(): readonly LinkProjectionDefinition[]
 
   /** All registered telemetry projection definitions. */
-  getTelemetryProjections(): readonly TelemetryProjectionDefinition[]
+  listTelemetryProjections(): readonly TelemetryProjectionDefinition[]
 
   /** Lookup a registered projection by id. */
   getProjectionById(projectionId: string): ProjectionDefinition | null

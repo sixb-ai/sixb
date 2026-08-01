@@ -33,6 +33,12 @@ import { dirname, join, resolve } from "node:path"
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const packagesUnderTest = ["packages/core", "packages/client", "packages/ui"] as const
 
+/**
+ * Per-package bound on the bundle check. All three together take about 150ms when healthy, so
+ * this is not a performance allowance — it is the line past which the bundler is presumed stuck.
+ */
+const BUNDLE_CHECK_BUDGET_MS = 60_000
+
 type PackageJson = {
   name: string
   main?: string
@@ -99,27 +105,28 @@ describe("published artifacts", () => {
     }
   })
 
-  test("ships compiled JavaScript that parses and resolves its own imports", async () => {
-    for (const pkg of extracted) {
-      // Wildcard subpaths such as `./hooks/*` are real published surface, so expand them to the
-      // files that actually shipped rather than skipping them.
-      const compiled = declaredTargets(pkg.manifest)
-        .filter((target) => target.endsWith(".js"))
-        .flatMap((target) => expandTarget(target, pkg.packedFiles))
-      expect(compiled.length).toBeGreaterThan(0)
+  test(
+    "ships compiled JavaScript that parses and resolves its own imports",
+    async () => {
+      for (const pkg of extracted) {
+        // Wildcard subpaths such as `./hooks/*` are real published surface, so expand them to the
+        // files that actually shipped rather than skipping them.
+        const compiled = declaredTargets(pkg.manifest)
+          .filter((target) => target.endsWith(".js"))
+          .flatMap((target) => expandTarget(target, pkg.packedFiles))
+        expect(compiled.length).toBeGreaterThan(0)
 
-      const result = await Bun.build({
-        entrypoints: compiled.map((relativePath) => join(pkg.dir, relativePath)),
-        // Only this package's own graph is under test; its dependencies are somebody else's.
-        packages: "external",
-        target: "bun",
-        throw: false,
-      })
+        const logs = await bundleInSubprocess({
+          entrypoints: compiled.map((relativePath) => join(pkg.dir, relativePath)),
+          packageDir: pkg.dir,
+          outdir: join(layoutRoot, "bundle-check", pkg.name.replace("/", "-")),
+        })
 
-      const logs = result.success ? [] : result.logs.map(String)
-      expect({ package: pkg.name, logs }).toEqual({ package: pkg.name, logs: [] })
-    }
-  }, 120_000)
+        expect({ package: pkg.name, logs }).toEqual({ package: pkg.name, logs: [] })
+      }
+    },
+    BUNDLE_CHECK_BUDGET_MS * packagesUnderTest.length
+  )
 
   test("never ships a development JSX runtime", async () => {
     for (const pkg of extracted) {
@@ -182,6 +189,74 @@ export const loaded = [${subpaths.map((_, index) => `m${index}`).join(", ")}].le
     expect(result.exitCode).toBe(0)
   }, 300_000)
 })
+
+/**
+ * Bundles the extracted package in a child process and returns the bundler's complaints.
+ *
+ * Deliberately not `Bun.build()`. The in-process bundler has deadlocked on this input on hosted
+ * runners — the build simply never settles — and a wedged bundler stays wedged for the life of the
+ * process, so every later test that bundles anything blocks forever too. Worse, the per-test
+ * timeout stops being a bound once that happens: it fired here at 120s, marking the test failed
+ * without unsticking the native work behind it, and then did not fire at all for the next bundler
+ * call twenty files later. That call blocked for ten more minutes until the job hit its own wall
+ * clock, so the log ended mid-stream with the one named failure thousands of lines above it.
+ *
+ * A child process is killable, so the same deadlock now fails this test, names the package, and
+ * lets the suite finish.
+ */
+async function bundleInSubprocess(input: {
+  entrypoints: string[]
+  packageDir: string
+  outdir: string
+}): Promise<string[]> {
+  const proc = Bun.spawn(
+    [
+      process.execPath,
+      "build",
+      ...input.entrypoints,
+      "--outdir",
+      input.outdir,
+      // Without a root, the CLI derives one from the working directory and lays the output out
+      // relative to that — which resolves back into the package's own `dist` and fails to write.
+      // The package is the root: outputs land flat under `outdir`, where nothing reads them.
+      "--root",
+      input.packageDir,
+      // Only this package's own graph is under test; its dependencies are somebody else's.
+      "--packages",
+      "external",
+      "--target",
+      "bun",
+    ],
+    // Same working directory the in-process build ran under, so resolution is unchanged.
+    { cwd: repoRoot, stdout: "ignore", stderr: "pipe" }
+  )
+
+  // Read stderr *while* the child runs. Waiting on `exited` first leaves the pipe unread, and a
+  // child that fills its buffer blocks on write while we wait for the exit that write prevents.
+  const stderr = new Response(proc.stderr).text()
+
+  let timedOut = false
+  const killTimer = setTimeout(() => {
+    timedOut = true
+    proc.kill()
+  }, BUNDLE_CHECK_BUDGET_MS)
+
+  try {
+    const exitCode = await proc.exited
+    if (timedOut) {
+      return [
+        `bun build did not finish within ${BUNDLE_CHECK_BUDGET_MS}ms and was killed. The bundler is stuck, not slow.`,
+      ]
+    }
+    if (exitCode === 0) return []
+    const output = (await stderr).trim()
+    return [output || `bun build exited with code ${exitCode} and said nothing.`]
+  } finally {
+    clearTimeout(killTimer)
+    // Settle the read either way, so a killed child leaves nothing pending behind this test.
+    await stderr.catch(() => "")
+  }
+}
 
 async function linkThirdPartyDependencies(): Promise<void> {
   const entries = await readdir(join(repoRoot, "node_modules"), { withFileTypes: true })

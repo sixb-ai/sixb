@@ -285,7 +285,7 @@ const sixb = new Sixb({
   syncs: [syncOrders, syncOrderEvents],
 })
 
-sixb.getSyncDefinitions()
+sixb.listSyncs()
 sixb.getSyncById("sync-orders")
 ```
 

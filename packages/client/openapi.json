@@ -22353,7 +22353,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["sync", "pipeline", "workflow", "action", "webhook"]
+              "enum": ["action", "agent", "pipeline", "projection", "sync", "webhook", "workflow"]
             }
           },
           {
@@ -22449,7 +22449,15 @@
                                 "properties": {
                                   "kind": {
                                     "type": "string",
-                                    "enum": ["sync", "pipeline", "workflow", "action", "webhook"]
+                                    "enum": [
+                                      "action",
+                                      "agent",
+                                      "pipeline",
+                                      "projection",
+                                      "sync",
+                                      "webhook",
+                                      "workflow"
+                                    ]
                                   },
                                   "id": {
                                     "type": "string"

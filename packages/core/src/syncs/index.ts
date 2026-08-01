@@ -1,6 +1,12 @@
 export { defineSync } from "./builders"
 export { SyncValidationError } from "./errors"
 export type {
+  RequestSyncRunInput,
+  SyncRunRequestOptions,
+  SyncRunRequestResult,
+} from "./request"
+export { requestSyncRun } from "./request"
+export type {
   BatchSyncConfig,
   BatchSyncDefinitionConfig,
   DatasetSyncTarget,

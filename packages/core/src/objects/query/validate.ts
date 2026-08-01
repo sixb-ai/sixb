@@ -216,7 +216,7 @@ function validateStart(
   }
 
   const objectTypeIds = includeSubtypes
-    ? uniqueStrings([objectTypeId, ...ctx.ontology.getSubTypes(objectTypeId)])
+    ? uniqueStrings([objectTypeId, ...ctx.ontology.listSubTypes(objectTypeId)])
     : [objectTypeId]
 
   return { result: { objectTypeIds }, query: { kind: "start", objectTypeId, includeSubtypes } }

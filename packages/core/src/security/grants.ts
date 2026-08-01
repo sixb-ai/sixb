@@ -15,7 +15,12 @@ import type { PipelineDefinition } from "../pipelines"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows/types"
 import { SecurityValidationError } from "./errors"
-import { isScope, type Scope, scopeIdOf } from "./scopes"
+import {
+  type BreadthSelector,
+  type BreadthTarget,
+  definitionIdOf,
+  isBreadthSelector,
+} from "./every"
 import type {
   AccessGrant,
   ApplicationDefinition,
@@ -26,115 +31,136 @@ import type {
   ViewGrant,
 } from "./types"
 
-type GrantInput<TDefinition, TTarget extends Scope["target"]> =
+type GrantInput<TDefinition, TTarget extends BreadthTarget> =
   | TDefinition
   | readonly TDefinition[]
-  | Scope<TTarget>
+  | BreadthSelector<TTarget>
 
-function selectionFrom<TDefinition extends { readonly id?: unknown }>(
-  input: GrantInput<TDefinition, Scope["target"]>,
-  label: string
-): Selection {
-  if (isScope(input)) {
-    return input.selection
+const VIEW_TARGETS = ["object", "dataset"] as const
+const RUN_TARGETS = ["workflow", "sync", "pipeline", "agent"] as const
+
+/**
+ * Six of the eight targets carry a `kind` discriminant naming themselves. The other two — an
+ * `ObjectType` and an `ActionDefinition` — carry none, and each appears in exactly one builder that
+ * allows no other undiscriminated target, so the allowed set names them unambiguously.
+ */
+const TARGET_BY_DEFINITION_KIND: Readonly<Partial<Record<string, BreadthTarget>>> = {
+  dataset: "dataset",
+  sync: "sync",
+  pipeline: "pipeline",
+  agent: "agent",
+  workflow: "workflow",
+  application: "application",
+}
+
+const UNDISCRIMINATED_TARGETS: readonly BreadthTarget[] = ["object", "action"]
+
+function targetOfDefinition<TTarget extends BreadthTarget>(
+  item: unknown,
+  label: string,
+  allowedTargets: readonly TTarget[]
+): TTarget {
+  const kind = (item as { readonly kind?: unknown } | null)?.kind
+  const discriminated = typeof kind === "string" ? TARGET_BY_DEFINITION_KIND[kind] : undefined
+  // Recognising the kind is not the same as accepting it. `can.run(myDataset)` used to return
+  // `target: "dataset"`, and `GRANT_KINDS["run:dataset"]` does not exist, so startup died on
+  // `spec.universeKey` with a `TypeError` naming neither the role nor the definition.
+  if (discriminated) {
+    if (!isAllowedTarget(discriminated, allowedTargets)) {
+      // "one targeting x", not "a x definition": four of the eight targets start with a vowel, and
+      // this string ships in a release. Same reason the selector branch below writes no article.
+      throw new SecurityValidationError(
+        `[Sixb] ${label} accepts ${allowedTargets.join(" or ")} definitions, but received one targeting ${discriminated}.`
+      )
+    }
+    return discriminated
+  }
+
+  const candidates = allowedTargets.filter((target) => UNDISCRIMINATED_TARGETS.includes(target))
+  const only = candidates.length === 1 ? candidates[0] : undefined
+  if (only) return only
+
+  throw new SecurityValidationError(
+    `[Sixb] ${label} accepts ${allowedTargets.join(" or ")} definitions, but received one Sixb could not classify.`
+  )
+}
+
+function isAllowedTarget<TTarget extends BreadthTarget>(
+  target: BreadthTarget,
+  allowedTargets: readonly TTarget[]
+): target is TTarget {
+  return (allowedTargets as readonly BreadthTarget[]).includes(target)
+}
+
+/**
+ * Every grant resolves its target and selection here, in one pass, so the two cannot disagree.
+ *
+ * Typing alone is not enough: a JavaScript caller, or an `as any`, would otherwise hand `can.apply`
+ * an `every.object()` and get a grant over the wrong universe. Sniffing only the first element of a
+ * list was not enough either — `can.run([mySync, myPipeline])` filed the pipeline's id under
+ * `run:sync`, and startup validation then reported it as an unknown *sync*.
+ *
+ * `TTarget` is what removes the casts at the call sites: each builder passes its own allowed targets
+ * and gets exactly those back, so the narrowing is proved rather than asserted.
+ */
+function resolveGrant<TDefinition extends { readonly id?: unknown }, TTarget extends BreadthTarget>(
+  input: GrantInput<TDefinition, TTarget>,
+  label: string,
+  allowedTargets: readonly TTarget[]
+): { readonly target: TTarget; readonly selection: Selection } {
+  if (isBreadthSelector(input)) {
+    if (!isAllowedTarget(input.target, allowedTargets)) {
+      throw new SecurityValidationError(
+        `[Sixb] ${label} accepts ${allowedTargets.join(" or ")} selectors, but received every.${input.target}().`
+      )
+    }
+    return { target: input.target, selection: input.selection }
   }
 
   const items = Array.isArray(input) ? input : [input as TDefinition]
-  if (items.length === 0) {
+
+  let target: TTarget | undefined
+  for (const item of items) {
+    const itemTarget = targetOfDefinition(item, label, allowedTargets)
+    if (target === undefined) {
+      target = itemTarget
+      continue
+    }
+    if (itemTarget !== target) {
+      throw new SecurityValidationError(
+        `[Sixb] ${label} requires one target per grant, but received both ${target} and ${itemTarget} definitions. Use one grant each.`
+      )
+    }
+  }
+  // Checked after the loop rather than before it: an empty list leaves `target` unset, which is the
+  // same condition, and proving it here is what lets the return type stay cast-free.
+  if (target === undefined) {
     throw new SecurityValidationError(`[Sixb] ${label} requires at least one definition.`)
   }
 
   // Dedupe explicit ids up front; resolution would dedupe via Set anyway.
-  const ids = [...new Set(items.map((item) => scopeIdOf(item, label)))]
-  return { all: false, ids }
+  const ids = [...new Set(items.map((item) => definitionIdOf(item, label)))]
+  return { target, selection: { all: false, ids } }
 }
 
-function isDatasetDefinitionInput(value: unknown): value is DatasetDefinition {
-  return (
-    typeof value === "object" && value !== null && (value as DatasetDefinition).kind === "dataset"
-  )
-}
-
-function viewTargetFrom(
-  input: GrantInput<ObjectType | DatasetDefinition, "object" | "dataset">
-): "object" | "dataset" {
-  if (isScope(input)) {
-    if (input.target !== "object" && input.target !== "dataset") {
-      throw new SecurityValidationError("[Sixb] can.view scope target must be object or dataset.")
-    }
-    return input.target
-  }
-
-  const first = Array.isArray(input) ? input[0] : input
-  return isDatasetDefinitionInput(first) ? "dataset" : "object"
-}
-
-function access(input: ApplicationDefinition | readonly ApplicationDefinition[]): AccessGrant {
-  return {
-    kind: "grant",
-    capability: "access",
-    target: "application",
-    selection: selectionFrom(input, "can.access"),
-  }
+function access(input: GrantInput<ApplicationDefinition, "application">): AccessGrant {
+  const { selection } = resolveGrant(input, "can.access", ["application"])
+  return { kind: "grant", capability: "access", target: "application", selection }
 }
 
 function view(input: GrantInput<ObjectType, "object">): ViewGrant<"object">
 function view(input: GrantInput<DatasetDefinition, "dataset">): ViewGrant<"dataset">
 function view(input: GrantInput<ObjectType | DatasetDefinition, "object" | "dataset">): ViewGrant {
-  return {
-    kind: "grant",
-    capability: "view",
-    target: viewTargetFrom(input),
-    selection: selectionFrom(input, "can.view"),
-  }
+  const { target, selection } = resolveGrant(input, "can.view", VIEW_TARGETS)
+  return { kind: "grant", capability: "view", target, selection }
 }
 
 function apply(input: GrantInput<ActionDefinition, "action">): ApplyGrant {
-  return { kind: "grant", capability: "apply", selection: selectionFrom(input, "can.apply") }
-}
-
-function isSyncDefinitionInput(value: unknown): value is SyncDefinition {
-  return typeof value === "object" && value !== null && (value as SyncDefinition).kind === "sync"
-}
-
-function isPipelineDefinitionInput(value: unknown): value is PipelineDefinition {
-  return (
-    typeof value === "object" && value !== null && (value as PipelineDefinition).kind === "pipeline"
-  )
-}
-
-function isAgentDefinitionInput(value: unknown): value is AgentDefinition {
-  return typeof value === "object" && value !== null && (value as AgentDefinition).kind === "agent"
-}
-
-function runTargetFrom(
-  input: GrantInput<
-    WorkflowDefinition | SyncDefinition | PipelineDefinition | AgentDefinition,
-    "workflow" | "sync" | "pipeline" | "agent"
-  >
-): "workflow" | "sync" | "pipeline" | "agent" {
-  if (isScope(input)) {
-    if (
-      input.target !== "workflow" &&
-      input.target !== "sync" &&
-      input.target !== "pipeline" &&
-      input.target !== "agent"
-    ) {
-      throw new SecurityValidationError(
-        "[Sixb] can.run scope target must be workflow, sync, pipeline, or agent."
-      )
-    }
-    return input.target
+  return {
+    kind: "grant",
+    capability: "apply",
+    selection: resolveGrant(input, "can.apply", ["action"]).selection,
   }
-
-  const first = Array.isArray(input) ? input[0] : input
-  if (isAgentDefinitionInput(first)) {
-    return "agent"
-  }
-  if (isPipelineDefinitionInput(first)) {
-    return "pipeline"
-  }
-  return isSyncDefinitionInput(first) ? "sync" : "workflow"
 }
 
 function run(input: GrantInput<WorkflowDefinition, "workflow">): RunGrant<"workflow">
@@ -147,12 +173,8 @@ function run(
     "workflow" | "sync" | "pipeline" | "agent"
   >
 ): RunGrant {
-  return {
-    kind: "grant",
-    capability: "run",
-    target: runTargetFrom(input),
-    selection: selectionFrom(input, "can.run"),
-  }
+  const { target, selection } = resolveGrant(input, "can.run", RUN_TARGETS)
+  return { kind: "grant", capability: "run", target, selection }
 }
 
 function observe(target: "logs"): ObserveGrant {
