@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "../events"
 import type { JsonValue } from "../json"
 import {
   collectObjectQueryValidationIssues,
@@ -14,9 +13,16 @@ import {
 } from "../objects/query"
 import { defineObjectType, link, OntologyRegistry, prop, stringEnum } from "../ontology"
 import type { ObjectStorage, QueryObjectsResult } from "../storage/objects"
+import type { Storage } from "../storage/types"
+import {
+  createMaterializerTestFixture,
+  type MaterializerFixtureLink,
+  type MaterializerFixtureObject,
+  type MaterializerTestFixture,
+} from "./materializer-fixture"
 
-export interface ObjectQueryProviderContractSuiteOptions<TStorage extends ObjectStorage> {
-  /** Factory that produces a fresh object storage instance for each test case. */
+export interface ObjectQueryProviderContractSuiteOptions<TStorage extends Storage> {
+  /** Factory that produces a fresh complete storage instance for each test case. */
   readonly createStorage: () => TStorage | Promise<TStorage>
   /** Optional cleanup invoked after every test case. */
   readonly teardown?: (storage: TStorage) => void | Promise<void>
@@ -142,14 +148,26 @@ export const objectQueryContractOntology = new OntologyRegistry({
  * traversal, set operations, pagination, search profile defaults, and stable
  * structured rejections for features outside a provider's capability map.
  */
-export function runObjectQueryProviderContractSuite<TStorage extends ObjectStorage>(
+export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
   label: string,
   options: ObjectQueryProviderContractSuiteOptions<TStorage>
 ): void {
-  const withStorage = async (body: (storage: TStorage) => Promise<void>): Promise<void> => {
+  const withStorage = async (
+    body: (context: {
+      readonly objects: TStorage["objects"]
+      readonly fixture: MaterializerTestFixture
+    }) => Promise<void>
+  ): Promise<void> => {
     const storage = await options.createStorage()
     try {
-      await body(storage)
+      await body({
+        objects: storage.objects,
+        fixture: createMaterializerTestFixture({
+          projectId,
+          ontology: objectQueryContractOntology,
+          storage,
+        }),
+      })
     } finally {
       await options.teardown?.(storage)
     }
@@ -224,7 +242,7 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("declares the portable V1 query capability surface", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async ({ objects: storage }) => {
         const capabilities = storage.queryCapabilities()
 
         expect(capabilities.queryObjects).toBe(true)
@@ -270,8 +288,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("pushes down scalar predicates, boolean groups, sorting, limits, and projections", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
 
         const result = await executeObjectQuery(
           {
@@ -328,8 +346,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("matches null, missing, neq, in, and not predicate semantics", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
 
         const nullable = await executeObjectQuery(
           {
@@ -417,8 +435,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("keeps page tokens stable when projection hides sorted cursor fields", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
 
         const input: ObjectQuery = {
           kind: "sort",
@@ -465,8 +483,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("omits totals when requested without losing hasMore", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
 
         const limited = await executeObjectQuery(
           {
@@ -512,8 +530,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("counts matching objects without returning rows", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
 
         const active = await countObjects(
           {
@@ -541,8 +559,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("checks existence without returning rows", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
 
         const active = await existsObjects(
           {
@@ -582,8 +600,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("plans aggregate operations without outer row-shaping requirements", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
         const query: ObjectQuery = {
           kind: "sort",
           fields: [{ kind: "relevance" }],
@@ -615,8 +633,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("counts matching objects by facetable properties without returning rows", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
 
         const status = await facetObjects(
           {
@@ -663,8 +681,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("pushes down traversal and set operations", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
 
         const outgoing = await executeObjectQuery(
           {
@@ -778,8 +796,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("hydrates expand links identically via pushdown or bounded fallback", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
 
         const outgoing = await executeObjectQuery(
           {
@@ -836,8 +854,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("expands includeSubtypes outside storage when the expanded query can push down", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
 
         const result = await executeObjectQuery(
           {
@@ -857,8 +875,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("pushes down basic text search using search profile defaults", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
 
         const result = await executeObjectQuery(
           {
@@ -882,21 +900,19 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("scopes search profile defaults by object type for subtype text queries", async () => {
-      await withStorage(async (storage) => {
-        await storage.applyObjectUpsert(
-          objectEvent("101", DefaultTextBase.id, "default-base", {
-            id: "default-base",
-            name: "ordinary",
-            alias: "secret",
-          })
-        )
-        await storage.applyObjectUpsert(
-          objectEvent("102", DefaultTextChild.id, "default-child", {
-            id: "default-child",
-            name: "ordinary",
-            alias: "secret",
-          })
-        )
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await fixture.seed({
+          objects: [
+            {
+              ref: { objectTypeId: DefaultTextBase.id, primaryId: "default-base" },
+              properties: { id: "default-base", name: "ordinary", alias: "secret" },
+            },
+            {
+              ref: { objectTypeId: DefaultTextChild.id, primaryId: "default-child" },
+              properties: { id: "default-child", name: "ordinary", alias: "secret" },
+            },
+          ],
+        })
 
         const result = await executeObjectQuery(
           {
@@ -919,8 +935,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("executes or rejects relevance sorting according to provider capabilities", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
         const query: ObjectQuery = {
           kind: "sort",
           fields: [{ kind: "relevance" }],
@@ -952,8 +968,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("executes or rejects vector search according to provider capabilities", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
         const query: ObjectQuery = {
           kind: "vector",
           propertyId: "embedding",
@@ -983,8 +999,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("executes bounded fallback when pushdown is disabled for a safe query", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
         const fallbackStorage = withoutQueryPushdown(storage)
 
         const result = await executeObjectQuery(
@@ -1013,8 +1029,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
     })
 
     test("rejects fallback for unsupported query nodes when pushdown is disabled", async () => {
-      await withStorage(async (storage) => {
-        await seedObjectQueryContractData(storage)
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
         const fallbackStorage = withoutQueryPushdown(storage)
 
         await expectPlanningIssue(
@@ -1041,151 +1057,107 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
   })
 }
 
-export async function seedObjectQueryContractData(storage: ObjectStorage): Promise<void> {
-  await storage.applyObjectUpsert(
-    objectEvent("001", Room.id, "room-alpha", {
-      id: "room-alpha",
-      name: "Alpha Conference",
-      description: "north alpha collaboration",
-      floor: "2",
-      capacity: 10,
-      occupied: true,
-      status: "active",
-      tags: ["lab", "video"],
-      metadata: { wing: "north" },
-      embedding: [1, 0],
-    })
-  )
-  await storage.applyObjectUpsert(
-    objectEvent("002", Room.id, "room-beta", {
-      id: "room-beta",
-      name: "Beta Lab",
-      description: "south beta focus",
-      floor: "2",
-      capacity: 30,
-      occupied: false,
-      status: "active",
-      tags: ["lab"],
-      metadata: { wing: "south" },
-      embedding: [0.8, 0.2],
-    })
-  )
-  await storage.applyObjectUpsert(
-    objectEvent("003", Room.id, "room-gamma", {
-      id: "room-gamma",
-      name: "Gamma Huddle",
-      description: "quiet office",
-      floor: "1",
-      capacity: 20,
-      occupied: true,
-      status: "paused",
-      tags: ["office"],
-      metadata: { zone: "quiet" },
-      embedding: [0, 1],
-    })
-  )
-  await storage.applyObjectUpsert(
-    objectEvent("004", Room.id, "room-null-floor", {
-      id: "room-null-floor",
-      name: "Null Floor",
-      description: "nullable floor fixture",
-      floor: null,
-      occupied: false,
-      status: "paused",
-      tags: [],
-      metadata: {},
-      embedding: [0, 0],
-    })
-  )
-  await storage.applyObjectUpsert(
-    objectEvent("005", Room.id, "room-missing-floor", {
-      id: "room-missing-floor",
-      name: "Missing Floor",
-      description: "missing floor fixture",
-      occupied: false,
-      status: "paused",
-      tags: [],
-      metadata: {},
-      embedding: [0, 0],
-    })
-  )
-  await storage.applyObjectUpsert(
-    objectEvent("006", Device.id, "device-projector", {
-      id: "device-projector",
-      name: "Projector",
-    })
-  )
-  await storage.applyObjectUpsert(
-    objectEvent("007", Device.id, "device-sensor", {
-      id: "device-sensor",
-      name: "Sensor",
-    })
-  )
-  await storage.applyObjectUpsert(
-    objectEvent("008", Asset.id, "asset-base", {
-      id: "asset-base",
-    })
-  )
-  await storage.applyObjectUpsert(
-    objectEvent("009", LaptopAsset.id, "laptop-1", {
-      id: "laptop-1",
-    })
-  )
-  await storage.applyLinkUpsert(
-    linkEvent("010", Room.id, "room-alpha", "hasDevice", Device.id, "device-projector")
-  )
-  await storage.applyLinkUpsert(
-    linkEvent("011", Room.id, "room-beta", "hasDevice", Device.id, "device-sensor")
-  )
-  await storage.applyObjectUpsert(objectEvent("103", Zone.id, "zone-one", { id: "zone-one" }))
-  await storage.applyLinkUpsert(
-    linkEvent("012", Zone.id, "zone-one", "hasDevice", Device.id, "device-projector")
-  )
+export async function seedObjectQueryContractData(fixture: MaterializerTestFixture): Promise<void> {
+  await fixture.seed({
+    objects: [
+      objectSeed(Room.id, "room-alpha", {
+        id: "room-alpha",
+        name: "Alpha Conference",
+        description: "north alpha collaboration",
+        floor: "2",
+        capacity: 10,
+        occupied: true,
+        status: "active",
+        tags: ["lab", "video"],
+        metadata: { wing: "north" },
+        embedding: [1, 0],
+      }),
+      objectSeed(Room.id, "room-beta", {
+        id: "room-beta",
+        name: "Beta Lab",
+        description: "south beta focus",
+        floor: "2",
+        capacity: 30,
+        occupied: false,
+        status: "active",
+        tags: ["lab"],
+        metadata: { wing: "south" },
+        embedding: [0.8, 0.2],
+      }),
+      objectSeed(Room.id, "room-gamma", {
+        id: "room-gamma",
+        name: "Gamma Huddle",
+        description: "quiet office",
+        floor: "1",
+        capacity: 20,
+        occupied: true,
+        status: "paused",
+        tags: ["office"],
+        metadata: { zone: "quiet" },
+        embedding: [0, 1],
+      }),
+      objectSeed(Room.id, "room-null-floor", {
+        id: "room-null-floor",
+        name: "Null Floor",
+        description: "nullable floor fixture",
+        floor: null,
+        occupied: false,
+        status: "paused",
+        tags: [],
+        metadata: {},
+        embedding: [0, 0],
+      }),
+      objectSeed(Room.id, "room-missing-floor", {
+        id: "room-missing-floor",
+        name: "Missing Floor",
+        description: "missing floor fixture",
+        occupied: false,
+        status: "paused",
+        tags: [],
+        metadata: {},
+        embedding: [0, 0],
+      }),
+      objectSeed(Device.id, "device-projector", {
+        id: "device-projector",
+        name: "Projector",
+      }),
+      objectSeed(Device.id, "device-sensor", { id: "device-sensor", name: "Sensor" }),
+      objectSeed(Asset.id, "asset-base", { id: "asset-base" }),
+      objectSeed(LaptopAsset.id, "laptop-1", { id: "laptop-1" }),
+      objectSeed(Zone.id, "zone-one", { id: "zone-one" }),
+    ],
+    links: [
+      linkSeed(Room.id, "room-alpha", "hasDevice", Device.id, "device-projector"),
+      linkSeed(Room.id, "room-beta", "hasDevice", Device.id, "device-sensor"),
+      linkSeed(Zone.id, "zone-one", "hasDevice", Device.id, "device-projector"),
+    ],
+  })
 }
 
-function objectEvent(
-  cursor: string,
+function objectSeed(
   objectTypeId: string,
   primaryId: string,
   properties: Record<string, JsonValue>
-): StoredObjectMutationEvent {
+): MaterializerFixtureObject {
   return {
-    id: `object-query-contract-object-${cursor}`,
-    cursor,
-    schemaVersion: 1,
-    projectId,
-    type: "object.created",
-    topic: "objects",
-    partitionKey: `${objectTypeId}:${primaryId}`,
-    payload: { objectTypeId, primaryId, properties, propertyChanges: {} },
-    occurredAt: `2026-01-01T00:00:${cursor.slice(-2)}.000Z`,
-    origin: { kind: "runtime", requestId: `object-${cursor}` },
-    commitId: `object-query-contract-object-commit-${cursor}`,
-    commitOrdinal: 0,
+    ref: { objectTypeId, primaryId },
+    properties,
   }
 }
 
-function linkEvent(
-  cursor: string,
+function linkSeed(
   sourceTypeId: string,
   sourceId: string,
   linkId: string,
   targetTypeId: string,
   targetId: string
-): StoredLinkMutationEvent {
+): MaterializerFixtureLink {
   return {
-    id: `object-query-contract-link-${cursor}`,
-    cursor,
-    schemaVersion: 1,
-    projectId,
-    type: "link.created",
-    topic: "links",
-    partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
-    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, propertyChanges: {} },
-    occurredAt: `2026-01-01T00:00:${cursor.slice(-2)}.000Z`,
-    origin: { kind: "runtime", requestId: `link-${cursor}` },
-    commitId: `object-query-contract-link-commit-${cursor}`,
-    commitOrdinal: 0,
+    ref: {
+      source: { objectTypeId: sourceTypeId, primaryId: sourceId },
+      linkId,
+      target: { objectTypeId: targetTypeId, primaryId: targetId },
+    },
   }
 }
 

@@ -1,72 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "../src"
-import {
-  buildLinkDeletedEvent,
-  buildObjectDeletedEvent,
-  buildObjectUpsertEvent,
-  EventsRuntime,
-} from "../src/events"
+import { EventsRuntime } from "../src/events"
 import { scopeKeysForEvent } from "../src/events/scope"
 import type { OntologyMaterializationEvent } from "../src/materialization/events"
 
-describe("object/link event drafts", () => {
-  test("carries typed mutation origin instead of generic metadata", () => {
-    const event = buildObjectUpsertEvent({
-      objectTypeId: "Invoice",
-      primaryId: "inv-1",
-      operation: "update",
-      properties: { amount: 700 },
-      previousProperties: { amount: 400 },
-      origin: {
-        kind: "action",
-        actionId: "approveInvoice",
-        runId: "act-1",
-      },
-    })
-
-    expect(event.origin).toEqual({
-      kind: "action",
-      actionId: "approveInvoice",
-      runId: "act-1",
-    })
-    expect(event).not.toHaveProperty("metadata")
-  })
-
-  test("builds deleted mutation events from previous properties", () => {
-    expect(
-      buildObjectDeletedEvent({
-        objectTypeId: "Invoice",
-        primaryId: "inv-1",
-        previousProperties: { amount: 700 },
-      })
-    ).toMatchObject({
-      type: "object.deleted",
-      payload: {
-        propertyChanges: {
-          amount: { operation: "cleared", before: 700, after: null },
-        },
-      },
-    })
-
-    expect(
-      buildLinkDeletedEvent({
-        sourceTypeId: "Invoice",
-        sourceId: "inv-1",
-        linkId: "payments",
-        targetTypeId: "Payment",
-        targetId: "pay-1",
-        previousProperties: { amount: 700 },
-      })
-    ).toMatchObject({
-      type: "link.deleted",
-      payload: {
-        propertyChanges: {
-          amount: { operation: "cleared", before: 700, after: null },
-        },
-      },
-    })
-  })
-
+describe("materialized object/link event envelopes", () => {
   test("stores object.updated with property changes", async () => {
     const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
     const [event] = await events.publishEnvelopes([

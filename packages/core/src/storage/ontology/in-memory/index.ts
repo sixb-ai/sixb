@@ -1,5 +1,5 @@
-import type { InMemoryObjectStorage } from "../../objects"
-import type { InMemoryTimeseriesStorage } from "../../timeseries"
+import type { InMemoryObjectStorage } from "../../objects/in-memory"
+import type { InMemoryTimeseriesStorage } from "../../timeseries/store"
 import type { OntologyStorage } from ".."
 import type { ProviderMaterializationTransactionLifecycle } from "../provider"
 import type { AssertSourceMaterializationExecution } from "../sources"

@@ -6,7 +6,7 @@ import type {
   OntologyMaterializationOrigin,
   OntologyOperationOutcome,
 } from "../../materialization/model"
-import { isActionMaterializationRunStorage, type Storage } from "../../storage"
+import type { Storage } from "../../storage"
 import type { MaterializationSession, OntologyCommitWrite } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { replayCommit, withSerializationRetry } from "../execution/commit-lifecycle"
@@ -75,7 +75,7 @@ async function lockActionRunForMaterialization(
   input: NormalizedEditCommit
 ): Promise<void> {
   if (input.source.kind !== "action") return
-  if (!isActionMaterializationRunStorage(storage.actionRuns)) {
+  if (!storage.actionRuns) {
     throw new MaterializationValidationError(
       "Storage does not provide Action run capabilities required by this commit."
     )

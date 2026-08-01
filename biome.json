@@ -65,6 +65,12 @@
   },
   "overrides": [
     {
+      "includes": ["packages/client/openapi.json"],
+      "formatter": {
+        "enabled": false
+      }
+    },
+    {
       "includes": ["packages/client/src/generated/**"],
       "linter": {
         "enabled": false

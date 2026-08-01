@@ -1,32 +1,30 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage, type JsonValue, type Storage } from "../src"
-import type {
-  StoredLinkMutationEvent,
-  StoredObjectMutationEvent,
-  StoredTelemetryAppendedEvent,
-} from "../src/events"
+import { defineObjectType, InMemoryStorage, OntologyRegistry, prop, type Storage } from "../src"
 import { type ActionRunStorage, StorageTransactionError } from "../src/storage"
-import {
-  createStoredLinkMutationEvent,
-  createStoredObjectMutationEvent,
-  createStoredTelemetryAppendedEvent,
-} from "../src/testing"
+import { createMaterializerTestFixture } from "../src/testing"
+
+const Room = defineObjectType({
+  id: "Room",
+  name: "Room",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("name", "string"),
+    prop("temperature", "double", { mode: "telemetry" }),
+  ],
+})
+const ontology = new OntologyRegistry({ sources: [Room] })
 
 describe("InMemoryStorage.transaction", () => {
   test("commits writes atomically", async () => {
     const storage = new InMemoryStorage()
 
     await storage.transaction(async (tx) => {
-      await tx.objects.applyObjectUpsert(objectEvent("event_1", "room_1", { name: "Blue" }))
+      await requireActionRuns(tx).queue(actionRunInput("run_commit"))
     })
 
-    const row = await storage.objects.getByPrimaryId({
-      projectId: "my-app",
-      objectTypeId: "Room",
-      primaryId: "room_1",
-    })
-
-    expect(row?.properties).toEqual({ name: "Blue" })
+    expect(
+      await storage.actionRuns.getById({ projectId: "my-app", id: "run_commit" })
+    ).not.toBeNull()
   })
 
   test("rejects root storage calls inside a transaction callback", async () => {
@@ -42,40 +40,16 @@ describe("InMemoryStorage.transaction", () => {
     ).rejects.toThrow("use the provided tx storage")
   })
 
-  test("does not recursively lock object and timeseries batch methods", async () => {
-    const storage = new InMemoryStorage()
-
-    await storage.objects.applyObjectUpsertBatch([
-      objectEvent("event_batch_1", "room_1", { name: "Blue" }),
-      objectEvent("event_batch_2", "room_2", { name: "Green" }),
-    ])
-    await storage.timeseries.applyTelemetryAppendedBatch([
-      telemetryEvent("telemetry_batch_1", 18, "2026-06-17T10:00:00.000Z"),
-      telemetryEvent("telemetry_batch_2", 19, "2026-06-17T10:01:00.000Z"),
-    ])
-
-    expect(
-      await storage.objects.getByPrimaryId({
-        projectId: "my-app",
-        objectTypeId: "Room",
-        primaryId: "room_2",
-      })
-    ).not.toBeNull()
-    expect(
-      await storage.timeseries.getLatest({
-        projectId: "my-app",
-        objectTypeId: "Room",
-        objectId: "room_1",
-        propertyId: "temperature",
-      })
-    ).toMatchObject({ value: 19 })
-  })
-
   test("honors facade method replacements without recursively acquiring the root lock", async () => {
     const storage = new InMemoryStorage()
-    await storage.objects.applyObjectUpsert(
-      objectEvent("event_decorated", "room_1", { name: "Blue" })
-    )
+    await materializerFixture(storage).seed({
+      objects: [
+        {
+          ref: { objectTypeId: "Room", primaryId: "room_1" },
+          properties: { id: "room_1", name: "Blue" },
+        },
+      ],
+    })
 
     const originalGetByPrimaryId = storage.objects.getByPrimaryId.bind(storage.objects)
     let objectCalls = 0
@@ -108,130 +82,72 @@ describe("InMemoryStorage.transaction", () => {
   test("rolls back writes across every mutated store when the transaction fails", async () => {
     const storage = new InMemoryStorage()
 
-    // Baseline state: one object exists before the transaction.
-    await storage.objects.applyObjectUpsert(objectEvent("event_1", "room_1", { name: "Blue" }))
-
     await expect(
       storage.transaction(async (tx) => {
-        // 1. Update an existing object.
-        await tx.objects.applyObjectUpsert(objectEvent("event_2", "room_1", { name: "Red" }))
-        // 2. Create a brand-new object.
-        await tx.objects.applyObjectUpsert(objectEvent("event_3", "room_2", { name: "Green" }))
-        // 3. Create a link.
-        await tx.objects.applyLinkUpsert(linkEvent("link_1", "room_1", "room_2"))
-        // 4. Write to a different store entirely.
-        await requireActionRuns(tx).queue({
-          id: "run_rollback",
-          projectId: "my-app",
-          actionId: "paint",
-          subject: { kind: "object", objectTypeId: "Room", primaryId: "room_1" },
-          params: {},
-          idempotencyKey: "action:my-app:run_rollback",
-        })
+        const runs = requireTransactionalRunStores(tx)
+        await runs.actionRuns.queue(actionRunInput("run_rollback"))
+        await runs.syncRuns.start(syncRunInput("sync_rollback"))
+        await runs.webhookRuns.start(webhookRunInput("webhook_rollback"))
 
         throw new Error("boom")
       })
     ).rejects.toThrow("boom")
 
-    // The updated object reverts to its pre-transaction value.
-    expect(
-      (
-        await storage.objects.getByPrimaryId({
-          projectId: "my-app",
-          objectTypeId: "Room",
-          primaryId: "room_1",
-        })
-      )?.properties
-    ).toEqual({ name: "Blue" })
-    // The created object is gone.
-    expect(
-      await storage.objects.getByPrimaryId({
-        projectId: "my-app",
-        objectTypeId: "Room",
-        primaryId: "room_2",
-      })
-    ).toBeNull()
-    // The created link is gone.
-    expect(
-      await storage.objects.listLinks({
-        projectId: "my-app",
-        objectTypeId: "Room",
-        objectId: "room_1",
-        linkId: "neighbour",
-      })
-    ).toHaveLength(0)
-    // The action-run write is gone.
     expect(await storage.actionRuns.getById({ projectId: "my-app", id: "run_rollback" })).toBeNull()
+    expect(await storage.syncRuns.getById({ projectId: "my-app", id: "sync_rollback" })).toBeNull()
+    expect(
+      await storage.webhookRuns.getById({ projectId: "my-app", id: "webhook_rollback" })
+    ).toBeNull()
   })
 
   test("commits writes across every mutated store atomically", async () => {
     const storage = new InMemoryStorage()
-    await storage.objects.applyObjectUpsert(objectEvent("event_1", "room_1", { name: "Blue" }))
 
     await storage.transaction(async (tx) => {
-      await tx.objects.applyObjectUpsert(objectEvent("event_2", "room_1", { name: "Red" }))
-      await tx.objects.applyObjectUpsert(objectEvent("event_3", "room_2", { name: "Green" }))
-      await tx.objects.applyLinkUpsert(linkEvent("link_1", "room_1", "room_2"))
-      await requireActionRuns(tx).queue({
-        id: "run_commit",
-        projectId: "my-app",
-        actionId: "paint",
-        subject: { kind: "object", objectTypeId: "Room", primaryId: "room_1" },
-        params: {},
-        idempotencyKey: "action:my-app:run_commit",
-      })
+      const runs = requireTransactionalRunStores(tx)
+      await runs.actionRuns.queue(actionRunInput("run_commit"))
+      await runs.syncRuns.start(syncRunInput("sync_commit"))
+      await runs.webhookRuns.start(webhookRunInput("webhook_commit"))
     })
 
     expect(
-      (
-        await storage.objects.getByPrimaryId({
-          projectId: "my-app",
-          objectTypeId: "Room",
-          primaryId: "room_1",
-        })
-      )?.properties
-    ).toEqual({ name: "Red" })
-    expect(
-      await storage.objects.getByPrimaryId({
-        projectId: "my-app",
-        objectTypeId: "Room",
-        primaryId: "room_2",
-      })
+      await storage.actionRuns.getById({ projectId: "my-app", id: "run_commit" })
     ).not.toBeNull()
     expect(
-      await storage.objects.listLinks({
-        projectId: "my-app",
-        objectTypeId: "Room",
-        objectId: "room_1",
-        linkId: "neighbour",
-      })
-    ).toHaveLength(1)
+      await storage.syncRuns.getById({ projectId: "my-app", id: "sync_commit" })
+    ).not.toBeNull()
     expect(
-      await storage.actionRuns.getById({ projectId: "my-app", id: "run_commit" })
-    ).not.toBeUndefined()
+      await storage.webhookRuns.getById({ projectId: "my-app", id: "webhook_commit" })
+    ).not.toBeNull()
   })
 
-  test("serializes direct object and timeseries operations around rollback", async () => {
+  test("serializes effective reads and materialization around rollback", async () => {
     const storage = new InMemoryStorage()
-    await storage.objects.applyObjectUpsert(
-      objectEvent("event_baseline", "room_1", {
-        name: "Blue",
-      })
-    )
-    await storage.timeseries.applyTelemetryAppended(
-      telemetryEvent("telemetry_baseline", 18, "2026-06-17T10:00:00.000Z")
-    )
+    const fixture = materializerFixture(storage)
+    await fixture.seed({
+      objects: [
+        {
+          ref: { objectTypeId: "Room", primaryId: "room_1" },
+          properties: { id: "room_1", name: "Blue" },
+        },
+      ],
+      telemetry: [
+        {
+          series: {
+            object: { objectTypeId: "Room", primaryId: "room_1" },
+            propertyId: "temperature",
+          },
+          value: 18,
+          at: "2026-06-17T10:00:00.000Z",
+        },
+      ],
+    })
 
     const transactionStarted = deferred()
     const releaseTransaction = deferred()
     const transactionResult = storage
       .transaction(async (tx) => {
-        await tx.objects.applyObjectUpsert(
-          objectEvent("event_uncommitted", "room_1", { name: "Red" })
-        )
-        await tx.timeseries.applyTelemetryAppended(
-          telemetryEvent("telemetry_uncommitted", 19, "2026-06-17T10:01:00.000Z")
-        )
+        await requireActionRuns(tx).queue(actionRunInput("run_uncommitted"))
         transactionStarted.resolve()
         await releaseTransaction.promise
         throw new Error("rollback")
@@ -269,16 +185,31 @@ describe("InMemoryStorage.transaction", () => {
       })
 
     let objectWriteSettled = false
-    const objectWrite = storage.objects
-      .applyObjectUpsert(objectEvent("event_external", "room_2", { name: "Green" }))
-      .then((row) => {
+    const objectWrite = fixture
+      .seed({
+        objects: [
+          {
+            ref: { objectTypeId: "Room", primaryId: "room_2" },
+            properties: { id: "room_2", name: "Green" },
+          },
+        ],
+      })
+      .then(() => {
         objectWriteSettled = true
-        return row
       })
 
     let timeseriesWriteSettled = false
-    const timeseriesWrite = storage.timeseries
-      .applyTelemetryAppended(telemetryEvent("telemetry_external", 20, "2026-06-17T10:02:00.000Z"))
+    const timeseriesWrite = fixture
+      .appendTelemetry([
+        {
+          series: {
+            object: { objectTypeId: "Room", primaryId: "room_1" },
+            propertyId: "temperature",
+          },
+          value: 20,
+          at: "2026-06-17T10:02:00.000Z",
+        },
+      ])
       .then(() => {
         timeseriesWriteSettled = true
       })
@@ -292,7 +223,7 @@ describe("InMemoryStorage.transaction", () => {
     releaseTransaction.resolve()
     expect(await transactionResult).toBeInstanceOf(Error)
 
-    expect((await objectRead)?.properties).toEqual({ name: "Blue" })
+    expect((await objectRead)?.properties).toEqual({ id: "room_1", name: "Blue", temperature: 18 })
     expect((await timeseriesRead).map((point) => point.value)).toEqual([18])
 
     await objectWrite
@@ -305,7 +236,7 @@ describe("InMemoryStorage.transaction", () => {
           primaryId: "room_1",
         })
       )?.properties
-    ).toEqual({ name: "Blue" })
+    ).toEqual({ id: "room_1", name: "Blue", temperature: 20 })
     expect(
       await storage.objects.getByPrimaryId({
         projectId: "my-app",
@@ -448,22 +379,6 @@ describe("InMemoryStorage.transaction", () => {
   })
 })
 
-function objectEvent(
-  id: string,
-  primaryId: string,
-  properties: Record<string, JsonValue>
-): StoredObjectMutationEvent {
-  return createStoredObjectMutationEvent({
-    id,
-    cursor: id,
-    projectId: "my-app",
-    occurredAt: "2026-06-17T10:00:00.000Z",
-    objectTypeId: "Room",
-    primaryId,
-    properties,
-  })
-}
-
 function requireActionRuns(tx: Storage): ActionRunStorage {
   if (!tx.actionRuns) {
     throw new Error("[test] expected transaction storage to expose actionRuns")
@@ -471,32 +386,30 @@ function requireActionRuns(tx: Storage): ActionRunStorage {
   return tx.actionRuns
 }
 
-function linkEvent(id: string, sourceId: string, targetId: string): StoredLinkMutationEvent {
-  return createStoredLinkMutationEvent({
-    id,
-    cursor: id,
-    projectId: "my-app",
-    occurredAt: "2026-06-17T10:00:00.000Z",
-    sourceTypeId: "Room",
-    sourceId,
-    linkId: "neighbour",
-    targetTypeId: "Room",
-    targetId,
-  })
+function requireTransactionalRunStores(tx: Storage) {
+  if (!tx.actionRuns || !tx.syncRuns || !tx.webhookRuns) {
+    throw new Error("[test] expected transaction storage to expose all run stores")
+  }
+  return {
+    actionRuns: tx.actionRuns,
+    syncRuns: tx.syncRuns,
+    webhookRuns: tx.webhookRuns,
+  }
 }
 
-function telemetryEvent(id: string, value: number, at: string): StoredTelemetryAppendedEvent {
-  return createStoredTelemetryAppendedEvent({
-    id,
-    cursor: id,
+function actionRunInput(id: string) {
+  return {
     projectId: "my-app",
-    occurredAt: at,
-    objectTypeId: "Room",
-    objectId: "room_1",
-    propertyId: "temperature",
-    value,
-    at,
-  })
+    id,
+    actionId: "paint",
+    subject: { kind: "object" as const, objectTypeId: "Room", primaryId: "room_1" },
+    params: {},
+    idempotencyKey: `action:my-app:${id}`,
+  }
+}
+
+function materializerFixture(storage: Storage) {
+  return createMaterializerTestFixture({ projectId: "my-app", ontology, storage })
 }
 
 function agentThreadInput(id: string) {

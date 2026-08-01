@@ -1,7 +1,7 @@
 import { runObjectQueryProviderContractSuite } from "@sixb/core/testing"
-import { SqliteObjectStorage } from "../src/object-storage"
+import { SqliteStorage } from "../src"
 
-runObjectQueryProviderContractSuite("SqliteObjectStorage object query provider contract", {
-  createStorage: () => new SqliteObjectStorage(),
+runObjectQueryProviderContractSuite("SqliteStorage object query provider contract", {
+  createStorage: () => new SqliteStorage(),
   teardown: (storage) => storage.close(),
 })

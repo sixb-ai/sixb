@@ -173,6 +173,12 @@
       "import": "./dist/storage/ontology/provider.js",
       "default": "./dist/storage/ontology/provider.js"
     },
+    "./internal/projection-run-storage-provider": {
+      "types": "./dist/storage/projection-runs/lifecycle.d.ts",
+      "bun": "./src/storage/projection-runs/lifecycle.ts",
+      "import": "./dist/storage/projection-runs/lifecycle.js",
+      "default": "./dist/storage/projection-runs/lifecycle.js"
+    },
     "./internal/projections": {
       "types": "./dist/projections/internal.d.ts",
       "bun": "./src/projections/internal.ts",

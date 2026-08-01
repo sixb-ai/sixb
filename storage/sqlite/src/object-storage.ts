@@ -18,10 +18,6 @@ import type {
   ObjectStorage,
   QueryObjectsInput,
   QueryObjectsResult,
-  StoredLinkDeletedEvent,
-  StoredLinkMutationEvent,
-  StoredObjectMutationEvent,
-  StoredTelemetryAppendedEvent,
 } from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "./migrations"
 import { type CompiledObjectQuery, compileObjectQuery } from "./object-query-compiler"
@@ -170,391 +166,6 @@ export class SqliteObjectStorage implements ObjectStorage {
         buckets: readFacetBuckets(this.db, compiled, facet),
       })),
     }
-  }
-
-  async applyObjectUpsert(event: StoredObjectMutationEvent): Promise<ObjectRow> {
-    // Check idempotency
-    const applied = this.db
-      .query("SELECT 1 FROM applied_events_objects WHERE event_id = ?")
-      .get(event.id)
-
-    if (applied) {
-      // Return existing row
-      const existing = this.db
-        .query(
-          "SELECT * FROM objects WHERE project_id = ? AND object_type_id = ? AND primary_id = ?"
-        )
-        .get(
-          event.projectId,
-          event.payload.objectTypeId,
-          event.payload.primaryId
-        ) as DatabaseRow | null
-
-      if (existing) {
-        return this.rowToObject(existing)
-      }
-    }
-
-    const occurredAt = new Date(event.occurredAt)
-
-    this.db.transaction(() => {
-      // Get existing properties if any
-      const existing = this.db
-        .query(
-          "SELECT properties, created_at, version FROM objects WHERE project_id = ? AND object_type_id = ? AND primary_id = ?"
-        )
-        .get(event.projectId, event.payload.objectTypeId, event.payload.primaryId) as {
-        properties: string
-        created_at: string
-        version: number
-      } | null
-
-      const existingProperties = existing ? JSON.parse(existing.properties) : {}
-      const mergedProperties = { ...existingProperties, ...event.payload.properties }
-
-      this.db
-        .query(
-          `
-          INSERT INTO objects (project_id, object_type_id, primary_id, properties, created_at, updated_at, version, source_event_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(project_id, object_type_id, primary_id) DO UPDATE SET
-            properties = excluded.properties,
-            updated_at = excluded.updated_at,
-            version = excluded.version,
-            source_event_id = excluded.source_event_id
-        `
-        )
-        .run(
-          event.projectId,
-          event.payload.objectTypeId,
-          event.payload.primaryId,
-          JSON.stringify(mergedProperties),
-          existing?.created_at ?? occurredAt.toISOString(),
-          occurredAt.toISOString(),
-          (existing?.version ?? 0) + 1,
-          event.id
-        )
-
-      this.db
-        .query("INSERT OR IGNORE INTO applied_events_objects (event_id) VALUES (?)")
-        .run(event.id)
-    })()
-
-    // Return the actual row from the database to include merged properties
-    const row = this.db
-      .query("SELECT * FROM objects WHERE project_id = ? AND object_type_id = ? AND primary_id = ?")
-      .get(event.projectId, event.payload.objectTypeId, event.payload.primaryId) as DatabaseRow
-
-    return this.rowToObject(row)
-  }
-
-  async applyObjectUpsertBatch(
-    events: readonly StoredObjectMutationEvent[]
-  ): Promise<readonly ObjectRow[]> {
-    if (events.length === 0) return []
-
-    const results: ObjectRow[] = []
-
-    this.db.transaction(() => {
-      const checkApplied = this.db.query("SELECT 1 FROM applied_events_objects WHERE event_id = ?")
-      const getExisting = this.db.query(
-        "SELECT * FROM objects WHERE project_id = ? AND object_type_id = ? AND primary_id = ?"
-      )
-      const getExistingProps = this.db.query(
-        "SELECT properties, created_at, version FROM objects WHERE project_id = ? AND object_type_id = ? AND primary_id = ?"
-      )
-      const upsertObject = this.db.query(`
-        INSERT INTO objects (project_id, object_type_id, primary_id, properties, created_at, updated_at, version, source_event_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(project_id, object_type_id, primary_id) DO UPDATE SET
-          properties = excluded.properties,
-          updated_at = excluded.updated_at,
-          version = excluded.version,
-          source_event_id = excluded.source_event_id
-      `)
-      const markApplied = this.db.query(
-        "INSERT OR IGNORE INTO applied_events_objects (event_id) VALUES (?)"
-      )
-
-      for (const event of events) {
-        const applied = checkApplied.get(event.id)
-        if (applied) {
-          const existing = getExisting.get(
-            event.projectId,
-            event.payload.objectTypeId,
-            event.payload.primaryId
-          ) as DatabaseRow | null
-          if (existing) {
-            results.push(this.rowToObject(existing))
-          }
-          continue
-        }
-
-        const occurredAt = new Date(event.occurredAt)
-        const existing = getExistingProps.get(
-          event.projectId,
-          event.payload.objectTypeId,
-          event.payload.primaryId
-        ) as { properties: string; created_at: string; version: number } | null
-
-        const existingProperties = existing ? JSON.parse(existing.properties) : {}
-        const mergedProperties = { ...existingProperties, ...event.payload.properties }
-
-        upsertObject.run(
-          event.projectId,
-          event.payload.objectTypeId,
-          event.payload.primaryId,
-          JSON.stringify(mergedProperties),
-          existing?.created_at ?? occurredAt.toISOString(),
-          occurredAt.toISOString(),
-          (existing?.version ?? 0) + 1,
-          event.id
-        )
-
-        markApplied.run(event.id)
-
-        const row = getExisting.get(
-          event.projectId,
-          event.payload.objectTypeId,
-          event.payload.primaryId
-        ) as DatabaseRow
-        results.push(this.rowToObject(row))
-      }
-    })()
-
-    return results
-  }
-
-  async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
-    // Check idempotency
-    const applied = this.db
-      .query("SELECT 1 FROM applied_events_objects WHERE event_id = ?")
-      .get(event.id)
-
-    if (applied) return
-
-    this.db.transaction(() => {
-      // Get current object
-      const existing = this.db
-        .query(
-          "SELECT properties FROM objects WHERE project_id = ? AND object_type_id = ? AND primary_id = ?"
-        )
-        .get(event.projectId, event.payload.objectTypeId, event.payload.objectId) as {
-        properties: string
-      } | null
-
-      if (!existing) return
-
-      const properties = JSON.parse(existing.properties)
-      properties[event.payload.propertyId] = event.payload.value
-
-      this.db
-        .query(
-          `
-          UPDATE objects
-          SET properties = ?, updated_at = ?, version = version + 1, source_event_id = ?
-          WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
-        `
-        )
-        .run(
-          JSON.stringify(properties),
-          event.payload.at,
-          event.id,
-          event.projectId,
-          event.payload.objectTypeId,
-          event.payload.objectId
-        )
-
-      this.db
-        .query("INSERT OR IGNORE INTO applied_events_objects (event_id) VALUES (?)")
-        .run(event.id)
-    })()
-  }
-
-  async applyTelemetryAppendedBatch(
-    events: readonly StoredTelemetryAppendedEvent[]
-  ): Promise<void> {
-    if (events.length === 0) return
-
-    this.db.transaction(() => {
-      const checkApplied = this.db.query("SELECT 1 FROM applied_events_objects WHERE event_id = ?")
-      const getProperties = this.db.query(
-        "SELECT properties FROM objects WHERE project_id = ? AND object_type_id = ? AND primary_id = ?"
-      )
-      const updateObject = this.db.query(`
-        UPDATE objects
-        SET properties = ?, updated_at = ?, version = version + 1, source_event_id = ?
-        WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
-      `)
-      const markApplied = this.db.query(
-        "INSERT OR IGNORE INTO applied_events_objects (event_id) VALUES (?)"
-      )
-
-      // Group events by unique object to minimize reads/writes
-      const objectGroups = new Map<
-        string,
-        {
-          events: StoredTelemetryAppendedEvent[]
-          projectId: string
-          objectTypeId: string
-          objectId: string
-        }
-      >()
-
-      for (const event of events) {
-        if (checkApplied.get(event.id)) continue
-
-        const groupKey = `${event.projectId}:${event.payload.objectTypeId}:${event.payload.objectId}`
-        let group = objectGroups.get(groupKey)
-        if (!group) {
-          group = {
-            events: [],
-            projectId: event.projectId,
-            objectTypeId: event.payload.objectTypeId,
-            objectId: event.payload.objectId,
-          }
-          objectGroups.set(groupKey, group)
-        }
-        group.events.push(event)
-      }
-
-      for (const group of objectGroups.values()) {
-        const existing = getProperties.get(group.projectId, group.objectTypeId, group.objectId) as {
-          properties: string
-        } | null
-
-        if (!existing) continue
-
-        const properties = JSON.parse(existing.properties)
-        let latestAt = ""
-        let latestEventId = ""
-
-        for (const event of group.events) {
-          properties[event.payload.propertyId] = event.payload.value
-          if (event.payload.at > latestAt) {
-            latestAt = event.payload.at
-            latestEventId = event.id
-          }
-          markApplied.run(event.id)
-        }
-
-        updateObject.run(
-          JSON.stringify(properties),
-          latestAt,
-          latestEventId,
-          group.projectId,
-          group.objectTypeId,
-          group.objectId
-        )
-      }
-    })()
-  }
-
-  async applyLinkUpsert(event: StoredLinkMutationEvent): Promise<void> {
-    // Check idempotency
-    const applied = this.db
-      .query("SELECT 1 FROM applied_events_objects WHERE event_id = ?")
-      .get(event.id)
-
-    if (applied) return
-
-    const occurredAt = new Date(event.occurredAt)
-
-    this.db
-      .query(
-        `
-        INSERT INTO links (project_id, source_type_id, source_id, link_id, target_type_id, target_id, properties, created_at, updated_at, source_event_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(project_id, source_type_id, source_id, link_id, target_type_id, target_id) DO UPDATE SET
-          properties = excluded.properties,
-          updated_at = excluded.updated_at,
-          source_event_id = excluded.source_event_id
-      `
-      )
-      .run(
-        event.projectId,
-        event.payload.sourceTypeId,
-        event.payload.sourceId,
-        event.payload.linkId,
-        event.payload.targetTypeId,
-        event.payload.targetId,
-        event.payload.properties ? JSON.stringify(event.payload.properties) : null,
-        occurredAt.toISOString(),
-        occurredAt.toISOString(),
-        event.id
-      )
-
-    this.db
-      .query("INSERT OR IGNORE INTO applied_events_objects (event_id) VALUES (?)")
-      .run(event.id)
-  }
-
-  async applyLinkUpsertBatch(events: readonly StoredLinkMutationEvent[]): Promise<void> {
-    if (events.length === 0) return
-
-    this.db.transaction(() => {
-      const checkApplied = this.db.query("SELECT 1 FROM applied_events_objects WHERE event_id = ?")
-      const upsertLink = this.db.query(`
-        INSERT INTO links (project_id, source_type_id, source_id, link_id, target_type_id, target_id, properties, created_at, updated_at, source_event_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(project_id, source_type_id, source_id, link_id, target_type_id, target_id) DO UPDATE SET
-          properties = excluded.properties,
-          updated_at = excluded.updated_at,
-          source_event_id = excluded.source_event_id
-      `)
-      const markApplied = this.db.query(
-        "INSERT OR IGNORE INTO applied_events_objects (event_id) VALUES (?)"
-      )
-
-      for (const event of events) {
-        if (checkApplied.get(event.id)) continue
-
-        const occurredAt = new Date(event.occurredAt)
-        upsertLink.run(
-          event.projectId,
-          event.payload.sourceTypeId,
-          event.payload.sourceId,
-          event.payload.linkId,
-          event.payload.targetTypeId,
-          event.payload.targetId,
-          event.payload.properties ? JSON.stringify(event.payload.properties) : null,
-          occurredAt.toISOString(),
-          occurredAt.toISOString(),
-          event.id
-        )
-        markApplied.run(event.id)
-      }
-    })()
-  }
-
-  async applyLinkDelete(event: StoredLinkDeletedEvent): Promise<void> {
-    // Check idempotency
-    const applied = this.db
-      .query("SELECT 1 FROM applied_events_objects WHERE event_id = ?")
-      .get(event.id)
-
-    if (applied) return
-
-    this.db
-      .query(
-        `
-        DELETE FROM links
-        WHERE project_id = ? AND source_type_id = ? AND source_id = ?
-        AND link_id = ? AND target_type_id = ? AND target_id = ?
-      `
-      )
-      .run(
-        event.projectId,
-        event.payload.sourceTypeId,
-        event.payload.sourceId,
-        event.payload.linkId,
-        event.payload.targetTypeId,
-        event.payload.targetId
-      )
-
-    this.db
-      .query("INSERT OR IGNORE INTO applied_events_objects (event_id) VALUES (?)")
-      .run(event.id)
   }
 
   async getByPrimaryId(params: {
@@ -803,8 +414,7 @@ export class SqliteObjectStorage implements ObjectStorage {
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
       version: row.version,
-      sourceEventId: row.source_event_id ?? undefined,
-      lastCommitId: row.last_commit_id ?? undefined,
+      lastCommitId: row.last_commit_id,
     }
   }
 
@@ -829,8 +439,7 @@ export class SqliteObjectStorage implements ObjectStorage {
       properties: row.properties ? JSON.parse(row.properties) : undefined,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
-      sourceEventId: row.source_event_id ?? undefined,
-      lastCommitId: row.last_commit_id ?? undefined,
+      lastCommitId: row.last_commit_id,
     }
   }
 
@@ -929,9 +538,8 @@ function reviveExpandedRow(value: unknown): ExpandedObjectRow {
     createdAt: new Date(row.createdAt as string),
     updatedAt: new Date(row.updatedAt as string),
     version: Number(row.version),
+    lastCommitId: String(row.lastCommitId),
   }
-  if (row.sourceEventId != null) expanded.sourceEventId = String(row.sourceEventId)
-  if (row.lastCommitId != null) expanded.lastCommitId = String(row.lastCommitId)
   if (isPlainObject(row.linkProperties) && Object.keys(row.linkProperties).length > 0) {
     expanded.linkProperties = row.linkProperties
   }
@@ -968,8 +576,7 @@ interface DatabaseRow {
   created_at: string
   updated_at: string
   version: number
-  source_event_id: string | null
-  last_commit_id: string | null
+  last_commit_id: string
 }
 
 interface ObjectQueryDatabaseRow extends DatabaseRow {
@@ -994,6 +601,5 @@ interface LinkDatabaseRow {
   properties: string | null
   created_at: string
   updated_at: string
-  source_event_id: string | null
-  last_commit_id: string | null
+  last_commit_id: string
 }

@@ -1,27 +1,17 @@
-/** `@sixb/core/storage` is the provider contract, so the serialization a provider needs lives here. */
-
 /**
- * The stored events that appear in this contract's own method signatures.
+ * Stored rule events that appear in this provider contract's method signatures.
  *
  * A type in a public interface signature must be exported from the same subpath as the interface, or
- * the interface simply cannot be implemented from outside — which was the case for `ObjectStorage`
- * and `TimeseriesStorage` before these six were re-exported here.
+ * the interface cannot be implemented from outside the package.
  */
-export type {
-  StoredLinkDeletedEvent,
-  StoredLinkMutationEvent,
-  StoredObjectMutationEvent,
-  StoredRuleResolvedEvent,
-  StoredRuleTriggeredEvent,
-  StoredTelemetryAppendedEvent,
-} from "../events"
+export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
 export { stableJsonStringify } from "../json"
 export type {
+  PinnedDatasetVersion,
   ProjectionExecution,
   ProjectionMaterializationIdentity,
 } from "../materialization/model"
 export type {
-  ActionMaterializationRunStorage,
   ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunParams,
@@ -50,7 +40,6 @@ export {
   canRequeueActionRunAfterEnqueueFailure,
   finishActionRunPhase,
   InMemoryActionRunStorage,
-  isActionMaterializationRunStorage,
   isTerminalActionRun,
 } from "./action-runs"
 export type {
@@ -224,7 +213,6 @@ export type {
   QueryObjectsInput,
   QueryObjectsResult,
 } from "./objects"
-export { InMemoryObjectStorage } from "./objects"
 export type {
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
@@ -346,33 +334,30 @@ export type {
 export { InMemoryPipelineRunStorage, PipelineRunError } from "./pipeline-runs"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
-  AssertProjectionMaterializationExecutionInput,
-  CompleteProjectionTelemetryInput,
-  FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
+  LinkProjectionRunRecord,
+  LinkProjectionTarget,
   ListLatestProjectionRunsInput,
   ListLatestProjectionRunsResult,
   ListProjectionRunsInput,
   ListProjectionRunsResult,
+  LockProjectionRunForMaterializationInput,
+  ObjectProjectionRunRecord,
+  ObjectProjectionTarget,
   ProjectionKind,
-  ProjectionMaterializationProtocol,
-  ProjectionMaterializationRunRecord,
-  ProjectionMaterializationRunStorage,
-  ProjectionRunDatasetVersion,
-  ProjectionRunObjectTypes,
+  ProjectionRunClaim,
   ProjectionRunProgress,
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
+  ProjectionTarget,
   ProjectionTelemetryCheckpoint,
-  StartOrReclaimProjectionMaterializationInput,
-  StartProjectionRunInput,
-  UpdateProjectionMaterializationInput,
+  StartOrReclaimProjectionRunInput,
+  TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
 } from "./projection-runs"
 export {
   InMemoryProjectionRunStorage,
-  isProjectionMaterializationRunStorage,
   PROJECTION_RUN_PROGRESS_KEYS,
   ProjectionRunError,
   projectionRunObjectTypesVisible,
@@ -410,7 +395,6 @@ export type {
   TimeseriesPoint,
   TimeseriesStorage,
 } from "./timeseries"
-export { InMemoryTimeseriesStorage } from "./timeseries"
 export {
   assertTransactionActive,
   createTransactionStorageProxy,

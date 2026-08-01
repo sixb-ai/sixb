@@ -1,52 +1,53 @@
 import { randomUUID } from "node:crypto"
+import {
+  advanceProjectionTelemetry,
+  assertGenericProgressDoesNotAdvanceTelemetry,
+  assertProjectionRunExecution,
+  assertProjectionRunListWindow,
+  assertProjectionRunNonEmpty,
+  assertProjectionRunRunning,
+  assertProjectionRunStartInput,
+  createProjectionRunClaim,
+  immutableDatasetVersionConflict,
+  mergeProjectionRunProgress,
+  type PersistedProjectionRunRecord,
+  planProjectionRunFinish,
+  planProjectionRunReclaim,
+  projectionRunNotFound,
+  publicProjectionRunRecord,
+  requireProjectionRunExecutionToken,
+  requireTelemetryProjectionRun,
+  restoreProjectionRun,
+  type StoredProjectionRunRecord,
+  staleProjectionRunExecution,
+} from "@sixb/core/internal/projection-run-storage-provider"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
-  AssertProjectionMaterializationExecutionInput,
-  CompleteProjectionTelemetryInput,
-  FinishProjectionMaterializationInput,
   FinishProjectionRunInput,
   ListLatestProjectionRunsInput,
   ListLatestProjectionRunsResult,
   ListProjectionRunsInput,
   ListProjectionRunsResult,
+  LockProjectionRunForMaterializationInput,
   ProjectionKind,
-  ProjectionMaterializationIdentity,
-  ProjectionMaterializationRunRecord,
-  ProjectionMaterializationRunStorage,
-  ProjectionRunObjectTypes,
-  ProjectionRunProgress,
+  ProjectionRunClaim,
   ProjectionRunRecord,
   ProjectionRunStatus,
-  StartOrReclaimProjectionMaterializationInput,
-  StartProjectionRunInput,
-  UpdateProjectionMaterializationInput,
+  ProjectionRunStorage,
+  StartOrReclaimProjectionRunInput,
+  TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
 } from "@sixb/core/storage"
-import { PROJECTION_RUN_PROGRESS_KEYS, ProjectionRunError } from "@sixb/core/storage"
+import { ProjectionRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SQLClient, SqlParameter } from "./pg-client"
-import { isUniqueViolation } from "./storage-errors"
 import { lockAdvisoryKeys, type PgStoreClient, runPgTransaction } from "./transactions"
 
-type StoredProjectionRunRecord = ProjectionRunRecord & { readonly executionToken?: string }
-
-export class PgProjectionRunStorage implements ProjectionMaterializationRunStorage {
+export class PgProjectionRunStorage implements ProjectionRunStorage {
   constructor(private readonly sql: PgStoreClient) {}
 
-  async startOrReclaimMaterialization(
-    input: StartOrReclaimProjectionMaterializationInput
-  ): Promise<ProjectionMaterializationRunRecord> {
-    assertNonEmpty(input.id, "id")
-    assertNonEmpty(input.projectId, "projectId")
-    assertIdentity(input.identity)
-    assertObjectTypes(input.identity.projectionKind, input)
-    if (input.identity.protocol === "telemetry") {
-      assertPositiveCounter(input.fixedBatchSize ?? 0, "fixedBatchSize")
-    } else if (input.fixedBatchSize !== undefined) {
-      throw new ProjectionRunError(
-        "[SixbPg] Replacement projection runs cannot declare a telemetry fixedBatchSize."
-      )
-    }
+  async startOrReclaim(input: StartOrReclaimProjectionRunInput): Promise<ProjectionRunClaim> {
+    assertProjectionRunStartInput(input)
 
     return runPgTransaction(this.sql, async (tx) => {
       await lockAdvisoryKeys(tx, [
@@ -68,9 +69,7 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
         LIMIT 1
       `
       if (metadataConflict) {
-        throw new ProjectionRunError(
-          `[SixbPg] Dataset version '${input.identity.datasetVersion.versionId}' reused an immutable dataset version id with different metadata.`
-        )
+        throw immutableDatasetVersionConflict(input.identity)
       }
 
       const [existingRow] = await tx<DatabaseRow[]>`
@@ -79,20 +78,12 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
         FOR UPDATE
       `
 
-      const existing = existingRow ? rowToStoredProjectionRunRecord(existingRow) : undefined
+      const existing = existingRow ? restoreProjectionRunRow(existingRow) : undefined
       const executionToken = createFreshExecutionToken(existing?.executionToken)
 
       if (existingRow && existing) {
-        assertRunning(existing)
-        assertMaterializationIdentityMatches(existing, input.identity)
-        assertObjectTypesMatch(existing, input)
-        if (existing.telemetryCheckpoint?.fixedBatchSize !== input.fixedBatchSize) {
-          throw new ProjectionRunError(
-            `[SixbPg] Projection run '${input.id}' fixed batch size does not match.`
-          )
-        }
-        assertCompleteMaterializationRecord(existing)
-        const attempt = safeAdd(existing.attempt, 1, "attempt")
+        const { attempt } = planProjectionRunReclaim(existing, input)
+        const previousExecutionToken = requireProjectionRunExecutionToken(existing)
 
         const [updated] = await tx<DatabaseRow[]>`
           UPDATE projection_runs
@@ -100,11 +91,11 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
           WHERE project_id = ${input.projectId}
             AND id = ${input.id}
             AND status = ${"running"}
-            AND execution_token = ${existing.executionToken}
+            AND execution_token = ${previousExecutionToken}
           RETURNING *
         `
-        if (!updated) throw staleExecutionToken(input.id)
-        return rowToMaterializationRunRecord(updated)
+        if (!updated) throw staleProjectionRunExecution(input.id)
+        return projectionRunClaim(updated)
       }
 
       const [inserted] = await tx<DatabaseRow[]>`
@@ -138,9 +129,9 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
           ${input.identity.projectionKind},
           ${input.identity.datasetVersion.datasetId},
           ${input.identity.datasetVersion.versionId},
-          ${input.objectTypeId ?? null},
-          ${input.sourceObjectTypeId ?? null},
-          ${input.targetObjectTypeId ?? null},
+          ${"objectTypeId" in input.target ? input.target.objectTypeId : null},
+          ${"sourceObjectTypeId" in input.target ? input.target.sourceObjectTypeId : null},
+          ${"sourceObjectTypeId" in input.target ? input.target.targetObjectTypeId : null},
           ${"running"},
           ${input.startedAt ?? new Date()},
           ${1},
@@ -158,27 +149,25 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
         RETURNING *
       `
 
-      return rowToMaterializationRunRecord(inserted)
+      return projectionRunClaim(inserted)
     })
   }
 
-  async assertMaterializationExecution(
-    input: AssertProjectionMaterializationExecutionInput
-  ): Promise<ProjectionMaterializationRunRecord> {
+  async lockForMaterialization(
+    input: LockProjectionRunForMaterializationInput
+  ): Promise<ProjectionRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
       const row = await requireMaterializationExecution(tx, input)
-      return rowToMaterializationRunRecord(row)
+      return rowToProjectionRunRecord(row)
     })
   }
 
-  async updateMaterialization(
-    input: UpdateProjectionMaterializationInput
-  ): Promise<ProjectionMaterializationRunRecord> {
+  async update(input: UpdateProjectionRunInput): Promise<ProjectionRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
-      const existing = await requireMaterializationExecution(tx, input)
-      const currentProgress = rowToProgress(existing)
-      assertGenericProgressDoesNotAdvanceTelemetry(existing, currentProgress, input)
-      const progress = mergeProgress(currentProgress, input)
+      const existingRow = await requireMaterializationExecution(tx, input)
+      const existing = restoreProjectionRunRow(existingRow)
+      assertGenericProgressDoesNotAdvanceTelemetry(existing, input.progress)
+      const progress = mergeProjectionRunProgress(existing.progress, input.progress)
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
         SET
@@ -190,110 +179,51 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
           AND execution_token = ${input.executionToken}
         RETURNING *
       `
-      if (!updated) throw staleExecutionToken(input.id)
-      return rowToMaterializationRunRecord(updated)
+      if (!updated) throw staleProjectionRunExecution(input.id)
+      return rowToProjectionRunRecord(updated)
     })
   }
 
-  async finishMaterialization(
-    input: FinishProjectionMaterializationInput
-  ): Promise<ProjectionRunRecord> {
+  async finish(input: FinishProjectionRunInput): Promise<ProjectionRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
       const existingRow = await requireMaterializationExecution(tx, input)
-      const existing = rowToMaterializationRunRecord(existingRow)
-      const currentProgress = rowToProgress(existingRow)
-      assertGenericProgressDoesNotAdvanceTelemetry(existingRow, currentProgress, input)
-      if (
-        input.status === "succeeded" &&
-        existing.materializationProtocol === "telemetry" &&
-        !existing.telemetryCheckpoint?.inputExhausted
-      ) {
-        throw new ProjectionRunError(
-          `[SixbPg] Telemetry projection run '${existing.id}' cannot succeed before its input is exhausted.`
-        )
-      }
-      const progress = mergeProgress(currentProgress, input)
+      const existing = restoreProjectionRunRow(existingRow)
+      const plan = planProjectionRunFinish(existing, input)
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
         SET
           status = ${input.status},
-          finished_at = ${input.finishedAt ?? new Date()},
+          finished_at = ${plan.finishedAt},
           execution_token = ${null},
-          source_rows_read = ${progress.sourceRowsRead},
-          source_rows_skipped = ${progress.sourceRowsSkipped},
-          error_message = ${input.status === "succeeded" ? null : (input.errorMessage ?? null)}
+          source_rows_read = ${plan.progress.sourceRowsRead},
+          source_rows_skipped = ${plan.progress.sourceRowsSkipped},
+          input_exhausted = ${plan.inputExhausted ?? existingRow.input_exhausted},
+          error_message = ${plan.errorMessage ?? null}
         WHERE project_id = ${input.projectId}
           AND id = ${input.id}
           AND status = ${"running"}
           AND execution_token = ${input.executionToken}
         RETURNING *
       `
-      if (!updated) throw staleExecutionToken(input.id)
+      if (!updated) throw staleProjectionRunExecution(input.id)
       return rowToProjectionRunRecord(updated)
     })
   }
 
   async advanceTelemetryCheckpoint(
     input: AdvanceProjectionTelemetryCheckpointInput
-  ): Promise<ProjectionMaterializationRunRecord> {
+  ): Promise<TelemetryProjectionRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
       const existingRow = await requireMaterializationExecution(tx, input)
-      const existing = rowToMaterializationRunRecord(existingRow)
-      if (existing.materializationProtocol !== "telemetry") {
-        throw new ProjectionRunError(
-          `[SixbPg] Projection run '${existing.id}' does not have a telemetry checkpoint.`
-        )
-      }
-      const checkpoint = existing.telemetryCheckpoint
-      if (!checkpoint) {
-        throw new ProjectionRunError(
-          `[SixbPg] Telemetry projection run '${existing.id}' has incomplete checkpoint state.`
-        )
-      }
-      assertCounter(input.batchOrdinal, "batchOrdinal")
-      assertPositiveCounter(input.batchRowCount, "batchRowCount")
-      assertCounter(input.batchRowsSkipped, "batchRowsSkipped")
-      if (input.batchRowsSkipped > input.batchRowCount) {
-        throw new ProjectionRunError(
-          `[SixbPg] Telemetry projection run '${existing.id}' skipped rows exceed its batch row count.`
-        )
-      }
-      if (input.batchOrdinal !== checkpoint.nextBatchOrdinal) {
-        throw new ProjectionRunError(
-          `[SixbPg] Telemetry projection run '${existing.id}' expected batch ordinal ${checkpoint.nextBatchOrdinal}, got ${input.batchOrdinal}.`
-        )
-      }
-      if (input.batchRowCount > checkpoint.fixedBatchSize) {
-        throw new ProjectionRunError(
-          `[SixbPg] Telemetry projection run '${existing.id}' batch exceeds its fixed size.`
-        )
-      }
-      if (!input.inputExhausted && input.batchRowCount !== checkpoint.fixedBatchSize) {
-        throw new ProjectionRunError(
-          `[SixbPg] Telemetry projection run '${existing.id}' cannot advance past a partial non-final batch.`
-        )
-      }
-      if (checkpoint.inputExhausted) {
-        throw new ProjectionRunError(
-          `[SixbPg] Telemetry projection run '${existing.id}' has already exhausted its input.`
-        )
-      }
-
-      const nextBatchOrdinal = safeAdd(checkpoint.nextBatchOrdinal, 1, "nextBatchOrdinal")
-      const nextRowOffset = safeAdd(checkpoint.nextRowOffset, input.batchRowCount, "nextRowOffset")
-      const nextRowsSkipped = safeAdd(
-        existing.sourceRowsSkipped,
-        input.batchRowsSkipped,
-        "sourceRowsSkipped"
-      )
+      const advance = advanceProjectionTelemetry(restoreProjectionRunRow(existingRow), input)
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
         SET
-          next_batch_ordinal = ${nextBatchOrdinal},
-          next_row_offset = ${nextRowOffset},
-          input_exhausted = ${input.inputExhausted},
-          source_rows_read = ${nextRowOffset},
-          source_rows_skipped = ${nextRowsSkipped}
+          next_batch_ordinal = ${advance.checkpoint.nextBatchOrdinal},
+          next_row_offset = ${advance.checkpoint.nextRowOffset},
+          input_exhausted = ${advance.checkpoint.inputExhausted},
+          source_rows_read = ${advance.progress.sourceRowsRead},
+          source_rows_skipped = ${advance.progress.sourceRowsSkipped}
         WHERE project_id = ${input.projectId}
           AND id = ${input.id}
           AND status = ${"running"}
@@ -302,132 +232,8 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
           AND input_exhausted = ${false}
         RETURNING *
       `
-      if (!updated) throw staleExecutionToken(input.id)
-      return rowToMaterializationRunRecord(updated)
-    })
-  }
-
-  async completeTelemetryInput(
-    input: CompleteProjectionTelemetryInput
-  ): Promise<ProjectionMaterializationRunRecord> {
-    return runPgTransaction(this.sql, async (tx) => {
-      const existingRow = await requireMaterializationExecution(tx, input)
-      const existing = rowToMaterializationRunRecord(existingRow)
-      const checkpoint = existing.telemetryCheckpoint
-      if (existing.materializationProtocol !== "telemetry" || !checkpoint) {
-        throw new ProjectionRunError(
-          `[SixbPg] Projection run '${existing.id}' does not have a telemetry checkpoint.`
-        )
-      }
-      if (checkpoint.inputExhausted) return existing
-
-      const [updated] = await tx<DatabaseRow[]>`
-        UPDATE projection_runs
-        SET input_exhausted = ${true}
-        WHERE project_id = ${input.projectId}
-          AND id = ${input.id}
-          AND status = ${"running"}
-          AND execution_token = ${input.executionToken}
-          AND input_exhausted = ${false}
-        RETURNING *
-      `
-      if (!updated) throw staleExecutionToken(input.id)
-      return rowToMaterializationRunRecord(updated)
-    })
-  }
-
-  async start(input: StartProjectionRunInput): Promise<ProjectionRunRecord> {
-    assertNonEmpty(input.id, "id")
-    assertNonEmpty(input.projectId, "projectId")
-    assertNonEmpty(input.projectionId, "projectionId")
-    assertNonEmpty(input.datasetId, "datasetId")
-    assertNonEmpty(input.datasetVersionId, "datasetVersionId")
-
-    try {
-      const [row] = await this.sql<DatabaseRow[]>`
-        INSERT INTO projection_runs (
-          project_id,
-          id,
-          projection_id,
-          projection_kind,
-          dataset_id,
-          dataset_version_id,
-          object_type_id,
-          source_object_type_id,
-          target_object_type_id,
-          status,
-          started_at
-        ) VALUES (
-          ${input.projectId},
-          ${input.id},
-          ${input.projectionId},
-          ${input.projectionKind},
-          ${input.datasetId},
-          ${input.datasetVersionId},
-          ${input.objectTypeId ?? null},
-          ${input.sourceObjectTypeId ?? null},
-          ${input.targetObjectTypeId ?? null},
-          ${"running"},
-          ${input.startedAt ?? new Date()}
-        )
-        RETURNING *
-      `
-
-      return rowToProjectionRunRecord(row)
-    } catch (error) {
-      if (isUniqueViolation(error)) {
-        throw new ProjectionRunError(
-          `[SixbPg] Projection run '${input.id}' already exists for project '${input.projectId}'.`
-        )
-      }
-      throw error
-    }
-  }
-
-  async update(input: UpdateProjectionRunInput): Promise<ProjectionRunRecord> {
-    return runPgTransaction(this.sql, async (tx) => {
-      const existing = await requireRunning(tx, input.projectId, input.id)
-      assertLegacyMutationAllowed(rowToStoredProjectionRunRecord(existing), "update")
-      const progress = mergeProgress(rowToProgress(existing), input)
-
-      const [updated] = await tx<DatabaseRow[]>`
-        UPDATE projection_runs
-        SET
-          source_rows_read = ${progress.sourceRowsRead},
-          source_rows_skipped = ${progress.sourceRowsSkipped}
-        WHERE project_id = ${input.projectId}
-          AND id = ${input.id}
-          AND status = ${"running"}
-          AND materialization_protocol IS NULL
-        RETURNING *
-      `
-      if (!updated) throw invalidLegacyTransition(input.id, "update")
-      return rowToProjectionRunRecord(updated)
-    })
-  }
-
-  async finish(input: FinishProjectionRunInput): Promise<ProjectionRunRecord> {
-    return runPgTransaction(this.sql, async (tx) => {
-      const existing = await requireRunning(tx, input.projectId, input.id)
-      assertLegacyMutationAllowed(rowToStoredProjectionRunRecord(existing), "finish")
-      const progress = mergeProgress(rowToProgress(existing), input)
-
-      const [updated] = await tx<DatabaseRow[]>`
-        UPDATE projection_runs
-        SET
-          status = ${input.status},
-          finished_at = ${input.finishedAt ?? new Date()},
-          source_rows_read = ${progress.sourceRowsRead},
-          source_rows_skipped = ${progress.sourceRowsSkipped},
-          error_message = ${input.status === "succeeded" ? null : (input.errorMessage ?? null)}
-        WHERE project_id = ${input.projectId}
-          AND id = ${input.id}
-          AND status = ${"running"}
-          AND materialization_protocol IS NULL
-        RETURNING *
-      `
-      if (!updated) throw invalidLegacyTransition(input.id, "finish")
-      return rowToProjectionRunRecord(updated)
+      if (!updated) throw staleProjectionRunExecution(input.id)
+      return rowToTelemetryProjectionRunRecord(updated)
     })
   }
 
@@ -441,7 +247,7 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
   }
 
   async list(input: ListProjectionRunsInput): Promise<ListProjectionRunsResult> {
-    assertNonEmpty(input.projectId, "projectId")
+    assertProjectionRunNonEmpty(input.projectId, "projectId")
 
     if (input.statuses && input.statuses.length === 0) {
       return { runs: [], hasMore: false, total: 0 }
@@ -501,8 +307,8 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
     const where = `WHERE ${whereClauses.join(" AND ")}`
     const order = input.order === "asc" ? "ASC" : "DESC"
     const offset = input.offset ?? 0
-    assertOptionalWindowValue(input.limit, "limit")
-    assertOptionalWindowValue(offset, "offset")
+    assertProjectionRunListWindow(input.limit, "limit")
+    assertProjectionRunListWindow(offset, "offset")
 
     const [totalRow] = await this.sql.unsafe<{ count: string | number }[]>(
       `SELECT COUNT(*)::bigint AS count FROM projection_runs ${where}`,
@@ -547,66 +353,25 @@ export class PgProjectionRunStorage implements ProjectionMaterializationRunStora
 
 async function requireMaterializationExecution(
   sql: SQLClient,
-  input: AssertProjectionMaterializationExecutionInput
+  input: LockProjectionRunForMaterializationInput
 ): Promise<DatabaseRow> {
-  assertNonEmpty(input.executionToken, "executionToken")
-  assertIdentity(input.identity)
   const row = await requireRunning(sql, input.projectId, input.id)
-  const record = rowToStoredProjectionRunRecord(row)
-  assertMaterializationIdentityMatches(record, input.identity)
-  if (!record.executionToken || record.executionToken !== input.executionToken) {
-    throw staleExecutionToken(input.id)
-  }
-  assertCompleteMaterializationRecord(record)
+  assertProjectionRunExecution(restoreProjectionRunRow(row), input)
   return row
 }
 
 async function requireRunning(sql: SQLClient, projectId: string, id: string): Promise<DatabaseRow> {
-  assertNonEmpty(projectId, "projectId")
-  assertNonEmpty(id, "id")
+  assertProjectionRunNonEmpty(projectId, "projectId")
+  assertProjectionRunNonEmpty(id, "id")
 
   const [row] = await sql<DatabaseRow[]>`
     SELECT * FROM projection_runs
     WHERE project_id = ${projectId} AND id = ${id}
     FOR UPDATE
   `
-  if (!row) {
-    throw new ProjectionRunError(
-      `[SixbPg] Projection run '${id}' not found for project '${projectId}'.`
-    )
-  }
-  assertRunning(rowToStoredProjectionRunRecord(row))
+  if (!row) throw projectionRunNotFound(projectId, id)
+  assertProjectionRunRunning(restoreProjectionRunRow(row))
   return row
-}
-
-function assertRunning(record: ProjectionRunRecord): void {
-  if (record.status !== "running") {
-    throw new ProjectionRunError(
-      `[SixbPg] Projection run '${record.id}' for project '${record.projectId}' is already terminal.`
-    )
-  }
-}
-
-function assertLegacyMutationAllowed(
-  record: ProjectionRunRecord,
-  operation: "update" | "finish"
-): void {
-  if (record.materializationProtocol !== undefined) {
-    throw invalidLegacyTransition(record.id, operation)
-  }
-}
-
-function invalidLegacyTransition(id: string, operation: "update" | "finish"): ProjectionRunError {
-  return new ProjectionRunError(
-    `[SixbPg] Projection materialization run '${id}' cannot use legacy ${operation}(); use ${operation}Materialization() with the current execution token.`
-  )
-}
-
-function staleExecutionToken(id: string): ProjectionRunError {
-  return new ProjectionRunError(
-    `[SixbPg] Projection run '${id}' execution token is stale.`,
-    "execution-lost"
-  )
 }
 
 function createFreshExecutionToken(previous: string | undefined): string {
@@ -623,189 +388,31 @@ function datasetVersionLockKey(projectId: string, datasetId: string, versionId: 
   return `projection-dataset-version:${JSON.stringify([projectId, datasetId, versionId])}`
 }
 
-function assertIdentity(identity: ProjectionMaterializationIdentity): void {
-  assertNonEmpty(identity.projectionId, "projectionId")
-  if (
-    identity.projectionKind !== "object" &&
-    identity.projectionKind !== "link" &&
-    identity.projectionKind !== "telemetry"
-  ) {
-    throw new ProjectionRunError(
-      "[SixbPg] Projection run projectionKind must be 'object', 'link', or 'telemetry'."
-    )
-  }
-  if (identity.protocol !== "replacement" && identity.protocol !== "telemetry") {
-    throw new ProjectionRunError(
-      "[SixbPg] Projection run protocol must be 'replacement' or 'telemetry'."
-    )
-  }
-  assertNonEmpty(identity.datasetVersion.datasetId, "datasetId")
-  assertNonEmpty(identity.datasetVersion.versionId, "datasetVersionId")
-  assertCanonicalTimestamp(identity.datasetVersion.createdAt, "datasetVersionCreatedAt")
-  assertNonEmpty(identity.ontologyRevision, "ontologyRevision")
-  assertNonEmpty(identity.projectionRevision, "projectionRevision")
-  assertNonEmpty(identity.ownershipHash, "ownershipHash")
-  if ((identity.protocol === "telemetry") !== (identity.projectionKind === "telemetry")) {
-    throw new ProjectionRunError(
-      `[SixbPg] Projection run protocol '${identity.protocol}' is incompatible with kind '${identity.projectionKind}'.`
-    )
-  }
-}
-
-function assertObjectTypes(kind: ProjectionKind, input: ProjectionRunObjectTypes): void {
-  if (kind === "link") {
-    assertNonEmpty(input.sourceObjectTypeId ?? "", "sourceObjectTypeId")
-    assertNonEmpty(input.targetObjectTypeId ?? "", "targetObjectTypeId")
-    if (input.objectTypeId !== undefined) {
-      throw new ProjectionRunError(
-        "[SixbPg] Link projection runs cannot declare a singular objectTypeId."
-      )
-    }
-    return
-  }
-  assertNonEmpty(input.objectTypeId ?? "", "objectTypeId")
-  if (input.sourceObjectTypeId !== undefined || input.targetObjectTypeId !== undefined) {
-    throw new ProjectionRunError(
-      "[SixbPg] Object and telemetry projection runs cannot declare link endpoint types."
-    )
-  }
-}
-
-function assertMaterializationIdentityMatches(
-  record: ProjectionRunRecord,
-  identity: ProjectionMaterializationIdentity
-): void {
-  if (
-    record.projectionId !== identity.projectionId ||
-    record.projectionKind !== identity.projectionKind ||
-    record.materializationProtocol !== identity.protocol ||
-    record.datasetId !== identity.datasetVersion.datasetId ||
-    record.datasetVersionId !== identity.datasetVersion.versionId ||
-    record.datasetVersionCreatedAt !== identity.datasetVersion.createdAt ||
-    record.ontologyRevision !== identity.ontologyRevision ||
-    record.projectionRevision !== identity.projectionRevision ||
-    record.ownershipHash !== identity.ownershipHash
-  ) {
-    throw new ProjectionRunError(
-      `[SixbPg] Projection run '${record.id}' materialization identity does not match.`
-    )
-  }
-}
-
-function assertObjectTypesMatch(
-  record: ProjectionRunRecord,
-  input: ProjectionRunObjectTypes
-): void {
-  if (
-    record.objectTypeId !== input.objectTypeId ||
-    record.sourceObjectTypeId !== input.sourceObjectTypeId ||
-    record.targetObjectTypeId !== input.targetObjectTypeId
-  ) {
-    throw new ProjectionRunError(
-      `[SixbPg] Projection run '${record.id}' target object types do not match.`
-    )
-  }
-}
-
-function assertCompleteMaterializationRecord(
-  record: StoredProjectionRunRecord
-): asserts record is ProjectionMaterializationRunRecord {
-  if (
-    record.attempt === undefined ||
-    record.attempt < 1 ||
-    !record.executionToken ||
-    !record.materializationProtocol ||
-    !record.datasetVersionCreatedAt ||
-    !record.ontologyRevision ||
-    !record.projectionRevision ||
-    !record.ownershipHash
-  ) {
-    throw new ProjectionRunError(
-      `[SixbPg] Projection run '${record.id}' has incomplete materialization state.`
-    )
-  }
-  if (record.materializationProtocol === "telemetry") {
-    if (!record.telemetryCheckpoint) {
-      throw new ProjectionRunError(
-        `[SixbPg] Telemetry projection run '${record.id}' has incomplete checkpoint state.`
-      )
-    }
-    if (record.sourceRowsRead !== record.telemetryCheckpoint.nextRowOffset) {
-      throw new ProjectionRunError(
-        `[SixbPg] Telemetry projection run '${record.id}' progress does not match its checkpoint.`
-      )
-    }
-  }
-}
-
-function mergeProgress(
-  existing: ProjectionRunProgress,
-  input: Partial<ProjectionRunProgress>
-): ProjectionRunProgress {
-  const merged = {} as Record<keyof ProjectionRunProgress, number>
-  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
-    assertOptionalCounter(input[key], key)
-    const value = input[key] ?? existing[key]
-    if (value < existing[key]) {
-      throw new ProjectionRunError(`[SixbPg] Projection run ${key} must not decrease.`)
-    }
-    merged[key] = value
-  }
-  assertProgress(merged)
-  return merged
-}
-
-function assertProgress(progress: ProjectionRunProgress): void {
-  if (progress.sourceRowsSkipped > progress.sourceRowsRead) {
-    throw new ProjectionRunError(
-      "[SixbPg] Projection run sourceRowsSkipped must not exceed sourceRowsRead."
-    )
-  }
-}
-
-function assertGenericProgressDoesNotAdvanceTelemetry(
-  row: Pick<DatabaseRow, "id" | "materialization_protocol">,
-  current: ProjectionRunProgress,
-  input: Partial<ProjectionRunProgress>
-): void {
-  if (row.materialization_protocol !== "telemetry") return
-  for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
-    if (input[key] !== undefined && input[key] !== current[key]) {
-      throw new ProjectionRunError(
-        `[SixbPg] Telemetry projection run '${row.id}' progress can only advance with its checkpoint.`
-      )
-    }
-  }
-}
-
-function rowToProgress(row: DatabaseRow): ProjectionRunProgress {
-  return {
-    sourceRowsRead: databaseSafeInteger(row.source_rows_read, "sourceRowsRead"),
-    sourceRowsSkipped: databaseSafeInteger(row.source_rows_skipped, "sourceRowsSkipped"),
-  }
-}
-
 function rowToProjectionRunRecord(row: DatabaseRow): ProjectionRunRecord {
-  const { executionToken: _, ...record } = rowToStoredProjectionRunRecord(row)
-  return record
+  return publicProjectionRunRecord(restoreProjectionRunRow(row))
 }
 
-function rowToMaterializationRunRecord(row: DatabaseRow): ProjectionMaterializationRunRecord {
-  const record = rowToStoredProjectionRunRecord(row)
-  assertCompleteMaterializationRecord(record)
-  return record
+function projectionRunClaim(row: DatabaseRow): ProjectionRunClaim {
+  return createProjectionRunClaim(restoreProjectionRunRow(row))
 }
 
-function rowToStoredProjectionRunRecord(row: DatabaseRow): StoredProjectionRunRecord {
-  const telemetryCheckpoint = checkpointFromRow(row)
+function rowToTelemetryProjectionRunRecord(row: DatabaseRow): TelemetryProjectionRunRecord {
+  return requireTelemetryProjectionRun(rowToProjectionRunRecord(row))
+}
 
-  return {
+function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
+  const persisted: PersistedProjectionRunRecord = {
     id: row.id,
     projectId: row.project_id,
     projectionId: row.projection_id,
     projectionKind: row.projection_kind,
+    protocol: row.materialization_protocol ?? undefined,
     datasetId: row.dataset_id,
     datasetVersionId: row.dataset_version_id,
+    datasetVersionCreatedAt: row.dataset_version_created_at ?? undefined,
+    ontologyRevision: row.ontology_revision ?? undefined,
+    projectionRevision: row.projection_revision ?? undefined,
+    ownershipHash: row.ownership_hash ?? undefined,
     objectTypeId: row.object_type_id ?? undefined,
     sourceObjectTypeId: row.source_object_type_id ?? undefined,
     targetObjectTypeId: row.target_object_type_id ?? undefined,
@@ -814,81 +421,24 @@ function rowToStoredProjectionRunRecord(row: DatabaseRow): StoredProjectionRunRe
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     attempt: databaseSafeInteger(row.attempt, "attempt"),
     executionToken: row.execution_token ?? undefined,
-    materializationProtocol: row.materialization_protocol ?? undefined,
-    datasetVersionCreatedAt: row.dataset_version_created_at ?? undefined,
-    ontologyRevision: row.ontology_revision ?? undefined,
-    projectionRevision: row.projection_revision ?? undefined,
-    ownershipHash: row.ownership_hash ?? undefined,
-    telemetryCheckpoint,
-    ...rowToProgress(row),
+    fixedBatchSize: optionalDatabaseSafeInteger(row.fixed_batch_size, "fixedBatchSize"),
+    nextBatchOrdinal: optionalDatabaseSafeInteger(row.next_batch_ordinal, "nextBatchOrdinal"),
+    nextRowOffset: optionalDatabaseSafeInteger(row.next_row_offset, "nextRowOffset"),
+    inputExhausted: row.input_exhausted ?? undefined,
+    progress: {
+      sourceRowsRead: databaseSafeInteger(row.source_rows_read, "sourceRowsRead"),
+      sourceRowsSkipped: databaseSafeInteger(row.source_rows_skipped, "sourceRowsSkipped"),
+    },
     errorMessage: row.error_message ?? undefined,
   }
+  return restoreProjectionRun(persisted)
 }
 
-function checkpointFromRow(row: DatabaseRow): ProjectionRunRecord["telemetryCheckpoint"] {
-  if (
-    row.fixed_batch_size === null ||
-    row.next_batch_ordinal === null ||
-    row.next_row_offset === null ||
-    row.input_exhausted === null
-  ) {
-    return undefined
-  }
-  return {
-    fixedBatchSize: databaseSafeInteger(row.fixed_batch_size, "fixedBatchSize"),
-    nextBatchOrdinal: databaseSafeInteger(row.next_batch_ordinal, "nextBatchOrdinal"),
-    nextRowOffset: databaseSafeInteger(row.next_row_offset, "nextRowOffset"),
-    inputExhausted: row.input_exhausted,
-  }
-}
-
-function assertNonEmpty(value: string, fieldName: string): void {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new ProjectionRunError(`[SixbPg] Projection run ${fieldName} must not be empty.`)
-  }
-}
-
-function assertCanonicalTimestamp(value: string, fieldName: string): void {
-  const milliseconds = Date.parse(value)
-  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) {
-    throw new ProjectionRunError(
-      `[SixbPg] Projection run ${fieldName} must be a canonical UTC timestamp.`
-    )
-  }
-}
-
-function assertCounter(value: number, fieldName: string): void {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new ProjectionRunError(
-      `[SixbPg] Projection run ${fieldName} must be a non-negative safe integer.`
-    )
-  }
-}
-
-function assertPositiveCounter(value: number, fieldName: string): void {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new ProjectionRunError(
-      `[SixbPg] Projection run ${fieldName} must be a positive safe integer.`
-    )
-  }
-}
-
-function assertOptionalCounter(value: number | undefined, fieldName: string): void {
-  if (value !== undefined) assertCounter(value, fieldName)
-}
-
-function assertOptionalWindowValue(value: number | undefined, fieldName: string): void {
-  if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
-    throw new ProjectionRunError(`[SixbPg] Projection run list ${fieldName} must be >= 0.`)
-  }
-}
-
-function safeAdd(left: number, right: number, fieldName: string): number {
-  const result = left + right
-  if (!Number.isSafeInteger(result)) {
-    throw new ProjectionRunError(`[SixbPg] Projection run ${fieldName} exceeds safe integer range.`)
-  }
-  return result
+function optionalDatabaseSafeInteger(
+  value: number | string | null,
+  fieldName: string
+): number | undefined {
+  return value === null ? undefined : databaseSafeInteger(value, fieldName)
 }
 
 function databaseSafeInteger(value: number | string | null, fieldName: string): number {

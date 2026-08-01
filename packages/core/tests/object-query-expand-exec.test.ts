@@ -1,18 +1,16 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import {
   defineObjectType,
-  type JsonValue,
+  InMemoryStorage,
   link,
   type ObjectExpansion,
   type ObjectQuery,
   OntologyRegistry,
   prop,
 } from "../src"
-import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "../src/events"
 import { countObjects, executeObjectQuery } from "../src/objects/query"
-import type { ExpandedLinkValue, ExpandedObjectRow } from "../src/storage"
-import { InMemoryObjectStorage } from "../src/storage"
-import { createStoredLinkMutationEvent, createStoredObjectMutationEvent } from "../src/testing"
+import type { ExpandedLinkValue, ExpandedObjectRow, ObjectStorage } from "../src/storage"
+import { createMaterializerTestFixture } from "../src/testing"
 
 // Execution-side tests for `.expand()`: the planner routes expand through the
 // bounded fallback, and the executor hydrates links over the batch storage
@@ -61,7 +59,10 @@ const Project = defineObjectType({
   ],
   links: [
     link("opportunity", Opportunity, { cardinality: "one" }),
-    link("members", Contact, { cardinality: "many" }),
+    link("members", Contact, {
+      cardinality: "many",
+      properties: [prop("role", "string")],
+    }),
   ],
 })
 
@@ -71,107 +72,141 @@ const ontology = new OntologyRegistry({
 
 const PROJECT = "p1"
 
-function objectEvent(
-  objectTypeId: string,
-  primaryId: string,
-  properties: Record<string, JsonValue>
-): StoredObjectMutationEvent {
-  return createStoredObjectMutationEvent({
-    projectId: PROJECT,
-    occurredAt: "2026-01-01T00:00:00.000Z",
-    cursor: crypto.randomUUID(),
-    objectTypeId,
-    primaryId,
-    properties,
-  })
-}
-
-function linkEvent(
-  sourceTypeId: string,
-  sourceId: string,
-  linkId: string,
-  targetTypeId: string,
-  targetId: string,
-  properties?: Record<string, JsonValue>
-): StoredLinkMutationEvent {
-  return createStoredLinkMutationEvent({
-    projectId: PROJECT,
-    occurredAt: "2026-01-01T00:00:00.000Z",
-    cursor: crypto.randomUUID(),
-    sourceTypeId,
-    sourceId,
-    linkId,
-    targetTypeId,
-    targetId,
-    ...(properties === undefined ? {} : { properties }),
-  })
-}
-
 // Records every (objectTypeId:primaryId) the executor batch-fetches, so dedup
 // across parents can be asserted directly.
-class BatchSpyStorage extends InMemoryObjectStorage {
-  fetchedKeys: string[] = []
-
-  override async getByPrimaryIdBatch(params: {
-    projectId: string
-    items: readonly { objectTypeId: string; primaryId: string }[]
-  }) {
-    for (const item of params.items) {
-      this.fetchedKeys.push(`${item.objectTypeId}:${item.primaryId}`)
-    }
-    return super.getByPrimaryIdBatch(params)
+function recordBatchFetches(storage: ObjectStorage): {
+  readonly storage: ObjectStorage
+  readonly fetchedKeys: string[]
+} {
+  const fetchedKeys: string[] = []
+  const getByPrimaryIdBatch = storage.getByPrimaryIdBatch
+  return {
+    storage: new Proxy(storage, {
+      get(target, property) {
+        if (property === "getByPrimaryIdBatch") {
+          return async (params: Parameters<ObjectStorage["getByPrimaryIdBatch"]>[0]) => {
+            for (const item of params.items) {
+              fetchedKeys.push(`${item.objectTypeId}:${item.primaryId}`)
+            }
+            return getByPrimaryIdBatch(params)
+          }
+        }
+        return Reflect.get(target, property, target)
+      },
+    }),
+    fetchedKeys,
   }
 }
 
-async function seed(storage: InMemoryObjectStorage): Promise<void> {
-  await storage.applyObjectUpsert(
-    objectEvent("Contact", "alice", { id: "alice", displayName: "Alice" })
-  )
-  await storage.applyObjectUpsert(objectEvent("Contact", "bob", { id: "bob", displayName: "Bob" }))
-  await storage.applyObjectUpsert(
-    objectEvent("Contact", "carol", { id: "carol", displayName: "Carol" })
-  )
-
-  await storage.applyObjectUpsert(objectEvent("Company", "acme", { id: "acme", name: "Acme" }))
-  await storage.applyObjectUpsert(
-    objectEvent("Company", "globex", { id: "globex", name: "Globex" })
-  )
-  // acme rolls up to globex — the third hop for the deep-expansion fixture.
-  await storage.applyLinkUpsert(linkEvent("Company", "acme", "parent", "Company", "globex"))
-
-  await storage.applyObjectUpsert(
-    objectEvent("Opportunity", "opp-1", { id: "opp-1", title: "Deal A" })
-  )
-  await storage.applyObjectUpsert(
-    objectEvent("Opportunity", "opp-2", { id: "opp-2", title: "Deal B" })
-  )
-  // Both opportunities point at the same company — the dedup fixture.
-  await storage.applyLinkUpsert(linkEvent("Opportunity", "opp-1", "company", "Company", "acme"))
-  await storage.applyLinkUpsert(linkEvent("Opportunity", "opp-2", "company", "Company", "acme"))
-  await storage.applyLinkUpsert(linkEvent("Opportunity", "opp-1", "contact", "Contact", "alice"))
-
-  await storage.applyObjectUpsert(
-    objectEvent("Project", "proj-1", { id: "proj-1", name: "Proj One" })
-  )
-  await storage.applyObjectUpsert(
-    objectEvent("Project", "proj-2", { id: "proj-2", name: "Proj Two" })
-  )
-  await storage.applyLinkUpsert(
-    linkEvent("Project", "proj-1", "opportunity", "Opportunity", "opp-1")
-  )
-  await storage.applyLinkUpsert(
-    linkEvent("Project", "proj-2", "opportunity", "Opportunity", "opp-2")
-  )
-  // proj-1 has three members, each edge carries a role.
-  await storage.applyLinkUpsert(
-    linkEvent("Project", "proj-1", "members", "Contact", "alice", { role: "lead" })
-  )
-  await storage.applyLinkUpsert(
-    linkEvent("Project", "proj-1", "members", "Contact", "bob", { role: "dev" })
-  )
-  await storage.applyLinkUpsert(
-    linkEvent("Project", "proj-1", "members", "Contact", "carol", { role: "qa" })
-  )
+async function seed(fixture: ReturnType<typeof createMaterializerTestFixture>): Promise<void> {
+  await fixture.seed({
+    objects: [
+      {
+        ref: { objectTypeId: "Contact", primaryId: "alice" },
+        properties: { id: "alice", displayName: "Alice" },
+      },
+      {
+        ref: { objectTypeId: "Contact", primaryId: "bob" },
+        properties: { id: "bob", displayName: "Bob" },
+      },
+      {
+        ref: { objectTypeId: "Contact", primaryId: "carol" },
+        properties: { id: "carol", displayName: "Carol" },
+      },
+      {
+        ref: { objectTypeId: "Company", primaryId: "acme" },
+        properties: { id: "acme", name: "Acme" },
+      },
+      {
+        ref: { objectTypeId: "Company", primaryId: "globex" },
+        properties: { id: "globex", name: "Globex" },
+      },
+      {
+        ref: { objectTypeId: "Opportunity", primaryId: "opp-1" },
+        properties: { id: "opp-1", title: "Deal A" },
+      },
+      {
+        ref: { objectTypeId: "Opportunity", primaryId: "opp-2" },
+        properties: { id: "opp-2", title: "Deal B" },
+      },
+      {
+        ref: { objectTypeId: "Project", primaryId: "proj-1" },
+        properties: { id: "proj-1", name: "Proj One" },
+      },
+      {
+        ref: { objectTypeId: "Project", primaryId: "proj-2" },
+        properties: { id: "proj-2", name: "Proj Two" },
+      },
+    ],
+    links: [
+      {
+        ref: {
+          source: { objectTypeId: "Company", primaryId: "acme" },
+          linkId: "parent",
+          target: { objectTypeId: "Company", primaryId: "globex" },
+        },
+      },
+      {
+        ref: {
+          source: { objectTypeId: "Opportunity", primaryId: "opp-1" },
+          linkId: "company",
+          target: { objectTypeId: "Company", primaryId: "acme" },
+        },
+      },
+      {
+        ref: {
+          source: { objectTypeId: "Opportunity", primaryId: "opp-2" },
+          linkId: "company",
+          target: { objectTypeId: "Company", primaryId: "acme" },
+        },
+      },
+      {
+        ref: {
+          source: { objectTypeId: "Opportunity", primaryId: "opp-1" },
+          linkId: "contact",
+          target: { objectTypeId: "Contact", primaryId: "alice" },
+        },
+      },
+      {
+        ref: {
+          source: { objectTypeId: "Project", primaryId: "proj-1" },
+          linkId: "opportunity",
+          target: { objectTypeId: "Opportunity", primaryId: "opp-1" },
+        },
+      },
+      {
+        ref: {
+          source: { objectTypeId: "Project", primaryId: "proj-2" },
+          linkId: "opportunity",
+          target: { objectTypeId: "Opportunity", primaryId: "opp-2" },
+        },
+      },
+      {
+        ref: {
+          source: { objectTypeId: "Project", primaryId: "proj-1" },
+          linkId: "members",
+          target: { objectTypeId: "Contact", primaryId: "alice" },
+        },
+        properties: { role: "lead" },
+      },
+      {
+        ref: {
+          source: { objectTypeId: "Project", primaryId: "proj-1" },
+          linkId: "members",
+          target: { objectTypeId: "Contact", primaryId: "bob" },
+        },
+        properties: { role: "dev" },
+      },
+      {
+        ref: {
+          source: { objectTypeId: "Project", primaryId: "proj-1" },
+          linkId: "members",
+          target: { objectTypeId: "Contact", primaryId: "carol" },
+        },
+        properties: { role: "qa" },
+      },
+    ],
+  })
 }
 
 // Build `expand(limit(start))` directly: expand normalizes to the outer layer
@@ -203,11 +238,17 @@ function list(value: ExpandedLinkValue | undefined): readonly ExpandedObjectRow[
   return value
 }
 
-let storage: BatchSpyStorage
+let storage: ObjectStorage
+let fetchedKeys: string[]
+let fixture: ReturnType<typeof createMaterializerTestFixture>
 
 beforeEach(async () => {
-  storage = new BatchSpyStorage()
-  await seed(storage)
+  const provider = new InMemoryStorage()
+  fixture = createMaterializerTestFixture({ projectId: PROJECT, ontology, storage: provider })
+  const observed = recordBatchFetches(provider.objects)
+  storage = observed.storage
+  fetchedKeys = observed.fetchedKeys
+  await seed(fixture)
 })
 
 describe("object query expand — execution", () => {
@@ -306,7 +347,7 @@ describe("object query expand — execution", () => {
     )
 
     // opp-1 and opp-2 both link to acme; the nested hop must batch it once.
-    const acmeFetches = storage.fetchedKeys.filter((key) => key === "Company:acme")
+    const acmeFetches = fetchedKeys.filter((key) => key === "Company:acme")
     expect(acmeFetches).toHaveLength(1)
   })
 
@@ -362,20 +403,44 @@ describe("object query expand — execution", () => {
   })
 
   test("hydrates a missing 'one' link target to null", async () => {
-    await storage.applyObjectUpsert(
-      objectEvent("Project", "proj-3", { id: "proj-3", name: "Proj Three" })
-    )
-    // Points at an opportunity that was never upserted (dangling link).
-    await storage.applyLinkUpsert(
-      linkEvent("Project", "proj-3", "opportunity", "Opportunity", "ghost")
-    )
+    await fixture.seed({
+      objects: [
+        {
+          ref: { objectTypeId: "Project", primaryId: "proj-3" },
+          properties: { id: "proj-3", name: "Proj Three" },
+        },
+      ],
+    })
+    const listLinksBatch = storage.listLinksBatch
+    const storageWithConcurrentDeletion = new Proxy(storage, {
+      get(target, property) {
+        if (property !== "listLinksBatch") return Reflect.get(target, property, target)
+        return async (params: Parameters<ObjectStorage["listLinksBatch"]>[0]) => {
+          const result = await listLinksBatch(params)
+          result.set("Project:proj-3:opportunity", [
+            {
+              projectId: PROJECT,
+              sourceTypeId: "Project",
+              sourceId: "proj-3",
+              linkId: "opportunity",
+              targetTypeId: "Opportunity",
+              targetId: "ghost",
+              createdAt: new Date("2026-01-01T00:00:00.000Z"),
+              updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+              lastCommitId: "concurrent-delete",
+            },
+          ])
+          return result
+        }
+      },
+    })
 
     const result = await executeObjectQuery(
       {
         projectId: PROJECT,
         query: expandProjects([{ linkId: "opportunity", direction: "outgoing" }]),
       },
-      { ontology, storage }
+      { ontology, storage: storageWithConcurrentDeletion }
     )
 
     expect(byId(result.objects, "proj-3").links?.opportunity).toBeNull()

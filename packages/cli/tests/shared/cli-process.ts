@@ -1,5 +1,70 @@
 import { readFile } from "node:fs/promises"
 
+export interface CompletedCliProcess {
+  readonly command: readonly string[]
+  readonly exitCode: number
+  readonly stdout: string
+  readonly stderr: string
+}
+
+export async function runCliToCompletion(options: {
+  readonly cmd: readonly string[]
+  readonly cwd: string
+  readonly env?: Readonly<Record<string, string | undefined>>
+  readonly timeoutMs?: number
+}): Promise<CompletedCliProcess> {
+  const command = [...options.cmd]
+  const timeoutMs = options.timeoutMs ?? 10_000
+  const proc = Bun.spawn({
+    cmd: command,
+    cwd: options.cwd,
+    env: { ...process.env, ...options.env },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+
+  let timedOut = false
+  const timeout = setTimeout(() => {
+    timedOut = true
+    proc.kill("SIGKILL")
+  }, timeoutMs)
+
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    const result = { command, exitCode, stdout, stderr }
+
+    if (timedOut) {
+      throw processFailure(result, `timed out after ${timeoutMs}ms`)
+    }
+
+    return result
+  } finally {
+    clearTimeout(timeout)
+    if (proc.exitCode === null) {
+      proc.kill("SIGKILL")
+      await proc.exited
+    }
+  }
+}
+
+export function assertCliSucceeded(result: CompletedCliProcess): void {
+  if (result.exitCode !== 0) {
+    throw processFailure(result, `exited with code ${result.exitCode}`)
+  }
+}
+
+function processFailure(result: CompletedCliProcess, reason: string): Error {
+  return new Error(
+    `[cli-process] Command ${reason}: ${result.command.join(" ")}\n` +
+      `stdout:\n${result.stdout.slice(-2_000)}\n` +
+      `stderr:\n${result.stderr.slice(-2_000)}`
+  )
+}
+
 export async function readLogEntries(logPath: string): Promise<Array<Record<string, unknown>>> {
   const source = await readFile(logPath, "utf-8").catch(() => "")
   return source

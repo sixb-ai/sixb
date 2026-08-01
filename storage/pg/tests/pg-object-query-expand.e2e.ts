@@ -1,15 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { defineObjectType, type JsonValue, link, OntologyRegistry, prop } from "@sixb/core"
-import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "@sixb/core/internal/events"
+import { defineObjectType, link, OntologyRegistry, prop } from "@sixb/core"
 import { executeObjectQuery } from "@sixb/core/internal/query"
 import type { ExpandedObjectRow } from "@sixb/core/storage"
-import { createStoredLinkMutationEvent, createStoredObjectMutationEvent } from "@sixb/core/testing"
+import { createMaterializerTestFixture } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
 // Self-contained ontology exercising the runtime shapes the in-memory contract
 // can't: a "one" link, a "many" link, a nested "one" hop, link properties, and a
-// dangling edge. All assertions hold for both pushdown (here, against Postgres)
+// stable link metadata. All assertions hold for both pushdown (here, against Postgres)
 // and the bounded fallback the cross-provider contract covers separately.
 const Tag = defineObjectType({
   id: "ExpandTag",
@@ -38,7 +37,10 @@ const Post = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true }), prop("title", "string")],
   links: [
     link("author", Author, { cardinality: "one" }),
-    link("tags", Tag, { cardinality: "many" }),
+    link("tags", Tag, {
+      cardinality: "many",
+      properties: [prop("weight", "integer")],
+    }),
   ],
 })
 
@@ -46,36 +48,90 @@ const ontology = new OntologyRegistry({ sources: [Tag, Author, Post] })
 const projectId = "expand-e2e"
 
 let storage: PostgresStorage
-let cursor = 0
-
 beforeAll(async () => {
   const created = await createTestStorage()
   storage = created.storage
-  const objects = storage.objects
-
-  await objects.applyObjectUpsert(objectEvent(Tag.id, "tag-a", { id: "tag-a", label: "Apple" }))
-  await objects.applyObjectUpsert(objectEvent(Tag.id, "tag-b", { id: "tag-b", label: "Banana" }))
-  await objects.applyObjectUpsert(objectEvent(Tag.id, "tag-c", { id: "tag-c", label: "Cherry" }))
-  await objects.applyObjectUpsert(
-    objectEvent(Author.id, "author-1", { id: "author-1", name: "Alice" })
-  )
-  await objects.applyObjectUpsert(
-    objectEvent(Author.id, "author-2", { id: "author-2", name: "Bob" })
-  )
-  await objects.applyObjectUpsert(objectEvent(Post.id, "post-1", { id: "post-1", title: "First" }))
-
-  await objects.applyLinkUpsert(linkEvent(Post.id, "post-1", "author", Author.id, "author-1"))
-  await objects.applyLinkUpsert(linkEvent(Author.id, "author-1", "favoriteTag", Tag.id, "tag-b"))
-  // author-1 → manager author-2 → favoriteTag tag-c: the third hop for deep expansion.
-  await objects.applyLinkUpsert(linkEvent(Author.id, "author-1", "manager", Author.id, "author-2"))
-  await objects.applyLinkUpsert(linkEvent(Author.id, "author-2", "favoriteTag", Tag.id, "tag-c"))
-  // post-1 → three real tags plus one dangling edge; tag-a carries link properties.
-  await objects.applyLinkUpsert(
-    linkEvent(Post.id, "post-1", "tags", Tag.id, "tag-a", { weight: 10 })
-  )
-  await objects.applyLinkUpsert(linkEvent(Post.id, "post-1", "tags", Tag.id, "tag-b"))
-  await objects.applyLinkUpsert(linkEvent(Post.id, "post-1", "tags", Tag.id, "tag-c"))
-  await objects.applyLinkUpsert(linkEvent(Post.id, "post-1", "tags", Tag.id, "tag-missing"))
+  const fixture = createMaterializerTestFixture({ projectId, ontology, storage })
+  await fixture.seed({
+    objects: [
+      {
+        ref: { objectTypeId: Tag.id, primaryId: "tag-a" },
+        properties: { id: "tag-a", label: "Apple" },
+      },
+      {
+        ref: { objectTypeId: Tag.id, primaryId: "tag-b" },
+        properties: { id: "tag-b", label: "Banana" },
+      },
+      {
+        ref: { objectTypeId: Tag.id, primaryId: "tag-c" },
+        properties: { id: "tag-c", label: "Cherry" },
+      },
+      {
+        ref: { objectTypeId: Author.id, primaryId: "author-1" },
+        properties: { id: "author-1", name: "Alice" },
+      },
+      {
+        ref: { objectTypeId: Author.id, primaryId: "author-2" },
+        properties: { id: "author-2", name: "Bob" },
+      },
+      {
+        ref: { objectTypeId: Post.id, primaryId: "post-1" },
+        properties: { id: "post-1", title: "First" },
+      },
+    ],
+    links: [
+      {
+        ref: {
+          source: { objectTypeId: Post.id, primaryId: "post-1" },
+          linkId: "author",
+          target: { objectTypeId: Author.id, primaryId: "author-1" },
+        },
+      },
+      {
+        ref: {
+          source: { objectTypeId: Author.id, primaryId: "author-1" },
+          linkId: "favoriteTag",
+          target: { objectTypeId: Tag.id, primaryId: "tag-b" },
+        },
+      },
+      {
+        ref: {
+          source: { objectTypeId: Author.id, primaryId: "author-1" },
+          linkId: "manager",
+          target: { objectTypeId: Author.id, primaryId: "author-2" },
+        },
+      },
+      {
+        ref: {
+          source: { objectTypeId: Author.id, primaryId: "author-2" },
+          linkId: "favoriteTag",
+          target: { objectTypeId: Tag.id, primaryId: "tag-c" },
+        },
+      },
+      {
+        ref: {
+          source: { objectTypeId: Post.id, primaryId: "post-1" },
+          linkId: "tags",
+          target: { objectTypeId: Tag.id, primaryId: "tag-a" },
+        },
+        properties: { weight: 10 },
+      },
+      {
+        ref: {
+          source: { objectTypeId: Post.id, primaryId: "post-1" },
+          linkId: "tags",
+          target: { objectTypeId: Tag.id, primaryId: "tag-b" },
+        },
+      },
+      {
+        ref: {
+          source: { objectTypeId: Post.id, primaryId: "post-1" },
+          linkId: "tags",
+          target: { objectTypeId: Tag.id, primaryId: "tag-c" },
+        },
+      },
+    ],
+  })
 })
 
 afterAll(async () => {
@@ -84,7 +140,7 @@ afterAll(async () => {
 })
 
 describe("PgObjectStorage expand pushdown", () => {
-  test("hydrates one and many links in-database, dropping a dangling edge", async () => {
+  test("hydrates one and many links in-database", async () => {
     const result = await executeObjectQuery(
       {
         projectId,
@@ -111,7 +167,7 @@ describe("PgObjectStorage expand pushdown", () => {
     expect(author.createdAt).toBeInstanceOf(Date)
     expect(author.updatedAt).toBeInstanceOf(Date)
 
-    // "many" → an array; the dangling tag-missing edge hydrates to nothing.
+    // "many" → an array.
     const tags = post.links?.tags as ExpandedObjectRow[]
     expect(tags.map((tag) => tag.primaryId).sort()).toEqual(["tag-a", "tag-b", "tag-c"])
   })
@@ -250,46 +306,4 @@ function postRow(
   const row = result.objects.find((candidate) => candidate.primaryId === primaryId)
   if (!row) throw new Error(`row '${primaryId}' not found`)
   return row
-}
-
-function objectEvent(
-  objectTypeId: string,
-  primaryId: string,
-  properties: Record<string, JsonValue>
-): StoredObjectMutationEvent {
-  cursor += 1
-  const tag = String(cursor).padStart(3, "0")
-  return createStoredObjectMutationEvent({
-    id: `expand-e2e-object-${tag}`,
-    cursor: tag,
-    projectId,
-    occurredAt: `2026-01-01T00:00:${tag.slice(-2)}.000Z`,
-    objectTypeId,
-    primaryId,
-    properties,
-  })
-}
-
-function linkEvent(
-  sourceTypeId: string,
-  sourceId: string,
-  linkId: string,
-  targetTypeId: string,
-  targetId: string,
-  properties?: Record<string, JsonValue>
-): StoredLinkMutationEvent {
-  cursor += 1
-  const tag = String(cursor).padStart(3, "0")
-  return createStoredLinkMutationEvent({
-    id: `expand-e2e-link-${tag}`,
-    cursor: tag,
-    projectId,
-    occurredAt: `2026-01-01T00:00:${tag.slice(-2)}.000Z`,
-    sourceTypeId,
-    sourceId,
-    linkId,
-    targetTypeId,
-    targetId,
-    ...(properties === undefined ? {} : { properties }),
-  })
 }

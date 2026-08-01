@@ -1,5 +1,3 @@
-import type { StoredTelemetryAppendedEvent } from "../../events"
-
 /**
  * Time-series projection storage for telemetry history.
  */
@@ -11,9 +9,8 @@ export interface TimeseriesPoint {
   value: unknown
   unit?: string
   at: Date
-  /** Materializer commit provenance. Absent only on points written by the legacy compile bridge. */
-  lastCommitId?: string
-  sourceEventId?: string
+  /** Commit that produced this effective point. */
+  lastCommitId: string
 }
 
 export interface TimeseriesHistorySeriesInput {
@@ -36,9 +33,6 @@ export interface TimeseriesHistoryBatchResult extends TimeseriesHistorySeriesInp
 }
 
 export interface TimeseriesStorage {
-  applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void>
-  applyTelemetryAppendedBatch(events: readonly StoredTelemetryAppendedEvent[]): Promise<void>
-
   getHistory(params: {
     projectId: string
     objectTypeId: string

@@ -15,22 +15,26 @@ export {
   runBrokerContractSuite,
 } from "./broker-contract"
 export {
+  type EffectiveStorageContractSuiteOptions,
+  runEffectiveStorageContractSuite,
+} from "./effective-storage-contract"
+export {
   type LakeStorageContractSuiteOptions,
   type LakeStorageSchemaEvolutionCapability,
   runLakeStorageContractSuite,
 } from "./lake-storage-contract"
 export {
-  createStoredLinkDeletedEvent,
-  createStoredLinkMutationEvent,
-  createStoredObjectDeletedEvent,
-  createStoredObjectMutationEvent,
-  createStoredTelemetryAppendedEvent,
-} from "./materialization-events"
-export {
   type MaterializationFailureBoundary,
   type MaterializationFailureContractSuiteOptions,
   runMaterializationFailureContractSuite,
 } from "./materialization-failure-contract"
+export {
+  createMaterializerTestFixture,
+  type MaterializerFixtureLink,
+  type MaterializerFixtureObject,
+  type MaterializerFixtureSeed,
+  type MaterializerTestFixture,
+} from "./materializer-fixture"
 export {
   type MaterializerStorageContractProvider,
   runMaterializerStorageContractSuite,

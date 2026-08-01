@@ -1,19 +1,20 @@
 import { describe, expect, test } from "bun:test"
 import type { ProjectionMaterializationIdentity } from "../materialization/model"
-import type { ProjectionMaterializationRunStorage } from "../storage/projection-runs"
+import type { ProjectionRunClaim, ProjectionRunStorage } from "../storage/projection-runs"
 
 export interface ProjectionRunStorageContractSuiteOptions<
-  TStorage extends ProjectionMaterializationRunStorage = ProjectionMaterializationRunStorage,
+  TStorage extends ProjectionRunStorage = ProjectionRunStorage,
 > {
   /** Factory that returns an isolated projection-run store for each test. */
   readonly createStorage: () => TStorage | Promise<TStorage>
-  /** Optional provider setup invoked after the store is created. */
   readonly setup?: (storage: TStorage) => void | Promise<void>
-  /** Optional provider cleanup invoked after every test, including failed tests. */
   readonly cleanup?: (storage: TStorage) => void | Promise<void>
 }
 
-const replacementIdentity: ProjectionMaterializationIdentity = {
+const projectId = "contract-project"
+const objectTarget = { objectTypeId: "Device" } as const
+
+const replacementIdentity = {
   projectionId: "contract.devices",
   projectionKind: "object",
   protocol: "replacement",
@@ -25,9 +26,9 @@ const replacementIdentity: ProjectionMaterializationIdentity = {
   ontologyRevision: "ontology-1",
   projectionRevision: "projection-1",
   ownershipHash: "ownership-1",
-}
+} as const satisfies ProjectionMaterializationIdentity
 
-const telemetryIdentity: ProjectionMaterializationIdentity = {
+const telemetryIdentity = {
   projectionId: "contract.temperatures",
   projectionKind: "telemetry",
   protocol: "telemetry",
@@ -39,18 +40,13 @@ const telemetryIdentity: ProjectionMaterializationIdentity = {
   ontologyRevision: "ontology-1",
   projectionRevision: "projection-telemetry-1",
   ownershipHash: "ownership-telemetry-1",
-}
+} as const satisfies ProjectionMaterializationIdentity
 
-/**
- * Runs the durable, fenced projection-run lifecycle against a provider.
- *
- * The suite deliberately tests storage mechanics only: stable run identity,
- * immutable provenance, execution-token fencing, physical telemetry checkpoints,
- * and guarded terminal transitions. It does not execute a projection.
- */
-export function runProjectionRunStorageContractSuite<
-  TStorage extends ProjectionMaterializationRunStorage,
->(label: string, options: ProjectionRunStorageContractSuiteOptions<TStorage>): void {
+/** Runs the single durable, fenced projection-run lifecycle against a provider. */
+export function runProjectionRunStorageContractSuite<TStorage extends ProjectionRunStorage>(
+  label: string,
+  options: ProjectionRunStorageContractSuiteOptions<TStorage>
+): void {
   const withStorage = async (body: (storage: TStorage) => Promise<void>): Promise<void> => {
     const storage = await options.createStorage()
     try {
@@ -62,134 +58,103 @@ export function runProjectionRunStorageContractSuite<
   }
 
   describe(label, () => {
-    test("keeps one stable run while reclaim rotates its token and increments its attempt", async () => {
+    test("keeps one run while reclaim rotates its execution", async () => {
       await withStorage(async (storage) => {
-        const input = {
-          id: "replacement-run",
-          projectId: "contract-project",
-          identity: replacementIdentity,
-          objectTypeId: "Device",
-        } as const
-        const first = await storage.startOrReclaimMaterialization(input)
-        const second = await storage.startOrReclaimMaterialization(input)
+        const input = replacementInput("replacement-run")
+        const first = await storage.startOrReclaim(input)
+        const second = await storage.startOrReclaim(input)
 
-        expect(first).toMatchObject({ id: input.id, attempt: 1, status: "running" })
-        expect(second).toMatchObject({ id: input.id, attempt: 2, status: "running" })
-        expect(second.executionToken).not.toBe(first.executionToken)
-        expect(await storage.getById({ projectId: input.projectId, id: input.id })).toMatchObject({
-          id: input.id,
-          attempt: 2,
-          projectionId: replacementIdentity.projectionId,
-          datasetVersionCreatedAt: replacementIdentity.datasetVersion.createdAt,
-          ontologyRevision: replacementIdentity.ontologyRevision,
-          projectionRevision: replacementIdentity.projectionRevision,
-          ownershipHash: replacementIdentity.ownershipHash,
+        expect(first.run).toMatchObject({ id: input.id, attempt: 1, status: "running" })
+        expect(second.run).toMatchObject({ id: input.id, attempt: 2, status: "running" })
+        expect(second.execution.executionToken).not.toBe(first.execution.executionToken)
+        expect(second.run).not.toHaveProperty("executionToken")
+        expect(await storage.getById({ projectId, id: input.id })).toMatchObject({
+          identity: replacementIdentity,
+          target: objectTarget,
+          progress: { sourceRowsRead: 0, sourceRowsSkipped: 0 },
         })
       })
     })
 
-    test("fences every stale progress and terminal write", async () => {
+    test("fences every stale lock, progress, and terminal write", async () => {
       await withStorage(async (storage) => {
-        const input = {
-          id: "fenced-run",
-          projectId: "contract-project",
-          identity: replacementIdentity,
-          objectTypeId: "Device",
-        } as const
-        const first = await storage.startOrReclaimMaterialization(input)
-        const current = await storage.startOrReclaimMaterialization(input)
-        const stale = {
-          id: input.id,
-          projectId: input.projectId,
-          identity: replacementIdentity,
-          executionToken: first.executionToken,
-        }
+        const input = replacementInput("fenced-run")
+        const stale = await storage.startOrReclaim(input)
+        const current = await storage.startOrReclaim(input)
 
-        await expect(storage.assertMaterializationExecution(stale)).rejects.toThrow(
+        await expect(storage.lockForMaterialization(executionInput(stale))).rejects.toThrow(
           "execution token is stale"
         )
         await expect(
-          storage.updateMaterialization({ ...stale, sourceRowsRead: 1 })
+          storage.update({
+            ...executionInput(stale),
+            progress: { sourceRowsRead: 1 },
+          })
         ).rejects.toThrow("execution token is stale")
         await expect(
-          storage.finishMaterialization({ ...stale, status: "cancelled" })
+          storage.finish({
+            ...executionInput(stale),
+            protocol: "replacement",
+            status: "cancelled",
+          })
         ).rejects.toThrow("execution token is stale")
 
         await expect(
-          storage.updateMaterialization({
-            ...stale,
-            executionToken: current.executionToken,
-            sourceRowsRead: 3,
+          storage.update({
+            ...executionInput(current),
+            progress: { sourceRowsRead: 3 },
           })
-        ).resolves.toMatchObject({ sourceRowsRead: 3 })
+        ).resolves.toMatchObject({ progress: { sourceRowsRead: 3 } })
       })
     })
 
-    test("rejects reclaim and writes whose immutable identity or targets drift", async () => {
+    test("rejects immutable identity and target drift", async () => {
       await withStorage(async (storage) => {
-        const input = {
-          id: "identity-run",
-          projectId: "contract-project",
-          identity: replacementIdentity,
-          objectTypeId: "Device",
-        } as const
-        const claimed = await storage.startOrReclaimMaterialization(input)
-        const changedIdentity = {
-          ...replacementIdentity,
-          ownershipHash: "different-ownership",
-        }
+        const input = replacementInput("identity-run")
+        const claim = await storage.startOrReclaim(input)
+        const changedIdentity = { ...replacementIdentity, ownershipHash: "different-ownership" }
 
         await expect(
-          storage.startOrReclaimMaterialization({ ...input, identity: changedIdentity })
+          storage.startOrReclaim({ ...input, identity: changedIdentity })
         ).rejects.toThrow("identity does not match")
         await expect(
-          storage.startOrReclaimMaterialization({ ...input, objectTypeId: "OtherDevice" })
+          storage.startOrReclaim({ ...input, target: { objectTypeId: "OtherDevice" } })
         ).rejects.toThrow("target object types do not match")
         await expect(
-          storage.assertMaterializationExecution({
-            id: input.id,
-            projectId: input.projectId,
+          storage.lockForMaterialization({
+            ...executionInput(claim),
             identity: changedIdentity,
-            executionToken: claimed.executionToken,
           })
         ).rejects.toThrow("identity does not match")
       })
     })
 
-    test("keeps skipped physical rows bounded by rows read", async () => {
+    test("keeps physical progress monotone and internally consistent", async () => {
       await withStorage(async (storage) => {
-        const claimed = await storage.startOrReclaimMaterialization({
-          id: "invalid-progress-run",
-          projectId: "contract-project",
-          identity: replacementIdentity,
-          objectTypeId: "Device",
-        })
-
+        const claim = await storage.startOrReclaim(replacementInput("progress-run"))
+        const execution = executionInput(claim)
         await expect(
-          storage.updateMaterialization({
-            id: claimed.id,
-            projectId: claimed.projectId,
-            identity: replacementIdentity,
-            executionToken: claimed.executionToken,
-            sourceRowsRead: 1,
-            sourceRowsSkipped: 2,
+          storage.update({
+            ...execution,
+            progress: { sourceRowsRead: 1, sourceRowsSkipped: 2 },
           })
         ).rejects.toThrow("sourceRowsSkipped must not exceed sourceRowsRead")
+        await storage.update({
+          ...execution,
+          progress: { sourceRowsRead: 5, sourceRowsSkipped: 1 },
+        })
+        await expect(
+          storage.update({ ...execution, progress: { sourceRowsRead: 4 } })
+        ).rejects.toThrow("must not decrease")
       })
     })
 
-    test("rejects reused immutable dataset versions with different creation metadata", async () => {
+    test("rejects immutable dataset-version metadata reuse", async () => {
       await withStorage(async (storage) => {
-        await storage.startOrReclaimMaterialization({
-          id: "dataset-metadata-first",
-          projectId: "contract-project",
-          identity: replacementIdentity,
-          objectTypeId: "Device",
-        })
+        await storage.startOrReclaim(replacementInput("dataset-metadata-first"))
         await expect(
-          storage.startOrReclaimMaterialization({
-            id: "dataset-metadata-conflict",
-            projectId: "contract-project",
+          storage.startOrReclaim({
+            ...replacementInput("dataset-metadata-conflict"),
             identity: {
               ...replacementIdentity,
               datasetVersion: {
@@ -197,44 +162,33 @@ export function runProjectionRunStorageContractSuite<
                 createdAt: "2026-01-02T00:00:00.000Z",
               },
             },
-            objectTypeId: "Device",
           })
         ).rejects.toThrow("immutable dataset version id with different metadata")
       })
     })
 
-    test("advances telemetry by physical rows in contiguous fixed batches", async () => {
+    test("advances telemetry in contiguous fixed physical batches", async () => {
       await withStorage(async (storage) => {
-        const claimed = await storage.startOrReclaimMaterialization({
+        const claim = await storage.startOrReclaim({
           id: "telemetry-run",
-          projectId: "contract-project",
+          projectId,
           identity: telemetryIdentity,
-          objectTypeId: "Device",
+          target: objectTarget,
           fixedBatchSize: 3,
         })
-        const execution = {
-          id: claimed.id,
-          projectId: claimed.projectId,
-          identity: telemetryIdentity,
-          executionToken: claimed.executionToken,
-        } as const
+        const execution = executionInput(claim)
+        expect(claim.run).toMatchObject({
+          telemetryCheckpoint: {
+            fixedBatchSize: 3,
+            nextBatchOrdinal: 0,
+            nextRowOffset: 0,
+            inputExhausted: false,
+          },
+        })
+        await expect(
+          storage.update({ ...execution, progress: { sourceRowsRead: 1 } })
+        ).rejects.toThrow("can only advance with its checkpoint")
 
-        expect(claimed.telemetryCheckpoint).toEqual({
-          fixedBatchSize: 3,
-          nextBatchOrdinal: 0,
-          nextRowOffset: 0,
-          inputExhausted: false,
-        })
-        await expect(
-          storage.updateMaterialization({ ...execution, sourceRowsRead: 1 })
-        ).rejects.toThrow("can only advance with its checkpoint")
-        await expect(
-          storage.finishMaterialization({
-            ...execution,
-            status: "failed",
-            sourceRowsSkipped: 1,
-          })
-        ).rejects.toThrow("can only advance with its checkpoint")
         await storage.advanceTelemetryCheckpoint({
           ...execution,
           batchOrdinal: 0,
@@ -260,15 +214,6 @@ export function runProjectionRunStorageContractSuite<
             inputExhausted: false,
           })
         ).rejects.toThrow("partial non-final batch")
-        await expect(
-          storage.advanceTelemetryCheckpoint({
-            ...execution,
-            batchOrdinal: 1,
-            batchRowCount: 4,
-            batchRowsSkipped: 0,
-            inputExhausted: true,
-          })
-        ).rejects.toThrow("exceeds its fixed size")
 
         const exhausted = await storage.advanceTelemetryCheckpoint({
           ...execution,
@@ -277,109 +222,56 @@ export function runProjectionRunStorageContractSuite<
           batchRowsSkipped: 1,
           inputExhausted: true,
         })
-        expect(exhausted).toMatchObject({ sourceRowsRead: 5, sourceRowsSkipped: 2 })
-        expect(exhausted.telemetryCheckpoint).toEqual({
-          fixedBatchSize: 3,
-          nextBatchOrdinal: 2,
-          nextRowOffset: 5,
-          inputExhausted: true,
+        expect(exhausted).toMatchObject({
+          progress: { sourceRowsRead: 5, sourceRowsSkipped: 2 },
+          telemetryCheckpoint: { nextBatchOrdinal: 2, nextRowOffset: 5, inputExhausted: true },
         })
-        await expect(
-          storage.advanceTelemetryCheckpoint({
-            ...execution,
-            batchOrdinal: 2,
-            batchRowCount: 1,
-            batchRowsSkipped: 0,
-            inputExhausted: true,
-          })
-        ).rejects.toThrow("already exhausted")
       })
     })
 
-    test("requires telemetry exhaustion and completes EOF idempotently", async () => {
+    test("requires and records explicit telemetry EOF with terminal success", async () => {
       await withStorage(async (storage) => {
-        const claimed = await storage.startOrReclaimMaterialization({
+        const claim = await storage.startOrReclaim({
           id: "empty-telemetry-run",
-          projectId: "contract-project",
+          projectId,
           identity: telemetryIdentity,
-          objectTypeId: "Device",
+          target: objectTarget,
           fixedBatchSize: 10,
         })
-        const execution = {
-          id: claimed.id,
-          projectId: claimed.projectId,
-          identity: telemetryIdentity,
-          executionToken: claimed.executionToken,
-        } as const
 
         await expect(
-          storage.finishMaterialization({ ...execution, status: "succeeded" })
-        ).rejects.toThrow("before its input is exhausted")
-        await storage.completeTelemetryInput(execution)
-        await expect(storage.completeTelemetryInput(execution)).resolves.toMatchObject({
+          storage.finish({
+            ...executionInput(claim),
+            protocol: "telemetry",
+            status: "succeeded",
+          } as Parameters<ProjectionRunStorage["finish"]>[0])
+        ).rejects.toThrow("cannot succeed before input exhaustion")
+        await expect(storage.getById({ projectId, id: claim.run.id })).resolves.toMatchObject({
+          status: "running",
+          telemetryCheckpoint: { inputExhausted: false },
+        })
+
+        const finished = await storage.finish({
+          ...executionInput(claim),
+          protocol: "telemetry",
+          status: "succeeded",
+          inputExhausted: true,
+        })
+        expect(finished).toMatchObject({
+          status: "succeeded",
+          progress: { sourceRowsRead: 0 },
           telemetryCheckpoint: { inputExhausted: true },
         })
-        const finished = await storage.finishMaterialization({
-          ...execution,
-          status: "succeeded",
-        })
-        expect(finished).toMatchObject({ status: "succeeded", sourceRowsRead: 0 })
-        await expect(storage.assertMaterializationExecution(execution)).rejects.toThrow(
+        await expect(storage.lockForMaterialization(executionInput(claim))).rejects.toThrow(
           "already terminal"
         )
       })
     })
 
-    test("guards terminal transitions and keeps legacy writes away from fenced runs", async () => {
+    test("keeps equal run ids isolated by project", async () => {
       await withStorage(async (storage) => {
-        const claimed = await storage.startOrReclaimMaterialization({
-          id: "terminal-run",
-          projectId: "contract-project",
-          identity: replacementIdentity,
-          objectTypeId: "Device",
-        })
-        const execution = {
-          id: claimed.id,
-          projectId: claimed.projectId,
-          identity: replacementIdentity,
-          executionToken: claimed.executionToken,
-        } as const
-
-        await expect(
-          storage.update({ id: claimed.id, projectId: claimed.projectId, sourceRowsRead: 1 })
-        ).rejects.toThrow("use updateMaterialization()")
-        await expect(
-          storage.finish({ id: claimed.id, projectId: claimed.projectId, status: "succeeded" })
-        ).rejects.toThrow("use finishMaterialization()")
-
-        await storage.finishMaterialization({
-          ...execution,
-          status: "failed",
-          errorMessage: "invalid input",
-        })
-        await expect(
-          storage.finishMaterialization({ ...execution, status: "cancelled" })
-        ).rejects.toThrow("already terminal")
-        expect(
-          await storage.getById({ projectId: claimed.projectId, id: claimed.id })
-        ).toMatchObject({ status: "failed", errorMessage: "invalid input" })
-      })
-    })
-
-    test("keeps projects isolated when run ids are equal", async () => {
-      await withStorage(async (storage) => {
-        await storage.startOrReclaimMaterialization({
-          id: "shared-id",
-          projectId: "project-a",
-          identity: replacementIdentity,
-          objectTypeId: "Device",
-        })
-        await storage.startOrReclaimMaterialization({
-          id: "shared-id",
-          projectId: "project-b",
-          identity: replacementIdentity,
-          objectTypeId: "Device",
-        })
+        await storage.startOrReclaim({ ...replacementInput("shared-id"), projectId: "project-a" })
+        await storage.startOrReclaim({ ...replacementInput("shared-id"), projectId: "project-b" })
 
         expect(await storage.getById({ projectId: "project-a", id: "shared-id" })).not.toBeNull()
         expect(await storage.getById({ projectId: "project-b", id: "shared-id" })).not.toBeNull()
@@ -387,4 +279,17 @@ export function runProjectionRunStorageContractSuite<
       })
     })
   })
+}
+
+function replacementInput(id: string) {
+  return { id, projectId, identity: replacementIdentity, target: objectTarget } as const
+}
+
+function executionInput(claim: ProjectionRunClaim) {
+  return {
+    id: claim.run.id,
+    projectId: claim.run.projectId,
+    identity: claim.run.identity,
+    executionToken: claim.execution.executionToken,
+  }
 }

@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { JsonValue, Storage } from "@sixb/core"
-import type { StoredLinkMutationEvent, StoredObjectMutationEvent } from "@sixb/core/internal/events"
+import type { Storage } from "@sixb/core"
 import { type ActionRunStorage, StorageTransactionError } from "@sixb/core/storage"
-import { createStoredLinkMutationEvent, createStoredObjectMutationEvent } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -20,16 +18,12 @@ describe("PostgresStorage.transaction", () => {
 
   test("commits writes atomically", async () => {
     await storage.transaction(async (tx) => {
-      await tx.objects.applyObjectUpsert(objectEvent("event_1", "room_1", { name: "Blue" }))
+      await requireActionRuns(tx).queue(actionRunInput("run_commit"))
     })
 
-    const row = await storage.objects.getByPrimaryId({
-      projectId: "my-app",
-      objectTypeId: "Room",
-      primaryId: "room_1",
-    })
-
-    expect(row?.properties).toEqual({ name: "Blue" })
+    expect(
+      await storage.actionRuns.getById({ projectId: "my-app", id: "run_commit" })
+    ).not.toBeNull()
   })
 
   test("rejects root storage calls inside a transaction callback", async () => {
@@ -45,51 +39,22 @@ describe("PostgresStorage.transaction", () => {
   })
 
   test("rolls back writes across every mutated table when the transaction fails", async () => {
-    await storage.objects.applyObjectUpsert(objectEvent("event_1", "room_1", { name: "Blue" }))
-
     await expect(
       storage.transaction(async (tx) => {
-        await tx.objects.applyObjectUpsert(objectEvent("event_2", "room_1", { name: "Red" }))
-        await tx.objects.applyObjectUpsert(objectEvent("event_3", "room_2", { name: "Green" }))
-        await tx.objects.applyLinkUpsert(linkEvent("link_1", "room_1", "room_2"))
-        await requireActionRuns(tx).queue({
-          id: "run_rollback",
-          projectId: "my-app",
-          actionId: "paint",
-          subject: { kind: "object", objectTypeId: "Room", primaryId: "room_1" },
-          params: {},
-          idempotencyKey: "action:my-app:run_rollback",
-        })
+        const runs = requireTransactionalRunStores(tx)
+        await runs.actionRuns.queue(actionRunInput("run_rollback"))
+        await runs.syncRuns.start(syncRunInput("sync_rollback"))
+        await runs.webhookRuns.start(webhookRunInput("webhook_rollback"))
 
         throw new Error("boom")
       })
     ).rejects.toThrow("boom")
 
-    expect(
-      (
-        await storage.objects.getByPrimaryId({
-          projectId: "my-app",
-          objectTypeId: "Room",
-          primaryId: "room_1",
-        })
-      )?.properties
-    ).toEqual({ name: "Blue" })
-    expect(
-      await storage.objects.getByPrimaryId({
-        projectId: "my-app",
-        objectTypeId: "Room",
-        primaryId: "room_2",
-      })
-    ).toBeNull()
-    expect(
-      await storage.objects.listLinks({
-        projectId: "my-app",
-        objectTypeId: "Room",
-        objectId: "room_1",
-        linkId: "neighbour",
-      })
-    ).toHaveLength(0)
     expect(await storage.actionRuns.getById({ projectId: "my-app", id: "run_rollback" })).toBeNull()
+    expect(await storage.syncRuns.getById({ projectId: "my-app", id: "sync_rollback" })).toBeNull()
+    expect(
+      await storage.webhookRuns.getById({ projectId: "my-app", id: "webhook_rollback" })
+    ).toBeNull()
   })
 
   test("rejects nested transactions", async () => {
@@ -114,20 +79,15 @@ describe("PostgresStorage.transaction", () => {
   })
 })
 
-function objectEvent(
-  id: string,
-  primaryId: string,
-  properties: Record<string, JsonValue>
-): StoredObjectMutationEvent {
-  return createStoredObjectMutationEvent({
-    id,
-    cursor: id,
+function actionRunInput(id: string) {
+  return {
     projectId: "my-app",
-    occurredAt: "2026-06-17T10:00:00.000Z",
-    objectTypeId: "Room",
-    primaryId,
-    properties,
-  })
+    id,
+    actionId: "paint",
+    subject: { kind: "none" as const },
+    params: {},
+    idempotencyKey: `action:my-app:${id}`,
+  }
 }
 
 function requireActionRuns(tx: Storage): ActionRunStorage {
@@ -137,16 +97,36 @@ function requireActionRuns(tx: Storage): ActionRunStorage {
   return tx.actionRuns
 }
 
-function linkEvent(id: string, sourceId: string, targetId: string): StoredLinkMutationEvent {
-  return createStoredLinkMutationEvent({
+function requireTransactionalRunStores(tx: Storage) {
+  if (!tx.actionRuns || !tx.syncRuns || !tx.webhookRuns) {
+    throw new Error("[test] expected transaction storage to expose all run stores")
+  }
+  return {
+    actionRuns: tx.actionRuns,
+    syncRuns: tx.syncRuns,
+    webhookRuns: tx.webhookRuns,
+  }
+}
+
+function syncRunInput(id: string) {
+  return {
     id,
-    cursor: id,
     projectId: "my-app",
-    occurredAt: "2026-06-17T10:00:00.000Z",
-    sourceTypeId: "Room",
-    sourceId,
-    linkId: "neighbour",
-    targetTypeId: "Room",
-    targetId,
-  })
+    syncId: `sync_${id}`,
+    datasetId: "orders",
+    mode: "append" as const,
+    startedAt: new Date("2026-06-17T10:00:00.000Z"),
+  }
+}
+
+function webhookRunInput(id: string) {
+  return {
+    id,
+    projectId: "my-app",
+    connectorId: "stripe",
+    webhookId: "payments",
+    method: "POST",
+    route: "/webhooks/stripe/payments",
+    startedAt: new Date("2026-06-17T10:00:00.000Z"),
+  }
 }

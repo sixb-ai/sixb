@@ -411,17 +411,7 @@ describe("SqlitePipelineRunStorage", () => {
     try {
       expect(bundled.pipelineRuns).toBeInstanceOf(SqlitePipelineRunStorage)
     } finally {
-      bundled.objects.close()
-      bundled.auth.close()
-      bundled.actionRuns.close()
-      bundled.pipelineRuns.close()
-      bundled.projectionRuns.close()
-      bundled.workflowRuns.close()
-      bundled.syncRuns.close()
-      bundled.timeseries.close()
-      bundled.webhookDeliveries.close()
-      bundled.webhookRuns.close()
-      bundled.rules.close()
+      bundled.close()
     }
   })
 })

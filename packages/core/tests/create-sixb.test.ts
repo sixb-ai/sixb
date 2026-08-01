@@ -9,13 +9,11 @@ import {
   defineAction,
   defineConnector,
   defineDataset,
-  defineLinkProjection,
   defineObjectType,
   defineProjection,
   defineRule,
   defineSchedule,
   defineSync,
-  defineTelemetryProjection,
   defineValueType,
   defineWorkflow,
   defineWorkflowStep,
@@ -1066,11 +1064,11 @@ export const roomReadingsDataset = defineDataset("canonical.room-readings", {
     await writeProjectFile(
       projectRoot,
       "projections/room-temperatures.ts",
-      `import { defineTelemetryProjection } from "${coreModuleUrl}"
+      `import { defineProjection } from "${coreModuleUrl}"
 import { roomReadingsDataset } from "../datasets/room-readings"
 import { Room } from "../ontology/room"
 
-export const roomTemperatureProjection = defineTelemetryProjection(
+export const roomTemperatureProjection = defineProjection(
   "room-temperatures",
   Room.p.temperature
 )
@@ -1255,7 +1253,7 @@ export const setTemperature = defineAction("setTemperature")
       ],
     })
 
-    const telemetryProjection = defineTelemetryProjection("room-temperatures", Room.p.temperature)
+    const telemetryProjection = defineProjection("room-temperatures", Room.p.temperature)
       .fromDataset(roomReadingsDataset)
       .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 
@@ -1297,7 +1295,7 @@ export const setTemperature = defineAction("setTemperature")
     const roomProjection = defineProjection("room-proj", Room)
       .fromDataset(canonicalRoomsDataset)
       .properties({ id: "room_id", name: "room_name" })
-    const roomSensorProjection = defineLinkProjection("room-sensor-proj", Room.l.hasSensors)
+    const roomSensorProjection = defineProjection("room-sensor-proj", Room.l.hasSensors)
       .fromDataset(roomSensorsDataset)
       .sourceField("room_id")
       .targetField("sensor_id")
@@ -1444,7 +1442,7 @@ export const setTemperature = defineAction("setTemperature")
         col("temperature", "float64"),
       ],
     })
-    const telemetryProjection = defineTelemetryProjection("room-temperatures", Room.p.temperature)
+    const telemetryProjection = defineProjection("room-temperatures", Room.p.temperature)
       .fromDataset(roomReadingsDataset)
       .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 

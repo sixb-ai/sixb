@@ -54,6 +54,19 @@
         "typescript": "^5.7.0",
       },
     },
+    "benchmarks/ontology-materialization": {
+      "name": "@sixb/benchmark-ontology-materialization",
+      "dependencies": {
+        "@sixb/core": "workspace:*",
+        "@sixb/pg": "workspace:*",
+        "@sixb/sqlite": "workspace:*",
+        "postgres": "^3.4.5",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
     "broker/nats": {
       "name": "@sixb/broker-nats",
       "version": "0.1.0",
@@ -1230,6 +1243,8 @@
     "@sixb/auth-magic-link": ["@sixb/auth-magic-link@workspace:auth/magic-link"],
 
     "@sixb/auth-oidc": ["@sixb/auth-oidc@workspace:auth/oidc"],
+
+    "@sixb/benchmark-ontology-materialization": ["@sixb/benchmark-ontology-materialization@workspace:benchmarks/ontology-materialization"],
 
     "@sixb/blob-local": ["@sixb/blob-local@workspace:storage/blob-local"],
 

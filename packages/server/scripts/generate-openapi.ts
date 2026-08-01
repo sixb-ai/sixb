@@ -80,11 +80,50 @@ async function main() {
 
   const spec = await res.json()
   const outputPath = resolve(import.meta.dir, "../../client/openapi.json")
-  await Bun.write(outputPath, `${JSON.stringify(spec, null, 2)}\n`)
+  await Bun.write(outputPath, `${formatOpenApiJson(spec)}\n`)
   console.log(`OpenAPI spec written to ${outputPath}`)
 
   await server.stop()
   process.exit(0)
+}
+
+/** Keep primitive schema lists compact so generated API changes remain reviewable. */
+function formatOpenApiJson(spec: unknown): string {
+  const lines = JSON.stringify(spec, null, 2).split("\n")
+
+  for (let start = lines.length - 1; start >= 0; start -= 1) {
+    const opening = lines[start]
+    const match = /^(\s*).*\[$/.exec(opening)
+    if (!match) continue
+
+    const indentation = match[1]
+    const values: string[] = []
+    let end = start + 1
+    for (; end < lines.length; end += 1) {
+      const line = lines[end]
+      if (line === `${indentation}]` || line === `${indentation}],`) break
+      const serialized = line.trim().replace(/,$/, "")
+      if (!isPrimitiveJson(serialized)) break
+      values.push(serialized)
+    }
+    if (end >= lines.length || values.length === 0) continue
+
+    const closing = lines[end].endsWith(",") ? "]," : "]"
+    const compact = `${opening}${values.join(", ")}${closing}`
+    if (compact.length > 100) continue
+    lines.splice(start, end - start + 1, compact)
+  }
+
+  return lines.join("\n")
+}
+
+function isPrimitiveJson(serialized: string): boolean {
+  try {
+    const value = JSON.parse(serialized)
+    return value === null || typeof value !== "object"
+  } catch {
+    return false
+  }
 }
 
 main()

@@ -2,10 +2,8 @@ import { describe, expect, test } from "bun:test"
 import {
   col,
   defineDataset,
-  defineLinkProjection,
   defineObjectType,
   defineProjection,
-  defineTelemetryProjection,
   defineValueType,
   link,
   OntologyRegistry,
@@ -65,7 +63,7 @@ describe("projection registry", () => {
     const roomProjection = defineProjection("rooms", Room)
       .fromDataset(rooms)
       .properties({ id: "room_id", name: "room_name" })
-    const temperatureProjection = defineTelemetryProjection("temperatures", Room.p.temperature)
+    const temperatureProjection = defineProjection("temperatures", Room.p.temperature)
       .fromDataset(readings)
       .points({ objectId: "room_id", at: "observed_at", value: "value" })
     const projectionRegistry = new ProjectionRegistry({
@@ -206,11 +204,11 @@ describe("projection registry", () => {
     const objectProjection = defineProjection("rooms", Room)
       .fromDataset(rooms)
       .properties({ id: "room_id", name: "room_name" })
-    const linkProjection = defineLinkProjection("room-sensors", Room.l.hasSensor)
+    const linkProjection = defineProjection("room-sensors", Room.l.hasSensor)
       .fromDataset(roomSensors)
       .sourceField("room_id")
       .targetField("sensor_id")
-    const telemetryProjection = defineTelemetryProjection("temperatures", Room.p.temperature)
+    const telemetryProjection = defineProjection("temperatures", Room.p.temperature)
       .fromDataset(readings)
       .points({ objectId: "room_id", at: "observed_at", value: "value" })
 
@@ -304,14 +302,14 @@ describe("projection registry", () => {
       ignoredDefinitionField: true,
     }
     const linkProjection = {
-      ...defineLinkProjection("room-sensors", Room.l.hasSensor)
+      ...defineProjection("room-sensors", Room.l.hasSensor)
         .fromDataset(roomSensors)
         .sourceField("room_id")
         .targetField("sensor_id"),
       ignoredDefinitionField: true,
     }
     const telemetryProjection = {
-      ...defineTelemetryProjection("temperatures", Room.p.temperature)
+      ...defineProjection("temperatures", Room.p.temperature)
         .fromDataset(readings)
         .points({ objectId: "room_id", at: "observed_at", value: "value" }),
       ignoredDefinitionField: true,
@@ -442,7 +440,7 @@ describe("projection registry", () => {
           target: Sensor,
         },
       })
-    const linkProjection = defineLinkProjection("room-sensors", Room.l.hasSensor)
+    const linkProjection = defineProjection("room-sensors", Room.l.hasSensor)
       .fromDataset(roomSensors)
       .sourceField("room_id")
       .targetField("sensor_id")

@@ -11,7 +11,6 @@ import {
   Sixb,
 } from "../src"
 import { type EventsRuntime, OntologyOutboxDispatcher } from "../src/events"
-import { objectService } from "../src/objects"
 import { getOntologyMutationRuntime } from "../src/runtime/internal"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -382,39 +381,6 @@ describe("runtime link batches", () => {
       "primary",
     ])
   })
-
-  test("reassigns a cardinality-one link and reports missing endpoints per item", async () => {
-    const { sixb } = createRuntime()
-    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
-    for (const sensorId of ["s1", "s2"]) {
-      await sixb.upsertObject("sensor", { id: sensorId, name: sensorId })
-    }
-    await sixb.upsertLink("room", "r1", "primarySensor", {
-      targetTypeId: "sensor",
-      targetId: "s1",
-    })
-
-    const results = await objectService.setLinkBatch(sixb, [
-      {
-        objectTypeId: "room",
-        sourceId: "r1",
-        linkId: "primarySensor",
-        target: { targetTypeId: "sensor", targetId: "s2" },
-      },
-      {
-        objectTypeId: "room",
-        sourceId: "r1",
-        linkId: "primarySensor",
-        target: { targetTypeId: "sensor", targetId: "missing" },
-      },
-    ])
-
-    expect(results[0]).toEqual({ ok: true, value: undefined })
-    expect(results[1].ok === false && results[1].error).toBeInstanceOf(ObjectNotFoundError)
-    expect((await listSensorLinks(sixb, "primarySensor")).map((row) => row.targetId)).toEqual([
-      "s2",
-    ])
-  })
 })
 
 describe("committed fact delivery", () => {
@@ -476,11 +442,10 @@ describe("committed fact delivery", () => {
     ).toEqual(["r1"])
   })
 
-  test("never appends events or writes providers outside the materializer", async () => {
-    const { deps, sixb } = createRuntime()
+  test("never appends events outside the materializer", async () => {
+    const { sixb } = createRuntime()
     const appendSpy = mock(sixb.events.append.bind(sixb.events))
     sixb.events.append = appendSpy
-    const providerWrites = spyLegacyProviderWrites(deps.storage)
 
     await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
     await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
@@ -492,7 +457,6 @@ describe("committed fact delivery", () => {
     await sixb.upsertObjectBatch("room", [{ properties: { id: "r2", name: "Bedroom" } }])
 
     expect(appendSpy).not.toHaveBeenCalled()
-    expect(providerWrites.filter((spy) => spy.mock.calls.length > 0)).toEqual([])
   })
 })
 
@@ -535,20 +499,4 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
     if (Date.now() >= deadline) throw new Error("Timed out waiting for asynchronous delivery.")
     await Bun.sleep(1)
   }
-}
-
-/** Watches the event-command provider methods the Materializer replaced. */
-function spyLegacyProviderWrites(storage: InMemoryStorage) {
-  const names = [
-    "applyObjectUpsert",
-    "applyObjectUpsertBatch",
-    "applyLinkUpsert",
-    "applyLinkUpsertBatch",
-    "applyLinkDelete",
-  ] as const
-  return names.map((name) => {
-    const spy = mock(storage.objects[name].bind(storage.objects))
-    Object.defineProperty(storage.objects, name, { value: spy, configurable: true })
-    return spy
-  })
 }

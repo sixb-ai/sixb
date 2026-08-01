@@ -98,7 +98,7 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
   }
 
   function toEditBatch(): EditBatch {
-    return { version: 1, operations: [...operations] }
+    return { operations: [...operations] }
   }
 
   function createObjectHandle(

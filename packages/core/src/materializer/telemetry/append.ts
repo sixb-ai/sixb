@@ -10,10 +10,7 @@ import type {
 } from "../../materialization/model"
 import { telemetryOwnershipKey } from "../../materialization/refs"
 import type { ProjectionRegistry } from "../../projections/registry"
-import type {
-  ProjectionMaterializationRunRecord,
-  ProjectionMaterializationRunStorage,
-} from "../../storage"
+import type { ProjectionRunRecord, ProjectionRunStorage } from "../../storage"
 import type {
   MaterializationSession,
   OntologyCommitRecord,
@@ -28,8 +25,8 @@ import {
   withSerializationRetry,
 } from "../execution/commit-lifecycle"
 import {
-  type AssertedProjectionExecution,
-  assertProjectionMaterializationExecution,
+  type LockedProjectionExecution,
+  lockProjectionRunForMaterialization,
 } from "../execution/run-correlation"
 import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
 import {
@@ -231,9 +228,9 @@ async function assertTelemetryExecution(
   storage: MaterializerStorage,
   projectId: string,
   command: PreparedTelemetryAppend
-): Promise<AssertedProjectionExecution | null> {
+): Promise<LockedProjectionExecution | null> {
   if (command.kind === "runtime") return null
-  const execution = await assertProjectionMaterializationExecution(storage, {
+  const execution = await lockProjectionRunForMaterialization(storage, {
     projectId,
     projectionRunId: command.source.execution.projectionRunId,
     executionToken: command.source.execution.executionToken,
@@ -252,7 +249,7 @@ async function assertTelemetryExecution(
 }
 
 function assertTelemetryBatchPosition(
-  run: ProjectionMaterializationRunRecord,
+  run: ProjectionRunRecord,
   batchOrdinal: number,
   sourceRowCount: number,
   inputExhausted: boolean
@@ -285,10 +282,7 @@ function assertTelemetryBatchPosition(
   }
 }
 
-function assertTelemetryReplayCheckpoint(
-  run: ProjectionMaterializationRunRecord,
-  batchOrdinal: number
-): void {
+function assertTelemetryReplayCheckpoint(run: ProjectionRunRecord, batchOrdinal: number): void {
   if (!run.telemetryCheckpoint || batchOrdinal >= run.telemetryCheckpoint.nextBatchOrdinal) {
     throw new MaterializationValidationError(
       `Telemetry commit batch ${batchOrdinal} exists without an advanced run checkpoint.`
@@ -484,7 +478,7 @@ async function finalizeTelemetryMaterialization(
   session: MaterializationSession,
   command: PreparedTelemetryAppend,
   result: TelemetryCommitResult,
-  projectionRuns: ProjectionMaterializationRunStorage | undefined
+  projectionRuns: ProjectionRunStorage | undefined
 ): Promise<TelemetryCommitResult> {
   const applied = await storage.ontology.materializations.finalize({
     session,

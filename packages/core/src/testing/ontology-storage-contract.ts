@@ -9,10 +9,7 @@ import type {
   MaterializationSession,
   OntologySourceRecord,
 } from "../storage/ontology"
-import {
-  isProjectionMaterializationRunStorage,
-  type ProjectionMaterializationRunStorage,
-} from "../storage/projection-runs"
+import type { ProjectionRunStorage } from "../storage/projection-runs"
 import {
   commitEmptyEdit,
   commitExactObject,
@@ -22,7 +19,7 @@ import {
 } from "./ontology-contract-fixture"
 
 export interface OntologyStorageContractStorage extends OntologyContractStorage {
-  readonly projectionRuns: ProjectionMaterializationRunStorage
+  readonly projectionRuns: ProjectionRunStorage
 }
 
 export interface OntologyStorageContractSuiteOptions<
@@ -39,7 +36,7 @@ export interface OntologyStorageContractSuiteOptions<
 const replacementIdentity = (
   versionId: string,
   projectionId = "contract.devices"
-): ProjectionMaterializationIdentity => ({
+): Extract<ProjectionMaterializationIdentity, { readonly projectionKind: "object" }> => ({
   projectionId,
   projectionKind: "object",
   protocol: "replacement",
@@ -65,7 +62,10 @@ const emptyProjectionCounts = {
 } as const
 
 interface ReadyCandidate {
-  readonly identity: ProjectionMaterializationIdentity
+  readonly identity: Extract<
+    ProjectionMaterializationIdentity,
+    { readonly projectionKind: "object" }
+  >
   readonly execution: ProjectionExecution
   readonly materializationId: string
   readonly source: { readonly projectionId: string }
@@ -194,16 +194,13 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
     test("stages insert-only source rows, seals counts, and fences stale execution tokens", async () => {
       await withStorage(async (storage) => {
         const identity = replacementIdentity("01")
-        const claimed = await storage.projectionRuns.startOrReclaimMaterialization({
+        const claimed = await storage.projectionRuns.startOrReclaim({
           id: "staging-run",
           projectId: "contract-project",
           identity,
-          objectTypeId: "ContractDevice",
+          target: { objectTypeId: "ContractDevice" },
         })
-        const execution = {
-          projectionRunId: claimed.id,
-          executionToken: claimed.executionToken,
-        }
+        const execution = claimed.execution
         const source = { projectionId: identity.projectionId }
         await expect(
           storage.ontology.sources.beginMaterialization({
@@ -293,11 +290,11 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         })
         expect(ready).toMatchObject({ status: "ready", rootCount: 1, assertionCount: 1 })
 
-        const reclaimed = await storage.projectionRuns.startOrReclaimMaterialization({
-          id: claimed.id,
-          projectId: claimed.projectId,
+        const reclaimed = await storage.projectionRuns.startOrReclaim({
+          id: claimed.run.id,
+          projectId: claimed.run.projectId,
           identity,
-          objectTypeId: "ContractDevice",
+          target: { objectTypeId: "ContractDevice" },
         })
         await expect(
           storage.ontology.sources.stageRows({
@@ -333,10 +330,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           kind: "reclaim",
           projectId: "contract-project",
           source,
-          execution: {
-            projectionRunId: reclaimed.id,
-            executionToken: reclaimed.executionToken,
-          },
+          execution: reclaimed.execution,
           abandonedAt: "2026-01-01T00:02:00.000Z",
         })
         expect(abandoned).toMatchObject({ status: "abandoned", executionToken: null })
@@ -431,11 +425,11 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           "candidate-stale-activation",
           "04"
         )
-        const reclaimed = await storage.projectionRuns.startOrReclaimMaterialization({
+        const reclaimed = await storage.projectionRuns.startOrReclaim({
           id: stale.execution.projectionRunId,
           projectId: "contract-project",
           identity: stale.identity,
-          objectTypeId: "ContractDevice",
+          target: { objectTypeId: "ContractDevice" },
         })
         await expect(
           activateEmptyCandidate(
@@ -450,10 +444,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           kind: "reclaim",
           projectId: "contract-project",
           source: stale.source,
-          execution: {
-            projectionRunId: reclaimed.id,
-            executionToken: reclaimed.executionToken,
-          },
+          execution: reclaimed.execution,
           abandonedAt: "2026-01-06T00:01:00.000Z",
         })
 
@@ -681,19 +672,19 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           projectionRevision: "telemetry-contract-revision",
           ownershipHash: "telemetry-contract-ownership",
         }
-        const run = await storage.projectionRuns.startOrReclaimMaterialization({
+        const run = await storage.projectionRuns.startOrReclaim({
           id: "telemetry-run",
           projectId: "contract-project",
           identity,
-          objectTypeId: "ContractDevice",
+          target: { objectTypeId: "ContractDevice" },
           fixedBatchSize: 2,
         })
         const execute = async (throwAfter: boolean) => {
           await storage.transaction(async (tx) => {
-            if (!isProjectionMaterializationRunStorage(tx.projectionRuns)) {
+            if (!tx.projectionRuns) {
               throw new Error("Contract transaction omitted required storage facades.")
             }
-            const header = telemetryHeader(identity, run.id)
+            const header = telemetryHeader(identity, run.run.id)
             const session = await tx.ontology.materializations.begin(header)
             await tx.ontology.materializations.finalize({
               session,
@@ -713,10 +704,10 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
               },
             })
             await tx.projectionRuns.advanceTelemetryCheckpoint({
-              id: run.id,
-              projectId: run.projectId,
+              id: run.run.id,
+              projectId: run.run.projectId,
               identity,
-              executionToken: run.executionToken,
+              executionToken: run.execution.executionToken,
               batchOrdinal: 0,
               batchRowCount: 2,
               batchRowsSkipped: 2,
@@ -730,11 +721,11 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         expect(
           await storage.ontology.commits.getByOrigin({
             projectId: "contract-project",
-            origin: { kind: "telemetry", projectionRunId: run.id, batchOrdinal: 0 },
+            origin: { kind: "telemetry", projectionRunId: run.run.id, batchOrdinal: 0 },
           })
         ).toBeNull()
         expect(
-          await storage.projectionRuns.getById({ projectId: run.projectId, id: run.id })
+          await storage.projectionRuns.getById({ projectId: run.run.projectId, id: run.run.id })
         ).toMatchObject({
           telemetryCheckpoint: { nextBatchOrdinal: 0, nextRowOffset: 0, inputExhausted: false },
         })
@@ -743,11 +734,11 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         expect(
           await storage.ontology.commits.getByOrigin({
             projectId: "contract-project",
-            origin: { kind: "telemetry", projectionRunId: run.id, batchOrdinal: 0 },
+            origin: { kind: "telemetry", projectionRunId: run.run.id, batchOrdinal: 0 },
           })
         ).toMatchObject({ id: "telemetry-commit" })
         expect(
-          await storage.projectionRuns.getById({ projectId: run.projectId, id: run.id })
+          await storage.projectionRuns.getById({ projectId: run.run.projectId, id: run.run.id })
         ).toMatchObject({
           telemetryCheckpoint: { nextBatchOrdinal: 1, nextRowOffset: 2, inputExhausted: true },
         })
@@ -763,16 +754,16 @@ async function createReadyEmptyCandidate(
   versionId: string
 ): Promise<ReadyCandidate> {
   const identity = replacementIdentity(versionId)
-  const run = await storage.projectionRuns.startOrReclaimMaterialization({
+  const run = await storage.projectionRuns.startOrReclaim({
     id: runId,
     projectId: "contract-project",
     identity,
-    objectTypeId: "ContractDevice",
+    target: { objectTypeId: "ContractDevice" },
   })
-  const execution = { projectionRunId: run.id, executionToken: run.executionToken }
+  const execution = run.execution
   const source = { projectionId: identity.projectionId }
   await storage.ontology.sources.beginMaterialization({
-    projectId: run.projectId,
+    projectId: run.run.projectId,
     source,
     materializationId,
     execution,
@@ -785,7 +776,7 @@ async function createReadyEmptyCandidate(
     createdAt: identity.datasetVersion.createdAt,
   })
   await storage.ontology.sources.markReady({
-    projectId: run.projectId,
+    projectId: run.run.projectId,
     source,
     materializationId,
     execution,
@@ -860,10 +851,10 @@ async function activateEmptyCandidate(
     },
   }
   await storage.transaction(async (tx) => {
-    if (!isProjectionMaterializationRunStorage(tx.projectionRuns)) {
+    if (!tx.projectionRuns) {
       throw new Error("Contract transaction omitted required storage facades.")
     }
-    await tx.projectionRuns.assertMaterializationExecution({
+    await tx.projectionRuns.lockForMaterialization({
       id: candidate.execution.projectionRunId,
       projectId: header.commit.projectId,
       identity: candidate.identity,

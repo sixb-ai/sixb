@@ -70,15 +70,15 @@ function runMatchesJob(
   identity: ProjectionRunRequestedQueueJob["payload"]
 ): boolean {
   return (
-    run.projectionId === identity.projectionId &&
-    run.projectionKind === identity.projectionKind &&
-    run.materializationProtocol === identity.protocol &&
-    run.datasetId === identity.datasetVersion.datasetId &&
-    run.datasetVersionId === identity.datasetVersion.versionId &&
-    run.datasetVersionCreatedAt === identity.datasetVersion.createdAt &&
-    run.ontologyRevision === identity.ontologyRevision &&
-    run.projectionRevision === identity.projectionRevision &&
-    run.ownershipHash === identity.ownershipHash
+    run.identity.projectionId === identity.projectionId &&
+    run.identity.projectionKind === identity.projectionKind &&
+    run.identity.protocol === identity.protocol &&
+    run.identity.datasetVersion.datasetId === identity.datasetVersion.datasetId &&
+    run.identity.datasetVersion.versionId === identity.datasetVersion.versionId &&
+    run.identity.datasetVersion.createdAt === identity.datasetVersion.createdAt &&
+    run.identity.ontologyRevision === identity.ontologyRevision &&
+    run.identity.projectionRevision === identity.projectionRevision &&
+    run.identity.ownershipHash === identity.ownershipHash
   )
 }
 

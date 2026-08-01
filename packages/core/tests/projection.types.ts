@@ -1,10 +1,8 @@
 import {
   col,
   defineDataset,
-  defineLinkProjection,
   defineObjectType,
   defineProjection,
-  defineTelemetryProjection,
   defineValueType,
   fromForeignKey,
   link,
@@ -216,20 +214,20 @@ fromForeignKey({
   target: _OfficeBuilding,
 }) // OK — extends "building"
 
-// 13. defineLinkProjection with valid single-target link
-const linkProj = defineLinkProjection("test", _Room.l.hasSensors)
+// 13. defineProjection infers the link builder from a single-target link token
+const linkProj = defineProjection("test", _Room.l.hasSensors)
   .fromDataset(roomSensorsDataset)
   .sourceField("room_id")
   .targetField("sensor_id")
 type _linkProjTag = Expect<Equal<typeof linkProj._tag, "LinkProjectionDefinition">>
 
-defineLinkProjection("test", _Room.l.hasSensors)
+defineProjection("test", _Room.l.hasSensors)
   .fromDataset(roomSensorsDataset)
   // @ts-expect-error — link projection fields must be string columns
   .sourceField("weight")
 
-// 14. defineTelemetryProjection with valid telemetry property and point mapping
-const telemetryProjection = defineTelemetryProjection("test", _Room.p.currentTemperature)
+// 14. defineProjection infers the telemetry builder from a telemetry property token
+const telemetryProjection = defineProjection("test", _Room.p.currentTemperature)
   .fromDataset(roomDataset)
   .points({
     objectId: "col_id",
@@ -240,7 +238,7 @@ type _telemetryProjTag = Expect<
   Equal<typeof telemetryProjection._tag, "TelemetryProjectionDefinition">
 >
 
-defineTelemetryProjection("test", _Room.p.currentTemperature).fromDataset(roomDataset).points({
+defineProjection("test", _Room.p.currentTemperature).fromDataset(roomDataset).points({
   objectId: "col_id",
   at: "col_last_seen_at",
   value: "col_temperature",
@@ -248,24 +246,24 @@ defineTelemetryProjection("test", _Room.p.currentTemperature).fromDataset(roomDa
 })
 
 // @ts-expect-error — telemetry projections require telemetry property tokens
-defineTelemetryProjection("test", _Room.p.name)
+defineProjection("test", _Room.p.name)
 
-defineTelemetryProjection("test", _Room.p.currentTemperature)
+defineProjection("test", _Room.p.currentTemperature)
   .fromDataset(roomDataset)
   // @ts-expect-error — objectId must be a string dataset column
   .points({ objectId: "col_room_number", at: "col_last_seen_at", value: "col_temperature" })
 
-defineTelemetryProjection("test", _Room.p.currentTemperature)
+defineProjection("test", _Room.p.currentTemperature)
   .fromDataset(roomDataset)
   // @ts-expect-error — at must be a string, date, or timestamp dataset column
   .points({ objectId: "col_id", at: "col_area", value: "col_temperature" })
 
-defineTelemetryProjection("test", _Room.p.currentTemperature)
+defineProjection("test", _Room.p.currentTemperature)
   .fromDataset(roomDataset)
   // @ts-expect-error — value column must be compatible with the telemetry property schema
   .points({ objectId: "col_id", at: "col_last_seen_at", value: "col_name" })
 
-defineTelemetryProjection("test", _Room.p.currentTemperature).fromDataset(roomDataset).points({
+defineProjection("test", _Room.p.currentTemperature).fromDataset(roomDataset).points({
   objectId: "col_id",
   at: "col_last_seen_at",
   value: "col_temperature",
@@ -273,7 +271,7 @@ defineTelemetryProjection("test", _Room.p.currentTemperature).fromDataset(roomDa
   unit: "col_room_number",
 })
 
-defineTelemetryProjection("test", _Room.p.currentTemperature).fromDataset(roomDataset).points({
+defineProjection("test", _Room.p.currentTemperature).fromDataset(roomDataset).points({
   objectId: "col_id",
   at: "col_last_seen_at",
   value: "col_temperature",

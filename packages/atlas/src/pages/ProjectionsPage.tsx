@@ -52,7 +52,7 @@ type Projection =
   | ListProjectionsResponse["linkProjections"][number]
   | ListProjectionsResponse["telemetryProjections"][number]
 type ProjectionRun = ListProjectionRunsResponse["runs"][number]
-type ProjectionKind = ProjectionRun["projectionKind"]
+type ProjectionKind = ProjectionRun["identity"]["projectionKind"]
 type RunStatus = ProjectionRun["status"]
 type ListViewStyle = "cards" | "table"
 
@@ -122,19 +122,19 @@ function KindBadge({ kind }: { kind: ProjectionKind }) {
 
 function runMetrics(run: ProjectionRun): { label: string; value: number }[] {
   return [
-    { label: "Rows read", value: run.sourceRowsRead },
-    { label: "Rows skipped", value: run.sourceRowsSkipped },
+    { label: "Rows read", value: run.progress.sourceRowsRead },
+    { label: "Rows skipped", value: run.progress.sourceRowsSkipped },
   ]
 }
 
 function primaryMetric(run: ProjectionRun): { label: string; value: number } {
-  return { label: "Rows", value: run.sourceRowsRead }
+  return { label: "Rows", value: run.progress.sourceRowsRead }
 }
 
 // Run ids stay stable across retries; the attempt is a separate execution counter.
 function runLabel(run: ProjectionRun): string {
   const id = run.id.length > 8 ? run.id.slice(0, 8) : run.id
-  return run.attempt === undefined ? id : `${id} · attempt ${run.attempt}`
+  return `${id} · attempt ${run.attempt}`
 }
 
 function runDuration(run: ProjectionRun): string {
@@ -471,9 +471,9 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
                   </p>
                   <p
                     className="mt-0.5 max-w-[180px] truncate font-mono text-xs text-muted-foreground"
-                    title={run.datasetVersionId}
+                    title={run.identity.datasetVersion.versionId}
                   >
-                    {run.datasetVersionId}
+                    {run.identity.datasetVersion.versionId}
                   </p>
                   {run.errorMessage && (
                     <p className="mt-1 break-words text-xs text-destructive">{run.errorMessage}</p>
@@ -515,9 +515,9 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
             </p>
             <p
               className="truncate font-mono text-xs text-muted-foreground"
-              title={run.datasetVersionId}
+              title={run.identity.datasetVersion.versionId}
             >
-              {run.datasetVersionId}
+              {run.identity.datasetVersion.versionId}
             </p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground tabular-nums">
               <span>{runDuration(run)}</span>

@@ -3,7 +3,6 @@ export { lowerEditBatch } from "./normalize"
 export type {
   EditablePropertyId,
   EditBatch,
-  EditBatchVersion,
   EditCreateProperties,
   EditObjectHandle,
   EditObjectProperties,

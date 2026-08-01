@@ -4,7 +4,6 @@ import {
   defineDataset,
   defineObjectType,
   defineProjection,
-  defineTelemetryProjection,
   InMemoryStorage,
   link,
   OntologyRegistry,
@@ -15,11 +14,9 @@ import {
   type OntologyMaterializerDependencies,
   type PinnedDatasetVersion,
   type ProjectionExecution,
-  type ProjectionMaterializationIdentity,
   ProjectionRegistry,
   type ProjectionSourceEntry,
   type ProjectionSourceReplacement,
-  type ProjectionTelemetryInputCompletion,
   type TelemetryAppend,
 } from "../src/materializer"
 
@@ -56,7 +53,7 @@ const deviceProjection = defineProjection("devices", Device)
       target: Device,
     },
   })
-const temperatureProjection = defineTelemetryProjection("temperatures", Device.p.temperature)
+const temperatureProjection = defineProjection("temperatures", Device.p.temperature)
   .fromDataset(readings)
   .points({ objectId: "device_id", at: "at", value: "value" })
 
@@ -97,14 +94,6 @@ export function createMaterializerFixture(
           datasetVersion: request.datasetVersion,
         })
         return baseMaterializer.projections.replace({ ...request, execution })
-      },
-      async completeTelemetryInput(request: ProjectionTelemetryInputCompletion) {
-        const execution = await resolveFixtureExecution(storage, projections, request.execution, {
-          projectionId: request.source.projectionId,
-          protocol: "telemetry",
-          datasetVersion: request.datasetVersion,
-        })
-        return baseMaterializer.projections.completeTelemetryInput({ ...request, execution })
       },
       finishRun: baseMaterializer.projections.finishRun,
     },
@@ -210,12 +199,6 @@ export async function claimProjectionExecution(
       ? projections.resolveSource(input.projectionId)
       : projections.resolveTelemetry(input.projectionId)
   const definition = resolved.definition
-  const projectionKind =
-    definition._tag === "ObjectProjectionDefinition"
-      ? "object"
-      : definition._tag === "LinkProjectionDefinition"
-        ? "link"
-        : "telemetry"
   const identityBase = {
     projectionId: resolved.projectionId,
     datasetVersion: {
@@ -226,31 +209,36 @@ export async function claimProjectionExecution(
     projectionRevision: resolved.projectionRevision,
     ownershipHash: resolved.ownershipHash,
   }
-  let identity: ProjectionMaterializationIdentity
-  if (input.protocol === "telemetry") {
-    identity = { ...identityBase, projectionKind: "telemetry", protocol: "telemetry" }
-  } else {
-    if (projectionKind === "telemetry") {
-      throw new Error("Replacement execution requires an object or link projection")
-    }
-    identity = { ...identityBase, projectionKind, protocol: "replacement" }
+  const common = { id: input.runId, projectId: "project" } as const
+  if (definition._tag === "TelemetryProjectionDefinition") {
+    const claim = await storage.projectionRuns.startOrReclaim({
+      ...common,
+      identity: { ...identityBase, projectionKind: "telemetry", protocol: "telemetry" },
+      target: { objectTypeId: definition.objectTypeId },
+      fixedBatchSize: input.fixedBatchSize ?? 1,
+    })
+    return claim.execution
   }
-  const objectTypes =
-    definition._tag === "LinkProjectionDefinition"
-      ? {
-          sourceObjectTypeId: definition.sourceObjectTypeId,
-          targetObjectTypeId: definition.targetObjectTypeId,
-        }
-      : { objectTypeId: definition.objectTypeId }
-  const run = await storage.projectionRuns.startOrReclaimMaterialization({
-    id: input.runId,
-    projectId: "project",
-    identity,
-    ...objectTypes,
-    ...(input.fixedBatchSize !== undefined ? { fixedBatchSize: input.fixedBatchSize } : {}),
+  if (input.protocol !== "replacement") {
+    throw new Error("Telemetry execution requires a telemetry projection")
+  }
+  if (definition._tag === "LinkProjectionDefinition") {
+    const claim = await storage.projectionRuns.startOrReclaim({
+      ...common,
+      identity: { ...identityBase, projectionKind: "link", protocol: "replacement" },
+      target: {
+        sourceObjectTypeId: definition.sourceObjectTypeId,
+        targetObjectTypeId: definition.targetObjectTypeId,
+      },
+    })
+    return claim.execution
+  }
+  const claim = await storage.projectionRuns.startOrReclaim({
+    ...common,
+    identity: { ...identityBase, projectionKind: "object", protocol: "replacement" },
+    target: { objectTypeId: definition.objectTypeId },
   })
-  if (!run.executionToken) throw new Error("Fixture projection claim returned no execution token")
-  return { projectionRunId: run.id, executionToken: run.executionToken }
+  return claim.execution
 }
 
 async function resolveFixtureExecution(

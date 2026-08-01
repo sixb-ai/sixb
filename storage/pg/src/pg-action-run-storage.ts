@@ -1,11 +1,11 @@
 import type { ActionSubject, JsonValue } from "@sixb/core"
 import type {
-  ActionMaterializationRunStorage,
   ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
+  ActionRunStorage,
   ActionRunWritebackRecord,
   EnterActionRunPhaseInput,
   FinishActionRunInput,
@@ -28,7 +28,7 @@ import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
-export class PgActionRunStorage implements ActionMaterializationRunStorage {
+export class PgActionRunStorage implements ActionRunStorage {
   constructor(private readonly sql: PgStoreClient) {}
 
   async lockForMaterialization(input: LockActionMaterializationRunInput): Promise<ActionRunRecord> {

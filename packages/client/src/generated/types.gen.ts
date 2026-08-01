@@ -7885,24 +7885,96 @@ export type ListProjectionsResponses = {
           targetObjectTypeId: string
         }
       }
-      latestRun: {
-        id: string
-        projectId: string
-        projectionId: string
-        projectionKind: "object" | "link" | "telemetry"
-        datasetId: string
-        datasetVersionId: string
-        objectTypeId?: string
-        sourceObjectTypeId?: string
-        targetObjectTypeId?: string
-        status: "running" | "succeeded" | "failed" | "cancelled"
-        attempt?: number
-        startedAt: string
-        finishedAt?: string
-        errorMessage?: string
-        sourceRowsRead: number
-        sourceRowsSkipped: number
-      } | null
+      latestRun:
+        | {
+            id: string
+            projectId: string
+            status: "running" | "succeeded" | "failed" | "cancelled"
+            attempt: number
+            progress: {
+              sourceRowsRead: number
+              sourceRowsSkipped: number
+            }
+            startedAt: string
+            finishedAt?: string
+            errorMessage?: string
+            identity: {
+              projectionId: string
+              datasetVersion: {
+                datasetId: string
+                versionId: string
+                createdAt: string
+              }
+              ontologyRevision: string
+              projectionRevision: string
+              ownershipHash: string
+              projectionKind: "object"
+              protocol: "replacement"
+            }
+            target: {
+              objectTypeId: string
+            }
+          }
+        | {
+            id: string
+            projectId: string
+            status: "running" | "succeeded" | "failed" | "cancelled"
+            attempt: number
+            progress: {
+              sourceRowsRead: number
+              sourceRowsSkipped: number
+            }
+            startedAt: string
+            finishedAt?: string
+            errorMessage?: string
+            identity: {
+              projectionId: string
+              datasetVersion: {
+                datasetId: string
+                versionId: string
+                createdAt: string
+              }
+              ontologyRevision: string
+              projectionRevision: string
+              ownershipHash: string
+              projectionKind: "link"
+              protocol: "replacement"
+            }
+            target: {
+              sourceObjectTypeId: string
+              targetObjectTypeId: string
+            }
+          }
+        | {
+            id: string
+            projectId: string
+            status: "running" | "succeeded" | "failed" | "cancelled"
+            attempt: number
+            progress: {
+              sourceRowsRead: number
+              sourceRowsSkipped: number
+            }
+            startedAt: string
+            finishedAt?: string
+            errorMessage?: string
+            identity: {
+              projectionId: string
+              datasetVersion: {
+                datasetId: string
+                versionId: string
+                createdAt: string
+              }
+              ontologyRevision: string
+              projectionRevision: string
+              ownershipHash: string
+              projectionKind: "telemetry"
+              protocol: "telemetry"
+            }
+            target: {
+              objectTypeId: string
+            }
+          }
+        | null
     }>
     linkProjections: Array<{
       _tag: "LinkProjectionDefinition"
@@ -7913,24 +7985,96 @@ export type ListProjectionsResponses = {
       datasetId: string
       sourceField: string
       targetField: string
-      latestRun: {
-        id: string
-        projectId: string
-        projectionId: string
-        projectionKind: "object" | "link" | "telemetry"
-        datasetId: string
-        datasetVersionId: string
-        objectTypeId?: string
-        sourceObjectTypeId?: string
-        targetObjectTypeId?: string
-        status: "running" | "succeeded" | "failed" | "cancelled"
-        attempt?: number
-        startedAt: string
-        finishedAt?: string
-        errorMessage?: string
-        sourceRowsRead: number
-        sourceRowsSkipped: number
-      } | null
+      latestRun:
+        | {
+            id: string
+            projectId: string
+            status: "running" | "succeeded" | "failed" | "cancelled"
+            attempt: number
+            progress: {
+              sourceRowsRead: number
+              sourceRowsSkipped: number
+            }
+            startedAt: string
+            finishedAt?: string
+            errorMessage?: string
+            identity: {
+              projectionId: string
+              datasetVersion: {
+                datasetId: string
+                versionId: string
+                createdAt: string
+              }
+              ontologyRevision: string
+              projectionRevision: string
+              ownershipHash: string
+              projectionKind: "object"
+              protocol: "replacement"
+            }
+            target: {
+              objectTypeId: string
+            }
+          }
+        | {
+            id: string
+            projectId: string
+            status: "running" | "succeeded" | "failed" | "cancelled"
+            attempt: number
+            progress: {
+              sourceRowsRead: number
+              sourceRowsSkipped: number
+            }
+            startedAt: string
+            finishedAt?: string
+            errorMessage?: string
+            identity: {
+              projectionId: string
+              datasetVersion: {
+                datasetId: string
+                versionId: string
+                createdAt: string
+              }
+              ontologyRevision: string
+              projectionRevision: string
+              ownershipHash: string
+              projectionKind: "link"
+              protocol: "replacement"
+            }
+            target: {
+              sourceObjectTypeId: string
+              targetObjectTypeId: string
+            }
+          }
+        | {
+            id: string
+            projectId: string
+            status: "running" | "succeeded" | "failed" | "cancelled"
+            attempt: number
+            progress: {
+              sourceRowsRead: number
+              sourceRowsSkipped: number
+            }
+            startedAt: string
+            finishedAt?: string
+            errorMessage?: string
+            identity: {
+              projectionId: string
+              datasetVersion: {
+                datasetId: string
+                versionId: string
+                createdAt: string
+              }
+              ontologyRevision: string
+              projectionRevision: string
+              ownershipHash: string
+              projectionKind: "telemetry"
+              protocol: "telemetry"
+            }
+            target: {
+              objectTypeId: string
+            }
+          }
+        | null
     }>
     telemetryProjections: Array<{
       _tag: "TelemetryProjectionDefinition"
@@ -7942,24 +8086,96 @@ export type ListProjectionsResponses = {
       atField: string
       valueField: string
       unitField?: string
-      latestRun: {
-        id: string
-        projectId: string
-        projectionId: string
-        projectionKind: "object" | "link" | "telemetry"
-        datasetId: string
-        datasetVersionId: string
-        objectTypeId?: string
-        sourceObjectTypeId?: string
-        targetObjectTypeId?: string
-        status: "running" | "succeeded" | "failed" | "cancelled"
-        attempt?: number
-        startedAt: string
-        finishedAt?: string
-        errorMessage?: string
-        sourceRowsRead: number
-        sourceRowsSkipped: number
-      } | null
+      latestRun:
+        | {
+            id: string
+            projectId: string
+            status: "running" | "succeeded" | "failed" | "cancelled"
+            attempt: number
+            progress: {
+              sourceRowsRead: number
+              sourceRowsSkipped: number
+            }
+            startedAt: string
+            finishedAt?: string
+            errorMessage?: string
+            identity: {
+              projectionId: string
+              datasetVersion: {
+                datasetId: string
+                versionId: string
+                createdAt: string
+              }
+              ontologyRevision: string
+              projectionRevision: string
+              ownershipHash: string
+              projectionKind: "object"
+              protocol: "replacement"
+            }
+            target: {
+              objectTypeId: string
+            }
+          }
+        | {
+            id: string
+            projectId: string
+            status: "running" | "succeeded" | "failed" | "cancelled"
+            attempt: number
+            progress: {
+              sourceRowsRead: number
+              sourceRowsSkipped: number
+            }
+            startedAt: string
+            finishedAt?: string
+            errorMessage?: string
+            identity: {
+              projectionId: string
+              datasetVersion: {
+                datasetId: string
+                versionId: string
+                createdAt: string
+              }
+              ontologyRevision: string
+              projectionRevision: string
+              ownershipHash: string
+              projectionKind: "link"
+              protocol: "replacement"
+            }
+            target: {
+              sourceObjectTypeId: string
+              targetObjectTypeId: string
+            }
+          }
+        | {
+            id: string
+            projectId: string
+            status: "running" | "succeeded" | "failed" | "cancelled"
+            attempt: number
+            progress: {
+              sourceRowsRead: number
+              sourceRowsSkipped: number
+            }
+            startedAt: string
+            finishedAt?: string
+            errorMessage?: string
+            identity: {
+              projectionId: string
+              datasetVersion: {
+                datasetId: string
+                versionId: string
+                createdAt: string
+              }
+              ontologyRevision: string
+              projectionRevision: string
+              ownershipHash: string
+              projectionKind: "telemetry"
+              protocol: "telemetry"
+            }
+            target: {
+              objectTypeId: string
+            }
+          }
+        | null
     }>
   }
 }
@@ -8007,24 +8223,96 @@ export type GetProjectionResponses = {
             targetObjectTypeId: string
           }
         }
-        latestRun: {
-          id: string
-          projectId: string
-          projectionId: string
-          projectionKind: "object" | "link" | "telemetry"
-          datasetId: string
-          datasetVersionId: string
-          objectTypeId?: string
-          sourceObjectTypeId?: string
-          targetObjectTypeId?: string
-          status: "running" | "succeeded" | "failed" | "cancelled"
-          attempt?: number
-          startedAt: string
-          finishedAt?: string
-          errorMessage?: string
-          sourceRowsRead: number
-          sourceRowsSkipped: number
-        } | null
+        latestRun:
+          | {
+              id: string
+              projectId: string
+              status: "running" | "succeeded" | "failed" | "cancelled"
+              attempt: number
+              progress: {
+                sourceRowsRead: number
+                sourceRowsSkipped: number
+              }
+              startedAt: string
+              finishedAt?: string
+              errorMessage?: string
+              identity: {
+                projectionId: string
+                datasetVersion: {
+                  datasetId: string
+                  versionId: string
+                  createdAt: string
+                }
+                ontologyRevision: string
+                projectionRevision: string
+                ownershipHash: string
+                projectionKind: "object"
+                protocol: "replacement"
+              }
+              target: {
+                objectTypeId: string
+              }
+            }
+          | {
+              id: string
+              projectId: string
+              status: "running" | "succeeded" | "failed" | "cancelled"
+              attempt: number
+              progress: {
+                sourceRowsRead: number
+                sourceRowsSkipped: number
+              }
+              startedAt: string
+              finishedAt?: string
+              errorMessage?: string
+              identity: {
+                projectionId: string
+                datasetVersion: {
+                  datasetId: string
+                  versionId: string
+                  createdAt: string
+                }
+                ontologyRevision: string
+                projectionRevision: string
+                ownershipHash: string
+                projectionKind: "link"
+                protocol: "replacement"
+              }
+              target: {
+                sourceObjectTypeId: string
+                targetObjectTypeId: string
+              }
+            }
+          | {
+              id: string
+              projectId: string
+              status: "running" | "succeeded" | "failed" | "cancelled"
+              attempt: number
+              progress: {
+                sourceRowsRead: number
+                sourceRowsSkipped: number
+              }
+              startedAt: string
+              finishedAt?: string
+              errorMessage?: string
+              identity: {
+                projectionId: string
+                datasetVersion: {
+                  datasetId: string
+                  versionId: string
+                  createdAt: string
+                }
+                ontologyRevision: string
+                projectionRevision: string
+                ownershipHash: string
+                projectionKind: "telemetry"
+                protocol: "telemetry"
+              }
+              target: {
+                objectTypeId: string
+              }
+            }
+          | null
       }
     | {
         _tag: "LinkProjectionDefinition"
@@ -8035,24 +8323,96 @@ export type GetProjectionResponses = {
         datasetId: string
         sourceField: string
         targetField: string
-        latestRun: {
-          id: string
-          projectId: string
-          projectionId: string
-          projectionKind: "object" | "link" | "telemetry"
-          datasetId: string
-          datasetVersionId: string
-          objectTypeId?: string
-          sourceObjectTypeId?: string
-          targetObjectTypeId?: string
-          status: "running" | "succeeded" | "failed" | "cancelled"
-          attempt?: number
-          startedAt: string
-          finishedAt?: string
-          errorMessage?: string
-          sourceRowsRead: number
-          sourceRowsSkipped: number
-        } | null
+        latestRun:
+          | {
+              id: string
+              projectId: string
+              status: "running" | "succeeded" | "failed" | "cancelled"
+              attempt: number
+              progress: {
+                sourceRowsRead: number
+                sourceRowsSkipped: number
+              }
+              startedAt: string
+              finishedAt?: string
+              errorMessage?: string
+              identity: {
+                projectionId: string
+                datasetVersion: {
+                  datasetId: string
+                  versionId: string
+                  createdAt: string
+                }
+                ontologyRevision: string
+                projectionRevision: string
+                ownershipHash: string
+                projectionKind: "object"
+                protocol: "replacement"
+              }
+              target: {
+                objectTypeId: string
+              }
+            }
+          | {
+              id: string
+              projectId: string
+              status: "running" | "succeeded" | "failed" | "cancelled"
+              attempt: number
+              progress: {
+                sourceRowsRead: number
+                sourceRowsSkipped: number
+              }
+              startedAt: string
+              finishedAt?: string
+              errorMessage?: string
+              identity: {
+                projectionId: string
+                datasetVersion: {
+                  datasetId: string
+                  versionId: string
+                  createdAt: string
+                }
+                ontologyRevision: string
+                projectionRevision: string
+                ownershipHash: string
+                projectionKind: "link"
+                protocol: "replacement"
+              }
+              target: {
+                sourceObjectTypeId: string
+                targetObjectTypeId: string
+              }
+            }
+          | {
+              id: string
+              projectId: string
+              status: "running" | "succeeded" | "failed" | "cancelled"
+              attempt: number
+              progress: {
+                sourceRowsRead: number
+                sourceRowsSkipped: number
+              }
+              startedAt: string
+              finishedAt?: string
+              errorMessage?: string
+              identity: {
+                projectionId: string
+                datasetVersion: {
+                  datasetId: string
+                  versionId: string
+                  createdAt: string
+                }
+                ontologyRevision: string
+                projectionRevision: string
+                ownershipHash: string
+                projectionKind: "telemetry"
+                protocol: "telemetry"
+              }
+              target: {
+                objectTypeId: string
+              }
+            }
+          | null
       }
     | {
         _tag: "TelemetryProjectionDefinition"
@@ -8064,24 +8424,96 @@ export type GetProjectionResponses = {
         atField: string
         valueField: string
         unitField?: string
-        latestRun: {
-          id: string
-          projectId: string
-          projectionId: string
-          projectionKind: "object" | "link" | "telemetry"
-          datasetId: string
-          datasetVersionId: string
-          objectTypeId?: string
-          sourceObjectTypeId?: string
-          targetObjectTypeId?: string
-          status: "running" | "succeeded" | "failed" | "cancelled"
-          attempt?: number
-          startedAt: string
-          finishedAt?: string
-          errorMessage?: string
-          sourceRowsRead: number
-          sourceRowsSkipped: number
-        } | null
+        latestRun:
+          | {
+              id: string
+              projectId: string
+              status: "running" | "succeeded" | "failed" | "cancelled"
+              attempt: number
+              progress: {
+                sourceRowsRead: number
+                sourceRowsSkipped: number
+              }
+              startedAt: string
+              finishedAt?: string
+              errorMessage?: string
+              identity: {
+                projectionId: string
+                datasetVersion: {
+                  datasetId: string
+                  versionId: string
+                  createdAt: string
+                }
+                ontologyRevision: string
+                projectionRevision: string
+                ownershipHash: string
+                projectionKind: "object"
+                protocol: "replacement"
+              }
+              target: {
+                objectTypeId: string
+              }
+            }
+          | {
+              id: string
+              projectId: string
+              status: "running" | "succeeded" | "failed" | "cancelled"
+              attempt: number
+              progress: {
+                sourceRowsRead: number
+                sourceRowsSkipped: number
+              }
+              startedAt: string
+              finishedAt?: string
+              errorMessage?: string
+              identity: {
+                projectionId: string
+                datasetVersion: {
+                  datasetId: string
+                  versionId: string
+                  createdAt: string
+                }
+                ontologyRevision: string
+                projectionRevision: string
+                ownershipHash: string
+                projectionKind: "link"
+                protocol: "replacement"
+              }
+              target: {
+                sourceObjectTypeId: string
+                targetObjectTypeId: string
+              }
+            }
+          | {
+              id: string
+              projectId: string
+              status: "running" | "succeeded" | "failed" | "cancelled"
+              attempt: number
+              progress: {
+                sourceRowsRead: number
+                sourceRowsSkipped: number
+              }
+              startedAt: string
+              finishedAt?: string
+              errorMessage?: string
+              identity: {
+                projectionId: string
+                datasetVersion: {
+                  datasetId: string
+                  versionId: string
+                  createdAt: string
+                }
+                ontologyRevision: string
+                projectionRevision: string
+                ownershipHash: string
+                projectionKind: "telemetry"
+                protocol: "telemetry"
+              }
+              target: {
+                objectTypeId: string
+              }
+            }
+          | null
       }
 }
 
@@ -8121,24 +8553,96 @@ export type ListProjectionRunsResponses = {
    * Response for status 200
    */
   200: {
-    runs: Array<{
-      id: string
-      projectId: string
-      projectionId: string
-      projectionKind: "object" | "link" | "telemetry"
-      datasetId: string
-      datasetVersionId: string
-      objectTypeId?: string
-      sourceObjectTypeId?: string
-      targetObjectTypeId?: string
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      attempt?: number
-      startedAt: string
-      finishedAt?: string
-      errorMessage?: string
-      sourceRowsRead: number
-      sourceRowsSkipped: number
-    }>
+    runs: Array<
+      | {
+          id: string
+          projectId: string
+          status: "running" | "succeeded" | "failed" | "cancelled"
+          attempt: number
+          progress: {
+            sourceRowsRead: number
+            sourceRowsSkipped: number
+          }
+          startedAt: string
+          finishedAt?: string
+          errorMessage?: string
+          identity: {
+            projectionId: string
+            datasetVersion: {
+              datasetId: string
+              versionId: string
+              createdAt: string
+            }
+            ontologyRevision: string
+            projectionRevision: string
+            ownershipHash: string
+            projectionKind: "object"
+            protocol: "replacement"
+          }
+          target: {
+            objectTypeId: string
+          }
+        }
+      | {
+          id: string
+          projectId: string
+          status: "running" | "succeeded" | "failed" | "cancelled"
+          attempt: number
+          progress: {
+            sourceRowsRead: number
+            sourceRowsSkipped: number
+          }
+          startedAt: string
+          finishedAt?: string
+          errorMessage?: string
+          identity: {
+            projectionId: string
+            datasetVersion: {
+              datasetId: string
+              versionId: string
+              createdAt: string
+            }
+            ontologyRevision: string
+            projectionRevision: string
+            ownershipHash: string
+            projectionKind: "link"
+            protocol: "replacement"
+          }
+          target: {
+            sourceObjectTypeId: string
+            targetObjectTypeId: string
+          }
+        }
+      | {
+          id: string
+          projectId: string
+          status: "running" | "succeeded" | "failed" | "cancelled"
+          attempt: number
+          progress: {
+            sourceRowsRead: number
+            sourceRowsSkipped: number
+          }
+          startedAt: string
+          finishedAt?: string
+          errorMessage?: string
+          identity: {
+            projectionId: string
+            datasetVersion: {
+              datasetId: string
+              versionId: string
+              createdAt: string
+            }
+            ontologyRevision: string
+            projectionRevision: string
+            ownershipHash: string
+            projectionKind: "telemetry"
+            protocol: "telemetry"
+          }
+          target: {
+            objectTypeId: string
+          }
+        }
+    >
     hasMore: boolean
     total: number
   }
@@ -8177,24 +8681,95 @@ export type GetProjectionRunResponses = {
   /**
    * Response for status 200
    */
-  200: {
-    id: string
-    projectId: string
-    projectionId: string
-    projectionKind: "object" | "link" | "telemetry"
-    datasetId: string
-    datasetVersionId: string
-    objectTypeId?: string
-    sourceObjectTypeId?: string
-    targetObjectTypeId?: string
-    status: "running" | "succeeded" | "failed" | "cancelled"
-    attempt?: number
-    startedAt: string
-    finishedAt?: string
-    errorMessage?: string
-    sourceRowsRead: number
-    sourceRowsSkipped: number
-  }
+  200:
+    | {
+        id: string
+        projectId: string
+        status: "running" | "succeeded" | "failed" | "cancelled"
+        attempt: number
+        progress: {
+          sourceRowsRead: number
+          sourceRowsSkipped: number
+        }
+        startedAt: string
+        finishedAt?: string
+        errorMessage?: string
+        identity: {
+          projectionId: string
+          datasetVersion: {
+            datasetId: string
+            versionId: string
+            createdAt: string
+          }
+          ontologyRevision: string
+          projectionRevision: string
+          ownershipHash: string
+          projectionKind: "object"
+          protocol: "replacement"
+        }
+        target: {
+          objectTypeId: string
+        }
+      }
+    | {
+        id: string
+        projectId: string
+        status: "running" | "succeeded" | "failed" | "cancelled"
+        attempt: number
+        progress: {
+          sourceRowsRead: number
+          sourceRowsSkipped: number
+        }
+        startedAt: string
+        finishedAt?: string
+        errorMessage?: string
+        identity: {
+          projectionId: string
+          datasetVersion: {
+            datasetId: string
+            versionId: string
+            createdAt: string
+          }
+          ontologyRevision: string
+          projectionRevision: string
+          ownershipHash: string
+          projectionKind: "link"
+          protocol: "replacement"
+        }
+        target: {
+          sourceObjectTypeId: string
+          targetObjectTypeId: string
+        }
+      }
+    | {
+        id: string
+        projectId: string
+        status: "running" | "succeeded" | "failed" | "cancelled"
+        attempt: number
+        progress: {
+          sourceRowsRead: number
+          sourceRowsSkipped: number
+        }
+        startedAt: string
+        finishedAt?: string
+        errorMessage?: string
+        identity: {
+          projectionId: string
+          datasetVersion: {
+            datasetId: string
+            versionId: string
+            createdAt: string
+          }
+          ontologyRevision: string
+          projectionRevision: string
+          ownershipHash: string
+          projectionKind: "telemetry"
+          protocol: "telemetry"
+        }
+        target: {
+          objectTypeId: string
+        }
+      }
 }
 
 export type GetProjectionRunResponse = GetProjectionRunResponses[keyof GetProjectionRunResponses]

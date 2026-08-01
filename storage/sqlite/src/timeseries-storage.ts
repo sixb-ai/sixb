@@ -1,6 +1,5 @@
 import type { Database } from "bun:sqlite"
 import type {
-  StoredTelemetryAppendedEvent,
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
   TimeseriesPoint,
@@ -20,54 +19,6 @@ export interface SqliteTimeseriesStorageOptions {
   connection?: SqliteStoreConnection
 }
 
-// A telemetry point is uniquely identified by (series, at). Re-applying the
-// same instant is a last-write-wins upsert, so telemetry writes are idempotent
-// under replay without a separate dedup ledger.
-const UPSERT_POINT_SQL = `
-  INSERT INTO timeseries (
-    project_id, object_type_id, object_id, property_id,
-    value, unit, at, source_event_id
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT (project_id, object_type_id, object_id, property_id, at)
-  DO UPDATE SET
-    value = excluded.value,
-    unit = excluded.unit,
-    source_event_id = excluded.source_event_id
-`
-
-function pointParams(
-  event: StoredTelemetryAppendedEvent
-): [string, string, string, string, string, string | null, string, string] {
-  return [
-    event.projectId,
-    event.payload.objectTypeId,
-    event.payload.objectId,
-    event.payload.propertyId,
-    JSON.stringify(event.payload.value),
-    event.payload.unit ?? null,
-    assertCanonicalUtcAt(event.payload.at),
-    event.id,
-  ]
-}
-
-// `at` is stored and compared as TEXT, so SQLite's lexicographic ordering and
-// range scans match chronological order — and the (series, at) identity stays
-// well-defined — only when every value is the canonical UTC ISO-8601 form that
-// appendTelemetryBatch produces via Date.toISOString(). Enforce that invariant
-// here so a writer that bypasses the normalization fails loudly instead of
-// silently corrupting history queries. (pg needs no equivalent: TIMESTAMPTZ
-// compares by instant regardless of textual form.)
-function assertCanonicalUtcAt(at: string): string {
-  const instant = new Date(at)
-  if (Number.isNaN(instant.getTime()) || instant.toISOString() !== at) {
-    throw new Error(
-      `[SixbSqlite] Telemetry 'at' must be a canonical UTC ISO-8601 timestamp ` +
-        `(e.g. "2026-06-21T10:00:00.000Z"), received "${at}".`
-    )
-  }
-  return at
-}
-
 /**
  * SQLite-based TimeseriesStorage implementation.
  *
@@ -84,23 +35,6 @@ export class SqliteTimeseriesStorage implements TimeseriesStorage {
     if (this.connection.installFreshSchema) {
       installFreshSqliteSchema(this.db)
     }
-  }
-
-  async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
-    this.db.query(UPSERT_POINT_SQL).run(...pointParams(event))
-  }
-
-  async applyTelemetryAppendedBatch(
-    events: readonly StoredTelemetryAppendedEvent[]
-  ): Promise<void> {
-    if (events.length === 0) return
-
-    this.db.transaction(() => {
-      const upsert = this.db.query(UPSERT_POINT_SQL)
-      for (const event of events) {
-        upsert.run(...pointParams(event))
-      }
-    })()
   }
 
   async getHistory(params: {
@@ -254,8 +188,7 @@ export class SqliteTimeseriesStorage implements TimeseriesStorage {
       value: JSON.parse(row.value),
       unit: row.unit ?? undefined,
       at: new Date(row.at),
-      sourceEventId: row.source_event_id ?? undefined,
-      lastCommitId: row.last_commit_id ?? undefined,
+      lastCommitId: row.last_commit_id,
     }
   }
 
@@ -275,6 +208,5 @@ interface DatabaseRow {
   value: string
   unit: string | null
   at: string
-  source_event_id: string | null
-  last_commit_id: string | null
+  last_commit_id: string
 }

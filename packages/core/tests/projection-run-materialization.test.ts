@@ -1,12 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import type { ProjectionMaterializationIdentity } from "../src/materialization/model"
-import { isActionMaterializationRunStorage } from "../src/storage/action-runs"
 import { InMemoryActionRunStorage } from "../src/storage/action-runs/in-memory"
 import { InMemoryStorage } from "../src/storage/index"
-import { isProjectionMaterializationRunStorage } from "../src/storage/projection-runs"
 import { InMemoryProjectionRunStorage } from "../src/storage/projection-runs/in-memory"
 
-const replacementIdentity: ProjectionMaterializationIdentity = {
+const replacementIdentity = {
   projectionId: "devices",
   projectionKind: "object",
   protocol: "replacement",
@@ -18,9 +16,9 @@ const replacementIdentity: ProjectionMaterializationIdentity = {
   ontologyRevision: "ontology-1",
   projectionRevision: "projection-1",
   ownershipHash: "ownership-1",
-}
+} as const satisfies ProjectionMaterializationIdentity
 
-const telemetryIdentity: ProjectionMaterializationIdentity = {
+const telemetryIdentity = {
   projectionId: "temperatures",
   projectionKind: "telemetry",
   protocol: "telemetry",
@@ -32,18 +30,9 @@ const telemetryIdentity: ProjectionMaterializationIdentity = {
   ontologyRevision: "ontology-1",
   projectionRevision: "projection-telemetry-1",
   ownershipHash: "ownership-telemetry-1",
-}
+} as const satisfies ProjectionMaterializationIdentity
 
 describe("projection run materialization ownership", () => {
-  test("exposes materialization as an explicit transitional capability", () => {
-    expect(isProjectionMaterializationRunStorage(undefined)).toBe(false)
-    expect(isProjectionMaterializationRunStorage(null)).toBe(false)
-    expect(isProjectionMaterializationRunStorage(new InMemoryProjectionRunStorage())).toBe(true)
-    expect(isActionMaterializationRunStorage(undefined)).toBe(false)
-    expect(isActionMaterializationRunStorage(null)).toBe(false)
-    expect(isActionMaterializationRunStorage(new InMemoryActionRunStorage())).toBe(true)
-  })
-
   test("rotates execution tokens on reclaim and fences stale attempts", async () => {
     const tokens = ["execution-1", "execution-2"]
     const storage = new InMemoryProjectionRunStorage({
@@ -53,41 +42,47 @@ describe("projection run materialization ownership", () => {
       id: "replacement-run",
       projectId: "project",
       identity: replacementIdentity,
-      objectTypeId: "Device",
+      target: { objectTypeId: "Device" },
     } as const
 
-    const first = await storage.startOrReclaimMaterialization(input)
-    const second = await storage.startOrReclaimMaterialization(input)
-    expect(first).toMatchObject({ attempt: 1, executionToken: "execution-1" })
-    expect(second).toMatchObject({ attempt: 2, executionToken: "execution-2" })
+    const first = await storage.startOrReclaim(input)
+    const second = await storage.startOrReclaim(input)
+    expect(first).toMatchObject({
+      run: { attempt: 1 },
+      execution: { executionToken: "execution-1" },
+    })
+    expect(second).toMatchObject({
+      run: { attempt: 2 },
+      execution: { executionToken: "execution-2" },
+    })
 
     await expect(
-      storage.updateMaterialization({
+      storage.update({
         id: input.id,
         projectId: input.projectId,
         identity: replacementIdentity,
         executionToken: "execution-1",
-        sourceRowsRead: 1,
+        progress: { sourceRowsRead: 1 },
       })
     ).rejects.toThrow("execution token is stale")
     await expect(
-      storage.updateMaterialization({
+      storage.update({
         id: input.id,
         projectId: input.projectId,
         identity: replacementIdentity,
         executionToken: "execution-2",
-        sourceRowsRead: 1,
+        progress: { sourceRowsRead: 1 },
       })
-    ).resolves.toMatchObject({ sourceRowsRead: 1 })
+    ).resolves.toMatchObject({ progress: { sourceRowsRead: 1 } })
   })
 
   test("stores only telemetry resume state and advances it contiguously", async () => {
     const storage = new InMemoryProjectionRunStorage({ executionToken: () => "execution" })
-    await storage.startOrReclaimMaterialization({
+    await storage.startOrReclaim({
       id: "telemetry-run",
       projectId: "project",
       identity: telemetryIdentity,
-      objectTypeId: "Device",
+      target: { objectTypeId: "Device" },
       fixedBatchSize: 2,
     })
 
@@ -101,22 +96,23 @@ describe("projection run materialization ownership", () => {
     })
 
     await expect(
-      storage.updateMaterialization({
+      storage.update({
         id: "telemetry-run",
         projectId: "project",
         identity: telemetryIdentity,
         executionToken: "execution",
-        sourceRowsRead: 1,
+        progress: { sourceRowsRead: 1 },
       })
     ).rejects.toThrow("can only advance with its checkpoint")
     await expect(
-      storage.finishMaterialization({
+      storage.finish({
         id: "telemetry-run",
         projectId: "project",
         identity: telemetryIdentity,
         executionToken: "execution",
+        protocol: "telemetry",
         status: "failed",
-        sourceRowsSkipped: 1,
+        progress: { sourceRowsSkipped: 1 },
       })
     ).rejects.toThrow("can only advance with its checkpoint")
 
@@ -208,58 +204,41 @@ describe("projection run materialization ownership", () => {
     ).rejects.toThrow("already exhausted")
   })
 
-  test("requires exhausted telemetry state before storage-level success", async () => {
+  test("requires explicit EOF before storage-level telemetry success", async () => {
     const storage = new InMemoryProjectionRunStorage({ executionToken: () => "execution" })
-    await storage.startOrReclaimMaterialization({
+    await storage.startOrReclaim({
       id: "telemetry-run",
       projectId: "project",
       identity: telemetryIdentity,
-      objectTypeId: "Device",
+      target: { objectTypeId: "Device" },
       fixedBatchSize: 10,
     })
 
     await expect(
-      storage.finishMaterialization({
+      storage.finish({
         id: "telemetry-run",
         projectId: "project",
         identity: telemetryIdentity,
         executionToken: "execution",
+        protocol: "telemetry",
         status: "succeeded",
-      })
-    ).rejects.toThrow("before its input is exhausted")
+      } as Parameters<typeof storage.finish>[0])
+    ).rejects.toThrow("cannot succeed before input exhaustion")
 
-    await storage.completeTelemetryInput({
-      id: "telemetry-run",
-      projectId: "project",
-      identity: telemetryIdentity,
-      executionToken: "execution",
-    })
     await expect(
-      storage.finishMaterialization({
+      storage.finish({
         id: "telemetry-run",
         projectId: "project",
         identity: telemetryIdentity,
         executionToken: "execution",
+        protocol: "telemetry",
         status: "succeeded",
+        inputExhausted: true,
       })
-    ).resolves.toMatchObject({ status: "succeeded" })
-  })
-
-  test("rejects legacy update and finish for fenced runs", async () => {
-    const storage = new InMemoryProjectionRunStorage({ executionToken: () => "execution" })
-    await storage.startOrReclaimMaterialization({
-      id: "replacement-run",
-      projectId: "project",
-      identity: replacementIdentity,
-      objectTypeId: "Device",
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      telemetryCheckpoint: { inputExhausted: true },
     })
-
-    await expect(
-      storage.update({ id: "replacement-run", projectId: "project", sourceRowsRead: 1 })
-    ).rejects.toThrow("use updateMaterialization()")
-    await expect(
-      storage.finish({ id: "replacement-run", projectId: "project", status: "succeeded" })
-    ).rejects.toThrow("use finishMaterialization()")
   })
 })
 
@@ -324,19 +303,15 @@ describe("in-memory run root lock", () => {
       id: "replacement-run",
       projectId: "project",
       identity: replacementIdentity,
-      objectTypeId: "Device",
+      target: { objectTypeId: "Device" },
     } as const
-    const first = await storage.projectionRuns.startOrReclaimMaterialization(start)
-    if (!first.executionToken) throw new Error("Expected a materialization token.")
+    const first = await storage.projectionRuns.startOrReclaim(start)
     const source = { projectionId: replacementIdentity.projectionId }
     await storage.ontology.sources.beginMaterialization({
       projectId: "project",
       source,
       materializationId: "materialization-1",
-      execution: {
-        projectionRunId: start.id,
-        executionToken: first.executionToken,
-      },
+      execution: first.execution,
       projectionKind: "object",
       protocol: "replacement",
       datasetVersion: replacementIdentity.datasetVersion,
@@ -346,17 +321,13 @@ describe("in-memory run root lock", () => {
       createdAt: "2026-01-01T00:00:01.000Z",
     })
 
-    const reclaimed = await storage.projectionRuns.startOrReclaimMaterialization(start)
-    if (!reclaimed.executionToken) throw new Error("Expected a reclaimed token.")
+    const reclaimed = await storage.projectionRuns.startOrReclaim(start)
     await expect(
       storage.ontology.sources.stageRows({
         projectId: "project",
         source,
         materializationId: "materialization-1",
-        execution: {
-          projectionRunId: start.id,
-          executionToken: first.executionToken,
-        },
+        execution: first.execution,
         rows: [],
       })
     ).rejects.toThrow("execution token is stale")
@@ -365,10 +336,7 @@ describe("in-memory run root lock", () => {
         kind: "reclaim",
         projectId: "project",
         source,
-        execution: {
-          projectionRunId: start.id,
-          executionToken: reclaimed.executionToken,
-        },
+        execution: reclaimed.execution,
         abandonedAt: "2026-01-01T00:00:02.000Z",
       })
     ).resolves.toMatchObject({ status: "abandoned", executionToken: null })
@@ -376,13 +344,12 @@ describe("in-memory run root lock", () => {
 
   test("serializes projection and action run writes after a failed transaction rollback", async () => {
     const storage = new InMemoryStorage()
-    const projection = await storage.projectionRuns.startOrReclaimMaterialization({
+    const projection = await storage.projectionRuns.startOrReclaim({
       id: "replacement-run",
       projectId: "project",
       identity: replacementIdentity,
-      objectTypeId: "Device",
+      target: { objectTypeId: "Device" },
     })
-    if (!projection.executionToken) throw new Error("Expected a materialization token.")
     await storage.actionRuns.queue({
       id: "action-run",
       projectId: "project",
@@ -402,15 +369,15 @@ describe("in-memory run root lock", () => {
       signalTransactionEntered = resolve
     })
     const failedTransaction = storage.transaction(async (tx) => {
-      if (!isProjectionMaterializationRunStorage(tx.projectionRuns) || !tx.actionRuns) {
+      if (!tx.projectionRuns || !tx.actionRuns) {
         throw new Error("Expected materialization run storage.")
       }
-      await tx.projectionRuns.updateMaterialization({
+      await tx.projectionRuns.update({
         id: "replacement-run",
         projectId: "project",
         identity: replacementIdentity,
-        executionToken: projection.executionToken!,
-        sourceRowsRead: 99,
+        executionToken: projection.execution.executionToken,
+        progress: { sourceRowsRead: 99 },
       })
       await tx.actionRuns.enterPhase({
         id: "action-run",
@@ -426,12 +393,12 @@ describe("in-memory run root lock", () => {
     let projectionFinished = false
     let actionFinished = false
     const projectionWrite = storage.projectionRuns
-      .updateMaterialization({
+      .update({
         id: "replacement-run",
         projectId: "project",
         identity: replacementIdentity,
-        executionToken: projection.executionToken,
-        sourceRowsRead: 1,
+        executionToken: projection.execution.executionToken,
+        progress: { sourceRowsRead: 1 },
       })
       .then((record) => {
         projectionFinished = true
@@ -451,11 +418,11 @@ describe("in-memory run root lock", () => {
 
     releaseTransaction()
     await expect(failedTransaction).rejects.toThrow("rollback")
-    expect(await projectionWrite).toMatchObject({ sourceRowsRead: 1 })
+    expect(await projectionWrite).toMatchObject({ progress: { sourceRowsRead: 1 } })
     expect(await actionWrite).toMatchObject({ phase: "effects" })
     expect(
       await storage.projectionRuns.getById({ projectId: "project", id: "replacement-run" })
-    ).toMatchObject({ sourceRowsRead: 1 })
+    ).toMatchObject({ progress: { sourceRowsRead: 1 } })
     expect(
       await storage.actionRuns.getById({ projectId: "project", id: "action-run" })
     ).toMatchObject({ phase: "effects" })

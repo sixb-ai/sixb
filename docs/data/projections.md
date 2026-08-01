@@ -6,13 +6,13 @@ become the `Invoice` and `Customer` objects your app reads through
 [`sixb.objects(...)`](../objects/overview.md).
 
 [Syncs](syncs.md) and [pipelines](pipelines.md) prepare the rows; projections create the objects and
-links on top of them. There are three kinds:
+links on top of them. `defineProjection` selects the right builder from its ontology target:
 
-| Builder | Produces | One row becomes |
+| Target | Produces | One row becomes |
 | --- | --- | --- |
-| `defineProjection` | Objects (and FK links) | One complete object root |
-| `defineLinkProjection` | Many-to-many links | One complete link root |
-| `defineTelemetryProjection` | Telemetry points | One reading on a series |
+| `ObjectType` | Objects (and FK links) | One complete object root |
+| `ObjectType.l.<linkId>` | Many-to-many links | One complete link root |
+| `ObjectType.p.<telemetryId>` | Telemetry points | One reading on a series |
 
 ## Object projection
 
@@ -102,15 +102,15 @@ the inline form; reach for `fromForeignKey()` only to build a descriptor separat
 
 ## Many-to-many link projection
 
-When a join dataset stores relationships, use `defineLinkProjection`. Each row becomes one link from
-a source object to a target object, identified by their primary ids.
+When a join dataset stores relationships, target its link token. Each row becomes one link from a
+source object to a target object, identified by their primary ids.
 
 ```ts
-import { defineLinkProjection } from "@sixb/core"
+import { defineProjection } from "@sixb/core"
 import { erpProjectMembersDataset } from "../datasets/erp"
 import { Project } from "../ontology/project"
 
-export const projectMembersProjection = defineLinkProjection("project-members", Project.l.members)
+export const projectMembersProjection = defineProjection("project-members", Project.l.members)
   .fromDataset(erpProjectMembersDataset)
   .sourceField("project_id")
   .targetField("employee_id")
@@ -118,7 +118,7 @@ export const projectMembersProjection = defineLinkProjection("project-members", 
 
 | Part | Meaning |
 | --- | --- |
-| `defineLinkProjection(id, SourceType.l.<linkId>)` | Names the projection and its target link |
+| `defineProjection(id, SourceType.l.<linkId>)` | Names the projection and its target link |
 | `.sourceField("column")` | Dataset column holding the source object's primary id |
 | `.targetField("column")` | Dataset column holding the target object's primary id |
 
@@ -139,11 +139,11 @@ prop("progress", "integer", { mode: "telemetry" })
 Then map a dataset of readings onto it with `.points(...)`:
 
 ```ts
-import { defineTelemetryProjection } from "@sixb/core"
+import { defineProjection } from "@sixb/core"
 import { erpProjectProgressDataset } from "../datasets/erp"
 import { Project } from "../ontology/project"
 
-export const projectProgressProjection = defineTelemetryProjection(
+export const projectProgressProjection = defineProjection(
   "project-progress",
   Project.p.progress
 )

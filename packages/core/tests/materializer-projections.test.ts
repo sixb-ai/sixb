@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import {
   col,
   defineDataset,
-  defineLinkProjection,
   defineObjectType,
   defineProjection,
   InMemoryStorage,
@@ -82,7 +81,7 @@ describe("ontology materializer projection replacement", () => {
       versionId: "wrong-target",
       createdAt: "2026-01-01T00:00:00.000Z",
     }
-    const run = await storage.projectionRuns.startOrReclaimMaterialization({
+    const run = await storage.projectionRuns.startOrReclaim({
       id: "wrong-target-run",
       projectId: "project",
       identity: {
@@ -94,9 +93,8 @@ describe("ontology materializer projection replacement", () => {
         projectionRevision: resolved.projectionRevision,
         ownershipHash: resolved.ownershipHash,
       },
-      objectTypeId: "Secret",
+      target: { objectTypeId: "Secret" },
     })
-    if (!run.executionToken) throw new Error("Projection run was not claimed")
     let consumed = false
     async function* shouldNotBeConsumed() {
       consumed = true
@@ -107,10 +105,7 @@ describe("ontology materializer projection replacement", () => {
       materializer.projections.replace({
         source: { projectionId: "devices" },
         datasetVersion,
-        execution: {
-          projectionRunId: run.id,
-          executionToken: run.executionToken,
-        },
+        execution: run.execution,
         entries: shouldNotBeConsumed(),
       })
     ).rejects.toMatchObject({ kind: "run-correlation" })
@@ -1222,7 +1217,7 @@ describe("ontology materializer projection replacement", () => {
     const joins = defineDataset("device-peers", {
       schema: [col("source_id", "string"), col("target_id", "string")],
     })
-    const definition = defineLinkProjection("device-peers", Device.l.peers)
+    const definition = defineProjection("device-peers", Device.l.peers)
       .fromDataset(joins)
       .sourceField("source_id")
       .targetField("target_id")

@@ -1,12 +1,19 @@
-import type { DatasetDefinition, ProjectionDefinition } from "@sixb/core"
+import type {
+  DatasetDefinition,
+  LinkProjectionDefinition,
+  LinkProjectionTarget,
+  ObjectProjectionDefinition,
+  ObjectProjectionTarget,
+  ProjectionDefinition,
+  TelemetryProjectionDefinition,
+} from "@sixb/core"
 import {
   createProjectionRunId,
   getProjectionRegistry,
   type ProjectionDispatchDescriptor,
-  projectionObjectTypeIds,
+  projectionTargetOf,
 } from "@sixb/core/internal/projections"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import type { ProjectionRunObjectTypes } from "@sixb/core/storage"
 import { ProjectionWorkerPermanentError } from "./errors"
 import {
   assertDatasetVersionMatchesDefinition,
@@ -14,12 +21,43 @@ import {
 } from "./schema-validation"
 import type { ProjectionJob, ProjectionWorkerContext } from "./types"
 
-export interface ValidatedProjectionJob {
+interface ValidatedProjectionJobBase {
+  readonly dataset: DatasetDefinition
+  readonly version: DatasetVersion
+}
+
+type ProjectionJobFor<TKind extends ProjectionJob["projectionKind"]> = Extract<
+  ProjectionJob,
+  { readonly projectionKind: TKind }
+>
+
+export type ValidatedProjectionJob = ValidatedProjectionJobBase &
+  (
+    | {
+        readonly kind: "object"
+        readonly job: ProjectionJobFor<"object">
+        readonly projection: ObjectProjectionDefinition
+        readonly target: ObjectProjectionTarget
+      }
+    | {
+        readonly kind: "link"
+        readonly job: ProjectionJobFor<"link">
+        readonly projection: LinkProjectionDefinition
+        readonly target: LinkProjectionTarget
+      }
+    | {
+        readonly kind: "telemetry"
+        readonly job: ProjectionJobFor<"telemetry">
+        readonly projection: TelemetryProjectionDefinition
+        readonly target: ObjectProjectionTarget
+      }
+  )
+
+interface ValidatedProjectionDependencies {
   readonly job: ProjectionJob
   readonly projection: ProjectionDefinition
   readonly dataset: DatasetDefinition
   readonly version: DatasetVersion
-  readonly objectTypes: ProjectionRunObjectTypes
 }
 
 export async function validateProjectionJob(
@@ -36,13 +74,47 @@ export async function validateProjectionJob(
 
   validatePinnedSchema({ runtime, projection, dataset, version })
 
-  return {
-    job,
-    projection,
-    dataset,
-    version,
-    objectTypes: projectionObjectTypeIds(projection),
+  return correlateValidatedProjection({ job, projection, dataset, version })
+}
+
+function correlateValidatedProjection(
+  input: ValidatedProjectionDependencies
+): ValidatedProjectionJob {
+  switch (input.projection._tag) {
+    case "ObjectProjectionDefinition":
+      if (input.job.projectionKind !== "object") throw invalidProjectionKind(input.job)
+      return {
+        ...input,
+        kind: "object",
+        job: input.job,
+        projection: input.projection,
+        target: projectionTargetOf(input.projection),
+      }
+    case "LinkProjectionDefinition":
+      if (input.job.projectionKind !== "link") throw invalidProjectionKind(input.job)
+      return {
+        ...input,
+        kind: "link",
+        job: input.job,
+        projection: input.projection,
+        target: projectionTargetOf(input.projection),
+      }
+    case "TelemetryProjectionDefinition":
+      if (input.job.projectionKind !== "telemetry") throw invalidProjectionKind(input.job)
+      return {
+        ...input,
+        kind: "telemetry",
+        job: input.job,
+        projection: input.projection,
+        target: projectionTargetOf(input.projection),
+      }
   }
+}
+
+function invalidProjectionKind(job: ProjectionJob): ProjectionWorkerPermanentError {
+  return permanent(
+    `Projection '${job.projectionId}' does not match queued kind '${job.projectionKind}'.`
+  )
 }
 
 function validatePinnedSchema(input: {

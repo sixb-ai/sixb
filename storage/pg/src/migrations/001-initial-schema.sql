@@ -6,8 +6,7 @@ CREATE TABLE objects (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL,
   version INTEGER NOT NULL,
-  source_event_id TEXT,
-  last_commit_id TEXT,
+  last_commit_id TEXT NOT NULL,
   PRIMARY KEY (project_id, object_type_id, primary_id)
 );
 
@@ -30,8 +29,7 @@ CREATE TABLE links (
   properties JSONB,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL,
-  source_event_id TEXT,
-  last_commit_id TEXT,
+  last_commit_id TEXT NOT NULL,
   PRIMARY KEY (project_id, source_type_id, source_id, link_id, target_type_id, target_id)
 );
 
@@ -48,8 +46,7 @@ CREATE TABLE timeseries (
   value JSONB NOT NULL,
   unit TEXT,
   at TIMESTAMPTZ NOT NULL,
-  source_event_id TEXT,
-  last_commit_id TEXT,
+  last_commit_id TEXT NOT NULL,
   -- A telemetry point's identity is (series, at): one value per instant per
   -- series. Appends upsert on this key, so no separate idempotency ledger is
   -- needed. This primary-key index serves exact point and ordered history reads;
@@ -67,8 +64,7 @@ CREATE TABLE timeseries_latest (
   value JSONB NOT NULL,
   unit TEXT,
   at TIMESTAMPTZ NOT NULL,
-  source_event_id TEXT,
-  last_commit_id TEXT,
+  last_commit_id TEXT NOT NULL,
   PRIMARY KEY (project_id, object_type_id, object_id, property_id)
 );
 
@@ -145,22 +141,22 @@ CREATE TABLE projection_runs (
   id TEXT NOT NULL,
   projection_id TEXT NOT NULL,
   projection_kind TEXT NOT NULL CHECK (projection_kind IN ('object', 'link', 'telemetry')),
-  materialization_protocol TEXT CHECK (
+  materialization_protocol TEXT NOT NULL CHECK (
     materialization_protocol IN ('replacement', 'telemetry')
   ),
   dataset_id TEXT NOT NULL,
   dataset_version_id TEXT NOT NULL,
-  dataset_version_created_at TEXT,
-  ontology_revision TEXT,
-  projection_revision TEXT,
-  ownership_hash TEXT,
+  dataset_version_created_at TEXT NOT NULL,
+  ontology_revision TEXT NOT NULL,
+  projection_revision TEXT NOT NULL,
+  ownership_hash TEXT NOT NULL,
   object_type_id TEXT,
   source_object_type_id TEXT,
   target_object_type_id TEXT,
   status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'cancelled')),
   started_at TIMESTAMPTZ NOT NULL,
   finished_at TIMESTAMPTZ,
-  attempt BIGINT NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+  attempt BIGINT NOT NULL CHECK (attempt >= 1),
   execution_token TEXT,
   fixed_batch_size BIGINT CHECK (fixed_batch_size IS NULL OR fixed_batch_size > 0),
   next_batch_ordinal BIGINT CHECK (next_batch_ordinal IS NULL OR next_batch_ordinal >= 0),
@@ -172,15 +168,26 @@ CREATE TABLE projection_runs (
   PRIMARY KEY (project_id, id),
   CHECK (source_rows_skipped <= source_rows_read),
   CHECK ((status = 'running') = (finished_at IS NULL)),
+  CHECK ((status = 'running') = (execution_token IS NOT NULL)),
+  CHECK ((projection_kind = 'telemetry') = (materialization_protocol = 'telemetry')),
   CHECK (
     (
-      materialization_protocol IS NULL
-      AND attempt = 0
-      AND execution_token IS NULL
-      AND dataset_version_created_at IS NULL
-      AND ontology_revision IS NULL
-      AND projection_revision IS NULL
-      AND ownership_hash IS NULL
+      projection_kind = 'link'
+      AND object_type_id IS NULL
+      AND source_object_type_id IS NOT NULL
+      AND target_object_type_id IS NOT NULL
+    )
+    OR
+    (
+      projection_kind IN ('object', 'telemetry')
+      AND object_type_id IS NOT NULL
+      AND source_object_type_id IS NULL
+      AND target_object_type_id IS NULL
+    )
+  ),
+  CHECK (
+    (
+      materialization_protocol = 'replacement'
       AND fixed_batch_size IS NULL
       AND next_batch_ordinal IS NULL
       AND next_row_offset IS NULL
@@ -188,49 +195,14 @@ CREATE TABLE projection_runs (
     )
     OR
     (
-      materialization_protocol IS NOT NULL
-      AND attempt >= 1
-      AND dataset_version_created_at IS NOT NULL
-      AND ontology_revision IS NOT NULL
-      AND projection_revision IS NOT NULL
-      AND ownership_hash IS NOT NULL
-      AND ((status = 'running') = (execution_token IS NOT NULL))
-      AND (
-        (
-          materialization_protocol = 'replacement'
-          AND projection_kind IN ('object', 'link')
-          AND fixed_batch_size IS NULL
-          AND next_batch_ordinal IS NULL
-          AND next_row_offset IS NULL
-          AND input_exhausted IS NULL
-        )
-        OR
-        (
-          materialization_protocol = 'telemetry'
-          AND projection_kind = 'telemetry'
-          AND fixed_batch_size IS NOT NULL
-          AND next_batch_ordinal IS NOT NULL
-          AND next_row_offset IS NOT NULL
-          AND input_exhausted IS NOT NULL
-        )
-      )
-      AND (
-        (
-          projection_kind = 'link'
-          AND object_type_id IS NULL
-          AND source_object_type_id IS NOT NULL
-          AND target_object_type_id IS NOT NULL
-        )
-        OR
-        (
-          projection_kind IN ('object', 'telemetry')
-          AND object_type_id IS NOT NULL
-          AND source_object_type_id IS NULL
-          AND target_object_type_id IS NULL
-        )
-      )
+      materialization_protocol = 'telemetry'
+      AND fixed_batch_size IS NOT NULL
+      AND next_batch_ordinal IS NOT NULL
+      AND next_row_offset IS NOT NULL
+      AND input_exhausted IS NOT NULL
     )
-  )
+  ),
+  CHECK (projection_kind != 'telemetry' OR status != 'succeeded' OR input_exhausted)
 );
 
 CREATE INDEX idx_pipeline_step_runs_project_started
@@ -747,13 +719,6 @@ CREATE TABLE rule_states (
 
 CREATE INDEX idx_rule_states_project_rule
   ON rule_states (project_id, rule_id);
-
--- Object materialization dedupes re-applied object/link mutation events and
--- telemetry.appended by id. Timeseries needs no equivalent ledger: its
--- (series, at) upsert is idempotent on its own.
-CREATE TABLE applied_events_objects (
-  event_id TEXT PRIMARY KEY
-);
 
 CREATE TABLE action_runs (
   project_id TEXT NOT NULL,

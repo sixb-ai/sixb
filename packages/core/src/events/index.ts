@@ -19,27 +19,10 @@ export {
   WORKFLOW_EVENT_DEFINITIONS,
 } from "./definitions"
 export { EventsError } from "./errors"
-export type {
-  LinkDeletedEventInput,
-  LinkUpsertEventInput,
-  ObjectDeletedEventInput,
-  ObjectUpsertEventInput,
-} from "./mutation-events"
-export {
-  buildLinkDeletedEvent,
-  buildLinkUpsertEvent,
-  buildObjectDeletedEvent,
-  buildObjectUpsertEvent,
-} from "./mutation-events"
 export {
   OntologyOutboxDispatcher,
   type OntologyOutboxDispatcherOptions,
 } from "./outbox-dispatcher"
-export {
-  clearedPropertyChanges,
-  diffPropertyChanges,
-  hasPropertyChanges,
-} from "./property-changes"
 export {
   DEFAULT_EVENTS_RETENTION_MS,
   type DomainEventLog,

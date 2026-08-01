@@ -3,24 +3,64 @@ import { z } from "zod"
 export const ProjectionKindSchema = z.enum(["object", "link", "telemetry"])
 export const ProjectionRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"])
 
-export const ProjectionRunSchema = z.object({
+const ProjectionRunIdentityBaseSchema = z.object({
+  projectionId: z.string(),
+  datasetVersion: z.object({
+    datasetId: z.string(),
+    versionId: z.string(),
+    createdAt: z.string(),
+  }),
+  ontologyRevision: z.string(),
+  projectionRevision: z.string(),
+  ownershipHash: z.string(),
+})
+
+const ProjectionRunBaseSchema = z.object({
   id: z.string(),
   projectId: z.string(),
-  projectionId: z.string(),
-  projectionKind: ProjectionKindSchema,
-  datasetId: z.string(),
-  datasetVersionId: z.string(),
-  objectTypeId: z.string().optional(),
-  sourceObjectTypeId: z.string().optional(),
-  targetObjectTypeId: z.string().optional(),
   status: ProjectionRunStatusSchema,
-  attempt: z.number().optional(),
+  attempt: z.number(),
+  progress: z.object({
+    sourceRowsRead: z.number(),
+    sourceRowsSkipped: z.number(),
+  }),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   errorMessage: z.string().optional(),
-  sourceRowsRead: z.number(),
-  sourceRowsSkipped: z.number(),
 })
+
+const ObjectProjectionRunSchema = ProjectionRunBaseSchema.extend({
+  identity: ProjectionRunIdentityBaseSchema.extend({
+    projectionKind: z.literal("object"),
+    protocol: z.literal("replacement"),
+  }),
+  target: z.object({ objectTypeId: z.string() }),
+})
+
+const LinkProjectionRunSchema = ProjectionRunBaseSchema.extend({
+  identity: ProjectionRunIdentityBaseSchema.extend({
+    projectionKind: z.literal("link"),
+    protocol: z.literal("replacement"),
+  }),
+  target: z.object({
+    sourceObjectTypeId: z.string(),
+    targetObjectTypeId: z.string(),
+  }),
+})
+
+const TelemetryProjectionRunSchema = ProjectionRunBaseSchema.extend({
+  identity: ProjectionRunIdentityBaseSchema.extend({
+    projectionKind: z.literal("telemetry"),
+    protocol: z.literal("telemetry"),
+  }),
+  target: z.object({ objectTypeId: z.string() }),
+})
+
+export const ProjectionRunSchema = z.union([
+  ObjectProjectionRunSchema,
+  LinkProjectionRunSchema,
+  TelemetryProjectionRunSchema,
+])
 
 export const ForeignKeyDescriptorSchema = z.object({
   linkId: z.string(),

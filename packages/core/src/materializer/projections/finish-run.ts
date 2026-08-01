@@ -6,13 +6,13 @@ import type {
   PinnedDatasetVersion,
   ProjectionMaterializationIdentity,
   ProjectionRunFinishInput,
+  ProjectionRunTerminalDecision,
 } from "../../materialization/model"
 import type { ProjectionDefinition, ResolvedProjection } from "../../projections/types"
-import type { ProjectionMaterializationRunRecord } from "../../storage"
 import type { OntologyCommitRecord } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { withSerializationRetry } from "../execution/commit-lifecycle"
-import { assertProjectionMaterializationExecution } from "../execution/run-correlation"
+import { lockProjectionRunForMaterialization } from "../execution/run-correlation"
 import {
   normalizePinnedDatasetVersion,
   normalizeProjectionExecution,
@@ -44,6 +44,7 @@ function prepareProjectionRunFinish(
   context: Pick<MaterializerContext, "projectId" | "projectionRegistry" | "clock">,
   raw: ProjectionRunFinishInput
 ): PreparedProjectionRunFinish {
+  assertValidTerminalDecision(raw)
   const source = normalizeProjectionSourceRef(raw.source)
   const datasetVersion = normalizePinnedDatasetVersion(raw.datasetVersion)
   const execution = normalizeProjectionExecution(raw.execution)
@@ -74,7 +75,7 @@ async function finishProjectionRunTransaction(
   storage: MaterializerStorage,
   command: PreparedProjectionRunFinish
 ): Promise<void> {
-  const { projectionRuns, run } = await assertProjectionMaterializationExecution(storage, {
+  const { projectionRuns } = await lockProjectionRunForMaterialization(storage, {
     projectId: command.projectId,
     projectionRunId: command.input.execution.projectionRunId,
     executionToken: command.input.execution.executionToken,
@@ -84,19 +85,51 @@ async function finishProjectionRunTransaction(
 
   if (command.input.protocol === "replacement") {
     await assertReplacementTerminalDecision(storage, command)
-  } else {
-    assertTelemetryTerminalDecision(run, command.input)
   }
 
-  await projectionRuns.finishMaterialization({
+  await projectionRuns.finish({
     id: command.input.execution.projectionRunId,
     projectId: command.projectId,
     executionToken: command.input.execution.executionToken,
     identity: command.identity,
-    status: command.input.status,
-    ...(command.input.status === "succeeded" ? {} : { errorMessage: command.input.errorMessage }),
+    ...terminalDecision(command.input),
     finishedAt: command.finishedAt,
   })
+}
+
+function assertValidTerminalDecision(input: ProjectionRunFinishInput): void {
+  if (input.protocol !== "replacement" && input.protocol !== "telemetry") {
+    throw new MaterializationValidationError("Projection finish protocol is invalid.")
+  }
+  if (input.status !== "succeeded" && input.status !== "failed" && input.status !== "cancelled") {
+    throw new MaterializationValidationError("Projection finish status must be terminal.")
+  }
+  const inputExhausted = "inputExhausted" in input ? input.inputExhausted : undefined
+  if (input.status === "succeeded" && input.protocol === "telemetry") {
+    if (inputExhausted === true) return
+    throw new MaterializationValidationError(
+      "Telemetry projection success requires an explicit exhausted-input acknowledgement."
+    )
+  }
+  if (inputExhausted !== undefined) {
+    throw new MaterializationValidationError(
+      "Only telemetry projection success can acknowledge exhausted input."
+    )
+  }
+}
+
+function terminalDecision(input: ProjectionRunFinishInput): ProjectionRunTerminalDecision {
+  if (input.status !== "succeeded") {
+    return {
+      protocol: input.protocol,
+      status: input.status,
+      ...(input.errorMessage === undefined ? {} : { errorMessage: input.errorMessage }),
+    }
+  }
+  if (input.protocol === "telemetry") {
+    return { protocol: "telemetry", status: "succeeded", inputExhausted: true }
+  }
+  return { protocol: "replacement", status: "succeeded" }
 }
 
 async function assertReplacementTerminalDecision(
@@ -158,17 +191,4 @@ function datasetVersionsEqual(left: PinnedDatasetVersion, right: PinnedDatasetVe
     left.versionId === right.versionId &&
     left.createdAt === right.createdAt
   )
-}
-
-function assertTelemetryTerminalDecision(
-  run: ProjectionMaterializationRunRecord,
-  input: ProjectionRunFinishInput
-): void {
-  if (input.status !== "succeeded") return
-  if (!run.telemetryCheckpoint?.inputExhausted) {
-    throw new MaterializationConflictError(
-      "run-correlation",
-      `Telemetry projection run '${run.id}' cannot succeed before its input is exhausted.`
-    )
-  }
 }

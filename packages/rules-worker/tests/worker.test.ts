@@ -1,11 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type { DomainEvent, RuleDefinition, SixbErrorContext, Storage } from "@sixb/core"
-import { InMemoryBroker, InMemoryStorage } from "@sixb/core"
+import {
+  defineObjectType,
+  InMemoryBroker,
+  InMemoryStorage,
+  link,
+  OntologyRegistry,
+  prop,
+} from "@sixb/core"
 import { attachSixbErrorReporter, flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import type { StoredDomainEvent, StoredObjectUpdatedEvent } from "@sixb/core/internal/events"
 import { EventsRuntime } from "@sixb/core/internal/events"
-import type { ObjectStorage, RulesStorage, TimeseriesStorage } from "@sixb/core/storage"
-import { InMemoryObjectStorage, InMemoryRulesStorage } from "@sixb/core/storage"
+import type { ObjectStorage, RulesStorage } from "@sixb/core/storage"
+import { InMemoryRulesStorage } from "@sixb/core/storage"
+import { createMaterializerTestFixture, type MaterializerTestFixture } from "@sixb/core/testing"
 import type { RulesWorkerSixb } from "../src"
 import { RulesWorker } from "../src"
 
@@ -37,6 +45,20 @@ const alsoPostedRule: RuleDefinition = {
   ...postedRule,
   id: "transaction.also-posted",
 }
+
+const Document = defineObjectType({
+  id: "document",
+  name: "Document",
+  properties: [prop("id", "string", { primary: true, required: true })],
+})
+const Transaction = defineObjectType({
+  id: "transaction",
+  name: "Transaction",
+  properties: [prop("id", "string", { primary: true, required: true }), prop("status", "string")],
+  links: [link("document", Document)],
+})
+const ontology = new OntologyRegistry({ sources: [Transaction, Document] })
+const fixturesByStorage = new WeakMap<Storage, MaterializerTestFixture>()
 
 const workers: RulesWorker[] = []
 
@@ -144,8 +166,9 @@ describe("RulesWorker", () => {
 
     try {
       const events = createEventsRuntime()
-      const objects = new ThrowOnceObjectStorage()
-      const storage = createStorage({ objects })
+      const storage = createStorage()
+      const objects = new ThrowOnceObjectStorage(storage.objects)
+      replaceObjectStorage(storage, objects.storage)
       const reports: Array<{ error: Error; context: SixbErrorContext }> = []
       const runtime = createRuntime({ events, storage })
       attachSixbErrorReporter(runtime, (error, context) => {
@@ -256,8 +279,9 @@ describe("RulesWorker", () => {
 
   test("reconciliation scans one object type once for all of its rules", async () => {
     const events = createEventsRuntime()
-    const objects = new CountingReconciliationObjectStorage()
-    const storage = createStorage({ objects })
+    const storage = createStorage()
+    const objects = new CountingReconciliationObjectStorage(storage.objects)
+    replaceObjectStorage(storage, objects.storage)
     await seedCurrentObject(storage, "posted")
     const worker = track(
       new RulesWorker(createRuntime({ rules: [postedRule, alsoPostedRule], events, storage }))
@@ -272,8 +296,9 @@ describe("RulesWorker", () => {
 
   test("serializes live evaluation behind reconciliation", async () => {
     const events = createEventsRuntime()
-    const objects = new BlockingReconciliationObjectStorage()
-    const storage = createStorage({ objects })
+    const storage = createStorage()
+    const objects = new BlockingReconciliationObjectStorage(storage.objects)
+    replaceObjectStorage(storage, objects.storage)
     await seedCurrentObject(storage, "posted")
     const worker = track(new RulesWorker(createRuntime({ events, storage })))
 
@@ -289,8 +314,9 @@ describe("RulesWorker", () => {
   })
 
   test("loads reconciliation links through one batch port", async () => {
-    const objects = new RecordingBatchLinkObjectStorage()
-    const storage = createStorage({ objects })
+    const storage = createStorage()
+    const objects = new RecordingBatchLinkObjectStorage(storage.objects)
+    replaceObjectStorage(storage, objects.storage)
     await seedCurrentObject(storage, "posted")
     const worker = track(new RulesWorker(createRuntime({ rules: [hasDocumentRule], storage })))
 
@@ -308,8 +334,9 @@ describe("RulesWorker", () => {
     try {
       const reports: { error: Error; context: SixbErrorContext }[] = []
       const events = createEventsRuntime()
-      const objects = new FailOneSubjectObjectStorage("tx-1")
-      const storage = createStorage({ objects })
+      const storage = createStorage()
+      const objects = new FailOneSubjectObjectStorage(storage.objects, "tx-1")
+      replaceObjectStorage(storage, objects.storage)
       await seedCurrentObject(storage, "posted")
       await seedCurrentObject(storage, "posted", "tx-2")
 
@@ -401,64 +428,70 @@ class DelayedRulesStorage extends InMemoryRulesStorage {
   }
 }
 
-class ThrowOnceObjectStorage extends InMemoryObjectStorage {
+class ThrowOnceObjectStorage {
   private shouldThrow = true
+  readonly storage: ObjectStorage
 
-  override async getByPrimaryId(
-    params: Parameters<ObjectStorage["getByPrimaryId"]>[0]
-  ): ReturnType<ObjectStorage["getByPrimaryId"]> {
-    if (this.shouldThrow) {
-      this.shouldThrow = false
-      throw new Error("Object storage failed.")
-    }
-
-    return super.getByPrimaryId(params)
+  constructor(delegate: ObjectStorage) {
+    this.storage = objectStorageFacade(delegate, {
+      getByPrimaryId: async (params) => {
+        if (this.shouldThrow) {
+          this.shouldThrow = false
+          throw new Error("Object storage failed.")
+        }
+        return delegate.getByPrimaryId(params)
+      },
+    })
   }
 }
 
 /**
- * Fails one subject deterministically and records which subjects were read individually.
+ * Fails one subject deterministically through both live and reconciliation reads.
  *
- * Reconciliation pages through `listByPrimaryIdPage`, so a `getByPrimaryId` for a given subject can
- * only come from live evaluation — which is what makes the read a usable isolation signal.
+ * Individual reads still identify which live candidates ran after the failure.
  */
-class FailOneSubjectObjectStorage extends InMemoryObjectStorage {
+class FailOneSubjectObjectStorage {
   readonly subjectReads: string[] = []
+  readonly storage: ObjectStorage
 
-  constructor(private readonly failingPrimaryId: string) {
-    super()
-  }
-
-  override async getByPrimaryId(
-    params: Parameters<ObjectStorage["getByPrimaryId"]>[0]
-  ): ReturnType<ObjectStorage["getByPrimaryId"]> {
-    this.subjectReads.push(params.primaryId)
-    if (params.primaryId === this.failingPrimaryId) {
-      throw new Error("Object storage failed.")
-    }
-
-    return super.getByPrimaryId(params)
+  constructor(delegate: ObjectStorage, failingPrimaryId: string) {
+    this.storage = objectStorageFacade(delegate, {
+      getByPrimaryId: async (params) => {
+        this.subjectReads.push(params.primaryId)
+        if (params.primaryId === failingPrimaryId) {
+          throw new Error("Object storage failed.")
+        }
+        return delegate.getByPrimaryId(params)
+      },
+      listByPrimaryIdPage: async (params) => {
+        const page = await delegate.listByPrimaryIdPage(params)
+        if (page.objects.some((object) => object.primaryId === failingPrimaryId)) {
+          throw new Error("Object storage failed.")
+        }
+        return page
+      },
+    })
   }
 }
 
-class BlockingReconciliationObjectStorage extends InMemoryObjectStorage {
+class BlockingReconciliationObjectStorage {
   private readonly reconciliationStarted = createDeferred<void>()
   private readonly reconciliationRelease = createDeferred<void>()
   liveReads = 0
+  readonly storage: ObjectStorage
 
-  override async listByPrimaryIdPage(
-    params: Parameters<ObjectStorage["listByPrimaryIdPage"]>[0]
-  ): ReturnType<ObjectStorage["listByPrimaryIdPage"]> {
-    this.reconciliationStarted.resolve()
-    await this.reconciliationRelease.promise
-    return super.listByPrimaryIdPage(params)
-  }
-
-  override async getByPrimaryId(
-    params: Parameters<ObjectStorage["getByPrimaryId"]>[0]
-  ): ReturnType<ObjectStorage["getByPrimaryId"]> {
-    this.liveReads += 1
-    return super.getByPrimaryId(params)
+  constructor(delegate: ObjectStorage) {
+    this.storage = objectStorageFacade(delegate, {
+      listByPrimaryIdPage: async (params) => {
+        this.reconciliationStarted.resolve()
+        await this.reconciliationRelease.promise
+        return delegate.listByPrimaryIdPage(params)
+      },
+      getByPrimaryId: async (params) => {
+        this.liveReads += 1
+        return delegate.getByPrimaryId(params)
+      },
+    })
   }
 
   waitForReconciliation(): Promise<void> {
@@ -470,31 +503,36 @@ class BlockingReconciliationObjectStorage extends InMemoryObjectStorage {
   }
 }
 
-class RecordingBatchLinkObjectStorage extends InMemoryObjectStorage {
+class RecordingBatchLinkObjectStorage {
   batchReads = 0
   directReads = 0
+  readonly storage: ObjectStorage
 
-  override async listLinksBatch(): ReturnType<ObjectStorage["listLinksBatch"]> {
-    this.batchReads += 1
-    return new Map()
-  }
-
-  override async listLinks(
-    params: Parameters<ObjectStorage["listLinks"]>[0]
-  ): ReturnType<ObjectStorage["listLinks"]> {
-    this.directReads += 1
-    return super.listLinks(params)
+  constructor(delegate: ObjectStorage) {
+    this.storage = objectStorageFacade(delegate, {
+      listLinksBatch: async () => {
+        this.batchReads += 1
+        return new Map()
+      },
+      listLinks: async (params) => {
+        this.directReads += 1
+        return delegate.listLinks(params)
+      },
+    })
   }
 }
 
-class CountingReconciliationObjectStorage extends InMemoryObjectStorage {
+class CountingReconciliationObjectStorage {
   pageReads = 0
+  readonly storage: ObjectStorage
 
-  override async listByPrimaryIdPage(
-    params: Parameters<ObjectStorage["listByPrimaryIdPage"]>[0]
-  ): ReturnType<ObjectStorage["listByPrimaryIdPage"]> {
-    this.pageReads += 1
-    return super.listByPrimaryIdPage(params)
+  constructor(delegate: ObjectStorage) {
+    this.storage = objectStorageFacade(delegate, {
+      listByPrimaryIdPage: async (params) => {
+        this.pageReads += 1
+        return delegate.listByPrimaryIdPage(params)
+      },
+    })
   }
 }
 
@@ -515,18 +553,28 @@ function createRuntime(
   }
 }
 
-function createStorage(
-  options: {
-    readonly objects?: ObjectStorage
-    readonly timeseries?: TimeseriesStorage
-    readonly rules?: RulesStorage
-  } = {}
-): Storage {
+function createStorage(options: { readonly rules?: RulesStorage } = {}): Storage {
   const storage = new InMemoryStorage()
   return Object.assign(storage, {
-    objects: options.objects ?? storage.objects,
-    timeseries: options.timeseries ?? storage.timeseries,
     rules: options.rules ?? storage.rules,
+  })
+}
+
+function replaceObjectStorage(storage: Storage, objects: ObjectStorage): void {
+  Object.assign(storage, { objects })
+}
+
+function objectStorageFacade(
+  delegate: ObjectStorage,
+  overrides: Partial<ObjectStorage>
+): ObjectStorage {
+  return new Proxy(delegate, {
+    get(target, property) {
+      if (Object.hasOwn(overrides, property)) {
+        return Reflect.get(overrides, property, overrides)
+      }
+      return Reflect.get(target, property, target)
+    },
   })
 }
 
@@ -565,10 +613,22 @@ async function seedCurrentObject(
   status: string,
   primaryId = "tx-1"
 ): Promise<void> {
-  await storage.objects.applyObjectUpsert({
-    ...objectUpdatedEvent(status, primaryId),
-    cursor: `seed-${primaryId}`,
+  await materializerFixture(storage).seed({
+    objects: [
+      {
+        ref: { objectTypeId: "transaction", primaryId },
+        properties: { id: primaryId, status },
+      },
+    ],
   })
+}
+
+function materializerFixture(storage: Storage): MaterializerTestFixture {
+  const existing = fixturesByStorage.get(storage)
+  if (existing) return existing
+  const fixture = createMaterializerTestFixture({ projectId, ontology, storage })
+  fixturesByStorage.set(storage, fixture)
+  return fixture
 }
 
 async function ruleEventTypes(events: EventsRuntime): Promise<readonly string[]> {

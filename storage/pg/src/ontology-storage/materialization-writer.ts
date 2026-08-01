@@ -181,12 +181,12 @@ export class PgMaterializationWriter {
         )
         INSERT INTO objects (
           project_id, object_type_id, primary_id, properties, created_at,
-          updated_at, version, source_event_id, last_commit_id
+          updated_at, version, last_commit_id
         )
         SELECT ${projectId}, value->>'objectTypeId', value->>'primaryId',
           value->'properties', (value->>'createdAt')::timestamptz,
           (value->>'updatedAt')::timestamptz, (value->>'version')::integer,
-          NULL, value->>'lastCommitId'
+          value->>'lastCommitId'
         FROM staged
         ON CONFLICT DO NOTHING
         RETURNING object_type_id
@@ -207,7 +207,7 @@ export class PgMaterializationWriter {
           created_at = (staged.value->>'createdAt')::timestamptz,
           updated_at = (staged.value->>'updatedAt')::timestamptz,
           version = (staged.value->>'version')::integer,
-          source_event_id = NULL, last_commit_id = staged.value->>'lastCommitId'
+          last_commit_id = staged.value->>'lastCommitId'
         FROM staged
         WHERE effective.project_id = ${projectId}
           AND effective.object_type_id = staged.value->>'objectTypeId'
@@ -245,13 +245,13 @@ export class PgMaterializationWriter {
         )
         INSERT INTO links (
           project_id, source_type_id, source_id, link_id, target_type_id, target_id,
-          properties, created_at, updated_at, source_event_id, last_commit_id
+          properties, created_at, updated_at, last_commit_id
         )
         SELECT ${projectId}, value->>'sourceTypeId', value->>'sourceId', value->>'linkId',
           value->>'targetTypeId', value->>'targetId',
           CASE WHEN value ? 'properties' THEN value->'properties' ELSE NULL END,
           (value->>'createdAt')::timestamptz, (value->>'updatedAt')::timestamptz,
-          NULL, value->>'lastCommitId'
+          value->>'lastCommitId'
         FROM staged
         ON CONFLICT DO NOTHING
         RETURNING source_type_id
@@ -274,7 +274,7 @@ export class PgMaterializationWriter {
           END,
           created_at = (staged.value->>'createdAt')::timestamptz,
           updated_at = (staged.value->>'updatedAt')::timestamptz,
-          source_event_id = NULL, last_commit_id = staged.value->>'lastCommitId'
+          last_commit_id = staged.value->>'lastCommitId'
         FROM staged
         WHERE effective.project_id = ${projectId}
           AND effective.source_type_id = staged.value->>'sourceTypeId'
@@ -308,25 +308,30 @@ export class PgMaterializationWriter {
         ), written AS (
           INSERT INTO timeseries (
             project_id, object_type_id, object_id, property_id,
-            value, unit, at, source_event_id, last_commit_id
+            value, unit, at, last_commit_id
           )
           SELECT ${projectId}, value->>'objectTypeId', value->>'objectId',
             value->>'propertyId', value->'value', value->>'unit',
-            (value->>'at')::timestamptz, NULL, value->>'lastCommitId'
+            (value->>'at')::timestamptz, value->>'lastCommitId'
           FROM staged
           ON CONFLICT DO NOTHING
           RETURNING *
+        ), latest_candidates AS (
+          SELECT DISTINCT ON (project_id, object_type_id, object_id, property_id)
+            project_id, object_type_id, object_id, property_id,
+            value, unit, at, last_commit_id
+          FROM written
+          ORDER BY project_id, object_type_id, object_id, property_id, at DESC
         ), latest AS (
           INSERT INTO timeseries_latest (
             project_id, object_type_id, object_id, property_id,
-            value, unit, at, source_event_id, last_commit_id
+            value, unit, at, last_commit_id
           )
           SELECT project_id, object_type_id, object_id, property_id,
-            value, unit, at, source_event_id, last_commit_id
-          FROM written
+            value, unit, at, last_commit_id
+          FROM latest_candidates
           ON CONFLICT (project_id, object_type_id, object_id, property_id)
           DO UPDATE SET value = EXCLUDED.value, unit = EXCLUDED.unit, at = EXCLUDED.at,
-            source_event_id = EXCLUDED.source_event_id,
             last_commit_id = EXCLUDED.last_commit_id
           WHERE EXCLUDED.at >= timeseries_latest.at
           RETURNING object_type_id
@@ -344,7 +349,7 @@ export class PgMaterializationWriter {
         ), written AS (
           UPDATE timeseries AS points
           SET value = staged.value->'value', unit = staged.value->>'unit',
-            source_event_id = NULL, last_commit_id = staged.value->>'lastCommitId'
+            last_commit_id = staged.value->>'lastCommitId'
           FROM staged
           WHERE points.project_id = ${projectId}
             AND points.object_type_id = staged.value->>'objectTypeId'
@@ -353,17 +358,22 @@ export class PgMaterializationWriter {
             AND points.at = (staged.value->>'at')::timestamptz
             AND points.last_commit_id = staged.value->>'expectedLastCommitId'
           RETURNING points.*
+        ), latest_candidates AS (
+          SELECT DISTINCT ON (project_id, object_type_id, object_id, property_id)
+            project_id, object_type_id, object_id, property_id,
+            value, unit, at, last_commit_id
+          FROM written
+          ORDER BY project_id, object_type_id, object_id, property_id, at DESC
         ), latest AS (
           INSERT INTO timeseries_latest (
             project_id, object_type_id, object_id, property_id,
-            value, unit, at, source_event_id, last_commit_id
+            value, unit, at, last_commit_id
           )
           SELECT project_id, object_type_id, object_id, property_id,
-            value, unit, at, source_event_id, last_commit_id
-          FROM written
+            value, unit, at, last_commit_id
+          FROM latest_candidates
           ON CONFLICT (project_id, object_type_id, object_id, property_id)
           DO UPDATE SET value = EXCLUDED.value, unit = EXCLUDED.unit, at = EXCLUDED.at,
-            source_event_id = EXCLUDED.source_event_id,
             last_commit_id = EXCLUDED.last_commit_id
           WHERE EXCLUDED.at >= timeseries_latest.at
           RETURNING object_type_id

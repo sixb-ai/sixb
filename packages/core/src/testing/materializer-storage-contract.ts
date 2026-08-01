@@ -5,7 +5,6 @@ import {
   defineDataset,
   defineObjectType,
   defineProjection,
-  defineTelemetryProjection,
   link,
   OntologyRegistry,
   prop,
@@ -13,14 +12,10 @@ import {
 } from ".."
 import {
   createOntologyMaterializer,
-  type ProjectionMaterializationIdentity,
   ProjectionRegistry,
   type ProjectionSourceEntry,
 } from "../materializer"
-import type {
-  ActionMaterializationRunStorage,
-  ProjectionMaterializationRunStorage,
-} from "../storage"
+import type { ActionRunStorage, ProjectionRunStorage } from "../storage"
 
 export interface MaterializerStorageContractProvider<TStorage extends Storage> {
   readonly createStorage: () => TStorage | Promise<TStorage>
@@ -28,8 +23,8 @@ export interface MaterializerStorageContractProvider<TStorage extends Storage> {
 }
 
 type ContractStorage = Storage & {
-  readonly actionRuns: ActionMaterializationRunStorage
-  readonly projectionRuns: ProjectionMaterializationRunStorage
+  readonly actionRuns: ActionRunStorage
+  readonly projectionRuns: ProjectionRunStorage
 }
 
 const Device = defineObjectType({
@@ -63,7 +58,7 @@ const deviceProjection = defineProjection("storage_contract_devices", Device)
       target: Device,
     },
   })
-const temperatureProjection = defineTelemetryProjection(
+const temperatureProjection = defineProjection(
   "storage_contract_temperatures",
   Device.p.temperature
 )
@@ -295,10 +290,10 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
 }
 
 function requireContractStorage(storage: Storage): ContractStorage {
-  if (!storage.actionRuns || !("lockForMaterialization" in storage.actionRuns)) {
+  if (!storage.actionRuns) {
     throw new Error("[Sixb] Materializer storage contract requires Action materialization runs.")
   }
-  if (!storage.projectionRuns || !("startOrReclaimMaterialization" in storage.projectionRuns)) {
+  if (!storage.projectionRuns) {
     throw new Error(
       "[Sixb] Materializer storage contract requires projection materialization runs."
     )
@@ -351,32 +346,44 @@ async function claim(
       ? projections.resolveSource(input.projectionId)
       : projections.resolveTelemetry(input.projectionId)
   const definition = resolved.definition
-  const projectionKind =
-    definition._tag === "ObjectProjectionDefinition"
-      ? "object"
-      : definition._tag === "LinkProjectionDefinition"
-        ? "link"
-        : "telemetry"
-  const identity = {
+  const identityBase = {
     projectionId: input.projectionId,
-    projectionKind,
-    protocol: input.protocol,
     datasetVersion: input.datasetVersion,
     ontologyRevision: projections.ontologyRevision,
     projectionRevision: resolved.projectionRevision,
     ownershipHash: resolved.ownershipHash,
-  } as ProjectionMaterializationIdentity
-  const run = await storage.projectionRuns.startOrReclaimMaterialization({
+  }
+  const common = {
     id: input.runId,
     projectId: "materializer-storage-contract",
-    identity,
-    ...(definition._tag === "LinkProjectionDefinition"
-      ? {
-          sourceObjectTypeId: definition.sourceObjectTypeId,
-          targetObjectTypeId: definition.targetObjectTypeId,
-        }
-      : { objectTypeId: definition.objectTypeId }),
-    ...(input.fixedBatchSize === undefined ? {} : { fixedBatchSize: input.fixedBatchSize }),
+  } as const
+
+  if (definition._tag === "TelemetryProjectionDefinition") {
+    const claim = await storage.projectionRuns.startOrReclaim({
+      ...common,
+      identity: { ...identityBase, projectionKind: "telemetry", protocol: "telemetry" },
+      target: { objectTypeId: definition.objectTypeId },
+      fixedBatchSize: input.fixedBatchSize ?? 1,
+    })
+    return claim.execution
+  }
+
+  if (definition._tag === "LinkProjectionDefinition") {
+    const claim = await storage.projectionRuns.startOrReclaim({
+      ...common,
+      identity: { ...identityBase, projectionKind: "link", protocol: "replacement" },
+      target: {
+        sourceObjectTypeId: definition.sourceObjectTypeId,
+        targetObjectTypeId: definition.targetObjectTypeId,
+      },
+    })
+    return claim.execution
+  }
+
+  const claim = await storage.projectionRuns.startOrReclaim({
+    ...common,
+    identity: { ...identityBase, projectionKind: "object", protocol: "replacement" },
+    target: { objectTypeId: definition.objectTypeId },
   })
-  return { projectionRunId: run.id, executionToken: run.executionToken }
+  return claim.execution
 }

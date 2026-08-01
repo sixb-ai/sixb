@@ -1,10 +1,7 @@
-import { type ProjectionDefinition, projectionObjectTypeIds } from "../projections"
+import type { ProjectionDefinition, ProjectionTarget } from "../projections"
+import { projectionTargetOf } from "../projections/builders"
 import type { ActionRunRecord } from "../storage/action-runs"
 import type { PipelineRunRecord } from "../storage/pipeline-runs"
-import {
-  type ProjectionRunObjectTypes,
-  projectionRunObjectTypesVisible,
-} from "../storage/projection-runs"
 import type { WorkflowInterventionRecord } from "../storage/workflow-interventions"
 import type { WorkflowRunRecord } from "../storage/workflow-runs"
 import { isAllowed } from "./decision"
@@ -61,14 +58,15 @@ export function canViewPipelineRun(
 /** A projection run is viewable when its target object type(s) are viewable. */
 export function canViewProjectionRun(
   authorization: AuthorizationContext | null | undefined,
-  run: ProjectionRunObjectTypes
+  target: ProjectionTarget
 ): boolean {
-  return (
-    !authorization ||
-    projectionRunObjectTypesVisible(run, (objectTypeId) =>
-      isAllowed(authorization, { kind: "object.view", objectTypeId })
-    )
-  )
+  if (!authorization) return true
+  const canView = (objectTypeId: string) =>
+    isAllowed(authorization, { kind: "object.view", objectTypeId })
+  if ("sourceObjectTypeId" in target) {
+    return canView(target.sourceObjectTypeId) && canView(target.targetObjectTypeId)
+  }
+  return canView(target.objectTypeId)
 }
 
 /** Whether a principal may see a projection definition (and its run history). */
@@ -76,5 +74,5 @@ export function canViewProjection(
   authorization: AuthorizationContext | null | undefined,
   projection: ProjectionDefinition
 ): boolean {
-  return canViewProjectionRun(authorization, projectionObjectTypeIds(projection))
+  return canViewProjectionRun(authorization, projectionTargetOf(projection))
 }

@@ -9,7 +9,6 @@ function materializerWithEventCount(eventCount: number): Materializer {
     edits: { commit: async () => result },
     projections: {
       replace: async () => result,
-      completeTelemetryInput: async () => undefined,
       finishRun: async () => undefined,
     },
     telemetry: { append: async () => result },
@@ -29,7 +28,6 @@ describe("ontology mutation runtime", () => {
     await runtime.commitEdits({} as never)
     await runtime.replaceProjection({} as never)
     await runtime.appendTelemetry({} as never)
-    await runtime.completeProjectionTelemetryInput({} as never)
     await runtime.finishProjection({} as never)
 
     expect(wakes).toBe(3)

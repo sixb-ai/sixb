@@ -2,10 +2,8 @@ import { describe, expect, test } from "bun:test"
 import {
   col,
   defineDataset,
-  defineLinkProjection,
   defineObjectType,
   defineProjection,
-  defineTelemetryProjection,
   fromForeignKey,
   isLinkProjectionDefinition,
   isObjectProjectionDefinition,
@@ -378,11 +376,11 @@ describe("fromForeignKey", () => {
   })
 })
 
-// ── defineLinkProjection ─────────────────────────────────────
+// ── Link projection ─────────────────────────────────────
 
-describe("defineLinkProjection", () => {
+describe("defineProjection — link target", () => {
   test("builds correct LinkProjectionDefinition", () => {
-    const result = defineLinkProjection("room-sensor-links", Room.l.hasSensors)
+    const result = defineProjection("room-sensor-links", Room.l.hasSensors)
       .fromDataset(roomSensorsDataset)
       .sourceField("room_id")
       .targetField("sensor_id")
@@ -398,30 +396,30 @@ describe("defineLinkProjection", () => {
   })
 
   test("rejects empty id", () => {
-    expect(() => defineLinkProjection("  ", Room.l.hasSensors)).toThrow(ProjectionValidationError)
-    expect(() => defineLinkProjection("  ", Room.l.hasSensors)).toThrow(
+    expect(() => defineProjection("  ", Room.l.hasSensors)).toThrow(ProjectionValidationError)
+    expect(() => defineProjection("  ", Room.l.hasSensors)).toThrow(
       "Projection id must not be empty"
     )
   })
 
   test("rejects empty dataset id", () => {
     const invalidDataset = { kind: "dataset", id: "  ", schema: { columns: [] } } as never
-    expect(() => defineLinkProjection("lp", Room.l.hasSensors).fromDataset(invalidDataset)).toThrow(
+    expect(() => defineProjection("lp", Room.l.hasSensors).fromDataset(invalidDataset)).toThrow(
       ProjectionValidationError
     )
-    expect(() => defineLinkProjection("lp", Room.l.hasSensors).fromDataset(invalidDataset)).toThrow(
+    expect(() => defineProjection("lp", Room.l.hasSensors).fromDataset(invalidDataset)).toThrow(
       "Projection dataset id must not be empty"
     )
   })
 
   test("rejects empty source field", () => {
     expect(() =>
-      defineLinkProjection("lp", Room.l.hasSensors)
+      defineProjection("lp", Room.l.hasSensors)
         .fromDataset(genericDataset)
         .sourceField("  " as never)
     ).toThrow(ProjectionValidationError)
     expect(() =>
-      defineLinkProjection("lp", Room.l.hasSensors)
+      defineProjection("lp", Room.l.hasSensors)
         .fromDataset(genericDataset)
         .sourceField("  " as never)
     ).toThrow("Projection source field must not be empty")
@@ -429,13 +427,13 @@ describe("defineLinkProjection", () => {
 
   test("rejects empty target field", () => {
     expect(() =>
-      defineLinkProjection("lp", Room.l.hasSensors)
+      defineProjection("lp", Room.l.hasSensors)
         .fromDataset(genericDataset)
         .sourceField("a")
         .targetField("  " as never)
     ).toThrow(ProjectionValidationError)
     expect(() =>
-      defineLinkProjection("lp", Room.l.hasSensors)
+      defineProjection("lp", Room.l.hasSensors)
         .fromDataset(genericDataset)
         .sourceField("a")
         .targetField("  " as never)
@@ -443,29 +441,29 @@ describe("defineLinkProjection", () => {
   })
 
   test("rejects polymorphic link token", () => {
-    expect(() => defineLinkProjection("lp", TypeWithPolymorphicLink.l.targets as never)).toThrow(
+    expect(() => defineProjection("lp", TypeWithPolymorphicLink.l.targets as never)).toThrow(
       ProjectionValidationError
     )
-    expect(() => defineLinkProjection("lp", TypeWithPolymorphicLink.l.targets as never)).toThrow(
+    expect(() => defineProjection("lp", TypeWithPolymorphicLink.l.targets as never)).toThrow(
       "polymorphic"
     )
   })
 
   test("rejects wildcard link token", () => {
-    expect(() => defineLinkProjection("lp", TypeWithWildcardLink.l.anything as never)).toThrow(
+    expect(() => defineProjection("lp", TypeWithWildcardLink.l.anything as never)).toThrow(
       ProjectionValidationError
     )
-    expect(() => defineLinkProjection("lp", TypeWithWildcardLink.l.anything as never)).toThrow(
+    expect(() => defineProjection("lp", TypeWithWildcardLink.l.anything as never)).toThrow(
       "wildcard"
     )
   })
 })
 
-// ── defineTelemetryProjection ────────────────────────────────
+// ── Telemetry projection ────────────────────────────────
 
-describe("defineTelemetryProjection", () => {
+describe("defineProjection — telemetry target", () => {
   test("builds correct TelemetryProjectionDefinition", () => {
-    const result = defineTelemetryProjection("room-temperatures", Room.p.temperature)
+    const result = defineProjection("room-temperatures", Room.p.temperature)
       .fromDataset(roomReadingsDataset)
       .points({
         objectId: "room_id",
@@ -485,7 +483,7 @@ describe("defineTelemetryProjection", () => {
   })
 
   test("builds definition with optional unit field", () => {
-    const result = defineTelemetryProjection("room-temperatures", Room.p.temperature)
+    const result = defineProjection("room-temperatures", Room.p.temperature)
       .fromDataset(roomReadingsDataset)
       .points({
         objectId: "room_id",
@@ -498,41 +496,39 @@ describe("defineTelemetryProjection", () => {
   })
 
   test("rejects static property token", () => {
-    expect(() => defineTelemetryProjection("room-names", Room.p.name as never)).toThrow(
+    expect(() => defineProjection("room-names", Room.p.name as never)).toThrow(
       ProjectionValidationError
     )
-    expect(() => defineTelemetryProjection("room-names", Room.p.name as never)).toThrow(
+    expect(() => defineProjection("room-names", Room.p.name as never)).toThrow(
       "must be telemetry-enabled"
     )
   })
 
   test("rejects empty id", () => {
-    expect(() => defineTelemetryProjection("  ", Room.p.temperature)).toThrow(
-      ProjectionValidationError
-    )
-    expect(() => defineTelemetryProjection("  ", Room.p.temperature)).toThrow(
+    expect(() => defineProjection("  ", Room.p.temperature)).toThrow(ProjectionValidationError)
+    expect(() => defineProjection("  ", Room.p.temperature)).toThrow(
       "Projection id must not be empty"
     )
   })
 
   test("rejects empty dataset id", () => {
     const invalidDataset = { kind: "dataset", id: "  ", schema: { columns: [] } } as never
-    expect(() =>
-      defineTelemetryProjection("tp", Room.p.temperature).fromDataset(invalidDataset)
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      defineTelemetryProjection("tp", Room.p.temperature).fromDataset(invalidDataset)
-    ).toThrow("Projection dataset id must not be empty")
+    expect(() => defineProjection("tp", Room.p.temperature).fromDataset(invalidDataset)).toThrow(
+      ProjectionValidationError
+    )
+    expect(() => defineProjection("tp", Room.p.temperature).fromDataset(invalidDataset)).toThrow(
+      "Projection dataset id must not be empty"
+    )
   })
 
   test("rejects missing required point mapping fields", () => {
     expect(() =>
-      defineTelemetryProjection("tp", Room.p.temperature)
+      defineProjection("tp", Room.p.temperature)
         .fromDataset(roomReadingsDataset)
         .points({ objectId: "room_id", value: "temperature" } as never)
     ).toThrow(ProjectionValidationError)
     expect(() =>
-      defineTelemetryProjection("tp", Room.p.temperature)
+      defineProjection("tp", Room.p.temperature)
         .fromDataset(roomReadingsDataset)
         .points({ objectId: "room_id", value: "temperature" } as never)
     ).toThrow("requires at")
@@ -540,7 +536,7 @@ describe("defineTelemetryProjection", () => {
 
   test("rejects unknown point mapping keys", () => {
     expect(() =>
-      defineTelemetryProjection("tp", Room.p.temperature)
+      defineProjection("tp", Room.p.temperature)
         .fromDataset(roomReadingsDataset)
         .points({
           objectId: "room_id",
@@ -550,7 +546,7 @@ describe("defineTelemetryProjection", () => {
         } as never)
     ).toThrow(ProjectionValidationError)
     expect(() =>
-      defineTelemetryProjection("tp", Room.p.temperature)
+      defineProjection("tp", Room.p.temperature)
         .fromDataset(roomReadingsDataset)
         .points({
           objectId: "room_id",
@@ -569,12 +565,12 @@ describe("type guards", () => {
     .fromDataset(genericDataset)
     .properties({ id: "col" })
 
-  const linkDef = defineLinkProjection("lp", Room.l.hasSensors)
+  const linkDef = defineProjection("lp", Room.l.hasSensors)
     .fromDataset(genericDataset)
     .sourceField("a")
     .targetField("b")
 
-  const telemetryDef = defineTelemetryProjection("tp", Room.p.temperature)
+  const telemetryDef = defineProjection("tp", Room.p.temperature)
     .fromDataset(roomReadingsDataset)
     .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 

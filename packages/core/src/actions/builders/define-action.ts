@@ -1,5 +1,5 @@
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
-import { ActionDefinitionError, effectsWithoutEditsMessage, legacyRunMessage } from "../errors"
+import { ActionDefinitionError, effectsWithoutEditsMessage } from "../errors"
 import type {
   ActionBuilder,
   ActionEditsHandler,
@@ -75,7 +75,6 @@ function createGlobalActionPhaseBuilder(
         edits: handler,
       })
     },
-    run: rejectLegacyRun,
   }
 
   return asPublicActionType<GlobalActionPhaseBuilder<string, ActionParamsConfig>>(builder)
@@ -134,7 +133,6 @@ function createObjectActionPhaseBuilder(
         edits: handler,
       })
     },
-    run: rejectLegacyRun,
   }
 
   return asPublicActionType<
@@ -182,7 +180,6 @@ function createGlobalDefinition(input: {
           effects: handler,
         })
       },
-      run: rejectLegacyRun,
     })
   )
 }
@@ -236,13 +233,8 @@ function createObjectDefinition(input: {
           effects: handler,
         })
       },
-      run: rejectLegacyRun,
     })
   )
-}
-
-function rejectLegacyRun(): never {
-  throw new ActionDefinitionError(legacyRunMessage)
 }
 
 // Runtime builders are plain objects; public builder types carry phase-order inference.

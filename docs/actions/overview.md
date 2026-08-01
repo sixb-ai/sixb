@@ -1,9 +1,10 @@
 # Actions
 
-Actions are typed commands against your [ontology](../ontology/overview.md). They are the only
-sanctioned way to mutate objects: instead of writing to storage directly, you define an action
-that declares its params, validates the request, talks to external systems, and stages the object
-edits to commit. Every request becomes a durable, replayable run with a lifecycle you can wait on.
+Actions are typed business commands against your [ontology](../ontology/overview.md). They declare
+params, validate the request, talk to external systems, and stage object edits for one atomic
+commit. Every request becomes a durable, replayable run with a lifecycle you can wait on. Trusted
+runtime code may also use the direct [object CRUD API](../objects/crud.md); storage providers remain
+read-only and never receive mutation events as commands.
 
 Their real power is doing both sides of a change as one run: **write back** to external systems
 *and* **edit** the ontology graph, so the two stay in step. Reach for just one phase when that is

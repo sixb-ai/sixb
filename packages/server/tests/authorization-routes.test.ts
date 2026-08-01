@@ -7,7 +7,6 @@ import {
   defineConnector,
   defineDataset,
   defineGroup,
-  defineLinkProjection,
   defineObjectType,
   definePipeline,
   definePipelineStep,
@@ -101,7 +100,7 @@ const customersInvoiceProjection = defineProjection("customers-invoices", Invoic
   .fromDataset(CustomersDataset)
   .properties({ id: "id" })
 
-const ordersContractInvoiceProjection = defineLinkProjection(
+const ordersContractInvoiceProjection = defineProjection(
   "orders-contract-invoices",
   Contract.l.invoice
 )

@@ -1,12 +1,20 @@
 import { describe, expect, test } from "bun:test"
 import type { JsonValue, RuleDefinition, Storage } from "@sixb/core"
-import { InMemoryBroker, InMemoryStorage } from "@sixb/core"
+import {
+  defineObjectType,
+  InMemoryBroker,
+  InMemoryStorage,
+  link,
+  OntologyRegistry,
+  prop,
+} from "@sixb/core"
 import type {
   StoredLinkCreatedEvent,
   StoredLinkDeletedEvent,
   StoredObjectUpdatedEvent,
 } from "@sixb/core/internal/events"
 import { EventsRuntime } from "@sixb/core/internal/events"
+import { createMaterializerTestFixture, type MaterializerTestFixture } from "@sixb/core/testing"
 import {
   buildRuleDependencyIndex,
   evaluateRuleEvents,
@@ -59,6 +67,24 @@ const compositeRule = rule("transaction.composite-review", {
 })
 
 const evaluatedAt = "2026-05-07T10:30:00.000Z"
+
+const Document = defineObjectType({
+  id: "document",
+  name: "Document",
+  properties: [prop("id", "string", { primary: true, required: true })],
+})
+const Transaction = defineObjectType({
+  id: "transaction",
+  name: "Transaction",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("status", "string"),
+    prop("amount", "double"),
+  ],
+  links: [link("document", Document), link("receipt", Document)],
+})
+const ontology = new OntologyRegistry({ sources: [Transaction, Document] })
+const fixturesByStorage = new WeakMap<Storage, MaterializerTestFixture>()
 
 describe("rule event matching", () => {
   test("buildRuleDependencyIndex indexes object and link dependencies", () => {
@@ -208,7 +234,7 @@ describe("rule subject evaluation", () => {
       evaluatedAt,
     })
 
-    await seedObject(runtime, "tx-1", { status: "posted" }, "2")
+    await seedObject(runtime, "tx-1", { status: "posted" })
     const result = await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
@@ -230,7 +256,7 @@ describe("rule subject evaluation", () => {
       evaluatedAt,
     })
 
-    await seedObject(runtime, "tx-1", { status: "draft" }, "2")
+    await seedObject(runtime, "tx-1", { status: "draft" })
     const result = await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
@@ -294,7 +320,7 @@ describe("rule subject evaluation", () => {
       evaluatedAt,
     })
 
-    await seedObject(runtime, "tx-1", { status: "draft" }, "2")
+    await seedObject(runtime, "tx-1", { status: "draft" })
     await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
@@ -302,7 +328,7 @@ describe("rule subject evaluation", () => {
       evaluatedAt: "2026-05-07T10:31:00.000Z",
     })
 
-    await seedObject(runtime, "tx-1", { status: "posted" }, "3")
+    await seedObject(runtime, "tx-1", { status: "posted" })
     const result = await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
@@ -320,7 +346,7 @@ describe("rule subject evaluation", () => {
 
   test("a delayed object event evaluates the latest committed object state", async () => {
     const runtime = createRuntime()
-    await seedObject(runtime, "tx-1", { status: "draft" }, "newer")
+    await seedObject(runtime, "tx-1", { status: "draft" })
 
     const result = await evaluateRuleForSubject({
       runtime,
@@ -336,7 +362,7 @@ describe("rule subject evaluation", () => {
   test("a delayed link-delete event evaluates the latest committed link state", async () => {
     const runtime = createRuntime()
     await seedObject(runtime, "tx-1")
-    await seedLink(runtime, "tx-1", "document", "newer")
+    await seedLink(runtime, "tx-1", "document")
 
     const result = await evaluateRuleForSubject({
       runtime,
@@ -538,25 +564,15 @@ function linkDeletedEvent(
 async function seedObject(
   runtime: ReturnType<typeof createRuntime>,
   primaryId: string,
-  properties: Record<string, JsonValue> = {},
-  cursor = "1"
+  properties: Record<string, JsonValue> = {}
 ): Promise<void> {
-  await runtime.storage.objects.applyObjectUpsert({
-    id: `seed-object-${cursor}`,
-    cursor: `seed-object-${cursor}`,
-    schemaVersion: 1,
-    projectId: "project-a",
-    type: "object.created",
-    topic: "objects",
-    partitionKey: `transaction:${primaryId}`,
-    payload: {
-      objectTypeId: "transaction",
-      primaryId,
-      properties,
-      propertyChanges: {},
-    },
-    occurredAt: "2026-05-07T10:00:00.000Z",
-    ...materializationCorrelation(cursor),
+  await materializerFixture(runtime.storage).seed({
+    objects: [
+      {
+        ref: { objectTypeId: "transaction", primaryId },
+        properties: { id: primaryId, ...properties },
+      },
+    ],
   })
 }
 
@@ -564,28 +580,33 @@ async function seedLink(
   runtime: ReturnType<typeof createRuntime>,
   sourceId: string,
   linkId: string,
-  cursor = "1",
   targetId = "doc-1"
 ): Promise<void> {
-  await runtime.storage.objects.applyLinkUpsert({
-    id: `seed-link-${cursor}`,
-    cursor: `seed-link-${cursor}`,
-    schemaVersion: 1,
-    projectId: "project-a",
-    type: "link.created",
-    topic: "links",
-    partitionKey: `transaction:${sourceId}:${linkId}`,
-    payload: {
-      sourceTypeId: "transaction",
-      sourceId,
-      linkId,
-      targetTypeId: "document",
-      targetId,
-      propertyChanges: {},
-    },
-    occurredAt: "2026-05-07T10:00:00.000Z",
-    ...materializationCorrelation(cursor),
+  await materializerFixture(runtime.storage).seed({
+    objects: [
+      {
+        ref: { objectTypeId: "document", primaryId: targetId },
+        properties: { id: targetId },
+      },
+    ],
+    links: [
+      {
+        ref: {
+          source: { objectTypeId: "transaction", primaryId: sourceId },
+          linkId,
+          target: { objectTypeId: "document", primaryId: targetId },
+        },
+      },
+    ],
   })
+}
+
+function materializerFixture(storage: Storage): MaterializerTestFixture {
+  const existing = fixturesByStorage.get(storage)
+  if (existing) return existing
+  const fixture = createMaterializerTestFixture({ projectId: "project-a", ontology, storage })
+  fixturesByStorage.set(storage, fixture)
+  return fixture
 }
 
 function materializationCorrelation(cursor: string) {

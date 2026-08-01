@@ -1,5 +1,5 @@
 import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
-import type { ProjectionMaterializationRunStorage } from "@sixb/core/storage"
+import type { ProjectionRunStorage } from "@sixb/core/storage"
 import { ProjectionWorkerError } from "./errors"
 
 const DEFAULT_PROGRESS_FLUSH_INTERVAL = 500
@@ -18,7 +18,7 @@ export class ReplacementProgress {
 
   constructor(
     private readonly input: {
-      readonly storage: ProjectionMaterializationRunStorage
+      readonly storage: ProjectionRunStorage
       readonly projectId: string
       readonly projectionRunId: string
       readonly executionToken: string
@@ -41,16 +41,18 @@ export class ReplacementProgress {
 
   async flush(): Promise<void> {
     if (!this.hasReachedPersistedFloor() || !this.hasNewProgress()) return
-    const run = await this.input.storage.updateMaterialization({
+    const run = await this.input.storage.update({
       projectId: this.input.projectId,
       id: this.input.projectionRunId,
       executionToken: this.input.executionToken,
       identity: this.input.identity,
-      sourceRowsRead: this.sourceRowsRead,
-      sourceRowsSkipped: this.sourceRowsSkipped,
+      progress: {
+        sourceRowsRead: this.sourceRowsRead,
+        sourceRowsSkipped: this.sourceRowsSkipped,
+      },
     })
-    this.lastFlushedRowsRead = run.sourceRowsRead
-    this.lastFlushedRowsSkipped = run.sourceRowsSkipped
+    this.lastFlushedRowsRead = run.progress.sourceRowsRead
+    this.lastFlushedRowsSkipped = run.progress.sourceRowsSkipped
   }
 
   assertComplete(): void {

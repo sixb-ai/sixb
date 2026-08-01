@@ -1,5 +1,5 @@
 import type { ObjectProjectionDefinition } from "@sixb/core"
-import { defineProjection, defineTelemetryProjection } from "@sixb/core"
+import { defineProjection } from "@sixb/core"
 import { panasonicDeviceSnapshots } from "../datasets/deviceSnapshots"
 import { PanasonicAcUnit } from "../ontology/acUnit"
 
@@ -10,21 +10,18 @@ export const panasonicDevicesProjection: ObjectProjectionDefinition = defineProj
   .fromDataset(panasonicDeviceSnapshots)
   .properties({ id: "id", guid: "guid", deviceName: "deviceName" })
 
-export const panasonicPowerProjection = defineTelemetryProjection(
-  "panasonic-power",
-  PanasonicAcUnit.p.power
-)
+export const panasonicPowerProjection = defineProjection("panasonic-power", PanasonicAcUnit.p.power)
   .fromDataset(panasonicDeviceSnapshots)
   .points({ objectId: "id", at: "observedAt", value: "power" })
 
-export const panasonicOperatingModeProjection = defineTelemetryProjection(
+export const panasonicOperatingModeProjection = defineProjection(
   "panasonic-operating-mode",
   PanasonicAcUnit.p.operatingMode
 )
   .fromDataset(panasonicDeviceSnapshots)
   .points({ objectId: "id", at: "observedAt", value: "operatingMode" })
 
-export const panasonicIndoorTemperatureProjection = defineTelemetryProjection(
+export const panasonicIndoorTemperatureProjection = defineProjection(
   "panasonic-indoor-temperature",
   PanasonicAcUnit.p.indoorTemperature
 )
@@ -36,7 +33,7 @@ export const panasonicIndoorTemperatureProjection = defineTelemetryProjection(
     unit: "temperatureUnit",
   })
 
-export const panasonicOutdoorTemperatureProjection = defineTelemetryProjection(
+export const panasonicOutdoorTemperatureProjection = defineProjection(
   "panasonic-outdoor-temperature",
   PanasonicAcUnit.p.outdoorTemperature
 )
@@ -48,7 +45,7 @@ export const panasonicOutdoorTemperatureProjection = defineTelemetryProjection(
     unit: "temperatureUnit",
   })
 
-export const panasonicTargetTemperatureProjection = defineTelemetryProjection(
+export const panasonicTargetTemperatureProjection = defineProjection(
   "panasonic-target-temperature",
   PanasonicAcUnit.p.targetTemperature
 )
@@ -60,49 +57,49 @@ export const panasonicTargetTemperatureProjection = defineTelemetryProjection(
     unit: "temperatureUnit",
   })
 
-export const panasonicFanSpeedProjection = defineTelemetryProjection(
+export const panasonicFanSpeedProjection = defineProjection(
   "panasonic-fan-speed",
   PanasonicAcUnit.p.fanSpeed
 )
   .fromDataset(panasonicDeviceSnapshots)
   .points({ objectId: "id", at: "observedAt", value: "fanSpeed" })
 
-export const panasonicSwingHorizontalProjection = defineTelemetryProjection(
+export const panasonicSwingHorizontalProjection = defineProjection(
   "panasonic-swing-horizontal",
   PanasonicAcUnit.p.swingHorizontal
 )
   .fromDataset(panasonicDeviceSnapshots)
   .points({ objectId: "id", at: "observedAt", value: "swingHorizontal" })
 
-export const panasonicSwingVerticalProjection = defineTelemetryProjection(
+export const panasonicSwingVerticalProjection = defineProjection(
   "panasonic-swing-vertical",
   PanasonicAcUnit.p.swingVertical
 )
   .fromDataset(panasonicDeviceSnapshots)
   .points({ objectId: "id", at: "observedAt", value: "swingVertical" })
 
-export const panasonicEcoModeProjection = defineTelemetryProjection(
+export const panasonicEcoModeProjection = defineProjection(
   "panasonic-eco-mode",
   PanasonicAcUnit.p.ecoMode
 )
   .fromDataset(panasonicDeviceSnapshots)
   .points({ objectId: "id", at: "observedAt", value: "ecoMode" })
 
-export const panasonicNanoeModeProjection = defineTelemetryProjection(
+export const panasonicNanoeModeProjection = defineProjection(
   "panasonic-nanoe-mode",
   PanasonicAcUnit.p.nanoeMode
 )
   .fromDataset(panasonicDeviceSnapshots)
   .points({ objectId: "id", at: "observedAt", value: "nanoeMode" })
 
-export const panasonicEcoNaviModeProjection = defineTelemetryProjection(
+export const panasonicEcoNaviModeProjection = defineProjection(
   "panasonic-eco-navi-mode",
   PanasonicAcUnit.p.ecoNaviMode
 )
   .fromDataset(panasonicDeviceSnapshots)
   .points({ objectId: "id", at: "observedAt", value: "ecoNaviMode" })
 
-export const panasonicIAutoModeProjection = defineTelemetryProjection(
+export const panasonicIAutoModeProjection = defineProjection(
   "panasonic-i-auto-mode",
   PanasonicAcUnit.p.iAutoMode
 )

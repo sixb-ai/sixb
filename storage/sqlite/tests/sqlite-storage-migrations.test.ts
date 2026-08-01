@@ -46,6 +46,18 @@ describe("SQLite storage migrations", () => {
     expect(readMigrationRows(sqliteStoragePath(tempDir))).toEqual(expectedStorageMigrationRows)
   })
 
+  test("repeated migration planning is idempotent", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-idempotent-migrations-"))
+    tempDirs.push(tempDir)
+    const storage = new SqliteStorage({ path: tempDir })
+    try {
+      await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+      await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
+    } finally {
+      storage.close()
+    }
+  })
+
   test("recorded old checksums are rejected before schema mutation", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-checksum-"))
     tempDirs.push(tempDir)
@@ -84,6 +96,13 @@ describe("SQLite storage migrations", () => {
       expect(readMemoryTableColumns(db, "objects")).toContain("last_commit_id")
       expect(readMemoryTableColumns(db, "links")).toContain("last_commit_id")
       expect(readMemoryTableColumns(db, "timeseries")).toContain("last_commit_id")
+      expect(readMemoryTableColumns(db, "objects")).not.toContain("source_event_id")
+      expect(readMemoryTableColumns(db, "links")).not.toContain("source_event_id")
+      expect(readMemoryTableColumns(db, "timeseries")).not.toContain("source_event_id")
+      expect(readMemoryTableNames(db)).not.toContain("applied_events_objects")
+      expect(readMemoryColumn(db, "objects", "last_commit_id")?.notnull).toBe(1)
+      expect(readMemoryColumn(db, "links", "last_commit_id")?.notnull).toBe(1)
+      expect(readMemoryColumn(db, "timeseries", "last_commit_id")?.notnull).toBe(1)
       expect(readMemoryTableColumns(db, "projection_runs")).toEqual(
         expect.arrayContaining([
           "attempt",
@@ -215,15 +234,15 @@ describe("SQLite storage migrations", () => {
       const insert = db.query(`
         INSERT INTO timeseries (
           project_id, object_type_id, object_id, property_id,
-          value, unit, at, source_event_id
+          value, unit, at, last_commit_id
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `)
-      insert.run("p", "Room", "r1", "temp", "70.5", null, "2026-06-01T12:00:00.000Z", "evt-1")
+      insert.run("p", "Room", "r1", "temp", "70.5", null, "2026-06-01T12:00:00.000Z", "commit-1")
 
       // A second row at the same (series, at) is rejected by the natural-key
-      // PRIMARY KEY, even with a different source_event_id — appends must upsert.
+      // PRIMARY KEY, even with a different commit — appends must upsert.
       expect(() =>
-        insert.run("p", "Room", "r1", "temp", "71", null, "2026-06-01T12:00:00.000Z", "evt-2")
+        insert.run("p", "Room", "r1", "temp", "71", null, "2026-06-01T12:00:00.000Z", "commit-2")
       ).toThrow()
     } finally {
       db.close()
@@ -306,6 +325,18 @@ function readMemoryTableColumns(db: Database, tableName: string): string[] {
   )
 }
 
+function readMemoryColumn(
+  db: Database,
+  tableName: string,
+  columnName: string
+): { readonly name: string; readonly notnull: number } | undefined {
+  const columns = db.query(`PRAGMA table_info(${tableName})`).all() as Array<{
+    readonly name: string
+    readonly notnull: number
+  }>
+  return columns.find((column) => column.name === columnName)
+}
+
 function writeStartedMigration(path: string): void {
   const db = new Database(path)
 
@@ -334,17 +365,5 @@ function writeStartedMigration(path: string): void {
 }
 
 function closeStorage(storage: SqliteStorage): void {
-  storage.objects.close()
-  storage.auth.close()
-  storage.agents.close()
-  storage.actionRuns.close()
-  storage.pipelineRuns.close()
-  storage.projectionRuns.close()
-  storage.workflowRuns.close()
-  storage.workflowInterventions.close()
-  storage.syncRuns.close()
-  storage.timeseries.close()
-  storage.webhookDeliveries.close()
-  storage.webhookRuns.close()
-  storage.rules.close()
+  storage.close()
 }

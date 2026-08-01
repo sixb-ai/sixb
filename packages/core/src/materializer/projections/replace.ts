@@ -23,7 +23,7 @@ import type {
 } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { replayCommitRecord, withSerializationRetry } from "../execution/commit-lifecycle"
-import { assertProjectionMaterializationExecution } from "../execution/run-correlation"
+import { lockProjectionRunForMaterialization } from "../execution/run-correlation"
 import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
 import { throwIfAborted } from "../shared/abort"
 import {
@@ -154,7 +154,7 @@ async function assertProjectionExecution(
   command: PreparedProjectionReplacement,
   options: { readonly capabilityErrorMessage?: string } = {}
 ): Promise<void> {
-  await assertProjectionMaterializationExecution(storage, {
+  await lockProjectionRunForMaterialization(storage, {
     projectId,
     projectionRunId: command.execution.projectionRunId,
     executionToken: command.execution.executionToken,

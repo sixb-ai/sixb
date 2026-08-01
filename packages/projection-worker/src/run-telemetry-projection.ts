@@ -35,7 +35,7 @@ type ProjectTelemetryRowResult =
  * Consumes stable physical row batches from the durable checkpoint.
  *
  * A full batch is committed inside the loop body, before `for await` requests the next row. EOF
- * after an exact multiple is therefore represented by guarded completion, not a fake empty commit.
+ * after an exact multiple is acknowledged by the fenced terminal write, not a fake empty commit.
  */
 export async function runTelemetryProjection(input: {
   readonly runtime: ProjectionWorkerContext
@@ -44,7 +44,7 @@ export async function runTelemetryProjection(input: {
   readonly version: DatasetVersion
   readonly execution: ClaimedProjectionExecution
   readonly signal: AbortSignal
-}): Promise<void> {
+}): Promise<{ readonly protocol: "telemetry"; readonly inputExhausted: true }> {
   const { runtime, projection, dataset, version, execution, signal } = input
   const checkpoint = execution.run.telemetryCheckpoint
   if (!checkpoint) {
@@ -52,7 +52,7 @@ export async function runTelemetryProjection(input: {
       `[SixbProjectionWorker] Telemetry projection run '${execution.run.id}' has no checkpoint.`
     )
   }
-  if (checkpoint.inputExhausted) return
+  if (checkpoint.inputExhausted) return telemetryInputExhausted()
 
   const plan = buildTelemetryProjectionPlan({ runtime, projection, dataset })
   const batch: unknown[] = []
@@ -60,8 +60,8 @@ export async function runTelemetryProjection(input: {
   let attemptRowsRead = 0
 
   for await (const row of runtime.lakeStorage.readRows({
-    datasetId: execution.run.datasetId,
-    versionId: execution.run.datasetVersionId,
+    datasetId: execution.run.identity.datasetVersion.datasetId,
+    versionId: execution.run.identity.datasetVersion.versionId,
     columns: plan.readColumns,
     offset: checkpoint.nextRowOffset,
   })) {
@@ -93,16 +93,22 @@ export async function runTelemetryProjection(input: {
     expectedRows: version.rowCount,
     rowsRead: checkpoint.nextRowOffset + attemptRowsRead,
   })
-  if (batch.length === 0) return
-  await appendPhysicalBatch({
-    runtime,
-    execution,
-    plan,
-    rows: batch,
-    batchOrdinal,
-    inputExhausted: true,
-    signal,
-  })
+  if (batch.length > 0) {
+    await appendPhysicalBatch({
+      runtime,
+      execution,
+      plan,
+      rows: batch,
+      batchOrdinal,
+      inputExhausted: true,
+      signal,
+    })
+  }
+  return telemetryInputExhausted()
+}
+
+function telemetryInputExhausted() {
+  return { protocol: "telemetry" as const, inputExhausted: true as const }
 }
 
 function assertWithinPinnedInput(input: {
@@ -157,11 +163,11 @@ async function appendPhysicalBatch(input: {
   await getOntologyMutationRuntime(runtime).appendTelemetry({
     source: {
       kind: "projection",
-      projection: { projectionId: execution.run.projectionId },
+      projection: { projectionId: execution.run.identity.projectionId },
       datasetVersion: {
-        datasetId: execution.run.datasetId,
-        versionId: execution.run.datasetVersionId,
-        createdAt: execution.run.datasetVersionCreatedAt,
+        datasetId: execution.run.identity.datasetVersion.datasetId,
+        versionId: execution.run.identity.datasetVersion.versionId,
+        createdAt: execution.run.identity.datasetVersion.createdAt,
       },
       execution: execution.execution,
       batchOrdinal,

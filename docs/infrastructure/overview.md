@@ -76,9 +76,46 @@ Storage providers must preserve bounded outbox claims, lease-fenced settlement, 
 published-row retention, and child-first cleanup of terminal source materializations. Pending rows,
 nonterminal sources, and `ontology_commits` are never removed by age.
 
+`ObjectStorage` and `TimeseriesStorage` are read models. Actions, runtime CRUD, projections, and
+telemetry all write through the Materializer and its private `OntologyStorage.materializations`
+protocol. Providers must not expose an event-to-row writer or interpret domain events as storage
+commands.
+
 The required `storage.ping()` readiness check must be lightweight and read-only. It must not open a
 write transaction, run migrations, or acquire a migration/advisory lock. Schema validation is a
 separate cached check and retries failures with a cooldown.
+
+## Storage schema boundary
+
+The initial SQLite and PostgreSQL schemas are the only supported ontology schema. They intentionally
+contain no compatibility importer or upgrade path from earlier unpublished schemas. Before switching
+an existing environment:
+
+```text
+freeze writers and drain jobs
+  -> export retained project-owned data
+  -> create fresh Sixb storage
+  -> run normal syncs and replacement projections
+  -> replay source-less state through Actions or runtime CRUD
+  -> verify, then switch configuration
+```
+
+Project-specific mappings and migration scripts stay outside the framework.
+
+## Materialization benchmark
+
+Repository contributors can exercise a one-million-row replacement against either SQL provider:
+
+```bash
+bun run benchmark:ontology-materialization --provider sqlite
+DATABASE_URL=postgres://... bun run benchmark:ontology-materialization --provider postgres
+```
+
+The command uses an isolated temporary database/schema, verifies the effective object count, then
+removes its data. Its JSON report separates candidate staging, semantic finalization, run
+finalization, peak RSS, database/WAL growth, and the wait observed by a competing writer. Results
+are measurements to record with the machine and database configuration, not universal pass/fail
+timing thresholds.
 
 ## Provider matrix
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
+import { assertCliSucceeded, runCliToCompletion } from "./shared/cli-process"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
@@ -40,28 +41,21 @@ describe("sixb token command", () => {
     })
     servers.push(server)
 
-    const proc = Bun.spawn({
-      cmd: ["bun", cliEntry, "token", "list"],
+    const result = await runCliToCompletion({
+      cmd: ["bun", cliEntry, "token", "list", "--json"],
       cwd: repoRoot,
       env: {
-        ...process.env,
         SIXB_API_URL: `http://127.0.0.1:${server.port}/api`,
         SIXB_API_TOKEN: "sixb_pat_tok_cli.secret",
       },
-      stdout: "pipe",
-      stderr: "pipe",
     })
-    const [exitCode, stdout, stderr] = await Promise.all([
-      proc.exited,
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
+    assertCliSucceeded(result)
 
-    expect(exitCode).toBe(0)
     expect(requestedPath).toBe("/api/auth/access-tokens")
     expect(authorizationHeader).toBe("Bearer sixb_pat_tok_cli.secret")
-    expect(stdout).toContain("Local CLI")
-    expect(stdout).toContain("tok_cli")
-    expect(stderr).toBe("")
-  })
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      accessTokens: [{ id: "tok_cli", name: "Local CLI" }],
+    })
+    expect(result.stderr).toBe("")
+  }, 15_000)
 })

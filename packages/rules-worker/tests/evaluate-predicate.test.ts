@@ -15,6 +15,7 @@ function objectRow(properties: Record<string, unknown>): ObjectRow {
     createdAt: now,
     updatedAt: now,
     version: 1,
+    lastCommitId: "commit-1",
   }
 }
 
@@ -28,6 +29,7 @@ function linkRow(linkId: string, targetId = "doc-1"): ObjectLinkRow {
     targetId,
     createdAt: now,
     updatedAt: now,
+    lastCommitId: "commit-1",
   }
 }
 

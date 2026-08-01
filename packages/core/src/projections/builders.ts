@@ -16,8 +16,11 @@ import { ProjectionValidationError } from "./errors"
 import type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
+  LinkProjectionTarget,
   ObjectProjectionDefinition,
+  ObjectProjectionTarget,
   ProjectionDefinition,
+  ProjectionTarget,
   TelemetryProjectionDefinition,
 } from "./types"
 import {
@@ -265,22 +268,22 @@ function isForeignKeyDescriptor(value: unknown): value is ForeignKeyDescriptor {
 
 // ── defineProjection ─────────────────────────────────────────
 
-interface ProjectionSourceBuilder<TObjectType extends ObjectType> {
+interface ObjectProjectionSourceBuilder<TObjectType extends ObjectType> {
   fromDataset<const TDataset extends DatasetDefinition>(
     dataset: TDataset
-  ): ProjectionMappingBuilder<TObjectType, TDataset>
+  ): ObjectProjectionMappingBuilder<TObjectType, TDataset>
 }
 
-interface ProjectionMappingBuilder<
+interface ObjectProjectionMappingBuilder<
   TObjectType extends ObjectType,
   TDataset extends DatasetDefinition,
 > {
   properties<const TMapping extends ProjectionMappingFor<TObjectType, TDataset>>(
     mapping: ExactProjectionMapping<TObjectType, TMapping>
-  ): ObjectProjectionDefinition & ProjectionLinkBuilder<TObjectType, TDataset>
+  ): ObjectProjectionDefinition & ObjectProjectionLinkBuilder<TObjectType, TDataset>
 }
 
-interface ProjectionLinkBuilder<
+interface ObjectProjectionLinkBuilder<
   TObjectType extends ObjectType,
   TDataset extends DatasetDefinition,
 > {
@@ -290,7 +293,7 @@ interface ProjectionLinkBuilder<
 }
 
 /**
- * Fluent builder for {@link ObjectProjectionDefinition}.
+ * Defines an object, link, or telemetry projection from its ontology target.
  *
  * ```ts
  * defineProjection("room-projection", Room)
@@ -308,20 +311,48 @@ interface ProjectionLinkBuilder<
 export function defineProjection<const TObjectType extends ObjectType>(
   id: string,
   objectType: TObjectType
-): ProjectionSourceBuilder<TObjectType> {
+): ObjectProjectionSourceBuilder<TObjectType>
+export function defineProjection<
+  TObjectTypeId extends string,
+  TLinkId extends string,
+  TTargetObjectTypeId extends string,
+>(
+  id: string,
+  linkToken: LinkToken<TObjectTypeId, TLinkId, TTargetObjectTypeId>
+): LinkProjectionSourceBuilder
+export function defineProjection<const TPropertyToken extends TelemetryPropertyToken>(
+  id: string,
+  propertyToken: TPropertyToken
+): TelemetryProjectionSourceBuilder<TPropertyToken>
+export function defineProjection(
+  id: string,
+  target: ObjectType | LinkToken<string, string, string> | TelemetryPropertyToken
+):
+  | ObjectProjectionSourceBuilder<ObjectType>
+  | LinkProjectionSourceBuilder
+  | TelemetryProjectionSourceBuilder<TelemetryPropertyToken> {
+  if ("link" in target) return buildLinkProjection(id, target)
+  if ("property" in target) return buildTelemetryProjection(id, target)
+  return buildObjectProjection(id, target)
+}
+
+function buildObjectProjection<const TObjectType extends ObjectType>(
+  id: string,
+  objectType: TObjectType
+): ObjectProjectionSourceBuilder<TObjectType> {
   assertNonEmpty(id, "id")
 
   return {
     fromDataset<const TDataset extends DatasetDefinition>(
       dataset: TDataset
-    ): ProjectionMappingBuilder<TObjectType, TDataset> {
+    ): ObjectProjectionMappingBuilder<TObjectType, TDataset> {
       assertProjectionDataset(dataset)
       const datasetId = dataset.id
 
       return {
         properties<const TMapping extends ProjectionMappingFor<TObjectType, TDataset>>(
           mapping: ExactProjectionMapping<TObjectType, TMapping>
-        ): ObjectProjectionDefinition & ProjectionLinkBuilder<TObjectType, TDataset> {
+        ): ObjectProjectionDefinition & ObjectProjectionLinkBuilder<TObjectType, TDataset> {
           const propertyMapping = mapping as Record<string, string>
           validatePropertyMapping(objectType, propertyMapping)
 
@@ -363,7 +394,7 @@ export function defineProjection<const TObjectType extends ObjectType>(
   }
 }
 
-// ── defineTelemetryProjection ────────────────────────────────
+// ── Telemetry projection ────────────────────────────────────
 
 interface TelemetryProjectionSourceBuilder<TPropertyToken extends TelemetryPropertyToken> {
   fromDataset<const TDataset extends DatasetDefinition>(
@@ -384,7 +415,7 @@ interface TelemetryProjectionMappingBuilder<
  * Fluent builder for {@link TelemetryProjectionDefinition}.
  *
  * ```ts
- * defineTelemetryProjection("room-temperatures", Room.p.temperature)
+ * defineProjection("room-temperatures", Room.p.temperature)
  *   .fromDataset(roomReadingsDataset)
  *   .points({
  *     objectId: "room_id",
@@ -394,7 +425,7 @@ interface TelemetryProjectionMappingBuilder<
  *   })
  * ```
  */
-export function defineTelemetryProjection<const TPropertyToken extends TelemetryPropertyToken>(
+function buildTelemetryProjection<const TPropertyToken extends TelemetryPropertyToken>(
   id: string,
   propertyToken: TPropertyToken
 ): TelemetryProjectionSourceBuilder<TPropertyToken> {
@@ -554,7 +585,7 @@ export function fromForeignKey<
   }
 }
 
-// ── defineLinkProjection ─────────────────────────────────────
+// ── Link projection ─────────────────────────────────────────
 
 interface LinkProjectionSourceBuilder {
   fromDataset<const TDataset extends DatasetDefinition>(
@@ -576,13 +607,13 @@ interface LinkProjectionTargetBuilder<TDataset extends DatasetDefinition> {
  * Fluent builder for {@link LinkProjectionDefinition} (many-to-many join datasets).
  *
  * ```ts
- * defineLinkProjection("room-sensor-links", Room.l.hasSensors)
+ * defineProjection("room-sensor-links", Room.l.hasSensors)
  *   .fromDataset(roomSensorsDataset)
  *   .sourceField("room_id")
  *   .targetField("sensor_id")
  * ```
  */
-export function defineLinkProjection<
+function buildLinkProjection<
   TObjectTypeId extends string,
   TLinkId extends string,
   TTargetObjectTypeId extends string,
@@ -696,19 +727,17 @@ export function projectionKindOf(
   return "telemetry"
 }
 
-/** The object type id(s) a projection materializes. */
-export interface ProjectionObjectTypeIds {
-  readonly objectTypeId?: string
-  readonly sourceObjectTypeId?: string
-  readonly targetObjectTypeId?: string
-}
-
 /**
  * Extracts the object type id(s) a projection targets, used to authorize run
  * visibility (`object.view`). Link projections require both ends; object and
  * telemetry projections target a single type.
  */
-export function projectionObjectTypeIds(projection: ProjectionDefinition): ProjectionObjectTypeIds {
+export function projectionTargetOf(projection: LinkProjectionDefinition): LinkProjectionTarget
+export function projectionTargetOf(
+  projection: ObjectProjectionDefinition | TelemetryProjectionDefinition
+): ObjectProjectionTarget
+export function projectionTargetOf(projection: ProjectionDefinition): ProjectionTarget
+export function projectionTargetOf(projection: ProjectionDefinition): ProjectionTarget {
   return projection._tag === "LinkProjectionDefinition"
     ? {
         sourceObjectTypeId: projection.sourceObjectTypeId,

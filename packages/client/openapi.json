@@ -22597,72 +22597,347 @@
                             }
                           },
                           "latestRun": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  },
+                                  "attempt": {
+                                    "type": "number"
+                                  },
+                                  "progress": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceRowsRead": {
+                                        "type": "number"
+                                      },
+                                      "sourceRowsSkipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                    "additionalProperties": false
+                                  },
+                                  "startedAt": {
+                                    "type": "string"
+                                  },
+                                  "finishedAt": {
+                                    "type": "string"
+                                  },
+                                  "errorMessage": {
+                                    "type": "string"
+                                  },
+                                  "identity": {
+                                    "type": "object",
+                                    "properties": {
+                                      "projectionId": {
+                                        "type": "string"
+                                      },
+                                      "datasetVersion": {
+                                        "type": "object",
+                                        "properties": {
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "versionId": {
+                                            "type": "string"
+                                          },
+                                          "createdAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["datasetId", "versionId", "createdAt"],
+                                        "additionalProperties": false
+                                      },
+                                      "ontologyRevision": {
+                                        "type": "string"
+                                      },
+                                      "projectionRevision": {
+                                        "type": "string"
+                                      },
+                                      "ownershipHash": {
+                                        "type": "string"
+                                      },
+                                      "projectionKind": {
+                                        "type": "string",
+                                        "enum": ["object"]
+                                      },
+                                      "protocol": {
+                                        "type": "string",
+                                        "enum": ["replacement"]
+                                      }
+                                    },
+                                    "required": [
+                                      "projectionId",
+                                      "datasetVersion",
+                                      "ontologyRevision",
+                                      "projectionRevision",
+                                      "ownershipHash",
+                                      "projectionKind",
+                                      "protocol"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "properties": {
+                                      "objectTypeId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["objectTypeId"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "projectId",
+                                  "status",
+                                  "attempt",
+                                  "progress",
+                                  "startedAt",
+                                  "identity",
+                                  "target"
+                                ],
+                                "additionalProperties": false
                               },
-                              "projectId": {
-                                "type": "string"
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  },
+                                  "attempt": {
+                                    "type": "number"
+                                  },
+                                  "progress": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceRowsRead": {
+                                        "type": "number"
+                                      },
+                                      "sourceRowsSkipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                    "additionalProperties": false
+                                  },
+                                  "startedAt": {
+                                    "type": "string"
+                                  },
+                                  "finishedAt": {
+                                    "type": "string"
+                                  },
+                                  "errorMessage": {
+                                    "type": "string"
+                                  },
+                                  "identity": {
+                                    "type": "object",
+                                    "properties": {
+                                      "projectionId": {
+                                        "type": "string"
+                                      },
+                                      "datasetVersion": {
+                                        "type": "object",
+                                        "properties": {
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "versionId": {
+                                            "type": "string"
+                                          },
+                                          "createdAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["datasetId", "versionId", "createdAt"],
+                                        "additionalProperties": false
+                                      },
+                                      "ontologyRevision": {
+                                        "type": "string"
+                                      },
+                                      "projectionRevision": {
+                                        "type": "string"
+                                      },
+                                      "ownershipHash": {
+                                        "type": "string"
+                                      },
+                                      "projectionKind": {
+                                        "type": "string",
+                                        "enum": ["link"]
+                                      },
+                                      "protocol": {
+                                        "type": "string",
+                                        "enum": ["replacement"]
+                                      }
+                                    },
+                                    "required": [
+                                      "projectionId",
+                                      "datasetVersion",
+                                      "ontologyRevision",
+                                      "projectionRevision",
+                                      "ownershipHash",
+                                      "projectionKind",
+                                      "protocol"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceObjectTypeId": {
+                                        "type": "string"
+                                      },
+                                      "targetObjectTypeId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["sourceObjectTypeId", "targetObjectTypeId"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "projectId",
+                                  "status",
+                                  "attempt",
+                                  "progress",
+                                  "startedAt",
+                                  "identity",
+                                  "target"
+                                ],
+                                "additionalProperties": false
                               },
-                              "projectionId": {
-                                "type": "string"
-                              },
-                              "projectionKind": {
-                                "type": "string",
-                                "enum": ["object", "link", "telemetry"]
-                              },
-                              "datasetId": {
-                                "type": "string"
-                              },
-                              "datasetVersionId": {
-                                "type": "string"
-                              },
-                              "objectTypeId": {
-                                "type": "string"
-                              },
-                              "sourceObjectTypeId": {
-                                "type": "string"
-                              },
-                              "targetObjectTypeId": {
-                                "type": "string"
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": ["running", "succeeded", "failed", "cancelled"]
-                              },
-                              "attempt": {
-                                "type": "number"
-                              },
-                              "startedAt": {
-                                "type": "string"
-                              },
-                              "finishedAt": {
-                                "type": "string"
-                              },
-                              "errorMessage": {
-                                "type": "string"
-                              },
-                              "sourceRowsRead": {
-                                "type": "number"
-                              },
-                              "sourceRowsSkipped": {
-                                "type": "number"
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  },
+                                  "attempt": {
+                                    "type": "number"
+                                  },
+                                  "progress": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceRowsRead": {
+                                        "type": "number"
+                                      },
+                                      "sourceRowsSkipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                    "additionalProperties": false
+                                  },
+                                  "startedAt": {
+                                    "type": "string"
+                                  },
+                                  "finishedAt": {
+                                    "type": "string"
+                                  },
+                                  "errorMessage": {
+                                    "type": "string"
+                                  },
+                                  "identity": {
+                                    "type": "object",
+                                    "properties": {
+                                      "projectionId": {
+                                        "type": "string"
+                                      },
+                                      "datasetVersion": {
+                                        "type": "object",
+                                        "properties": {
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "versionId": {
+                                            "type": "string"
+                                          },
+                                          "createdAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["datasetId", "versionId", "createdAt"],
+                                        "additionalProperties": false
+                                      },
+                                      "ontologyRevision": {
+                                        "type": "string"
+                                      },
+                                      "projectionRevision": {
+                                        "type": "string"
+                                      },
+                                      "ownershipHash": {
+                                        "type": "string"
+                                      },
+                                      "projectionKind": {
+                                        "type": "string",
+                                        "enum": ["telemetry"]
+                                      },
+                                      "protocol": {
+                                        "type": "string",
+                                        "enum": ["telemetry"]
+                                      }
+                                    },
+                                    "required": [
+                                      "projectionId",
+                                      "datasetVersion",
+                                      "ontologyRevision",
+                                      "projectionRevision",
+                                      "ownershipHash",
+                                      "projectionKind",
+                                      "protocol"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "properties": {
+                                      "objectTypeId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["objectTypeId"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "projectId",
+                                  "status",
+                                  "attempt",
+                                  "progress",
+                                  "startedAt",
+                                  "identity",
+                                  "target"
+                                ],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": [
-                              "id",
-                              "projectId",
-                              "projectionId",
-                              "projectionKind",
-                              "datasetId",
-                              "datasetVersionId",
-                              "status",
-                              "startedAt",
-                              "sourceRowsRead",
-                              "sourceRowsSkipped"
                             ],
-                            "additionalProperties": false,
                             "nullable": true
                           }
                         },
@@ -22709,72 +22984,347 @@
                             "type": "string"
                           },
                           "latestRun": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  },
+                                  "attempt": {
+                                    "type": "number"
+                                  },
+                                  "progress": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceRowsRead": {
+                                        "type": "number"
+                                      },
+                                      "sourceRowsSkipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                    "additionalProperties": false
+                                  },
+                                  "startedAt": {
+                                    "type": "string"
+                                  },
+                                  "finishedAt": {
+                                    "type": "string"
+                                  },
+                                  "errorMessage": {
+                                    "type": "string"
+                                  },
+                                  "identity": {
+                                    "type": "object",
+                                    "properties": {
+                                      "projectionId": {
+                                        "type": "string"
+                                      },
+                                      "datasetVersion": {
+                                        "type": "object",
+                                        "properties": {
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "versionId": {
+                                            "type": "string"
+                                          },
+                                          "createdAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["datasetId", "versionId", "createdAt"],
+                                        "additionalProperties": false
+                                      },
+                                      "ontologyRevision": {
+                                        "type": "string"
+                                      },
+                                      "projectionRevision": {
+                                        "type": "string"
+                                      },
+                                      "ownershipHash": {
+                                        "type": "string"
+                                      },
+                                      "projectionKind": {
+                                        "type": "string",
+                                        "enum": ["object"]
+                                      },
+                                      "protocol": {
+                                        "type": "string",
+                                        "enum": ["replacement"]
+                                      }
+                                    },
+                                    "required": [
+                                      "projectionId",
+                                      "datasetVersion",
+                                      "ontologyRevision",
+                                      "projectionRevision",
+                                      "ownershipHash",
+                                      "projectionKind",
+                                      "protocol"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "properties": {
+                                      "objectTypeId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["objectTypeId"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "projectId",
+                                  "status",
+                                  "attempt",
+                                  "progress",
+                                  "startedAt",
+                                  "identity",
+                                  "target"
+                                ],
+                                "additionalProperties": false
                               },
-                              "projectId": {
-                                "type": "string"
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  },
+                                  "attempt": {
+                                    "type": "number"
+                                  },
+                                  "progress": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceRowsRead": {
+                                        "type": "number"
+                                      },
+                                      "sourceRowsSkipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                    "additionalProperties": false
+                                  },
+                                  "startedAt": {
+                                    "type": "string"
+                                  },
+                                  "finishedAt": {
+                                    "type": "string"
+                                  },
+                                  "errorMessage": {
+                                    "type": "string"
+                                  },
+                                  "identity": {
+                                    "type": "object",
+                                    "properties": {
+                                      "projectionId": {
+                                        "type": "string"
+                                      },
+                                      "datasetVersion": {
+                                        "type": "object",
+                                        "properties": {
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "versionId": {
+                                            "type": "string"
+                                          },
+                                          "createdAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["datasetId", "versionId", "createdAt"],
+                                        "additionalProperties": false
+                                      },
+                                      "ontologyRevision": {
+                                        "type": "string"
+                                      },
+                                      "projectionRevision": {
+                                        "type": "string"
+                                      },
+                                      "ownershipHash": {
+                                        "type": "string"
+                                      },
+                                      "projectionKind": {
+                                        "type": "string",
+                                        "enum": ["link"]
+                                      },
+                                      "protocol": {
+                                        "type": "string",
+                                        "enum": ["replacement"]
+                                      }
+                                    },
+                                    "required": [
+                                      "projectionId",
+                                      "datasetVersion",
+                                      "ontologyRevision",
+                                      "projectionRevision",
+                                      "ownershipHash",
+                                      "projectionKind",
+                                      "protocol"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceObjectTypeId": {
+                                        "type": "string"
+                                      },
+                                      "targetObjectTypeId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["sourceObjectTypeId", "targetObjectTypeId"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "projectId",
+                                  "status",
+                                  "attempt",
+                                  "progress",
+                                  "startedAt",
+                                  "identity",
+                                  "target"
+                                ],
+                                "additionalProperties": false
                               },
-                              "projectionId": {
-                                "type": "string"
-                              },
-                              "projectionKind": {
-                                "type": "string",
-                                "enum": ["object", "link", "telemetry"]
-                              },
-                              "datasetId": {
-                                "type": "string"
-                              },
-                              "datasetVersionId": {
-                                "type": "string"
-                              },
-                              "objectTypeId": {
-                                "type": "string"
-                              },
-                              "sourceObjectTypeId": {
-                                "type": "string"
-                              },
-                              "targetObjectTypeId": {
-                                "type": "string"
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": ["running", "succeeded", "failed", "cancelled"]
-                              },
-                              "attempt": {
-                                "type": "number"
-                              },
-                              "startedAt": {
-                                "type": "string"
-                              },
-                              "finishedAt": {
-                                "type": "string"
-                              },
-                              "errorMessage": {
-                                "type": "string"
-                              },
-                              "sourceRowsRead": {
-                                "type": "number"
-                              },
-                              "sourceRowsSkipped": {
-                                "type": "number"
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  },
+                                  "attempt": {
+                                    "type": "number"
+                                  },
+                                  "progress": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceRowsRead": {
+                                        "type": "number"
+                                      },
+                                      "sourceRowsSkipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                    "additionalProperties": false
+                                  },
+                                  "startedAt": {
+                                    "type": "string"
+                                  },
+                                  "finishedAt": {
+                                    "type": "string"
+                                  },
+                                  "errorMessage": {
+                                    "type": "string"
+                                  },
+                                  "identity": {
+                                    "type": "object",
+                                    "properties": {
+                                      "projectionId": {
+                                        "type": "string"
+                                      },
+                                      "datasetVersion": {
+                                        "type": "object",
+                                        "properties": {
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "versionId": {
+                                            "type": "string"
+                                          },
+                                          "createdAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["datasetId", "versionId", "createdAt"],
+                                        "additionalProperties": false
+                                      },
+                                      "ontologyRevision": {
+                                        "type": "string"
+                                      },
+                                      "projectionRevision": {
+                                        "type": "string"
+                                      },
+                                      "ownershipHash": {
+                                        "type": "string"
+                                      },
+                                      "projectionKind": {
+                                        "type": "string",
+                                        "enum": ["telemetry"]
+                                      },
+                                      "protocol": {
+                                        "type": "string",
+                                        "enum": ["telemetry"]
+                                      }
+                                    },
+                                    "required": [
+                                      "projectionId",
+                                      "datasetVersion",
+                                      "ontologyRevision",
+                                      "projectionRevision",
+                                      "ownershipHash",
+                                      "projectionKind",
+                                      "protocol"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "properties": {
+                                      "objectTypeId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["objectTypeId"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "projectId",
+                                  "status",
+                                  "attempt",
+                                  "progress",
+                                  "startedAt",
+                                  "identity",
+                                  "target"
+                                ],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": [
-                              "id",
-                              "projectId",
-                              "projectionId",
-                              "projectionKind",
-                              "datasetId",
-                              "datasetVersionId",
-                              "status",
-                              "startedAt",
-                              "sourceRowsRead",
-                              "sourceRowsSkipped"
                             ],
-                            "additionalProperties": false,
                             "nullable": true
                           }
                         },
@@ -22826,72 +23376,347 @@
                             "type": "string"
                           },
                           "latestRun": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  },
+                                  "attempt": {
+                                    "type": "number"
+                                  },
+                                  "progress": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceRowsRead": {
+                                        "type": "number"
+                                      },
+                                      "sourceRowsSkipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                    "additionalProperties": false
+                                  },
+                                  "startedAt": {
+                                    "type": "string"
+                                  },
+                                  "finishedAt": {
+                                    "type": "string"
+                                  },
+                                  "errorMessage": {
+                                    "type": "string"
+                                  },
+                                  "identity": {
+                                    "type": "object",
+                                    "properties": {
+                                      "projectionId": {
+                                        "type": "string"
+                                      },
+                                      "datasetVersion": {
+                                        "type": "object",
+                                        "properties": {
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "versionId": {
+                                            "type": "string"
+                                          },
+                                          "createdAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["datasetId", "versionId", "createdAt"],
+                                        "additionalProperties": false
+                                      },
+                                      "ontologyRevision": {
+                                        "type": "string"
+                                      },
+                                      "projectionRevision": {
+                                        "type": "string"
+                                      },
+                                      "ownershipHash": {
+                                        "type": "string"
+                                      },
+                                      "projectionKind": {
+                                        "type": "string",
+                                        "enum": ["object"]
+                                      },
+                                      "protocol": {
+                                        "type": "string",
+                                        "enum": ["replacement"]
+                                      }
+                                    },
+                                    "required": [
+                                      "projectionId",
+                                      "datasetVersion",
+                                      "ontologyRevision",
+                                      "projectionRevision",
+                                      "ownershipHash",
+                                      "projectionKind",
+                                      "protocol"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "properties": {
+                                      "objectTypeId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["objectTypeId"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "projectId",
+                                  "status",
+                                  "attempt",
+                                  "progress",
+                                  "startedAt",
+                                  "identity",
+                                  "target"
+                                ],
+                                "additionalProperties": false
                               },
-                              "projectId": {
-                                "type": "string"
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  },
+                                  "attempt": {
+                                    "type": "number"
+                                  },
+                                  "progress": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceRowsRead": {
+                                        "type": "number"
+                                      },
+                                      "sourceRowsSkipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                    "additionalProperties": false
+                                  },
+                                  "startedAt": {
+                                    "type": "string"
+                                  },
+                                  "finishedAt": {
+                                    "type": "string"
+                                  },
+                                  "errorMessage": {
+                                    "type": "string"
+                                  },
+                                  "identity": {
+                                    "type": "object",
+                                    "properties": {
+                                      "projectionId": {
+                                        "type": "string"
+                                      },
+                                      "datasetVersion": {
+                                        "type": "object",
+                                        "properties": {
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "versionId": {
+                                            "type": "string"
+                                          },
+                                          "createdAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["datasetId", "versionId", "createdAt"],
+                                        "additionalProperties": false
+                                      },
+                                      "ontologyRevision": {
+                                        "type": "string"
+                                      },
+                                      "projectionRevision": {
+                                        "type": "string"
+                                      },
+                                      "ownershipHash": {
+                                        "type": "string"
+                                      },
+                                      "projectionKind": {
+                                        "type": "string",
+                                        "enum": ["link"]
+                                      },
+                                      "protocol": {
+                                        "type": "string",
+                                        "enum": ["replacement"]
+                                      }
+                                    },
+                                    "required": [
+                                      "projectionId",
+                                      "datasetVersion",
+                                      "ontologyRevision",
+                                      "projectionRevision",
+                                      "ownershipHash",
+                                      "projectionKind",
+                                      "protocol"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceObjectTypeId": {
+                                        "type": "string"
+                                      },
+                                      "targetObjectTypeId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["sourceObjectTypeId", "targetObjectTypeId"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "projectId",
+                                  "status",
+                                  "attempt",
+                                  "progress",
+                                  "startedAt",
+                                  "identity",
+                                  "target"
+                                ],
+                                "additionalProperties": false
                               },
-                              "projectionId": {
-                                "type": "string"
-                              },
-                              "projectionKind": {
-                                "type": "string",
-                                "enum": ["object", "link", "telemetry"]
-                              },
-                              "datasetId": {
-                                "type": "string"
-                              },
-                              "datasetVersionId": {
-                                "type": "string"
-                              },
-                              "objectTypeId": {
-                                "type": "string"
-                              },
-                              "sourceObjectTypeId": {
-                                "type": "string"
-                              },
-                              "targetObjectTypeId": {
-                                "type": "string"
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": ["running", "succeeded", "failed", "cancelled"]
-                              },
-                              "attempt": {
-                                "type": "number"
-                              },
-                              "startedAt": {
-                                "type": "string"
-                              },
-                              "finishedAt": {
-                                "type": "string"
-                              },
-                              "errorMessage": {
-                                "type": "string"
-                              },
-                              "sourceRowsRead": {
-                                "type": "number"
-                              },
-                              "sourceRowsSkipped": {
-                                "type": "number"
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "projectId": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  },
+                                  "attempt": {
+                                    "type": "number"
+                                  },
+                                  "progress": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceRowsRead": {
+                                        "type": "number"
+                                      },
+                                      "sourceRowsSkipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                    "additionalProperties": false
+                                  },
+                                  "startedAt": {
+                                    "type": "string"
+                                  },
+                                  "finishedAt": {
+                                    "type": "string"
+                                  },
+                                  "errorMessage": {
+                                    "type": "string"
+                                  },
+                                  "identity": {
+                                    "type": "object",
+                                    "properties": {
+                                      "projectionId": {
+                                        "type": "string"
+                                      },
+                                      "datasetVersion": {
+                                        "type": "object",
+                                        "properties": {
+                                          "datasetId": {
+                                            "type": "string"
+                                          },
+                                          "versionId": {
+                                            "type": "string"
+                                          },
+                                          "createdAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["datasetId", "versionId", "createdAt"],
+                                        "additionalProperties": false
+                                      },
+                                      "ontologyRevision": {
+                                        "type": "string"
+                                      },
+                                      "projectionRevision": {
+                                        "type": "string"
+                                      },
+                                      "ownershipHash": {
+                                        "type": "string"
+                                      },
+                                      "projectionKind": {
+                                        "type": "string",
+                                        "enum": ["telemetry"]
+                                      },
+                                      "protocol": {
+                                        "type": "string",
+                                        "enum": ["telemetry"]
+                                      }
+                                    },
+                                    "required": [
+                                      "projectionId",
+                                      "datasetVersion",
+                                      "ontologyRevision",
+                                      "projectionRevision",
+                                      "ownershipHash",
+                                      "projectionKind",
+                                      "protocol"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "properties": {
+                                      "objectTypeId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["objectTypeId"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "projectId",
+                                  "status",
+                                  "attempt",
+                                  "progress",
+                                  "startedAt",
+                                  "identity",
+                                  "target"
+                                ],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": [
-                              "id",
-                              "projectId",
-                              "projectionId",
-                              "projectionKind",
-                              "datasetId",
-                              "datasetVersionId",
-                              "status",
-                              "startedAt",
-                              "sourceRowsRead",
-                              "sourceRowsSkipped"
                             ],
-                            "additionalProperties": false,
                             "nullable": true
                           }
                         },
@@ -22987,72 +23812,347 @@
                           }
                         },
                         "latestRun": {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "projectId": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                },
+                                "attempt": {
+                                  "type": "number"
+                                },
+                                "progress": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceRowsRead": {
+                                      "type": "number"
+                                    },
+                                    "sourceRowsSkipped": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                  "additionalProperties": false
+                                },
+                                "startedAt": {
+                                  "type": "string"
+                                },
+                                "finishedAt": {
+                                  "type": "string"
+                                },
+                                "errorMessage": {
+                                  "type": "string"
+                                },
+                                "identity": {
+                                  "type": "object",
+                                  "properties": {
+                                    "projectionId": {
+                                      "type": "string"
+                                    },
+                                    "datasetVersion": {
+                                      "type": "object",
+                                      "properties": {
+                                        "datasetId": {
+                                          "type": "string"
+                                        },
+                                        "versionId": {
+                                          "type": "string"
+                                        },
+                                        "createdAt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["datasetId", "versionId", "createdAt"],
+                                      "additionalProperties": false
+                                    },
+                                    "ontologyRevision": {
+                                      "type": "string"
+                                    },
+                                    "projectionRevision": {
+                                      "type": "string"
+                                    },
+                                    "ownershipHash": {
+                                      "type": "string"
+                                    },
+                                    "projectionKind": {
+                                      "type": "string",
+                                      "enum": ["object"]
+                                    },
+                                    "protocol": {
+                                      "type": "string",
+                                      "enum": ["replacement"]
+                                    }
+                                  },
+                                  "required": [
+                                    "projectionId",
+                                    "datasetVersion",
+                                    "ontologyRevision",
+                                    "projectionRevision",
+                                    "ownershipHash",
+                                    "projectionKind",
+                                    "protocol"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "target": {
+                                  "type": "object",
+                                  "properties": {
+                                    "objectTypeId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["objectTypeId"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "projectId",
+                                "status",
+                                "attempt",
+                                "progress",
+                                "startedAt",
+                                "identity",
+                                "target"
+                              ],
+                              "additionalProperties": false
                             },
-                            "projectId": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "projectId": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                },
+                                "attempt": {
+                                  "type": "number"
+                                },
+                                "progress": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceRowsRead": {
+                                      "type": "number"
+                                    },
+                                    "sourceRowsSkipped": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                  "additionalProperties": false
+                                },
+                                "startedAt": {
+                                  "type": "string"
+                                },
+                                "finishedAt": {
+                                  "type": "string"
+                                },
+                                "errorMessage": {
+                                  "type": "string"
+                                },
+                                "identity": {
+                                  "type": "object",
+                                  "properties": {
+                                    "projectionId": {
+                                      "type": "string"
+                                    },
+                                    "datasetVersion": {
+                                      "type": "object",
+                                      "properties": {
+                                        "datasetId": {
+                                          "type": "string"
+                                        },
+                                        "versionId": {
+                                          "type": "string"
+                                        },
+                                        "createdAt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["datasetId", "versionId", "createdAt"],
+                                      "additionalProperties": false
+                                    },
+                                    "ontologyRevision": {
+                                      "type": "string"
+                                    },
+                                    "projectionRevision": {
+                                      "type": "string"
+                                    },
+                                    "ownershipHash": {
+                                      "type": "string"
+                                    },
+                                    "projectionKind": {
+                                      "type": "string",
+                                      "enum": ["link"]
+                                    },
+                                    "protocol": {
+                                      "type": "string",
+                                      "enum": ["replacement"]
+                                    }
+                                  },
+                                  "required": [
+                                    "projectionId",
+                                    "datasetVersion",
+                                    "ontologyRevision",
+                                    "projectionRevision",
+                                    "ownershipHash",
+                                    "projectionKind",
+                                    "protocol"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "target": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceObjectTypeId": {
+                                      "type": "string"
+                                    },
+                                    "targetObjectTypeId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["sourceObjectTypeId", "targetObjectTypeId"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "projectId",
+                                "status",
+                                "attempt",
+                                "progress",
+                                "startedAt",
+                                "identity",
+                                "target"
+                              ],
+                              "additionalProperties": false
                             },
-                            "projectionId": {
-                              "type": "string"
-                            },
-                            "projectionKind": {
-                              "type": "string",
-                              "enum": ["object", "link", "telemetry"]
-                            },
-                            "datasetId": {
-                              "type": "string"
-                            },
-                            "datasetVersionId": {
-                              "type": "string"
-                            },
-                            "objectTypeId": {
-                              "type": "string"
-                            },
-                            "sourceObjectTypeId": {
-                              "type": "string"
-                            },
-                            "targetObjectTypeId": {
-                              "type": "string"
-                            },
-                            "status": {
-                              "type": "string",
-                              "enum": ["running", "succeeded", "failed", "cancelled"]
-                            },
-                            "attempt": {
-                              "type": "number"
-                            },
-                            "startedAt": {
-                              "type": "string"
-                            },
-                            "finishedAt": {
-                              "type": "string"
-                            },
-                            "errorMessage": {
-                              "type": "string"
-                            },
-                            "sourceRowsRead": {
-                              "type": "number"
-                            },
-                            "sourceRowsSkipped": {
-                              "type": "number"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "projectId": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                },
+                                "attempt": {
+                                  "type": "number"
+                                },
+                                "progress": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceRowsRead": {
+                                      "type": "number"
+                                    },
+                                    "sourceRowsSkipped": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                  "additionalProperties": false
+                                },
+                                "startedAt": {
+                                  "type": "string"
+                                },
+                                "finishedAt": {
+                                  "type": "string"
+                                },
+                                "errorMessage": {
+                                  "type": "string"
+                                },
+                                "identity": {
+                                  "type": "object",
+                                  "properties": {
+                                    "projectionId": {
+                                      "type": "string"
+                                    },
+                                    "datasetVersion": {
+                                      "type": "object",
+                                      "properties": {
+                                        "datasetId": {
+                                          "type": "string"
+                                        },
+                                        "versionId": {
+                                          "type": "string"
+                                        },
+                                        "createdAt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["datasetId", "versionId", "createdAt"],
+                                      "additionalProperties": false
+                                    },
+                                    "ontologyRevision": {
+                                      "type": "string"
+                                    },
+                                    "projectionRevision": {
+                                      "type": "string"
+                                    },
+                                    "ownershipHash": {
+                                      "type": "string"
+                                    },
+                                    "projectionKind": {
+                                      "type": "string",
+                                      "enum": ["telemetry"]
+                                    },
+                                    "protocol": {
+                                      "type": "string",
+                                      "enum": ["telemetry"]
+                                    }
+                                  },
+                                  "required": [
+                                    "projectionId",
+                                    "datasetVersion",
+                                    "ontologyRevision",
+                                    "projectionRevision",
+                                    "ownershipHash",
+                                    "projectionKind",
+                                    "protocol"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "target": {
+                                  "type": "object",
+                                  "properties": {
+                                    "objectTypeId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["objectTypeId"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "projectId",
+                                "status",
+                                "attempt",
+                                "progress",
+                                "startedAt",
+                                "identity",
+                                "target"
+                              ],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": [
-                            "id",
-                            "projectId",
-                            "projectionId",
-                            "projectionKind",
-                            "datasetId",
-                            "datasetVersionId",
-                            "status",
-                            "startedAt",
-                            "sourceRowsRead",
-                            "sourceRowsSkipped"
                           ],
-                          "additionalProperties": false,
                           "nullable": true
                         }
                       },
@@ -23096,72 +24196,347 @@
                           "type": "string"
                         },
                         "latestRun": {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "projectId": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                },
+                                "attempt": {
+                                  "type": "number"
+                                },
+                                "progress": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceRowsRead": {
+                                      "type": "number"
+                                    },
+                                    "sourceRowsSkipped": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                  "additionalProperties": false
+                                },
+                                "startedAt": {
+                                  "type": "string"
+                                },
+                                "finishedAt": {
+                                  "type": "string"
+                                },
+                                "errorMessage": {
+                                  "type": "string"
+                                },
+                                "identity": {
+                                  "type": "object",
+                                  "properties": {
+                                    "projectionId": {
+                                      "type": "string"
+                                    },
+                                    "datasetVersion": {
+                                      "type": "object",
+                                      "properties": {
+                                        "datasetId": {
+                                          "type": "string"
+                                        },
+                                        "versionId": {
+                                          "type": "string"
+                                        },
+                                        "createdAt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["datasetId", "versionId", "createdAt"],
+                                      "additionalProperties": false
+                                    },
+                                    "ontologyRevision": {
+                                      "type": "string"
+                                    },
+                                    "projectionRevision": {
+                                      "type": "string"
+                                    },
+                                    "ownershipHash": {
+                                      "type": "string"
+                                    },
+                                    "projectionKind": {
+                                      "type": "string",
+                                      "enum": ["object"]
+                                    },
+                                    "protocol": {
+                                      "type": "string",
+                                      "enum": ["replacement"]
+                                    }
+                                  },
+                                  "required": [
+                                    "projectionId",
+                                    "datasetVersion",
+                                    "ontologyRevision",
+                                    "projectionRevision",
+                                    "ownershipHash",
+                                    "projectionKind",
+                                    "protocol"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "target": {
+                                  "type": "object",
+                                  "properties": {
+                                    "objectTypeId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["objectTypeId"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "projectId",
+                                "status",
+                                "attempt",
+                                "progress",
+                                "startedAt",
+                                "identity",
+                                "target"
+                              ],
+                              "additionalProperties": false
                             },
-                            "projectId": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "projectId": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                },
+                                "attempt": {
+                                  "type": "number"
+                                },
+                                "progress": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceRowsRead": {
+                                      "type": "number"
+                                    },
+                                    "sourceRowsSkipped": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                  "additionalProperties": false
+                                },
+                                "startedAt": {
+                                  "type": "string"
+                                },
+                                "finishedAt": {
+                                  "type": "string"
+                                },
+                                "errorMessage": {
+                                  "type": "string"
+                                },
+                                "identity": {
+                                  "type": "object",
+                                  "properties": {
+                                    "projectionId": {
+                                      "type": "string"
+                                    },
+                                    "datasetVersion": {
+                                      "type": "object",
+                                      "properties": {
+                                        "datasetId": {
+                                          "type": "string"
+                                        },
+                                        "versionId": {
+                                          "type": "string"
+                                        },
+                                        "createdAt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["datasetId", "versionId", "createdAt"],
+                                      "additionalProperties": false
+                                    },
+                                    "ontologyRevision": {
+                                      "type": "string"
+                                    },
+                                    "projectionRevision": {
+                                      "type": "string"
+                                    },
+                                    "ownershipHash": {
+                                      "type": "string"
+                                    },
+                                    "projectionKind": {
+                                      "type": "string",
+                                      "enum": ["link"]
+                                    },
+                                    "protocol": {
+                                      "type": "string",
+                                      "enum": ["replacement"]
+                                    }
+                                  },
+                                  "required": [
+                                    "projectionId",
+                                    "datasetVersion",
+                                    "ontologyRevision",
+                                    "projectionRevision",
+                                    "ownershipHash",
+                                    "projectionKind",
+                                    "protocol"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "target": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceObjectTypeId": {
+                                      "type": "string"
+                                    },
+                                    "targetObjectTypeId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["sourceObjectTypeId", "targetObjectTypeId"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "projectId",
+                                "status",
+                                "attempt",
+                                "progress",
+                                "startedAt",
+                                "identity",
+                                "target"
+                              ],
+                              "additionalProperties": false
                             },
-                            "projectionId": {
-                              "type": "string"
-                            },
-                            "projectionKind": {
-                              "type": "string",
-                              "enum": ["object", "link", "telemetry"]
-                            },
-                            "datasetId": {
-                              "type": "string"
-                            },
-                            "datasetVersionId": {
-                              "type": "string"
-                            },
-                            "objectTypeId": {
-                              "type": "string"
-                            },
-                            "sourceObjectTypeId": {
-                              "type": "string"
-                            },
-                            "targetObjectTypeId": {
-                              "type": "string"
-                            },
-                            "status": {
-                              "type": "string",
-                              "enum": ["running", "succeeded", "failed", "cancelled"]
-                            },
-                            "attempt": {
-                              "type": "number"
-                            },
-                            "startedAt": {
-                              "type": "string"
-                            },
-                            "finishedAt": {
-                              "type": "string"
-                            },
-                            "errorMessage": {
-                              "type": "string"
-                            },
-                            "sourceRowsRead": {
-                              "type": "number"
-                            },
-                            "sourceRowsSkipped": {
-                              "type": "number"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "projectId": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                },
+                                "attempt": {
+                                  "type": "number"
+                                },
+                                "progress": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceRowsRead": {
+                                      "type": "number"
+                                    },
+                                    "sourceRowsSkipped": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                  "additionalProperties": false
+                                },
+                                "startedAt": {
+                                  "type": "string"
+                                },
+                                "finishedAt": {
+                                  "type": "string"
+                                },
+                                "errorMessage": {
+                                  "type": "string"
+                                },
+                                "identity": {
+                                  "type": "object",
+                                  "properties": {
+                                    "projectionId": {
+                                      "type": "string"
+                                    },
+                                    "datasetVersion": {
+                                      "type": "object",
+                                      "properties": {
+                                        "datasetId": {
+                                          "type": "string"
+                                        },
+                                        "versionId": {
+                                          "type": "string"
+                                        },
+                                        "createdAt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["datasetId", "versionId", "createdAt"],
+                                      "additionalProperties": false
+                                    },
+                                    "ontologyRevision": {
+                                      "type": "string"
+                                    },
+                                    "projectionRevision": {
+                                      "type": "string"
+                                    },
+                                    "ownershipHash": {
+                                      "type": "string"
+                                    },
+                                    "projectionKind": {
+                                      "type": "string",
+                                      "enum": ["telemetry"]
+                                    },
+                                    "protocol": {
+                                      "type": "string",
+                                      "enum": ["telemetry"]
+                                    }
+                                  },
+                                  "required": [
+                                    "projectionId",
+                                    "datasetVersion",
+                                    "ontologyRevision",
+                                    "projectionRevision",
+                                    "ownershipHash",
+                                    "projectionKind",
+                                    "protocol"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "target": {
+                                  "type": "object",
+                                  "properties": {
+                                    "objectTypeId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["objectTypeId"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "projectId",
+                                "status",
+                                "attempt",
+                                "progress",
+                                "startedAt",
+                                "identity",
+                                "target"
+                              ],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": [
-                            "id",
-                            "projectId",
-                            "projectionId",
-                            "projectionKind",
-                            "datasetId",
-                            "datasetVersionId",
-                            "status",
-                            "startedAt",
-                            "sourceRowsRead",
-                            "sourceRowsSkipped"
                           ],
-                          "additionalProperties": false,
                           "nullable": true
                         }
                       },
@@ -23210,72 +24585,347 @@
                           "type": "string"
                         },
                         "latestRun": {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "projectId": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                },
+                                "attempt": {
+                                  "type": "number"
+                                },
+                                "progress": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceRowsRead": {
+                                      "type": "number"
+                                    },
+                                    "sourceRowsSkipped": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                  "additionalProperties": false
+                                },
+                                "startedAt": {
+                                  "type": "string"
+                                },
+                                "finishedAt": {
+                                  "type": "string"
+                                },
+                                "errorMessage": {
+                                  "type": "string"
+                                },
+                                "identity": {
+                                  "type": "object",
+                                  "properties": {
+                                    "projectionId": {
+                                      "type": "string"
+                                    },
+                                    "datasetVersion": {
+                                      "type": "object",
+                                      "properties": {
+                                        "datasetId": {
+                                          "type": "string"
+                                        },
+                                        "versionId": {
+                                          "type": "string"
+                                        },
+                                        "createdAt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["datasetId", "versionId", "createdAt"],
+                                      "additionalProperties": false
+                                    },
+                                    "ontologyRevision": {
+                                      "type": "string"
+                                    },
+                                    "projectionRevision": {
+                                      "type": "string"
+                                    },
+                                    "ownershipHash": {
+                                      "type": "string"
+                                    },
+                                    "projectionKind": {
+                                      "type": "string",
+                                      "enum": ["object"]
+                                    },
+                                    "protocol": {
+                                      "type": "string",
+                                      "enum": ["replacement"]
+                                    }
+                                  },
+                                  "required": [
+                                    "projectionId",
+                                    "datasetVersion",
+                                    "ontologyRevision",
+                                    "projectionRevision",
+                                    "ownershipHash",
+                                    "projectionKind",
+                                    "protocol"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "target": {
+                                  "type": "object",
+                                  "properties": {
+                                    "objectTypeId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["objectTypeId"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "projectId",
+                                "status",
+                                "attempt",
+                                "progress",
+                                "startedAt",
+                                "identity",
+                                "target"
+                              ],
+                              "additionalProperties": false
                             },
-                            "projectId": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "projectId": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                },
+                                "attempt": {
+                                  "type": "number"
+                                },
+                                "progress": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceRowsRead": {
+                                      "type": "number"
+                                    },
+                                    "sourceRowsSkipped": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                  "additionalProperties": false
+                                },
+                                "startedAt": {
+                                  "type": "string"
+                                },
+                                "finishedAt": {
+                                  "type": "string"
+                                },
+                                "errorMessage": {
+                                  "type": "string"
+                                },
+                                "identity": {
+                                  "type": "object",
+                                  "properties": {
+                                    "projectionId": {
+                                      "type": "string"
+                                    },
+                                    "datasetVersion": {
+                                      "type": "object",
+                                      "properties": {
+                                        "datasetId": {
+                                          "type": "string"
+                                        },
+                                        "versionId": {
+                                          "type": "string"
+                                        },
+                                        "createdAt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["datasetId", "versionId", "createdAt"],
+                                      "additionalProperties": false
+                                    },
+                                    "ontologyRevision": {
+                                      "type": "string"
+                                    },
+                                    "projectionRevision": {
+                                      "type": "string"
+                                    },
+                                    "ownershipHash": {
+                                      "type": "string"
+                                    },
+                                    "projectionKind": {
+                                      "type": "string",
+                                      "enum": ["link"]
+                                    },
+                                    "protocol": {
+                                      "type": "string",
+                                      "enum": ["replacement"]
+                                    }
+                                  },
+                                  "required": [
+                                    "projectionId",
+                                    "datasetVersion",
+                                    "ontologyRevision",
+                                    "projectionRevision",
+                                    "ownershipHash",
+                                    "projectionKind",
+                                    "protocol"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "target": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceObjectTypeId": {
+                                      "type": "string"
+                                    },
+                                    "targetObjectTypeId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["sourceObjectTypeId", "targetObjectTypeId"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "projectId",
+                                "status",
+                                "attempt",
+                                "progress",
+                                "startedAt",
+                                "identity",
+                                "target"
+                              ],
+                              "additionalProperties": false
                             },
-                            "projectionId": {
-                              "type": "string"
-                            },
-                            "projectionKind": {
-                              "type": "string",
-                              "enum": ["object", "link", "telemetry"]
-                            },
-                            "datasetId": {
-                              "type": "string"
-                            },
-                            "datasetVersionId": {
-                              "type": "string"
-                            },
-                            "objectTypeId": {
-                              "type": "string"
-                            },
-                            "sourceObjectTypeId": {
-                              "type": "string"
-                            },
-                            "targetObjectTypeId": {
-                              "type": "string"
-                            },
-                            "status": {
-                              "type": "string",
-                              "enum": ["running", "succeeded", "failed", "cancelled"]
-                            },
-                            "attempt": {
-                              "type": "number"
-                            },
-                            "startedAt": {
-                              "type": "string"
-                            },
-                            "finishedAt": {
-                              "type": "string"
-                            },
-                            "errorMessage": {
-                              "type": "string"
-                            },
-                            "sourceRowsRead": {
-                              "type": "number"
-                            },
-                            "sourceRowsSkipped": {
-                              "type": "number"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "projectId": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                },
+                                "attempt": {
+                                  "type": "number"
+                                },
+                                "progress": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceRowsRead": {
+                                      "type": "number"
+                                    },
+                                    "sourceRowsSkipped": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                  "additionalProperties": false
+                                },
+                                "startedAt": {
+                                  "type": "string"
+                                },
+                                "finishedAt": {
+                                  "type": "string"
+                                },
+                                "errorMessage": {
+                                  "type": "string"
+                                },
+                                "identity": {
+                                  "type": "object",
+                                  "properties": {
+                                    "projectionId": {
+                                      "type": "string"
+                                    },
+                                    "datasetVersion": {
+                                      "type": "object",
+                                      "properties": {
+                                        "datasetId": {
+                                          "type": "string"
+                                        },
+                                        "versionId": {
+                                          "type": "string"
+                                        },
+                                        "createdAt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["datasetId", "versionId", "createdAt"],
+                                      "additionalProperties": false
+                                    },
+                                    "ontologyRevision": {
+                                      "type": "string"
+                                    },
+                                    "projectionRevision": {
+                                      "type": "string"
+                                    },
+                                    "ownershipHash": {
+                                      "type": "string"
+                                    },
+                                    "projectionKind": {
+                                      "type": "string",
+                                      "enum": ["telemetry"]
+                                    },
+                                    "protocol": {
+                                      "type": "string",
+                                      "enum": ["telemetry"]
+                                    }
+                                  },
+                                  "required": [
+                                    "projectionId",
+                                    "datasetVersion",
+                                    "ontologyRevision",
+                                    "projectionRevision",
+                                    "ownershipHash",
+                                    "projectionKind",
+                                    "protocol"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "target": {
+                                  "type": "object",
+                                  "properties": {
+                                    "objectTypeId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["objectTypeId"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "projectId",
+                                "status",
+                                "attempt",
+                                "progress",
+                                "startedAt",
+                                "identity",
+                                "target"
+                              ],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": [
-                            "id",
-                            "projectId",
-                            "projectionId",
-                            "projectionKind",
-                            "datasetId",
-                            "datasetVersionId",
-                            "status",
-                            "startedAt",
-                            "sourceRowsRead",
-                            "sourceRowsSkipped"
                           ],
-                          "additionalProperties": false,
                           "nullable": true
                         }
                       },
@@ -23418,72 +25068,347 @@
                     "runs": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "projectId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "succeeded", "failed", "cancelled"]
+                              },
+                              "attempt": {
+                                "type": "number"
+                              },
+                              "progress": {
+                                "type": "object",
+                                "properties": {
+                                  "sourceRowsRead": {
+                                    "type": "number"
+                                  },
+                                  "sourceRowsSkipped": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                "additionalProperties": false
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "finishedAt": {
+                                "type": "string"
+                              },
+                              "errorMessage": {
+                                "type": "string"
+                              },
+                              "identity": {
+                                "type": "object",
+                                "properties": {
+                                  "projectionId": {
+                                    "type": "string"
+                                  },
+                                  "datasetVersion": {
+                                    "type": "object",
+                                    "properties": {
+                                      "datasetId": {
+                                        "type": "string"
+                                      },
+                                      "versionId": {
+                                        "type": "string"
+                                      },
+                                      "createdAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["datasetId", "versionId", "createdAt"],
+                                    "additionalProperties": false
+                                  },
+                                  "ontologyRevision": {
+                                    "type": "string"
+                                  },
+                                  "projectionRevision": {
+                                    "type": "string"
+                                  },
+                                  "ownershipHash": {
+                                    "type": "string"
+                                  },
+                                  "projectionKind": {
+                                    "type": "string",
+                                    "enum": ["object"]
+                                  },
+                                  "protocol": {
+                                    "type": "string",
+                                    "enum": ["replacement"]
+                                  }
+                                },
+                                "required": [
+                                  "projectionId",
+                                  "datasetVersion",
+                                  "ontologyRevision",
+                                  "projectionRevision",
+                                  "ownershipHash",
+                                  "projectionKind",
+                                  "protocol"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "target": {
+                                "type": "object",
+                                "properties": {
+                                  "objectTypeId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["objectTypeId"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "projectId",
+                              "status",
+                              "attempt",
+                              "progress",
+                              "startedAt",
+                              "identity",
+                              "target"
+                            ],
+                            "additionalProperties": false
                           },
-                          "projectId": {
-                            "type": "string"
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "projectId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "succeeded", "failed", "cancelled"]
+                              },
+                              "attempt": {
+                                "type": "number"
+                              },
+                              "progress": {
+                                "type": "object",
+                                "properties": {
+                                  "sourceRowsRead": {
+                                    "type": "number"
+                                  },
+                                  "sourceRowsSkipped": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                "additionalProperties": false
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "finishedAt": {
+                                "type": "string"
+                              },
+                              "errorMessage": {
+                                "type": "string"
+                              },
+                              "identity": {
+                                "type": "object",
+                                "properties": {
+                                  "projectionId": {
+                                    "type": "string"
+                                  },
+                                  "datasetVersion": {
+                                    "type": "object",
+                                    "properties": {
+                                      "datasetId": {
+                                        "type": "string"
+                                      },
+                                      "versionId": {
+                                        "type": "string"
+                                      },
+                                      "createdAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["datasetId", "versionId", "createdAt"],
+                                    "additionalProperties": false
+                                  },
+                                  "ontologyRevision": {
+                                    "type": "string"
+                                  },
+                                  "projectionRevision": {
+                                    "type": "string"
+                                  },
+                                  "ownershipHash": {
+                                    "type": "string"
+                                  },
+                                  "projectionKind": {
+                                    "type": "string",
+                                    "enum": ["link"]
+                                  },
+                                  "protocol": {
+                                    "type": "string",
+                                    "enum": ["replacement"]
+                                  }
+                                },
+                                "required": [
+                                  "projectionId",
+                                  "datasetVersion",
+                                  "ontologyRevision",
+                                  "projectionRevision",
+                                  "ownershipHash",
+                                  "projectionKind",
+                                  "protocol"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "target": {
+                                "type": "object",
+                                "properties": {
+                                  "sourceObjectTypeId": {
+                                    "type": "string"
+                                  },
+                                  "targetObjectTypeId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["sourceObjectTypeId", "targetObjectTypeId"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "projectId",
+                              "status",
+                              "attempt",
+                              "progress",
+                              "startedAt",
+                              "identity",
+                              "target"
+                            ],
+                            "additionalProperties": false
                           },
-                          "projectionId": {
-                            "type": "string"
-                          },
-                          "projectionKind": {
-                            "type": "string",
-                            "enum": ["object", "link", "telemetry"]
-                          },
-                          "datasetId": {
-                            "type": "string"
-                          },
-                          "datasetVersionId": {
-                            "type": "string"
-                          },
-                          "objectTypeId": {
-                            "type": "string"
-                          },
-                          "sourceObjectTypeId": {
-                            "type": "string"
-                          },
-                          "targetObjectTypeId": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string",
-                            "enum": ["running", "succeeded", "failed", "cancelled"]
-                          },
-                          "attempt": {
-                            "type": "number"
-                          },
-                          "startedAt": {
-                            "type": "string"
-                          },
-                          "finishedAt": {
-                            "type": "string"
-                          },
-                          "errorMessage": {
-                            "type": "string"
-                          },
-                          "sourceRowsRead": {
-                            "type": "number"
-                          },
-                          "sourceRowsSkipped": {
-                            "type": "number"
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "projectId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "succeeded", "failed", "cancelled"]
+                              },
+                              "attempt": {
+                                "type": "number"
+                              },
+                              "progress": {
+                                "type": "object",
+                                "properties": {
+                                  "sourceRowsRead": {
+                                    "type": "number"
+                                  },
+                                  "sourceRowsSkipped": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                                "additionalProperties": false
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "finishedAt": {
+                                "type": "string"
+                              },
+                              "errorMessage": {
+                                "type": "string"
+                              },
+                              "identity": {
+                                "type": "object",
+                                "properties": {
+                                  "projectionId": {
+                                    "type": "string"
+                                  },
+                                  "datasetVersion": {
+                                    "type": "object",
+                                    "properties": {
+                                      "datasetId": {
+                                        "type": "string"
+                                      },
+                                      "versionId": {
+                                        "type": "string"
+                                      },
+                                      "createdAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["datasetId", "versionId", "createdAt"],
+                                    "additionalProperties": false
+                                  },
+                                  "ontologyRevision": {
+                                    "type": "string"
+                                  },
+                                  "projectionRevision": {
+                                    "type": "string"
+                                  },
+                                  "ownershipHash": {
+                                    "type": "string"
+                                  },
+                                  "projectionKind": {
+                                    "type": "string",
+                                    "enum": ["telemetry"]
+                                  },
+                                  "protocol": {
+                                    "type": "string",
+                                    "enum": ["telemetry"]
+                                  }
+                                },
+                                "required": [
+                                  "projectionId",
+                                  "datasetVersion",
+                                  "ontologyRevision",
+                                  "projectionRevision",
+                                  "ownershipHash",
+                                  "projectionKind",
+                                  "protocol"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "target": {
+                                "type": "object",
+                                "properties": {
+                                  "objectTypeId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["objectTypeId"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "projectId",
+                              "status",
+                              "attempt",
+                              "progress",
+                              "startedAt",
+                              "identity",
+                              "target"
+                            ],
+                            "additionalProperties": false
                           }
-                        },
-                        "required": [
-                          "id",
-                          "projectId",
-                          "projectionId",
-                          "projectionKind",
-                          "datasetId",
-                          "datasetVersionId",
-                          "status",
-                          "startedAt",
-                          "sourceRowsRead",
-                          "sourceRowsSkipped"
-                        ],
-                        "additionalProperties": false
+                        ]
                       }
                     },
                     "hasMore": {
@@ -23541,72 +25466,347 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["running", "succeeded", "failed", "cancelled"]
+                        },
+                        "attempt": {
+                          "type": "number"
+                        },
+                        "progress": {
+                          "type": "object",
+                          "properties": {
+                            "sourceRowsRead": {
+                              "type": "number"
+                            },
+                            "sourceRowsSkipped": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                          "additionalProperties": false
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "finishedAt": {
+                          "type": "string"
+                        },
+                        "errorMessage": {
+                          "type": "string"
+                        },
+                        "identity": {
+                          "type": "object",
+                          "properties": {
+                            "projectionId": {
+                              "type": "string"
+                            },
+                            "datasetVersion": {
+                              "type": "object",
+                              "properties": {
+                                "datasetId": {
+                                  "type": "string"
+                                },
+                                "versionId": {
+                                  "type": "string"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["datasetId", "versionId", "createdAt"],
+                              "additionalProperties": false
+                            },
+                            "ontologyRevision": {
+                              "type": "string"
+                            },
+                            "projectionRevision": {
+                              "type": "string"
+                            },
+                            "ownershipHash": {
+                              "type": "string"
+                            },
+                            "projectionKind": {
+                              "type": "string",
+                              "enum": ["object"]
+                            },
+                            "protocol": {
+                              "type": "string",
+                              "enum": ["replacement"]
+                            }
+                          },
+                          "required": [
+                            "projectionId",
+                            "datasetVersion",
+                            "ontologyRevision",
+                            "projectionRevision",
+                            "ownershipHash",
+                            "projectionKind",
+                            "protocol"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "objectTypeId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["objectTypeId"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "status",
+                        "attempt",
+                        "progress",
+                        "startedAt",
+                        "identity",
+                        "target"
+                      ],
+                      "additionalProperties": false
                     },
-                    "projectId": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["running", "succeeded", "failed", "cancelled"]
+                        },
+                        "attempt": {
+                          "type": "number"
+                        },
+                        "progress": {
+                          "type": "object",
+                          "properties": {
+                            "sourceRowsRead": {
+                              "type": "number"
+                            },
+                            "sourceRowsSkipped": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                          "additionalProperties": false
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "finishedAt": {
+                          "type": "string"
+                        },
+                        "errorMessage": {
+                          "type": "string"
+                        },
+                        "identity": {
+                          "type": "object",
+                          "properties": {
+                            "projectionId": {
+                              "type": "string"
+                            },
+                            "datasetVersion": {
+                              "type": "object",
+                              "properties": {
+                                "datasetId": {
+                                  "type": "string"
+                                },
+                                "versionId": {
+                                  "type": "string"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["datasetId", "versionId", "createdAt"],
+                              "additionalProperties": false
+                            },
+                            "ontologyRevision": {
+                              "type": "string"
+                            },
+                            "projectionRevision": {
+                              "type": "string"
+                            },
+                            "ownershipHash": {
+                              "type": "string"
+                            },
+                            "projectionKind": {
+                              "type": "string",
+                              "enum": ["link"]
+                            },
+                            "protocol": {
+                              "type": "string",
+                              "enum": ["replacement"]
+                            }
+                          },
+                          "required": [
+                            "projectionId",
+                            "datasetVersion",
+                            "ontologyRevision",
+                            "projectionRevision",
+                            "ownershipHash",
+                            "projectionKind",
+                            "protocol"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "sourceObjectTypeId": {
+                              "type": "string"
+                            },
+                            "targetObjectTypeId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["sourceObjectTypeId", "targetObjectTypeId"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "status",
+                        "attempt",
+                        "progress",
+                        "startedAt",
+                        "identity",
+                        "target"
+                      ],
+                      "additionalProperties": false
                     },
-                    "projectionId": {
-                      "type": "string"
-                    },
-                    "projectionKind": {
-                      "type": "string",
-                      "enum": ["object", "link", "telemetry"]
-                    },
-                    "datasetId": {
-                      "type": "string"
-                    },
-                    "datasetVersionId": {
-                      "type": "string"
-                    },
-                    "objectTypeId": {
-                      "type": "string"
-                    },
-                    "sourceObjectTypeId": {
-                      "type": "string"
-                    },
-                    "targetObjectTypeId": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": ["running", "succeeded", "failed", "cancelled"]
-                    },
-                    "attempt": {
-                      "type": "number"
-                    },
-                    "startedAt": {
-                      "type": "string"
-                    },
-                    "finishedAt": {
-                      "type": "string"
-                    },
-                    "errorMessage": {
-                      "type": "string"
-                    },
-                    "sourceRowsRead": {
-                      "type": "number"
-                    },
-                    "sourceRowsSkipped": {
-                      "type": "number"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["running", "succeeded", "failed", "cancelled"]
+                        },
+                        "attempt": {
+                          "type": "number"
+                        },
+                        "progress": {
+                          "type": "object",
+                          "properties": {
+                            "sourceRowsRead": {
+                              "type": "number"
+                            },
+                            "sourceRowsSkipped": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["sourceRowsRead", "sourceRowsSkipped"],
+                          "additionalProperties": false
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "finishedAt": {
+                          "type": "string"
+                        },
+                        "errorMessage": {
+                          "type": "string"
+                        },
+                        "identity": {
+                          "type": "object",
+                          "properties": {
+                            "projectionId": {
+                              "type": "string"
+                            },
+                            "datasetVersion": {
+                              "type": "object",
+                              "properties": {
+                                "datasetId": {
+                                  "type": "string"
+                                },
+                                "versionId": {
+                                  "type": "string"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["datasetId", "versionId", "createdAt"],
+                              "additionalProperties": false
+                            },
+                            "ontologyRevision": {
+                              "type": "string"
+                            },
+                            "projectionRevision": {
+                              "type": "string"
+                            },
+                            "ownershipHash": {
+                              "type": "string"
+                            },
+                            "projectionKind": {
+                              "type": "string",
+                              "enum": ["telemetry"]
+                            },
+                            "protocol": {
+                              "type": "string",
+                              "enum": ["telemetry"]
+                            }
+                          },
+                          "required": [
+                            "projectionId",
+                            "datasetVersion",
+                            "ontologyRevision",
+                            "projectionRevision",
+                            "ownershipHash",
+                            "projectionKind",
+                            "protocol"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "objectTypeId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["objectTypeId"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "status",
+                        "attempt",
+                        "progress",
+                        "startedAt",
+                        "identity",
+                        "target"
+                      ],
+                      "additionalProperties": false
                     }
-                  },
-                  "required": [
-                    "id",
-                    "projectId",
-                    "projectionId",
-                    "projectionKind",
-                    "datasetId",
-                    "datasetVersionId",
-                    "status",
-                    "startedAt",
-                    "sourceRowsRead",
-                    "sourceRowsSkipped"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               }
             }

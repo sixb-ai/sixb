@@ -154,7 +154,7 @@ describe("ProjectionWorker", () => {
         () => projectionRunsStorage.getById({ projectId: sixb.id, id: runId }),
         (value) => value?.status === "succeeded"
       )
-      expect(run?.sourceRowsRead).toBe(1)
+      expect(run?.progress.sourceRowsRead).toBe(1)
 
       const room = await sixb.storage.objects.getByPrimaryId({
         projectId: sixb.id,
@@ -287,7 +287,7 @@ describe("ProjectionWorker", () => {
         () => requireProjectionRunsStorage(sixb).getById({ projectId: sixb.id, id: runId }),
         (value) => value?.status === "succeeded"
       )
-      expect(run?.sourceRowsRead).toBe(1)
+      expect(run?.progress.sourceRowsRead).toBe(1)
       expect(
         await sixb.storage.objects.getByPrimaryId({
           projectId: sixb.id,
