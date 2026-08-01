@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { artifactScope, findUndeclaredImports, sourceScope } from "./package-boundaries"
 import {
   discoverPublishablePackages,
   type ExportTarget,
@@ -19,6 +20,7 @@ topologicalPublishOrder(packages)
 
 for (const packageInfo of packages) {
   validatePackage(packageInfo)
+  await assertImportsAreDeclared(packageInfo)
   await dryRunPack(packageInfo)
 }
 
@@ -174,6 +176,37 @@ function hasRootExport(exports: unknown): boolean {
 
   const keys = Object.keys(exports)
   return keys.includes(".") || keys.every((key) => !key.startsWith("."))
+}
+
+/**
+ * A package may only import what it declares.
+ *
+ * This is the assertion that does not depend on how the build happens to resolve things. A bundler
+ * that absorbs a sibling instead of leaving it external emits that sibling's third-party imports
+ * from the wrong package, and they show up here as names this manifest never promised — which is
+ * also how a plainly forgotten dependency shows up. `tsc` cannot see either one: the root
+ * `tsconfig.json` maps every `@sixb/*` specifier to source, so an undeclared sibling type-checks.
+ *
+ * Both directions matter. `dist` is what non-Bun consumers load; `src` ships in the tarball and
+ * `exports.bun` points Bun consumers straight at it.
+ */
+async function assertImportsAreDeclared(packageInfo: PublishablePackage): Promise<void> {
+  const name = packageName(packageInfo)
+  const packageRoot = join(root, packageInfo.dir)
+
+  for (const scope of [sourceScope, artifactScope]) {
+    const undeclared = await findUndeclaredImports(packageRoot, packageInfo.packageJson, scope)
+    if (undeclared.length === 0) continue
+
+    const detail = undeclared
+      .map(({ specifier, file }) => `  ${specifier} (${scope.directory}/${file})`)
+      .join("\n")
+    throw new Error(
+      `[SixbPublish] ${name} imports packages it does not declare:\n${detail}\n` +
+        "Declare them, or — when they belong to a sibling — check that the sibling is a declared " +
+        "workspace dependency so the build keeps it external instead of absorbing its source."
+    )
+  }
 }
 
 async function dryRunPack(packageInfo: PublishablePackage): Promise<void> {

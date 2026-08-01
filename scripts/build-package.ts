@@ -1,11 +1,15 @@
 import type { Dirent } from "node:fs"
-import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises"
+import { cp, mkdir, readdir, rm } from "node:fs/promises"
 import { extname, join, relative, resolve } from "node:path"
+import { workspaceBoundaryPlugins } from "./package-boundaries"
 
 type PackageJson = {
   name?: string
   types?: string
   exports?: ExportsMap
+  dependencies?: Record<string, string>
+  peerDependencies?: Record<string, string>
+  optionalDependencies?: Record<string, string>
   sixbBuild?: {
     entrypoints?: string[]
     assets?: Array<{
@@ -32,7 +36,6 @@ const packageRoot = process.cwd()
 const srcRoot = join(packageRoot, "src")
 const distRoot = join(packageRoot, "dist")
 const packageJsonPath = join(packageRoot, "package.json")
-const buildConfigDir = join(packageRoot, ".tsbuild")
 
 const packageJson = (await Bun.file(packageJsonPath).json()) as PackageJson
 const packageName = packageJson.name ?? relative(process.cwd(), packageRoot)
@@ -42,7 +45,6 @@ const packageName = packageJson.name ?? relative(process.cwd(), packageRoot)
 // styles, and copied assets cannot leak into a later tarball.
 await cleanRuntimeOutputs(distRoot)
 await mkdir(distRoot, { recursive: true })
-await mkdir(buildConfigDir, { recursive: true })
 
 await ensureDeclarations()
 
@@ -52,7 +54,6 @@ const entrypoints = await resolveEntrypoints(
 )
 
 if (entrypoints.length > 0) {
-  const bundleTsconfigPath = await writeBundleTsconfig()
   const result = await Bun.build({
     entrypoints,
     outdir: distRoot,
@@ -60,6 +61,11 @@ if (entrypoints.length > 0) {
     target: "bun",
     format: "esm",
     packages: "external",
+    // `packages: "external"` judges the resolved path, so it stops applying the moment something
+    // resolves a sibling to a file instead of a package — which the root `tsconfig.json` `paths`
+    // map does whenever `node_modules` has no entry for the specifier. This settles every sibling
+    // on the specifier itself, before resolution can blur it. See `package-boundaries.ts`.
+    plugins: workspaceBoundaryPlugins(packageJson),
     sourcemap: "external",
     // Share modules between entrypoints via chunks. Without splitting, each
     // subpath entry bundles its own copy of shared modules, so stateful
@@ -77,7 +83,6 @@ if (entrypoints.length > 0) {
     // so this pins the value rather than introducing the fold — and
     // `"production"` is the honest value for a published artifact.
     define: { "process.env.NODE_ENV": '"production"' },
-    tsconfig: bundleTsconfigPath,
   })
 
   if (!result.success) {
@@ -203,24 +208,6 @@ async function cleanRuntimeOutputs(directory: string): Promise<void> {
 
 function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && error.code === "ENOENT"
-}
-
-async function writeBundleTsconfig(): Promise<string> {
-  const bundleTsconfigPath = join(buildConfigDir, "tsconfig.bundle.json")
-  await writeFile(
-    bundleTsconfigPath,
-    `${JSON.stringify(
-      {
-        extends: "../tsconfig.json",
-        compilerOptions: {
-          paths: {},
-        },
-      },
-      null,
-      2
-    )}\n`
-  )
-  return bundleTsconfigPath
 }
 
 async function resolveEntrypoints(

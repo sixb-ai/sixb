@@ -248,6 +248,27 @@
         "typescript": "^5.7.0",
       },
     },
+    "examples/auth": {
+      "name": "@sixb/example-auth",
+      "dependencies": {
+        "@sixb/app": "workspace:*",
+        "@sixb/auth-magic-link": "workspace:*",
+        "@sixb/auth-oidc": "workspace:*",
+        "@sixb/client": "workspace:*",
+        "@sixb/core": "workspace:*",
+        "@sixb/sqlite": "workspace:*",
+        "@tanstack/react-query": "^5.0.0",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+        "react-router-dom": "^7.13.0",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/node": "^22.15.30",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+      },
+    },
     "examples/northline": {
       "name": "@sixb/example-northline",
       "dependencies": {
@@ -271,27 +292,6 @@
       },
       "devDependencies": {
         "@sixb/server": "workspace:*",
-        "@types/bun": "latest",
-        "@types/node": "^22.15.30",
-        "@types/react": "^19.0.0",
-        "@types/react-dom": "^19.0.0",
-      },
-    },
-    "examples/auth": {
-      "name": "@sixb/example-auth",
-      "dependencies": {
-        "@sixb/app": "workspace:*",
-        "@sixb/auth-magic-link": "workspace:*",
-        "@sixb/auth-oidc": "workspace:*",
-        "@sixb/client": "workspace:*",
-        "@sixb/core": "workspace:*",
-        "@sixb/sqlite": "workspace:*",
-        "@tanstack/react-query": "^5.0.0",
-        "react": "^19.0.0",
-        "react-dom": "^19.0.0",
-        "react-router-dom": "^7.13.0",
-      },
-      "devDependencies": {
         "@types/bun": "latest",
         "@types/node": "^22.15.30",
         "@types/react": "^19.0.0",
@@ -648,7 +648,11 @@
       "peerDependencies": {
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
+        "tailwindcss": "^4.0.0",
       },
+      "optionalPeers": [
+        "tailwindcss",
+      ],
     },
     "packages/workflow-worker": {
       "name": "@sixb/workflow-worker",
@@ -1290,9 +1294,9 @@
 
     "@sixb/ducklake": ["@sixb/ducklake@workspace:storage/ducklake"],
 
-    "@sixb/example-northline": ["@sixb/example-northline@workspace:examples/northline"],
-
     "@sixb/example-auth": ["@sixb/example-auth@workspace:examples/auth"],
+
+    "@sixb/example-northline": ["@sixb/example-northline@workspace:examples/northline"],
 
     "@sixb/example-panasonic-ac": ["@sixb/example-panasonic-ac@workspace:examples/panasonic-ac"],
 
@@ -2421,8 +2425,6 @@
     "@reduxjs/toolkit/immer": ["immer@11.1.8", "", {}, "sha512-/tbkHMW7y10Lx6i1crLjD4/OhNkRG+Fo7byZHtah0547nIeXYcpIXaUh0IAQY6gO5459qpGGYapcEOHtFXkIuA=="],
 
     "@sixb/docs/tailwindcss": ["tailwindcss@4.3.0", "", {}, "sha512-y6nxMGB1nMW9R6k96e5gdIFzcfL/gTJRNaqGes1YvkLnPVXzWgbqFF2yLC0T8G774n24cx3Pe8XrKoniCOAH+Q=="],
-
-    "@sixb/example-acme-corp/tailwindcss": ["tailwindcss@4.3.0", "", {}, "sha512-y6nxMGB1nMW9R6k96e5gdIFzcfL/gTJRNaqGes1YvkLnPVXzWgbqFF2yLC0T8G774n24cx3Pe8XrKoniCOAH+Q=="],
 
     "@sixb/example-roku-tv/tailwindcss": ["tailwindcss@4.3.0", "", {}, "sha512-y6nxMGB1nMW9R6k96e5gdIFzcfL/gTJRNaqGes1YvkLnPVXzWgbqFF2yLC0T8G774n24cx3Pe8XrKoniCOAH+Q=="],
 

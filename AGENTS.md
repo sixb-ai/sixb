@@ -108,6 +108,8 @@ repo's `typecheck` chain reads source.
 - A type that appears in a public interface signature must be exported from the same subpath as the interface, or the interface cannot be implemented from outside.
 - `@sixb/core/internal/*` is for this repo's packages only — no compatibility promise. Nothing in `docs/`, `examples/`, `templates/`, or `apps/` may import from it.
 - Export types freely (users need them to annotate their own code); keep runtime values minimal. Connectors export all their wire types on purpose.
+- A package may import a sibling; it must never absorb one. Every bare specifier its JavaScript and TypeScript import — in `src` and in `dist` — has to be a declared `dependencies`/`peerDependencies`/`optionalDependencies` entry, and `test:publish` rejects the rest in both directions. `tsc` cannot: the root `paths` map resolves an undeclared `@sixb/*` import to source, so it type-checks and then the bundler inlines it. `scripts/package-boundaries.ts` holds the rule and explains the failure.
+- Stylesheets served from `src` sit outside that check and stay a manual call. A bare `@import` in CSS is resolved by the consumer's Tailwind — relative to the stylesheet, then up through `node_modules` — not by the module resolver. `@sixb/ui` takes `tailwindcss` as an optional peer for exactly that reason: `@sixb/ui/globals.css` opens with `@import "tailwindcss"`, and only the consumer can satisfy it.
 
 ## Code Style
 
@@ -138,6 +140,10 @@ repo's `typecheck` chain reads source.
   `packages/core/tests/published-artifacts.e2e.ts` shows the shape. The one in-process exception is
   `atlas-app.test.ts`, which imports Bun's HTML entry because that import *is* the behavior under
   test — it is why `test:ci` runs behind a guard at all.
+- A guard is proven by removing it. Before landing a test that locks in a fix, revert the fix and
+  watch the test fail — a test that passes either way locks in nothing, and reads for years as if
+  it did. Say in the test how to reproduce that check, and say it there when a toolchain version
+  is what makes the failure reachable.
 - Run targeted tests first, then broader checks when shared behavior changes.
 
 ## Contribution Flow
