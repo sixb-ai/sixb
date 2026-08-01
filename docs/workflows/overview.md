@@ -253,6 +253,10 @@ A run moves through these statuses, recorded per run and per node so you can ins
 Nodes run sequentially. Step `input` and `output` are validated against their schemas at runtime, so
 a malformed shape fails the run rather than passing bad data downstream.
 
+`GET /api/workflows` carries a `latestRun` per workflow. It is `null` when the workflow has never
+run, and also when the `storage` provider keeps no run history — every published provider does, so
+only a partial custom provider hits that second case.
+
 ## Register and run
 
 Put workflow definitions under `workflows/` and export them. `createSixb()` discovers them
