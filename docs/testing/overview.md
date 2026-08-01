@@ -217,13 +217,17 @@ await expect(
 expect(await anonymous.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
 ```
 
-There are nine grant kinds. `access:application` gates browser applications at the server
+There are eleven grant kinds. `access:application` gates browser applications at the server
 boundary, and `observe:logs` gates reading captured [logs](../logging/overview.md). The scoped
 runtime gates the rest: `view:object` (`list`/`getObject`), `view:dataset` (`listDatasets`),
+`edit:object` (`upsertObject`, links, `delete`), `append:telemetry` (`appendTelemetry`),
 `apply:action` (`requestAction`), `run:workflow` (`requestWorkflowRun`), `run:sync`
 (`requestSyncRun`), `run:pipeline` (`requestPipelineRun`), and `run:agent` (`requestAgentRun`). See [authorization](../auth/authorization.md) for how roles,
 grants, groups, and membership policies resolve; the full pattern lives in
 `examples/auth/tests/atlas-authorization.test.ts`.
+
+A write test needs **both** `can.view(Type)` and `can.edit(Type)`; a telemetry-only test needs
+`can.append(Type)` and nothing else.
 
 ## Client/server e2e
 

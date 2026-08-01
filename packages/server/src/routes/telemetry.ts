@@ -4,7 +4,6 @@ import type { TimeseriesPoint } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
@@ -33,10 +32,12 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
   return app
     .post(
       "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId",
-      async ({ params, body, set }) => {
+      async (context) => {
+        const { params, body, set } = context
+        const { scoped } = requestAuthState(context)
         try {
           const parsedBody = AppendTelemetryBodySchema.parse(body)
-          await sixb.appendTelemetry(params.objectTypeId, [
+          await (scoped ?? sixb).appendTelemetry(params.objectTypeId, [
             {
               id: params.objectId,
               properties: {
@@ -59,13 +60,14 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         response: {
           200: SuccessResponseSchema,
           400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
         detail: {
           summary: "Append telemetry point",
           tags: [OPENAPI_TAGS.telemetry.name],
           operationId: "appendTelemetry",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("appendTelemetry"),
         },
       }
     )

@@ -13,14 +13,16 @@ import type { AgentRunRecord } from "@sixb/core/storage"
  * need that). A scoped principal therefore gains no protection unless the route
  * actively routes through `scoped`. Concretely:
  *
- *   - A grant-enforced read/list/query/action/workflow handler MUST use
- *     `scoped` (falling back to the raw `sixb` only when `scoped` is null).
- *     Using the raw `sixb` on a path an authenticated principal can reach is a
- *     silent god-mode bypass — it will not fail to compile or to run.
- *   - Surfaces with no grant family yet (object/link/telemetry writes,
- *     auth admin) stay authenticated-only by design and use the raw `sixb`
- *     deliberately, not by omission. Add such a route consciously, and lock it
- *     down when its grant family lands.
+ *   - A grant-enforced handler MUST use `scoped` (falling back to the raw
+ *     `sixb` only when `scoped` is null). That now covers writes as well as
+ *     reads: object, link, and telemetry writes enforce `edit:object` and
+ *     `append:telemetry`. Using the raw `sixb` on a path an authenticated
+ *     principal can reach is a silent god-mode bypass — it will not fail to
+ *     compile or to run.
+ *   - Surfaces with no grant family yet (auth admin, raw storage) stay
+ *     authenticated-only by design and use the raw `sixb` deliberately, not by
+ *     omission. Add such a route consciously, and lock it down when its grant
+ *     family lands.
  *
  * This implicit default is a known V1 trade-off (kept for runtime ergonomics);
  * if it proves error-prone, make privileged access explicit at this boundary.

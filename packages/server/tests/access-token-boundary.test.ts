@@ -32,6 +32,10 @@ describe("access token auth boundary", () => {
       ["POST", "/api/objects/query/exists"],
       ["POST", "/api/objects/query/facets"],
       ["GET", "/api/objects/device/fan-1"],
+      ["PUT", "/api/objects/device/fan-1"],
+      ["PUT", "/api/objects/device/fan-1/links/located-at"],
+      ["DELETE", "/api/objects/device/fan-1/links/located-at"],
+      ["POST", "/api/objects/device/fan-1/telemetry/temperature"],
       ["POST", "/api/telemetry/history"],
       ["GET", "/api/objects/device/fan-1/telemetry/temperature/history"],
       ["GET", "/api/objects/device/fan-1/telemetry/temperature/latest"],
@@ -53,11 +57,10 @@ describe("access token auth boundary", () => {
 
   test("rejects raw, admin, browser, and integration routes", () => {
     const rejectedRoutes = [
-      ["PUT", "/api/objects/device/fan-1"],
+      // The object, link, and telemetry writes moved out of this list: they enforce `edit:object`
+      // and `append:telemetry` now, which is the precondition SIXB_API_ROUTES states for bearer
+      // eligibility. `GET .../links` stays here — `listLinks` has no read grant covering it.
       ["GET", "/api/objects/device/fan-1/links"],
-      ["PUT", "/api/objects/device/fan-1/links/located-at"],
-      ["DELETE", "/api/objects/device/fan-1/links/located-at"],
-      ["POST", "/api/objects/device/fan-1/telemetry/temperature"],
       ["GET", "/api/workflow-interventions"],
       ["POST", "/api/workflow-interventions/int_1/submit"],
       ["GET", "/api/workflows/renew-contract/runs/run_1"],

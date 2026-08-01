@@ -12,7 +12,7 @@ A request first resolves an identity (authentication), then resolves that identi
 | Layer | Answers | Covers | Page |
 | --- | --- | --- | --- |
 | Authentication | Who you are | Login strategies (magic link, OIDC), sessions, cookies, bootstrap, invitations, member lifecycle | [Authentication](./authentication.md) |
-| Authorization | What you may do | Groups, roles, grants (`can.view` / `can.apply` / `can.run`), membership policies, the scoped runtime | [Authorization](./authorization.md) |
+| Authorization | What you may do | Groups, roles, grants (`can.view` / `can.edit` / `can.apply` / `can.run`), membership policies, the scoped runtime | [Authorization](./authorization.md) |
 
 ## How they connect
 

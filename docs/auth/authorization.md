@@ -81,15 +81,17 @@ are the union of every role whose `grantedTo` group it belongs to.
 
 ## Grants
 
-A grant pairs a capability with the definitions it covers. Five capability builders —
-`can.access`, `can.view`, `can.apply`, `can.run`, and `can.observe` — resolve to **nine grant
-kinds**, one per protected target family.
+A grant pairs a capability with the definitions it covers. Seven capability builders —
+`can.access`, `can.view`, `can.edit`, `can.append`, `can.apply`, `can.run`, and `can.observe` —
+resolve to **eleven grant kinds**, one per protected target family.
 
 | Grant kind | Builder | Allows | Targets |
 | --- | --- | --- | --- |
 | `access:application` | `can.access(...)` | Open a grant-controlled browser application | `applications.atlas`, `applications.app` |
 | `view:object` | `can.view(...)` | Read objects: `get`, `list`, `query`, telemetry, related events | [Object types](../ontology/object-types.md) |
 | `view:dataset` | `can.view(...)` | Read datasets and their versions | [Datasets](../data/datasets.md) |
+| `edit:object` | `can.edit(...)` | Write objects: properties, links, `delete`, `restore` | [Object types](../ontology/object-types.md) |
+| `append:telemetry` | `can.append(...)` | Append telemetry points | [Object types](../ontology/object-types.md) |
 | `apply:action` | `can.apply(...)` | Request actions | [Actions](../actions/overview.md) |
 | `run:workflow` | `can.run(...)` | Start workflows | [Workflows](../workflows/overview.md) |
 | `run:sync` | `can.run(...)` | Run syncs | [Syncs](../data/syncs.md) |
@@ -100,9 +102,14 @@ kinds**, one per protected target family.
 `can.access` accepts the built-in `applications.atlas` and `applications.app` definitions.
 `can.view` resolves to `view:object` or `view:dataset` from the definition you pass; `can.run`
 picks between `run:workflow`, `run:sync`, `run:pipeline`, and `run:agent` the same way. Each is
-type-checked, so mixing target families in one call does not compile. `can.view(Type)` also covers
-the type's subtypes. `can.observe` takes the `"logs"` target literal and grants `observe:logs`,
-which gates reading captured [logs](../logging/overview.md).
+type-checked, so mixing target families in one call does not compile. `can.observe` takes the
+`"logs"` target literal and grants `observe:logs`, which gates reading captured
+[logs](../logging/overview.md).
+
+> **Only `can.view(Type)` reaches subtypes.** `can.edit` and `can.append` cover exactly the types
+> you name, so adding a type under one you granted never makes it writable on its own.
+
+Writing takes two grants; see [why](#why-writing-needs-the-read-grant-too).
 
 ### Selecting definitions
 
@@ -114,6 +121,8 @@ Each builder takes one definition, a list, or a breadth selector.
 | One definition | `can.view(Invoice)` |
 | Several definitions | `can.view([Customer, Invoice])` |
 | Every object type | `can.view(every.object())` |
+| Write every object type | `can.edit(every.object())` |
+| Ingest telemetry everywhere | `can.append(every.object())` |
 | Every dataset | `can.view(every.dataset())` |
 | Every action | `can.apply(every.action())` |
 | Every workflow | `can.run(every.workflow())` |
@@ -142,6 +151,7 @@ export const financeAdminFullAccess = defineRole("finance-admin.full-access", {
   grantedTo: [financeAdmins],
   grants: [
     can.view(every.object()),
+    can.edit(every.object()),
     can.view(every.dataset()),
     can.apply(every.action()),
     can.run(every.workflow()),
@@ -292,21 +302,6 @@ membership policy above) can then invite and manage the rest of the team. See
 
 ## How grants are enforced
 
-> **0.1.0 limit — HTTP writes are not grant-checked.** Grants cover reads and run requests. These
-> four routes call the privileged runtime directly, so **any authenticated session can write any
-> object type**:
->
-> | Route | Writes |
-> | --- | --- |
-> | `PUT /api/objects/:objectTypeId/:objectId` | object properties |
-> | `PUT /api/objects/:objectTypeId/:objectId/links/:linkId` | a link |
-> | `DELETE /api/objects/:objectTypeId/:objectId/links/:linkId` | removes a link |
-> | `POST /api/objects/:objectTypeId/:objectId/telemetry/:propertyId` | a telemetry point |
->
-> Route writes through [actions](../actions/overview.md) instead: `apply:action` is enforced and the
-> write is recorded as a run. Block the four routes at your reverse proxy if untrusted principals
-> hold sessions.
-
 Grants are enforced through a **scoped runtime**. The raw `sixb` instance is privileged — it has
 no authorization context and bypasses all grant checks. That is intended for trusted system code
 (startup, syncs, projections, workers, tests).
@@ -317,6 +312,7 @@ To enforce a principal's grants, derive a scoped runtime with `sixb.as(context)`
 const scoped = sixb.as(authorizationContext)
 
 await scoped.objects(Invoice).list()      // only if view:object covers Invoice
+await scoped.objects(Invoice).upsert(...)  // only if view:object AND edit:object cover Invoice
 await scoped.requestAction(input)        // only if apply:action covers it
 await scoped.requestWorkflowRun(input)   // only if run:workflow covers it
 await scoped.readEvents()                // events whose subject is visible
@@ -328,12 +324,15 @@ APIs return only the definitions the principal can reach.
 ### Scoped runtime surface
 
 The scoped runtime exposes only operations whose grants are enforceable end to end. Catalog and
-read methods are filtered to what the principal may reach. Writes, links, telemetry appends, and
-auth administration stay on the privileged runtime.
+read methods are filtered to what the principal may reach. Auth administration, infrastructure
+handles, and `listLinks` stay on the privileged runtime.
 
 | Method | Gated by |
 | --- | --- |
 | `objects(Type)`, `list`, `getObject` | `view:object` |
+| `upsertObject`, `upsertObjectBatch`, `byId().delete()`, `byId().restore()` | `view:object` + `edit:object` |
+| `upsertLink`, `upsertLinkBatch`, `removeLink`, `byId().link()`, `byId().unlink()` | `edit:object` on the source, `view:object` on the target |
+| `appendTelemetry`, `appendTelemetryBatch`, `byId().telemetry().append()` | `append:telemetry` |
 | `requestAction`, `requestActionAndWait` | `apply:action` |
 | `requestWorkflowRun` | `run:workflow` |
 | `requestSyncRun` | `run:sync` |
@@ -345,6 +344,34 @@ auth administration stay on the privileged runtime.
 | `listPipelines`, `getPipelineById` | `run:pipeline` |
 | `requestAgentRun`, `listAgents`, `getAgentById`, `listThreads`, `getThread` | `run:agent` |
 | `readEvents` | subject visibility (see below) |
+
+### Why writing needs the read grant too
+
+An upsert answers with the **merged** row: the Materializer reconciles your write against whatever
+else asserts that object — a [projection](../data/projections.md), an action — so the response can
+carry properties you never sent. `edit:object` therefore takes effect only alongside
+`view:object`.
+
+`append:telemetry` is the exception, and deliberately so. An append answers `{ success: true }` and
+nothing else, so it needs no read grant. That is what makes a **write-only principal** expressible:
+
+```ts
+// A device pushes readings and can read nothing at all.
+export const sensorIngest = defineRole("sensor.ingest", {
+  grantedTo: [devices],
+  grants: [can.append(Sensor)],
+})
+```
+
+Links follow the type they are declared on. Writing `Invoice.l.customer` needs `edit:object` on
+`Invoice` and only `view:object` on `Customer` — a clerk attaching a customer to an invoice does not
+need write access to customers. The read rule already works this way: seeing a link requires
+`view:object` on both endpoints.
+
+> **Writes are not free of intent.** A grant says *who may write*; it does not record *why*.
+> Prefer an [action](../actions/overview.md) for anything a person would call a decision: it
+> validates, it is recorded as a run, and the resulting events name the action. Direct writes are
+> for integrations and ingestion, where there is no decision to record.
 
 ### Event visibility
 

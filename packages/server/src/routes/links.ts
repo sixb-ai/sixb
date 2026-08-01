@@ -1,8 +1,8 @@
 import { isAllowed, type OntologySource, type Sixb } from "@sixb/core"
 import type { ObjectLinkRow } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
+import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
@@ -73,10 +73,12 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
     )
     .put(
       "/api/objects/:objectTypeId/:objectId/links/:linkId",
-      async ({ params, body, set }) => {
+      async (context) => {
+        const { params, body, set } = context
+        const { scoped } = requestAuthState(context)
         try {
           const parsedBody = UpsertLinkBodySchema.parse(body)
-          await sixb.upsertLink(params.objectTypeId, params.objectId, params.linkId, {
+          await (scoped ?? sixb).upsertLink(params.objectTypeId, params.objectId, params.linkId, {
             targetTypeId: parsedBody.targetTypeId,
             targetId: parsedBody.targetId,
             properties: parsedBody.properties,
@@ -93,22 +95,25 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         response: {
           200: SuccessResponseSchema,
           400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
         detail: {
           summary: "Create or update object link",
           tags: [OPENAPI_TAGS.links.name],
           operationId: "upsertObjectLink",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("upsertObjectLink"),
         },
       }
     )
     .delete(
       "/api/objects/:objectTypeId/:objectId/links/:linkId",
-      async ({ params, query, set }) => {
+      async (context) => {
+        const { params, query, set } = context
+        const { scoped } = requestAuthState(context)
         try {
           const parsedQuery = RemoveLinkQuerySchema.parse(query)
-          await sixb.removeLink(params.objectTypeId, params.objectId, params.linkId, {
+          await (scoped ?? sixb).removeLink(params.objectTypeId, params.objectId, params.linkId, {
             targetTypeId: parsedQuery.targetTypeId,
             targetId: parsedQuery.targetId,
           })
@@ -124,13 +129,14 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         response: {
           200: SuccessResponseSchema,
           400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
         detail: {
           summary: "Remove object link",
           tags: [OPENAPI_TAGS.links.name],
           operationId: "removeObjectLink",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("removeObjectLink"),
         },
       }
     )

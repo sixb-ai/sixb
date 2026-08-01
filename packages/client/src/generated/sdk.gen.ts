@@ -1391,7 +1391,10 @@ export const upsertObject = <ThrowOnError extends boolean = false>(
   options: Options<UpsertObjectData, ThrowOnError>
 ) =>
   (options.client ?? client).put<UpsertObjectResponses, UpsertObjectErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/objects/{objectTypeId}/{objectId}",
     ...options,
     headers: {
@@ -1799,7 +1802,10 @@ export const removeObjectLink = <ThrowOnError extends boolean = false>(
     RemoveObjectLinkErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/objects/{objectTypeId}/{objectId}/links/{linkId}",
     ...options,
   })
@@ -1811,7 +1817,10 @@ export const upsertObjectLink = <ThrowOnError extends boolean = false>(
   options: Options<UpsertObjectLinkData, ThrowOnError>
 ) =>
   (options.client ?? client).put<UpsertObjectLinkResponses, UpsertObjectLinkErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/objects/{objectTypeId}/{objectId}/links/{linkId}",
     ...options,
     headers: {
@@ -1827,7 +1836,10 @@ export const appendTelemetry = <ThrowOnError extends boolean = false>(
   options: Options<AppendTelemetryData, ThrowOnError>
 ) =>
   (options.client ?? client).post<AppendTelemetryResponses, AppendTelemetryErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}",
     ...options,
     headers: {

@@ -159,6 +159,39 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: true,
   },
+  // The four write routes. Bearer-capable because they now enforce scoped authorization
+  // (`edit:object` / `append:telemetry`), which is exactly the precondition this table's rule states.
+  // NOT agent-proxied: letting an agent turn write objects on its own is a separate decision, and
+  // the gateway already hands routes a scoped runtime, so flipping `agentApi` later needs no
+  // authorization work — only that decision.
+  {
+    operationId: "upsertObject",
+    method: "PUT",
+    path: "/api/objects/:objectTypeId/:objectId",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "upsertObjectLink",
+    method: "PUT",
+    path: "/api/objects/:objectTypeId/:objectId/links/:linkId",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "removeObjectLink",
+    method: "DELETE",
+    path: "/api/objects/:objectTypeId/:objectId/links/:linkId",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "appendTelemetry",
+    method: "POST",
+    path: "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId",
+    accessToken: true,
+    agentApi: false,
+  },
   {
     operationId: "getBulkTelemetryHistory",
     method: "POST",

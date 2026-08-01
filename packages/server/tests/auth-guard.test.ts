@@ -42,6 +42,14 @@ const Device = defineObjectType({
   ],
 })
 
+// The CSRF and origin tests below drive `PUT /api/objects/device/:id` because it is a mutation, not
+// because they care about authorization. It enforces `edit:object` now, so they seed the grant to
+// keep asserting the status the guard produces rather than the one the write grant would.
+const deviceWriter = defineRole("device.writer", {
+  grantedTo: [securityAdmins],
+  grants: [can.view(Device), can.edit(Device)],
+})
+
 async function getFreePort(): Promise<number> {
   return await new Promise<number>((resolvePromise, reject) => {
     const server = createServer() as ReturnType<typeof createServer> & {
@@ -713,7 +721,7 @@ describe("server auth guard", () => {
   })
 
   test("uses the browser origin audience for CSRF-protected API mutations", async () => {
-    const { sixb, storage } = createRuntime({ auth: true })
+    const { sixb, storage } = createRuntime({ auth: true, roles: [deviceWriter] })
     const seeded = await seedSession(storage, { audience: "app" })
     const app = createSixbApi(
       new SixbServer({
@@ -741,7 +749,7 @@ describe("server auth guard", () => {
   })
 
   test("requires CSRF only after authentication for mutations", async () => {
-    const { sixb, storage } = createRuntime({ auth: true })
+    const { sixb, storage } = createRuntime({ auth: true, roles: [deviceWriter] })
     const seeded = await seedSession(storage)
     const app = createSixbApi(
       new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
@@ -1007,7 +1015,7 @@ describe("server auth guard", () => {
   })
 
   test("allows API-owned docs mutations with the API-origin session and CSRF token", async () => {
-    const { sixb, storage } = createRuntime({ auth: true })
+    const { sixb, storage } = createRuntime({ auth: true, roles: [deviceWriter] })
     const seeded = await seedSession(storage)
     const app = createSixbApi(
       new SixbServer({
