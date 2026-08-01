@@ -60,10 +60,61 @@ export interface MigrationReport {
   readonly skipped: readonly string[]
 }
 
+/**
+ * Grouped by what an operator has to do about it: nothing (`current`), run
+ * `sixb db migrate` (`uninitialized`, `pending`), or intervene by hand (the rest).
+ *
+ * There is no state for "the history could not be read": an unreachable database, a missing
+ * grant or a corrupt table all throw out of the read, and the probe reports that reason.
+ */
+export type MigrationState =
+  /** Every known migration is applied. The only state a host should serve traffic in. */
+  | "current"
+  /** No migration history exists yet: an empty database, or one never migrated. */
+  | "uninitialized"
+  /** History is a valid prefix of this build's migrations, but incomplete. */
+  | "pending"
+  /** The database has versions this build does not know — usually an app rolled back without its schema. */
+  | "ahead"
+  /** A migration recorded a start and never an end. */
+  | "dirty"
+  /** History contradicts the declared migrations: changed checksum, mismatched id, duplicate version, foreign adapter. */
+  | "incompatible"
+
+interface MigrationStatusBase {
+  readonly adapterId: string
+  readonly latestVersion: number
+  /** Highest applied version; 0 when no history exists. */
+  readonly appliedVersion: number
+}
+
+/**
+ * A state, and the reason for it when there is one to give.
+ *
+ * A union rather than an optional field, which accepted `current` with a reason and `dirty`
+ * without one. Every state but `current` exists because an operator has to act.
+ */
+export type MigrationStatus =
+  | (MigrationStatusBase & { readonly state: "current"; readonly reason?: never })
+  | (MigrationStatusBase & {
+      readonly state: Exclude<MigrationState, "current">
+      /** What an operator has to do about it. */
+      readonly reason: string
+    })
+
 export interface StorageMigrator {
   readonly adapterId: string
   readonly latestVersion: number
-  plan(): Promise<MigrationPlan<unknown>>
+
+  /**
+   * Reports the schema state without touching it.
+   *
+   * Strictly read-only, unlike `migrate()`, which calls `ensure()` first and so runs DDL.
+   * `/ready` is unauthenticated, and a least-privilege deployment has no DDL grant to spend on
+   * a health check. Reports the dangerous states (`ahead`, `dirty`) rather than throwing.
+   */
+  status(): Promise<MigrationStatus>
+
   migrate(): Promise<MigrationReport>
 }
 

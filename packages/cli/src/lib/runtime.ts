@@ -29,10 +29,8 @@ export async function stopQuietly(stopFn: (() => Promise<void>) | undefined | nu
   await stopFn().catch(() => {})
 }
 
-async function closeProvider(provider: unknown): Promise<void> {
-  const close = (provider as { close?: unknown } | null | undefined)?.close
-  if (typeof close !== "function") return
-  await close.call(provider)
+async function closeProvider(provider: { close?(): void | Promise<void> }): Promise<void> {
+  await provider.close?.()
 }
 
 export interface RunningSixbRuntime {

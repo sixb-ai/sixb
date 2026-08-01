@@ -248,6 +248,23 @@ describe("server auth guard", () => {
     expect(await response.json()).toEqual({ error: "Authentication required" })
   })
 
+  test("protects a route registered outside the known prefixes", async () => {
+    const { sixb } = createRuntime({ auth: true })
+    const app = createSixbApi(
+      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+    ).get("/internal/metrics", () => "secret")
+
+    // This is the case the classifier's default actually governs. An *unregistered*
+    // path 404s before the lifecycle hooks run, so it was never exposed; the trap was
+    // the next route someone mounts outside /api, /ws and /docs, which the old
+    // "public" default would have served to anyone. Adding it here reproduces that
+    // exactly: the route matches, the guard runs, and it now demands a session.
+    const response = await app.fetch(new Request("http://localhost/internal/metrics"))
+
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ error: "Authentication required" })
+  })
+
   test("accepts bearer tokens only on the access token route boundary", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const credential = await seedAccessToken(storage)

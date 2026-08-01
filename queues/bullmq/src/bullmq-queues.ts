@@ -68,7 +68,7 @@ export interface BullMqQueuesOptions {
  * (BullMQ requires `maxRetriesPerRequest: null` on the worker connection for blocking fetches).
  */
 export class BullMqQueues implements Queues {
-  readonly provider = "bullmq"
+  readonly scope = "shared" as const
   readonly syncRuns: BullMqQueue<SyncRunRequestedQueueJob>
   readonly pipelines: BullMqQueue<PipelineRunRequestedQueueJob>
   readonly projections: BullMqQueue<ProjectionRunRequestedQueueJob>
@@ -97,6 +97,11 @@ export class BullMqQueues implements Queues {
     this.workflows = new BullMqQueue<WorkflowQueueJob>(shared, "workflow.runs")
     this.actions = new BullMqQueue<ActionRunRequestedQueueJob>(shared, "action.runs")
     this.agents = new BullMqQueue<AgentRunRequestedQueueJob>(shared, "agent.runs")
+  }
+
+  /** The non-blocking handle: a probe has no business queueing behind BullMQ's fetch loop. */
+  async health(): Promise<void> {
+    await this.connections.queueConnection.ping()
   }
 
   async close(): Promise<void> {

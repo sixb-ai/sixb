@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
-import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook } from "@sixb/core"
+import type { WebhookDefinition, WebhookVerification, WebhookVerificationSubject } from "@sixb/core"
+import { defineWebhook, resolveWebhookVerification, warnUnverifiedWebhook } from "@sixb/core"
 import type {
   MercuryClient,
   MercuryEvent,
@@ -12,10 +12,27 @@ import type {
 /** Mercury's recommended replay window for webhook signature timestamps. */
 const DEFAULT_TOLERANCE_MS = 5 * 60 * 1000
 
-export interface MercuryEventsWebhookOptions {
+export const MERCURY_WEBHOOK: WebhookVerificationSubject = {
+  connector: "SixbMercury",
+  verifies: "the Mercury-Signature HMAC",
+  credentialOption: "`credential` on `mercuryEventsWebhook()`",
+  allowOption: "`allowUnverified: true`",
+}
+
+/** In the words `mercury()` uses for the same two options. */
+export const MERCURY_CONNECTOR_WEBHOOK: WebhookVerificationSubject = {
+  ...MERCURY_WEBHOOK,
+  credentialOption: "`webhookSecret` on `mercury()`",
+  allowOption: "`webhookAllowUnverified: true`",
+}
+
+/**
+ * Either a signing secret or an explicit decision to do without one. For a banking
+ * connector especially, an unverified route is a decision and not a default — so the type
+ * has no shape that expresses neither.
+ */
+export type MercuryEventsWebhookOptions = WebhookVerification & {
   readonly onEvent: MercuryEventHandler
-  /** Endpoint signing secret. Verification is skipped when omitted. */
-  readonly secret?: string
   /** Maximum accepted signature age. Defaults to 5 minutes. */
   readonly toleranceMs?: number
 }
@@ -31,19 +48,29 @@ export interface MercuryEventsWebhookOptions {
 export function mercuryEventsWebhook(
   options: MercuryEventsWebhookOptions
 ): WebhookDefinition<MercuryEvent, MercuryClient> {
+  return createMercuryEventsWebhook(options, MERCURY_WEBHOOK)
+}
+
+/** Package-internal: the connector factory passes the subject written in its own vocabulary. */
+export function createMercuryEventsWebhook(
+  options: MercuryEventsWebhookOptions,
+  subject: WebhookVerificationSubject
+): WebhookDefinition<MercuryEvent, MercuryClient> {
   const toleranceMs = options.toleranceMs ?? DEFAULT_TOLERANCE_MS
   assertToleranceMs(toleranceMs)
+
+  warnUnverifiedWebhook(subject, resolveWebhookVerification(subject, options))
 
   return defineWebhook("events")
     .post()
     .json({ parse: parseMercuryEvent })
     .verify(({ request, rawBody }) => {
-      if (!options.secret) {
+      if (!options.credential) {
         return
       }
 
       verifySignature(
-        options.secret,
+        options.credential,
         rawBody,
         request.headers.get("mercury-signature"),
         toleranceMs

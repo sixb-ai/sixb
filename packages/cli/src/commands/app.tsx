@@ -5,7 +5,7 @@ import { resolveBrowserTopology } from "../lib/browser-topology"
 import type { LoadedSixb } from "../lib/loadSixb"
 import { builtAppOutdir, loadProductionSixb } from "../lib/production"
 import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
-import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
+import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
 
 export interface AppOptions {
   entry?: string
@@ -18,8 +18,7 @@ export interface AppOptions {
 export async function runApp(options: AppOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionSixb({ entry: options.entry })
-  const host = options.host ?? "0.0.0.0"
+  const loaded = await loadProductionSixb({ entry: options.entry, role: "app" })
   const app = renderPersistent(
     <LoadingView title="Starting sixb app" subtitle={loaded.entry} status="Starting app" />
   )
@@ -41,7 +40,7 @@ export async function runApp(options: AppOptions = {}) {
 
     const topology = resolveBrowserTopology({
       mode: "production",
-      host,
+      host: options.host,
       appPort: options.port,
       apiPublicOrigin: options.apiPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
@@ -91,8 +90,7 @@ export async function runApp(options: AppOptions = {}) {
     if (sixb) {
       await stopSixbProviders(sixb)
     }
-    const message = error instanceof Error ? error.message : String(error)
-    await renderStatic(<ErrorView message={message} />)
+    await renderCliError(error)
     process.exit(1)
   }
 }

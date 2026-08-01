@@ -626,7 +626,9 @@ describe("github connector", () => {
 
     test("registers only when onEvent is set", () => {
       expect(github({ token: "t" }).webhooks).toBeUndefined()
-      expect(github({ token: "t", onEvent: () => {} }).webhooks).toHaveLength(1)
+      expect(
+        github({ token: "t", webhookAllowUnverified: true, onEvent: () => {} }).webhooks
+      ).toHaveLength(1)
     })
 
     test("types payloads by narrowed webhook event name", () => {
@@ -648,7 +650,7 @@ describe("github connector", () => {
     test("verifies the signature and forwards event + runtime to onEvent", async () => {
       const received: GitHubEventContext[] = []
       const webhook = githubEventsWebhook({
-        secret: "shh",
+        credential: "shh",
         onEvent: (context) => {
           received.push(context)
         },
@@ -689,6 +691,7 @@ describe("github connector", () => {
     test("dispatches non-issue events too", async () => {
       const names: string[] = []
       const webhook = githubEventsWebhook({
+        allowUnverified: true,
         onEvent: (context) => {
           names.push(context.event.name)
         },
@@ -706,7 +709,7 @@ describe("github connector", () => {
     })
 
     test("rejects an invalid signature", () => {
-      const webhook = githubEventsWebhook({ secret: "shh", onEvent: () => {} })
+      const webhook = githubEventsWebhook({ credential: "shh", onEvent: () => {} })
       expect(() =>
         webhook.verify?.({
           request: new Request("https://x/hook", {
@@ -721,6 +724,7 @@ describe("github connector", () => {
     test("ignores deliveries without an event header", async () => {
       let called = false
       const webhook = githubEventsWebhook({
+        allowUnverified: true,
         onEvent: () => {
           called = true
         },
@@ -735,3 +739,51 @@ describe("github connector", () => {
     })
   })
 })
+
+describe("githubEventsWebhook without a secret", () => {
+  test("cannot be written without a secret or an explicit opt-in", () => {
+    // The first guarantee is the type: `WebhookVerification` has no shape that carries
+    // neither, so this line does not compile.
+    // @ts-expect-error - neither `credential` nor `allowUnverified`
+    const missing: Parameters<typeof githubEventsWebhook>[0] = { onEvent: () => {} }
+
+    // The second is the throw, for the caller the type cannot reach — plain JS, or one who
+    // widened to `any`. `if (!options.secret) return` inside `.verify()` used to accept
+    // anything that reached the route, and for a while it only warned, which a startup log
+    // buries. Now `createSixb()` fails and the API role never starts.
+    expect(() => githubEventsWebhook(missing)).toThrow(/X-Hub-Signature-256/)
+  })
+
+  test("accepts unverified deliveries when asked to, and says so", () => {
+    const warnings = captureWarnings(() =>
+      githubEventsWebhook({ allowUnverified: true, onEvent: () => {} })
+    )
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain("X-Hub-Signature-256")
+    expect(warnings[0]).toContain("accepts unverified requests")
+  })
+
+  test("stays quiet when a secret is configured", () => {
+    const warnings = captureWarnings(() =>
+      githubEventsWebhook({ credential: "whsec_test", onEvent: () => {} })
+    )
+
+    expect(warnings).toEqual([])
+  })
+})
+
+/** Captures `console.warn` for the duration of one call. */
+function captureWarnings(run: () => void): string[] {
+  const warnings: string[] = []
+  const original = console.warn
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "))
+  }
+  try {
+    run()
+  } finally {
+    console.warn = original
+  }
+  return warnings
+}

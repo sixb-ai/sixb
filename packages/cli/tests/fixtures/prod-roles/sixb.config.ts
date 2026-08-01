@@ -8,7 +8,6 @@ import {
   defineSchedule,
   defineSync,
   InMemoryBlobStorage,
-  InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
@@ -18,6 +17,7 @@ import {
   Sixb,
   type StorageMigrator,
 } from "@sixb/core"
+import { SharedBroker } from "../shared/sharedBroker"
 
 const Transaction = defineObjectType({
   id: "Transaction",
@@ -73,10 +73,13 @@ class TrackingLakeStorage extends InMemoryLakeStorage {
   }
 }
 
-// Not an `InMemoryQueues` instance and without an in-memory `provider` tag, so it
-// passes the `sixb worker` shared-queue guard while still backed by real queues.
 class SharedQueues implements Queues {
+  readonly scope = "shared" as const
   private readonly inner = new InMemoryQueues()
+
+  health(): Promise<void> {
+    return this.inner.health()
+  }
 
   get syncRuns() {
     return this.inner.syncRuns
@@ -106,9 +109,19 @@ function loggingStorage() {
   const migrator: StorageMigrator = {
     adapterId: "FixtureStorage",
     latestVersion: 1,
-    async plan() {
-      throw new Error("plan should not run")
+    async status() {
+      logFixtureEvent({ type: "storage:status" })
+      return {
+        adapterId: "FixtureStorage",
+        latestVersion: 1,
+        appliedVersion: 1,
+        state: "current",
+      }
     },
+    // `migrate()` runs the DDL, through `ensure()`. It is logged so the e2e can assert
+    // that a boot migrates exactly once and that every later probe adds none — the
+    // read-only-probe rule, which used to be witnessed by a `plan()` that no longer
+    // exists on the contract.
     async migrate() {
       logFixtureEvent({ type: "storage:migrate" })
       return {
@@ -121,7 +134,15 @@ function loggingStorage() {
     },
   }
 
-  return Object.assign(new InMemoryStorage(), { migrators: [migrator] })
+  // `close` is logged so the role tests can assert the shutdown ORDER, not just that
+  // shutdown happened: storage must close after the broker has drained the outbox it
+  // reads from, or the final publication loses rows.
+  return Object.assign(new InMemoryStorage(), {
+    migrators: [migrator],
+    close() {
+      logFixtureEvent({ type: "storage:close" })
+    },
+  })
 }
 
 export const sixb = new Sixb({
@@ -130,7 +151,7 @@ export const sixb = new Sixb({
   auth: { id: "disabled", kind: "disabled", allowDisabledInProduction: true },
   ontology: [Transaction],
   connectors: [erpDb],
-  broker: new InMemoryBroker(),
+  broker: new SharedBroker(),
   storage: loggingStorage(),
   lakeStorage: new TrackingLakeStorage(),
   blobStorage: new InMemoryBlobStorage(),

@@ -287,4 +287,13 @@ export interface Storage {
     run: (tx: Storage) => Promise<T> | T,
     options?: StorageTransactionOptions
   ): Promise<T>
+
+  /**
+   * Release external resources (connections, pools, file handles).
+   *
+   * Optional: a provider that owns none omits it. Hosts must close storage
+   * *after* whatever claims from it — the CLI drains the outbox and closes the
+   * broker first, or the final publication loses the rows it was reading.
+   */
+  close?(): void | Promise<void>
 }

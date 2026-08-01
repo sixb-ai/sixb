@@ -148,8 +148,13 @@ describe("startSixbRuntime", () => {
     const migrator: StorageMigrator = {
       adapterId: "FixtureStorage",
       latestVersion: 1,
-      async plan() {
-        throw new Error("plan should not run")
+      async status() {
+        return {
+          adapterId: "FixtureStorage",
+          latestVersion: 1,
+          appliedVersion: 1,
+          state: "current" as const,
+        }
       },
       async migrate() {
         calls.push("storage")
@@ -869,8 +874,13 @@ describe("split runtime preparation", () => {
     const migrator: StorageMigrator = {
       adapterId: "FixtureStorage",
       latestVersion: 1,
-      async plan() {
-        throw new Error("plan should not run")
+      async status() {
+        return {
+          adapterId: "FixtureStorage",
+          latestVersion: 1,
+          appliedVersion: 1,
+          state: "current" as const,
+        }
       },
       async migrate() {
         calls.push("storage")

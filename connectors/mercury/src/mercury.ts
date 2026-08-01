@@ -1,9 +1,13 @@
 import { rest } from "@sixb/connector-rest"
-import type { ConnectorAdapter, WebhookDefinition } from "@sixb/core"
+import {
+  type ConnectorAdapter,
+  resolveWebhookVerification,
+  type WebhookDefinition,
+} from "@sixb/core"
 import { createMercuryClient } from "./client"
 import { createMercuryHttp } from "./http"
 import type { MercuryAccessTokenResolver, MercuryClient, MercuryConnectorOptions } from "./types"
-import { mercuryEventsWebhook } from "./webhooks"
+import { createMercuryEventsWebhook, MERCURY_CONNECTOR_WEBHOOK } from "./webhooks"
 
 const DEFAULT_BASE_URL = "https://api.mercury.com/api/v1/"
 
@@ -59,11 +63,19 @@ function collectWebhooks(
 
   if (options.onEvent) {
     webhooks.push(
-      mercuryEventsWebhook({
-        onEvent: options.onEvent,
-        secret: options.webhookSecret,
-        toleranceMs: options.webhookToleranceMs,
-      }) as WebhookDefinition<unknown, MercuryClient>
+      createMercuryEventsWebhook(
+        {
+          onEvent: options.onEvent,
+          // The secret usually arrives from the environment, so the decision is made here
+          // rather than by the type: a secret, an explicit opt-in, or no webhook.
+          ...resolveWebhookVerification(MERCURY_CONNECTOR_WEBHOOK, {
+            credential: options.webhookSecret,
+            allowUnverified: options.webhookAllowUnverified,
+          }),
+          toleranceMs: options.webhookToleranceMs,
+        },
+        MERCURY_CONNECTOR_WEBHOOK
+      ) as WebhookDefinition<unknown, MercuryClient>
     )
   }
 

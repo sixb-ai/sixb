@@ -1,6 +1,7 @@
 import { Box, render, Text } from "ink"
 import type React from "react"
 import { useEffect, useMemo, useState } from "react"
+import { errorMessage, errorRemediation } from "../lib/errors"
 
 // ─── Primitives ──────────────────────────────────────────────────────────────
 
@@ -15,6 +16,24 @@ export async function renderStatic(view: React.ReactNode) {
 
 export function renderPersistent(view: React.ReactNode) {
   return render(view, { exitOnCtrlC: false })
+}
+
+/**
+ * Renders a caught failure the one way the CLI renders failures, so a remediation carried on
+ * the error reaches the terminal without each caller remembering to pass it through.
+ */
+export async function renderCliError(
+  error: unknown,
+  options: { readonly title?: string; readonly details?: readonly string[] } = {}
+): Promise<void> {
+  await renderStatic(
+    <ErrorView
+      {...(options.title ? { title: options.title } : {})}
+      message={errorMessage(error)}
+      {...(errorRemediation(error) ? { remediation: errorRemediation(error) } : {})}
+      {...(options.details ? { details: options.details } : {})}
+    />
+  )
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
@@ -226,6 +245,22 @@ function ServicePanel({ name, items }: { name: string; items: KeyValueItem[] }) 
   )
 }
 
+/**
+ * What the role did to the storage schema at startup, worded the same way by every
+ * role. Absent when there was nothing to report, so a runtime without migrators does
+ * not grow a panel that says nothing.
+ */
+function StoragePanel({ summary }: { summary?: string | null }) {
+  if (!summary) return null
+
+  return (
+    <>
+      <Spacer />
+      <ServicePanel name="Storage" items={[{ label: "Schema", value: summary }]} />
+    </>
+  )
+}
+
 function BulletList({ items, dim = false }: { items: readonly string[]; dim?: boolean }) {
   return (
     <Box flexDirection="column">
@@ -332,7 +367,7 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           { label: "check", value: "Validate project configuration and health" },
           { label: "typegen", value: "Generate ontology types for client query inference" },
           { label: "build", value: "Build runtime and production UI/app assets" },
-          { label: "db migrate", value: "Run adapter-owned database migrations" },
+          { label: "db migrate", value: "Run adapter-owned database migrations ahead of a role" },
           { label: "lake check", value: "Check lake dataset definitions for drift" },
           { label: "lake cleanup", value: "Run lake storage maintenance cleanup" },
           { label: "init [dir]", value: "Initialize sixb project in directory" },
@@ -345,8 +380,15 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
         labelWidth={22}
         items={[
           { label: "--entry <path>", value: "Entry file (default: sixb.config.ts)" },
+          {
+            label: "--no-migrate",
+            value: "Start a role without migrating storage (or SIXB_SKIP_MIGRATION=1)",
+          },
           { label: "--port <port>", value: "Role port; dev uses Atlas base port" },
-          { label: "--host <host>", value: "Browser app bind host (default: 0.0.0.0)" },
+          {
+            label: "--host <host>",
+            value: "Bind host (dev: 127.0.0.1, production roles: 0.0.0.0)",
+          },
           { label: "--api-port <port>", value: "API port (default: Atlas port + 2)" },
           { label: "--api-host <host>", value: "API bind host (default: --host)" },
           { label: "--api-public-origin <origin>", value: "Public API origin" },
@@ -409,11 +451,14 @@ export function VersionView({ version }: { version: string }) {
 export function ErrorView({
   title = "Error",
   message,
+  remediation,
   details = [],
 }: {
   title?: string
   message: string
-  details?: string[]
+  /** What to do next. Rendered apart from the diagnosis, not appended to it. */
+  remediation?: string
+  details?: readonly string[]
 }) {
   return (
     <Box flexDirection="column">
@@ -424,6 +469,13 @@ export function ErrorView({
       <Panel title="Failure" borderColor="red">
         <Text>{message}</Text>
       </Panel>
+      {remediation ? (
+        <>
+          <Spacer />
+          <SectionTitle>Try this</SectionTitle>
+          <Text>{remediation}</Text>
+        </>
+      ) : null}
       {details.length > 0 ? (
         <>
           <Spacer />
@@ -560,10 +612,12 @@ export function StartView({
 export function WorkerView({
   name,
   workerId,
+  storage,
   warnings = [],
 }: {
   name: string
   workerId: string
+  storage?: string | null
   warnings?: readonly string[]
 }) {
   return (
@@ -574,6 +628,7 @@ export function WorkerView({
       <Text dimColor>{name}</Text>
       <Spacer />
       <ServicePanel name="Worker" items={[{ label: "ID", value: workerId }]} />
+      <StoragePanel summary={storage} />
       {warnings.length > 0 ? (
         <>
           <Spacer />
@@ -590,10 +645,12 @@ export function WorkerView({
 export function WorkerGroupView({
   name,
   workerTypes,
+  storage,
   warnings = [],
 }: {
   name: string
   workerTypes: readonly string[]
+  storage?: string | null
   warnings?: readonly string[]
 }) {
   return (
@@ -607,6 +664,7 @@ export function WorkerGroupView({
         name="Workers"
         items={workerTypes.map((workerType) => ({ label: workerType, value: "running" }))}
       />
+      <StoragePanel summary={storage} />
       {warnings.length > 0 ? (
         <>
           <Spacer />
@@ -625,12 +683,14 @@ export function RoleView({
   name,
   serviceName,
   items,
+  storage,
   warnings = [],
 }: {
   title: string
   name: string
   serviceName: string
   items: KeyValueItem[]
+  storage?: string | null
   warnings?: readonly string[]
 }) {
   return (
@@ -641,6 +701,7 @@ export function RoleView({
       <Text dimColor>{name}</Text>
       <Spacer />
       <ServicePanel name={serviceName} items={items} />
+      <StoragePanel summary={storage} />
       {warnings.length > 0 ? (
         <>
           <Spacer />
@@ -656,30 +717,32 @@ export function RoleView({
 
 export function CheckView({
   projectId,
-  events,
   storage,
   timeseries,
   broker,
+  queues,
   projectValidation,
   ontology,
   warnings,
 }: {
   projectId: string
-  events: { ok: boolean; message?: string }
   storage: { ok: boolean; message?: string }
   timeseries: { ok: boolean; message?: string }
   broker: { ok: boolean; message?: string }
+  queues: { ok: boolean; message?: string }
   projectValidation?: { ok: boolean; message?: string }
   ontology?: { enabled: boolean; source: string; errors: number; warnings: number }
-  warnings: string[]
+  warnings: readonly string[]
 }) {
   const validation = projectValidation ?? { ok: true, message: "ok" }
   const ontologyOk = (ontology?.errors ?? 0) === 0
-  const allOk = events.ok && storage.ok && timeseries.ok && broker.ok && validation.ok && ontologyOk
+  const allOk = [storage, timeseries, broker, queues, validation].every((row) => row.ok)
+  const healthy = allOk && ontologyOk
 
-  function statusText(provider: { ok: boolean; message?: string }): string {
-    if (provider.ok) return "ok"
-    return provider.message ?? "failed"
+  // The message wins when there is one, pass or fail: a probe that succeeded still says which
+  // provider answered and whether its schema is current.
+  function statusText(row: { ok: boolean; message?: string }): string {
+    return row.message ?? (row.ok ? "ok" : "failed")
   }
 
   function statusColor(ok: boolean): string {
@@ -688,17 +751,13 @@ export function CheckView({
 
   return (
     <Box flexDirection="column">
-      <Text color={allOk ? "green" : "red"} bold>
-        {allOk ? "Sixb is healthy" : "Sixb has issues"}
+      <Text color={healthy ? "green" : "red"} bold>
+        {healthy ? "Sixb is healthy" : "Sixb has issues"}
       </Text>
       <Text dimColor>{projectId}</Text>
       <Spacer />
       <SectionTitle>Providers</SectionTitle>
       <Box flexDirection="column">
-        <Text>
-          <Text dimColor>{padLabel("Events", 14)}</Text>
-          <Text color={statusColor(events.ok)}>{statusText(events)}</Text>
-        </Text>
         <Text>
           <Text dimColor>{padLabel("Storage", 14)}</Text>
           <Text color={statusColor(storage.ok)}>{statusText(storage)}</Text>
@@ -710,6 +769,10 @@ export function CheckView({
         <Text>
           <Text dimColor>{padLabel("Broker", 14)}</Text>
           <Text color={statusColor(broker.ok)}>{statusText(broker)}</Text>
+        </Text>
+        <Text>
+          <Text dimColor>{padLabel("Queues", 14)}</Text>
+          <Text color={statusColor(queues.ok)}>{statusText(queues)}</Text>
         </Text>
         <Text>
           <Text dimColor>{padLabel("Project", 14)}</Text>
@@ -787,9 +850,12 @@ export function TypegenView({
 export function DbMigrateView({
   projectId,
   status,
+  applied = [],
 }: {
   projectId: string
   status: "migrated" | "current" | "skipped"
+  /** Migration step ids this run applied, named so the output can be checked. */
+  applied?: readonly string[]
 }) {
   return (
     <Box flexDirection="column">
@@ -799,6 +865,13 @@ export function DbMigrateView({
       <Text dimColor>{projectId}</Text>
       <Spacer />
       <KeyValueList items={[{ label: "Storage", value: status }]} />
+      {applied.length > 0 ? (
+        <>
+          <Spacer />
+          <SectionTitle>Applied</SectionTitle>
+          <BulletList items={applied} />
+        </>
+      ) : null}
     </Box>
   )
 }

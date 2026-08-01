@@ -32,8 +32,12 @@ describe("browser topology", () => {
     })
 
     expect(topology).toMatchObject({
-      host: "0.0.0.0",
-      apiHost: "0.0.0.0",
+      // Loopback, not every interface. A dev server binding 0.0.0.0 put the project's
+      // data — behind an API usually running with auth disabled — on whatever network
+      // the laptop was on. The origins stay `localhost`, so nothing an author reads
+      // changes; `--host 0.0.0.0` opts back in for reaching it from a phone.
+      host: "127.0.0.1",
+      apiHost: "127.0.0.1",
       atlasPort: 3000,
       appPort: 3001,
       apiPort: 3002,
@@ -60,6 +64,17 @@ describe("browser topology", () => {
     expect(topology.allowedBrowserOrigins).toEqual([
       { origin: "http://localhost:3000", audience: "atlas" },
     ])
+  })
+
+  test("binds every interface in production", () => {
+    process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
+    process.env.SIXB_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
+
+    const topology = resolveBrowserTopology({ mode: "production", includeCustomApp: false })
+
+    // The opposite default from development, and deliberately so: a role in a container
+    // has to accept traffic from its load balancer, which is never on loopback.
+    expect(topology).toMatchObject({ host: "0.0.0.0", apiHost: "0.0.0.0" })
   })
 
   test("requires explicit production origins", () => {

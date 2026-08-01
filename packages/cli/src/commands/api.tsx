@@ -5,10 +5,12 @@ import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib
 import type { LoadedSixb } from "../lib/loadSixb"
 import { builtAppOutdir, loadProductionSixb } from "../lib/production"
 import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
-import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
+import { migrateStorageForRole } from "../lib/storage-migration"
+import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
 
 export interface ApiOptions {
   entry?: string
+  noMigrate?: boolean
   port?: string
   host?: string
   apiPort?: string
@@ -21,8 +23,7 @@ export interface ApiOptions {
 export async function runApi(options: ApiOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionSixb({ entry: options.entry })
-  const host = options.host ?? "0.0.0.0"
+  const loaded = await loadProductionSixb({ entry: options.entry, role: "api" })
   const app = renderPersistent(
     <LoadingView title="Starting sixb api" subtitle={loaded.entry} status="Preparing runtime" />
   )
@@ -31,13 +32,29 @@ export async function runApi(options: ApiOptions = {}) {
   let server: SixbServer | null = null
 
   try {
+    // Ahead of `server.start()`, which is what kicks off the read-only schema probe
+    // behind `/ready`. Migrating after it would leave the probe racing the change it
+    // reports on, and the first `/ready` answer would be stale by construction.
+    const migration = await migrateStorageForRole(sixb, {
+      role: "api",
+      noMigrate: options.noMigrate,
+      onStart: () =>
+        app.rerender(
+          <LoadingView
+            title="Starting sixb api"
+            subtitle={loaded.entry}
+            status="Migrating storage"
+          />
+        ),
+    })
+
     const appOutdir = builtAppOutdir(loaded.buildOutdir)
     const hasBuiltCustomApp = await stat(resolve(appOutdir, "index.html"))
       .then(() => true)
       .catch(() => false)
     const topology = resolveBrowserTopology({
       mode: "production",
-      host,
+      host: options.host,
       apiHost: options.apiHost,
       port: options.port,
       apiPort: options.apiPort ?? options.port,
@@ -69,6 +86,7 @@ export async function runApi(options: ApiOptions = {}) {
           { label: "API docs", value: apiDocsUrl(topology) },
           { label: "Events", value: apiEventsUrl(topology) },
         ]}
+        storage={migration.summary}
       />
     )
 
@@ -87,8 +105,7 @@ export async function runApi(options: ApiOptions = {}) {
     if (sixb) {
       await stopSixbProviders(sixb)
     }
-    const message = error instanceof Error ? error.message : String(error)
-    await renderStatic(<ErrorView message={message} />)
+    await renderCliError(error)
     process.exit(1)
   }
 }

@@ -37,6 +37,13 @@ export interface RunProjectionJobInput {
   readonly runtime: ProjectionWorkerContext
   readonly job: ProjectionJob
   readonly signal?: AbortSignal
+  /**
+   * Clock for the missing-target grace window, measured from the run's own `startedAt`.
+   *
+   * A test seam: production reads `Date.now()`. Nothing else here needs a clock, so it is
+   * not a general injection point.
+   */
+  readonly now?: () => number
   /** Test seam only. Production always uses the protocol constant (500 physical rows). */
   readonly telemetryBatchSize?: number
   readonly onRunFailed?: ProjectionRunFailedHandler

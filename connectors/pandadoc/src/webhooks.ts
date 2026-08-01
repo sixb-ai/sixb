@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
-import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook } from "@sixb/core"
+import type { WebhookDefinition, WebhookVerification, WebhookVerificationSubject } from "@sixb/core"
+import { defineWebhook, resolveWebhookVerification, warnUnverifiedWebhook } from "@sixb/core"
 import type {
   PandaDocClient,
   PandaDocJsonObject,
@@ -10,24 +10,48 @@ import type {
   PandaDocWebhookSharedKeyResolver,
 } from "./types"
 
-interface PandaDocEventsWebhookOptions {
-  readonly sharedKey?: PandaDocWebhookSharedKeyResolver
+export const PANDADOC_WEBHOOK: WebhookVerificationSubject = {
+  connector: "SixbPandaDoc",
+  verifies: "the `signature` query parameter",
+  credentialOption: "`credential` on `pandaDocEventsWebhook()`",
+  allowOption: "`allowUnverified: true`",
+}
+
+/** In the words `pandadoc()` uses for the same two options. */
+export const PANDADOC_CONNECTOR_WEBHOOK: WebhookVerificationSubject = {
+  ...PANDADOC_WEBHOOK,
+  credentialOption: "`webhookSharedKey` on `pandadoc()`",
+  allowOption: "`webhookAllowUnverified: true`",
+}
+
+/** Either a shared key or an explicit decision to do without one. */
+type PandaDocEventsWebhookOptions = WebhookVerification<PandaDocWebhookSharedKeyResolver> & {
   readonly onEvent: PandaDocWebhookEventHandler
 }
 
 export function pandaDocEventsWebhook(
   options: PandaDocEventsWebhookOptions
 ): WebhookDefinition<readonly PandaDocWebhookEvent[], PandaDocClient> {
+  return createPandaDocEventsWebhook(options, PANDADOC_WEBHOOK)
+}
+
+/** Package-internal: the connector factory passes the subject written in its own vocabulary. */
+export function createPandaDocEventsWebhook(
+  options: PandaDocEventsWebhookOptions,
+  subject: WebhookVerificationSubject
+): WebhookDefinition<readonly PandaDocWebhookEvent[], PandaDocClient> {
+  warnUnverifiedWebhook(subject, resolveWebhookVerification(subject, options))
+
   return defineWebhook("events")
     .post()
     .json({ parse: parsePandaDocWebhookEvents })
     .verify(async ({ request, rawBody }) => {
-      if (!options.sharedKey) {
+      if (!options.credential) {
         return
       }
 
       verifySignature(
-        await resolveSharedKey(options.sharedKey),
+        await resolveSharedKey(options.credential),
         rawBody,
         new URL(request.url).searchParams.get("signature")
       )

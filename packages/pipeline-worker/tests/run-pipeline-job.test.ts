@@ -13,7 +13,11 @@ import {
   definePipelineStep,
   InMemoryLakeStorage,
 } from "@sixb/core"
-import type { DatasetWriteMode, ExecuteSqlTransformInput } from "@sixb/core/lake-storage"
+import type {
+  DatasetWriteMode,
+  ExecuteSqlTransformInput,
+  LakeSqlTransformCapabilities,
+} from "@sixb/core/lake-storage"
 import type { PipelineRunStorage } from "@sixb/core/storage"
 import { InMemoryPipelineRunStorage } from "@sixb/core/storage"
 import { runPipelineJob } from "../src/run-pipeline-job"
@@ -75,16 +79,24 @@ async function collectRows(rows: AsyncIterable<DatasetRow>): Promise<DatasetRow[
   return result
 }
 
+const ALL_SQL_CAPABILITIES: LakeSqlTransformCapabilities = {
+  preview: true,
+  supportsAppend: true,
+  supportsSnapshot: true,
+}
+
 class SqlTransformLakeStorage extends InMemoryLakeStorage implements LakeStorageWithSql<"duckdb"> {
   readonly executeCalls: ExecuteSqlTransformInput<"duckdb">[] = []
+  readonly sql: LakeStorageWithSql<"duckdb">["sql"]
 
-  readonly sql = {
+  constructor(capabilities: LakeSqlTransformCapabilities = ALL_SQL_CAPABILITIES) {
+    super()
+    this.sql = { ...this.sqlBase, capabilities }
+  }
+
+  private readonly sqlBase = {
     dialect: "duckdb" as const,
-    capabilities: {
-      preview: true,
-      supportsAppend: true,
-      supportsSnapshot: true,
-    },
+    capabilities: ALL_SQL_CAPABILITIES,
     preview: async function* (): AsyncIterable<DatasetRow> {},
     execute: async (input: ExecuteSqlTransformInput<"duckdb">) => {
       this.executeCalls.push(input)
@@ -369,6 +381,35 @@ describe("runPipelineJob", () => {
 
     const committedRows = await collectRows(lakeStorage.readRows({ datasetId: "customers" }))
     expect(committedRows).toEqual([{ id: "cust_1", name: "Ada" }])
+  })
+
+  test("refuses a write mode the SQL executor declares it cannot do", async () => {
+    // `LakeSqlExecutor.capabilities` is a required field on the contract that nothing read.
+    // A provider declaring `supportsAppend: false` was asked to be honest and then ignored,
+    // so the step reached `execute()` and failed in whatever words that provider used.
+    const lakeStorage = new SqlTransformLakeStorage({
+      preview: true,
+      supportsAppend: false,
+      supportsSnapshot: true,
+    })
+    await seedDatasetVersion(lakeStorage, rawCustomersDataset, [{ id: "cust_1", name: "Ada" }])
+    await lakeStorage.createDataset(customerStatsDataset)
+
+    const statsStep = definePipelineStep("customer-stats")
+      .inputs({ rawCustomers: rawCustomersDataset })
+      .output(customerStatsDataset, { mode: "append" })
+      .sql(({ rawCustomers }) => `select count(*) as value from ${rawCustomers}`)
+    const runtime = createRuntime({
+      pipelines: [definePipeline("customers").then(statsStep)],
+      datasets: [rawCustomersDataset, customerStatsDataset],
+      lakeStorage,
+    })
+
+    await expect(
+      runPipelineJob({ runtime, job: { id: "run_sql", pipelineId: "customers" } })
+    ).rejects.toThrow("writes in 'append' mode, which the duckdb SQL executor does not support")
+    // Refused before the provider was asked to do it, so nothing was written or committed.
+    expect(lakeStorage.executeCalls).toHaveLength(0)
   })
 
   test("executes SQL steps through lakeStorage.sql.execute with pinned sources", async () => {

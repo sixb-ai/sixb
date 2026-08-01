@@ -1,4 +1,5 @@
 import type { Worker } from "@sixb/core/internal/workers"
+import { SixbCliError } from "../lib/errors"
 import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
 import {
@@ -7,15 +8,18 @@ import {
   stopSixbProviders,
   waitForWorkerFailure,
 } from "../lib/runtime"
+import { assertShareableProviders } from "../lib/shareable-providers"
+import { migrateStorageForRole } from "../lib/storage-migration"
 import {
   createWorkerForType,
   resolveWorkerTypeToStart,
-  usesInMemoryQueues,
+  unmetWorkerRequirement,
 } from "../lib/worker-registry"
-import { ErrorView, LoadingView, renderPersistent, renderStatic, WorkerView } from "../ui"
+import { LoadingView, renderCliError, renderPersistent, WorkerView } from "../ui"
 
 export interface WorkerOptions {
   entry?: string
+  noMigrate?: boolean
   workerType?: string
   apiPublicOrigin?: string
 }
@@ -36,11 +40,25 @@ export async function runWorker(options: WorkerOptions = {}) {
   try {
     sixb = await loadSixbFromEntry(entry)
 
-    if (usesInMemoryQueues(sixb)) {
-      throw new Error(
-        "[SixbWorker] `sixb worker` requires a queue provider that can be shared across processes. `InMemoryQueues` is for `sixb dev` only."
-      )
+    assertShareableProviders(sixb, "worker")
+
+    // Before the migration, which is the first thing here that changes something: this used to
+    // bring the schema up to date and then refuse to run.
+    const unmet = unmetWorkerRequirement(workerType, {
+      agentApiBaseUrl: options.apiPublicOrigin,
+    })
+    if (unmet) {
+      throw new SixbCliError(`[SixbCLI] \`sixb worker ${workerType}\` cannot start: it ${unmet}.`)
     }
+
+    const migration = await migrateStorageForRole(sixb, {
+      role: "worker",
+      noMigrate: options.noMigrate,
+      onStart: () =>
+        app.rerender(
+          <LoadingView title="Starting sixb worker" subtitle={entry} status="Migrating storage" />
+        ),
+    })
 
     app.rerender(
       <LoadingView title="Starting sixb worker" subtitle={entry} status="Starting worker" />
@@ -52,7 +70,7 @@ export async function runWorker(options: WorkerOptions = {}) {
     await worker.start()
 
     const workerId = `${workerType}-worker-${sixb.id}`
-    app.rerender(<WorkerView name={sixb.id} workerId={workerId} />)
+    app.rerender(<WorkerView name={sixb.id} workerId={workerId} storage={migration.summary} />)
 
     await Promise.race([
       runUntilSignal(async () => {
@@ -72,8 +90,7 @@ export async function runWorker(options: WorkerOptions = {}) {
     if (sixb) {
       await stopSixbProviders(sixb)
     }
-    const message = error instanceof Error ? error.message : String(error)
-    await renderStatic(<ErrorView message={message} />)
+    await renderCliError(error)
     process.exit(1)
   }
 }

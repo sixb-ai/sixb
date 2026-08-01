@@ -1,8 +1,8 @@
 import { rest } from "@sixb/connector-rest"
-import type { ConnectorAdapter } from "@sixb/core"
+import { type ConnectorAdapter, resolveWebhookVerification } from "@sixb/core"
 import type { CompanyCamClient, CompanyCamConnectorOptions } from "./client"
 import { createCompanyCamClient } from "./client"
-import { companyCamEventsWebhook } from "./events"
+import { COMPANYCAM_CONNECTOR_WEBHOOK, createCompanyCamEventsWebhook } from "./events"
 import { createHttp } from "./http"
 
 const DEFAULT_BASE_URL = "https://api.companycam.com/v2/"
@@ -37,7 +37,20 @@ export function companycam(options: CompanyCamConnectorOptions): CompanyCamConne
   return {
     type: "companycam",
     webhooks: options.onEvent
-      ? [companyCamEventsWebhook({ secret: options.webhookSecret, onEvent: options.onEvent })]
+      ? [
+          createCompanyCamEventsWebhook(
+            {
+              // The secret usually arrives from the environment, so the decision is made
+              // here rather than by the type: a secret, an explicit opt-in, or no webhook.
+              ...resolveWebhookVerification(COMPANYCAM_CONNECTOR_WEBHOOK, {
+                credential: options.webhookSecret,
+                allowUnverified: options.webhookAllowUnverified,
+              }),
+              onEvent: options.onEvent,
+            },
+            COMPANYCAM_CONNECTOR_WEBHOOK
+          ),
+        ]
       : undefined,
     async connect(context) {
       const http = createHttp(await restAdapter.connect(context))

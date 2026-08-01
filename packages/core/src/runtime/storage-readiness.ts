@@ -1,5 +1,5 @@
 import type { SixbReadiness } from "../maintenance"
-import { isMigrationCapableStorage, type Storage } from "../storage"
+import { checkStorageSchema, isMigrationCapableStorage, type Storage } from "../storage"
 
 const DEFAULT_SCHEMA_RETRY_DELAY_MS = 60_000
 
@@ -65,19 +65,13 @@ export class StorageReadiness {
   }
 
   private async validateSchema(): Promise<void> {
-    if (!isMigrationCapableStorage(this.storage)) {
-      this.schema = { status: "valid" }
-      return
-    }
+    // Shared with `sixb check`, so the panel an author reads before deploying and the
+    // `/ready` a load balancer polls after cannot disagree about what "usable" means.
+    const result = await checkStorageSchema(this.storage)
 
-    try {
-      const plans = await Promise.all(this.storage.migrators.map((migrator) => migrator.plan()))
-      this.schema = plans.every((plan) => plan.pending.length === 0)
-        ? { status: "valid" }
-        : this.invalidSchema("Storage schema has pending migrations.")
-    } catch {
-      this.schema = this.invalidSchema("Storage schema could not be verified.")
-    }
+    this.schema = result.ok
+      ? { status: "valid" }
+      : this.invalidSchema(result.reason ?? "Storage schema is not usable.")
   }
 
   private invalidSchema(reason: string): SchemaReadiness {

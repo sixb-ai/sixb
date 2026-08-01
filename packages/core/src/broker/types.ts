@@ -1,4 +1,5 @@
 import type { JsonValue } from "../json"
+import type { ProviderScope } from "../provider-scope"
 
 /**
  * Opaque broker cursor.
@@ -109,5 +110,20 @@ export interface Broker {
     handler: (records: readonly BrokerRecord[]) => void
   ): Promise<() => void>
 
-  close?(): Promise<void>
+  /**
+   * Whether this broker can be shared across processes.
+   *
+   * A `"process"` broker means each role subscribes to its own private streams and no
+   * event ever crosses a process boundary. Production roles refuse to start against
+   * one. See {@link ProviderScope} for why it is required rather than inferred.
+   */
+  readonly scope: ProviderScope
+
+  /**
+   * Release external resources. Optional: a provider that owns none omits it.
+   *
+   * Widened from `Promise<void>` so every provider slot declares the same shape —
+   * `SqliteStorage.close()` is synchronous, and callers `await` either way.
+   */
+  close?(): void | Promise<void>
 }

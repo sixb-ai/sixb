@@ -13,13 +13,19 @@ function basic(username: string, password: string): string {
 describe("pipedrive events webhook", () => {
   test("registers only when onEvent is set", () => {
     expect(pipedrive({ apiToken: "t" }).webhooks).toBeUndefined()
-    expect(pipedrive({ apiToken: "t", onEvent: () => {} }).webhooks).toHaveLength(1)
+    expect(
+      pipedrive({
+        apiToken: "t",
+        webhookAuth: { username: "sixb", password: "secret" },
+        onEvent: () => {},
+      }).webhooks
+    ).toHaveLength(1)
   })
 
   test("verifies basic auth, dispatches the event, and responds 200", async () => {
     const received: PipedriveEventContext[] = []
     const webhook = pipedriveEventsWebhook({
-      auth: { username: "sixb", password: "secret" },
+      credential: { username: "sixb", password: "secret" },
       onEvent: (context) => {
         received.push(context)
       },
@@ -66,7 +72,7 @@ describe("pipedrive events webhook", () => {
 
   test("rejects invalid basic auth when configured", () => {
     const webhook = pipedriveEventsWebhook({
-      auth: { username: "sixb", password: "secret" },
+      credential: { username: "sixb", password: "secret" },
       onEvent: () => {},
     })
 
@@ -82,9 +88,67 @@ describe("pipedrive events webhook", () => {
   })
 
   test("rejects an unexpected payload shape", () => {
-    const webhook = pipedriveEventsWebhook({ onEvent: () => {} })
+    const webhook = pipedriveEventsWebhook({
+      credential: { username: "sixb", password: "secret" },
+      onEvent: () => {},
+    })
     expect(() => webhook.body.parse({ meta: { action: "change" } })).toThrow(
       "Unexpected webhook payload"
     )
   })
 })
+
+describe("pipedriveEventsWebhook without credentials", () => {
+  test("cannot be written without credentials or an explicit opt-in", () => {
+    // @ts-expect-error - neither `credential` nor `allowUnverified`
+    const missing: Parameters<typeof pipedriveEventsWebhook>[0] = { onEvent: () => {} }
+
+    // `verifyBasicAuth` returned early when no credentials were configured, so this route
+    // accepted any request that reached it.
+    expect(() => pipedriveEventsWebhook(missing)).toThrow(/basic-auth/)
+  })
+
+  test("refuses credentials an unset environment variable would produce", () => {
+    // `{ username: process.env.X!, password: process.env.Y! }` is a truthy object whatever the
+    // variables hold, so the union cannot see this one. Both entry points have to catch it.
+    const empty = { username: "", password: "" }
+    const unset = { username: undefined, password: undefined } as unknown as {
+      username: string
+      password: string
+    }
+
+    expect(() => pipedriveEventsWebhook({ credential: empty, onEvent: () => {} })).toThrow(
+      /non-empty username and password/
+    )
+    expect(() => pipedriveEventsWebhook({ credential: unset, onEvent: () => {} })).toThrow(
+      /non-empty username and password/
+    )
+    expect(() => pipedrive({ apiToken: "t", webhookAuth: empty, onEvent: () => {} })).toThrow(
+      /`webhookAuth` on `pipedrive\(\)`/
+    )
+  })
+
+  test("accepts unverified deliveries when asked to, and says so", () => {
+    const warnings = captureWarnings(() =>
+      pipedriveEventsWebhook({ allowUnverified: true, onEvent: () => {} })
+    )
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain("accepts unverified requests")
+  })
+})
+
+/** Captures `console.warn` for the duration of one call. */
+function captureWarnings(run: () => void): string[] {
+  const warnings: string[] = []
+  const original = console.warn
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "))
+  }
+  try {
+    run()
+  } finally {
+    console.warn = original
+  }
+  return warnings
+}

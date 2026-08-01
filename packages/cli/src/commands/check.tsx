@@ -1,4 +1,5 @@
 import { resolve } from "node:path"
+import { checkRuntimeHealth } from "../lib/health"
 import { loadSixbFromEntry } from "../lib/loadSixb"
 import { stopSixbProviders } from "../lib/runtime"
 import { generateProjectTypes } from "../lib/typegen"
@@ -15,8 +16,8 @@ export async function runCheck(options: CheckOptions = {}) {
 
   try {
     const objectTypes = sixb.listObjectTypes()
+    const health = await checkRuntimeHealth(sixb)
 
-    const providerStatus = { ok: true, message: "configured" }
     const projectValidation =
       objectTypes.length > 0
         ? { ok: true, message: `${objectTypes.length} object type(s)` }
@@ -25,22 +26,30 @@ export async function runCheck(options: CheckOptions = {}) {
     await renderStatic(
       <CheckView
         projectId={sixb.id}
-        events={providerStatus}
-        storage={providerStatus}
-        timeseries={providerStatus}
-        broker={providerStatus}
+        storage={health.storage}
+        timeseries={health.timeseries}
+        broker={health.broker}
+        queues={health.queues}
         projectValidation={projectValidation}
         ontology={{
           enabled: true,
           source: entry,
           errors: objectTypes.length > 0 ? 0 : 1,
+          // Ontology warnings, which nothing produces yet. The provider warnings below
+          // are a different thing and counting them here read as ontology drift.
           warnings: 0,
         }}
-        warnings={[]}
+        warnings={health.warnings}
       />
     )
 
-    if (objectTypes.length === 0) process.exit(1)
+    // A failing probe exits non-zero so `sixb check` can gate a deploy. `exitCode`, not
+    // `exit()`: `process.exit()` terminates immediately and the `finally` below never runs, so
+    // the providers this command opened were left unclosed on the one path where that matters.
+    const failed = [health.storage, health.timeseries, health.broker, health.queues].some(
+      (check) => !check.ok
+    )
+    if (objectTypes.length === 0 || failed) process.exitCode = 1
   } finally {
     // Tear down runtime providers (broker, queues, storage, connectors) so the
     // process can exit instead of hanging on open connections. Mirrors lake-check.

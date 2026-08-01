@@ -27,6 +27,10 @@ import { useQuery } from "@tanstack/react-query"
 import { BellRing, ChevronLeft, ChevronRight, ListChecks, Loader2, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import {
+  isUnconfiguredStorageError,
+  UnrecordedHistoryState,
+} from "../components/UnrecordedHistoryState"
 import { useRuleLiveUpdates } from "../features/rules/hooks/useRuleLiveUpdates"
 import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
@@ -179,8 +183,58 @@ function dependencyEventLabel(dependency: RuleSummary["dependencies"][number]): 
   }
 }
 
-function ActiveStateBadge({ count }: { count: number }) {
-  if (count === 0) {
+/**
+ * What the badge is allowed to claim.
+ *
+ * An empty `states` array is only a count of zero once the query has answered — loading, failed
+ * and unrecorded are all empty for reasons that say nothing about the rule.
+ */
+export type ActiveStateCount =
+  | { readonly kind: "known"; readonly count: number }
+  | { readonly kind: "loading" }
+  | { readonly kind: "unrecorded" }
+  | { readonly kind: "error" }
+
+/**
+ * The reason a rule-state query cannot support a count, or `null` when it can. Read once per query
+ * and shared by every row, so a list cannot show one rule as unrecorded and the next as zero.
+ */
+export function unknownActiveStates(query: {
+  isLoading: boolean
+  isError: boolean
+  error: unknown
+}): Exclude<ActiveStateCount, { kind: "known" }> | null {
+  // Before `isError`: a 501 is an error to the query client and a fact about the
+  // deployment to a reader.
+  if (isUnconfiguredStorageError(query.error)) return { kind: "unrecorded" }
+  if (query.isLoading) return { kind: "loading" }
+  if (query.isError) return { kind: "error" }
+  return null
+}
+
+function ActiveStateBadge({ count }: { count: ActiveStateCount }) {
+  // A badge that appears saying one thing and then changes is worse than one that arrives late.
+  if (count.kind === "loading") {
+    return null
+  }
+
+  if (count.kind === "unrecorded") {
+    return (
+      <Badge variant="outline" className="rounded-md border-border text-muted-foreground">
+        Not recorded
+      </Badge>
+    )
+  }
+
+  if (count.kind === "error") {
+    return (
+      <Badge variant="outline" className="rounded-md border-border text-muted-foreground">
+        Unavailable
+      </Badge>
+    )
+  }
+
+  if (count.count === 0) {
     return (
       <Badge variant="outline" className="rounded-md border-border text-muted-foreground">
         None active
@@ -194,7 +248,7 @@ function ActiveStateBadge({ count }: { count: number }) {
       className="rounded-md border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200"
     >
       <BellRing className="h-3 w-3" />
-      {count} active
+      {count.count} active
     </Badge>
   )
 }
@@ -220,15 +274,16 @@ function RuleListItem({
   onSelect,
 }: {
   rule: ListRulesResponse[number]
-  activeCount: number
+  activeCount: ActiveStateCount
   onSelect: () => void
 }) {
+  const active = activeCount.kind === "known" && activeCount.count > 0
   return (
     <CollectionCardButton
       onClick={onSelect}
-      className={cn(activeCount > 0 && "border-amber-500/40 bg-amber-500/5")}
+      className={cn(active && "border-amber-500/40 bg-amber-500/5")}
     >
-      <RuleIcon active={activeCount > 0} />
+      <RuleIcon active={active} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <p className="truncate text-sm font-medium text-foreground">{ruleName(rule)}</p>
@@ -253,11 +308,11 @@ function RuleListItem({
 
 function RuleTableView({
   rules,
-  activeCountByRule,
+  activeCount,
   onSelect,
 }: {
   rules: ListRulesResponse
-  activeCountByRule: ReadonlyMap<string, number>
+  activeCount: (ruleId: string) => ActiveStateCount
   onSelect: (ruleId: string) => void
 }) {
   return (
@@ -274,7 +329,6 @@ function RuleTableView({
         </TableHeader>
         <TableBody>
           {rules.map((rule) => {
-            const activeCount = activeCountByRule.get(rule.id) ?? 0
             return (
               <TableRow key={rule.id} onClick={() => onSelect(rule.id)} className="cursor-pointer">
                 <TableCell className="max-w-[260px]">
@@ -290,7 +344,7 @@ function RuleTableView({
                   <span className="block truncate">{describePredicate(rule.predicate)}</span>
                 </TableCell>
                 <TableCell>
-                  <ActiveStateBadge count={activeCount} />
+                  <ActiveStateBadge count={activeCount(rule.id)} />
                 </TableCell>
                 <TableCell className="hidden text-right text-sm text-muted-foreground lg:table-cell">
                   {rule.dependencies.length}
@@ -491,13 +545,13 @@ function RulesContent({
   rules,
   filteredRules,
   viewStyle,
-  activeCountByRule,
+  activeCount,
   onSelectRule,
 }: {
   rules: ListRulesResponse
   filteredRules: ListRulesResponse
   viewStyle: RulesListViewStyle
-  activeCountByRule: ReadonlyMap<string, number>
+  activeCount: (ruleId: string) => ActiveStateCount
   onSelectRule: (ruleId: string) => void
 }) {
   if (rules.length === 0) {
@@ -522,13 +576,7 @@ function RulesContent({
   }
 
   if (viewStyle === "table") {
-    return (
-      <RuleTableView
-        rules={filteredRules}
-        activeCountByRule={activeCountByRule}
-        onSelect={onSelectRule}
-      />
-    )
+    return <RuleTableView rules={filteredRules} activeCount={activeCount} onSelect={onSelectRule} />
   }
 
   return (
@@ -537,7 +585,7 @@ function RulesContent({
         <RuleListItem
           key={rule.id}
           rule={rule}
-          activeCount={activeCountByRule.get(rule.id) ?? 0}
+          activeCount={activeCount(rule.id)}
           onSelect={() => onSelectRule(rule.id)}
         />
       ))}
@@ -557,6 +605,7 @@ export function RulesPage() {
 
   const rules = rulesQuery.data ?? []
   const states = statesQuery.data?.states ?? []
+  const unknownStates = unknownActiveStates(statesQuery)
   const activeCountByRule = useMemo(() => {
     const counts = new Map<string, number>()
     for (const state of states) {
@@ -564,6 +613,10 @@ export function RulesPage() {
     }
     return counts
   }, [states])
+  // Only consulted when the query supports a count, so a rule absent from the map is genuinely
+  // at zero rather than unknown.
+  const activeCount = (ruleId: string): ActiveStateCount =>
+    unknownStates ?? { kind: "known", count: activeCountByRule.get(ruleId) ?? 0 }
 
   const filteredRules = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -647,7 +700,7 @@ export function RulesPage() {
           rules={rules}
           filteredRules={filteredRules}
           viewStyle={viewStyle}
-          activeCountByRule={activeCountByRule}
+          activeCount={activeCount}
           onSelectRule={handleSelectRule}
         />
       </div>
@@ -717,7 +770,12 @@ export function RuleDetailPage() {
     )
   }
 
-  const activeTotal = statesQuery.data?.total ?? states.length
+  // The panel below already distinguishes an unrecorded history from an empty one; the badge used
+  // to contradict it, reading "None active" directly above "Rule state is not recorded".
+  const activeTotal: ActiveStateCount = unknownActiveStates(statesQuery) ?? {
+    kind: "known",
+    count: statesQuery.data?.total ?? states.length,
+  }
   const triggers = rule.dependencies.map(dependencyEventLabel)
 
   return (
@@ -777,6 +835,8 @@ export function RuleDetailPage() {
               <span className="text-sm">Loading states...</span>
             </div>
           </div>
+        ) : isUnconfiguredStorageError(statesQuery.error) ? (
+          <UnrecordedHistoryState what="Rule state" />
         ) : statesQuery.isError ? (
           <EmptyState
             icon={<BellRing className="h-10 w-10" />}

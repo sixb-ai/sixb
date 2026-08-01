@@ -20,6 +20,7 @@ import {
   type IsolationProbe,
   type LocalIsolation,
   type ResolvedIsolation,
+  warnIfUnisolated,
 } from "./isolation/detect"
 import { warnIfRestrictedDowngraded } from "./isolation/network"
 import { buildNoneArgv } from "./isolation/none"
@@ -241,6 +242,7 @@ async function resolveBackend(requested: LocalIsolation): Promise<ResolvedIsolat
   const probe = detectIsolation()
 
   if (requested === "auto") {
+    warnIfUnisolated(probe)
     return probe.backend
   }
 

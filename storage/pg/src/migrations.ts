@@ -7,7 +7,12 @@ import type {
   MigrationStep,
   MigrationStepOptions,
 } from "@sixb/core/storage"
-import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@sixb/core/storage"
+import {
+  defineMigrations,
+  describeMigrationHistory,
+  runMigrationSet,
+  step,
+} from "@sixb/core/storage"
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
@@ -50,13 +55,10 @@ export function createPostgresMigrator(params: {
   return {
     adapterId: params.migrations.adapterId,
     latestVersion: params.migrations.latestVersion,
-    plan() {
-      return withPostgresMigrationLock(params, async (sql) => {
-        const session = postgresMigrationSession(sql, params.schemaName)
-        return planMigrationSet({
-          migrations: params.migrations,
-          state: session.state,
-        })
+    async status() {
+      return describeMigrationHistory({
+        migrations: params.migrations,
+        rows: await readPostgresHistory(params.sql, params.schemaName, params.migrations.adapterId),
       })
     },
     migrate() {
@@ -178,6 +180,38 @@ function postgresMigrationSession(
       },
     },
   }
+}
+
+/**
+ * Reads migration history without DDL and without the advisory lock. `null` means the
+ * history table does not exist, which is a state and not a failure.
+ *
+ * `migrate()` cannot be used for this: it calls `ensure()` first, so it runs
+ * `CREATE SCHEMA`/`CREATE TABLE` and reserves a connection to hold
+ * `pg_advisory_lock`. A probe must need no DDL grant — `/ready` is public and
+ * unauthenticated — and must not serialize N replicas behind one lock.
+ *
+ * `to_regclass` returns NULL for a missing relation (including a missing schema)
+ * instead of raising, and needs no catalog privileges.
+ */
+async function readPostgresHistory(
+  sql: SQL,
+  schemaName: string,
+  adapterId: string
+): Promise<readonly MigrationRecord[] | null> {
+  const schema = quoteIdent(schemaName)
+  const probe = await sql.unsafe<{ oid: string | null }[]>(`SELECT to_regclass($1) AS oid`, [
+    `${schema}.sixb_migrations`,
+  ])
+  if (!probe[0]?.oid) {
+    return null
+  }
+
+  const rows = await sql.unsafe<PostgresMigrationRow[]>(
+    `SELECT * FROM ${schema}.sixb_migrations WHERE adapter_id = $1 ORDER BY version`,
+    [adapterId]
+  )
+  return rows.map(rowToMigrationRecord)
 }
 
 async function withPostgresMigrationLock<T>(

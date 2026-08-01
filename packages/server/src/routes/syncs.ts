@@ -13,7 +13,13 @@ import {
   SyncRunsQuerySchema,
   SyncSchema,
 } from "../schemas/syncs"
-import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
+import {
+  handleRouteError,
+  parseDate,
+  parseOptionalInt,
+  toIsoString,
+  unconfiguredStorageResponse,
+} from "../utils/http"
 
 function serializeSyncRun(run: SyncRunRecord) {
   return {
@@ -145,11 +151,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           const parsed = SyncRunsQuerySchema.parse(query)
           const storage = sixb.storage.syncRuns
           if (!storage) {
-            return {
-              runs: [],
-              hasMore: false,
-              total: 0,
-            }
+            return unconfiguredStorageResponse(set, "Sync run storage")
           }
 
           // Scope to runnable syncs the same way workflow run history does: pass
@@ -181,7 +183,11 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       },
       {
         query: SyncRunsQuerySchema,
-        response: { 200: SyncRunListResponseSchema, 400: ErrorResponseSchema },
+        response: {
+          200: SyncRunListResponseSchema,
+          400: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
         detail: {
           summary: "List sync run history",
           tags: [OPENAPI_TAGS.syncRuns.name],

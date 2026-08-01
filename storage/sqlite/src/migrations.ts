@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite"
 import { createHash } from "node:crypto"
-import { mkdirSync } from "node:fs"
+import { existsSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import type { StorageMigrator } from "@sixb/core"
 import type {
@@ -10,7 +10,12 @@ import type {
   MigrationStep,
   MigrationStepOptions,
 } from "@sixb/core/storage"
-import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@sixb/core/storage"
+import {
+  defineMigrations,
+  describeMigrationHistory,
+  runMigrationSet,
+  step,
+} from "@sixb/core/storage"
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
@@ -83,13 +88,11 @@ export function createSqliteMigrator(params: {
   return {
     adapterId: params.migrations.adapterId,
     latestVersion: params.migrations.latestVersion,
-    async plan() {
-      return withSqliteDatabase(params.path, (db) =>
-        planMigrationSet({
-          migrations: params.migrations,
-          state: sqliteMigrationHistoryStore(db),
-        })
-      )
+    async status() {
+      return describeMigrationHistory({
+        migrations: params.migrations,
+        rows: await readSqliteHistory(params.path, params.migrations.adapterId),
+      })
     },
     async migrate() {
       return withSqliteDatabase(params.path, (db) =>
@@ -185,6 +188,41 @@ function rowToMigrationRecord(row: unknown): MigrationRecord {
 
 function checksum(value: string): string {
   return createHash("sha256").update(value).digest("hex")
+}
+
+/**
+ * Reads migration history without creating anything. `null` means there is no history
+ * to read, which is a state and not a failure.
+ *
+ * `new Database(path)` creates the file, and `withSqliteDatabase` additionally mkdirs
+ * its parent — fine on the way to a migration, wrong for a probe. So: `existsSync`
+ * first, then open `readonly` so even a mistake below cannot write. `:memory:` is
+ * always empty on a fresh connection, so there is nothing to report.
+ */
+async function readSqliteHistory(
+  path: string,
+  adapterId: string
+): Promise<readonly MigrationRecord[] | null> {
+  if (path === ":memory:" || !existsSync(path)) {
+    return null
+  }
+
+  const db = new Database(path, { readonly: true })
+  try {
+    const table = db
+      .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sixb_migrations'")
+      .get()
+    if (!table) {
+      return null
+    }
+
+    return db
+      .query("SELECT * FROM sixb_migrations WHERE adapter_id = ? ORDER BY version")
+      .all(adapterId)
+      .map(rowToMigrationRecord)
+  } finally {
+    db.close()
+  }
 }
 
 async function withSqliteDatabase<T>(path: string, run: (db: Database) => Promise<T>): Promise<T> {

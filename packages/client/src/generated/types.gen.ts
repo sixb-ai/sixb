@@ -2251,6 +2251,12 @@ export type ListSyncRunsErrors = {
   400: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type ListSyncRunsError = ListSyncRunsErrors[keyof ListSyncRunsErrors]
@@ -2574,6 +2580,12 @@ export type ListPipelineRunsErrors = {
   400: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type ListPipelineRunsError = ListPipelineRunsErrors[keyof ListPipelineRunsErrors]
@@ -2626,6 +2638,12 @@ export type GetPipelineRunErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }
@@ -2946,6 +2964,12 @@ export type ListWorkflowInterventionsErrors = {
   400: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type ListWorkflowInterventionsError =
@@ -3020,6 +3044,12 @@ export type GetWorkflowInterventionErrors = {
   404: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type GetWorkflowInterventionError =
@@ -3092,6 +3122,12 @@ export type SubmitWorkflowInterventionErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }
@@ -3169,6 +3205,12 @@ export type CancelWorkflowInterventionErrors = {
   404: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type CancelWorkflowInterventionError =
@@ -3241,6 +3283,12 @@ export type ListWorkflowRunsErrors = {
   400: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type ListWorkflowRunsError = ListWorkflowRunsErrors[keyof ListWorkflowRunsErrors]
@@ -3294,6 +3342,12 @@ export type GetWorkflowRunErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }
@@ -3382,6 +3436,12 @@ export type GetWorkflowAgentNodeExecutionErrors = {
   404: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type GetWorkflowAgentNodeExecutionError =
@@ -3440,6 +3500,12 @@ export type CancelWorkflowRunErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }
@@ -3530,6 +3596,10 @@ export type GetWorkflowRunFileContentErrors = {
    * Requested byte range is not satisfiable
    */
   416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
 }
 
 export type GetWorkflowRunFileContentError =
@@ -3574,6 +3644,10 @@ export type HeadWorkflowRunFileContentErrors = {
    * Requested byte range is not satisfiable
    */
   416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
 }
 
 export type HeadWorkflowRunFileContentError =
@@ -3616,6 +3690,10 @@ export type GetWorkflowNodeRunFileContentErrors = {
    * Requested byte range is not satisfiable
    */
   416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
 }
 
 export type GetWorkflowNodeRunFileContentError =
@@ -3661,6 +3739,10 @@ export type HeadWorkflowNodeRunFileContentErrors = {
    * Requested byte range is not satisfiable
    */
   416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
 }
 
 export type HeadWorkflowNodeRunFileContentError =
@@ -3707,6 +3789,12 @@ export type RequestWorkflowRunErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }
@@ -4018,6 +4106,12 @@ export type ListRuleStatesErrors = {
    * Response for status 400
    */
   400: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }
@@ -5137,6 +5231,12 @@ export type ListActionRunsErrors = {
   400: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type ListActionRunsError = ListActionRunsErrors[keyof ListActionRunsErrors]
@@ -5213,6 +5313,12 @@ export type GetActionRunErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }
@@ -5330,6 +5436,10 @@ export type GetActionRunFileContentErrors = {
    * Requested byte range is not satisfiable
    */
   416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
 }
 
 export type GetActionRunFileContentError =
@@ -5374,6 +5484,10 @@ export type HeadActionRunFileContentErrors = {
    * Requested byte range is not satisfiable
    */
   416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
 }
 
 export type HeadActionRunFileContentError =
@@ -5479,6 +5593,12 @@ export type ListAgentThreadsErrors = {
   400: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type ListAgentThreadsError = ListAgentThreadsErrors[keyof ListAgentThreadsErrors]
@@ -5541,6 +5661,12 @@ export type CreateAgentThreadErrors = {
   409: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type CreateAgentThreadError = CreateAgentThreadErrors[keyof CreateAgentThreadErrors]
@@ -5591,6 +5717,12 @@ export type GetAgentThreadErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }
@@ -5646,6 +5778,12 @@ export type ListAgentThreadMessagesErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }
@@ -5947,6 +6085,12 @@ export type PostAgentThreadMessageErrors = {
   409: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type PostAgentThreadMessageError =
@@ -6040,6 +6184,10 @@ export type GetAgentMessageFileContentErrors = {
    * Requested byte range is not satisfiable
    */
   416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
 }
 
 export type GetAgentMessageFileContentError =
@@ -6085,6 +6233,10 @@ export type HeadAgentMessageFileContentErrors = {
    * Requested byte range is not satisfiable
    */
   416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
 }
 
 export type HeadAgentMessageFileContentError =
@@ -6129,6 +6281,12 @@ export type CancelAgentRunErrors = {
    * Response for status 409
    */
   409: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }
@@ -6225,6 +6383,12 @@ export type RetryAgentRunErrors = {
   409: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type RetryAgentRunError = RetryAgentRunErrors[keyof RetryAgentRunErrors]
@@ -6317,6 +6481,12 @@ export type ListAgentThreadRunsErrors = {
   404: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type ListAgentThreadRunsError = ListAgentThreadRunsErrors[keyof ListAgentThreadRunsErrors]
@@ -6405,6 +6575,12 @@ export type GetAgentRunErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }
@@ -8544,6 +8720,12 @@ export type ListProjectionRunsErrors = {
   400: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type ListProjectionRunsError = ListProjectionRunsErrors[keyof ListProjectionRunsErrors]
@@ -8673,6 +8855,12 @@ export type GetProjectionRunErrors = {
   404: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type GetProjectionRunError = GetProjectionRunErrors[keyof GetProjectionRunErrors]
@@ -8796,6 +8984,12 @@ export type ListWebhookRunsErrors = {
    * Response for status 400
    */
   400: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }

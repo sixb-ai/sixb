@@ -7,6 +7,7 @@ import { ProjectionRunError } from "./errors"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
   FinishProjectionRunInput,
+  ProjectionMissingTarget,
   ProjectionRunClaim,
   ProjectionRunProgress,
   ProjectionRunRecord,
@@ -45,6 +46,10 @@ export interface PersistedProjectionRunRecord {
   readonly nextBatchOrdinal?: number
   readonly nextRowOffset?: number
   readonly inputExhausted?: boolean
+  readonly missingTargetObjectTypeId?: string
+  readonly missingTargetObjectId?: string
+  readonly missingTargetBatchOrdinal?: number
+  readonly missingTargetFirstSeenAt?: Date
   readonly progress: ProjectionRunProgress
   readonly errorMessage?: string
 }
@@ -438,11 +443,13 @@ export function restoreProjectionRun(row: PersistedProjectionRunRecord): StoredP
     if (row.status === "succeeded" && !telemetryCheckpoint.inputExhausted) {
       throw incompleteProjectionRun(row.id)
     }
+    const missingTarget = restoreMissingTarget(row, telemetryCheckpoint)
     return {
       ...base,
       identity,
       target: { objectTypeId: row.objectTypeId },
       telemetryCheckpoint,
+      ...(missingTarget ? { missingTarget } : {}),
     }
   }
   assertNoCheckpoint(row)
@@ -664,6 +671,52 @@ function restoreCheckpoint(row: PersistedProjectionRunRecord): ProjectionTelemet
   }
 }
 
+/**
+ * A wait is either fully persisted or absent. A partially written one would read as "waiting since
+ * the epoch" or "waiting for nothing", and both would decide a run's fate.
+ */
+function restoreMissingTarget(
+  row: PersistedProjectionRunRecord,
+  checkpoint: ProjectionTelemetryCheckpoint
+): ProjectionMissingTarget | undefined {
+  const columns = [
+    row.missingTargetObjectTypeId,
+    row.missingTargetObjectId,
+    row.missingTargetBatchOrdinal,
+    row.missingTargetFirstSeenAt,
+  ]
+  if (columns.every((column) => column === undefined)) return undefined
+  if (
+    row.missingTargetObjectTypeId === undefined ||
+    row.missingTargetObjectId === undefined ||
+    row.missingTargetBatchOrdinal === undefined ||
+    row.missingTargetFirstSeenAt === undefined
+  ) {
+    throw new ProjectionRunError(
+      `[Sixb] Telemetry projection run '${row.id}' has a partially persisted missing target.`
+    )
+  }
+  const missingTarget: ProjectionMissingTarget = {
+    objectTypeId: row.missingTargetObjectTypeId,
+    objectId: row.missingTargetObjectId,
+    batchOrdinal: row.missingTargetBatchOrdinal,
+    firstSeenAt: new Date(row.missingTargetFirstSeenAt),
+  }
+  assertValidDate(missingTarget.firstSeenAt, "missingTarget.firstSeenAt")
+  assertProjectionRunCounter(missingTarget.batchOrdinal, "missingTarget.batchOrdinal")
+  if (missingTarget.batchOrdinal !== checkpoint.nextBatchOrdinal) {
+    throw new ProjectionRunError(
+      `[Sixb] Telemetry projection run '${row.id}' is waiting on a batch it has already passed.`
+    )
+  }
+  if (missingTarget.objectTypeId !== row.objectTypeId) {
+    throw new ProjectionRunError(
+      `[Sixb] Telemetry projection run '${row.id}' is waiting on an object type it does not write.`
+    )
+  }
+  return missingTarget
+}
+
 function assertNoCheckpoint(row: PersistedProjectionRunRecord): void {
   if (
     row.fixedBatchSize === undefined &&
@@ -686,6 +739,37 @@ function incompleteProjectionRun(id: string): ProjectionRunError {
 
 function invalidProjectionRunTarget(id: string): ProjectionRunError {
   return new ProjectionRunError(`[Sixb] Projection run '${id}' has an invalid target.`)
+}
+
+/**
+ * Validates a wait before it is stored, so every adapter refuses the same shapes and the SQL
+ * `CHECK` behind them never has to be the thing that catches it.
+ *
+ * The ordinal has to be the batch the run is actually stuck on: anchored to a stale one, a wait
+ * would survive the progress that resolved it and fail a run that is working. The object type
+ * has to be the one this run writes, since that is the only type its telemetry can reference.
+ */
+export function assertProjectionMissingTarget(
+  record: TelemetryProjectionRunRecord,
+  missingTarget: ProjectionMissingTarget
+): ProjectionMissingTarget {
+  assertProjectionRunNonEmpty(missingTarget.objectTypeId, "missingTarget.objectTypeId")
+  assertProjectionRunNonEmpty(missingTarget.objectId, "missingTarget.objectId")
+  assertProjectionRunCounter(missingTarget.batchOrdinal, "missingTarget.batchOrdinal")
+  if (Number.isNaN(missingTarget.firstSeenAt.getTime())) {
+    throw new ProjectionRunError("[Sixb] Projection run missingTarget.firstSeenAt is invalid.")
+  }
+  if (missingTarget.objectTypeId !== record.target.objectTypeId) {
+    throw new ProjectionRunError(
+      `[Sixb] Telemetry projection run '${record.id}' cannot wait on '${missingTarget.objectTypeId}'; it writes '${record.target.objectTypeId}'.`
+    )
+  }
+  if (missingTarget.batchOrdinal !== record.telemetryCheckpoint.nextBatchOrdinal) {
+    throw new ProjectionRunError(
+      `[Sixb] Telemetry projection run '${record.id}' cannot wait on batch ${missingTarget.batchOrdinal}; it is at ${record.telemetryCheckpoint.nextBatchOrdinal}.`
+    )
+  }
+  return missingTarget
 }
 
 export function requireTelemetryProjectionRun<TRecord extends ProjectionRunRecord>(

@@ -20,7 +20,13 @@ import {
 } from "../schemas/actions"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
-import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
+import {
+  handleRouteError,
+  parseDate,
+  parseOptionalInt,
+  toIsoString,
+  unconfiguredStorageResponse,
+} from "../utils/http"
 
 const ActionRunFileContentQuerySchema = FileContentQuerySchema.extend({
   path: z
@@ -84,8 +90,7 @@ async function actionRunFileContentResponse(
 
   const storage = sixb.storage.actionRuns
   if (!storage) {
-    context.set.status = 400
-    return { error: "Action run storage is not configured" }
+    return unconfiguredStorageResponse(context.set, "Action run storage")
   }
 
   return createContextualFileContentResponse({
@@ -116,8 +121,7 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         try {
           const storage = sixb.storage.actionRuns
           if (!storage) {
-            set.status = 400
-            return { error: "Action run storage is not configured" }
+            return unconfiguredStorageResponse(set, "Action run storage")
           }
 
           const parsed = ActionRunsQuerySchema.parse(query)
@@ -151,7 +155,11 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
       },
       {
         query: ActionRunsQuerySchema,
-        response: { 200: ActionRunListResponseSchema, 400: ErrorResponseSchema },
+        response: {
+          200: ActionRunListResponseSchema,
+          400: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
         detail: {
           summary: "List action run history",
           tags: [OPENAPI_TAGS.actionRuns.name],
@@ -167,8 +175,7 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         try {
           const storage = sixb.storage.actionRuns
           if (!storage) {
-            set.status = 400
-            return { error: "Action run storage is not configured" }
+            return unconfiguredStorageResponse(set, "Action run storage")
           }
 
           const run = await storage.getById({ projectId: sixb.id, id: params.runId })
@@ -188,6 +195,7 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
           200: ActionRunDetailSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Get action run detail",
@@ -208,7 +216,7 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
           tags: ["Actions"],
           operationId: "getActionRunFileContent",
           security: bearerSecurityRequirement("getActionRunFileContent"),
-          responses: fileContentGetResponses(),
+          responses: fileContentGetResponses({ optionalStorage: true }),
         },
       }
     )
@@ -223,7 +231,7 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
           tags: ["Actions"],
           operationId: "headActionRunFileContent",
           security: bearerSecurityRequirement("headActionRunFileContent"),
-          responses: fileContentHeadResponses(),
+          responses: fileContentHeadResponses({ optionalStorage: true }),
         },
       }
     )

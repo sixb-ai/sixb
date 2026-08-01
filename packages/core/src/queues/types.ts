@@ -1,5 +1,6 @@
 import type { JsonValue } from "../json"
 import type { ProjectionMaterializationIdentity } from "../materialization/model"
+import type { ProviderScope } from "../provider-scope"
 import type { WorkflowRunSource } from "../workflows/types"
 
 export interface QueueJobEnvelope {
@@ -203,4 +204,27 @@ export interface Queues {
   readonly workflows: Queue<WorkflowQueueJob>
   readonly actions: Queue<ActionRunRequestedQueueJob>
   readonly agents: Queue<AgentQueueJob>
+
+  /**
+   * Whether these queues can be shared across processes.
+   *
+   * A `"process"` provider gives every role its own private lane, so jobs are
+   * enqueued where nobody claims them and the system looks alive while doing
+   * nothing. Production roles refuse to start against one. See
+   * {@link ProviderScope} for why it is required rather than inferred.
+   */
+  readonly scope: ProviderScope
+
+  /**
+   * Reports whether the backing service is reachable, without enqueueing or claiming.
+   *
+   * The only read-only member of this contract, and required for that reason: `sixb check`
+   * used to paint its queues row green without a round trip, and an optional probe would
+   * have left the same hole open for anyone who skipped it. Resolve when reachable, throw
+   * otherwise — the message reaches an operator, so it has to name the condition.
+   */
+  health(): Promise<void>
+
+  /** Release external resources. Optional: a provider that owns none omits it. */
+  close?(): void | Promise<void>
 }

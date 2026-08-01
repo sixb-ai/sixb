@@ -8,16 +8,18 @@ import {
   stopSixbProviders,
   waitForWorkerFailure,
 } from "../lib/runtime"
-import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
+import { migrateStorageForRole } from "../lib/storage-migration"
+import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
 
 export interface OrchestratorOptions {
   entry?: string
+  noMigrate?: boolean
 }
 
 export async function runOrchestrator(options: OrchestratorOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionSixb({ entry: options.entry })
+  const loaded = await loadProductionSixb({ entry: options.entry, role: "orchestrator" })
   const app = renderPersistent(
     <LoadingView
       title="Starting sixb orchestrator"
@@ -30,6 +32,19 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
   let runtime: RunningOrchestratorRuntime | null = null
 
   try {
+    const migration = await migrateStorageForRole(sixb, {
+      role: "orchestrator",
+      noMigrate: options.noMigrate,
+      onStart: () =>
+        app.rerender(
+          <LoadingView
+            title="Starting sixb orchestrator"
+            subtitle={loaded.entry}
+            status="Migrating storage"
+          />
+        ),
+    })
+
     runtime = await startOrchestratorRuntime(sixb)
 
     const warnings = [...runtime.warnings]
@@ -43,6 +58,7 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
         name={sixb.id}
         serviceName="Orchestrator"
         items={[{ label: "Role", value: "event-to-queue dispatcher" }]}
+        storage={migration.summary}
         warnings={warnings}
       />
     )
@@ -65,8 +81,7 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
     if (sixb) {
       await stopSixbProviders(sixb)
     }
-    const message = error instanceof Error ? error.message : String(error)
-    await renderStatic(<ErrorView message={message} />)
+    await renderCliError(error)
     process.exit(1)
   }
 }

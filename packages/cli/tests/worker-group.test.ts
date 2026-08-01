@@ -33,14 +33,15 @@ async function tempLogPath(): Promise<string> {
 // long-running "starts workers" cases live in worker-group.e2e.ts.
 async function runOnce(
   args: readonly string[],
-  fixture: string
+  fixture: string,
+  env: Record<string, string | undefined> = {}
 ): Promise<{ exitCode: number; stdout: string; logEntries: Array<Record<string, unknown>> }> {
   const logPath = await tempLogPath()
 
   const result = Bun.spawnSync({
     cmd: ["bun", cliEntry, ...args, "--entry", fixtureEntry(fixture)],
     cwd: repoRoot,
-    env: { ...process.env, SIXB_CLI_TEST_LOG: logPath },
+    env: { ...process.env, ...env, SIXB_CLI_TEST_LOG: logPath },
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -64,8 +65,22 @@ describe("sixb worker-group", () => {
     const result = await runOnce(["worker-group"], "valid-project")
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("requires a queue provider")
+    expect(result.stdout).toContain("requires a queues provider")
     expect(result.stdout).toContain("InMemoryQueues")
+  })
+
+  test("refuses without migrating, so a bad command leaves no schema behind", async () => {
+    // The fixture registers agents, so auto-selection picks the `agent` worker, whose construction
+    // needs an API origin. The refusal is right; running a schema change first was not.
+    const result = await runOnce(["worker-group"], "worker-group", {
+      SIXB_API_PUBLIC_ORIGIN: undefined,
+    })
+
+    expect(result.exitCode).toBe(1)
+    // A short fragment: the panel wraps at the terminal width, so the flag lands on the
+    // next rendered line.
+    expect(result.stdout).toContain("cannot start: agent requires")
+    expect(result.logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
   })
 
   test("stops workers and providers when a worker fails to start", async () => {

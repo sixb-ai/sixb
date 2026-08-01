@@ -1,9 +1,9 @@
 import { rest } from "@sixb/connector-rest"
-import type { ConnectorAdapter } from "@sixb/core"
+import { type ConnectorAdapter, resolveWebhookVerification } from "@sixb/core"
 import { createPandaDocClient } from "./client"
 import { createPandaDocHttp } from "./http"
 import type { PandaDocClient, PandaDocConnectorOptions, PandaDocKeyResolver } from "./types"
-import { pandaDocEventsWebhook } from "./webhooks"
+import { createPandaDocEventsWebhook, PANDADOC_CONNECTOR_WEBHOOK } from "./webhooks"
 
 const DEFAULT_BASE_URL = "https://api.pandadoc.com/"
 
@@ -28,10 +28,16 @@ export function pandadoc(options: PandaDocConnectorOptions): PandaDocConnector {
     type: "pandadoc",
     webhooks: options.onEvent
       ? [
-          pandaDocEventsWebhook({
-            sharedKey: options.webhookSharedKey,
-            onEvent: options.onEvent,
-          }),
+          createPandaDocEventsWebhook(
+            {
+              ...resolveWebhookVerification(PANDADOC_CONNECTOR_WEBHOOK, {
+                credential: options.webhookSharedKey,
+                allowUnverified: options.webhookAllowUnverified,
+              }),
+              onEvent: options.onEvent,
+            },
+            PANDADOC_CONNECTOR_WEBHOOK
+          ),
         ]
       : undefined,
     async connect(context) {

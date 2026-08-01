@@ -45,14 +45,17 @@ function verifyCtx(body: string, signature: string | null): VerifyCtx {
 describe("mercury events webhook", () => {
   test("registers only when onEvent is set", () => {
     expect(mercury({ accessToken: TOKEN }).webhooks).toBeUndefined()
-    expect(mercury({ accessToken: TOKEN, onEvent: () => {} }).webhooks).toHaveLength(1)
+    expect(
+      mercury({ accessToken: TOKEN, webhookAllowUnverified: true, onEvent: () => {} }).webhooks
+    ).toHaveLength(1)
   })
 
   test("extra webhooks are registered alongside the built-in events route", () => {
     const connector = mercury({
       accessToken: TOKEN,
+      webhookAllowUnverified: true,
       onEvent: () => {},
-      webhooks: [mercuryEventsWebhook({ onEvent: () => {} }) as never],
+      webhooks: [mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} }) as never],
     })
 
     expect(connector.webhooks).toHaveLength(2)
@@ -61,7 +64,7 @@ describe("mercury events webhook", () => {
   test("verifies the signature, dispatches the event, and responds 200", async () => {
     const received: MercuryEventContext[] = []
     const webhook = mercuryEventsWebhook({
-      secret: SECRET,
+      credential: SECRET,
       onEvent: (context) => {
         received.push(context)
       },
@@ -90,7 +93,7 @@ describe("mercury events webhook", () => {
   })
 
   test("rejects a tampered body under a valid-looking signature", () => {
-    const webhook = mercuryEventsWebhook({ secret: SECRET, onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} })
     const signed = JSON.stringify(EVENT)
     const tampered = JSON.stringify({ ...EVENT, resourceId: "attacker-controlled" })
 
@@ -100,7 +103,7 @@ describe("mercury events webhook", () => {
   })
 
   test("rejects a signature produced with the wrong secret", () => {
-    const webhook = mercuryEventsWebhook({ secret: SECRET, onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} })
     const body = JSON.stringify(EVENT)
 
     expect(() => webhook.verify?.(verifyCtx(body, sign("whsec_other", body)))).toThrow(
@@ -109,7 +112,7 @@ describe("mercury events webhook", () => {
   })
 
   test("rejects a stale timestamp to block replays", () => {
-    const webhook = mercuryEventsWebhook({ secret: SECRET, onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} })
     const body = JSON.stringify(EVENT)
     const sixMinutesAgo = Date.now() - 6 * 60 * 1000
 
@@ -120,7 +123,7 @@ describe("mercury events webhook", () => {
 
   test("accepts a stale timestamp when the tolerance is widened", () => {
     const webhook = mercuryEventsWebhook({
-      secret: SECRET,
+      credential: SECRET,
       onEvent: () => {},
       toleranceMs: 60 * 60 * 1000,
     })
@@ -131,7 +134,7 @@ describe("mercury events webhook", () => {
   })
 
   test("rejects a missing or malformed signature header", () => {
-    const webhook = mercuryEventsWebhook({ secret: SECRET, onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} })
     const body = JSON.stringify(EVENT)
 
     expect(() => webhook.verify?.(verifyCtx(body, null))).toThrow("Missing Mercury-Signature")
@@ -144,19 +147,19 @@ describe("mercury events webhook", () => {
   })
 
   test("skips verification when no secret is configured", () => {
-    const webhook = mercuryEventsWebhook({ onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} })
 
     expect(() => webhook.verify?.(verifyCtx("{}", null))).not.toThrow()
   })
 
   test("reports the event id as the idempotency key for at-least-once delivery", () => {
-    const webhook = mercuryEventsWebhook({ onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} })
 
     expect(webhook.idempotencyKey?.({ body: EVENT } as unknown as IdempotencyCtx)).toBe(EVENT.id)
   })
 
   test("parses a balance event and defaults its optional fields", () => {
-    const webhook = mercuryEventsWebhook({ onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} })
 
     const parsed = webhook.body.parse({
       id: "ev-1",
@@ -173,7 +176,7 @@ describe("mercury events webhook", () => {
   })
 
   test("rejects payloads that are not Mercury events", () => {
-    const webhook = mercuryEventsWebhook({ onEvent: () => {} })
+    const webhook = mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} })
 
     expect(() => webhook.body.parse({})).toThrow("Unexpected webhook payload")
     expect(() => webhook.body.parse({ id: "ev-1", resourceType: "spaceship" })).toThrow(
@@ -185,8 +188,56 @@ describe("mercury events webhook", () => {
   })
 
   test("rejects a non-positive tolerance at construction", () => {
-    expect(() => mercuryEventsWebhook({ onEvent: () => {}, toleranceMs: 0 })).toThrow(
-      "webhookToleranceMs must be a positive finite number"
-    )
+    expect(() =>
+      mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {}, toleranceMs: 0 })
+    ).toThrow("webhookToleranceMs must be a positive finite number")
   })
 })
+
+describe("mercuryEventsWebhook without a secret", () => {
+  test("cannot be written without a secret or an explicit opt-in", () => {
+    // The first guarantee is the type: `WebhookVerification` has no shape that carries
+    // neither, so this line does not compile.
+    // @ts-expect-error - neither `credential` nor `allowUnverified`
+    const missing: Parameters<typeof mercuryEventsWebhook>[0] = { onEvent: () => {} }
+
+    // The second is the throw, for the caller the type cannot reach — plain JS, or one who
+    // widened to `any`. `if (!options.secret) return` inside `.verify()` used to accept
+    // anything that reached the route, and for a while it only warned, which a startup log
+    // buries. Now `createSixb()` fails and the API role never starts.
+    expect(() => mercuryEventsWebhook(missing)).toThrow(/Mercury-Signature/)
+  })
+
+  test("accepts unverified deliveries when asked to, and says so", () => {
+    const warnings = captureWarnings(() =>
+      mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} })
+    )
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain("Mercury-Signature")
+    expect(warnings[0]).toContain("accepts unverified requests")
+  })
+
+  test("stays quiet when a secret is configured", () => {
+    const warnings = captureWarnings(() =>
+      mercuryEventsWebhook({ credential: "whsec_test", onEvent: () => {} })
+    )
+
+    expect(warnings).toEqual([])
+  })
+})
+
+/** Captures `console.warn` for the duration of one call. */
+function captureWarnings(run: () => void): string[] {
+  const warnings: string[] = []
+  const original = console.warn
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "))
+  }
+  try {
+    run()
+  } finally {
+    console.warn = original
+  }
+  return warnings
+}

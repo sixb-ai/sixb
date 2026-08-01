@@ -1,10 +1,10 @@
 import { rest } from "@sixb/connector-rest"
-import type { ConnectorAdapter } from "@sixb/core"
+import { type ConnectorAdapter, resolveWebhookVerification } from "@sixb/core"
 import { createGitHubClient } from "./client"
 import { assertNonEmpty } from "./http"
 import type { GitHubClient } from "./types/client"
 import type { GitHubConnectorOptions } from "./types/options"
-import { githubEventsWebhook } from "./webhook"
+import { createGitHubEventsWebhook, GITHUB_CONNECTOR_WEBHOOK } from "./webhook"
 
 const GITHUB_API_BASE = "https://api.github.com/"
 const GITHUB_API_VERSION = "2022-11-28"
@@ -43,7 +43,20 @@ export function github(options: GitHubConnectorOptions): GitHubConnector {
   return {
     type: "github",
     webhooks: options.onEvent
-      ? [githubEventsWebhook({ secret: options.webhookSecret, onEvent: options.onEvent })]
+      ? [
+          createGitHubEventsWebhook(
+            {
+              // The secret usually arrives from the environment, so the decision is made
+              // here rather than by the type: a secret, an explicit opt-in, or no webhook.
+              ...resolveWebhookVerification(GITHUB_CONNECTOR_WEBHOOK, {
+                credential: options.webhookSecret,
+                allowUnverified: options.webhookAllowUnverified,
+              }),
+              onEvent: options.onEvent,
+            },
+            GITHUB_CONNECTOR_WEBHOOK
+          ),
+        ]
       : undefined,
     async connect(context) {
       return createGitHubClient(await http.connect(context), apiBaseUrl)

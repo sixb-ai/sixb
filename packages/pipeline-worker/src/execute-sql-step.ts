@@ -5,7 +5,11 @@ import type {
   PipelineDefinition,
   PipelineStepDefinition,
 } from "@sixb/core"
-import type { DatasetVersion } from "@sixb/core/lake-storage"
+import type {
+  DatasetVersion,
+  DatasetWriteMode,
+  LakeSqlTransformCapabilities,
+} from "@sixb/core/lake-storage"
 import { PipelineWorkerError, throwIfAborted } from "./errors"
 import type { ResolvedStepInput } from "./step-inputs"
 import type { PipelineJob, PipelineWorkerContext } from "./types"
@@ -15,6 +19,25 @@ function hasSqlExecutor(lakeStorage: LakeStorage): lakeStorage is LakeStorageWit
 
   return (
     typeof sql === "object" && sql !== null && "execute" in sql && typeof sql.execute === "function"
+  )
+}
+
+function assertSqlModeSupported(input: {
+  readonly capabilities: LakeSqlTransformCapabilities
+  readonly dialect: string
+  readonly mode: DatasetWriteMode
+  readonly pipelineId: string
+  readonly stepId: string
+}): void {
+  const supported =
+    input.mode === "append"
+      ? input.capabilities.supportsAppend
+      : input.capabilities.supportsSnapshot
+  if (supported) return
+
+  throw new PipelineWorkerError(
+    `[SixbPipelineWorker] Pipeline '${input.pipelineId}' step '${input.stepId}' writes in ` +
+      `'${input.mode}' mode, which the ${input.dialect} SQL executor does not support.`
   )
 }
 
@@ -44,6 +67,18 @@ export async function executeSqlStep(input: {
       `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' requires SQL transform support, but lake storage does not provide lakeStorage.sql.execute(...).`
     )
   }
+
+  // `LakeSqlExecutor.capabilities` is a required field on the contract that nothing read,
+  // so a provider declaring `supportsAppend: false` was asked to be honest and then
+  // ignored — the unsupported mode failed somewhere inside the provider instead, in
+  // whatever words that provider happened to use.
+  assertSqlModeSupported({
+    capabilities: runtime.lakeStorage.sql.capabilities,
+    dialect: runtime.lakeStorage.sql.dialect,
+    mode: step.mode,
+    pipelineId: pipeline.id,
+    stepId: step.id,
+  })
 
   throwIfAborted(signal)
 

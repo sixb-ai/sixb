@@ -28,7 +28,10 @@ export function classifyRoute(request: Request): RouteAccess {
     return { kind: "html", csrfProtected: !isCsrfExemptMethod(request.method) }
   }
 
-  return { kind: "public", csrfProtected: false }
+  // Unreachable today — every registered route matches a branch above, and an unregistered
+  // path 404s before these hooks run. It defaults to `api` so the next route mounted outside
+  // those prefixes is protected until someone puts it on the allow-list, not the reverse.
+  return { kind: "api", csrfProtected: !isCsrfExemptMethod(request.method) }
 }
 
 export function isPublicRoute(pathname: string, method: string): boolean {
@@ -46,15 +49,16 @@ export function isPublicRoute(pathname: string, method: string): boolean {
     return true
   }
 
+  // The gateway authenticates each request with the run's own execution token.
   if (pathname.startsWith(`${AGENT_API_GATEWAY_PREFIX}/`)) {
     return true
   }
 
-  if (pathname.startsWith("/__sixb/") && normalizedMethod === "GET") {
-    return true
-  }
-
-  if (pathname.startsWith("/api/webhooks/")) {
+  // Public because a webhook cannot carry a session: the signature its connector
+  // verifies is the credential. POST only — `WebhookDefinition.method` is the literal
+  // `"POST"`, so nothing else is ever registered here, and the allow-list should not be
+  // wider than what it allows.
+  if (pathname.startsWith("/api/webhooks/") && normalizedMethod === "POST") {
     return true
   }
 

@@ -53,7 +53,13 @@ import {
   WorkflowRunsQuerySchema,
   WorkflowSchema,
 } from "../schemas/workflows"
-import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
+import {
+  handleRouteError,
+  parseDate,
+  parseOptionalInt,
+  toIsoString,
+  unconfiguredStorageResponse,
+} from "../utils/http"
 
 const WorkflowRunFileContentQuerySchema = FileContentQuerySchema.extend({
   path: z
@@ -213,8 +219,7 @@ async function workflowRunFileContentResponse(
 
   const storage = sixb.storage.workflowRuns
   if (!storage) {
-    context.set.status = 400
-    return { error: "Workflow run storage is not configured" }
+    return unconfiguredStorageResponse(context.set, "Workflow run storage")
   }
 
   return createContextualFileContentResponse({
@@ -249,8 +254,7 @@ async function workflowNodeFileContentResponse(
 
   const storage = sixb.storage.workflowRuns
   if (!storage) {
-    context.set.status = 400
-    return { error: "Workflow run storage is not configured" }
+    return unconfiguredStorageResponse(context.set, "Workflow run storage")
   }
 
   return createContextualFileContentResponse({
@@ -595,7 +599,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           const offset = parseOptionalInt(parsed.offset)
           const storage = sixb.storage.workflowInterventions
           if (!storage) {
-            return { interventions: [], hasMore: false, total: 0 }
+            return unconfiguredStorageResponse(set, "Workflow intervention storage")
           }
 
           const workflowIds = scoped
@@ -631,7 +635,11 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       },
       {
         query: WorkflowInterventionsQuerySchema,
-        response: { 200: WorkflowInterventionListResponseSchema, 400: ErrorResponseSchema },
+        response: {
+          200: WorkflowInterventionListResponseSchema,
+          400: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
         detail: {
           summary: "List workflow interventions",
           tags: [OPENAPI_TAGS.workflowInterventions.name],
@@ -647,8 +655,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         try {
           const storage = sixb.storage.workflowInterventions
           if (!storage) {
-            set.status = 400
-            return { error: "Workflow intervention storage is not configured" }
+            return unconfiguredStorageResponse(set, "Workflow intervention storage")
           }
 
           const intervention = await storage.getById({
@@ -675,6 +682,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           200: WorkflowInterventionSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Get workflow intervention detail",
@@ -691,8 +699,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         try {
           const storage = sixb.storage.workflowInterventions
           if (!storage) {
-            set.status = 400
-            return { error: "Workflow intervention storage is not configured" }
+            return unconfiguredStorageResponse(set, "Workflow intervention storage")
           }
 
           const intervention = await storage.getById({
@@ -763,6 +770,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           202: SubmitWorkflowInterventionResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Submit a workflow intervention response",
@@ -780,14 +788,12 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         try {
           const interventionStorage = sixb.storage.workflowInterventions
           if (!interventionStorage) {
-            set.status = 400
-            return { error: "Workflow intervention storage is not configured" }
+            return unconfiguredStorageResponse(set, "Workflow intervention storage")
           }
 
           const runStorage = sixb.storage.workflowRuns
           if (!runStorage) {
-            set.status = 400
-            return { error: "Workflow run storage is not configured" }
+            return unconfiguredStorageResponse(set, "Workflow run storage")
           }
 
           const intervention = await interventionStorage.getById({
@@ -890,6 +896,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           200: CancelWorkflowInterventionResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Cancel a workflow intervention",
@@ -910,7 +917,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           const offset = parseOptionalInt(parsed.offset)
           const storage = sixb.storage.workflowRuns
           if (!storage) {
-            return { runs: [], hasMore: false, total: 0 }
+            return unconfiguredStorageResponse(set, "Workflow run storage")
           }
 
           const workflowIds = scoped
@@ -941,7 +948,11 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       },
       {
         query: WorkflowRunsQuerySchema,
-        response: { 200: WorkflowRunListResponseSchema, 400: ErrorResponseSchema },
+        response: {
+          200: WorkflowRunListResponseSchema,
+          400: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
         detail: {
           summary: "List workflow run history",
           tags: [OPENAPI_TAGS.workflowRuns.name],
@@ -957,8 +968,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         try {
           const storage = sixb.storage.workflowRuns
           if (!storage) {
-            set.status = 400
-            return { error: "Workflow run storage is not configured" }
+            return unconfiguredStorageResponse(set, "Workflow run storage")
           }
 
           const run = await storage.getById({ projectId: sixb.id, id: params.runId })
@@ -989,6 +999,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           200: WorkflowRunDetailResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Get workflow run detail",
@@ -1005,8 +1016,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         try {
           const storage = sixb.storage.workflowRuns
           if (!storage) {
-            set.status = 400
-            return { error: "Workflow run storage is not configured" }
+            return unconfiguredStorageResponse(set, "Workflow run storage")
           }
           const run = await storage.getById({ projectId: sixb.id, id: params.runId })
           if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
@@ -1044,6 +1054,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           200: WorkflowAgentNodeExecutionSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Get workflow agent node execution detail",
@@ -1062,8 +1073,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           CancelWorkflowRunBodySchema.parse(body ?? {})
           const storage = sixb.storage.workflowRuns
           if (!storage) {
-            set.status = 400
-            return { error: "Workflow run storage is not configured" }
+            return unconfiguredStorageResponse(set, "Workflow run storage")
           }
           const existing = await storage.getById({ projectId: sixb.id, id: params.runId })
           if (!existing || !canAccessWorkflowRun(authz, scoped, existing)) {
@@ -1195,6 +1205,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           200: CancelWorkflowRunResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Cancel a workflow run",
@@ -1215,7 +1226,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           tags: ["Workflows"],
           operationId: "getWorkflowRunFileContent",
           security: bearerSecurityRequirement("getWorkflowRunFileContent"),
-          responses: fileContentGetResponses(),
+          responses: fileContentGetResponses({ optionalStorage: true }),
         },
       }
     )
@@ -1230,7 +1241,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           tags: ["Workflows"],
           operationId: "headWorkflowRunFileContent",
           security: bearerSecurityRequirement("headWorkflowRunFileContent"),
-          responses: fileContentHeadResponses(),
+          responses: fileContentHeadResponses({ optionalStorage: true }),
         },
       }
     )
@@ -1245,7 +1256,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           tags: ["Workflows"],
           operationId: "getWorkflowNodeRunFileContent",
           security: bearerSecurityRequirement("getWorkflowNodeRunFileContent"),
-          responses: fileContentGetResponses(),
+          responses: fileContentGetResponses({ optionalStorage: true }),
         },
       }
     )
@@ -1260,7 +1271,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           tags: ["Workflows"],
           operationId: "headWorkflowNodeRunFileContent",
           security: bearerSecurityRequirement("headWorkflowNodeRunFileContent"),
-          responses: fileContentHeadResponses(),
+          responses: fileContentHeadResponses({ optionalStorage: true }),
         },
       }
     )
@@ -1277,8 +1288,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           }
 
           if (!sixb.storage.workflowRuns) {
-            set.status = 400
-            return { error: "Workflow run storage is not configured" }
+            return unconfiguredStorageResponse(set, "Workflow run storage")
           }
 
           const parsedBody = RequestWorkflowRunBodySchema.parse(body)
@@ -1310,6 +1320,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Request a workflow run",

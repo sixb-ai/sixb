@@ -14,7 +14,13 @@ export async function runDbMigrate(options: DbMigrateOptions = {}) {
 
   try {
     const result = await migrateStorage(sixb.storage)
-    await renderStatic(<DbMigrateView projectId={sixb.id} status={result.status} />)
+    await renderStatic(
+      <DbMigrateView
+        projectId={sixb.id}
+        status={result.status}
+        applied={result.reports.flatMap((report) => report.applied)}
+      />
+    )
   } finally {
     await stopSixbProviders(sixb)
   }

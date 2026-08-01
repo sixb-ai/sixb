@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { join } from "node:path"
-import { ErrorView, HelpView, renderStatic, VersionView } from "./ui"
+import { HelpView, renderCliError, renderStatic, VersionView } from "./ui"
 
 const args = process.argv.slice(2)
 
@@ -187,6 +187,7 @@ async function main(): Promise<void> {
       const { runWorker } = await import("./commands/worker")
       await runWorker({
         entry: getFlag("entry"),
+        noMigrate: hasFlag("no-migrate"),
         workerType: getCommandPositionals()[0],
         apiPublicOrigin: getFlag("api-public-origin"),
       })
@@ -197,6 +198,7 @@ async function main(): Promise<void> {
       const { runWorkerGroup } = await import("./commands/worker-group")
       await runWorkerGroup({
         entry: getFlag("entry"),
+        noMigrate: hasFlag("no-migrate"),
         workerTypes: getCommandPositionals(),
         apiPublicOrigin: getFlag("api-public-origin"),
       })
@@ -207,6 +209,7 @@ async function main(): Promise<void> {
       const { runApi } = await import("./commands/api")
       await runApi({
         entry: getFlag("entry"),
+        noMigrate: hasFlag("no-migrate"),
         port: getFlag("port"),
         host: getFlag("host"),
         apiPort: getFlag("api-port"),
@@ -291,19 +294,19 @@ async function main(): Promise<void> {
 
     case "scheduler": {
       const { runScheduler } = await import("./commands/scheduler")
-      await runScheduler({ entry: getFlag("entry") })
+      await runScheduler({ entry: getFlag("entry"), noMigrate: hasFlag("no-migrate") })
       break
     }
 
     case "orchestrator": {
       const { runOrchestrator } = await import("./commands/orchestrator")
-      await runOrchestrator({ entry: getFlag("entry") })
+      await runOrchestrator({ entry: getFlag("entry"), noMigrate: hasFlag("no-migrate") })
       break
     }
 
     case "rules": {
       const { runRules } = await import("./commands/rules")
-      await runRules({ entry: getFlag("entry") })
+      await runRules({ entry: getFlag("entry"), noMigrate: hasFlag("no-migrate") })
       break
     }
 
@@ -382,7 +385,6 @@ async function main(): Promise<void> {
 }
 
 main().catch(async (error) => {
-  const message = error instanceof Error ? error.message : String(error)
-  await renderStatic(<ErrorView message={message} />)
+  await renderCliError(error)
   process.exit(1)
 })

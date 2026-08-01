@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 import {
   advanceProjectionTelemetry,
   assertGenericProgressDoesNotAdvanceTelemetry,
+  assertProjectionMissingTarget,
   assertProjectionRunExecution,
   assertProjectionRunListWindow,
   assertProjectionRunNonEmpty,
@@ -35,6 +36,7 @@ import type {
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
+  RecordProjectionMissingTargetInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
@@ -254,7 +256,11 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
             next_row_offset = ?,
             input_exhausted = ?,
             source_rows_read = ?,
-            source_rows_skipped = ?
+            source_rows_skipped = ?,
+            missing_target_object_type_id = NULL,
+            missing_target_object_id = NULL,
+            missing_target_batch_ordinal = NULL,
+            missing_target_first_seen_at = NULL
           WHERE project_id = ? AND id = ? AND status = 'running' AND execution_token = ?
             AND next_batch_ordinal = ? AND input_exhausted = 0
         `
@@ -269,6 +275,43 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
           input.id,
           input.executionToken,
           input.batchOrdinal
+        )
+      if (result.changes !== 1) throw staleProjectionRunExecution(input.id)
+      return rowToTelemetryProjectionRunRecord(this.requireRow(input.projectId, input.id))
+    })
+  }
+
+  async recordMissingTarget(
+    input: RecordProjectionMissingTargetInput
+  ): Promise<TelemetryProjectionRunRecord> {
+    return runImmediateTransaction(this.db, () => {
+      const existing = this.requireMaterializationExecution(input)
+      const missingTarget = assertProjectionMissingTarget(
+        requireTelemetryProjectionRun(restoreProjectionRunRow(existing)),
+        input.missingTarget
+      )
+      const result = this.db
+        .query(
+          `
+          UPDATE projection_runs
+          SET
+            missing_target_object_type_id = ?,
+            missing_target_object_id = ?,
+            missing_target_batch_ordinal = ?,
+            missing_target_first_seen_at = ?
+          WHERE project_id = ? AND id = ? AND status = 'running' AND execution_token = ?
+            AND next_batch_ordinal = ?
+        `
+        )
+        .run(
+          missingTarget.objectTypeId,
+          missingTarget.objectId,
+          missingTarget.batchOrdinal,
+          missingTarget.firstSeenAt.toISOString(),
+          input.projectId,
+          input.id,
+          input.executionToken,
+          missingTarget.batchOrdinal
         )
       if (result.changes !== 1) throw staleProjectionRunExecution(input.id)
       return rowToTelemetryProjectionRunRecord(this.requireRow(input.projectId, input.id))
@@ -472,6 +515,15 @@ function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
     nextBatchOrdinal: optionalDatabaseSafeInteger(row.next_batch_ordinal, "nextBatchOrdinal"),
     nextRowOffset: optionalDatabaseSafeInteger(row.next_row_offset, "nextRowOffset"),
     inputExhausted: row.input_exhausted === null ? undefined : row.input_exhausted === 1,
+    missingTargetObjectTypeId: row.missing_target_object_type_id ?? undefined,
+    missingTargetObjectId: row.missing_target_object_id ?? undefined,
+    missingTargetBatchOrdinal: optionalDatabaseSafeInteger(
+      row.missing_target_batch_ordinal,
+      "missingTargetBatchOrdinal"
+    ),
+    missingTargetFirstSeenAt: row.missing_target_first_seen_at
+      ? new Date(row.missing_target_first_seen_at)
+      : undefined,
     progress: {
       sourceRowsRead: databaseSafeInteger(row.source_rows_read, "sourceRowsRead"),
       sourceRowsSkipped: databaseSafeInteger(row.source_rows_skipped, "sourceRowsSkipped"),
@@ -530,6 +582,10 @@ interface DatabaseRow {
   next_batch_ordinal: number | null
   next_row_offset: number | null
   input_exhausted: 0 | 1 | null
+  missing_target_object_type_id: string | null
+  missing_target_object_id: string | null
+  missing_target_batch_ordinal: number | null
+  missing_target_first_seen_at: string | null
   source_rows_read: number
   source_rows_skipped: number
   error_message: string | null

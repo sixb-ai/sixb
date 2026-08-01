@@ -42,6 +42,24 @@ export interface ProjectionTelemetryCheckpoint {
   readonly inputExhausted: boolean
 }
 
+/**
+ * The object a telemetry batch is waiting for, and when this run first found it missing.
+ *
+ * A projection's dataset can legitimately be materialized before the objects it references, so
+ * the run waits instead of failing. The wait needs a start, and the run has no other durable one:
+ * `startedAt` is when the run began, which on a batched projection is long before the batch that
+ * cannot commit, and `attempt` counts every reclaim including the ones an unreachable queue caused.
+ *
+ * Cleared by any committed batch, so a run that is making progress never carries a stale wait.
+ */
+export interface ProjectionMissingTarget {
+  readonly objectTypeId: string
+  readonly objectId: string
+  /** The batch that could not commit because of it. */
+  readonly batchOrdinal: number
+  readonly firstSeenAt: Date
+}
+
 interface ProjectionRunRecordBase {
   readonly id: string
   readonly projectId: string
@@ -62,18 +80,25 @@ export type ObjectProjectionRunRecord = ProjectionRunRecordBase & {
   readonly identity: ProjectionIdentity<"object">
   readonly target: ObjectProjectionTarget
   readonly telemetryCheckpoint?: never
+  readonly missingTarget?: never
 }
 
 export type LinkProjectionRunRecord = ProjectionRunRecordBase & {
   readonly identity: ProjectionIdentity<"link">
   readonly target: LinkProjectionTarget
   readonly telemetryCheckpoint?: never
+  readonly missingTarget?: never
 }
 
 export type TelemetryProjectionRunRecord = ProjectionRunRecordBase & {
   readonly identity: ProjectionIdentity<"telemetry">
   readonly target: ObjectProjectionTarget
   readonly telemetryCheckpoint: ProjectionTelemetryCheckpoint
+  /**
+   * Only telemetry carries this: `MaterializationObjectNotFoundError` is raised by telemetry
+   * validation alone, and only a batched protocol has a checkpoint to anchor the wait to.
+   */
+  readonly missingTarget?: ProjectionMissingTarget
 }
 
 /** Durable projection lifecycle state. The execution token is deliberately returned separately. */
@@ -150,6 +175,11 @@ export interface AdvanceProjectionTelemetryCheckpointInput
   readonly inputExhausted: boolean
 }
 
+export interface RecordProjectionMissingTargetInput
+  extends LockProjectionRunForMaterializationInput {
+  readonly missingTarget: ProjectionMissingTarget
+}
+
 export interface ListProjectionRunsInput {
   readonly projectId: string
   readonly projectionId?: string
@@ -192,9 +222,17 @@ export interface ProjectionRunStorage {
   ): Promise<ProjectionRunRecord>
   /** Updates physical source progress only. */
   update(input: UpdateProjectionRunInput): Promise<ProjectionRunRecord>
-  /** Advances telemetry progress atomically with the corresponding ontology commit. */
+  /**
+   * Advances telemetry progress atomically with the corresponding ontology commit.
+   *
+   * Clears any recorded missing target: a batch that commits is a batch that was not waiting.
+   */
   advanceTelemetryCheckpoint(
     input: AdvanceProjectionTelemetryCheckpointInput
+  ): Promise<TelemetryProjectionRunRecord>
+  /** Records the object a telemetry batch is waiting for, so the wait has a durable start. */
+  recordMissingTarget(
+    input: RecordProjectionMissingTargetInput
   ): Promise<TelemetryProjectionRunRecord>
   /** Telemetry success also records the worker's EOF observation atomically. */
   finish(input: FinishProjectionRunInput): Promise<ProjectionRunRecord>

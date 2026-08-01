@@ -1,3 +1,4 @@
+export type { ProviderScope } from "../provider-scope"
 export { QueueError } from "./errors"
 export { InMemoryQueues } from "./in-memory"
 export type {

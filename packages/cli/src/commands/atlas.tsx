@@ -3,7 +3,7 @@ import { resolveBrowserTopology } from "../lib/browser-topology"
 import type { LoadedSixb } from "../lib/loadSixb"
 import { builtAtlasOutdir, loadProductionSixb } from "../lib/production"
 import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
-import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
+import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
 
 export interface AtlasOptions {
   entry?: string
@@ -16,8 +16,7 @@ export interface AtlasOptions {
 export async function runAtlas(options: AtlasOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionSixb({ entry: options.entry })
-  const host = options.host ?? "0.0.0.0"
+  const loaded = await loadProductionSixb({ entry: options.entry, role: "atlas" })
   const app = renderPersistent(
     <LoadingView title="Starting sixb atlas" subtitle={loaded.entry} status="Starting Atlas" />
   )
@@ -28,7 +27,7 @@ export async function runAtlas(options: AtlasOptions = {}) {
   try {
     const topology = resolveBrowserTopology({
       mode: "production",
-      host,
+      host: options.host,
       port: options.port,
       apiPublicOrigin: options.apiPublicOrigin,
       atlasPublicOrigin: options.atlasPublicOrigin,
@@ -75,8 +74,7 @@ export async function runAtlas(options: AtlasOptions = {}) {
     if (sixb) {
       await stopSixbProviders(sixb)
     }
-    const message = error instanceof Error ? error.message : String(error)
-    await renderStatic(<ErrorView message={message} />)
+    await renderCliError(error)
     process.exit(1)
   }
 }

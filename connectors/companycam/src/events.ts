@@ -1,11 +1,25 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
-import type { WebhookDefinition } from "@sixb/core"
-import { defineWebhook } from "@sixb/core"
+import type { WebhookDefinition, WebhookVerification, WebhookVerificationSubject } from "@sixb/core"
+import { defineWebhook, resolveWebhookVerification, warnUnverifiedWebhook } from "@sixb/core"
 import type { CompanyCamClient } from "./client"
 import type { CompanyCamEventHandler, CompanyCamWebhookEvent } from "./types"
 
-interface CompanyCamEventsWebhookOptions {
-  readonly secret?: string
+export const COMPANYCAM_WEBHOOK: WebhookVerificationSubject = {
+  connector: "SixbCompanyCam",
+  verifies: "the X-CompanyCam-Signature HMAC",
+  credentialOption: "`credential` on `companyCamEventsWebhook()`",
+  allowOption: "`allowUnverified: true`",
+}
+
+/** In the words `companycam()` uses for the same two options. */
+export const COMPANYCAM_CONNECTOR_WEBHOOK: WebhookVerificationSubject = {
+  ...COMPANYCAM_WEBHOOK,
+  credentialOption: "`webhookSecret` on `companycam()`",
+  allowOption: "`webhookAllowUnverified: true`",
+}
+
+/** Either a signing secret or an explicit decision to do without one. */
+type CompanyCamEventsWebhookOptions = WebhookVerification & {
   readonly onEvent: CompanyCamEventHandler
 }
 
@@ -21,14 +35,24 @@ interface CompanyCamEventsWebhookOptions {
 export function companyCamEventsWebhook(
   options: CompanyCamEventsWebhookOptions
 ): WebhookDefinition<unknown, CompanyCamClient> {
+  return createCompanyCamEventsWebhook(options, COMPANYCAM_WEBHOOK)
+}
+
+/** Package-internal: the connector factory passes the subject written in its own vocabulary. */
+export function createCompanyCamEventsWebhook(
+  options: CompanyCamEventsWebhookOptions,
+  subject: WebhookVerificationSubject
+): WebhookDefinition<unknown, CompanyCamClient> {
+  warnUnverifiedWebhook(subject, resolveWebhookVerification(subject, options))
+
   return defineWebhook("events")
     .post()
     .json()
     .verify(({ request, rawBody }) => {
-      if (!options.secret) {
+      if (!options.credential) {
         return
       }
-      verifySignature(options.secret, rawBody, request.headers.get("x-companycam-signature"))
+      verifySignature(options.credential, rawBody, request.headers.get("x-companycam-signature"))
     })
     .handle<CompanyCamClient>(async ({ body, sixb, logger, client }) => {
       await options.onEvent({ event: toEvent(body), sixb, logger, client })

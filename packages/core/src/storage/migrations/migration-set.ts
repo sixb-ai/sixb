@@ -5,6 +5,7 @@ import type {
   MigrationRecord,
   MigrationReport,
   MigrationSet,
+  MigrationStatus,
   MigrationStep,
   MigrationStepOptions,
 } from "./types"
@@ -48,7 +49,7 @@ export function defineMigrations<TContext>(
   }
 }
 
-export async function planMigrationSet<TContext>(
+async function planMigrationSet<TContext>(
   params: PlanMigrationSetParams<TContext>
 ): Promise<MigrationPlan<TContext>> {
   await params.state.ensure()
@@ -124,30 +125,75 @@ function assertValidSteps<TContext>(
   }
 }
 
-function assertAppliedPrefix<TContext>(
-  migrations: MigrationSet<TContext>,
-  rows: readonly MigrationRecord[]
-): readonly MigrationRecord[] {
+/**
+ * Classifies migration history without touching the database.
+ *
+ * The single source of truth for what a history means. `status()` reports the result
+ * and `assertAppliedPrefix` throws on it, so the read-only probe and the migration
+ * path can never disagree about whether a database is usable.
+ *
+ * `rows: null` means the history table itself is absent, which a probe must be able to
+ * express without creating it.
+ */
+export function describeMigrationHistory<TContext>(params: {
+  readonly migrations: MigrationSet<TContext>
+  readonly rows: readonly MigrationRecord[] | null
+}): MigrationStatus {
+  const { migrations, rows } = params
+  const base = { adapterId: migrations.adapterId, latestVersion: migrations.latestVersion }
+
+  // An adapter that declares no migrations and has recorded none is as current as it can
+  // be. Reading that as `uninitialized` sent an operator to run `sixb db migrate`, which
+  // would have applied nothing and reported the same state again. Only the empty history
+  // qualifies: an adapter with no steps whose database recorded some is `ahead`, which
+  // the walk below still finds.
+  if (rows === null) {
+    return migrations.steps.length === 0
+      ? { ...base, appliedVersion: 0, state: "current" }
+      : {
+          ...base,
+          appliedVersion: 0,
+          state: "uninitialized",
+          reason: "No migration history exists. Run `sixb db migrate`.",
+        }
+  }
+
   const applied = [...rows].sort((a, b) => a.version - b.version)
+  const appliedVersion = applied.at(-1)?.version ?? 0
+  const found = { ...base, appliedVersion }
   const seen = new Set<number>()
 
   for (const row of applied) {
     if (row.adapterId !== migrations.adapterId) {
-      throw new Error(
-        `[${migrations.adapterId}] Migration state belongs to a different adapter: ${row.adapterId}`
-      )
+      return {
+        ...found,
+        state: "incompatible",
+        reason: `Migration state belongs to a different adapter: ${row.adapterId}`,
+      }
     }
 
     if (row.status === "started") {
-      throw new Error(`[${migrations.adapterId}] Database is in a dirty migration state`)
+      return {
+        ...found,
+        state: "dirty",
+        reason: `Migration '${row.id}' started and never finished. Resolve it by hand before serving traffic.`,
+      }
     }
 
     if (row.status !== "applied") {
-      throw new Error(`[${migrations.adapterId}] Invalid migration status: ${row.status}`)
+      return {
+        ...found,
+        state: "incompatible",
+        reason: `Invalid migration status: ${row.status}`,
+      }
     }
 
     if (seen.has(row.version)) {
-      throw new Error(`[${migrations.adapterId}] Duplicate applied migration: ${row.version}`)
+      return {
+        ...found,
+        state: "incompatible",
+        reason: `Duplicate applied migration: ${row.version}`,
+      }
     }
 
     seen.add(row.version)
@@ -157,19 +203,68 @@ function assertAppliedPrefix<TContext>(
     const migration = migrations.steps[index]
 
     if (!migration || row.version > migrations.latestVersion) {
-      throw new Error(`[${migrations.adapterId}] Database schema is newer than this Sixb version`)
+      return {
+        ...found,
+        state: "ahead",
+        reason:
+          "Database schema is newer than this Sixb version. Downgrades are not supported; " +
+          "deploy a build that knows this schema.",
+      }
     }
 
     if (row.version !== migration.version || row.id !== migration.id) {
-      throw new Error(
-        `[${migrations.adapterId}] Applied migration history does not match declared migrations`
-      )
+      return {
+        ...found,
+        state: "incompatible",
+        reason: "Applied migration history does not match declared migrations",
+      }
     }
 
     if ((row.checksum ?? null) !== (migration.checksum ?? null)) {
-      throw new Error(`[${migrations.adapterId}] Applied migration checksum changed: ${row.id}`)
+      return {
+        ...found,
+        state: "incompatible",
+        reason: `Applied migration checksum changed: ${row.id}`,
+      }
     }
   }
 
-  return applied
+  if (applied.length === 0) {
+    return migrations.steps.length === 0
+      ? { ...found, state: "current" }
+      : {
+          ...found,
+          state: "uninitialized",
+          reason: "Migration history is empty. Run `sixb db migrate`.",
+        }
+  }
+
+  const pendingCount = migrations.steps.length - applied.length
+  if (pendingCount > 0) {
+    return {
+      ...found,
+      state: "pending",
+      reason: `${pendingCount} migration(s) are not applied. Run \`sixb db migrate\`.`,
+    }
+  }
+
+  return { ...found, state: "current" }
+}
+
+function assertAppliedPrefix<TContext>(
+  migrations: MigrationSet<TContext>,
+  rows: readonly MigrationRecord[]
+): readonly MigrationRecord[] {
+  const status = describeMigrationHistory({ migrations, rows })
+
+  // `uninitialized` and `pending` are the normal inputs to a migration, not failures.
+  if (
+    status.state !== "current" &&
+    status.state !== "uninitialized" &&
+    status.state !== "pending"
+  ) {
+    throw new Error(`[${migrations.adapterId}] ${status.reason}`)
+  }
+
+  return [...rows].sort((a, b) => a.version - b.version)
 }

@@ -1,11 +1,11 @@
 import { ActionWorker } from "@sixb/action-worker"
 import { AgentWorker } from "@sixb/agent-worker"
-import { InMemoryQueues } from "@sixb/core"
 import type { Worker } from "@sixb/core/internal/workers"
 import { PipelineWorker } from "@sixb/pipeline-worker"
 import { ProjectionWorker } from "@sixb/projection-worker"
 import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
+import { SixbCliError } from "./errors"
 import type { LoadedSixb } from "./loadSixb"
 
 export interface WorkerCreationOptions {
@@ -14,7 +14,15 @@ export interface WorkerCreationOptions {
 
 interface WorkerFactory {
   readonly create: (sixb: LoadedSixb, options: WorkerCreationOptions) => Worker
+  /**
+   * Why this worker cannot be constructed with the given options, or `null` when it can.
+   * Asked before anything is constructed, so a group names every reason at once.
+   */
+  readonly unmetRequirement?: (options: WorkerCreationOptions) => string | null
 }
+
+const AGENT_ORIGIN_REQUIRED =
+  "requires --api-public-origin or SIXB_API_PUBLIC_ORIGIN (agent workers call the API)"
 
 const workerFactories: Record<string, WorkerFactory> = {
   sync: {
@@ -28,6 +36,8 @@ const workerFactories: Record<string, WorkerFactory> = {
       new AgentWorker(sixb, {
         apiBaseUrl: resolveAgentApiBaseUrl(options.agentApiBaseUrl),
       }),
+    unmetRequirement: (options) =>
+      agentApiBaseUrl(options.agentApiBaseUrl) ? null : AGENT_ORIGIN_REQUIRED,
   },
   pipeline: {
     create: (sixb) => new PipelineWorker(sixb),
@@ -65,6 +75,64 @@ export function resolveWorkerTypeToStart(requestedWorker?: string): string {
   }
 
   return requestedWorker
+}
+
+/**
+ * Why this worker cannot be constructed with these options, or `null` when it can. Exported
+ * for `sixb worker`, which has to answer this before it migrates storage.
+ */
+export function unmetWorkerRequirement(
+  workerType: string,
+  options: WorkerCreationOptions
+): string | null {
+  return workerFactories[workerType]?.unmetRequirement?.(options) ?? null
+}
+
+export interface WorkerGroupInputs {
+  readonly workerTypes: readonly string[]
+  readonly options: WorkerCreationOptions
+  /**
+   * Whether the types were auto-selected rather than named on the command line. It changes the
+   * remedy only: an auto-selected type can also be dropped by naming the rest.
+   */
+  readonly autoSelected: boolean
+}
+
+/**
+ * Refuses a worker group that cannot start whole, naming every reason at once.
+ *
+ * Five of six workers means jobs piling up in a queue nobody claims, which looks exactly like
+ * an idle system — so the refusal is right, and it has to say which workers it took down.
+ */
+export function assertWorkerInputs(input: WorkerGroupInputs): void {
+  const unmet = input.workerTypes
+    .map((workerType) => ({
+      workerType,
+      reason: unmetWorkerRequirement(workerType, input.options),
+    }))
+    .filter((entry): entry is { workerType: string; reason: string } => entry.reason !== null)
+
+  if (unmet.length === 0) return
+
+  const blocked = unmet.map((entry) => `${entry.workerType} ${entry.reason}`).join("; ")
+  const ready = input.workerTypes.filter(
+    (workerType) => !unmet.some((entry) => entry.workerType === workerType)
+  )
+  const readyNote =
+    ready.length > 0
+      ? ` No worker started, including the ${ready.length} that were ready (${ready.join(", ")}).`
+      : ""
+  // Only when there is something to name: with every auto-selected worker blocked, this
+  // offered the command that had just failed as the way out of its own failure.
+  const remediation =
+    input.autoSelected && ready.length > 0
+      ? `These were selected automatically from what the project registers. Fix the above, or ` +
+        `name the workers you want: \`sixb worker-group ${ready.join(" ")}\`.`
+      : undefined
+
+  throw new SixbCliError(`[SixbCLI] \`sixb worker-group\` cannot start: ${blocked}.${readyNote}`, {
+    remediation,
+  })
 }
 
 export function resolveRegisteredWorkerTypes(sixb: LoadedSixb): readonly string[] {
@@ -106,17 +174,14 @@ function knownWorkers(): string {
   return Object.keys(workerFactories).join(", ")
 }
 
-function resolveAgentApiBaseUrl(value: string | undefined): string {
-  const apiBaseUrl = value?.trim() || process.env.SIXB_API_PUBLIC_ORIGIN?.trim()
-  if (!apiBaseUrl) {
-    throw new Error(
-      "[SixbWorker] Agent workers require --api-public-origin or SIXB_API_PUBLIC_ORIGIN."
-    )
-  }
-  return apiBaseUrl
+function agentApiBaseUrl(value: string | undefined): string | null {
+  return value?.trim() || process.env.SIXB_API_PUBLIC_ORIGIN?.trim() || null
 }
 
-export function usesInMemoryQueues(sixb: LoadedSixb): boolean {
-  const queues = sixb.queues as { provider?: unknown }
-  return sixb.queues instanceof InMemoryQueues || queues.provider === "in-memory"
+function resolveAgentApiBaseUrl(value: string | undefined): string {
+  const apiBaseUrl = agentApiBaseUrl(value)
+  if (!apiBaseUrl) {
+    throw new Error(`[SixbWorker] The agent worker ${AGENT_ORIGIN_REQUIRED}.`)
+  }
+  return apiBaseUrl
 }

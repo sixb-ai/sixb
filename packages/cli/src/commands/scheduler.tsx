@@ -7,16 +7,18 @@ import {
   stopQuietly,
   stopSixbProviders,
 } from "../lib/runtime"
-import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
+import { migrateStorageForRole } from "../lib/storage-migration"
+import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
 
 export interface SchedulerOptions {
   entry?: string
+  noMigrate?: boolean
 }
 
 export async function runScheduler(options: SchedulerOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionSixb({ entry: options.entry })
+  const loaded = await loadProductionSixb({ entry: options.entry, role: "scheduler" })
   const app = renderPersistent(
     <LoadingView
       title="Starting sixb scheduler"
@@ -29,6 +31,19 @@ export async function runScheduler(options: SchedulerOptions = {}) {
   let runtime: RunningSchedulerRuntime | null = null
 
   try {
+    const migration = await migrateStorageForRole(sixb, {
+      role: "scheduler",
+      noMigrate: options.noMigrate,
+      onStart: () =>
+        app.rerender(
+          <LoadingView
+            title="Starting sixb scheduler"
+            subtitle={loaded.entry}
+            status="Migrating storage"
+          />
+        ),
+    })
+
     runtime = await startSchedulerRuntime(sixb)
 
     app.rerender(
@@ -37,6 +52,7 @@ export async function runScheduler(options: SchedulerOptions = {}) {
         name={sixb.id}
         serviceName="Scheduler"
         items={[{ label: "Role", value: "schedule event producer" }]}
+        storage={migration.summary}
       />
     )
 
@@ -55,8 +71,7 @@ export async function runScheduler(options: SchedulerOptions = {}) {
     if (sixb) {
       await stopSixbProviders(sixb)
     }
-    const message = error instanceof Error ? error.message : String(error)
-    await renderStatic(<ErrorView message={message} />)
+    await renderCliError(error)
     process.exit(1)
   }
 }

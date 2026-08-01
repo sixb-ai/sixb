@@ -129,4 +129,7 @@ export interface LakeStorage {
   getVersion(datasetId: string, versionId: string): Promise<DatasetVersion | null>
   /** Explicit immutable-version reads have stable physical order and stable offset semantics. */
   readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow>
+
+  /** Release external resources. Optional: a provider that owns none omits it. */
+  close?(): void | Promise<void>
 }

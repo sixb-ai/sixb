@@ -13,6 +13,7 @@ import { Alert, AlertDescription, AlertTitle, Button, CardTitle } from "@sixb/ui
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, Loader2, Send, UserCheck } from "lucide-react"
 import { type SubmitEvent, useCallback, useEffect, useState } from "react"
+import { isUnconfiguredStorageError } from "../../../../components/UnrecordedHistoryState"
 import { formatDate, type WorkflowRunNode } from "../../utils/workflows"
 import {
   buildWorkflowInput,
@@ -165,6 +166,17 @@ export function WorkflowInterventionPanel({ node }: { node: WorkflowRunNode }) {
 
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading pending intervention...</p>
+      ) : isUnconfiguredStorageError(interventionsQuery.error) ? (
+        // Not destructive: nothing failed. The runtime simply cannot run intervention
+        // nodes at all, which is a configuration answer rather than an incident.
+        <Alert>
+          <UserCheck className="h-4 w-4" />
+          <AlertTitle>Interventions are not recorded</AlertTitle>
+          <AlertDescription>
+            This runtime has no intervention storage configured, so pending interventions cannot be
+            listed or answered. Add the storage provider to use intervention nodes.
+          </AlertDescription>
+        </Alert>
       ) : apiErrorMessage ? (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />

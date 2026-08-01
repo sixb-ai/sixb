@@ -45,6 +45,9 @@ export interface BlobStorage {
   put(input: PutBlobInput): Promise<FileRef>
   open(blobId: string): Promise<ReadableStream<Uint8Array>>
   stat(blobId: string): Promise<BlobInfo | null>
+
+  /** Release external resources. Optional: a provider that owns none omits it. */
+  close?(): void | Promise<void>
 }
 
 /**

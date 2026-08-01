@@ -2,6 +2,20 @@ const RETRY_BASE_DELAY_MS = 1_000
 const RETRY_MAX_DELAY_MS = 5 * 60_000
 const MAX_EXPONENT = Math.ceil(Math.log2(RETRY_MAX_DELAY_MS / RETRY_BASE_DELAY_MS))
 
+/**
+ * How long a telemetry batch waits for one missing object before the run fails.
+ *
+ * Measured from `run.missingTarget.firstSeenAt` — the first delivery that found *this* object
+ * missing at *this* batch — and not from `run.startedAt`, which is when the run began: a batched
+ * projection commits for minutes before reaching the batch that cannot, so a window anchored
+ * there gave a long run no grace at all on its first missing target.
+ *
+ * Any committed batch clears the wait, and a different object at the same batch starts a new one,
+ * which is progress by definition: the batch fails on its first missing object, so the object
+ * only changes once the previous one exists.
+ */
+export const MISSING_TARGET_GRACE_MS = 2 * 60_000
+
 /** Deterministic per-job jitter avoids synchronized retries while keeping tests reproducible. */
 export function projectionRetryAvailableAt(input: {
   readonly jobId: string

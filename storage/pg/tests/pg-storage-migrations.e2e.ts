@@ -200,10 +200,47 @@ describe("Postgres storage migrations", () => {
 
   test("dirty migration history blocks storage migrations", async () => {
     await withStorage(false, async (storage, schemaName) => {
-      await storage.migrators[0]!.plan()
+      // Migrate first, then plant a started row above the applied ones: a dirty history
+      // has to block a schema that is otherwise current, which is the case an operator
+      // actually meets after a migration was interrupted.
+      await migrateStorage(storage)
       await writeStartedMigration(schemaName)
 
-      await expect(migrateStorage(storage)).rejects.toThrow("dirty migration state")
+      await expect(migrateStorage(storage)).rejects.toThrow("started and never finished")
+    })
+  })
+
+  // The teeth of C1.6. `plan()` calls ensure() first, so probing the schema with it runs
+  // CREATE SCHEMA / CREATE TABLE. An unauthenticated GET /ready and every `sixb api`
+  // boot reach this path, and a least-privilege role has no DDL grant to spend on a
+  // health check. (status() also skips the advisory lock plan() takes, which is why N
+  // replicas no longer serialize on their first probe — not asserted here because the
+  // lock key is private, and a test that guesses it could not fail.)
+  test("status() reports an unmigrated schema without creating it", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      const [migrator] = storage.migrators
+      const status = await migrator?.status()
+
+      expect(status).toMatchObject({
+        adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+        state: "uninitialized",
+        appliedVersion: 0,
+      })
+      expect(status?.reason).toBeTruthy()
+      // No DDL ran: the schema itself never came into existence.
+      expect(await schemaExists(schemaName)).toBe(false)
+    })
+  })
+
+  test("status() reports current after a migration", async () => {
+    await withStorage(true, async (storage) => {
+      const [migrator] = storage.migrators
+
+      expect(await migrator?.status()).toMatchObject({
+        adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+        state: "current",
+        appliedVersion: 1,
+      })
     })
   })
 
@@ -467,7 +504,7 @@ async function writeStartedMigration(schemaName: string): Promise<void> {
       `
         INSERT INTO ${quoteIdent(schemaName)}.sixb_migrations (
           adapter_id, version, id, checksum, status, started_at, finished_at
-        ) VALUES ($1, 1, '001-initial-schema', NULL, 'started', $2, NULL)
+        ) VALUES ($1, 9999, '9999-interrupted', NULL, 'started', $2, NULL)
       `,
       [POSTGRES_STORAGE_ADAPTER_ID, "2026-04-19T00:00:00.000Z"]
     )
@@ -484,4 +521,13 @@ async function withSql<T>(run: (sql: SQL) => Promise<T>): Promise<T> {
   } finally {
     await sql.close()
   }
+}
+
+async function schemaExists(schemaName: string): Promise<boolean> {
+  return withSql(async (sql) => {
+    const rows = (await sql.unsafe(`SELECT to_regnamespace($1) AS oid`, [schemaName])) as Array<{
+      oid: string | null
+    }>
+    return Boolean(rows[0]?.oid)
+  })
 }

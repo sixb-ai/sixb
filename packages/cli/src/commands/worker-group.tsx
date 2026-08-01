@@ -7,16 +7,19 @@ import {
   stopSixbProviders,
   waitForWorkerFailure,
 } from "../lib/runtime"
+import { assertShareableProviders } from "../lib/shareable-providers"
+import { migrateStorageForRole } from "../lib/storage-migration"
 import {
+  assertWorkerInputs,
   createWorkerForType,
   resolveRegisteredWorkerTypes,
   resolveWorkerTypeToStart,
-  usesInMemoryQueues,
 } from "../lib/worker-registry"
-import { ErrorView, LoadingView, renderPersistent, renderStatic, WorkerGroupView } from "../ui"
+import { LoadingView, renderCliError, renderPersistent, WorkerGroupView } from "../ui"
 
 export interface WorkerGroupOptions {
   entry?: string
+  noMigrate?: boolean
   workerTypes?: readonly string[]
   apiPublicOrigin?: string
 }
@@ -46,14 +49,33 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
   try {
     sixb = await loadSixbFromEntry(entry)
 
-    if (usesInMemoryQueues(sixb)) {
-      throw new Error(
-        "[SixbWorkerGroup] `sixb worker-group` requires a queue provider that can be shared across processes. `InMemoryQueues` is for `sixb dev` only."
-      )
-    }
+    assertShareableProviders(sixb, "worker-group")
 
     const workerTypes =
       requestedTypes.length > 0 ? requestedTypes : resolveRegisteredWorkerTypes(sixb)
+
+    // Before the `map()` below, which constructs them: one unconstructable type used to throw
+    // from inside that map, so the operator heard about the first problem and never learned it
+    // had taken every other worker down. And before the migration, which used to run first and
+    // leave a schema behind on a command that then refused.
+    assertWorkerInputs({
+      workerTypes,
+      options: { agentApiBaseUrl: options.apiPublicOrigin },
+      autoSelected: requestedTypes.length === 0,
+    })
+
+    const migration = await migrateStorageForRole(sixb, {
+      role: "worker-group",
+      noMigrate: options.noMigrate,
+      onStart: () =>
+        app.rerender(
+          <LoadingView
+            title="Starting sixb worker group"
+            subtitle={entry}
+            status="Migrating storage"
+          />
+        ),
+    })
 
     app.rerender(
       <LoadingView title="Starting sixb worker group" subtitle={entry} status="Starting workers" />
@@ -71,7 +93,14 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
         ? ["No queue worker types are registered; the worker group process is idle."]
         : []
 
-    app.rerender(<WorkerGroupView name={sixb.id} workerTypes={workerTypes} warnings={warnings} />)
+    app.rerender(
+      <WorkerGroupView
+        name={sixb.id}
+        workerTypes={workerTypes}
+        storage={migration.summary}
+        warnings={warnings}
+      />
+    )
 
     await Promise.race([
       runUntilSignal(async () => {
@@ -85,8 +114,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
   } catch (error) {
     app.unmount()
     await stopWorkersAndProviders()
-    const message = error instanceof Error ? error.message : String(error)
-    await renderStatic(<ErrorView message={message} />)
+    await renderCliError(error)
     process.exit(1)
   }
 }

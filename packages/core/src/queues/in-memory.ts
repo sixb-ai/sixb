@@ -344,7 +344,7 @@ class InMemoryQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob> {
 }
 
 export class InMemoryQueues implements Queues {
-  readonly provider = "in-memory"
+  readonly scope = "process" as const
   private readonly store = new InMemoryQueueStore()
 
   readonly syncRuns = new InMemoryQueue<SyncRunRequestedQueueJob>(this.store, "sync.runs")
@@ -356,4 +356,9 @@ export class InMemoryQueues implements Queues {
   readonly workflows = new InMemoryQueue<WorkflowQueueJob>(this.store, "workflow.runs")
   readonly actions = new InMemoryQueue<ActionRunRequestedQueueJob>(this.store, "action.runs")
   readonly agents = new InMemoryQueue<AgentQueueJob>(this.store, "agent.runs")
+
+  /** Nothing to reach: the store is a field of this object. */
+  health(): Promise<void> {
+    return Promise.resolve()
+  }
 }

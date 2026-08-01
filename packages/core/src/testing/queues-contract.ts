@@ -610,5 +610,25 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         })
       })
     })
+
+    describe("health", () => {
+      // `sixb check` reports its queues row from this call. While the method was absent, that row
+      // was a literal the command printed green.
+      test("resolves against a reachable backend", async () => {
+        await withQueues(async (queues) => {
+          await expect(queues.health()).resolves.toBeUndefined()
+        })
+      })
+    })
+
+    describe("scope", () => {
+      // Asserted rather than left to the type checker: a provider that declares the wrong scope is
+      // a deployment that looks healthy and claims nothing.
+      test("declares whether it can be shared across processes", async () => {
+        await withQueues(async (queues) => {
+          expect(["process", "shared"]).toContain(queues.scope)
+        })
+      })
+    })
   })
 }

@@ -1,6 +1,7 @@
 import { appendFileSync } from "node:fs"
 import {
   col,
+  type DatasetDefinition,
   defineAgent,
   defineConnector,
   defineDataset,
@@ -10,7 +11,6 @@ import {
   defineProjection,
   defineSync,
   InMemoryBlobStorage,
-  InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
@@ -20,6 +20,7 @@ import {
   Sixb,
   type StorageMigrator,
 } from "@sixb/core"
+import { SharedBroker } from "../shared/sharedBroker"
 
 const assistant = defineAgent("assistant", {
   name: "Assistant",
@@ -77,6 +78,18 @@ function logFixtureEvent(entry: Record<string, unknown>): void {
 }
 
 class TrackingLakeStorage extends InMemoryLakeStorage {
+  // Logs every definition probe so the group's startup can be shown not to open the lake
+  // catalog. Co-hosting pipeline and projection workers makes this the role most likely to
+  // regress into a startup-time lake attach.
+  override async assertDatasetDefinitionsCompatible(
+    definitions: readonly DatasetDefinition[]
+  ): Promise<void> {
+    for (const definition of definitions) {
+      logFixtureEvent({ type: "lake:assert", datasetId: definition.id })
+    }
+    return super.assertDatasetDefinitionsCompatible(definitions)
+  }
+
   async close(): Promise<void> {
     logFixtureEvent({ type: "lake-storage:close" })
   }
@@ -107,7 +120,13 @@ function claimLoggingQueue<T extends object>(queue: T, workerType: string): T {
 // Not an `InMemoryQueues` instance, so it passes the shared-queue guard while
 // still backed by real in-memory queues for the workers to poll.
 class SharedQueues implements Queues {
+  readonly scope = "shared" as const
   private readonly inner = new InMemoryQueues()
+
+  health(): Promise<void> {
+    return this.inner.health()
+  }
+
   readonly syncRuns = claimLoggingQueue(this.inner.syncRuns, "sync")
   readonly pipelines = claimLoggingQueue(this.inner.pipelines, "pipeline")
   readonly projections = claimLoggingQueue(this.inner.projections, "projection")
@@ -124,8 +143,13 @@ function loggingStorage() {
   const migrator: StorageMigrator = {
     adapterId: "FixtureStorage",
     latestVersion: 1,
-    async plan() {
-      throw new Error("plan should not run")
+    async status() {
+      return {
+        adapterId: "FixtureStorage",
+        latestVersion: 1,
+        appliedVersion: 1,
+        state: "current" as const,
+      }
     },
     async migrate() {
       logFixtureEvent({ type: "storage:migrate" })
@@ -146,7 +170,7 @@ export const sixb = new Sixb({
   id: "cli-worker-group",
   ontology: [Order],
   connectors: [erpDb],
-  broker: new InMemoryBroker(),
+  broker: new SharedBroker(),
   storage: loggingStorage(),
   lakeStorage: new TrackingLakeStorage(),
   blobStorage: new InMemoryBlobStorage(),

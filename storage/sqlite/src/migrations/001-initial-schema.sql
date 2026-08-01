@@ -105,6 +105,12 @@ CREATE TABLE projection_runs (
   next_batch_ordinal INTEGER CHECK (next_batch_ordinal >= 0),
   next_row_offset INTEGER CHECK (next_row_offset >= 0),
   input_exhausted INTEGER CHECK (input_exhausted IN (0, 1)),
+  missing_target_object_type_id TEXT,
+  missing_target_object_id TEXT,
+  missing_target_batch_ordinal INTEGER CHECK (
+    missing_target_batch_ordinal IS NULL OR missing_target_batch_ordinal >= 0
+  ),
+  missing_target_first_seen_at TEXT,
   source_rows_read INTEGER NOT NULL DEFAULT 0 CHECK (source_rows_read >= 0),
   source_rows_skipped INTEGER NOT NULL DEFAULT 0 CHECK (source_rows_skipped >= 0),
   error_message TEXT,
@@ -143,6 +149,22 @@ CREATE TABLE projection_runs (
       AND next_batch_ordinal IS NOT NULL
       AND next_row_offset IS NOT NULL
       AND input_exhausted IS NOT NULL
+    )
+  ),
+  CHECK (
+    (
+      missing_target_object_type_id IS NULL
+      AND missing_target_object_id IS NULL
+      AND missing_target_batch_ordinal IS NULL
+      AND missing_target_first_seen_at IS NULL
+    )
+    OR
+    (
+      projection_kind = 'telemetry'
+      AND missing_target_object_type_id = object_type_id
+      AND missing_target_object_id IS NOT NULL
+      AND missing_target_batch_ordinal = next_batch_ordinal
+      AND missing_target_first_seen_at IS NOT NULL
     )
   ),
   CHECK (projection_kind != 'telemetry' OR status != 'succeeded' OR input_exhausted = 1)

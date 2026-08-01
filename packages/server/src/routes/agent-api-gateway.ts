@@ -108,7 +108,9 @@ async function resolveAgentRunAuthState(
   const agentStorage = sixb.storage.agents
   const workflowRuns = sixb.storage.workflowRuns
   if (!agentStorage && !workflowRuns) {
-    return jsonError(403, "Agent API gateway is not configured for this runtime.")
+    // 501, not 403: nothing about the caller is being refused — neither storage role
+    // that could hold an agent run is configured, so no request can ever succeed here.
+    return jsonError(501, "Agent API gateway is not configured for this runtime.")
   }
 
   const conversationalRun = await agentStorage?.runs.getById({
@@ -145,9 +147,15 @@ async function resolveAgentRunAuthState(
     }
   }
 
+  // Two different failures shared one status. Missing auth storage is a runtime the
+  // operator did not configure; a run without an execution principal is a run that
+  // cannot prove an identity. Only the first is a 501.
   const auth = sixb.storage.auth
-  if (!auth || !run.executionPrincipal) {
-    return jsonError(403, "Agent API gateway is not configured for authenticated agent access.")
+  if (!auth) {
+    return jsonError(501, "Agent API gateway is not configured for authenticated agent access.")
+  }
+  if (!run.executionPrincipal) {
+    return jsonError(403, "Agent run has no execution identity.")
   }
 
   const serviceAccount = await auth.serviceAccounts.getById({
