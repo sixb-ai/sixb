@@ -66,6 +66,7 @@ All JSON routes are prefixed with `/api` and mirror the runtime's typed APIs; se
 | -------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------- |
 | Objects CRUD   | `GET /api/objects`, `GET/PUT /api/objects/:type/:id`                                 | [Objects](../objects/overview.md)               |
 | Object query   | `POST /api/objects/query`, `.../query/count`, `.../query/exists`, `.../query/facets` | [Querying](../objects/querying.md)              |
+| Files          | `POST /api/files`, `/api/files/uploads/...`, `GET .../files/content`                 | [Files](#files)                                 |
 | Telemetry      | `GET/POST /api/objects/:type/:id/telemetry/:prop`, `.../history`, `.../latest`       | [Telemetry](../objects/telemetry.md)            |
 | Links          | `GET/PUT/DELETE /api/objects/:type/:id/links/:linkId`                                | [Links](../ontology/links.md)                   |
 | Actions        | `GET /api/actions`, `POST /api/actions/:actionId`                                    | [Actions](../actions/overview.md)               |
@@ -96,6 +97,38 @@ Status endpoints have distinct meanings:
 | `GET /health` | The API process is alive. | Returns `200` while the process can serve HTTP. |
 | `GET /ready` | Storage is reachable and its schema is current. | Returns `503` when the runtime must leave traffic. |
 | `GET /api/status` | Cached outbox, retry, cleanup, and maintenance state. | Reports `degraded` without removing a healthy API from traffic. |
+
+## Files
+
+A [`fileRef`](../ontology/properties.md) property holds a blob. Uploading it takes one request
+when the file is small, and a session when it is not.
+
+| Route | Use |
+| --- | --- |
+| `POST /api/files` | one multipart request; the whole file travels through the API |
+| `POST /api/files/uploads` | open a session for a large or client-uploaded file |
+| `PUT /api/files/uploads/:uploadId/content` | send the content through the API |
+| `POST /api/files/uploads/:uploadId/parts/:partNumber` | get a signed URL and upload the part directly to blob storage |
+| `POST /api/files/uploads/:uploadId/complete` | finish the session and get the reference |
+| `POST /api/files/uploads/:uploadId/abort` | discard it |
+
+Reading back is `GET` (or `HEAD`) on the owner's `files/content`, with a JSON pointer to the
+reference as `path` — on an object it must start with `/properties`:
+
+```bash
+curl "$API/api/objects/Invoice/inv-1/files/content?path=/properties/scan" -o scan.pdf
+```
+
+The same route shape hangs off action runs, workflow runs, workflow-run nodes, and agent thread
+messages — `/api/action-runs/:runId/files/content`, `/api/workflow-runs/:runId/files/content`,
+`.../nodes/:nodeKey/files/content`, and
+`/api/agent-threads/:threadId/messages/:messageId/files/content`.
+
+> **0.1.0 limit — upload sessions are in-memory.** Neither `@sixb/pg` nor `@sixb/sqlite`
+> implements `fileUploadSessions`, so every session opened by `POST /api/files/uploads` lives in
+> the serving process: it does not survive a restart and is not shared across replicas. Route a
+> session's requests to one instance, supply your own store on `sixb.storage.fileUploadSessions`,
+> or use single-request `POST /api/files`, which is unaffected.
 
 ## Real-time events
 

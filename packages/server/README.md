@@ -60,6 +60,17 @@ origins are shown as invitation destinations and participate in `can.access(appl
 | `GET` | `/api/objects/:objectTypeId/:objectKey/telemetry/:propertyId/history` | Get telemetry history (`?from=&to=&limit=&order=`) |
 | `GET` | `/api/objects/:objectTypeId/:objectKey/telemetry/:propertyId/latest` | Get latest telemetry point |
 | `GET` | `/api/events` | Read domain events (`?topic=&type=&afterCursor=&limit=`) |
+| `POST` | `/api/files` | Upload a file in one request |
+| `POST` | `/api/files/uploads` | Open an upload session for a large or client-uploaded file |
+| `PUT` | `/api/files/uploads/:uploadId/content` | Send session content through the API |
+| `POST` | `/api/files/uploads/:uploadId/parts/:partNumber` | Sign one part for direct upload to blob storage |
+| `POST` | `/api/files/uploads/:uploadId/complete` | Complete the session and return the file reference |
+| `POST` | `/api/files/uploads/:uploadId/abort` | Discard the session |
+| `GET` | `/api/objects/:objectTypeId/:objectKey/files/content` | Download a `fileRef` property (`?path=/properties/scan`) |
+
+Upload sessions default to an in-memory store: neither `@sixb/pg` nor `@sixb/sqlite` implements
+`fileUploadSessions` in 0.1.0, so a session does not survive a restart and is not shared across
+replicas. Single-request `POST /api/files` is unaffected.
 
 ### WebSocket
 
