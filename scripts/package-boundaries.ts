@@ -20,6 +20,10 @@ import { internalDependencies } from "./publishable-packages"
  * So the boundary is asserted twice, from one derivation so the two can never drift:
  * `build-package.ts` resolves every sibling as external before the bundler can decide, and
  * `pack-smoke.ts` rejects any package whose imports outrun what its manifest declares.
+ *
+ * Stylesheets are out of scope. A bare `@import` in CSS is resolved by the consumer's Tailwind —
+ * relative to the stylesheet, then up through `node_modules` — not by the module resolver, so
+ * what a published stylesheet needs is declared by hand. `AGENTS.md` says so next to this rule.
  */
 
 /**
@@ -48,11 +52,14 @@ export interface UndeclaredImport {
 /**
  * `src` ships in the tarball and `exports.bun` points Bun consumers straight at it, so a source
  * import is a runtime import on someone else's machine — a devDependency there fails for them,
- * never for us.
+ * never for us. Every module extension, not only the TypeScript ones the repo happens to use.
  */
-export const sourceScope: ImportScope = { directory: "src", glob: "**/*.{ts,tsx}" }
+export const sourceScope: ImportScope = {
+  directory: "src",
+  glob: "**/*.{ts,tsx,js,jsx,mjs,cjs}",
+}
 
-/** What every non-Bun consumer loads. */
+/** What every non-Bun consumer loads. `Bun.build` emits `.js` and nothing else. */
 export const artifactScope: ImportScope = { directory: "dist", glob: "**/*.js" }
 
 /**
