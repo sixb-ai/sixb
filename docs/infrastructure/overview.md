@@ -102,6 +102,32 @@ freeze writers and drain jobs
 
 Project-specific mappings and migration scripts stay outside the framework.
 
+## Retention
+
+The API role purges expired rows every 60 seconds, in the same maintenance pass that
+catches the outbox up.
+
+| Table                  | Purged                                    | Default |
+| ---------------------- | ----------------------------------------- | ------- |
+| `ontology_outbox`      | published rows                            | 24 h    |
+| `ontology_source_rows` | terminal materializations, children first | 24 h    |
+| `ontology_commits`     | **nothing** — it grows with every commit  | —       |
+
+Pending outbox rows and nonterminal sources are live data and are never purged by age.
+Size the disk with `ontology_commits` in mind: 0.1.0 has no purge for it.
+
+```ts
+export const sixb = await createSixb({
+  // ...
+  ontologyMaintenance: {
+    intervalMs: 60_000,
+    publishedOutboxRetentionMs: 24 * 60 * 60_000,
+    terminalSourceRetentionMs: 24 * 60 * 60_000,
+    cleanupLimit: 1_000, // rows deleted per table per pass
+  },
+})
+```
+
 ## Provider matrix
 
 Pick a real provider class for each slot. `InMemory*` providers come from `@sixb/core` and
@@ -160,15 +186,17 @@ See [Deployment](../deployment/overview.md) for running this in production.
 ## Migrations
 
 SQL-backed storage providers (`@sixb/pg`, `@sixb/sqlite`) own their schema and ship
-migrations. The CLI runs them automatically on startup, so you mainly need the explicit
-command for pre-deploy migration steps:
+migrations. The six roles that touch the schema apply them at startup, so the explicit
+command is for running the migration as its own deploy stage:
 
 ```bash
-sixb db:migrate
+sixb db migrate
 ```
 
 This loads your runtime and applies pending migrations against the configured `storage`
-provider. In-memory and file-lake providers have no schema and skip this step.
+provider. In-memory and file-lake providers have no schema and skip this step. See
+[Deployment](../deployment/overview.md#storage-migrations) for which roles migrate and how
+to start them without migrating.
 
 ## Related
 
