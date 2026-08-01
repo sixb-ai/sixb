@@ -4,7 +4,6 @@
   "workspaces": [
     "apps/*",
     "auth/*",
-    "benchmarks/*",
     "packages/*",
     "connectors/*",
     "broker/*",
@@ -27,8 +26,7 @@
     "test:e2e": "bun run --workspaces --if-present test:e2e",
     "test:all": "bun run test && bun run test:e2e",
     "lint": "biome check auth/*/src packages/*/src connectors/*/src sandboxes/*/src",
-    "typecheck": "bun run build:types && bun run typecheck:benchmarks && bun run typecheck:tests && bun run typecheck:template && bun run typecheck:examples",
-    "typecheck:benchmarks": "bun --filter '@sixb/benchmark-*' typecheck",
+    "typecheck": "bun run build:types && bun run typecheck:tests && bun run typecheck:template && bun run typecheck:examples",
     "typecheck:tests": "tsc -p tsconfig.tests.json",
     "typecheck:template": "tsc -p packages/create-sixb/tsconfig.template.json",
     "typecheck:examples": "bun --filter '@sixb/docs' --filter '@sixb/example-*' typecheck",
@@ -42,7 +40,6 @@
     "docs:build": "bun --filter @sixb/docs build",
     "docs:typecheck": "bun --filter @sixb/docs typecheck",
     "test:publish": "bun scripts/pack-smoke.ts",
-    "benchmark:ontology-materialization": "bun --filter @sixb/benchmark-ontology-materialization benchmark",
     "ui:dev": "bun --filter @sixb/ui dev",
     "ui:add": "bun --filter @sixb/ui shadcn:add"
   },
