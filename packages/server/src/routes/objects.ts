@@ -801,11 +801,15 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         const { scoped } = requestAuthState(context)
         try {
           const parsedBody = UpsertObjectBodySchema.parse(body)
-          const primaryPropertyId = sixb.getPrimaryPropertyId(params.objectTypeId)
-          const properties = { ...parsedBody.properties, [primaryPropertyId]: params.objectId }
           // Scoped when a principal is attached, privileged only when auth is off or the request is
-          // public — the same fallback the read routes use.
-          const object = await (scoped ?? sixb).upsertObject(params.objectTypeId, properties)
+          // public — the same fallback the read routes use. Scoped for the primary-property lookup
+          // too: on the privileged runtime it answers 404 for an unregistered type before any grant
+          // is checked, which told an ungranted principal apart from a registered type (403) and so
+          // handed back the type universe that `listObjectTypes` filters out.
+          const runtime = scoped ?? sixb
+          const primaryPropertyId = runtime.getPrimaryPropertyId(params.objectTypeId)
+          const properties = { ...parsedBody.properties, [primaryPropertyId]: params.objectId }
+          const object = await runtime.upsertObject(params.objectTypeId, properties)
           return serializeObject(object)
         } catch (error) {
           // Was a local catch mapping every error to 404/400, which turned a missing grant into

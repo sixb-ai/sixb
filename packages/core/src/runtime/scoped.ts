@@ -154,6 +154,17 @@ export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> 
   /** Get an object by type id and primary id (server / dynamic contexts). */
   getObject(objectTypeId: string, primaryId: string): Promise<ObjectRow | null>
 
+  /**
+   * The primary property of a type the principal may view.
+   *
+   * Asserts before it looks the type up, which is the whole point of having it here: the privileged
+   * lookup answers "unknown type" for an unregistered id and a primary property for a registered
+   * one, so a caller that reaches it before any grant check can tell the two apart. Every other
+   * ontology read is grant-filtered — `listObjectTypes` returns only viewable types — and this
+   * matches them.
+   */
+  getPrimaryPropertyId: SixbInstance<TOntologySources>["getPrimaryPropertyId"]
+
   // The string-based write entry points, indexed off the full runtime rather than restated, so the
   // surface that now carries authorization cannot drift from the one it delegates to.
   /** Upsert an object by type id. Requires `view:object` and `edit:object`. */
@@ -315,6 +326,11 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
         objectTypeId,
         primaryId,
       })
+    },
+
+    getPrimaryPropertyId: (objectTypeId: string) => {
+      assertAuthorized(runtime, { kind: "object.view", objectTypeId })
+      return runtime.ontology.getPrimaryPropertyId(objectTypeId)
     },
 
     // Same delegation as the privileged runtime's own methods; the leaves assert the grants off

@@ -595,6 +595,38 @@ describe("authorized object routes", () => {
     expect(otherType.status).toBe(403)
   })
 
+  test("the write route does not say which object types exist", async () => {
+    const { app, storage } = await createApp()
+    // `operations` holds run grants only — no view of any object type.
+    const outsider = await seedSession(storage, ["operations"], "usr_outsider")
+
+    const registered = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c1", {
+        method: "PUT",
+        headers: outsider.csrfHeaders,
+        body: JSON.stringify({ properties: { id: "c1" } }),
+      })
+    )
+    const unregistered = await app.fetch(
+      new Request("http://localhost/api/objects/ghost/g1", {
+        method: "PUT",
+        headers: outsider.csrfHeaders,
+        body: JSON.stringify({ properties: { id: "g1" } }),
+      })
+    )
+
+    // `listObjectTypes` shows this principal nothing, so the write route must not answer 403 for a
+    // type that exists and 404 for one that does not — that difference is the type universe. The
+    // primary-property lookup runs on the scoped runtime for exactly this reason; point it back at
+    // the privileged `sixb` in the route and the second status returns to 404.
+    expect([registered.status, unregistered.status]).toEqual([403, 403])
+
+    const listed = await app.fetch(
+      new Request("http://localhost/api/object-types", { headers: outsider.headers })
+    )
+    expect(await listed.json()).toEqual([])
+  })
+
   test("link writes require edit on the source and view on the target", async () => {
     const { app, storage } = await createApp()
     const viewer = await seedSession(storage, ["commercial"], "usr_view")

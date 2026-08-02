@@ -854,6 +854,7 @@ describe("ScopedSixb surface", () => {
         "getAgentById",
         "getObject",
         "getPipelineById",
+        "getPrimaryPropertyId",
         "getSyncById",
         "getThread",
         "getWorkflowById",
