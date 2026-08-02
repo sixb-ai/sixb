@@ -11,6 +11,7 @@
 [Documentation](https://docs.sixb.ai) ·
 [Quickstart](#quickstart) ·
 [Atlas](#meet-atlas) ·
+[Discord](https://discord.gg/rPSbZSRDzQ) ·
 [Contributing](https://github.com/sixb-ai/sixb/blob/main/CONTRIBUTING.md)
 
 [![npm](https://img.shields.io/npm/v/@sixb/core?color=black&label=version)](https://www.npmjs.com/package/@sixb/core)
