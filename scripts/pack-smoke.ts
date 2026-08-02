@@ -1,5 +1,12 @@
 import { join } from "node:path"
-import { artifactScope, findUndeclaredImports, sourceScope } from "./package-boundaries"
+import { pathToFileURL } from "node:url"
+import {
+  artifactScope,
+  findAliasDrift,
+  findUndeclaredImports,
+  resolutionBoundaryFile,
+  sourceScope,
+} from "./package-boundaries"
 import {
   discoverPublishablePackages,
   type ExportTarget,
@@ -13,6 +20,7 @@ const root = process.cwd()
 const packages = await discoverPublishablePackages(root)
 
 assertLockstepVersions(packages)
+await assertSourceAliasesMirrorExports(packages)
 
 // A cycle makes the release unpublishable, because a package cannot go to the registry before
 // something it depends on. Failing here beats finding out halfway through a publish run.
@@ -47,6 +55,37 @@ function assertLockstepVersions(all: PublishablePackage[]): void {
     .map(([version, names]) => `  ${version}: ${names.join(", ")}`)
     .join("\n")
   throw new Error(`[SixbPublish] Publishable packages must share one version.\n${detail}`)
+}
+
+/**
+ * The root `paths` map and `exports.bun` must name the same file for every source-first subpath.
+ *
+ * Not a property of any tarball, which is why it sits beside the version and cycle checks rather
+ * than in the per-package loop: those are the repo-wide invariants a release depends on, and this
+ * one decides whether the bundles we build here hold one copy of each module or two.
+ *
+ * The config is read as a module so a comment in it stays legal — `Bun.file().json()` is strict,
+ * and three of these configs already carry comments explaining themselves.
+ */
+async function assertSourceAliasesMirrorExports(all: PublishablePackage[]): Promise<void> {
+  const tsconfig = await import(pathToFileURL(join(root, "tsconfig.json")).href)
+  const paths = tsconfig.default?.compilerOptions?.paths ?? {}
+
+  const drift = findAliasDrift(all, paths)
+  if (drift.length === 0) return
+
+  const detail = drift
+    .map(
+      ({ specifier, expected, actual }) =>
+        `  ${specifier}\n    tsconfig: ${actual ?? "(none)"}\n    exports.bun: ${expected}`
+    )
+    .join("\n")
+  throw new Error(
+    `[SixbPublish] The root tsconfig paths map no longer mirrors exports.bun:\n${detail}\n` +
+      "Point each one at the file its `bun` condition names. A specifier the map has forgotten " +
+      "resolves through `exports.import` instead, which puts a second copy of that module in the " +
+      "same bundle."
+  )
 }
 
 function validatePackage(packageInfo: PublishablePackage): void {
@@ -235,6 +274,16 @@ async function dryRunPack(packageInfo: PublishablePackage): Promise<void> {
 
   if ([...packedPaths].some((path) => path.split("/").includes("tests"))) {
     throw new Error(`[SixbPublish] ${packageName(packageInfo)} pack output includes tests.`)
+  }
+
+  // The build writes this; only `files` can lose it, and losing it is silent — the artifact keeps
+  // working everywhere except the one consumer whose own aliases reach into it.
+  const boundary = join(artifactScope.directory, resolutionBoundaryFile)
+  if (!packedPaths.has(boundary)) {
+    throw new Error(
+      `[SixbPublish] ${packageName(packageInfo)} does not ship ${boundary}, so a consumer's ` +
+        "tsconfig paths map applies inside its dist."
+    )
   }
 
   for (const target of packageTargets(packageInfo.packageJson)) {
