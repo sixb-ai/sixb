@@ -97,8 +97,8 @@ The event only wakes evaluation: Rules always read current committed object/link
 and periodic reconciliation repairs events missed while the worker was offline and resolves active
 state for deleted objects. Live evaluation and reconciliation share one serialized coordinator.
 
-V0.1.0 supports one active Rules worker per project. Rule notifications are at-least-once, so
-consumers must tolerate a duplicate around process failure.
+The pre-0.1 line supports one active Rules worker per project. Rule notifications are at-least-once,
+so consumers must tolerate a duplicate around process failure.
 
 ## Reacting to the signal
 

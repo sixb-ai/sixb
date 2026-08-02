@@ -1,6 +1,6 @@
 {
   "name": "@sixb/agent-worker",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Worker that runs Sixb agent threads",
   "keywords": [
     "sixb",

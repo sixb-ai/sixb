@@ -1,6 +1,6 @@
 {
   "name": "@sixb/sandboxes-smolvm",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "smolvm microVM sandbox provider for Sixb agents",
   "keywords": [
     "sixb",

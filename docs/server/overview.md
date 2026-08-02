@@ -126,7 +126,7 @@ messages — `/api/action-runs/:runId/files/content`, `/api/workflow-runs/:runId
 `.../nodes/:nodeKey/files/content`, and
 `/api/agent-threads/:threadId/messages/:messageId/files/content`.
 
-> **0.1.0 limit — upload sessions are in-memory.** Neither `@sixb/pg` nor `@sixb/sqlite`
+> **Pre-0.1 limit — upload sessions are in-memory.** Neither `@sixb/pg` nor `@sixb/sqlite`
 > implements `fileUploadSessions`, so every session opened by `POST /api/files/uploads` lives in
 > the serving process: it does not survive a restart and is not shared across replicas. Route a
 > session's requests to one instance, supply your own store on `sixb.storage.fileUploadSessions`,

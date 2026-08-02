@@ -2,9 +2,10 @@
 
 All Sixb packages ship on one version. A release publishes all of them or none.
 
-## 0.1.0
+## 0.0.1
 
-First public release.
+First public preview release. This version is published under npm's `next` tag and is not the
+recommended `latest` release.
 
 Sixb gives operational systems a shared backbone: a typed ontology, and the primitives that read and
 write it — actions, workflows, rules, events, schedules, agents, datasets, syncs, pipelines,
@@ -20,8 +21,8 @@ bun create sixb my-app
 
 ### Compatibility
 
-This is a 0.x release and carries no compatibility guarantee. Expect public API to move between
-minor versions.
+This is a 0.0.x preview and carries no compatibility guarantee. Expect public APIs and persisted
+state to change between any two preview versions.
 
 The database schema is one migration whose checksum is verified at startup. Before 1.0, a schema
 change **replaces** that migration rather than adding another, so moving between 0.x versions can

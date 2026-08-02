@@ -224,9 +224,9 @@ What `restore()` does depends on where the object came from:
 | Written only from code | Ceases to exist. Not reversible. | No-op — `upsert` it again instead. |
 | Also written by a projection | Stays hidden even while the projection keeps asserting it. | Reveals the projected object again. |
 
-There is no HTTP route for either yet. Write capabilities are not part of the grant model in 0.1.0,
-so a `DELETE` endpoint would expose a cascading delete to every authenticated session. An ungated
-`upsert` is recoverable; an ungated delete of a managed object is not.
+There is no HTTP route for either yet. Write capabilities are not part of the grant model before
+0.1, so a `DELETE` endpoint would expose a cascading delete to every authenticated session. An
+ungated `upsert` is recoverable; an ungated delete of a managed object is not.
 
 ## requestAction
 

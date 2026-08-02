@@ -179,6 +179,10 @@ Prefer targeted checks while iterating, then broader checks before review.
 Every publishable package shares one version and ships together — a release publishes all of them or
 none. `bun run test:publish` fails if they drift apart, so a version bump touches every manifest.
 
+The `0.0.x` line is for public validation. Publish those versions only under npm's `next` tag and
+increment the patch for every new artifact: npm versions are immutable. The `latest` tag is reserved
+for `0.1.0`, the first minimally stable, tested release, and later versions.
+
 Releasing is two commands. The first produces exactly what gets published and proves it; the second
 publishes, in dependency order, skipping anything already on the registry so an interrupted run can
 be re-run:
@@ -188,9 +192,14 @@ bun run release
 bun run release:publish -- --tag next
 ```
 
-Publish to a temporary tag first, verify it, then move `latest`. The publish script prints the
-`npm dist-tag` commands to do that. Note that `bun publish --dry-run` still authenticates; to
-rehearse without credentials, point `--registry` at a local registry.
+The tag changes how npm resolves an install, not the package version: consumers opt into previews
+with `bun add @sixb/core@next` or `bunx create-sixb@next my-app`. Publishing another preview moves
+`next` forward without making it the default install.
+
+For `0.1.0` and later, publish to `next` first, verify it, then move the same immutable version to
+`latest`. The publish script prints the `npm dist-tag` commands only when that promotion is allowed,
+and refuses to publish a `0.0.x` version directly to `latest`. Note that `bun publish --dry-run`
+still authenticates; to rehearse without credentials, point `--registry` at a local registry.
 
 ## The feeling we want
 

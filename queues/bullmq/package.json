@@ -1,6 +1,6 @@
 {
   "name": "@sixb/queues-bullmq",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Redis/BullMQ-backed queue provider for Sixb",
   "keywords": [
     "sixb",

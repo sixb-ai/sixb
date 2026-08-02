@@ -1,6 +1,6 @@
 {
   "name": "@sixb/client",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Type-safe SDK for Sixb API with TanStack Query hooks",
   "keywords": [
     "sixb",

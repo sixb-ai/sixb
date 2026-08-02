@@ -218,8 +218,10 @@ independently against the same durable providers.
 
 ## Status
 
-Sixb is currently `0.1.0`. APIs may change between minor releases, and database upgrades may require
-manual migration before 1.0. See the [changelog](CHANGELOG.md) for compatibility notes.
+Sixb is currently in the preview `0.0.x` line, starting with `0.0.1`. Preview releases are
+published under npm's `next` tag and may change between any two versions. Version `0.1.0` will be
+the first minimally stable, tested release promoted to `latest`. See the
+[changelog](CHANGELOG.md) for compatibility notes.
 
 ## Contributing
 

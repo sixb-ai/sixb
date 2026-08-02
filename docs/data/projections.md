@@ -233,7 +233,7 @@ sixb worker projection
 - Object and link projections are authoritative replacements for their source. A later dataset
   version withdraws source-owned objects or links that are no longer present; managed edits remain
   separate overrides.
-- Replacement snapshots are the only V0.1.0 source materialization protocol. Activation, the
+- Replacement snapshots are the only pre-0.1 source materialization protocol. Activation, the
   durable `ontology_commits` record, and stable outbox envelopes commit atomically. Dataset CDC or
   change-stream projection is deferred.
 - An object projection requires one nonblank primary identity per dataset row and one row per object

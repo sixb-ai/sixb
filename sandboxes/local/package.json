@@ -1,6 +1,6 @@
 {
   "name": "@sixb/sandboxes-local",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Local process sandbox provider for Sixb agents",
   "keywords": [
     "sixb",

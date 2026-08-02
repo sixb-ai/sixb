@@ -3,7 +3,7 @@
   "info": {
     "title": "Sixb API",
     "description": "Ontology-first digital twins runtime API",
-    "version": "0.1.0"
+    "version": "0.0.1"
   },
   "components": {
     "securitySchemes": {

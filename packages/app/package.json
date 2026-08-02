@@ -1,6 +1,6 @@
 {
   "name": "@sixb/app",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Custom app toolkit for Sixb projects — route scanning, dev serving, and production builds",
   "keywords": [
     "sixb",
