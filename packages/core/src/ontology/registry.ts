@@ -6,7 +6,11 @@
  * `Sixb` facade.
  */
 
-import { formatUnknownObjectTypeMessage, OntologyValidationError } from "./errors"
+import {
+  formatUnknownObjectTypeMessage,
+  OntologyNotFoundError,
+  OntologyValidationError,
+} from "./errors"
 import type { ObjectTypeWithPropertyTokens } from "./tokens"
 import { createLinkTokenMap, createPropertyTokenMap } from "./tokens"
 import type { ObjectType, Schema, ValueType } from "./types"
@@ -203,7 +207,7 @@ export class OntologyRegistry {
   resolveObjectType(objectTypeId: string): ObjectTypeWithPropertyTokens {
     const objectType = this.objectTypesById.get(objectTypeId)
     if (!objectType) {
-      throw new OntologyValidationError(formatUnknownObjectTypeMessage(objectTypeId))
+      throw new OntologyNotFoundError(formatUnknownObjectTypeMessage(objectTypeId))
     }
     return objectType
   }
@@ -211,7 +215,7 @@ export class OntologyRegistry {
   /** Get the primary property id for a given object type. Throws if unknown. */
   getPrimaryPropertyId(objectTypeId: string): string {
     const id = this.primaryByTypeId.get(objectTypeId)
-    if (!id) throw new OntologyValidationError(formatUnknownObjectTypeMessage(objectTypeId))
+    if (!id) throw new OntologyNotFoundError(formatUnknownObjectTypeMessage(objectTypeId))
     return id
   }
 
