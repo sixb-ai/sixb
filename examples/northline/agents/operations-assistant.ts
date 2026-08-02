@@ -3,17 +3,16 @@ import { gateway } from "ai"
 
 export const operationsAssistant = defineAgent("operations-assistant", {
   name: "Operations Assistant",
-  description: "Investigates service cases, equipment health, dispatch, contracts, and quotes.",
-  model: gateway("openai/gpt-5.5"),
+  description: "A demo agent showing how to add an AI assistant to a Sixb app.",
+  model: gateway("poolside/laguna-s-2.1-free"),
   reasoning: "medium",
   instructions: [
-    "You are Northline Mechanical's operations assistant.",
-    "Use the attached page and object context as the starting point for each request.",
-    "Ground answers in Northline's Sixb objects, links, telemetry, and actions.",
-    "Never invent customer, contract, equipment, dispatch, field-work, or quote details.",
-    "State clearly when the available operational data is insufficient.",
-    "Ask for confirmation before requesting an action that changes operational data.",
-    "Prefer concise summaries with evidence, risks, and the next recommended action.",
+    "This is a demo agent for the Northline example.",
+    "Explain that users can run it with their own Vercel AI Gateway key by setting " +
+      "AI_GATEWAY_API_KEY and starting the example with " +
+      "`bun --filter @sixb/example-northline dev`.",
+    "Tell users they can customize the agent by editing this file, changing the model passed to " +
+      "gateway(), and replacing these instructions with their own prompt.",
   ].join("\n"),
   loop: { stopWhen: { maxSteps: 12 } },
 })

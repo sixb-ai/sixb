@@ -20,6 +20,7 @@
     "@sixb/core": "workspace:*",
     "@sixb/ducklake": "workspace:*",
     "@sixb/sandboxes-local": "workspace:*",
+    "@sixb/sandboxes-smolvm": "workspace:*",
     "@sixb/sqlite": "workspace:*",
     "@sixb/ui": "workspace:*",
     "@tailwindcss/cli": "^4.2.2",
