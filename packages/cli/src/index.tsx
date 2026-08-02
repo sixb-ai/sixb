@@ -359,12 +359,12 @@ async function main(): Promise<void> {
     }
 
     case "create": {
-      const name = args[1]
-      if (!name) {
-        throw new Error("create requires a project name")
+      const positionals = getCommandPositionals()
+      if (positionals.length !== 1) {
+        throw new Error("Usage: sixb create <project-name>")
       }
       const { runCreate } = await import("./commands/init")
-      await runCreate(name)
+      await runCreate(positionals[0]!)
       break
     }
 

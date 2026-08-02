@@ -16,7 +16,11 @@
     "app/**/*.ts",
     "app/**/*.tsx",
     "actions/**/*.ts",
+    "connectors/**/*.ts",
+    "datasets/**/*.ts",
     "ontology/**/*.ts",
+    "projections/**/*.ts",
+    "syncs/**/*.ts",
     "sixb.config.ts",
     ".sixb/types/**/*.d.ts"
   ]

@@ -55,7 +55,9 @@ describe("create-sixb packed artifacts", () => {
     const result = runPacked([createEntry, "--help"], runRoot)
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("bun create sixb <project-name>")
+    expect(result.stdout).toContain("create-sixb")
+    expect(result.stdout).toContain("Create a new Sixb project")
+    expect(result.stdout).toContain("bun create sixb <directory>")
     expect(result.stderr).toBe("")
   })
 
@@ -64,6 +66,10 @@ describe("create-sixb packed artifacts", () => {
     const result = runPacked([createEntry, "starter"], cwd)
 
     expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("sixb\n\nSuccess! Created starter")
+    expect(result.stdout).toContain(join(cwd, "starter"))
+    expect(result.stdout).toContain("Next steps\n  cd starter\n  bun install\n  bun run dev")
+    expect(result.stdout).not.toContain("\u001b[")
     expect(result.stderr).toBe("")
     await assertScaffold(join(cwd, "starter"), "starter")
   })
@@ -73,8 +79,29 @@ describe("create-sixb packed artifacts", () => {
     const result = runPacked([cliEntry, "create", "starter-cli"], cwd)
 
     expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("sixb\n\nSuccess! Created starter-cli")
+    expect(result.stdout).toContain("Next steps\n  cd starter-cli\n  bun install\n  bun run dev")
+    expect(result.stdout).not.toContain("Files")
     expect(result.stderr).toBe("")
     await assertScaffold(join(cwd, "starter-cli"), "starter-cli")
+  })
+
+  test("prints a shell-safe path and omits cd when creating in the current directory", async () => {
+    const nestedCwd = await createRunDirectory("launcher-path")
+    const nestedResult = runPacked(
+      [createEntry, join("projects with spaces", "starter")],
+      nestedCwd
+    )
+
+    expect(nestedResult.exitCode).toBe(0)
+    expect(nestedResult.stdout).toContain("cd 'projects with spaces/starter'")
+
+    const currentCwd = await createRunDirectory("launcher-current")
+    const currentResult = runPacked([createEntry, "."], currentCwd)
+
+    expect(currentResult.exitCode).toBe(0)
+    expect(currentResult.stdout).not.toContain("\n  cd ")
+    expect(currentResult.stdout).toContain("Next steps\n  bun install\n  bun run dev")
   })
 
   test("refuses to merge into a non-empty directory from either command", async () => {
@@ -168,11 +195,13 @@ function runPacked(
 async function assertScaffold(projectDir: string, name: string): Promise<void> {
   await stat(join(projectDir, "sixb.config.ts"))
   await stat(join(projectDir, "app", "page.tsx"))
+  await stat(join(projectDir, "app", "public", "sixb-wordmark.svg"))
   await stat(join(projectDir, ".gitignore"))
   expect(await Bun.file(join(projectDir, "gitignore")).exists()).toBe(false)
 
   const configSource = await readFile(join(projectDir, "sixb.config.ts"), "utf8")
   expect(configSource).toContain(`const projectId = "${name}"`)
+  expect(configSource).toContain('mkdirSync(".sixb/lake", { recursive: true })')
   expect(configSource).toContain('new SqliteStorage({ path: ".sixb" })')
   expect(configSource).toContain("new DuckLakeStorage({")
   expect(configSource).toContain('path: ".sixb/lake/metadata.ducklake"')
@@ -180,9 +209,13 @@ async function assertScaffold(projectDir: string, name: string): Promise<void> {
   expect(configSource).not.toContain("LocalLakeStorage")
   expect(configSource).not.toContain("isProduction")
 
-  const incrementAction = await readFile(join(projectDir, "actions", "increment.ts"), "utf8")
-  expect(incrementAction).toContain('defineAction("increment")')
-  expect(incrementAction).toContain(".edits(")
+  const connector = await readFile(join(projectDir, "connectors", "celestrak.ts"), "utf8")
+  expect(connector).toContain('defineConnector("celestrak"')
+  expect(connector).toContain("CATNR=66514")
+
+  const sync = await readFile(join(projectDir, "syncs", "satellite-orbit.ts"), "utf8")
+  expect(sync).toContain('defineSync("sync-satellite-orbit")')
+  expect(sync).toContain(".intoDataset(satelliteOrbit)")
 
   const packageJson = JSON.parse(await readFile(join(projectDir, "package.json"), "utf8")) as {
     name?: string
@@ -191,5 +224,7 @@ async function assertScaffold(projectDir: string, name: string): Promise<void> {
   expect(packageJson.name).toBe(name)
   expect(packageJson.dependencies?.["@sixb/cli"]).toBe("^0.0.1")
   expect(packageJson.dependencies?.["@sixb/ducklake"]).toBe("^0.0.1")
+  expect(packageJson.dependencies?.cobe).toBe("^2.0.1")
+  expect(packageJson.dependencies?.["satellite.js"]).toBe("^7.1.0")
   expect(packageJson.dependencies?.["@sixb/lake-local"]).toBeUndefined()
 }
