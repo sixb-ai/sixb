@@ -2264,4 +2264,33 @@ describe("SixbServer HTTP contract", () => {
       ])
     })
   })
+
+  test("separates a bad write body from a name the ontology does not register", async () => {
+    await withHttpContractServer(async ({ baseUrl }) => {
+      // The status used to be picked by searching the message for "Unknown" or "not found", so
+      // every ontology validation error whose text began "Unknown property" answered 404. To see
+      // this fail, drop the OntologyValidationError branch from `handleRouteError`.
+      const unknownProperty = await fetch(`${baseUrl}/api/objects/device/fan-2`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ properties: { id: "fan-2", nope: "x" } }),
+      })
+      expect(unknownProperty.status).toBe(400)
+
+      const unknownObjectType = await fetch(`${baseUrl}/api/objects/ghost/fan-2`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ properties: {} }),
+      })
+      expect(unknownObjectType.status).toBe(404)
+
+      // A link id is named in the path, so an unregistered one is still missing, not malformed.
+      const unknownLink = await fetch(`${baseUrl}/api/objects/space/system/links/ghost`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ targetTypeId: "device", targetId: "fan-2" }),
+      })
+      expect(unknownLink.status).toBe(404)
+    })
+  })
 })

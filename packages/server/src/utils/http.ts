@@ -1,5 +1,9 @@
-import { AuthorizationError } from "@sixb/core"
-import { FileUploadSessionError, type FileUploadSessionErrorReason } from "@sixb/core/storage"
+import { AuthorizationError, OntologyNotFoundError, OntologyValidationError } from "@sixb/core"
+import {
+  FileUploadSessionError,
+  type FileUploadSessionErrorReason,
+  ObjectNotFoundError,
+} from "@sixb/core/storage"
 import { RequestBodyTooLargeError } from "./request-body"
 
 export function toIsoString(value: Date): string {
@@ -70,6 +74,22 @@ export function handleRouteError(
     return { error: error.message }
   }
 
+  // Before the OntologyValidationError branch: it is a subclass, and it is the half that is a
+  // missing resource rather than bad input.
+  if (error instanceof OntologyNotFoundError || error instanceof ObjectNotFoundError) {
+    set.status = 404
+    return { error: error.message }
+  }
+
+  if (error instanceof OntologyValidationError) {
+    set.status = 400
+    return { error: error.message }
+  }
+
+  // The tail. Core still throws a bare `Error` for "Unknown sync 'x'" and its siblings, so the
+  // message is all a route has to go on; reading it is a guess that misfires whenever a validation
+  // message happens to contain one of these words. Every error that gains a class moves above this
+  // line and the guess covers less.
   const message = error instanceof Error ? error.message : String(error)
   set.status = message.includes("not found") || message.includes("Unknown") ? 404 : 400
   return { error: message }
