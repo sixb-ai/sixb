@@ -107,11 +107,12 @@ Project-specific mappings and migration scripts stay outside the framework.
 The API role purges expired rows every 60 seconds, in the same maintenance pass that
 catches the outbox up.
 
-| Table                  | Purged                                    | Default |
-| ---------------------- | ----------------------------------------- | ------- |
-| `ontology_outbox`      | published rows                            | 24 h    |
-| `ontology_source_rows` | terminal materializations, children first | 24 h    |
-| `ontology_commits`     | **nothing** — it grows with every commit  | —       |
+| Table                  | Purged                                     | Default |
+| ---------------------- | ------------------------------------------ | ------- |
+| `ontology_outbox`      | published rows                             | 24 h    |
+| `ontology_source_rows` | the rows of a terminal materialization     | 24 h    |
+| `ontology_sources`     | its manifest, once those rows are gone     | 24 h    |
+| `ontology_commits`     | **nothing** — it grows with every commit   | —       |
 
 Pending outbox rows and nonterminal sources are live data and are never purged by age.
 Size the disk with `ontology_commits` in mind: 0.1.0 has no purge for it.

@@ -197,8 +197,9 @@ touch only the components.
 It works with no configuration — lookups fall back to a shared
 [Photon](https://photon.komoot.io) provider, which is free and needs no API key:
 
-> **Where the data goes.** The default sends every keystroke to `photon.komoot.io`. Self-host
-> Photon or supply your own `AddressProvider` before typing confidential addresses into it.
+> **Where the data goes.** The default sends what you type to `photon.komoot.io`, debounced and
+> from the third character on. Self-host Photon or supply your own `AddressProvider` before typing
+> confidential addresses into it.
 
 ```tsx
 import { AddressFields } from "@sixb/ui/components"

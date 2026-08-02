@@ -143,9 +143,10 @@ await sixb.events.append({
 })
 ```
 
-Ontology facts are not appendable. `append` throws on `object.*`, `link.*`, and `telemetry.*`,
-because the Materializer emits those itself once the ontology commit succeeds. Write through the
-ontology and the event follows:
+Ontology facts are not appendable. `object.*`, `link.*`, and `telemetry.*` are not in the parameter
+type, so they do not compile, and the runtime throws for a caller that reached it untyped. The
+Materializer emits them itself once the ontology commit succeeds — write through the ontology and
+the event follows:
 
 ```ts
 // emits object.updated after the commit

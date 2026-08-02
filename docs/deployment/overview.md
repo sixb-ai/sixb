@@ -122,13 +122,17 @@ with no registered worker types prints a warning and stays running.
 A role that talks to a browser refuses to start in production without the origins it
 needs. Every flag has an environment equivalent; the flag wins.
 
-| Role                | Required                                       | Also required when                         |
-| ------------------- | ---------------------------------------------- | ------------------------------------------ |
-| `sixb api`          | `--api-public-origin`, `--atlas-public-origin` | `--app-public-origin`, with a built `app/` |
-| `sixb atlas`        | `--api-public-origin`                          | —                                          |
-| `sixb app`          | `--api-public-origin`                          | —                                          |
-| `sixb worker agent` | `--api-public-origin`                          | —                                          |
-| everything else     | none                                           | —                                          |
+| Role                | Required                                       | Also required when                                     |
+| ------------------- | ---------------------------------------------- | ------------------------------------------------------ |
+| `sixb api`          | `--api-public-origin`, `--atlas-public-origin` | `--app-public-origin`, with a built `app/`             |
+| `sixb atlas`        | `--api-public-origin`                          | —                                                      |
+| `sixb app`          | `--api-public-origin`                          | —                                                      |
+| `sixb worker agent` | `--api-public-origin`                          | —                                                      |
+| `sixb worker-group` | none                                           | `--api-public-origin`, with `agent` in the group       |
+| everything else     | none                                           | —                                                      |
+
+A group refuses to start whole, so the origin is required as soon as `agent` is one of its
+workers — including when the group selected it for you from a project that registers agents.
 
 | Flag                    | Environment variable       |
 | ----------------------- | -------------------------- |
