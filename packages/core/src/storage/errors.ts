@@ -18,14 +18,6 @@ export class ObjectNotFoundError extends SixbError {
   }
 }
 
-export class ObjectStorageError extends SixbError {
-  override readonly name = "ObjectStorageError"
-
-  constructor(message: string, options?: SixbErrorOptions) {
-    super("runtime.invariant_violated", message, options)
-  }
-}
-
 export type StorageTransactionErrorReason =
   | "nested_transaction"
   | "serialization_failure"

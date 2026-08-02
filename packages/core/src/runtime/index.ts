@@ -12,7 +12,7 @@ export { OntologyNotFoundError, OntologyValidationError } from "../ontology"
 export type { PipelineDefinition } from "../pipelines"
 export { PipelineError } from "../pipelines"
 export { ProjectionValidationError } from "../projections"
-export { SchedulerError, SchedulerValidationError } from "../scheduler"
+export { SchedulerValidationError } from "../scheduler"
 export type { ScheduleDefinition } from "../schedules"
 export { CronValidationError, ScheduleValidationError } from "../schedules"
 export type {

@@ -100,7 +100,6 @@ export { AuthStorageError } from "./auth"
 export type { StorageTransactionErrorOptions, StorageTransactionErrorReason } from "./errors"
 export {
   isStorageSerializationFailure,
-  ObjectStorageError,
   StorageTransactionError,
 } from "./errors"
 export type {

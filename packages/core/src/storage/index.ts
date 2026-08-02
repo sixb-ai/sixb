@@ -162,7 +162,6 @@ export type {
 export {
   isStorageSerializationFailure,
   ObjectNotFoundError,
-  ObjectStorageError,
   StorageTransactionError,
 } from "./errors"
 export type {

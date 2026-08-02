@@ -13,6 +13,7 @@ import type {
   MagicLinkRequestInput,
   MagicLinkRequestResult,
 } from "@sixb/core/auth/strategy"
+import { SixbError, type SixbErrorOptions } from "@sixb/core/errors"
 import type { AuthStorage } from "@sixb/core/storage"
 import { createMagicLinkEmail, type SendMagicLinkInput } from "./email"
 import {
@@ -44,11 +45,12 @@ export interface MagicLinkOptions {
   readonly subject?: string
 }
 
-export class MagicLinkError extends Error {
-  readonly name = "MagicLinkError"
+/** The project's `magicLink(...)` options are wrong; no sign-in attempt can fix it. */
+export class MagicLinkError extends SixbError {
+  override readonly name = "MagicLinkError"
 
-  constructor(message: string) {
-    super(`[Sixb] ${message}`)
+  constructor(message: string, options?: SixbErrorOptions) {
+    super("runtime.invalid_definition", `[Sixb] ${message}`, options)
   }
 }
 

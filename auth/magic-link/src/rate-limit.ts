@@ -1,3 +1,4 @@
+import { SixbError } from "@sixb/core/errors"
 export interface MagicLinkRateLimitOptions {
   readonly perMinute: number
   readonly perHour: number
@@ -86,10 +87,10 @@ export function resolveRateLimitOptions(
   return { perMinute, perHour }
 }
 
-class MagicLinkConfigError extends Error {
-  readonly name = "MagicLinkConfigError"
+class MagicLinkConfigError extends SixbError {
+  override readonly name = "MagicLinkConfigError"
 
   constructor(message: string) {
-    super(`[Sixb] ${message}`)
+    super("runtime.invalid_definition", `[Sixb] ${message}`)
   }
 }

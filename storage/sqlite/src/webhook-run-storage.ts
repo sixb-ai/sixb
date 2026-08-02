@@ -74,6 +74,7 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new WebhookRunError(
+          "storage.conflict",
           `[SixbSqlite] Webhook run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
@@ -84,6 +85,7 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
     const record = await this.getById({ projectId: input.projectId, id: input.id })
     if (!record) {
       throw new WebhookRunError(
+        "runtime.invalid_input",
         `[SixbSqlite] Failed to load webhook run '${input.id}' for project '${input.projectId}'.`
       )
     }
@@ -99,12 +101,14 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
 
       if (!existing) {
         throw new WebhookRunError(
+          "webhook.run_not_found",
           `[SixbSqlite] Webhook run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new WebhookRunError(
+          "storage.conflict",
           `[SixbSqlite] Webhook run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }

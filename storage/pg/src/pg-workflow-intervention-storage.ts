@@ -61,6 +61,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new WorkflowInterventionError(
+          "storage.conflict",
           `[SixbPg] Workflow intervention '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
@@ -247,12 +248,14 @@ async function requirePendingIntervention(
 
   if (!row) {
     throw new WorkflowInterventionError(
+      "workflow.intervention_not_found",
       `[SixbPg] Workflow intervention '${id}' not found for project '${projectId}'.`
     )
   }
 
   if (row.status !== "pending") {
     throw new WorkflowInterventionError(
+      "runtime.invalid_input",
       `[SixbPg] Workflow intervention '${id}' for project '${projectId}' is not pending.`
     )
   }
@@ -310,6 +313,7 @@ function rowToWorkflowInterventionRecord(
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
     throw new WorkflowInterventionError(
+      "runtime.invalid_input",
       `[SixbPg] Workflow intervention ${fieldName} must be a non-negative integer.`
     )
   }

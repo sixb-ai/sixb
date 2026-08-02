@@ -60,7 +60,7 @@ and how many times, is a property of each worker.
 
 A code that is only ever thrown does not help the person looking at a run that failed an hour ago.
 So every failure Sixb records — in the `error` column of a run row, in the run the API hands back,
-in the event handed to the runtime observer — is the same four-field object:
+in the failure handed to [`onError`](error-handling.md) — is the same four-field object:
 
 ```ts
 interface SixbFailure {
@@ -268,6 +268,7 @@ be wrong. A failure you see often under this code is worth a real code — open 
 | `sync.already_running` | no | A run is already in flight for that sync. |
 | `sync.failed` | no | The sync run failed. |
 | `sync.not_found` | no | No sync is registered under that id. |
+| `sync.run_not_found` | no | No sync run exists under that id. |
 
 ### `telemetry.*`
 
@@ -281,6 +282,7 @@ be wrong. A failure you see often under this code is worth a real code — open 
 | --- | --- | --- |
 | `webhook.failed` | no | The webhook run failed. |
 | `webhook.not_found` | no | No webhook is registered under that path. |
+| `webhook.run_not_found` | no | No webhook run exists under that id. |
 | `webhook.unverified` | no | The payload's signature did not verify. |
 
 ### `workflow.*`

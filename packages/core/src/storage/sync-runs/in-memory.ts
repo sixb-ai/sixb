@@ -54,6 +54,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     const key = syncRunKey(input.projectId, input.id)
     if (this.rows.has(key)) {
       throw new SyncRunError(
+        "storage.conflict",
         `[Sixb] Sync run '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
@@ -80,6 +81,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
 
     if (!existing) {
       throw new SyncRunError(
+        "sync.run_not_found",
         `[Sixb] Sync run '${input.id}' not found for project '${input.projectId}'.`
       )
     }
@@ -87,11 +89,13 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     if (input.status === "succeeded") {
       if (input.output && input.output.datasetId !== existing.datasetId) {
         throw new SyncRunError(
+          "runtime.invalid_input",
           `[Sixb] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.datasetId}'.`
         )
       }
       if (!input.output && (existing.mode !== "append" || input.rowsRead !== 0)) {
         throw new SyncRunError(
+          "runtime.invalid_input",
           `[Sixb] Sync run '${input.id}' may omit its output only for an empty append.`
         )
       }

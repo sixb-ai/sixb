@@ -32,7 +32,10 @@ function normalizeError(error: SixbFailure | undefined): SixbFailure | undefined
 
 function assertNonNegativeInteger(value: number | undefined, fieldName: string): void {
   if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
-    throw new PipelineRunError(`[Sixb] Pipeline run ${fieldName} must be a non-negative integer.`)
+    throw new PipelineRunError(
+      "runtime.invalid_input",
+      `[Sixb] Pipeline run ${fieldName} must be a non-negative integer.`
+    )
   }
 }
 
@@ -63,6 +66,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     const key = storageKey(input.projectId, input.id)
     if (this.runs.has(key)) {
       throw new PipelineRunError(
+        "storage.conflict",
         `[Sixb] Pipeline run '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
@@ -108,6 +112,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     const pipelineRun = this.requireRunningPipelineRun(input.projectId, input.pipelineRunId)
     if (pipelineRun.pipelineId !== input.pipelineId) {
       throw new PipelineRunError(
+        "runtime.invalid_input",
         `[Sixb] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipelineId}'.`
       )
     }
@@ -115,6 +120,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     const key = storageKey(input.projectId, input.id)
     if (this.steps.has(key)) {
       throw new PipelineRunError(
+        "storage.conflict",
         `[Sixb] Pipeline step run '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
@@ -143,6 +149,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
 
     if (input.status === "succeeded" && input.output.datasetId !== existing.datasetId) {
       throw new PipelineRunError(
+        "runtime.invalid_input",
         `[Sixb] Pipeline step run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.datasetId}'.`
       )
     }
@@ -265,6 +272,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     const record = this.runs.get(storageKey(projectId, id))
     if (!record) {
       throw new PipelineRunError(
+        "pipeline.run_not_found",
         `[Sixb] Pipeline run '${id}' not found for project '${projectId}'.`
       )
     }
@@ -276,6 +284,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     const record = this.requireExistingPipelineRun(projectId, id)
     if (record.status !== "running") {
       throw new PipelineRunError(
+        "storage.conflict",
         `[Sixb] Pipeline run '${id}' for project '${projectId}' is already terminal.`
       )
     }
@@ -287,12 +296,14 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     const record = this.steps.get(storageKey(projectId, id))
     if (!record) {
       throw new PipelineRunError(
+        "pipeline.run_not_found",
         `[Sixb] Pipeline step run '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (record.status !== "running") {
       throw new PipelineRunError(
+        "storage.conflict",
         `[Sixb] Pipeline step run '${id}' for project '${projectId}' is already terminal.`
       )
     }

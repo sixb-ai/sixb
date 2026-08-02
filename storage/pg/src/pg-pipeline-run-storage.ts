@@ -48,6 +48,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new PipelineRunError(
+          "storage.conflict",
           `[SixbPg] Pipeline run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
@@ -65,12 +66,14 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
       if (!existing) {
         throw new PipelineRunError(
+          "pipeline.run_not_found",
           `[SixbPg] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new PipelineRunError(
+          "storage.conflict",
           `[SixbPg] Pipeline run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }
@@ -113,18 +116,21 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
       if (!pipelineRun) {
         throw new PipelineRunError(
+          "pipeline.run_not_found",
           `[SixbPg] Pipeline run '${input.pipelineRunId}' not found for project '${input.projectId}'.`
         )
       }
 
       if (pipelineRun.status !== "running") {
         throw new PipelineRunError(
+          "storage.conflict",
           `[SixbPg] Pipeline run '${input.pipelineRunId}' for project '${input.projectId}' is already terminal.`
         )
       }
 
       if (pipelineRun.pipeline_id !== input.pipelineId) {
         throw new PipelineRunError(
+          "runtime.invalid_input",
           `[SixbPg] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipeline_id}'.`
         )
       }
@@ -161,6 +167,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
       } catch (error) {
         if (isUniqueViolation(error)) {
           throw new PipelineRunError(
+            "storage.conflict",
             `[SixbPg] Pipeline step run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
@@ -181,18 +188,21 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
       if (!existing) {
         throw new PipelineRunError(
+          "pipeline.run_not_found",
           `[SixbPg] Pipeline step run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new PipelineRunError(
+          "storage.conflict",
           `[SixbPg] Pipeline step run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }
 
       if (input.status === "succeeded" && input.output.datasetId !== existing.dataset_id) {
         throw new PipelineRunError(
+          "runtime.invalid_input",
           `[SixbPg] Pipeline step run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
         )
       }
@@ -403,7 +413,10 @@ function parseDatasetVersionRefs(
 
 function assertOptionalNonNegativeInteger(value: number | undefined, fieldName: string): void {
   if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
-    throw new PipelineRunError(`[SixbPg] Pipeline run ${fieldName} must be a non-negative integer.`)
+    throw new PipelineRunError(
+      "runtime.invalid_input",
+      `[SixbPg] Pipeline run ${fieldName} must be a non-negative integer.`
+    )
   }
 }
 

@@ -85,6 +85,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new WorkflowRunError(
+          "workflow.run_conflict",
           `[SixbPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
@@ -105,12 +106,14 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
       if (existing) {
         if (existing.status !== "queued") {
           throw new WorkflowRunError(
+            "workflow.run_conflict",
             `[SixbPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
 
         if (existing.workflow_id !== input.workflowId) {
           throw new WorkflowRunError(
+            "runtime.invalid_input",
             `[SixbPg] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflow_id}'.`
           )
         }
@@ -173,6 +176,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
       } catch (error) {
         if (isUniqueViolation(error)) {
           throw new WorkflowRunError(
+            "workflow.run_conflict",
             `[SixbPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
@@ -227,12 +231,14 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
+          "workflow.run_not_found",
           `[SixbPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (!canFinishWorkflowRun(existing.status, input.status)) {
         throw new WorkflowRunError(
+          "runtime.invalid_input",
           `[SixbPg] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${existing.status}'.`
         )
       }
@@ -277,12 +283,14 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
+          "workflow.run_not_found",
           `[SixbPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new WorkflowRunError(
+          "workflow.run_conflict",
           `[SixbPg] Workflow run '${input.id}' for project '${input.projectId}' must be running.`
         )
       }
@@ -314,12 +322,14 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
+          "workflow.run_not_found",
           `[SixbPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "waiting") {
         throw new WorkflowRunError(
+          "workflow.run_conflict",
           `[SixbPg] Workflow run '${input.id}' for project '${input.projectId}' must be waiting.`
         )
       }
@@ -430,6 +440,7 @@ export class PgWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorag
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new WorkflowRunError(
+          "workflow.run_conflict",
           `[SixbPg] Agent execution already exists for workflow node run '${input.nodeRunId}'.`
         )
       }
@@ -525,11 +536,13 @@ export class PgWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorag
       `
       if (!row) {
         throw new WorkflowRunError(
+          "workflow.node_run_not_found",
           `[SixbPg] Agent workflow node run '${input.nodeRunId}' not found.`
         )
       }
       if (row.status !== "queued" && row.status !== "running") {
         throw new WorkflowRunError(
+          "workflow.run_conflict",
           `[SixbPg] Agent workflow node run '${input.nodeRunId}' cannot be cancelled from status '${row.status}'.`
         )
       }
@@ -597,12 +610,14 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (!workflowRun) {
         throw new WorkflowRunError(
+          "workflow.run_not_found",
           `[SixbPg] Workflow run '${input.workflowRunId}' not found for project '${input.projectId}'.`
         )
       }
 
       if (workflowRun.status !== "running") {
         throw new WorkflowRunError(
+          "workflow.run_conflict",
           `[SixbPg] Workflow run '${input.workflowRunId}' for project '${input.projectId}' must be running.`
         )
       }
@@ -610,6 +625,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (workflowRun.workflow_id !== input.workflowId) {
         throw new WorkflowRunError(
+          "runtime.invalid_input",
           `[SixbPg] Workflow node run '${input.id}' workflow '${input.workflowId}' does not match workflow run '${input.workflowRunId}' workflow '${workflowRun.workflow_id}'.`
         )
       }
@@ -648,6 +664,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
       } catch (error) {
         if (isUniqueViolation(error)) {
           throw new WorkflowRunError(
+            "workflow.run_conflict",
             `[SixbPg] Workflow node run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
@@ -667,6 +684,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
+          "workflow.node_run_not_found",
           `[SixbPg] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
@@ -674,6 +692,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (existing.status !== "running" && existing.status !== "waiting") {
         throw new WorkflowRunError(
+          "workflow.run_conflict",
           `[SixbPg] Workflow node run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }
@@ -715,6 +734,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
+          "workflow.node_run_not_found",
           `[SixbPg] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
@@ -722,6 +742,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (existing.status !== "running") {
         throw new WorkflowRunError(
+          "workflow.run_conflict",
           `[SixbPg] Workflow node run '${input.id}' for project '${input.projectId}' must be running.`
         )
       }
@@ -875,7 +896,10 @@ function rowToWorkflowNodeRunRecord(row: WorkflowNodeRunDatabaseRow): WorkflowNo
 
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
-    throw new WorkflowRunError(`[SixbPg] Workflow run ${fieldName} must be a non-negative integer.`)
+    throw new WorkflowRunError(
+      "runtime.invalid_input",
+      `[SixbPg] Workflow run ${fieldName} must be a non-negative integer.`
+    )
   }
 }
 
@@ -960,11 +984,13 @@ async function lockWorkflowAgentNodeRun(
   `
   if (!row) {
     throw new WorkflowRunError(
+      "workflow.node_run_not_found",
       `[SixbPg] Agent workflow node run '${nodeRunId}' not found for project '${projectId}'.`
     )
   }
   if (row.status !== status) {
     throw new WorkflowRunError(
+      "workflow.run_conflict",
       `[SixbPg] Agent workflow node run '${nodeRunId}' must be ${status} (status '${row.status}').`
     )
   }
@@ -977,6 +1003,7 @@ function assertWorkflowAgentNodeOwnership(
 ): void {
   if (row.execution_token !== token) {
     throw new WorkflowRunError(
+      "workflow.run_conflict",
       `[SixbPg] Execution token is no longer current on agent workflow node run '${row.node_run_id}'.`
     )
   }
@@ -1033,9 +1060,11 @@ async function lockWorkflowRun(
   const [row] = await sql<WorkflowRunDatabaseRow[]>`
     SELECT * FROM workflow_runs WHERE project_id = ${projectId} AND id = ${id} FOR UPDATE
   `
-  if (!row) throw new WorkflowRunError(`[SixbPg] Workflow run '${id}' not found.`)
+  if (!row)
+    throw new WorkflowRunError("workflow.run_not_found", `[SixbPg] Workflow run '${id}' not found.`)
   if (row.status !== status) {
     throw new WorkflowRunError(
+      "workflow.run_conflict",
       `[SixbPg] Workflow run '${id}' must be ${status} (status '${row.status}').`
     )
   }
@@ -1045,6 +1074,7 @@ async function lockWorkflowRun(
 function assertWorkflowRunExecutionOwnership(row: WorkflowRunDatabaseRow, token?: string): void {
   if (row.execution_token !== (token ?? null)) {
     throw new WorkflowRunError(
+      "workflow.run_conflict",
       `[SixbPg] Execution token is no longer current on workflow run '${row.id}'.`
     )
   }
@@ -1060,6 +1090,10 @@ async function assertWorkflowNodeParentExecutionOwnership(
     WHERE project_id = ${node.project_id} AND id = ${node.workflow_run_id}
     FOR UPDATE
   `
-  if (!run) throw new WorkflowRunError(`[SixbPg] Parent workflow run was not found.`)
+  if (!run)
+    throw new WorkflowRunError(
+      "workflow.run_not_found",
+      `[SixbPg] Parent workflow run was not found.`
+    )
   assertWorkflowRunExecutionOwnership(run, token)
 }

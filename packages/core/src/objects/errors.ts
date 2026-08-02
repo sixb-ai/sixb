@@ -1,7 +1,14 @@
+import { SixbError, type SixbErrorOptions } from "../errors"
+
 /**
- * Error for runtime invariants and failures specific to the objects module
- * (e.g., unexpected event results after appending an object/link event).
+ * A broken invariant inside the objects module — a materializer that returned no outcome for a
+ * write it accepted. Nothing the caller sent can produce this, which is why it is not a validation
+ * error.
  */
-export class ObjectError extends Error {
-  readonly name = "ObjectError"
+export class ObjectError extends SixbError {
+  override readonly name = "ObjectError"
+
+  constructor(message: string, options?: SixbErrorOptions) {
+    super("runtime.invariant_violated", message, options)
+  }
 }

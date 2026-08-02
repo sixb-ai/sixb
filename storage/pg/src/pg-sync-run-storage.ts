@@ -50,6 +50,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new SyncRunError(
+          "storage.conflict",
           `[SixbPg] Sync run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
@@ -67,6 +68,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
 
       if (!existing) {
         throw new SyncRunError(
+          "sync.run_not_found",
           `[SixbPg] Sync run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
@@ -74,11 +76,13 @@ export class PgSyncRunStorage implements SyncRunStorage {
       if (input.status === "succeeded") {
         if (input.output && input.output.datasetId !== existing.dataset_id) {
           throw new SyncRunError(
+            "runtime.invalid_input",
             `[SixbPg] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
           )
         }
         if (!input.output && (existing.mode !== "append" || input.rowsRead !== 0)) {
           throw new SyncRunError(
+            "runtime.invalid_input",
             `[SixbPg] Sync run '${input.id}' may omit its output only for an empty append.`
           )
         }

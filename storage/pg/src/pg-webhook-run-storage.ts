@@ -44,6 +44,7 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new WebhookRunError(
+          "storage.conflict",
           `[SixbPg] Webhook run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
@@ -62,12 +63,14 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
 
       if (!existing) {
         throw new WebhookRunError(
+          "webhook.run_not_found",
           `[SixbPg] Webhook run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new WebhookRunError(
+          "storage.conflict",
           `[SixbPg] Webhook run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }

@@ -1,3 +1,4 @@
+import { type SixbErrorOptions, SixbValidationError } from "../errors"
 /**
  * How a webhook is allowed to treat the credential its provider sends.
  *
@@ -35,8 +36,13 @@ export interface WebhookVerificationSubject {
   readonly allowOption: string
 }
 
-export class UnverifiedWebhookError extends Error {
-  readonly name = "UnverifiedWebhookError"
+/** A webhook route left unverified without the project saying so out loud. */
+export class UnverifiedWebhookError extends SixbValidationError {
+  override readonly name = "UnverifiedWebhookError"
+
+  constructor(message: string, options?: SixbErrorOptions) {
+    super("runtime.invalid_definition", message, options)
+  }
 }
 
 /**

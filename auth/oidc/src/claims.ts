@@ -18,19 +18,22 @@ export function resolveOidcProfile(input: {
 }): ResolvedOidcProfile {
   const subject = claimString(input.idTokenClaims, "sub")
   if (!subject) {
-    throw new OidcAuthError("OIDC id token is missing a subject.")
+    throw new OidcAuthError("auth.invalid_credentials", "OIDC id token is missing a subject.")
   }
 
   const userInfoSubject = input.userInfo ? claimString(input.userInfo, "sub") : undefined
   if (userInfoSubject && userInfoSubject !== subject) {
-    throw new OidcAuthError("OIDC userinfo subject does not match the id token subject.")
+    throw new OidcAuthError(
+      "auth.invalid_credentials",
+      "OIDC userinfo subject does not match the id token subject."
+    )
   }
 
   const email =
     (input.userInfo ? claimString(input.userInfo, "email") : undefined) ??
     claimString(input.idTokenClaims, "email")
   if (!email) {
-    throw new OidcAuthError("OIDC claims are missing an email.")
+    throw new OidcAuthError("auth.invalid_credentials", "OIDC claims are missing an email.")
   }
 
   const emailVerified =

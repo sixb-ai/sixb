@@ -1,7 +1,13 @@
+import { SixbError, type SixbErrorOptions } from "../errors"
+
 /**
- * Error for event runtime invariants and failures (e.g., unknown event
- * types encountered when converting new events to their stored form).
+ * A broken invariant in the event runtime — an envelope whose type no ontology knows, a payload the
+ * broker cannot carry. The events themselves are framework-produced, so this is never bad input.
  */
-export class EventsError extends Error {
-  readonly name = "EventsError"
+export class EventsError extends SixbError {
+  override readonly name = "EventsError"
+
+  constructor(message: string, options?: SixbErrorOptions) {
+    super("runtime.invariant_violated", message, options)
+  }
 }
