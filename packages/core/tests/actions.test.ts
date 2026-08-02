@@ -857,7 +857,7 @@ describe("requestAction", () => {
       status: "failed",
       phase: "enqueue",
       error: {
-        name: "Error",
+        code: "action.failed",
         message: "queue unavailable",
         phase: "enqueue",
       },

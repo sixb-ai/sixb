@@ -42,7 +42,7 @@ describe("PgActionRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       error: {
-        name: "SlackError",
+        code: "action.failed",
         message: "Slack timed out",
         phase: "effects",
       },
@@ -70,7 +70,7 @@ describe("PgActionRunStorage", () => {
       effects: {
         status: "failed",
         error: {
-          name: "SlackError",
+          code: "action.failed",
           message: "Slack timed out",
           phase: "effects",
         },

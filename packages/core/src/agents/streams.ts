@@ -1,4 +1,5 @@
 import type { Broker, BrokerStreamDefinition } from "../broker"
+import type { SixbFailure } from "../errors"
 import type { JsonValue } from "../json"
 import type { AgentRunRecord } from "../storage/agents/types"
 
@@ -118,7 +119,7 @@ export type AgentRunStreamEvent =
       readonly type: "agent.run.finished"
       readonly status: "succeeded" | "failed" | "cancelled"
       readonly finishReason?: string
-      readonly error?: string
+      readonly error?: SixbFailure
     })
 
 export type AgentRunFinishedEvent = Extract<AgentRunStreamEvent, { type: "agent.run.finished" }>

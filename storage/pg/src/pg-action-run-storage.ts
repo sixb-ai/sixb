@@ -1,7 +1,6 @@
 import type { ActionSubject, JsonValue } from "@sixb/core"
 import type {
   ActionRunEffectsRecord,
-  ActionRunFailure,
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
@@ -23,6 +22,8 @@ import {
   canRequeueActionRunAfterEnqueueFailure,
   finishActionRunPhase,
   isTerminalActionRun,
+  parseActionRunFailure,
+  serializeActionRunFailure,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
@@ -76,17 +77,11 @@ export class PgActionRunStorage implements ActionRunStorage {
           writeback_status,
           writeback_completed_at,
           writeback_result,
-          writeback_error_name,
-          writeback_error_message,
-          writeback_error_phase,
+          writeback_error,
           effects_status,
           effects_completed_at,
-          effects_error_name,
-          effects_error_message,
-          effects_error_phase,
-          error_name,
-          error_message,
-          error_phase
+          effects_error,
+          error
         ) VALUES (
           ${input.projectId},
           ${input.id},
@@ -101,12 +96,6 @@ export class PgActionRunStorage implements ActionRunStorage {
           ${null},
           ${JSON.stringify(input.params)}::text::jsonb,
           ${input.idempotencyKey},
-          ${null},
-          ${null},
-          ${null},
-          ${null},
-          ${null},
-          ${null},
           ${null},
           ${null},
           ${null},
@@ -157,17 +146,11 @@ export class PgActionRunStorage implements ActionRunStorage {
           writeback_status = ${null},
           writeback_completed_at = ${null},
           writeback_result = ${null},
-          writeback_error_name = ${null},
-          writeback_error_message = ${null},
-          writeback_error_phase = ${null},
+          writeback_error = ${null},
           effects_status = ${null},
           effects_completed_at = ${null},
-          effects_error_name = ${null},
-          effects_error_message = ${null},
-          effects_error_phase = ${null},
-          error_name = ${null},
-          error_message = ${null},
-          error_phase = ${null}
+          effects_error = ${null},
+          error = ${null}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
@@ -183,9 +166,7 @@ export class PgActionRunStorage implements ActionRunStorage {
         status = ${"running"},
         phase = ${input.phase ?? "validation"},
         started_at = ${input.startedAt ?? new Date()},
-        error_name = ${null},
-        error_message = ${null},
-        error_phase = ${null}
+        error = ${null}
       WHERE project_id = ${input.projectId}
         AND id = ${input.id}
         AND status = ${"queued"}
@@ -251,9 +232,7 @@ export class PgActionRunStorage implements ActionRunStorage {
           writeback_status = ${input.status},
           writeback_completed_at = ${nextWriteback.completedAt},
           writeback_result = ${input.status === "succeeded" ? JSON.stringify(input.result) : null}::text::jsonb,
-          writeback_error_name = ${input.status === "failed" ? (input.error.name ?? null) : null},
-          writeback_error_message = ${input.status === "failed" ? input.error.message : null},
-          writeback_error_phase = ${input.status === "failed" ? (input.error.phase ?? "writeback") : null}
+          writeback_error = ${serializeActionRunFailure(input.status === "failed" ? input.error : undefined, "writeback")}::text::jsonb
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
@@ -284,9 +263,7 @@ export class PgActionRunStorage implements ActionRunStorage {
           phase = ${"effects"},
           effects_status = ${input.status},
           effects_completed_at = ${nextEffects.completedAt},
-          effects_error_name = ${input.status === "failed" ? (input.error.name ?? null) : null},
-          effects_error_message = ${input.status === "failed" ? input.error.message : null},
-          effects_error_phase = ${input.status === "failed" ? (input.error.phase ?? "effects") : null}
+          effects_error = ${serializeActionRunFailure(input.status === "failed" ? input.error : undefined, "effects")}::text::jsonb
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
@@ -323,9 +300,7 @@ export class PgActionRunStorage implements ActionRunStorage {
           status = ${input.status},
           phase = ${phase},
           finished_at = ${input.finishedAt ?? new Date()},
-          error_name = ${input.status === "succeeded" ? null : (input.error?.name ?? null)},
-          error_message = ${input.status === "succeeded" ? null : (input.error?.message ?? null)},
-          error_phase = ${input.status === "succeeded" ? null : (input.error?.phase ?? phase)}
+          error = ${serializeActionRunFailure(input.status === "succeeded" ? undefined : input.error, phase)}::text::jsonb
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
@@ -483,26 +458,6 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 }
 
-function toActionRunFailure(row: DatabaseRow): ActionRunFailure | undefined {
-  return toFailure(row.error_name, row.error_message, row.error_phase)
-}
-
-function toFailure(
-  name: string | null,
-  message: string | null,
-  phase: ActionRunPhase | null
-): ActionRunFailure | undefined {
-  if (!message) {
-    return undefined
-  }
-
-  return {
-    name: name ?? undefined,
-    message,
-    phase: phase ?? undefined,
-  }
-}
-
 function toActionRunWritebackRecord(row: DatabaseRow): ActionRunWritebackRecord | undefined {
   if (!row.writeback_status) {
     return undefined
@@ -523,11 +478,7 @@ function toActionRunWritebackRecord(row: DatabaseRow): ActionRunWritebackRecord 
   return {
     status: "failed",
     completedAt,
-    error: toFailure(
-      row.writeback_error_name,
-      row.writeback_error_message,
-      row.writeback_error_phase
-    ),
+    error: parseActionRunFailure(row.writeback_error),
   }
 }
 
@@ -550,7 +501,7 @@ function toActionRunEffectsRecord(row: DatabaseRow): ActionRunEffectsRecord | un
   return {
     status: "failed",
     completedAt,
-    error: toFailure(row.effects_error_name, row.effects_error_message, row.effects_error_phase),
+    error: parseActionRunFailure(row.effects_error),
   }
 }
 
@@ -606,7 +557,7 @@ function rowToActionRunRecord(row: DatabaseRow): ActionRunRecord {
     idempotencyKey: row.idempotency_key,
     writeback: toActionRunWritebackRecord(row),
     effects: toActionRunEffectsRecord(row),
-    error: toActionRunFailure(row),
+    error: parseActionRunFailure(row.error),
   }
 }
 
@@ -643,15 +594,9 @@ interface DatabaseRow {
   writeback_status: ActionRunWritebackRecord["status"] | null
   writeback_completed_at: Date | string | null
   writeback_result: JsonValue | null
-  writeback_error_name: string | null
-  writeback_error_message: string | null
-  writeback_error_phase: ActionRunPhase | null
+  writeback_error: JsonValue | null
   effects_status: ActionRunEffectsRecord["status"] | null
   effects_completed_at: Date | string | null
-  effects_error_name: string | null
-  effects_error_message: string | null
-  effects_error_phase: ActionRunPhase | null
-  error_name: string | null
-  error_message: string | null
-  error_phase: ActionRunPhase | null
+  effects_error: JsonValue | null
+  error: JsonValue | null
 }

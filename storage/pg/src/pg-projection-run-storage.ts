@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import type { JsonValue } from "@sixb/core"
 import {
   advanceProjectionTelemetry,
   assertGenericProgressDoesNotAdvanceTelemetry,
@@ -40,7 +41,7 @@ import type {
   TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
 } from "@sixb/core/storage"
-import { ProjectionRunError } from "@sixb/core/storage"
+import { ProjectionRunError, parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { lockAdvisoryKeys, type PgStoreClient, runPgTransaction } from "./transactions"
@@ -200,7 +201,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           source_rows_read = ${plan.progress.sourceRowsRead},
           source_rows_skipped = ${plan.progress.sourceRowsSkipped},
           input_exhausted = ${plan.inputExhausted ?? existingRow.input_exhausted},
-          error_message = ${plan.errorMessage ?? null}
+          error = ${serializeSixbFailure(plan.error)}::text::jsonb
         WHERE project_id = ${input.projectId}
           AND id = ${input.id}
           AND status = ${"running"}
@@ -470,7 +471,7 @@ function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
       sourceRowsRead: databaseSafeInteger(row.source_rows_read, "sourceRowsRead"),
       sourceRowsSkipped: databaseSafeInteger(row.source_rows_skipped, "sourceRowsSkipped"),
     },
-    errorMessage: row.error_message ?? undefined,
+    error: parseSixbFailure(row.error),
   }
   return restoreProjectionRun(persisted)
 }
@@ -522,5 +523,5 @@ interface DatabaseRow {
   missing_target_first_seen_at: Date | string | null
   source_rows_read: number | string
   source_rows_skipped: number | string
-  error_message: string | null
+  error: JsonValue | null
 }

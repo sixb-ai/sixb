@@ -20,6 +20,7 @@ import {
 } from "../schemas/actions"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
+import { toWireFailure } from "../utils/failure"
 import {
   handleRouteError,
   parseDate,
@@ -48,7 +49,7 @@ function serializeActionRunSummary(
     queuedAt: toIsoString(run.queuedAt),
     startedAt: run.startedAt ? toIsoString(run.startedAt) : undefined,
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
-    error: run.error,
+    error: toWireFailure(run.error),
   })
 }
 
@@ -63,14 +64,14 @@ function serializeActionRunDetail(
           status: run.writeback.status,
           completedAt: toIsoString(run.writeback.completedAt),
           ...(run.writeback.result !== undefined ? { result: run.writeback.result } : {}),
-          error: run.writeback.error,
+          error: toWireFailure(run.writeback.error),
         }
       : undefined,
     effects: run.effects
       ? {
           status: run.effects.status,
           completedAt: toIsoString(run.effects.completedAt),
-          error: run.effects.error,
+          error: toWireFailure(run.effects.error),
         }
       : undefined,
   })

@@ -104,7 +104,7 @@ describe("SqliteSyncRunStorage", () => {
       status: "failed",
       rowsRead: 23,
       error: {
-        name: "Error",
+        code: "sync.failed",
         message: "Database connection lost",
       },
     })
@@ -225,6 +225,7 @@ describe("SqliteSyncRunStorage", () => {
         projectId: "my-app",
         status: "failed",
         error: {
+          code: "sync.failed",
           message: "boom",
         },
       })

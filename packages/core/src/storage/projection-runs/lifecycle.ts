@@ -1,3 +1,4 @@
+import type { SixbFailure } from "../../errors"
 import type {
   ProjectionMaterializationIdentity,
   ProjectionRunTerminalDecision,
@@ -51,7 +52,7 @@ export interface PersistedProjectionRunRecord {
   readonly missingTargetBatchOrdinal?: number
   readonly missingTargetFirstSeenAt?: Date
   readonly progress: ProjectionRunProgress
-  readonly errorMessage?: string
+  readonly error?: SixbFailure
 }
 
 export interface ProjectionTelemetryAdvance {
@@ -64,7 +65,7 @@ export interface ProjectionRunFinishPlan {
   readonly finishedAt: Date
   readonly progress: ProjectionRunProgress
   readonly inputExhausted?: true
-  readonly errorMessage?: string
+  readonly error?: SixbFailure
 }
 
 // ── Scalar and identity validation ──────────────────────────
@@ -353,9 +354,7 @@ export function planProjectionRunFinish(
     ...(input.status === "succeeded" && input.protocol === "telemetry"
       ? { inputExhausted: true as const }
       : {}),
-    ...(input.status === "succeeded" || input.errorMessage === undefined
-      ? {}
-      : { errorMessage: input.errorMessage }),
+    ...(input.status === "succeeded" || input.error === undefined ? {} : { error: input.error }),
   }
 }
 
@@ -370,7 +369,7 @@ export function finishProjectionRunRecord(
     status: plan.status,
     finishedAt: plan.finishedAt,
     progress: plan.progress,
-    errorMessage: plan.errorMessage,
+    error: plan.error,
   }
   if (plan.inputExhausted) {
     const telemetry = requireTelemetryProjectionRun(record)
@@ -412,7 +411,7 @@ export function restoreProjectionRun(row: PersistedProjectionRunRecord): StoredP
     finishedAt: row.finishedAt ? new Date(row.finishedAt) : undefined,
     attempt: row.attempt,
     progress: { ...row.progress },
-    errorMessage: row.errorMessage,
+    error: row.error,
     executionToken: row.executionToken,
   }
 

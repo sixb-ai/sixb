@@ -67,7 +67,7 @@ describe("SqliteActionRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       error: {
-        name: "FetchError",
+        code: "action.failed",
         message: "TeamLeader API returned 503 Service Unavailable",
         phase: "writeback",
       },
@@ -103,7 +103,7 @@ describe("SqliteActionRunStorage", () => {
       id: "act_1",
     })
     expect(failed?.error).toEqual({
-      name: "FetchError",
+      code: "action.failed",
       message: "TeamLeader API returned 503 Service Unavailable",
       phase: "writeback",
     })
@@ -148,6 +148,7 @@ describe("SqliteActionRunStorage", () => {
         projectId: "my-app",
         status: "failed",
         error: {
+          code: "action.failed",
           message: "boom",
         },
       })
@@ -172,6 +173,7 @@ describe("SqliteActionRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       error: {
+        code: "action.failed",
         message: "writeback failed",
         phase: "writeback",
       },
@@ -203,6 +205,7 @@ describe("SqliteActionRunStorage", () => {
       phase: "enqueue",
       finishedAt: new Date("2026-04-29T10:00:01.000Z"),
       error: {
+        code: "action.failed",
         message: "queue unavailable",
         phase: "enqueue",
       },
@@ -266,7 +269,7 @@ describe("SqliteActionRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       error: {
-        name: "SlackError",
+        code: "action.failed",
         message: "Slack timed out",
         phase: "effects",
       },
@@ -294,7 +297,7 @@ describe("SqliteActionRunStorage", () => {
       effects: {
         status: "failed",
         error: {
-          name: "SlackError",
+          code: "action.failed",
           message: "Slack timed out",
           phase: "effects",
         },

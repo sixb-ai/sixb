@@ -7,7 +7,7 @@ import type {
   WebhookRunRecord,
   WebhookRunStorage,
 } from "@sixb/core/storage"
-import { WebhookRunError } from "@sixb/core/storage"
+import { parseSixbFailure, serializeSixbFailure, WebhookRunError } from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   appendRunListFilters,
@@ -131,7 +131,7 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
           input.responseStatus ?? null,
           input.idempotencyKey ?? null,
           input.deliveryClaimResult ?? null,
-          input.status === "succeeded" ? null : (input.error ?? null),
+          input.status === "succeeded" ? null : serializeSixbFailure(input.error),
           input.projectId,
           input.id
         )
@@ -218,7 +218,7 @@ function rowToWebhookRunRecord(row: WebhookRunDatabaseRow): WebhookRunRecord {
     responseStatus: row.response_status ?? undefined,
     idempotencyKey: row.idempotency_key ?? undefined,
     deliveryClaimResult: row.delivery_claim_result ?? undefined,
-    error: row.error ?? undefined,
+    error: parseSixbFailure(row.error),
   }
 }
 

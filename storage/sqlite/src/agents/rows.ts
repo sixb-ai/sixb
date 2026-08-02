@@ -7,6 +7,7 @@ import {
   type AgentRunUsage,
   type AgentThreadRecord,
   coerceAgentRunFinishReason,
+  parseSixbFailure,
 } from "@sixb/core/storage"
 import type { SqliteValue } from "../run-list-query"
 
@@ -107,7 +108,7 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     modelId: row.model_id ?? undefined,
     finishReason: coerceAgentRunFinishReason(row.finish_reason),
     usage: rowToUsage(row),
-    error: row.error ?? undefined,
+    error: parseSixbFailure(row.error),
     diagnostics:
       row.diagnostics === null ? undefined : (JSON.parse(row.diagnostics) as AgentRunDiagnostic[]),
     attempt: row.attempt,

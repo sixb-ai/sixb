@@ -9,14 +9,13 @@ import type {
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
   ListPipelineStepRunsResult,
-  PipelineRunFailure,
   PipelineRunRecord,
   PipelineRunStorage,
   PipelineStepRunRecord,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "@sixb/core/storage"
-import { PipelineRunError } from "@sixb/core/storage"
+import { PipelineRunError, parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
@@ -116,8 +115,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
             finished_at = ?,
             output_dataset_id = ?,
             output_version_id = ?,
-            error_name = ?,
-            error_message = ?
+            error = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -126,8 +124,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
           (input.finishedAt ?? new Date()).toISOString(),
           input.status === "succeeded" ? (input.output?.datasetId ?? null) : null,
           input.status === "succeeded" ? (input.output?.versionId ?? null) : null,
-          input.status === "succeeded" ? null : (input.error?.name ?? null),
-          input.status === "succeeded" ? null : (input.error?.message ?? null),
+          input.status === "succeeded" ? null : serializeSixbFailure(input.error),
           input.projectId,
           input.id
         )
@@ -255,8 +252,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
             finished_at = ?,
             output_version_id = ?,
             rows_written = ?,
-            error_name = ?,
-            error_message = ?
+            error = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -265,8 +261,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
           (input.finishedAt ?? new Date()).toISOString(),
           input.status === "succeeded" ? input.output.versionId : null,
           input.rowsWritten ?? existing.rows_written ?? null,
-          input.status === "succeeded" ? null : (input.error?.name ?? null),
-          input.status === "succeeded" ? null : (input.error?.message ?? null),
+          input.status === "succeeded" ? null : serializeSixbFailure(input.error),
           input.projectId,
           input.id
         )
@@ -409,20 +404,6 @@ function parseDatasetVersionRefs(value: string): readonly DatasetVersionRef[] {
   return JSON.parse(value) as readonly DatasetVersionRef[]
 }
 
-function toFailure(row: {
-  readonly error_name: string | null
-  readonly error_message: string | null
-}): PipelineRunFailure | undefined {
-  if (!row.error_message) {
-    return undefined
-  }
-
-  return {
-    name: row.error_name ?? undefined,
-    message: row.error_message,
-  }
-}
-
 function rowToPipelineRunRecord(row: PipelineRunDatabaseRow): PipelineRunRecord {
   return {
     id: row.id,
@@ -438,7 +419,7 @@ function rowToPipelineRunRecord(row: PipelineRunDatabaseRow): PipelineRunRecord 
             versionId: row.output_version_id,
           }
         : undefined,
-    error: toFailure(row),
+    error: parseSixbFailure(row.error),
   }
 }
 
@@ -462,7 +443,7 @@ function rowToPipelineStepRunRecord(row: PipelineStepRunDatabaseRow): PipelineSt
         }
       : undefined,
     rowsWritten: row.rows_written ?? undefined,
-    error: toFailure(row),
+    error: parseSixbFailure(row.error),
   }
 }
 
@@ -483,8 +464,7 @@ interface PipelineRunDatabaseRow {
   finished_at: string | null
   output_dataset_id: string | null
   output_version_id: string | null
-  error_name: string | null
-  error_message: string | null
+  error: string | null
 }
 
 interface PipelineStepRunDatabaseRow {
@@ -501,6 +481,5 @@ interface PipelineStepRunDatabaseRow {
   inputs: string
   output_version_id: string | null
   rows_written: number | null
-  error_name: string | null
-  error_message: string | null
+  error: string | null
 }

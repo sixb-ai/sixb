@@ -1,3 +1,4 @@
+import type { SixbFailure } from "../../errors"
 import type { EventEnvelope } from "../envelope"
 
 export interface PipelineRunStartedEvent extends EventEnvelope {
@@ -43,7 +44,7 @@ export interface PipelineRunStepFinishedEvent extends EventEnvelope {
     finishedAt: string
     versionId?: string
     rowsWritten?: number
-    error?: string
+    error?: SixbFailure
   }
 }
 

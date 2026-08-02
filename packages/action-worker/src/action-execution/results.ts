@@ -103,8 +103,9 @@ export function failedResult(
 }
 
 function redeliveryFailure(runId: string, run: ActionRunRecord): ActionRunFailure {
+  // Decided here, not caught: there is no thrown error to unwrap into the record.
   return {
-    name: "ActionRunLeaseLostError",
+    code: "queue.lease_lost",
     message: `Action run '${runId}' was redelivered while already running. The previous worker may have lost its queue lease or crashed before reaching a resumable phase boundary.`,
     phase: run.phase ?? "validation",
   }

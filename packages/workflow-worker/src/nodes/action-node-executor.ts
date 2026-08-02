@@ -84,6 +84,7 @@ function actionRunStatusFailure(
   phase: ActionRunFailure["phase"]
 ): ActionRunFailure {
   return {
+    code: "action.failed",
     message: `Action run finished with status '${status}'.`,
     phase,
   }

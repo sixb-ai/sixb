@@ -726,7 +726,7 @@ describe("agent routes", () => {
       id: request.run.id,
       projectId: sixb.id,
       status: "failed",
-      error: "dispatch failed",
+      error: { code: "agent.failed", message: "dispatch failed" },
     })
 
     const response = await app.fetch(

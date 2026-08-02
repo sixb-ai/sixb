@@ -1,3 +1,4 @@
+import type { SixbFailure } from "../errors"
 import type { EventActor, EventOrigin } from "../events/envelope"
 import type { PropertyChange, PropertyChangeMap } from "../events/property-changes"
 import type { JsonValue } from "../json"
@@ -188,7 +189,7 @@ export type ProjectionRunTerminalDecision =
   | {
       readonly protocol: ProjectionProtocolIdentity["protocol"]
       readonly status: "failed" | "cancelled"
-      readonly errorMessage?: string
+      readonly error?: SixbFailure
       readonly inputExhausted?: never
     }
 

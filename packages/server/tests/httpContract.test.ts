@@ -523,7 +523,7 @@ describe("SixbServer HTTP contract", () => {
       status: "failed",
       completedAt: new Date("2026-02-18T09:12:04.000Z"),
       error: {
-        name: "NotificationError",
+        code: "runtime.unexpected",
         message: "Notification failed",
         phase: "effects",
       },
@@ -1825,7 +1825,7 @@ describe("SixbServer HTTP contract", () => {
       expect(cancelledRun).toMatchObject({
         id: pending.workflowRunId,
         status: "cancelled",
-        error: "Workflow intervention cancelled.",
+        error: { code: "runtime.cancelled", message: "Workflow intervention cancelled." },
       })
 
       const cancelledNode = await sixb.storage.workflowRuns!.nodes.getById({
@@ -1835,7 +1835,7 @@ describe("SixbServer HTTP contract", () => {
       expect(cancelledNode).toMatchObject({
         id: pending.nodeRunId,
         status: "cancelled",
-        error: "Workflow intervention cancelled.",
+        error: { code: "runtime.cancelled", message: "Workflow intervention cancelled." },
       })
 
       const workflowEvents = await events.read({
@@ -2081,7 +2081,6 @@ describe("SixbServer HTTP contract", () => {
           status: "failed",
           completedAt: "2026-02-18T09:12:04.000Z",
           error: {
-            name: "NotificationError",
             message: "Notification failed",
             phase: "effects",
           },

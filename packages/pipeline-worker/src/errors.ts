@@ -1,7 +1,7 @@
 import type { DatasetDefinition, PipelineDefinition } from "@sixb/core"
 import { SixbError, type SixbErrorOptions } from "@sixb/core/errors"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import type { PipelineRunFailure, PipelineRunStatus } from "@sixb/core/storage"
+import { type PipelineRunStatus, type SixbFailure, toSixbFailure } from "@sixb/core/storage"
 import type { PipelineJob } from "./types"
 
 export class PipelineWorkerError extends SixbError {
@@ -12,17 +12,17 @@ export class PipelineWorkerError extends SixbError {
   }
 }
 
-export function toPipelineRunFailure(error: unknown): PipelineRunFailure {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-    }
-  }
-
-  return {
-    message: String(error),
-  }
+/**
+ * Files an unlabeled pipeline failure under the pipeline's own code rather than the catch-all, and
+ * under the cancellation code when that is the status it is written with.
+ */
+export function toPipelineRunFailure(
+  error: unknown,
+  status: Extract<PipelineRunStatus, "failed" | "cancelled"> = "failed"
+): SixbFailure {
+  return toSixbFailure(error, {
+    fallbackCode: status === "cancelled" ? "runtime.cancelled" : "pipeline.failed",
+  })
 }
 
 export function throwIfAborted(signal: AbortSignal): void {

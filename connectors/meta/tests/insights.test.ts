@@ -126,7 +126,17 @@ describe("meta connector — insights", () => {
 
   test("throws MetaApiError on a non-2xx response", async () => {
     mockFetch(() =>
-      Promise.resolve(json({ error: { message: "Invalid metric" } }, { status: 400 }))
+      Promise.resolve(
+        json(
+          {
+            error: {
+              code: "runtime.unexpected",
+              message: "Invalid metric",
+            },
+          },
+          { status: 400 }
+        )
+      )
     )
 
     const client = await meta({ accessToken: "t" }).connect(CONTEXT)
@@ -143,7 +153,12 @@ describe("meta connector — insights", () => {
       return Promise.resolve(
         calls === 1
           ? json(
-              { error: { message: "rate limited" } },
+              {
+                error: {
+                  code: "runtime.unexpected",
+                  message: "rate limited",
+                },
+              },
               { status: 429, headers: { "Retry-After": "0" } }
             )
           : json({ data: [{ name: "reach" }] })

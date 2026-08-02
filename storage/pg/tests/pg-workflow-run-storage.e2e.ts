@@ -206,7 +206,7 @@ describe("PgWorkflowRunStorage", () => {
       id: "run-1",
       projectId: "my-app",
       status: "failed",
-      error: "No invoice candidate",
+      error: { code: "workflow.failed", message: "No invoice candidate" },
     })
 
     await storage.workflowRuns.start({
@@ -257,7 +257,7 @@ describe("PgWorkflowRunStorage", () => {
       projectId: "my-app",
       id: "run-1",
     })
-    expect(failed?.error).toBe("No invoice candidate")
+    expect(failed?.error).toEqual({ code: "workflow.failed", message: "No invoice candidate" })
   })
 
   test("lists the latest run for multiple workflow ids", async () => {
@@ -373,7 +373,7 @@ describe("PgWorkflowRunStorage", () => {
       id: "node-1",
       projectId: "my-app",
       status: "failed",
-      error: "No match",
+      error: { code: "workflow.failed", message: "No match" },
     })
 
     await storage.workflowRuns.nodes.start({
@@ -426,7 +426,7 @@ describe("PgWorkflowRunStorage", () => {
       statuses: ["failed"],
     })
     expect(failedNodes.nodes[0]?.output).toBeUndefined()
-    expect(failedNodes.nodes[0]?.error).toBe("No match")
+    expect(failedNodes.nodes[0]?.error).toEqual({ code: "workflow.failed", message: "No match" })
   })
 
   test("rejects invalid workflow and node run lifecycle transitions", async () => {
@@ -451,7 +451,7 @@ describe("PgWorkflowRunStorage", () => {
         id: "missing",
         projectId: "my-app",
         status: "failed",
-        error: "boom",
+        error: { code: "workflow.failed", message: "boom" },
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -513,7 +513,7 @@ describe("PgWorkflowRunStorage", () => {
       id: "node-1",
       projectId: "my-app",
       status: "cancelled",
-      error: "Stopped",
+      error: { code: "runtime.cancelled", message: "Stopped" },
     })
 
     await expect(
@@ -521,7 +521,7 @@ describe("PgWorkflowRunStorage", () => {
         id: "node-1",
         projectId: "my-app",
         status: "failed",
-        error: "Too late",
+        error: { code: "runtime.cancelled", message: "Too late" },
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -529,7 +529,7 @@ describe("PgWorkflowRunStorage", () => {
       id: "wf-run-1",
       projectId: "my-app",
       status: "cancelled",
-      error: "Stopped",
+      error: { code: "runtime.cancelled", message: "Stopped" },
     })
 
     await expect(
@@ -551,7 +551,7 @@ describe("PgWorkflowRunStorage", () => {
         id: "wf-run-1",
         projectId: "my-app",
         status: "failed",
-        error: "Too late",
+        error: { code: "runtime.cancelled", message: "Too late" },
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
   })
@@ -653,11 +653,11 @@ describe("PgWorkflowRunStorage", () => {
     const cancelled = await storage.workflowRuns.agentNodes.cancel({
       projectId: "my-app",
       nodeRunId: running.nodeRunId,
-      error: "Workflow cancelled.",
+      error: { code: "runtime.cancelled", message: "Workflow cancelled." },
     })
     expect(cancelled).toMatchObject({
       status: "cancelled",
-      error: "Workflow cancelled.",
+      error: { code: "runtime.cancelled", message: "Workflow cancelled." },
       prompt: "Resolve tr_1.",
     })
     expect(cancelled.execution).toBeUndefined()

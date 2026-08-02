@@ -1,8 +1,7 @@
 import type { JsonValue } from "@sixb/core"
 import { isObjectActionDefinition } from "@sixb/core"
 import type { ActionEditCommitResult } from "@sixb/core/internal/actions"
-import type { ActionRunRecord } from "@sixb/core/storage"
-import { toActionRunFailure } from "../normalize"
+import { type ActionRunRecord, toActionRunFailure } from "@sixb/core/storage"
 import { type BasePhaseContext, requireObjectSubject, toActionRuntimeFacade } from "./context"
 import type { LoadedObjectTarget, PhaseExecutionBase, UpdateActiveRun } from "./types"
 

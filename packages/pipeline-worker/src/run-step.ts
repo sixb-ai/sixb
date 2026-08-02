@@ -116,13 +116,14 @@ export async function runStep(input: {
     }
   } catch (error) {
     if (!committedVersion) {
+      const stepStatus = statusForFailure(signal, error)
       const failedStepRun = await runtime.pipelineRunsStorage
         .finishStep({
           projectId: runtime.id,
           id: stepRunId,
-          status: statusForFailure(signal, error),
+          status: stepStatus,
           rowsWritten,
-          error: toPipelineRunFailure(error),
+          error: toPipelineRunFailure(error, stepStatus),
         })
         .catch(() => null)
 

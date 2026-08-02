@@ -486,7 +486,7 @@ describe("PipelineWorker", () => {
       stepIndex: 1,
       totalSteps: 2,
       status: "failed",
-      error: "nope",
+      error: { code: "pipeline.failed", message: "nope" },
     })
 
     const datasetPayload = events[3]?.payload as {

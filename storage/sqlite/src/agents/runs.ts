@@ -11,6 +11,7 @@ import {
   type ListAgentRunsResult,
   type ReclaimAgentRunInput,
   type StartAgentRunInput,
+  serializeSixbFailure,
 } from "@sixb/core/storage"
 import {
   appendRunListFilters,
@@ -146,7 +147,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
         )
         .run(
           input.status,
-          input.error ?? null,
+          serializeSixbFailure(input.error),
           completedAt.toISOString(),
           input.projectId,
           input.id
@@ -208,7 +209,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
 
   async finish(input: FinishAgentRunInput): Promise<AgentRunRecord> {
     const completedAt = input.completedAt ?? new Date()
-    const errorValue = input.status === "succeeded" ? null : (input.error ?? null)
+    const errorValue = input.status === "succeeded" ? null : serializeSixbFailure(input.error)
 
     return this.db.transaction(() => {
       const run = this.requireRunning(input.projectId, input.id)

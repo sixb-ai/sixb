@@ -1,12 +1,8 @@
+import type { SixbFailure } from "../../errors"
 import type { JsonValue } from "../../json"
 import type { DatasetVersionRef, DatasetWriteMode } from "../../lake-storage"
 
 export type SyncRunStatus = "running" | "succeeded" | "failed" | "cancelled"
-
-export interface SyncRunFailure {
-  readonly name?: string // Example: "AbortError"
-  readonly message: string // Example: "Sync cancelled by request"
-}
 
 export interface SyncRunRecord {
   readonly id: string
@@ -21,7 +17,7 @@ export interface SyncRunRecord {
   readonly output?: DatasetVersionRef
   readonly expectedLatestVersionId?: string
   readonly commitMessage?: string
-  readonly error?: SyncRunFailure
+  readonly error?: SixbFailure
   readonly checkpoint?: JsonValue
 }
 
@@ -53,7 +49,7 @@ export type FinishSyncRunInput =
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
       readonly rowsRead?: number
-      readonly error?: SyncRunFailure
+      readonly error?: SixbFailure
     }
 
 export interface ListSyncRunsInput {

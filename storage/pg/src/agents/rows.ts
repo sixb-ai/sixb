@@ -1,4 +1,4 @@
-import { type AgentMessagePart, type Principal, SYSTEM_PRINCIPAL } from "@sixb/core"
+import { type AgentMessagePart, type JsonValue, type Principal, SYSTEM_PRINCIPAL } from "@sixb/core"
 import {
   type AgentMessageRecord,
   type AgentRunDiagnostic,
@@ -6,6 +6,7 @@ import {
   type AgentRunUsage,
   type AgentThreadRecord,
   coerceAgentRunFinishReason,
+  parseSixbFailure,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "../pg-client"
 
@@ -45,7 +46,7 @@ export interface AgentRunRow {
   usage_total_tokens: number | string | null
   usage_reasoning_tokens: number | string | null
   usage_cached_input_tokens: number | string | null
-  error: string | null
+  error: JsonValue | null
   diagnostics: AgentRunDiagnostic[] | string | null
   attempt: number | string
   execution_token: string | null
@@ -107,7 +108,7 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     modelId: row.model_id ?? undefined,
     finishReason: coerceAgentRunFinishReason(row.finish_reason),
     usage: rowToUsage(row),
-    error: row.error ?? undefined,
+    error: parseSixbFailure(row.error),
     diagnostics: normalizeDiagnostics(row.diagnostics),
     attempt: Number(row.attempt),
     execution:

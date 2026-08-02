@@ -10,6 +10,7 @@ import {
   type ListAgentRunsResult,
   type ReclaimAgentRunInput,
   type StartAgentRunInput,
+  serializeSixbFailure,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "../pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "../run-list-query"
@@ -121,7 +122,7 @@ export class PgAgentRunStore implements AgentRunStore {
       const run = await this.lockStatus(tx, input.projectId, input.id, "queued")
       const [row] = await tx<AgentRunRow[]>`
         UPDATE agent_runs
-        SET status = ${input.status}, error = ${input.error ?? null}, completed_at = ${completedAt}
+        SET status = ${input.status}, error = ${serializeSixbFailure(input.error)}::text::jsonb, completed_at = ${completedAt}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
@@ -174,7 +175,7 @@ export class PgAgentRunStore implements AgentRunStore {
 
   async finish(input: FinishAgentRunInput): Promise<AgentRunRecord> {
     const completedAt = input.completedAt ?? new Date()
-    const errorValue = input.status === "succeeded" ? null : (input.error ?? null)
+    const errorValue = input.status === "succeeded" ? null : serializeSixbFailure(input.error)
 
     return runPgTransaction(this.sql, async (tx) => {
       const run = await this.lockRunning(tx, input.projectId, input.id)
@@ -197,7 +198,7 @@ export class PgAgentRunStore implements AgentRunStore {
           usage_total_tokens = ${input.usage?.totalTokens ?? null},
           usage_reasoning_tokens = ${input.usage?.reasoningTokens ?? null},
           usage_cached_input_tokens = ${input.usage?.cachedInputTokens ?? null},
-          error = ${errorValue},
+          error = ${errorValue}::text::jsonb,
           diagnostics = ${input.diagnostics === undefined ? null : JSON.stringify(input.diagnostics)}::text::jsonb,
           execution_token = ${null},
           execution_queue_lease_expires_at = ${null},

@@ -7,7 +7,6 @@ export type {
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
-  SyncRunFailure,
   SyncRunRecord,
   SyncRunStatus,
   SyncRunStorage,

@@ -66,8 +66,7 @@ CREATE TABLE sync_runs (
   output_version_id TEXT,
   expected_latest_version_id TEXT,
   commit_message TEXT,
-  error_name TEXT,
-  error_message TEXT,
+  error TEXT,
   checkpoint TEXT,
   PRIMARY KEY (project_id, id)
 );
@@ -113,7 +112,7 @@ CREATE TABLE projection_runs (
   missing_target_first_seen_at TEXT,
   source_rows_read INTEGER NOT NULL DEFAULT 0 CHECK (source_rows_read >= 0),
   source_rows_skipped INTEGER NOT NULL DEFAULT 0 CHECK (source_rows_skipped >= 0),
-  error_message TEXT,
+  error TEXT,
   PRIMARY KEY (project_id, id),
   CHECK (source_rows_skipped <= source_rows_read),
   CHECK ((status = 'running') = (finished_at IS NULL)),
@@ -432,8 +431,7 @@ CREATE TABLE pipeline_runs (
   finished_at TEXT,
   output_dataset_id TEXT,
   output_version_id TEXT,
-  error_name TEXT,
-  error_message TEXT,
+  error TEXT,
   PRIMARY KEY (project_id, id)
 );
 
@@ -458,8 +456,7 @@ CREATE TABLE pipeline_step_runs (
   inputs TEXT NOT NULL,
   output_version_id TEXT,
   rows_written INTEGER CHECK (rows_written IS NULL OR rows_written >= 0),
-  error_name TEXT,
-  error_message TEXT,
+  error TEXT,
   PRIMARY KEY (project_id, id)
 );
 
@@ -702,50 +699,11 @@ CREATE TABLE action_runs (
   writeback_status TEXT CHECK (writeback_status IS NULL OR writeback_status IN ('succeeded', 'failed')),
   writeback_completed_at TEXT,
   writeback_result TEXT,
-  writeback_error_name TEXT,
-  writeback_error_message TEXT,
-  writeback_error_phase TEXT CHECK (
-    writeback_error_phase IS NULL OR writeback_error_phase IN (
-      'request',
-      'enqueue',
-      'validation',
-      'writeback',
-      'edits',
-      'commit',
-      'effects',
-      'cancelled'
-    )
-  ),
+  writeback_error TEXT,
   effects_status TEXT CHECK (effects_status IS NULL OR effects_status IN ('succeeded', 'failed')),
   effects_completed_at TEXT,
-  effects_error_name TEXT,
-  effects_error_message TEXT,
-  effects_error_phase TEXT CHECK (
-    effects_error_phase IS NULL OR effects_error_phase IN (
-      'request',
-      'enqueue',
-      'validation',
-      'writeback',
-      'edits',
-      'commit',
-      'effects',
-      'cancelled'
-    )
-  ),
-  error_name TEXT,
-  error_message TEXT,
-  error_phase TEXT CHECK (
-    error_phase IS NULL OR error_phase IN (
-      'request',
-      'enqueue',
-      'validation',
-      'writeback',
-      'edits',
-      'commit',
-      'effects',
-      'cancelled'
-    )
-  ),
+  effects_error TEXT,
+  error TEXT,
   CHECK (
     (subject_kind = 'none' AND object_type_id IS NULL AND primary_id IS NULL)
     OR (subject_kind = 'object' AND object_type_id IS NOT NULL AND primary_id IS NOT NULL)

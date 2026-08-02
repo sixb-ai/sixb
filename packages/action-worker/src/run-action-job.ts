@@ -1,6 +1,6 @@
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { ActionRunRecord } from "@sixb/core/storage"
-import { isTerminalActionRun } from "@sixb/core/storage"
+import { isTerminalActionRun, toActionRunFailure } from "@sixb/core/storage"
 import { executeActionPhases } from "./action-execution/phases"
 import {
   failedResult,
@@ -8,7 +8,7 @@ import {
   resolveRedeliveredRunningRun,
 } from "./action-execution/results"
 import { ActionWorkerError } from "./errors"
-import { throwIfAborted, toActionRunFailure } from "./normalize"
+import { throwIfAborted } from "./normalize"
 import type { ActionRunResult, RunActionJobInput } from "./types"
 
 export async function runActionJob(input: RunActionJobInput): Promise<ActionRunResult> {

@@ -73,7 +73,7 @@ describe("PgWebhookDeliveryStorage", () => {
     await storage.webhookDeliveries.fail({
       ...deliveryKey,
       failedAt: "2026-04-19T12:00:01.000Z",
-      error: "handler failed",
+      error: { code: "webhook.failed", message: "handler failed" },
     })
 
     await expect(
@@ -135,14 +135,14 @@ describe("PgWebhookDeliveryStorage", () => {
       storage.webhookDeliveries.fail({
         ...failedDeliveryKey,
         failedAt: "2026-04-19T12:00:03.000Z",
-        error: "handler failed",
+        error: { code: "webhook.failed", message: "handler failed" },
       })
     ).resolves.toMatchObject({
       ...failedDeliveryKey,
       status: "failed",
       receivedAt: "2026-04-19T12:00:02.000Z",
       failedAt: "2026-04-19T12:00:03.000Z",
-      error: "handler failed",
+      error: { code: "webhook.failed", message: "handler failed" },
     })
   })
 })

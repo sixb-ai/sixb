@@ -1,5 +1,6 @@
 import type { AgentMessagePart } from "../../agents/message"
 import type { Principal } from "../../auth"
+import type { SixbFailure } from "../../errors"
 import type { JsonValue } from "../../json"
 import type { WorkflowIOSnapshot, WorkflowRunSource } from "../../workflows/types"
 import type { AgentExecutionStatus, AgentRunFinishReason, AgentRunUsage } from "../agents"
@@ -41,7 +42,7 @@ export interface WorkflowAgentNodeRunRecord {
   readonly usage?: AgentRunUsage
   readonly trace?: readonly AgentMessagePart[]
   readonly diagnostics?: readonly JsonValue[]
-  readonly error?: string
+  readonly error?: SixbFailure
   readonly attempt: number
   readonly execution?: WorkflowAgentNodeRunExecution
   readonly createdAt: Date
@@ -89,14 +90,14 @@ export type FinishWorkflowAgentNodeRunInput = {
   readonly usage?: AgentRunUsage
   readonly trace?: readonly AgentMessagePart[]
   readonly diagnostics?: readonly JsonValue[]
-  readonly error?: string
+  readonly error?: SixbFailure
   readonly completedAt?: Date
 }
 
 export interface CancelWorkflowAgentNodeRunInput {
   readonly projectId: string
   readonly nodeRunId: string
-  readonly error?: string
+  readonly error?: SixbFailure
   readonly completedAt?: Date
 }
 
@@ -124,7 +125,7 @@ export interface WorkflowRunRecord {
   readonly queuedAt?: Date
   readonly startedAt: Date
   readonly finishedAt?: Date
-  readonly error?: string
+  readonly error?: SixbFailure
   readonly source?: WorkflowRunSource
   readonly requestedByPrincipal: Principal
   readonly attempt: number
@@ -145,7 +146,7 @@ export interface WorkflowNodeRunRecord {
   readonly startedAt: Date
   readonly finishedAt?: Date
   readonly output?: WorkflowIOSnapshot
-  readonly error?: string
+  readonly error?: SixbFailure
 }
 
 export interface StartWorkflowRunInput {
@@ -209,7 +210,7 @@ export type FinishWorkflowRunInput =
       readonly projectId: string
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
-      readonly error?: string
+      readonly error?: SixbFailure
       readonly executionToken?: string
     }
 
@@ -248,7 +249,7 @@ export type FinishWorkflowNodeRunInput =
       readonly projectId: string
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
-      readonly error?: string
+      readonly error?: SixbFailure
       readonly executionToken?: string
     }
 

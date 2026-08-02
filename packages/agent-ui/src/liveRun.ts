@@ -83,7 +83,7 @@ function reduceEvent(state: LiveRunState, event: AgentRunStreamEvent): LiveRunSt
         ...state,
         active: false,
         finishStatus: event.status,
-        finishError: event.error ?? null,
+        finishError: event.error?.message ?? null,
       }
     default:
       return state

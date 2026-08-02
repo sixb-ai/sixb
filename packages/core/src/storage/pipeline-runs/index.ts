@@ -9,7 +9,6 @@ export type {
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
   ListPipelineStepRunsResult,
-  PipelineRunFailure,
   PipelineRunRecord,
   PipelineRunStatus,
   PipelineRunStorage,

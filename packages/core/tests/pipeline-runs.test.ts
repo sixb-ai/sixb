@@ -57,7 +57,7 @@ describe("InMemoryPipelineRunStorage", () => {
       status: "failed",
       finishedAt: new Date("2026-05-08T10:00:01.000Z"),
       error: {
-        name: "Error",
+        code: "pipeline.failed",
         message: "No committed source version",
       },
     })
@@ -126,7 +126,7 @@ describe("InMemoryPipelineRunStorage", () => {
     expect(failed?.status).toBe("failed")
     expect(failed?.output).toBeUndefined()
     expect(failed?.error).toEqual({
-      name: "Error",
+      code: "pipeline.failed",
       message: "No committed source version",
     })
   })
@@ -259,7 +259,7 @@ describe("InMemoryPipelineRunStorage", () => {
       status: "failed",
       rowsWritten: 3,
       error: {
-        name: "Error",
+        code: "pipeline.failed",
         message: "Invalid row",
       },
     })
@@ -315,7 +315,7 @@ describe("InMemoryPipelineRunStorage", () => {
       statuses: ["failed"],
     })
     expect(failedSteps.steps[0]?.error).toEqual({
-      name: "Error",
+      code: "pipeline.failed",
       message: "Invalid row",
     })
     expect(failedSteps.steps[0]?.rowsWritten).toBe(3)
@@ -344,6 +344,7 @@ describe("InMemoryPipelineRunStorage", () => {
         projectId: "my-app",
         status: "failed",
         error: {
+          code: "pipeline.failed",
           message: "boom",
         },
       })
@@ -377,6 +378,7 @@ describe("InMemoryPipelineRunStorage", () => {
       projectId: "my-app",
       status: "cancelled",
       error: {
+        code: "pipeline.failed",
         message: "Stopped",
       },
     })
@@ -387,6 +389,7 @@ describe("InMemoryPipelineRunStorage", () => {
         projectId: "my-app",
         status: "failed",
         error: {
+          code: "pipeline.failed",
           message: "Too late",
         },
       })
@@ -397,6 +400,7 @@ describe("InMemoryPipelineRunStorage", () => {
       projectId: "my-app",
       status: "cancelled",
       error: {
+        code: "pipeline.failed",
         message: "Stopped",
       },
     })
@@ -420,6 +424,7 @@ describe("InMemoryPipelineRunStorage", () => {
         projectId: "my-app",
         status: "failed",
         error: {
+          code: "pipeline.failed",
           message: "Too late",
         },
       })

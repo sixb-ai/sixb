@@ -2,8 +2,7 @@ import type { ActionReadObjectSetSource, JsonValue } from "@sixb/core"
 import { assertJsonValue, cloneJsonValue, isObjectActionDefinition } from "@sixb/core"
 import type { ActionReadRecorder } from "@sixb/core/internal/actions"
 import { createActionReadFacade } from "@sixb/core/internal/actions"
-import type { ActionRunRecord } from "@sixb/core/storage"
-import { toActionRunFailure } from "../normalize"
+import { type ActionRunRecord, toActionRunFailure } from "@sixb/core/storage"
 import { type BasePhaseContext, requireObjectTarget, toActionRuntimeFacade } from "./context"
 import type {
   LoadedObjectTarget,

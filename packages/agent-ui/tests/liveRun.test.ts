@@ -138,7 +138,11 @@ describe("liveRunReducer", () => {
   test("captures a failed run's terminal status and error", () => {
     const state = liveRunReducer(createLiveRunState("run"), {
       type: "event",
-      event: event({ type: "agent.run.finished", status: "failed", error: "nope" }),
+      event: event({
+        type: "agent.run.finished",
+        status: "failed",
+        error: { code: "agent.failed", message: "nope" },
+      }),
     })
     expect(state.active).toBe(false)
     expect(state.finishStatus).toBe("failed")

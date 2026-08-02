@@ -1,4 +1,5 @@
 import type { WorkflowRunStatus } from "@sixb/core/storage"
+import { type SixbFailure, toSixbFailure } from "@sixb/core/storage"
 
 export function createAbortError(): Error {
   const error = new Error("Workflow worker aborted.")
@@ -23,12 +24,18 @@ export function statusForFailure(
   return signal.aborted || isAbortError(error) ? "cancelled" : "failed"
 }
 
-export function toWorkflowRunError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
+/**
+ * Files an unlabeled workflow failure under the workflow's own code rather than the catch-all, and
+ * under the cancellation code when that is what the status says — a cancelled run whose record reads
+ * `workflow.failed` contradicts itself.
+ */
+export function toWorkflowRunError(
+  error: unknown,
+  status: Extract<WorkflowRunStatus, "failed" | "cancelled"> = "failed"
+): SixbFailure {
+  return toSixbFailure(error, {
+    fallbackCode: status === "cancelled" ? "runtime.cancelled" : "workflow.failed",
+  })
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

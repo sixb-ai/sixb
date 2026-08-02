@@ -59,7 +59,7 @@ describe("SqlitePipelineRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       error: {
-        name: "Error",
+        code: "pipeline.failed",
         message: "No committed source version",
       },
     })
@@ -127,7 +127,7 @@ describe("SqlitePipelineRunStorage", () => {
     })
     expect(failed?.status).toBe("failed")
     expect(failed?.error).toEqual({
-      name: "Error",
+      code: "pipeline.failed",
       message: "No committed source version",
     })
   })
@@ -251,7 +251,7 @@ describe("SqlitePipelineRunStorage", () => {
       status: "failed",
       rowsWritten: 3,
       error: {
-        name: "Error",
+        code: "pipeline.failed",
         message: "Invalid row",
       },
     })
@@ -307,7 +307,7 @@ describe("SqlitePipelineRunStorage", () => {
       statuses: ["failed"],
     })
     expect(failedSteps.steps[0]?.error).toEqual({
-      name: "Error",
+      code: "pipeline.failed",
       message: "Invalid row",
     })
     expect(failedSteps.steps[0]?.rowsWritten).toBe(3)
@@ -334,6 +334,7 @@ describe("SqlitePipelineRunStorage", () => {
         projectId: "my-app",
         status: "failed",
         error: {
+          code: "pipeline.failed",
           message: "boom",
         },
       })
@@ -367,6 +368,7 @@ describe("SqlitePipelineRunStorage", () => {
       projectId: "my-app",
       status: "cancelled",
       error: {
+        code: "pipeline.failed",
         message: "Stopped",
       },
     })
@@ -377,6 +379,7 @@ describe("SqlitePipelineRunStorage", () => {
         projectId: "my-app",
         status: "failed",
         error: {
+          code: "pipeline.failed",
           message: "Too late",
         },
       })
@@ -387,6 +390,7 @@ describe("SqlitePipelineRunStorage", () => {
       projectId: "my-app",
       status: "cancelled",
       error: {
+        code: "pipeline.failed",
         message: "Stopped",
       },
     })

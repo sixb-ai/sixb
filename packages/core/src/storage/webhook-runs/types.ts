@@ -1,3 +1,4 @@
+import type { SixbFailure } from "../../errors"
 import type { WebhookDeliveryClaimResult } from "../webhook-deliveries"
 
 export type WebhookRunStatus = "running" | "succeeded" | "failed" | "skipped"
@@ -17,7 +18,7 @@ export interface WebhookRunRecord {
   readonly responseStatus?: number
   readonly idempotencyKey?: string
   readonly deliveryClaimResult?: WebhookDeliveryClaimResult
-  readonly error?: string
+  readonly error?: SixbFailure
 }
 
 export interface StartWebhookRunInput {
@@ -39,7 +40,7 @@ export interface FinishWebhookRunInput {
   readonly responseStatus?: number
   readonly idempotencyKey?: string
   readonly deliveryClaimResult?: WebhookDeliveryClaimResult
-  readonly error?: string
+  readonly error?: SixbFailure
 }
 
 export interface ListWebhookRunsInput {

@@ -120,7 +120,7 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
           projectId: runtime.id,
           id: job.id,
           status,
-          error: toPipelineRunFailure(error),
+          error: toPipelineRunFailure(error, status),
         })
         if (status === "failed" && run.status === "failed") input.onRunFailed?.(error, run)
       } catch {

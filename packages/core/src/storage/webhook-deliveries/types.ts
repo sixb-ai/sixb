@@ -1,3 +1,4 @@
+import type { SixbFailure } from "../../errors"
 export type WebhookDeliveryClaimResult = "claimed" | "duplicate" | "in_progress"
 export type WebhookDeliveryStatus = "in_progress" | "completed" | "failed"
 
@@ -13,7 +14,7 @@ export interface WebhookDeliveryRecord extends WebhookDeliveryKey {
   readonly receivedAt?: string
   readonly completedAt?: string
   readonly failedAt?: string
-  readonly error?: string
+  readonly error?: SixbFailure
 }
 
 export interface WebhookDeliveryClaimRecord extends WebhookDeliveryRecord {
@@ -36,6 +37,6 @@ export interface WebhookDeliveryStorage {
   claim(input: WebhookDeliveryKey & { receivedAt: string }): Promise<WebhookDeliveryClaimRecord>
   complete(input: WebhookDeliveryKey & { completedAt: string }): Promise<WebhookDeliveryRecord>
   fail(
-    input: WebhookDeliveryKey & { failedAt: string; error: string }
+    input: WebhookDeliveryKey & { failedAt: string; error: SixbFailure }
   ): Promise<WebhookDeliveryRecord>
 }

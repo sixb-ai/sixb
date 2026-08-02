@@ -106,7 +106,7 @@ describe("PgSyncRunStorage", () => {
       status: "failed",
       rowsRead: 23,
       error: {
-        name: "Error",
+        code: "sync.failed",
         message: "Database connection lost",
       },
     })
@@ -227,6 +227,7 @@ describe("PgSyncRunStorage", () => {
         projectId: "my-app",
         status: "failed",
         error: {
+          code: "sync.failed",
           message: "boom",
         },
       })

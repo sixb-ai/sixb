@@ -9,7 +9,7 @@ import {
   type ProjectionRunTerminalDecision,
 } from "@sixb/core/internal/materialization"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
-import type { ProjectionRunRecord } from "@sixb/core/storage"
+import { type ProjectionRunRecord, toSixbFailure } from "@sixb/core/storage"
 import { ProjectionWorkerPermanentError } from "./errors"
 import {
   assertProjectionJobId,
@@ -48,7 +48,7 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
       await finishProjection(input, execution, {
         protocol: input.job.protocol,
         status: "cancelled",
-        errorMessage: error.message,
+        error: toSixbFailure(error, { fallbackCode: "runtime.cancelled" }),
       })
       throw error
     }
@@ -56,7 +56,7 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
       await finishProjection(input, execution, {
         protocol: input.job.protocol,
         status: "failed",
-        errorMessage: errorMessage(error),
+        error: toSixbFailure(error, { fallbackCode: "projection.failed" }),
       })
       const run = await requireRun(input)
       input.onRunFailed?.(error, run)
@@ -281,10 +281,6 @@ function isPermanentSyncFailure(error: unknown): boolean {
 
 function isExplicitCancellation(error: unknown): error is MaterializationCancellationError {
   return error instanceof MaterializationCancellationError
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /**

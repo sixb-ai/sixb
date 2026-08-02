@@ -1,4 +1,5 @@
 import type { AgentDefinition, ValueType, WorkflowDefinition } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
@@ -12,6 +13,7 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
+import { toSixbFailure } from "@sixb/core/storage"
 import { AgentWorkerError } from "./errors"
 import { reconcileAgentExecutionIdentity } from "./identity"
 import {
@@ -176,9 +178,14 @@ async function loadWorkflowAgentNodeExecution(
     await runs.agentNodes.cancel({
       projectId: context.id,
       nodeRunId: nodeRun.id,
-      error: workflowRun
-        ? `Parent workflow run is ${workflowRun.status}.`
-        : "Parent workflow run is missing.",
+      error: toSixbFailure(
+        new SixbError(
+          "runtime.cancelled",
+          workflowRun
+            ? `Parent workflow run is ${workflowRun.status}.`
+            : "Parent workflow run is missing."
+        )
+      ),
     })
     return null
   }
@@ -299,7 +306,7 @@ async function finishWorkflowAgentNodeFailed(input: {
   readonly status: "failed" | "cancelled"
   readonly error: unknown
 }): Promise<{ readonly node: WorkflowNodeRunRecord; readonly run: WorkflowRunRecord }> {
-  const message = errorMessage(input.error)
+  const failure = toSixbFailure(input.error, { fallbackCode: "agent.failed" })
   return input.context.storage.transaction(async (tx) => {
     const runs = tx.workflowRuns
     if (!runs) throw new AgentWorkerError("Workflow storage disappeared during finalization.")
@@ -309,19 +316,19 @@ async function finishWorkflowAgentNodeFailed(input: {
       executionToken: input.executionToken,
       status: input.status,
       modelId: input.agent.model.modelId,
-      error: message,
+      error: failure,
     })
     const node = await runs.nodes.finish({
       projectId: input.context.id,
       id: input.nodeRun.id,
       status: input.status,
-      error: message,
+      error: failure,
     })
     const run = await runs.finish({
       projectId: input.context.id,
       id: input.nodeRun.workflowRunId,
       status: input.status,
-      error: message,
+      error: failure,
     })
     return { node, run }
   })
@@ -459,8 +466,4 @@ function requireFinishedAt(
     throw new AgentWorkerError(`Workflow run record '${record.id}' has no finishedAt.`)
   }
   return record.finishedAt
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

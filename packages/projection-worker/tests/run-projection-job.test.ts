@@ -2125,7 +2125,7 @@ describe("runProjectionJob", () => {
     expect(run?.status).toBe("failed")
     expect(run?.progress.sourceRowsRead).toBe(1)
     expect(run?.progress.sourceRowsSkipped).toBe(0)
-    expect(run?.errorMessage).toContain("must be one of")
+    expect(run?.error?.message).toContain("must be one of")
   })
 
   test("normalizes int64 strings mapped to integer-like object properties", async () => {
@@ -2245,7 +2245,7 @@ describe("runProjectionJob", () => {
     expect(run?.status).toBe("failed")
     expect(run?.progress.sourceRowsRead).toBe(1)
     expect(run?.progress.sourceRowsSkipped).toBe(0)
-    expect(run?.errorMessage).toContain("cannot safely coerce")
+    expect(run?.error?.message).toContain("cannot safely coerce")
   })
 
   test("materializes fileRef object properties from fileRef dataset columns", async () => {
@@ -2674,7 +2674,7 @@ describe("runProjectionJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(run?.progress.sourceRowsRead).toBe(0)
-    expect(run?.errorMessage).toContain("Invalid unit")
+    expect(run?.error?.message).toContain("Invalid unit")
 
     // The fixed physical batch is atomic: no prefix of it is committed.
     const history = await deps.storage.timeseries.getHistory({

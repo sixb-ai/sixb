@@ -11,12 +11,14 @@ import type {
   WebhookMetadata,
   WebhookResponse,
 } from "@sixb/core"
+import type { SixbErrorCode } from "@sixb/core/errors"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type {
   FinishWebhookRunStatus,
   WebhookDeliveryClaimResult,
   WebhookDeliveryKey,
 } from "@sixb/core/storage"
+import { type SixbFailure, toSixbFailure } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
 
@@ -43,7 +45,7 @@ interface WebhookRunFinishInput {
   readonly responseStatus?: number
   readonly idempotencyKey?: string
   readonly deliveryClaimResult?: WebhookDeliveryClaimResult
-  readonly error?: string
+  readonly error?: SixbFailure
 }
 
 type DeliveryClaimResult =
@@ -115,7 +117,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
       runId,
       status: "failed",
       responseStatus: 500,
-      error: error instanceof Error ? error.message : String(error),
+      error: toSixbFailure(error, { fallbackCode: "webhook.failed" }),
     })
     reportFailure(error)
     throw error
@@ -142,7 +144,7 @@ async function dispatchWebhookRun(
       runId,
       status: "failed",
       responseStatus: 405,
-      error: "Method not allowed",
+      error: webhookFailure("runtime.invalid_input", "Method not allowed"),
     })
     return { error: "Method not allowed" }
   }
@@ -159,7 +161,7 @@ async function dispatchWebhookRun(
       runId,
       status: "failed",
       responseStatus,
-      error: message,
+      error: webhookFailure("runtime.invalid_input", message),
     })
     return { error: message }
   }
@@ -187,7 +189,7 @@ async function dispatchWebhookRun(
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
       responseStatus: 401,
-      error: "Webhook verification failed",
+      error: webhookFailure("webhook.unverified", "Webhook verification failed"),
     })
     return { error: "Webhook verification failed" }
   }
@@ -204,7 +206,7 @@ async function dispatchWebhookRun(
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
       responseStatus: 400,
-      error: message,
+      error: webhookFailure("runtime.invalid_input", message),
     })
     return { error: message }
   }
@@ -252,7 +254,7 @@ async function dispatchWebhookRun(
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
       responseStatus: 500,
-      error: "Webhook delivery claim failed",
+      error: webhookFailure("webhook.failed", "Webhook delivery claim failed"),
     })
     return { error: "Webhook delivery claim failed" }
   }
@@ -268,7 +270,7 @@ async function dispatchWebhookRun(
       await sixb.storage.webhookDeliveries?.fail({
         ...deliveryKey,
         failedAt: new Date().toISOString(),
-        error: error instanceof Error ? error.message : String(error),
+        error: toSixbFailure(error, { fallbackCode: "webhook.failed" }),
       })
     }
 
@@ -281,7 +283,7 @@ async function dispatchWebhookRun(
       responseStatus: 500,
       idempotencyKey,
       deliveryClaimResult,
-      error: "Webhook handler failed",
+      error: webhookFailure("webhook.failed", "Webhook handler failed"),
     })
     return { error: "Webhook handler failed" }
   }
@@ -300,7 +302,7 @@ async function dispatchWebhookRun(
         await sixb.storage.webhookDeliveries?.fail({
           ...deliveryKey,
           failedAt: finalizedAt,
-          error: failureMessage,
+          error: webhookFailure("webhook.failed", failureMessage),
         })
       } else {
         await sixb.storage.webhookDeliveries?.complete({
@@ -320,7 +322,7 @@ async function dispatchWebhookRun(
       responseStatus: 500,
       idempotencyKey,
       deliveryClaimResult,
-      error: "Webhook delivery completion failed",
+      error: webhookFailure("webhook.failed", "Webhook delivery completion failed"),
     })
     return { error: "Webhook delivery completion failed" }
   }
@@ -336,7 +338,7 @@ async function dispatchWebhookRun(
     responseStatus,
     idempotencyKey,
     deliveryClaimResult,
-    error: responseError,
+    error: responseError ? webhookFailure("webhook.failed", responseError) : undefined,
   })
 
   return applyWebhookResponse(set, response)
@@ -366,6 +368,12 @@ async function startWebhookRun(
     // Webhook run history is observability-only. Logging and dispatch continue
     // even when history storage is unavailable or temporarily failing.
   }
+}
+
+/** A webhook run's terminal failure, recorded in the one shape the other run tables use. */
+/** A failure the route decided itself rather than caught: there is nothing to unwrap. */
+function webhookFailure(code: SixbErrorCode, message: string): SixbFailure {
+  return { code, message }
 }
 
 async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {

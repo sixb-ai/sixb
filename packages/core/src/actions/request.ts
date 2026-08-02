@@ -12,6 +12,7 @@ import {
   actionRunParamsEqual,
   actionSubjectsEqual,
   isTerminalActionRun,
+  toActionRunFailure,
 } from "../storage"
 import { createActionRunId, createActionRunIdempotencyKey } from "./run-id"
 import type { ActionDefinition, ActionSubject } from "./types"
@@ -387,21 +388,4 @@ function assertExistingRunMatchesRequest(
 
 function isRetryableEnqueueFailure(record: ActionRunRecord): boolean {
   return record.status === "failed" && record.phase === "enqueue"
-}
-
-function toActionRunFailure(
-  error: unknown,
-  phase: "enqueue"
-): { name?: string; message: string; phase: "enqueue" } {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      phase,
-    }
-  }
-  return {
-    message: String(error),
-    phase,
-  }
 }

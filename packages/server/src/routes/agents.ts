@@ -139,7 +139,7 @@ export function serializeAgentRun(run: AgentRunRecord): ReturnType<typeof AgentR
     finishReason: run.finishReason,
     usage: run.usage,
     diagnostics: run.diagnostics,
-    error: run.error,
+    error: run.error?.message,
     attempt: run.attempt,
     streamId: agentRunStreamId(run.id),
     createdAt: toIsoString(run.createdAt),

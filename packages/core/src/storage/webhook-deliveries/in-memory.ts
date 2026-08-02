@@ -1,3 +1,4 @@
+import type { SixbFailure } from "../../errors"
 import type {
   WebhookDeliveryClaimRecord,
   WebhookDeliveryKey,
@@ -81,7 +82,7 @@ export class InMemoryWebhookDeliveryStorage implements WebhookDeliveryStorage {
   }
 
   async fail(
-    input: WebhookDeliveryKey & { failedAt: string; error: string }
+    input: WebhookDeliveryKey & { failedAt: string; error: SixbFailure }
   ): Promise<WebhookDeliveryRecord> {
     const key = serializeKey(input)
     const next: WebhookDeliveryRecord = {

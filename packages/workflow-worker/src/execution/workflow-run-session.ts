@@ -552,7 +552,7 @@ export class WorkflowRunSession {
 
     await this.dependencies.recorder.finishActiveNodeAfterError({
       status,
-      error: toWorkflowRunError(error),
+      error: toWorkflowRunError(error, status),
     })
 
     await this.finishWorkflowRunAfterError({ error, status })
@@ -588,7 +588,7 @@ export class WorkflowRunSession {
     const finishError = await this.dependencies.recorder
       .finishRunAfterError({
         status: input.status,
-        error: toWorkflowRunError(input.error),
+        error: toWorkflowRunError(input.error, input.status),
         onTransition:
           input.status === "failed"
             ? (run) => this.dependencies.onRunFailed?.(input.error, run)

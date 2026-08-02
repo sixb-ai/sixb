@@ -1,3 +1,4 @@
+import type { SixbFailure } from "../../errors"
 import type {
   PinnedDatasetVersion,
   ProjectionExecution,
@@ -68,7 +69,7 @@ interface ProjectionRunRecordBase {
   readonly progress: ProjectionRunProgress
   readonly startedAt: Date
   readonly finishedAt?: Date
-  readonly errorMessage?: string
+  readonly error?: SixbFailure
 }
 
 type ProjectionIdentity<TKind extends ProjectionKind> = Extract<

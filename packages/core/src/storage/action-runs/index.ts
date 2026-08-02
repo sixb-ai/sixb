@@ -29,3 +29,10 @@ export type {
   RecordActionWritebackInput,
   StartActionRunInput,
 } from "./types"
+export {
+  ACTION_RUN_PHASES,
+  isActionRunPhase,
+  parseActionRunFailure,
+  serializeActionRunFailure,
+  toActionRunFailure,
+} from "./types"

@@ -218,7 +218,7 @@ describe("ProjectionWorker", () => {
         () => projectionRunsStorage.getById({ projectId: sixb.id, id: runId }),
         (value) => value?.status === "failed"
       )
-      expect(run?.errorMessage).toContain("room_id")
+      expect(run?.error?.message).toContain("room_id")
 
       await waitFor(
         async () => reports.length,

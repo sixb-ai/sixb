@@ -6,7 +6,7 @@ import type {
   WebhookRunRecord,
   WebhookRunStorage,
 } from "@sixb/core/storage"
-import { WebhookRunError } from "@sixb/core/storage"
+import { parseSixbFailure, serializeSixbFailure, WebhookRunError } from "@sixb/core/storage"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
@@ -81,7 +81,7 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
           response_status = ${input.responseStatus ?? null},
           idempotency_key = ${input.idempotencyKey ?? null},
           delivery_claim_result = ${input.deliveryClaimResult ?? null},
-          error = ${input.status === "succeeded" ? null : (input.error ?? null)}
+          error = ${input.status === "succeeded" ? null : serializeSixbFailure(input.error)}::text::jsonb
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
@@ -163,7 +163,7 @@ function rowToWebhookRunRecord(row: WebhookRunDatabaseRow): WebhookRunRecord {
     responseStatus: row.response_status != null ? Number(row.response_status) : undefined,
     idempotencyKey: row.idempotency_key ?? undefined,
     deliveryClaimResult: row.delivery_claim_result ?? undefined,
-    error: row.error ?? undefined,
+    error: parseSixbFailure(row.error),
   }
 }
 

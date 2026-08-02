@@ -15,6 +15,7 @@ import {
   PipelineSchema,
   RequestPipelineRunResponseSchema,
 } from "../schemas/pipelines"
+import { toWireFailure } from "../utils/failure"
 import {
   handleRouteError,
   parseDate,
@@ -32,7 +33,7 @@ function serializePipelineRun(run: PipelineRunRecord) {
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
     output: run.output,
-    error: run.error,
+    error: toWireFailure(run.error),
   }
 }
 
@@ -53,7 +54,7 @@ function serializePipelineStepRun(step: PipelineStepRunRecord) {
     inputs: step.inputs,
     output: step.output,
     rowsWritten: step.rowsWritten,
-    error: step.error,
+    error: toWireFailure(step.error),
   }
 }
 

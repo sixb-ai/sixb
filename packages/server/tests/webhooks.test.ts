@@ -182,7 +182,7 @@ describe("webhook routes", () => {
       webhookId: "telemetry",
       status: "failed",
       responseStatus: 400,
-      error: "value must be a number",
+      error: { code: "runtime.invalid_input", message: "value must be a number" },
     })
     expect(run?.requestBodyBytes).toBe(new TextEncoder().encode(payload).byteLength)
   })
@@ -390,21 +390,21 @@ describe("webhook routes", () => {
           method: "GET",
           status: "failed",
           responseStatus: 405,
-          error: "Method not allowed",
+          error: { code: "runtime.invalid_input", message: "Method not allowed" },
         }),
         expect.objectContaining({
           webhookId: "events",
           method: "POST",
           status: "failed",
           responseStatus: 401,
-          error: "Webhook verification failed",
+          error: { code: "webhook.unverified", message: "Webhook verification failed" },
         }),
         expect.objectContaining({
           webhookId: "failing",
           method: "POST",
           status: "failed",
           responseStatus: 500,
-          error: "Webhook handler failed",
+          error: { code: "webhook.failed", message: "Webhook handler failed" },
         }),
       ])
     )

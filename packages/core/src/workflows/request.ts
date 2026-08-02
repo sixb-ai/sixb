@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
 import { reportRunFailure } from "../error-reporting/capability"
+import { toSixbFailure } from "../errors"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { WorkflowValidationError } from "./errors"
 import { snapshotWorkflowInput } from "./snapshot"
@@ -106,7 +107,7 @@ export async function requestWorkflowRun(
       projectId: runtime.projectId,
       id: runId,
       status: "failed",
-      error: error instanceof Error ? error.message : String(error),
+      error: toSixbFailure(error, { fallbackCode: "workflow.failed" }),
     })
     reportRunFailure(runtime, error, {
       projectId: runtime.projectId,

@@ -13,6 +13,7 @@ import {
   SyncRunsQuerySchema,
   SyncSchema,
 } from "../schemas/syncs"
+import { toWireFailure } from "../utils/failure"
 import {
   handleRouteError,
   parseDate,
@@ -35,7 +36,7 @@ function serializeSyncRun(run: SyncRunRecord) {
     output: run.output,
     expectedLatestVersionId: run.expectedLatestVersionId,
     commitMessage: run.commitMessage,
-    error: run.error,
+    error: toWireFailure(run.error),
   }
 }
 

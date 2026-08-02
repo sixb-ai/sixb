@@ -10,7 +10,7 @@ import {
 import { SixbConflictError } from "@sixb/core/errors"
 import { resolveLogsRuntime } from "@sixb/core/internal/logging"
 import type { DatasetVersion, LakeWriteSession } from "@sixb/core/lake-storage"
-import type { SyncRunFailure, SyncRunRecord } from "@sixb/core/storage"
+import { type SixbFailure, type SyncRunRecord, toSixbFailure } from "@sixb/core/storage"
 import { assertDatasetRow, normalizeReadResult, throwIfAborted } from "./normalize"
 import type { RunSyncJobInput, SyncRunResult } from "./types"
 
@@ -24,17 +24,11 @@ export class SyncRunAlreadyStartedError extends SixbConflictError {
   }
 }
 
-function toSyncRunFailure(error: unknown): SyncRunFailure {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-    }
-  }
-
-  return {
-    message: String(error),
-  }
+/** An aborted run is not a failed sync, so the code follows the status it is written with. */
+function toSyncRunFailure(error: unknown, status: "failed" | "cancelled"): SixbFailure {
+  return toSixbFailure(error, {
+    fallbackCode: status === "cancelled" ? "runtime.cancelled" : "sync.failed",
+  })
 }
 
 function createBookkeepingError(options: {
@@ -325,7 +319,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
           id: job.id,
           status,
           rowsRead,
-          error: toSyncRunFailure(error),
+          error: toSyncRunFailure(error, status),
         })
         if (status === "failed" && run.status === "failed") input.onRunFailed?.(error, run)
       } catch {

@@ -1,3 +1,4 @@
+import type { JsonValue } from "@sixb/core"
 import type { DatasetVersionRef } from "@sixb/core/lake-storage"
 import type {
   FinishPipelineRunInput,
@@ -8,14 +9,13 @@ import type {
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
   ListPipelineStepRunsResult,
-  PipelineRunFailure,
   PipelineRunRecord,
   PipelineRunStorage,
   PipelineStepRunRecord,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "@sixb/core/storage"
-import { PipelineRunError } from "@sixb/core/storage"
+import { PipelineRunError, parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
@@ -84,8 +84,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
                 finished_at = ${input.finishedAt ?? new Date()},
                 output_dataset_id = ${input.output?.datasetId ?? null},
                 output_version_id = ${input.output?.versionId ?? null},
-                error_name = ${null},
-                error_message = ${null}
+                error = ${null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
             `
@@ -96,8 +95,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
                 finished_at = ${input.finishedAt ?? new Date()},
                 output_dataset_id = ${null},
                 output_version_id = ${null},
-                error_name = ${input.error?.name ?? null},
-                error_message = ${input.error?.message ?? null}
+                error = ${serializeSixbFailure(input.error)}::text::jsonb
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
             `
@@ -208,8 +206,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
                 finished_at = ${input.finishedAt ?? new Date()},
                 output_version_id = ${input.output.versionId},
                 rows_written = ${input.rowsWritten ?? existing.rows_written ?? null},
-                error_name = ${null},
-                error_message = ${null}
+                error = ${null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
             `
@@ -220,8 +217,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
                 finished_at = ${input.finishedAt ?? new Date()},
                 output_version_id = ${null},
                 rows_written = ${input.rowsWritten ?? existing.rows_written ?? null},
-                error_name = ${input.error?.name ?? null},
-                error_message = ${input.error?.message ?? null}
+                error = ${serializeSixbFailure(input.error)}::text::jsonb
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
             `
@@ -356,20 +352,6 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
   }
 }
 
-function toFailure(row: {
-  readonly error_name: string | null
-  readonly error_message: string | null
-}): PipelineRunFailure | undefined {
-  if (!row.error_message) {
-    return undefined
-  }
-
-  return {
-    name: row.error_name ?? undefined,
-    message: row.error_message,
-  }
-}
-
 function rowToPipelineRunRecord(row: PipelineRunDatabaseRow): PipelineRunRecord {
   return {
     id: row.id,
@@ -385,7 +367,7 @@ function rowToPipelineRunRecord(row: PipelineRunDatabaseRow): PipelineRunRecord 
             versionId: row.output_version_id,
           }
         : undefined,
-    error: toFailure(row),
+    error: parseSixbFailure(row.error),
   }
 }
 
@@ -409,7 +391,7 @@ function rowToPipelineStepRunRecord(row: PipelineStepRunDatabaseRow): PipelineSt
         }
       : undefined,
     rowsWritten: row.rows_written != null ? Number(row.rows_written) : undefined,
-    error: toFailure(row),
+    error: parseSixbFailure(row.error),
   }
 }
 
@@ -434,8 +416,7 @@ interface PipelineRunDatabaseRow {
   finished_at: Date | string | null
   output_dataset_id: string | null
   output_version_id: string | null
-  error_name: string | null
-  error_message: string | null
+  error: JsonValue | null
 }
 
 interface PipelineStepRunDatabaseRow {
@@ -452,6 +433,5 @@ interface PipelineStepRunDatabaseRow {
   inputs: readonly DatasetVersionRef[] | string
   output_version_id: string | null
   rows_written: number | string | null
-  error_name: string | null
-  error_message: string | null
+  error: JsonValue | null
 }

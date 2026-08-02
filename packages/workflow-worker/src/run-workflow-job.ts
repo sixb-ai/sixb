@@ -117,11 +117,12 @@ async function failQueuedRun(input: RunWorkflowJobInput, error: unknown): Promis
     return
   }
 
+  const status = statusForFailure(input.signal ?? new AbortController().signal, error)
   const failed = await input.runtime.workflowRuns.finish({
     projectId: input.runtime.projectId,
     id: input.job.id,
-    status: statusForFailure(input.signal ?? new AbortController().signal, error),
-    error: toWorkflowRunError(error),
+    status,
+    error: toWorkflowRunError(error, status),
   })
 
   if (failed.status === "failed") {

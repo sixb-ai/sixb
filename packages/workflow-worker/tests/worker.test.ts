@@ -376,7 +376,7 @@ describe("WorkflowWorker", () => {
         }),
       (value) => value?.status === "failed"
     )
-    expect(run?.error).toBe("workflow exploded")
+    expect(run?.error).toEqual({ code: "workflow.failed", message: "workflow exploded" })
 
     const reported = await waitFor(
       async () => reports,
@@ -419,14 +419,14 @@ describe("WorkflowWorker", () => {
       runId: "wfrun_worker_failed",
       nodeRunId: "wfrun_worker_failed:node:0",
       status: "failed",
-      error: "workflow exploded",
+      error: { code: "workflow.failed", message: "workflow exploded" },
     })
     expect(events[3]?.payload).toMatchObject({
       workflowId: workflow.id,
       runId: "wfrun_worker_failed",
       status: "failed",
       finishedAt: expect.any(String),
-      error: "workflow exploded",
+      error: { code: "workflow.failed", message: "workflow exploded" },
     })
 
     await Bun.sleep(50)
@@ -789,7 +789,7 @@ describe("WorkflowWorker", () => {
       (value) => value.length === 1
     )
 
-    expect(run?.error).toBe(resumeError.message)
+    expect(run?.error?.message).toBe(resumeError.message)
     expect(reported[0]?.error).toBe(resumeError)
     expect(reported[0]?.context).toMatchObject({
       attempt: 1,

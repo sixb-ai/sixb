@@ -1,3 +1,4 @@
+import type { SixbFailure } from "../../errors"
 import {
   cloneRecord,
   compareStartedAt,
@@ -18,7 +19,6 @@ import type {
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
   ListPipelineStepRunsResult,
-  PipelineRunFailure,
   PipelineRunRecord,
   PipelineRunStorage,
   PipelineStepRunRecord,
@@ -26,7 +26,7 @@ import type {
   StartPipelineStepRunInput,
 } from "./types"
 
-function normalizeError(error: PipelineRunFailure | undefined): PipelineRunFailure | undefined {
+function normalizeError(error: SixbFailure | undefined): SixbFailure | undefined {
   return error ? cloneRecord(error) : undefined
 }
 

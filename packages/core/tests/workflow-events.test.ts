@@ -218,7 +218,7 @@ describe("workflow runtime events", () => {
             nodeKey: "findBestInvoice",
             status: "failed",
             finishedAt: "2026-05-08T10:00:02.000Z",
-            error: "No match",
+            error: { code: "workflow.failed", message: "No match" },
           },
         },
         {
@@ -228,7 +228,7 @@ describe("workflow runtime events", () => {
             runId: "wfrun_1",
             status: "failed",
             finishedAt: "2026-05-08T10:00:03.000Z",
-            error: "No match",
+            error: { code: "workflow.failed", message: "No match" },
           },
         },
       ],
@@ -257,7 +257,7 @@ describe("workflow runtime events", () => {
       runId: "wfrun_1",
       status: "failed",
       finishedAt: "2026-05-08T10:00:03.000Z",
-      error: "No match",
+      error: { code: "workflow.failed", message: "No match" },
     })
   })
 })

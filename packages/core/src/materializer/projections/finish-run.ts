@@ -123,7 +123,7 @@ function terminalDecision(input: ProjectionRunFinishInput): ProjectionRunTermina
     return {
       protocol: input.protocol,
       status: input.status,
-      ...(input.errorMessage === undefined ? {} : { errorMessage: input.errorMessage }),
+      ...(input.error === undefined ? {} : { error: input.error }),
     }
   }
   if (input.protocol === "telemetry") {

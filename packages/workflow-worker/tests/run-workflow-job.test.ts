@@ -309,6 +309,7 @@ async function completeRequestedActions(
               id: event.payload.runId,
               status: "failed",
               error: {
+                code: "workflow.failed",
                 message: options.effectsErrorMessage,
                 phase: "effects",
               },
@@ -329,6 +330,7 @@ async function completeRequestedActions(
                   status: "failed",
                   finishedAt: new Date("2026-05-08T10:00:00.000Z"),
                   error: {
+                    code: "workflow.failed",
                     message: errorMessage,
                     phase: "writeback",
                   },
@@ -354,6 +356,7 @@ async function completeRequestedActions(
                       runId: event.payload.runId,
                       subject: event.payload.subject,
                       error: {
+                        code: "workflow.failed",
                         message: errorMessage,
                         phase: "writeback",
                       },
@@ -1107,7 +1110,7 @@ describe("runWorkflowJob", () => {
           onNodeStarted: async () => undefined,
           onNodeFinished: async () => undefined,
           onRunFinished: async (run) => {
-            observerCalls.push(`${run.status}:${run.error}`)
+            observerCalls.push(`${run.status}:${run.error?.message}`)
           },
         },
       })
@@ -1155,7 +1158,7 @@ describe("runWorkflowJob", () => {
     expect(run?.status).toBe("failed")
     expect(nodes.nodes).toHaveLength(1)
     expect(nodes.nodes[0]?.status).toBe("failed")
-    expect(nodes.nodes[0]?.error).toContain(
+    expect(nodes.nodes[0]?.error?.message).toContain(
       'Workflow "invalid-output-workflow" step "invalid-output" output.invoice'
     )
   })
@@ -1195,7 +1198,7 @@ describe("runWorkflowJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(nodes.nodes.map((node) => node.status)).toEqual(["succeeded", "failed"])
-    expect(nodes.nodes[1]?.error).toBe("step exploded")
+    expect(nodes.nodes[1]?.error).toEqual({ code: "workflow.failed", message: "step exploded" })
   })
 
   test("waits for action nodes to finish without running the action handler inline", async () => {
@@ -1493,7 +1496,11 @@ describe("runWorkflowJob", () => {
       expect(actionRun?.status).toBe("succeeded")
       expect(actionRun?.effects).toMatchObject({
         status: "failed",
-        error: { message: "notification failed", phase: "effects" },
+        error: {
+          code: "workflow.failed",
+          message: "notification failed",
+          phase: "effects",
+        },
       })
     } finally {
       unsubscribe()
@@ -1613,7 +1620,16 @@ describe("runWorkflowJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(nodes.nodes.map((node) => node.status)).toEqual(["succeeded", "failed"])
-    expect(nodes.nodes[1]?.error).toBe("attach failed")
+    expect(nodes.nodes[1]?.error).toEqual({
+      code: "action.failed",
+      message: "attach failed",
+      details: {
+        actionId: "attach-invoice",
+        objectTypeId: "Transaction",
+        primaryId: "txn_1",
+        runId: "wfrun_action_run_failed:action:1",
+      },
+    })
   })
 
   test("marks action node and workflow failed when the action run fails after request", async () => {

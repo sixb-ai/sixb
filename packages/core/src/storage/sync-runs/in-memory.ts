@@ -1,3 +1,4 @@
+import type { SixbFailure } from "../../errors"
 import { cloneJsonValue, type JsonValue } from "../../json"
 import {
   compareStartedAt,
@@ -15,7 +16,6 @@ import type {
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
-  SyncRunFailure,
   SyncRunRecord,
   SyncRunStorage,
 } from "./types"
@@ -32,7 +32,7 @@ function normalizeCheckpoint(checkpoint: JsonValue | undefined): JsonValue | und
   return checkpoint !== undefined ? cloneJsonValue(checkpoint) : undefined
 }
 
-function normalizeError(error: SyncRunFailure | undefined): SyncRunFailure | undefined {
+function normalizeError(error: SixbFailure | undefined): SixbFailure | undefined {
   return error ? structuredClone(error) : undefined
 }
 

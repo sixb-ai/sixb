@@ -5,6 +5,7 @@ import type {
   WebhookDeliveryRecord,
   WebhookDeliveryStorage,
 } from "@sixb/core/storage"
+import { parseSixbFailure, type SixbFailure, serializeSixbFailure } from "@sixb/core/storage"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
@@ -111,13 +112,13 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
   }
 
   async fail(
-    input: WebhookDeliveryKey & { failedAt: string; error: string }
+    input: WebhookDeliveryKey & { failedAt: string; error: SixbFailure }
   ): Promise<WebhookDeliveryRecord> {
     const [updated] = await this.sql<WebhookDeliveryRow[]>`
       UPDATE webhook_deliveries
       SET status = ${"failed"},
           failed_at = ${input.failedAt},
-          error = ${input.error}
+          error = ${serializeSixbFailure(input.error)}::text::jsonb
       WHERE project_id = ${input.projectId}
         AND connector_id = ${input.connectorId}
         AND webhook_id = ${input.webhookId}
@@ -155,7 +156,7 @@ function toWebhookDeliveryRecord(row: WebhookDeliveryRow): WebhookDeliveryRecord
     receivedAt: toIsoString(row.received_at),
     completedAt: row.completed_at ? toIsoString(row.completed_at) : undefined,
     failedAt: row.failed_at ? toIsoString(row.failed_at) : undefined,
-    error: row.error ?? undefined,
+    error: parseSixbFailure(row.error),
   }
 }
 

@@ -13,6 +13,7 @@ import {
   type WorkflowInterventionNodeDefinition,
 } from "@sixb/core/internal/workflows"
 import type {
+  SixbFailure,
   WorkflowAgentNodeRunRecord,
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
@@ -82,6 +83,12 @@ const WorkflowNodeFileContentParamsSchema = WorkflowRunParamsSchema.extend({
   nodeKey: z.string().min(1),
 })
 
+/** Cancelling an intervention is a decision, not a caught error, so the record is written directly. */
+const INTERVENTION_CANCELLED: SixbFailure = {
+  code: "runtime.cancelled",
+  message: "Workflow intervention cancelled.",
+}
+
 function serializeWorkflowRun(run: WorkflowRunRecord) {
   return {
     id: run.id,
@@ -92,7 +99,7 @@ function serializeWorkflowRun(run: WorkflowRunRecord) {
     queuedAt: run.queuedAt ? toIsoString(run.queuedAt) : undefined,
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
-    error: run.error,
+    error: run.error?.message,
     requestedBy: serializePrincipal(run.requestedByPrincipal),
   }
 }
@@ -117,7 +124,7 @@ function serializeWorkflowNodeRun(
     startedAt: toIsoString(node.startedAt),
     finishedAt: node.finishedAt ? toIsoString(node.finishedAt) : undefined,
     output: node.output,
-    error: node.error,
+    error: node.error?.message,
     ...(agentExecution
       ? { agentExecution: serializeWorkflowAgentExecutionSummary(agentExecution) }
       : {}),
@@ -151,7 +158,7 @@ function serializeWorkflowAgentExecution(execution: WorkflowAgentNodeRunRecord) 
       : undefined,
     trace: execution.trace,
     diagnostics: execution.diagnostics,
-    error: execution.error,
+    error: execution.error?.message,
     createdAt: toIsoString(execution.createdAt),
   }
 }
@@ -861,14 +868,14 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
                 id: intervention.nodeRunId,
                 status: "cancelled",
                 finishedAt: cancelledAt,
-                error: "Workflow intervention cancelled.",
+                error: INTERVENTION_CANCELLED,
               })
               const cancelledRun = await tx.workflowRuns.finish({
                 projectId: sixb.id,
                 id: intervention.workflowRunId,
                 status: "cancelled",
                 finishedAt: cancelledAt,
-                error: "Workflow intervention cancelled.",
+                error: INTERVENTION_CANCELLED,
               })
               return { cancelled, cancelledNode, cancelledRun }
             }
@@ -1104,7 +1111,10 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           }
 
           const cancelledAt = new Date()
-          const cancellationError = "Workflow run cancelled."
+          const cancellationError: SixbFailure = {
+            code: "runtime.cancelled",
+            message: "Workflow run cancelled.",
+          }
           const result = await sixb.storage.transaction(async (tx) => {
             const runs = tx.workflowRuns
             if (!runs) {

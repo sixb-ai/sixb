@@ -238,7 +238,7 @@ describe("runActionJob", () => {
     expect(result.status).toBe("failed")
     if ("error" in result) {
       expect(result.error).toEqual({
-        name: "Error",
+        code: "action.failed",
         message: "external API failed",
         phase: "writeback",
       })
@@ -798,7 +798,7 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error.name).toBe("ActionRunLeaseLostError")
+      expect(result.error.code).toBe("queue.lease_lost")
       expect(result.error.phase).toBe("validation")
     }
     expect(invoked).toBe(0)
@@ -946,7 +946,7 @@ describe("runActionJob", () => {
     expect(run?.effects).toMatchObject({
       status: "failed",
       error: {
-        name: "Error",
+        code: "action.failed",
         message: "notification failed",
         phase: "effects",
       },

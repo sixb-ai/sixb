@@ -590,6 +590,7 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 1,
       error: {
+        code: "sync.failed",
         message:
           "[SixbSyncWorker] Sync 'sync-orders' returned an invalid row at item 2. Dataset rows must be plain objects.",
       },
@@ -624,6 +625,7 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 0,
       error: {
+        code: "sync.failed",
         message:
           "[SixbSyncWorker] Sync 'sync-orders' returned an unsupported read result. Expected a row object, iterable, or async iterable.",
       },
@@ -658,6 +660,7 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 0,
       error: {
+        code: "sync.failed",
         message:
           "[SixbSyncWorker] Sync 'sync-orders' returned an invalid row at item 1. Dataset 'raw.erp.orders' row contains unknown column 'unexpected'.",
       },
@@ -701,6 +704,7 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 0,
       error: {
+        code: "sync.failed",
         message:
           "[SixbSyncWorker] Sync 'sync-docs' returned row 1 with dataset 'raw.docs' column 'attachment' referencing unknown blob 'blob_missing'.",
       },
@@ -804,7 +808,7 @@ describe("runSyncJob", () => {
       status: "cancelled",
       rowsRead: 1,
       error: {
-        name: "AbortError",
+        code: "runtime.cancelled",
       },
     })
   })

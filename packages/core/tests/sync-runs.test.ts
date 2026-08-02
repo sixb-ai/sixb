@@ -122,6 +122,7 @@ describe("InMemorySyncRunStorage", () => {
         projectId: "my-app",
         status: "failed",
         error: {
+          code: "sync.failed",
           message: "boom",
         },
       })
@@ -146,7 +147,7 @@ describe("InMemorySyncRunStorage", () => {
       finishedAt: new Date("2026-04-06T15:00:00.420Z"),
       rowsRead: 23,
       error: {
-        name: "Error",
+        code: "sync.failed",
         message: "Database connection lost",
       },
     })
@@ -212,7 +213,7 @@ describe("InMemorySyncRunStorage", () => {
     expect(failed?.status).toBe("failed")
     expect(failed?.rowsRead).toBe(23)
     expect(failed?.error).toEqual({
-      name: "Error",
+      code: "sync.failed",
       message: "Database connection lost",
     })
   })

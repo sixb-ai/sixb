@@ -528,7 +528,7 @@ describe("runPipelineJob", () => {
       stepId: "customer-stats",
       status: "failed",
       error: {
-        name: "PipelineWorkerError",
+        code: "pipeline.failed",
       },
     })
     expect(stepRuns.steps[0]?.error?.message).toContain("requires SQL transform support")

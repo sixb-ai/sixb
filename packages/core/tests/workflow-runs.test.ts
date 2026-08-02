@@ -170,10 +170,10 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "wf-run-failed-before-start",
       projectId: "my-app",
       status: "failed",
-      error: "queue dispatch failed",
+      error: { code: "workflow.failed", message: "queue dispatch failed" },
     })
     expect(finished.status).toBe("failed")
-    expect(finished.error).toBe("queue dispatch failed")
+    expect(finished.error).toEqual({ code: "workflow.failed", message: "queue dispatch failed" })
   })
 
   test("waits and resumes workflow and node runs", async () => {
@@ -251,7 +251,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "wf-run-cancelled-while-waiting",
       projectId: "my-app",
       status: "cancelled",
-      error: "Reviewer cancelled",
+      error: { code: "runtime.cancelled", message: "Reviewer cancelled" },
     })
     expect(cancelled.status).toBe("cancelled")
   })
@@ -270,7 +270,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "run-1",
       projectId: "my-app",
       status: "failed",
-      error: "No invoice candidate",
+      error: { code: "workflow.failed", message: "No invoice candidate" },
     })
 
     await storage.start({
@@ -322,7 +322,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "run-1",
     })
     expect(failed?.status).toBe("failed")
-    expect(failed?.error).toBe("No invoice candidate")
+    expect(failed?.error).toEqual({ code: "workflow.failed", message: "No invoice candidate" })
   })
 
   test("lists the latest run for multiple workflow ids", async () => {
@@ -446,7 +446,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "node-1",
       projectId: "my-app",
       status: "failed",
-      error: "No match",
+      error: { code: "workflow.failed", message: "No match" },
     })
 
     await storage.nodes.start({
@@ -499,7 +499,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       statuses: ["failed"],
     })
     expect(failedNodes.nodes[0]?.output).toBeUndefined()
-    expect(failedNodes.nodes[0]?.error).toBe("No match")
+    expect(failedNodes.nodes[0]?.error).toEqual({ code: "workflow.failed", message: "No match" })
   })
 
   test("rejects invalid workflow and node run lifecycle transitions", async () => {
@@ -526,7 +526,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         id: "missing",
         projectId: "my-app",
         status: "failed",
-        error: "boom",
+        error: { code: "workflow.failed", message: "boom" },
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -602,7 +602,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "node-1",
       projectId: "my-app",
       status: "cancelled",
-      error: "Stopped",
+      error: { code: "runtime.cancelled", message: "Stopped" },
     })
 
     await expect(
@@ -610,7 +610,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         id: "node-1",
         projectId: "my-app",
         status: "failed",
-        error: "Too late",
+        error: { code: "runtime.cancelled", message: "Too late" },
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -618,7 +618,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "wf-run-1",
       projectId: "my-app",
       status: "cancelled",
-      error: "Stopped",
+      error: { code: "runtime.cancelled", message: "Stopped" },
     })
 
     await expect(
@@ -640,7 +640,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         id: "wf-run-1",
         projectId: "my-app",
         status: "failed",
-        error: "Too late",
+        error: { code: "runtime.cancelled", message: "Too late" },
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
   })
@@ -746,12 +746,12 @@ describe("InMemoryWorkflowRunStorage", () => {
     const cancelled = await storage.agentNodes.cancel({
       projectId: "my-app",
       nodeRunId: execution.nodeRunId,
-      error: "Workflow cancelled.",
+      error: { code: "runtime.cancelled", message: "Workflow cancelled." },
     })
     expect(cancelled).toMatchObject({
       status: "cancelled",
       prompt: "Resolve txn_1.",
-      error: "Workflow cancelled.",
+      error: { code: "runtime.cancelled", message: "Workflow cancelled." },
     })
     expect(
       (await storage.nodes.getById({ projectId: "my-app", id: execution.nodeRunId }))?.input

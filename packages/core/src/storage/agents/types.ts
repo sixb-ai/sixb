@@ -1,5 +1,6 @@
 import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "../../agents/message"
 import type { Principal } from "../../auth"
+import type { SixbFailure } from "../../errors"
 import type { JsonValue } from "../../json"
 
 // ── agent_threads — one conversation with an agent ──────────────────────────────────────────────
@@ -156,7 +157,7 @@ export interface AgentRunRecord {
   /** Platform diagnostics are transcript annotations, never agent-authored message content. */
   readonly diagnostics?: readonly AgentRunDiagnostic[]
   /** Failure message when the run did not succeed. */
-  readonly error?: string
+  readonly error?: SixbFailure
   /** Execution attempts: `0` while queued, `1` on first start, incremented on redelivery. */
   readonly attempt: number
   readonly execution?: AgentRunExecution
@@ -188,7 +189,7 @@ export interface FinishQueuedAgentRunInput {
   readonly id: string
   readonly projectId: string
   readonly status: "failed" | "cancelled"
-  readonly error?: string
+  readonly error?: SixbFailure
   readonly completedAt?: Date
 }
 
@@ -227,7 +228,7 @@ export type FinishAgentRunInput =
       readonly finishReason?: AgentRunFinishReason
       readonly usage?: AgentRunUsage
       readonly diagnostics?: readonly AgentRunDiagnostic[]
-      readonly error?: string
+      readonly error?: SixbFailure
       readonly completedAt?: Date
     }
 

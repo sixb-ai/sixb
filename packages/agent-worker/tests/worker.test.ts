@@ -3087,7 +3087,7 @@ describe("AgentWorker", () => {
         { label: "run failed" }
       )
       expect(run.status).toBe("failed")
-      expect(run.error).toContain("sandbox provisioning unavailable")
+      expect(run.error?.message).toContain("sandbox provisioning unavailable")
 
       // The turn threw before finalizing, so no assistant message was persisted.
       const messages = await listMessages(storage, threadId)
@@ -3314,7 +3314,7 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("failed")
-      expect(run.error).toContain("turn budget")
+      expect(run.error?.message).toContain("turn budget")
       expect(
         (await listRunStreamRecords(sixb.broker, run.id)).find(
           (record) => record.name === "agent.run.finished"
@@ -3388,7 +3388,7 @@ describe("AgentWorker", () => {
         { label: "missing agent run failed" }
       )
       expect(failed).toMatchObject({ status: "failed", attempt: 0 })
-      expect(failed.error).toContain("not registered")
+      expect(failed.error?.message).toContain("not registered")
       await reporter.flush()
       expect(reports).toHaveLength(1)
       expect(reports[0]?.error).toBeInstanceOf(AgentWorkerError)

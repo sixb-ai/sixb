@@ -91,6 +91,7 @@ describe("InMemoryActionRunStorage", () => {
         projectId: "my-app",
         status: "failed",
         error: {
+          code: "action.failed",
           message: "boom",
           phase: "validation",
         },
@@ -118,6 +119,7 @@ describe("InMemoryActionRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       error: {
+        code: "action.failed",
         message: "writeback failed",
         phase: "writeback",
       },
@@ -154,7 +156,7 @@ describe("InMemoryActionRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       error: {
-        name: "FetchError",
+        code: "action.failed",
         message: "TeamLeader API returned 503 Service Unavailable",
         phase: "writeback",
       },
@@ -207,7 +209,7 @@ describe("InMemoryActionRunStorage", () => {
       id: "act_1",
     })
     expect(failed?.error).toEqual({
-      name: "FetchError",
+      code: "action.failed",
       message: "TeamLeader API returned 503 Service Unavailable",
       phase: "writeback",
     })
@@ -248,7 +250,7 @@ describe("InMemoryActionRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       error: {
-        name: "SlackError",
+        code: "action.failed",
         message: "Slack timed out",
         phase: "effects",
       },
@@ -256,7 +258,7 @@ describe("InMemoryActionRunStorage", () => {
     expect(effects.effects).toMatchObject({
       status: "failed",
       error: {
-        name: "SlackError",
+        code: "action.failed",
         message: "Slack timed out",
         phase: "effects",
       },

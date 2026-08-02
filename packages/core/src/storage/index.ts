@@ -4,6 +4,14 @@
  * A type in a public interface signature must be exported from the same subpath as the interface, or
  * the interface cannot be implemented from outside the package.
  */
+
+/**
+ * The failure record every run table stores, on the same subpath as the storage contracts that
+ * carry it. `toSixbFailure` comes with it: a provider that catches a driver error has to be able to
+ * record it in the one shape, not invent a second.
+ */
+export type { SixbErrorCode, SixbFailure, SixbFailureDetails } from "../errors"
+export { parseSixbFailure, serializeSixbFailure, toSixbFailure } from "../errors"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
 export { stableJsonStringify } from "../json"
 export type {
@@ -42,6 +50,13 @@ export {
   InMemoryActionRunStorage,
   isTerminalActionRun,
 } from "./action-runs"
+export {
+  ACTION_RUN_PHASES,
+  isActionRunPhase,
+  parseActionRunFailure,
+  serializeActionRunFailure,
+  toActionRunFailure,
+} from "./action-runs/types"
 export type {
   AgentExecutionStatus,
   AgentMessageRecord,
@@ -326,7 +341,6 @@ export type {
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
   ListPipelineStepRunsResult,
-  PipelineRunFailure,
   PipelineRunRecord,
   PipelineRunStatus,
   PipelineRunStorage,
@@ -387,7 +401,6 @@ export type {
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
-  SyncRunFailure,
   SyncRunRecord,
   SyncRunStatus,
   SyncRunStorage,

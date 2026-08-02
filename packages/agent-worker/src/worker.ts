@@ -1,5 +1,6 @@
 import { join } from "node:path"
 import type { AgentDefinition, Principal } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import {
   createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
@@ -11,7 +12,7 @@ import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/inter
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
-import { AgentStorageError } from "@sixb/core/storage"
+import { AgentStorageError, toSixbFailure } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
 import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } from "./errors"
@@ -176,7 +177,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
           projectId: context.id,
           id: run.id,
           status: "failed",
-          error: `Agent '${agentId}' is not registered.`,
+          error: toSixbFailure(
+            new SixbError("agent.not_found", `Agent '${agentId}' is not registered.`)
+          ),
         })
         this.reportFailure(error, failed, job.attempt)
         await context.streamSink.publishRunFinished(failed)
@@ -330,7 +333,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
         projectId: this.sixb.id,
         id: run.id,
         status: "failed",
-        error: toErrorMessage(error),
+        error: toSixbFailure(error, { fallbackCode: "agent.failed" }),
       })
       this.reportFailure(error, failed, claimed.job.attempt)
       await this.requireContext().streamSink.publishRunFinished(failed)
@@ -561,7 +564,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
         id: runId,
         executionToken,
         status,
-        error: toErrorMessage(error),
+        error: toSixbFailure(error, { fallbackCode: "agent.failed" }),
       })
     } catch (finalizeError) {
       // Execution already lost / run already terminal — nothing more to record.
@@ -631,13 +634,6 @@ function isExecutionGone(error: unknown): boolean {
 
 function backoff(ms: number): string {
   return new Date(Date.now() + ms).toISOString()
-}
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-  return String(error)
 }
 
 function normalizeRequiredString(value: string | undefined): string {
