@@ -39,14 +39,11 @@ export async function runApp(options: AppOptions = {}) {
     }
 
     const topology = resolveBrowserTopology({
-      mode: "production",
+      role: "app",
       host: options.host,
       appPort: options.port,
       apiPublicOrigin: options.apiPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
-      includeAtlas: false,
-      includeCustomApp: true,
-      serves: "app",
     })
 
     const customApp = await createCustomApp({
@@ -69,7 +66,7 @@ export async function runApp(options: AppOptions = {}) {
         title="Sixb app started"
         name={sixb.id}
         serviceName="Custom app"
-        items={[{ label: "URL", value: servedUrl(topology, "app") }]}
+        items={[{ label: "URL", value: servedUrl(topology) }]}
       />
     )
 

@@ -26,14 +26,11 @@ export async function runAtlas(options: AtlasOptions = {}) {
 
   try {
     const topology = resolveBrowserTopology({
-      mode: "production",
+      role: "atlas",
       host: options.host,
       port: options.port,
       apiPublicOrigin: options.apiPublicOrigin,
       atlasPublicOrigin: options.atlasPublicOrigin,
-      includeAtlas: true,
-      includeCustomApp: false,
-      serves: "atlas",
     })
 
     const atlas = createAtlasApp({
@@ -53,7 +50,7 @@ export async function runAtlas(options: AtlasOptions = {}) {
         title="Sixb Atlas started"
         name={sixb.id}
         serviceName="Atlas"
-        items={[{ label: "URL", value: servedUrl(topology, "atlas") }]}
+        items={[{ label: "URL", value: servedUrl(topology) }]}
       />
     )
 
