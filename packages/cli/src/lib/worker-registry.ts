@@ -7,6 +7,7 @@ import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
 import { SixbCliError } from "./errors"
 import type { LoadedSixb } from "./loadSixb"
+import { configuredOrigin } from "./public-origin"
 
 export interface WorkerCreationOptions {
   readonly agentApiBaseUrl?: string
@@ -17,6 +18,9 @@ interface WorkerFactory {
   /**
    * Why this worker cannot be constructed with the given options, or `null` when it can.
    * Asked before anything is constructed, so a group names every reason at once.
+   *
+   * A malformed input throws instead of answering: it is one bad value rather than one
+   * unsatisfied worker, and the list of workers it took down would say nothing about it.
    */
   readonly unmetRequirement?: (options: WorkerCreationOptions) => string | null
 }
@@ -175,7 +179,7 @@ function knownWorkers(): string {
 }
 
 function agentApiBaseUrl(value: string | undefined): string | null {
-  return value?.trim() || process.env.SIXB_API_PUBLIC_ORIGIN?.trim() || null
+  return configuredOrigin(value, "SIXB_API_PUBLIC_ORIGIN", "API public origin")
 }
 
 function resolveAgentApiBaseUrl(value: string | undefined): string {

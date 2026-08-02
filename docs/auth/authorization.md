@@ -292,6 +292,21 @@ membership policy above) can then invite and manage the rest of the team. See
 
 ## How grants are enforced
 
+> **0.1.0 limit — HTTP writes are not grant-checked.** Grants cover reads and run requests. These
+> four routes call the privileged runtime directly, so **any authenticated session can write any
+> object type**:
+>
+> | Route | Writes |
+> | --- | --- |
+> | `PUT /api/objects/:objectTypeId/:objectId` | object properties |
+> | `PUT /api/objects/:objectTypeId/:objectId/links/:linkId` | a link |
+> | `DELETE /api/objects/:objectTypeId/:objectId/links/:linkId` | removes a link |
+> | `POST /api/objects/:objectTypeId/:objectId/telemetry/:propertyId` | a telemetry point |
+>
+> Route writes through [actions](../actions/overview.md) instead: `apply:action` is enforced and the
+> write is recorded as a run. Block the four routes at your reverse proxy if untrusted principals
+> hold sessions.
+
 Grants are enforced through a **scoped runtime**. The raw `sixb` instance is privileged — it has
 no authorization context and bypasses all grant checks. That is intended for trusted system code
 (startup, syncs, projections, workers, tests).
@@ -354,9 +369,9 @@ for the event model.
 ## With the server
 
 The Sixb server does this for you. It resolves the session once per request and routes
-authenticated traffic through `sixb.as(context)` automatically, so grants are enforced without
-extra wiring. You define groups, roles, and membership policies; the server applies them. See the
-[Server overview](../server/overview.md).
+authenticated traffic through `sixb.as(context)` automatically, so read and run grants are enforced
+without extra wiring. You define groups, roles, and membership policies; the server applies them.
+See the [Server overview](../server/overview.md).
 
 To build a context yourself in a custom integration, resolve it from the request:
 

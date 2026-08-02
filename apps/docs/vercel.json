@@ -3,6 +3,6 @@
   "framework": "nextjs",
   "buildCommand": "bun run build",
   "installCommand": "bun install",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- ':/apps/docs' ':/packages/ui'",
+  "ignoreCommand": "bun ../../scripts/docs-vercel-ignore.ts",
   "github": { "silent": true }
 }

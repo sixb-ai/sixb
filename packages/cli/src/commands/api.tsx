@@ -53,15 +53,15 @@ export async function runApi(options: ApiOptions = {}) {
       .then(() => true)
       .catch(() => false)
     const topology = resolveBrowserTopology({
-      mode: "production",
+      role: "api",
       host: options.host,
       apiHost: options.apiHost,
       port: options.port,
-      apiPort: options.apiPort ?? options.port,
+      apiPort: options.apiPort,
       apiPublicOrigin: options.apiPublicOrigin,
       atlasPublicOrigin: options.atlasPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
-      includeCustomApp: hasBuiltCustomApp,
+      hasCustomApp: hasBuiltCustomApp,
     })
 
     server = createSixbServer({

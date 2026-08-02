@@ -42,7 +42,7 @@ export async function runDev(options: DevOptions = {}) {
     const customAppProbe = await createCustomApp({ rootDir: projectRoot })
     const hasCustomApp = await customAppProbe.hasRoutes()
     const topology = resolveBrowserTopology({
-      mode: "development",
+      role: "dev",
       host: options.host,
       apiHost: options.apiHost,
       port: options.port,
@@ -50,7 +50,7 @@ export async function runDev(options: DevOptions = {}) {
       apiPublicOrigin: options.apiPublicOrigin,
       atlasPublicOrigin: options.atlasPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
-      includeCustomApp: hasCustomApp,
+      hasCustomApp,
     })
 
     runtime = await startSixbRuntime(sixb, {

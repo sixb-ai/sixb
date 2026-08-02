@@ -35,6 +35,27 @@ describe("assertWorkerInputs", () => {
     ).not.toThrow()
   })
 
+  test("refuses an origin the browser roles would refuse, at the same moment they would", () => {
+    // `sixb api` has always rejected a bare host. The agent worker used to accept it and
+    // fail at its first request instead, so one `SIXB_API_PUBLIC_ORIGIN` could stop one
+    // role at startup and start another. Both now read the same definition.
+    process.env.SIXB_API_PUBLIC_ORIGIN = "api.example.com"
+
+    expect(() =>
+      assertWorkerInputs({ workerTypes: ["agent"], options: {}, autoSelected: false })
+    ).toThrow("Invalid API public origin")
+  })
+
+  test("refuses a full URL where an origin is expected", () => {
+    expect(() =>
+      assertWorkerInputs({
+        workerTypes: ["agent"],
+        options: { agentApiBaseUrl: "https://api.example.com/api" },
+        autoSelected: false,
+      })
+    ).toThrow("must be an origin")
+  })
+
   test("names what it took down, and how to proceed without it", () => {
     // The whole group refusing is correct: five of six workers running means agent jobs
     // pile up in a queue nobody claims, which looks exactly like an idle system. What was

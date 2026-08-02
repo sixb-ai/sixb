@@ -124,11 +124,32 @@ predicates. See [Client events](../client/events.md). For action buttons, prefer
 
 ### Appending events
 
-`sixb.events.append(input)` authors supported non-ontology domain events. Object, link, and telemetry
-facts are emitted only by the Materializer after their ontology commit succeeds; the public
-`DomainEventLog` cannot publish persisted outbox envelopes.
+`sixb.events.append(input)` authors supported non-ontology domain events:
 
 ```ts
+// fire a scheduled workflow now, without waiting for its cron
+await sixb.events.append({
+  events: [
+    {
+      type: "schedule.triggered",
+      payload: {
+        scheduleId: "nightly-invoice-sweep",
+        occurrenceAt: "2026-04-18T02:00:00.000Z",
+        triggeredAt: "2026-04-18T02:00:00.000Z",
+        occurrenceKey: "nightly-invoice-sweep:2026-04-18T02:00:00.000Z",
+      },
+    },
+  ],
+})
+```
+
+Ontology facts are not appendable. `object.*`, `link.*`, and `telemetry.*` are not in the parameter
+type, so they do not compile, and the runtime throws for a caller that reached it untyped. The
+Materializer emits them itself once the ontology commit succeeds — write through the ontology and
+the event follows:
+
+```ts
+// emits object.updated after the commit
 await sixb.objects(Invoice).upsert({
   properties: { id: "INV-1042", status: "paid" },
 })

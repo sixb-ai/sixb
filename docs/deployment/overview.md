@@ -94,8 +94,8 @@ Each role is a `sixb` subcommand that runs in `NODE_ENV=production`. All accept
 | `sixb worker <type>`           | Runs one queue worker                                 |
 | `sixb worker-group [types...]` | Runs several queue workers in one process            |
 
-The worker `<type>` is one of `sync`, `action`, `pipeline`, `projection`, or
-`workflow`:
+The worker `<type>` is one of `sync`, `action`, `agent`, `pipeline`, `projection`,
+or `workflow`:
 
 ```bash
 sixb worker sync
@@ -116,6 +116,56 @@ sixb worker-group
 A role process is **idle**, not an error, when it has nothing to do — an
 orchestrator with no routes, a rules process with no rules, or a worker group
 with no registered worker types prints a warning and stays running.
+
+## Public origins
+
+A role that talks to a browser refuses to start in production without the origins it
+needs. Every flag has an environment equivalent; the flag wins.
+
+| Role                | Required                                       | Also required when                                     |
+| ------------------- | ---------------------------------------------- | ------------------------------------------------------ |
+| `sixb api`          | `--api-public-origin`, `--atlas-public-origin` | `--app-public-origin`, with a built `app/`             |
+| `sixb atlas`        | `--api-public-origin`                          | —                                                      |
+| `sixb app`          | `--api-public-origin`                          | —                                                      |
+| `sixb worker agent` | `--api-public-origin`                          | —                                                      |
+| `sixb worker-group` | none                                           | `--api-public-origin`, with `agent` in the group       |
+| everything else     | none                                           | —                                                      |
+
+A group refuses to start whole, so the origin is required as soon as `agent` is one of its
+workers — including when the group selected it for you from a project that registers agents.
+
+| Flag                    | Environment variable       |
+| ----------------------- | -------------------------- |
+| `--api-public-origin`   | `SIXB_API_PUBLIC_ORIGIN`   |
+| `--atlas-public-origin` | `SIXB_ATLAS_PUBLIC_ORIGIN` |
+| `--app-public-origin`   | `SIXB_APP_PUBLIC_ORIGIN`   |
+
+`sixb api` is the strict one because those origins are its CORS allowlist: each browser
+origin maps to one auth audience, and an unlisted one is rejected. `sixb atlas` and
+`sixb app` only display their own origin, so they start without it and print the address
+they bound instead — set it when you want the startup panel to show the public URL.
+
+An origin is scheme, host, and port, nothing else: `https://api.acme.example.com`. A path,
+a query string, or a fragment is rejected.
+
+## Storage migrations
+
+The six roles that touch the schema — `api`, `rules`, `scheduler`, `orchestrator`,
+`worker`, `worker-group` — bring it up to date at startup, so a forgotten migration
+cannot surface as a missing column on the first request. `atlas` and `app` serve a
+browser bundle and hold no DDL grant, so they never migrate.
+
+Run it as its own deploy stage when you want the schema change separated from the
+rollout:
+
+```bash
+sixb db migrate
+sixb api --no-migrate     # or SIXB_SKIP_MIGRATION=1
+```
+
+Postgres serializes concurrent migrators on an advisory lock, so replicas starting
+together are safe. **SQLite has no cross-process lock**: migrate it as its own step and
+start the roles with `--no-migrate`.
 
 ## Execution model
 
@@ -187,8 +237,8 @@ Workers claim jobs with a **lease** (default 15 minutes). On each outcome:
 The API role owns `OntologyMaintenance`: immediate post-commit publication still runs in the
 process that committed, while the API performs durable outbox catch-up and retention every 60
 seconds. Queue workers do not poll the outbox, and no dedicated outbox process is required.
-Deployments with separate roles must run at least one API role per project so durable outbox
-catch-up and retention remain active.
+Deployments with separate roles must run at least one API role per project, or durable outbox
+catch-up and retention never run.
 
 Because jobs and run records live in durable, shared providers, a crashed worker
 loses no work: the unfinished job's lease expires and another worker reclaims it.
@@ -230,6 +280,9 @@ A typical deployment runs each role as a separate process, all loading the same
 config against shared durable providers:
 
 ```bash
+export SIXB_API_PUBLIC_ORIGIN=https://api.acme.example.com
+export SIXB_ATLAS_PUBLIC_ORIGIN=https://atlas.acme.example.com
+
 sixb api            # HTTP/WS API
 sixb atlas          # admin UI
 sixb orchestrator   # event -> queue dispatch
@@ -238,9 +291,21 @@ sixb rules          # rule evaluation
 sixb worker-group   # all registered queue workers
 ```
 
-Scale queue-worker roles horizontally: extra `sixb worker` processes share the queue and increase
-throughput because each job is claimed by one worker. V0.1.0 runs one API maintenance owner and one
-Rules worker per project; Rules reconciliation has no cross-process lease yet.
+## Scaling roles
+
+The data plane scales horizontally. The control plane does not: in 0.1.0 the
+orchestrator, scheduler, and rules roles must each run as a **single process**.
+
+| Role                               | Replicas | Why                                                    |
+| ---------------------------------- | -------- | ------------------------------------------------------ |
+| `sixb api`                         | many     | outbox claims are lease-fenced, so drains never overlap |
+| `sixb atlas`, `sixb app`           | many     | they serve a static bundle                              |
+| `sixb worker`, `sixb worker-group` | many     | each job is claimed by exactly one worker               |
+| `sixb orchestrator`                | **one**  | a second process dispatches the same event twice        |
+| `sixb scheduler`                   | **one**  | a second process fires the same occurrence twice        |
+| `sixb rules`                       | **one**  | reconciliation has no cross-process lease               |
+
+Running two of a single-process role does not corrupt data — it duplicates runs.
 
 ## Related
 

@@ -197,6 +197,10 @@ touch only the components.
 It works with no configuration — lookups fall back to a shared
 [Photon](https://photon.komoot.io) provider, which is free and needs no API key:
 
+> **Where the data goes.** The default sends what you type to `photon.komoot.io`, debounced and
+> from the third character on. Self-host Photon or supply your own `AddressProvider` before typing
+> confidential addresses into it.
+
 ```tsx
 import { AddressFields } from "@sixb/ui/components"
 import { type AddressDraft, EMPTY_ADDRESS_DRAFT } from "@sixb/ui/lib/address"
@@ -275,7 +279,11 @@ way as address lookup.
 | Hooks | `@sixb/ui/hooks` | `useDictation`, `useSpeechRecognition`, `SpeechRecognitionProvider` |
 | Recognizers | `@sixb/ui/lib/speech` | `SpeechRecognizer` contract, `createWebSpeechRecognizer` |
 
-The default recognizer is the browser's own Web Speech API — no key and no server:
+The default recognizer is the browser's own Web Speech API — no key and no setup:
+
+> **Where the data goes.** "In the browser" is not "on the device": Chrome implements
+> `webkitSpeechRecognition` by streaming the audio to Google. Supply your own `SpeechRecognizer`
+> for confidential dictation.
 
 ```tsx
 import { DictationTextarea } from "@sixb/ui/components"

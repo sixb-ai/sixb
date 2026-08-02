@@ -231,6 +231,8 @@ describe("role startup connection budget", () => {
     async () => {
       await writePrebuiltAssets(PREBUILT_ATLAS)
       const [atlasPort, apiPort] = await getFreePorts(2)
+      // No `--atlas-public-origin`: Atlas passes its own origin to nothing but the startup
+      // panel, and requiring it made the documented production command exit non-zero.
       const { ready, logEntries } = await startRole([
         "atlas",
         "--port",
@@ -239,8 +241,6 @@ describe("role startup connection budget", () => {
         "127.0.0.1",
         "--api-public-origin",
         `http://localhost:${apiPort}`,
-        "--atlas-public-origin",
-        `http://localhost:${atlasPort}`,
       ])
 
       expect(ready).toBe(true)
@@ -270,8 +270,6 @@ describe("role startup connection budget", () => {
         "127.0.0.1",
         "--api-public-origin",
         `http://localhost:${apiPort}`,
-        "--app-public-origin",
-        `http://localhost:${appPort}`,
       ])
 
       expect(ready).toBe(true)

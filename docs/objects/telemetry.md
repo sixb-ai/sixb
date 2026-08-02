@@ -168,7 +168,8 @@ The server exposes the same operations as routes on an object:
 | `GET` | `/api/objects/:objectTypeId/:objectId/telemetry/:propertyId/latest` | Read latest point |
 
 The append body is `{ value, unit?, at? }`. History accepts `from`, `to`, `order`, and `limit` as
-query parameters. See the [HTTP reference](./http-reference.md) for the full object API.
+query parameters. Appending is **not grant-checked in 0.1.0** — see
+[Authorization](../auth/authorization.md). See the [HTTP reference](./http-reference.md) for the full object API.
 
 ## The telemetry.appended event
 
