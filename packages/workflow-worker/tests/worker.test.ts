@@ -15,10 +15,14 @@ import {
   Sixb,
   type SixbErrorContext,
   type SixbErrorHandler,
+  type SixbFailure,
   type WorkflowDefinition,
 } from "@sixb/core"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import { WorkflowWorker } from "../src"
+
+/** What `onError` is handed: the portable record, and the live thrown value on the context. */
+type Report = { failure: SixbFailure; context: SixbErrorContext & { cause: unknown } }
 
 const Transaction = defineObjectType({
   id: "Transaction",
@@ -326,7 +330,7 @@ describe("WorkflowWorker", () => {
   })
 
   test("reports a terminal failed workflow once with the original error", async () => {
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reports: Report[] = []
     const workflow = defineWorkflow("failing-workflow")
       .input({
         transaction: ref(Transaction),
@@ -334,8 +338,8 @@ describe("WorkflowWorker", () => {
       .then(failingStep)
     const sixb = createSixb({
       workflows: [workflow],
-      onError: (error, context) => {
-        reports.push({ error, context })
+      onError: (failure, context) => {
+        reports.push({ failure, context })
       },
     })
     await sixb.queues.workflows.enqueue({
@@ -382,7 +386,7 @@ describe("WorkflowWorker", () => {
       async () => reports,
       (value) => value.length === 1
     )
-    expect(reported[0]?.error).toBe(workflowExplosion)
+    expect(reported[0]?.context.cause).toBe(workflowExplosion)
     expect(reported[0]?.context).toMatchObject({
       type: "run.failed",
       notificationId: `project:${sixb.id}:run:workflow:wfrun_worker_failed:failed:${run?.finishedAt?.toISOString()}`,
@@ -440,7 +444,7 @@ describe("WorkflowWorker", () => {
   })
 
   test("reports a queued run that fails before workflow start", async () => {
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reports: Report[] = []
     const workflow = defineWorkflow("queued-invalid-workflow")
       .input({
         transaction: ref(Transaction),
@@ -448,8 +452,8 @@ describe("WorkflowWorker", () => {
       .then(findBestInvoice)
     const sixb = createSixb({
       workflows: [workflow],
-      onError: (error, context) => {
-        reports.push({ error, context })
+      onError: (failure, context) => {
+        reports.push({ failure, context })
       },
     })
 
@@ -490,7 +494,7 @@ describe("WorkflowWorker", () => {
       (value) => value.length === 1
     )
 
-    expect(reported[0]?.error.message).toContain("Missing required field")
+    expect(reported[0]?.failure.message).toContain("Missing required field")
     expect(reported[0]?.context).toMatchObject({
       type: "run.failed",
       notificationId: `project:${sixb.id}:run:workflow:wfrun_queued_invalid:failed:${run?.finishedAt?.toISOString()}`,
@@ -716,11 +720,11 @@ describe("WorkflowWorker", () => {
         invoice: steps.findBestInvoice.invoice,
       }))
       .then(failAfterResume)
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reports: Report[] = []
     const sixb = createSixb({
       workflows: [workflow],
-      onError: (error, context) => {
-        reports.push({ error, context })
+      onError: (failure, context) => {
+        reports.push({ failure, context })
       },
     })
 
@@ -790,7 +794,7 @@ describe("WorkflowWorker", () => {
     )
 
     expect(run?.error?.message).toBe(resumeError.message)
-    expect(reported[0]?.error).toBe(resumeError)
+    expect(reported[0]?.context.cause).toBe(resumeError)
     expect(reported[0]?.context).toMatchObject({
       attempt: 1,
       run: {
@@ -802,12 +806,12 @@ describe("WorkflowWorker", () => {
   })
 
   test("keeps the run recoverable without reporting a failure on worker shutdown", async () => {
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reports: Report[] = []
     const workflow = defineWorkflow("cancel-workflow").input({}).then(slowStep)
     const sixb = createSixb({
       workflows: [workflow],
-      onError: (error, context) => {
-        reports.push({ error, context })
+      onError: (failure, context) => {
+        reports.push({ failure, context })
       },
     })
     await sixb.queues.workflows.enqueue({

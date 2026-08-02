@@ -110,4 +110,11 @@ export interface OrchestratorRuntimeOptions {
   readonly routes: OrchestratorRoutes
   /** Required when the compiled routes contain projections. */
   readonly projectionDispatch?: ProjectionDispatchPorts
+  /**
+   * The runtime the orchestrator escalates through, which is the `Sixb` it routes for.
+   *
+   * Optional because the orchestrator is also driven directly in tests, where a dispatch failure
+   * has nowhere to go.
+   */
+  readonly host?: unknown
 }

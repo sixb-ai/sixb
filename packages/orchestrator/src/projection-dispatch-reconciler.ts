@@ -1,3 +1,4 @@
+import { reportBackgroundTaskFailure } from "@sixb/core/internal/error-reporting"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { ProjectionRunRequestedQueueJob, Queue } from "@sixb/core/queues"
@@ -12,6 +13,8 @@ interface ProjectionDispatchReconcilerInput extends ProjectionDispatchPorts {
   readonly projectId: string
   readonly queue: Queue<ProjectionRunRequestedQueueJob>
   readonly descriptors: readonly ProjectionDispatchDescriptor[]
+  /** The runtime this pass escalates through. Absent when the reconciler is driven from a test. */
+  readonly host?: unknown
 }
 
 export async function runProjectionDispatchReconciler(
@@ -31,10 +34,13 @@ export async function reconcileProjectionDispatch(
     try {
       await reconcileProjection(input, descriptor)
     } catch (error) {
-      console.error(
-        `[SixbOrchestrator] Projection dispatch reconciliation failed (projectionId=${descriptor.projectionId}, datasetId=${descriptor.datasetId}):`,
-        error
-      )
+      // This pass is the repair path for projection dispatch: while it keeps failing, a dataset
+      // version that the live path missed stays unprojected and no run says so.
+      reportBackgroundTaskFailure(input.host, error, {
+        projectId: input.projectId,
+        task: "orchestrator.projection-reconcile",
+        subject: `${descriptor.projectionId}:${descriptor.datasetId}`,
+      })
     }
   }
 }

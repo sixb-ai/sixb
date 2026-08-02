@@ -31,6 +31,7 @@ import {
   type SandboxFileRecord,
   Sixb,
   type SixbErrorContext,
+  type SixbFailure,
   type Storage,
 } from "@sixb/core"
 import { type AgentRunStreamEvent, agentRunStreamId } from "@sixb/core/agents/streams"
@@ -61,6 +62,9 @@ import { createConversationAgentEnvironment } from "../src/run-environment"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
 import type { AgentWorkerContext, AgentWorkerStorage } from "../src/types"
 import { waitFor, writeProjectSkill } from "./helpers"
+
+/** What `onError` is handed: the portable record, and the live thrown value on the context. */
+type Report = { failure: SixbFailure; context: SixbErrorContext & { cause: unknown } }
 
 const PROJECT_ID = "agent-worker-tests"
 const TEST_AGENT_API_BASE_URL = "http://localhost:3002/api/"
@@ -1813,9 +1817,11 @@ describe("AgentWorker", () => {
   test("redelivers without reporting when queue ownership is lost", async () => {
     const sixb = buildSixb(slowAnswerModel(120))
     const storage = agentStorageOf(sixb)
-    let reportCount = 0
-    const reporter = attachSixbErrorReporter(sixb, () => {
-      reportCount += 1
+    // A lost lease escalates as a queue-task failure, which is not what this asserts: the run
+    // recovered on redelivery, so nothing may report it as failed.
+    let runFailureCount = 0
+    const reporter = attachSixbErrorReporter(sixb, (_failure, context) => {
+      if (context.type === "run.failed") runFailureCount += 1
     })
     const queue = sixb.queues.agents
     const originalRenew = queue.renewLease?.bind(queue)
@@ -1848,7 +1854,7 @@ describe("AgentWorker", () => {
       )
       expect(assistants).toHaveLength(1)
       await reporter.flush()
-      expect(reportCount).toBe(0)
+      expect(runFailureCount).toBe(0)
     } finally {
       await worker.stop()
       console.error = originalConsoleError
@@ -3003,9 +3009,9 @@ describe("AgentWorker", () => {
       }),
     })
     const sixb = buildSixb(failingModel)
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    const reporter = attachSixbErrorReporter(sixb, (error, context) => {
-      reports.push({ error, context })
+    const reports: Report[] = []
+    const reporter = attachSixbErrorReporter(sixb, (failure, context) => {
+      reports.push({ failure, context })
     })
     const storage = agentStorageOf(sixb)
 
@@ -3027,7 +3033,7 @@ describe("AgentWorker", () => {
       expect(run.error).toBeDefined()
       await reporter.flush()
       expect(reports).toHaveLength(1)
-      expect(reports[0]?.error).toBe(originalError)
+      expect(reports[0]?.context.cause).toBe(originalError)
       expect(reports[0]?.context).toMatchObject({
         type: "run.failed",
         notificationId: `project:${PROJECT_ID}:run:agent:${run.id}:failed:${run.completedAt?.toISOString()}`,
@@ -3338,9 +3344,9 @@ describe("AgentWorker", () => {
   test("reports a queued run failed when its agent is no longer registered", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    const reporter = attachSixbErrorReporter(sixb, (error, context) => {
-      reports.push({ error, context })
+    const reports: Report[] = []
+    const reporter = attachSixbErrorReporter(sixb, (failure, context) => {
+      reports.push({ failure, context })
     })
     const threadId = "thread-missing-agent"
     const runId = createAgentRunId()
@@ -3391,7 +3397,7 @@ describe("AgentWorker", () => {
       expect(failed.error?.message).toContain("not registered")
       await reporter.flush()
       expect(reports).toHaveLength(1)
-      expect(reports[0]?.error).toBeInstanceOf(AgentWorkerError)
+      expect(reports[0]?.context.cause).toBeInstanceOf(AgentWorkerError)
       expect(reports[0]?.context).toMatchObject({
         projectId: PROJECT_ID,
         attempt: 1,

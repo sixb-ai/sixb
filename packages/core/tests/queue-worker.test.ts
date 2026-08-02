@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { InMemoryQueues } from "../src"
+import { attachSixbErrorReporter, flushSixbErrors } from "../src/error-reporting/internal"
 import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "../src/queues"
 import { QueueWorker, type QueueWorkerFailureDecision } from "../src/workers"
 
@@ -254,11 +255,16 @@ describe("QueueWorker", () => {
       }
     }
 
+    // A settlement failure is escalated, not printed at the call site, so the worker needs the host
+    // it escalates through. With no `onError` configured the channel's default is what prints.
+    const host = {}
+    attachSixbErrorReporter(host)
     const worker = new ResilientWorker({
       projectId: PROJECT_ID,
       queue: queues.syncRuns,
       workerId: "w",
       idlePollMs: 10,
+      host,
     })
     const consoleError = spyOn(console, "error").mockImplementation(() => {})
 
@@ -275,7 +281,11 @@ describe("QueueWorker", () => {
         jobs: [{ type: "sync.run.requested", payload: { syncId: "second" } }],
       })
       await waitFor(() => processed.includes("second"))
-      expect(consoleError).toHaveBeenCalled()
+      await flushSixbErrors(host)
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining("background task 'queue.settle' failed"),
+        expect.anything()
+      )
     } finally {
       await worker.stop()
       consoleError.mockRestore()

@@ -1,4 +1,5 @@
 import { workflowAgentNodeQueueJobId } from "@sixb/core/internal/agents"
+import { reportBackgroundTaskFailure } from "@sixb/core/internal/error-reporting"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
 import {
   snapshotWorkflowAgentStepInput,
@@ -101,10 +102,13 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
         ],
       })
     } catch (error) {
-      console.error(
-        `[SixbWorkflowWorker] Could not dispatch agent workflow node '${nodeRun.id}'; the agent worker will retry.`,
-        error
-      )
+      // The node is parked as waiting and durable; the agent worker's scan is what retries this.
+      // Until it does, the workflow sits at this node with nothing recording why.
+      reportBackgroundTaskFailure(context.runtime, error, {
+        projectId: context.runtime.projectId,
+        task: "agent.dispatch",
+        subject: nodeRun.id,
+      })
     }
 
     return { status: "waiting", ...parked, waitingAt }

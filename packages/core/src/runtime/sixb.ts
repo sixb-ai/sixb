@@ -36,6 +36,7 @@ import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
 import {
   attachSixbErrorReporter,
+  reportBackgroundTaskFailure,
   reportEventDeliveryFailure,
   shareSixbErrorReporter,
 } from "../error-reporting/capability"
@@ -385,12 +386,22 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
           projectId: this.projectId,
           ...failure,
         }),
+      onError: (error) =>
+        reportBackgroundTaskFailure(this, error, {
+          projectId: this.projectId,
+          task: "ontology.outbox",
+        }),
     })
     this.ontologyMaintenance = new OntologyMaintenance({
       projectId: this.projectId,
       storage: this.storage,
       dispatcher: this.committedFacts,
       options: options.ontologyMaintenance,
+      onError: (error) =>
+        reportBackgroundTaskFailure(this, error, {
+          projectId: this.projectId,
+          task: "ontology.maintenance",
+        }),
     })
 
     this.runtimeContext = {
@@ -577,6 +588,12 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     const runtime = new SchedulerRuntime({
       schedules: this.listSchedules(),
       events: this.eventsRuntime,
+      onError: (error, scheduleId) =>
+        reportBackgroundTaskFailure(this, error, {
+          projectId: this.projectId,
+          task: "schedule.plan",
+          subject: scheduleId,
+        }),
     })
 
     await runtime.start()

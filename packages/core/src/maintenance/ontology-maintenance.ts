@@ -66,6 +66,8 @@ export class OntologyMaintenance {
       "shutdownTimeoutMs"
     )
     this.now = dependencies.now ?? (() => new Date())
+    // A runtime fills this with the escalation channel, so the fallback is the standalone path —
+    // maintenance constructed directly, which is a test or an embedding, not a running project.
     this.onError =
       dependencies.onError ??
       ((error) => console.error("[Sixb] Ontology maintenance error:", error))

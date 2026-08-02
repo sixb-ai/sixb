@@ -1,4 +1,4 @@
-import { normalizeReportedError } from "./normalize"
+import { type SixbFailure, toSixbFailure } from "../errors"
 import type { SixbErrorContext, SixbErrorHandler } from "./types"
 
 const DEFAULT_FLUSH_TIMEOUT_MS = 5_000
@@ -6,14 +6,17 @@ const DEFAULT_FLUSH_TIMEOUT_MS = 5_000
 /** Failure-isolated, non-blocking adapter around the configured callback. */
 export class SixbErrorReporter {
   private readonly pending = new Set<Promise<void>>()
+  private readonly handler: SixbErrorHandler
 
-  constructor(private readonly handler?: SixbErrorHandler) {}
+  constructor(handler?: SixbErrorHandler) {
+    this.handler = handler ?? printFailure
+  }
 
   report(error: unknown, context: SixbErrorContext): void {
-    if (!this.handler) return
+    const failure = toSixbFailure(error)
 
     const invocation = Promise.resolve()
-      .then(() => this.handler?.(normalizeReportedError(error), context))
+      .then(() => this.handler(failure, { ...context, cause: error }))
       .then(() => undefined)
       .catch((handlerError) => {
         try {
@@ -44,6 +47,51 @@ export class SixbErrorReporter {
         return
       }
     }
+  }
+}
+
+/**
+ * What a runtime with no `onError` does with a failure.
+ *
+ * Not silence, because the project that has not configured reporting yet is exactly the one that
+ * needs to see its dispatcher failing. Every escalation used to print at its own call site in its
+ * own wording; this is the one line all of them print now, and setting `onError` replaces it rather
+ * than adding to it.
+ *
+ * The thrown value goes through as the second argument so the runtime renders its stack, which is
+ * the part a message cannot carry.
+ */
+function printFailure(failure: SixbFailure, context: SixbErrorContext & { cause: unknown }): void {
+  try {
+    console.error(
+      `[Sixb] ${describe(context)} — ${failure.code}: ${failure.message}`,
+      context.cause
+    )
+  } catch {
+    // A replaced `console` must not turn a reported failure into an unhandled rejection.
+  }
+}
+
+/** Where the failure happened, in the terms an operator uses for that part of the runtime. */
+function describe(context: SixbErrorContext): string {
+  switch (context.type) {
+    case "run.failed":
+      return `${context.run.kind} run '${context.run.runId}' failed`
+    case "event.delivery.failed":
+      return context.source
+        ? `[${context.source}] event delivery failed (${context.eventTypes.join(", ")})`
+        : `event delivery failed (${context.eventTypes.join(", ")})`
+    case "rule.evaluation.failed": {
+      const subject = context.subject
+        ? ` on ${context.subject.objectTypeId}:${context.subject.primaryId}`
+        : ""
+      const rule = context.ruleId ? `rule '${context.ruleId}'${subject}` : "rule"
+      return `${rule} evaluation failed (${context.source})`
+    }
+    case "background.task.failed":
+      return context.subject
+        ? `background task '${context.task}' failed on '${context.subject}'`
+        : `background task '${context.task}' failed`
   }
 }
 

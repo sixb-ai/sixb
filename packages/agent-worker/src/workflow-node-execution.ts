@@ -1,7 +1,7 @@
 import type { AgentDefinition, ValueType, WorkflowDefinition } from "@sixb/core"
 import { SixbError } from "@sixb/core/errors"
 import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
-import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { reportBackgroundTaskFailure, reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
@@ -110,10 +110,13 @@ export async function executeWorkflowAgentNode(
     })
     await emitNodeSucceeded(input.sixb, completedNode, workflow.nodes.length)
     await enqueueWorkflowAgentNodeResume(input.sixb, nodeRun).catch((error) => {
-      console.error(
-        `[SixbAgentWorker] Could not resume workflow after agent node '${nodeRun.id}'; the dispatcher will retry.`,
-        error
-      )
+      // The node is recorded as finished; only the resume job is missing, and the agent worker's
+      // dispatch loop re-enqueues it. Until it does, the workflow stops here with nothing saying so.
+      reportBackgroundTaskFailure(input.sixb, error, {
+        projectId: input.sixb.id,
+        task: "workflow.resume",
+        subject: nodeRun.id,
+      })
     })
   } catch (error) {
     if (lostQueueDelivery(error, signal)) return
@@ -339,8 +342,8 @@ async function emitNodeSucceeded(
   node: WorkflowNodeRunRecord,
   totalNodes: number
 ): Promise<void> {
-  await sixb.events
-    .append({
+  await sixb.events.emit(
+    {
       events: [
         {
           type: "workflow.run.node.finished",
@@ -358,13 +361,9 @@ async function emitNodeSucceeded(
           },
         },
       ],
-    })
-    .catch((error) => {
-      console.error(
-        `[SixbAgentWorker] Could not emit completion for workflow agent node '${node.id}'.`,
-        error
-      )
-    })
+    },
+    { source: "SixbAgentWorker" }
+  )
 }
 
 async function emitNodeAndRunFailed(
@@ -373,8 +372,8 @@ async function emitNodeAndRunFailed(
   totalNodes: number,
   status: "failed" | "cancelled"
 ): Promise<void> {
-  await sixb.events
-    .append({
+  await sixb.events.emit(
+    {
       events: [
         {
           type: "workflow.run.node.finished",
@@ -403,13 +402,9 @@ async function emitNodeAndRunFailed(
           },
         },
       ],
-    })
-    .catch((error) => {
-      console.error(
-        `[SixbAgentWorker] Could not emit failure for workflow agent node '${failed.node.id}'.`,
-        error
-      )
-    })
+    },
+    { source: "SixbAgentWorker" }
+  )
 }
 
 export async function enqueueWorkflowAgentNodeResume(

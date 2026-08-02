@@ -1,3 +1,5 @@
+import type { SixbFailure } from "../errors"
+
 /**
  * The failed unit of work, discriminated by primitive. Each variant carries the correlation its
  * primitive actually has, and there is exactly one variant per `SixbRunKind`.
@@ -45,6 +47,43 @@ export type SixbFailedRun =
       readonly webhookId: string
     }
 
+/**
+ * The background work of the runtime, named.
+ *
+ * Closed, for the reason every other Sixb vocabulary is (`SIXB_RUN_KINDS`, `SIXB_ERROR_CODES`): a
+ * handler routes on it — this task pages, that one opens a ticket — and a free string makes that
+ * routing a typo away from silence.
+ *
+ * These are the loops that keep a project moving without anyone asking them to. None of them is a
+ * run, so none has a row to record a failure on, which is why each was a `console.error` reaching
+ * nobody before this existed.
+ */
+export const SIXB_BACKGROUND_TASKS = [
+  /** Handing a queued agent run to its worker. */
+  "agent.dispatch",
+  /** Publishing committed ontology facts as domain events. */
+  "ontology.outbox",
+  /** The periodic pass that repairs projections and re-drives a stalled outbox. */
+  "ontology.maintenance",
+  /** Turning a domain event into the queue jobs and event schedules it routes to. */
+  "orchestrator.dispatch",
+  /** Re-driving projection dispatch for datasets the live path missed. */
+  "orchestrator.projection-reconcile",
+  /** Holding the event subscription a project's live routing depends on. */
+  "orchestrator.subscribe",
+  /** Keeping the lease on a claimed queue job. */
+  "queue.lease",
+  /** Acking, failing, or releasing a queue job once its work is done. */
+  "queue.settle",
+  /** Planning when a cron schedule fires next. */
+  "schedule.plan",
+  /** Re-entering a workflow once the node it was waiting on finished. */
+  "workflow.resume",
+] as const
+
+/** One of the runtime's own background loops. See {@link SIXB_BACKGROUND_TASKS}. */
+export type SixbBackgroundTask = (typeof SIXB_BACKGROUND_TASKS)[number]
+
 interface SixbFailureContext<TType extends string> {
   readonly type: TType
   /**
@@ -84,6 +123,12 @@ export interface SixbEventDeliveryFailedContext
   /** Which event types never reached subscribers. Payloads are never included. */
   readonly eventTypes: readonly string[]
   /**
+   * The framework component that was emitting, as it labels itself (`SixbActionWorker`). Present on
+   * the emit path, where the emitter is the first thing an operator wants to know; absent on the
+   * outbox path, which is the runtime itself.
+   */
+  readonly source?: string
+  /**
    * Stable envelope IDs, present only when the events were persisted before delivery failed.
    * Payloads and lease identifiers are never exposed.
    */
@@ -112,6 +157,24 @@ export interface SixbRuleEvaluationFailedContext
 }
 
 /**
+ * One of the runtime's background loops failed.
+ *
+ * The other three contexts name work someone asked for. This one names work nobody asked for and
+ * everything depends on: a dispatcher that cannot claim is a project where nothing runs, and a
+ * schedule whose next occurrence cannot be computed stops firing for good. Neither has a run row,
+ * so neither has anywhere to be seen — which is what makes them the failures most worth escalating,
+ * not the least.
+ *
+ * `subject` is what the task was working on when it failed, when there was one thing: a run id, an
+ * event type, a queue job. It is free text because a task chooses its own — branch on `task`.
+ */
+export interface SixbBackgroundTaskFailedContext
+  extends SixbFailureContext<"background.task.failed"> {
+  readonly task: SixbBackgroundTask
+  readonly subject?: string
+}
+
+/**
  * Context supplied to the global Sixb error handler, discriminated by `type`.
  *
  * Failure notifications never change the outcome of the operation they observe.
@@ -120,6 +183,23 @@ export type SixbErrorContext =
   | SixbRunFailedContext
   | SixbEventDeliveryFailedContext
   | SixbRuleEvaluationFailedContext
+  | SixbBackgroundTaskFailedContext
 
-/** Observes runtime failures without changing their outcome. */
-export type SixbErrorHandler = (error: Error, context: SixbErrorContext) => void | Promise<void>
+/**
+ * Observes runtime failures without changing their outcome.
+ *
+ * The first argument is the same {@link SixbFailure} the run row stores and the API returns, so a
+ * handler branches on `failure.code` — the one identifier that survives a reworded message, a
+ * process boundary, and a serialization. The second is where the failure happened.
+ *
+ * `context.cause` is the value that was actually thrown, alive and with its stack. It is deliberately
+ * not part of the record: `failure.cause` is the string an operator reads, and this is the object a
+ * reporter like Sentry attaches. Nothing serializes it.
+ *
+ * Sixb prints every failure it reports when no handler is configured, so leaving this unset is not
+ * silence. Passing `() => {}` is.
+ */
+export type SixbErrorHandler = (
+  failure: SixbFailure,
+  context: SixbErrorContext & { readonly cause: unknown }
+) => void | Promise<void>

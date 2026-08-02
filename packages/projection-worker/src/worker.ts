@@ -32,6 +32,7 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
       projectId: sixb.projectId,
       queue: sixb.queues.projections,
       workerId: `projection-worker-${sixb.id}`,
+      host: sixb,
     })
     this.context = buildProjectionContext(sixb, projectionRunsStorage)
     this.sixb = sixb

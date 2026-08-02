@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
-import type { SixbErrorContext } from "../src"
+import type { SixbErrorContext, SixbFailure } from "../src"
 import { InMemoryBroker } from "../src"
 import { attachSixbErrorReporter, flushSixbErrors } from "../src/error-reporting/internal"
 import type { StoredScheduleTriggeredEvent } from "../src/events"
 import { EventsRuntime } from "../src/events"
 import { SchedulerRuntime, SchedulerValidationError } from "../src/scheduler"
 import { defineSchedule } from "../src/schedules"
+
+/** What `onError` is handed: the portable record, and the live thrown value on the context. */
+type Report = { failure: SixbFailure; context: SixbErrorContext & { cause: unknown } }
 
 const PROJECT = "test"
 
@@ -294,10 +297,10 @@ describe("SchedulerRuntime", () => {
     console.error = () => {}
 
     try {
-      const reports: { error: Error; context: SixbErrorContext }[] = []
+      const reports: Report["context"][] = []
       const host = {}
-      attachSixbErrorReporter(host, (error, context) => {
-        reports.push({ error, context })
+      attachSixbErrorReporter(host, (_failure, context) => {
+        reports.push(context)
       })
 
       // The scheduler reports lost triggers through its events runtime, so the host is attached there.
@@ -320,8 +323,8 @@ describe("SchedulerRuntime", () => {
       await flushSixbErrors(host)
 
       expect(reports).toHaveLength(1)
-      expect(reports[0]?.error).toBe(appendFailure)
-      const context = reports[0]?.context
+      expect(reports[0]?.cause).toBe(appendFailure)
+      const context = reports[0]
       expect(context?.type).toBe("event.delivery.failed")
       if (context?.type !== "event.delivery.failed") throw new Error("expected a delivery failure")
       expect(context.eventTypes).toEqual(["schedule.triggered"])

@@ -7,7 +7,7 @@ import {
   subscribeAgentRunCancel,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
-import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { reportBackgroundTaskFailure, reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
@@ -83,6 +83,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       projectId: sixb.id,
       queue: sixb.queues.agents,
       workerId: `agent-worker-${sixb.id}`,
+      host: sixb,
       claimLimit: normalizeConcurrency(options.concurrency),
       leaseMs,
       idlePollMs: options.idlePollMs,
@@ -375,14 +376,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
           consecutiveFailures = 0
         } else {
           consecutiveFailures += 1
-          console.error(
-            `[SixbAgentWorker] Could not dispatch ${result.failures.length} queued agent run(s); retrying.`,
-            result.failures[0]?.error
-          )
+          this.reportDispatchFailure(result.failures[0]?.error, result.failures[0]?.runId)
         }
       } catch (error) {
         consecutiveFailures += 1
-        console.error("[SixbAgentWorker] Could not scan queued agent runs; retrying.", error)
+        this.reportDispatchFailure(error)
       }
 
       const delayMs =
@@ -396,6 +394,18 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
             : AGENT_DISPATCH_IDLE_MS
       await waitForAbort(delayMs, signal)
     }
+  }
+
+  /**
+   * The scan is the retry for a publication that failed elsewhere, so when the scan itself cannot
+   * dispatch there is nothing left behind it: queued runs stay queued and nothing says why.
+   */
+  private reportDispatchFailure(error: unknown, runId?: string): void {
+    reportBackgroundTaskFailure(this.sixb, error, {
+      projectId: this.sixb.id,
+      task: "agent.dispatch",
+      ...(runId === undefined ? {} : { subject: runId }),
+    })
   }
 
   private async dispatchWorkflowAgentNodes(context: AgentWorkerContext): Promise<number> {

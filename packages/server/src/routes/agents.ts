@@ -16,6 +16,7 @@ import {
   publishAgentRunCancel,
   publishAgentRunFinished,
 } from "@sixb/core/internal/agents"
+import { reportBackgroundTaskFailure } from "@sixb/core/internal/error-reporting"
 import {
   type AgentMessageRecord,
   type AgentRunDiagnostic,
@@ -187,6 +188,22 @@ async function getAgentMessageFileContentThread(params: {
 
 function principalForRequest(authz: AuthorizationContext | null): Principal {
   return authz?.principal ?? SYSTEM_PRINCIPAL
+}
+
+/**
+ * A retried run is queued and durable before this point; the agent worker's scan is the retry for a
+ * failed publication. Nothing else records that the retry did not go out.
+ */
+function reportRetryDispatchFailure(
+  sixb: Sixb<readonly OntologySource[]>,
+  error: unknown,
+  runId: string
+): void {
+  reportBackgroundTaskFailure(sixb, error, {
+    projectId: sixb.id,
+    task: "agent.dispatch",
+    subject: runId,
+  })
 }
 
 /** Publish the terminal record core owns; stream delivery stays best-effort at this boundary. */
@@ -773,16 +790,10 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             })
             const failure = dispatch.failures[0]
             if (failure) {
-              console.error(
-                `[SixbServer] Could not dispatch retried agent run '${run.id}'; retrying later.`,
-                failure.error
-              )
+              reportRetryDispatchFailure(sixb, failure.error, run.id)
             }
           } catch (error) {
-            console.error(
-              `[SixbServer] Could not dispatch retried agent run '${run.id}'; retrying later.`,
-              error
-            )
+            reportRetryDispatchFailure(sixb, error, run.id)
           }
 
           set.status = 202

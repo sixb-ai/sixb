@@ -145,6 +145,7 @@ export async function startOrchestratorRuntime(
         : undefined
     orchestratorWorker = new OrchestratorWorker({
       projectId: sixb.id,
+      host: sixb,
       events: sixb.events,
       queues: sixb.queues,
       routes,

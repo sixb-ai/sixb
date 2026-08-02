@@ -2,6 +2,7 @@ import type { Principal } from "../auth"
 import { SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
+import { reportBackgroundTaskFailure } from "../error-reporting/capability"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
   type AgentRunRecord,
@@ -137,13 +138,10 @@ export async function requestAgentRun(
     jobId = dispatch.dispatched[0]?.jobId
     const failure = dispatch.failures[0]
     if (failure) {
-      console.error(
-        `[Sixb] Could not dispatch queued agent run '${runId}'; retrying later.`,
-        failure.error
-      )
+      reportDispatchFailure(runtime, failure.error, runId)
     }
   } catch (error) {
-    console.error(`[Sixb] Could not dispatch queued agent run '${runId}'; retrying later.`, error)
+    reportDispatchFailure(runtime, error, runId)
   }
 
   return {
@@ -195,4 +193,17 @@ function requireAgentStorage(runtime: SixbRuntimeContext): AgentStorage {
     throw new AgentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
   }
   return agents
+}
+
+/**
+ * The run is queued and durable at this point, so a failed publication is not the caller's problem:
+ * an agent worker scans queued runs and retries with the same deterministic job id. It is the
+ * operator's, because until that scan lands the run sits there doing nothing.
+ */
+function reportDispatchFailure(runtime: SixbRuntimeContext, error: unknown, runId: string): void {
+  reportBackgroundTaskFailure(runtime, error, {
+    projectId: runtime.projectId,
+    task: "agent.dispatch",
+    subject: runId,
+  })
 }

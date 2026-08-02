@@ -10,12 +10,20 @@ export interface SchedulerRuntimeOptions {
   schedules: readonly ScheduleDefinition[]
   events: DomainEventLog
   now?: () => Date
+  /**
+   * Where a schedule that can no longer be planned is escalated.
+   *
+   * A runtime fills this with the escalation channel; the fallback is the standalone path — a
+   * scheduler constructed directly, which is a test or an embedding, not a running project.
+   */
+  onError?: (error: unknown, scheduleId: string) => void
 }
 
 export class SchedulerRuntime {
   private readonly schedules: readonly CronScheduleDefinition[]
   private readonly events: DomainEventLog
   private readonly now: () => Date
+  private readonly onError: (error: unknown, scheduleId: string) => void
   private started = false
   private timer: ReturnType<typeof setTimeout> | null = null
   private readonly nextOccurrences = new Map<string, Date>()
@@ -25,6 +33,13 @@ export class SchedulerRuntime {
     this.schedules = options.schedules.filter(isCronSchedule)
     this.events = options.events
     this.now = options.now ?? (() => new Date())
+    this.onError =
+      options.onError ??
+      ((error, scheduleId) =>
+        console.error(
+          `[Sixb] Scheduler failed to compute next occurrence for '${scheduleId}':`,
+          error
+        ))
   }
 
   async start(): Promise<void> {
@@ -151,10 +166,8 @@ export class SchedulerRuntime {
         )
         this.nextOccurrences.set(schedule.id, next)
       } catch (error) {
-        console.error(
-          `[Sixb] Scheduler failed to compute next occurrence for '${schedule.id}':`,
-          error
-        )
+        // The schedule stops firing from here on, and no run records why.
+        this.onError(error, schedule.id)
         this.nextOccurrences.delete(schedule.id)
       }
     }

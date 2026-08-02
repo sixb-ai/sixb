@@ -5,6 +5,7 @@ import type {
   PipelineDefinition,
   SixbErrorContext,
   SixbErrorHandler,
+  SixbFailure,
 } from "@sixb/core"
 import {
   col,
@@ -23,6 +24,9 @@ import {
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import type { BeginDatasetWriteInput, LakeWriteSession } from "@sixb/core/lake-storage"
 import { PipelineWorker } from "../src"
+
+/** What `onError` is handed: the portable record, and the live thrown value on the context. */
+type Report = { failure: SixbFailure; context: SixbErrorContext & { cause: unknown } }
 
 const Room = defineObjectType({
   id: "Room",
@@ -383,7 +387,7 @@ describe("PipelineWorker", () => {
   })
 
   test("emits committed step events and reports once before failing a later step", async () => {
-    const reports: { error: Error; context: SixbErrorContext }[] = []
+    const reports: Report[] = []
     const originalError = new Error("nope")
     const cleanStep = definePipelineStep("clean-customers")
       .inputs({ rawCustomers: rawCustomersDataset })
@@ -401,8 +405,8 @@ describe("PipelineWorker", () => {
     const sixb = createSixbForPipeline({
       pipeline,
       datasets: [rawCustomersDataset, customersDataset, failingStep.output],
-      onError(error, context) {
-        reports.push({ error, context })
+      onError(failure, context) {
+        reports.push({ failure, context })
       },
     })
     await seedDatasetVersion(sixb.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
@@ -435,8 +439,9 @@ describe("PipelineWorker", () => {
         (count) => count === 1
       )
       expect(reports).toHaveLength(1)
-      expect(reports[0]?.error).toBe(originalError)
+      expect(reports[0]?.context.cause).toBe(originalError)
       expect(reports[0]?.context).toEqual({
+        cause: expect.anything(),
         type: "run.failed",
         notificationId: `project:${sixb.id}:run:pipeline:run-fails-late:failed:${run!.finishedAt!.toISOString()}`,
         projectId: sixb.id,

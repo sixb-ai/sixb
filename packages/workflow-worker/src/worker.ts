@@ -45,6 +45,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
       projectId: sixb.projectId,
       queue: sixb.queues.workflows,
       workerId: `workflow-worker-${sixb.id}`,
+      host: sixb,
     })
 
     this.context = buildWorkflowContext(sixb, workflowRuns)

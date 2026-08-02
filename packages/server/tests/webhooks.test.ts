@@ -13,11 +13,15 @@ import {
   Sixb,
   type SixbErrorContext,
   type SixbErrorHandler,
+  type SixbFailure,
   type SixbOptions,
 } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
+
+/** What `onError` is handed: the portable record, and the live thrown value on the context. */
+type Report = { failure: SixbFailure; context: SixbErrorContext & { cause: unknown } }
 
 function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
   options: SixbOptions<TOntologySources>
@@ -322,7 +326,7 @@ describe("webhook routes", () => {
 
   test("maps unknown, unsupported, verification, and handler errors", async () => {
     const handlerError = new Error("boom")
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reports: Report[] = []
     const connector = defineConnector("github", {
       type: "test",
       webhooks: [
@@ -352,8 +356,8 @@ describe("webhook routes", () => {
       [connector],
       storage,
       undefined,
-      (error, context) => {
-        reports.push({ error, context })
+      (failure, context) => {
+        reports.push({ failure, context })
       }
     )
 
@@ -414,7 +418,7 @@ describe("webhook routes", () => {
 
     const failedRun = runs.runs.find((run) => run.webhookId === "failing")
     expect(reports).toHaveLength(1)
-    expect(reports[0]?.error).toBe(handlerError)
+    expect(reports[0]?.context.cause).toBe(handlerError)
     expect(reports[0]?.context).toMatchObject({
       type: "run.failed",
       notificationId: `project:test-project:run:webhook:${failedRun?.id}:failed:${reports[0]?.context.occurredAt}`,
@@ -431,7 +435,7 @@ describe("webhook routes", () => {
   test("reports delivery infrastructure and returned non-4xx failures exactly once", async () => {
     const claimError = new Error("claim storage unavailable")
     const completionError = new Error("completion storage unavailable")
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reports: Report[] = []
     const connector = defineConnector("github", {
       type: "test",
       webhooks: [
@@ -491,8 +495,8 @@ describe("webhook routes", () => {
       [connector],
       storage,
       undefined,
-      (error, context) => {
-        reports.push({ error, context })
+      (failure, context) => {
+        reports.push({ failure, context })
       }
     )
     const dispatch = (webhookId: string) =>
@@ -522,14 +526,14 @@ describe("webhook routes", () => {
     expect(success.status).toBe(202)
 
     expect(reports).toHaveLength(4)
-    expect(reports.map((report) => report.error)).toEqual([
+    expect(reports.map((report) => report.context.cause)).toEqual([
       claimError,
       completionError,
       expect.any(Error),
       expect.any(Error),
     ])
-    expect(reports[2]?.error.message).toBe("Webhook handler returned HTTP 503")
-    expect(reports[3]?.error.message).toBe("Webhook handler returned HTTP 302")
+    expect(reports[2]?.failure.message).toBe("Webhook handler returned HTTP 503")
+    expect(reports[3]?.failure.message).toBe("Webhook handler returned HTTP 302")
     const runContexts = reports.map((report) => {
       if (report.context.type !== "run.failed") {
         throw new Error(`Unexpected error context '${report.context.type}'.`)

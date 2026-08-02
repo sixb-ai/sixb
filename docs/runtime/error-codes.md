@@ -1,9 +1,9 @@
 # Error codes
 
 Every failure Sixb raises on purpose carries a `SixbErrorCode` — a short, stable string like
-`storage.conflict`. The code is written into the run row, returned on the wire, handed to the
-runtime observer, and rendered by Atlas. It is the same string on all four surfaces, so a branch
-you write once keeps working wherever the failure turns up.
+`storage.conflict`. The code is written into the run row, returned on the wire, handed to
+[`onError`](error-handling.md), and rendered by Atlas. It is the same string on all four surfaces,
+so a branch you write once keeps working wherever the failure turns up.
 
 Message text is not part of the contract. It is written for a human reading one failure and may be
 reworded in a patch release. Never parse it.

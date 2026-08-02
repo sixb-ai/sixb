@@ -1,3 +1,6 @@
+import { reportBackgroundTaskFailure } from "../error-reporting/capability"
+import type { SixbBackgroundTask } from "../error-reporting/types"
+import { SixbError } from "../errors"
 import type { ClaimedQueueJob, Queue, QueueJob, QueueJobError } from "../queues"
 import { WorkerAbortError } from "./errors"
 import {
@@ -14,6 +17,13 @@ export interface QueueWorkerConfig<TJob extends QueueJob> {
   readonly leaseMs?: number
   readonly claimLimit?: number
   readonly idlePollMs?: number
+  /**
+   * The runtime this worker escalates through, which is the `Sixb` the subclass was given.
+   *
+   * Optional because a worker can be driven directly. Without it the lease and settlement failures
+   * below have nowhere to go, which is why every worker in this repo passes it.
+   */
+  readonly host?: unknown
 }
 
 export interface QueueWorkerFailureDecision {
@@ -39,6 +49,7 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
       leaseMs: config.leaseMs ?? DEFAULT_LEASE_MS,
       claimLimit: config.claimLimit ?? DEFAULT_CLAIM_LIMIT,
       idlePollMs: config.idlePollMs ?? DEFAULT_IDLE_POLL_MS,
+      host: config.host,
     }
   }
 
@@ -139,15 +150,17 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
       leaseMs: this.config.leaseMs,
       signal,
       onLeaseLost: () => {
-        console.error(
-          `[SixbQueueWorker] Lost lease for queue job '${claimed.job.id}'; leaving it for redelivery.`
+        this.reportQueueFailure(
+          "queue.lease",
+          new SixbError(
+            "queue.lease_lost",
+            `[SixbQueueWorker] Lost lease for queue job '${claimed.job.id}'; leaving it for redelivery.`
+          ),
+          claimed.job.id
         )
       },
       onRenewalError: (error) => {
-        console.error(
-          `[SixbQueueWorker] Could not renew lease for queue job '${claimed.job.id}'; retrying.`,
-          error
-        )
+        this.reportQueueFailure("queue.lease", error, claimed.job.id)
       },
     })
 
@@ -163,7 +176,7 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
       if (delivery.state === "lost") return
 
       if (outcome.ok) {
-        await settleOrLog(delivery, "complete", () => delivery.complete())
+        await this.settleOrReport(delivery, "complete", () => delivery.complete())
         return
       }
 
@@ -182,7 +195,7 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
         const decision = await this.onExecutionError(claimed, error)
         await this.applyFailureDecision(delivery, decision, error)
       } catch (settlementError) {
-        logQueueOperationError("apply failure decision to", claimed, settlementError)
+        this.reportSettlementFailure("apply failure decision to", claimed, settlementError)
       }
     } finally {
       await delivery.close()
@@ -204,26 +217,48 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
 
     await delivery.fail(toQueueJobError(error))
   }
-}
 
-async function settleOrLog<TJob extends QueueJob>(
-  delivery: QueueDelivery<TJob>,
-  operation: string,
-  settle: () => Promise<QueueSettlementResult>
-): Promise<void> {
-  try {
-    // A "lost" result needs no extra logging here: loss is already reported via onLeaseLost.
-    await settle()
-  } catch (error) {
-    logQueueOperationError(operation, delivery.claimed, error)
+  private async settleOrReport(
+    delivery: QueueDelivery<TJob>,
+    operation: string,
+    settle: () => Promise<QueueSettlementResult>
+  ): Promise<void> {
+    try {
+      // A "lost" result needs no report here: loss is already escalated via onLeaseLost.
+      await settle()
+    } catch (error) {
+      this.reportSettlementFailure(operation, delivery.claimed, error)
+    }
   }
-}
 
-function logQueueOperationError(operation: string, claimed: ClaimedQueueJob, error: unknown): void {
-  console.error(
-    `[SixbQueueWorker] Could not ${operation} queue job '${claimed.job.id}'; it may be redelivered.`,
-    error
-  )
+  private reportSettlementFailure(
+    operation: string,
+    claimed: ClaimedQueueJob,
+    error: unknown
+  ): void {
+    this.reportQueueFailure(
+      "queue.settle",
+      new SixbError(
+        "queue.unavailable",
+        `[SixbQueueWorker] Could not ${operation} queue job '${claimed.job.id}'; it may be redelivered.`,
+        { cause: error }
+      ),
+      claimed.job.id
+    )
+  }
+
+  /**
+   * A job whose lease or settlement fails is not a failed run: the work either finished or will be
+   * redelivered, so no run row records this. The queue is the thing in trouble, and this is the only
+   * place that says so.
+   */
+  private reportQueueFailure(task: SixbBackgroundTask, error: unknown, jobId: string): void {
+    reportBackgroundTaskFailure(this.config.host, error, {
+      projectId: this.config.projectId,
+      task,
+      subject: jobId,
+    })
+  }
 }
 
 function toQueueJobError(error: unknown): QueueJobError {

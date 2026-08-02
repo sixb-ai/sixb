@@ -1,15 +1,19 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import type { SixbErrorContext } from "../src"
+import { SIXB_BACKGROUND_TASKS, type SixbErrorContext, type SixbFailure } from "../src"
 import type { Broker } from "../src/broker"
 import {
   attachSixbErrorReporter,
   flushSixbErrors,
-  normalizeReportedError,
+  reportBackgroundTaskFailure,
   reportEventDeliveryFailure,
   reportRuleEvaluationFailure,
   reportRunFailure,
 } from "../src/error-reporting/internal"
+import { SixbError } from "../src/errors"
 import { EventsRuntime } from "../src/events"
+
+/** What `onError` is handed: the portable record, and the live thrown value on the context. */
+type Report = { failure: SixbFailure; context: SixbErrorContext & { cause: unknown } }
 
 const PROJECT_ID = "error-reporting-tests"
 const OCCURRED_AT = "2026-07-29T12:00:00.000Z"
@@ -17,9 +21,9 @@ const OCCURRED_AT = "2026-07-29T12:00:00.000Z"
 describe("Sixb error reporting", () => {
   test("reports a normalized terminal run failure with stable context", async () => {
     const host = {}
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    attachSixbErrorReporter(host, (error, context) => {
-      reports.push({ error, context })
+    const reports: Report[] = []
+    attachSixbErrorReporter(host, (failure, context) => {
+      reports.push({ failure, context })
     })
 
     reportRunFailure(host, "projection exploded", {
@@ -36,9 +40,13 @@ describe("Sixb error reporting", () => {
     await flushSixbErrors(host)
 
     expect(reports).toHaveLength(1)
-    expect(reports[0]?.error).toBeInstanceOf(Error)
-    expect(reports[0]?.error.message).toBe("projection exploded")
+    // A bare string was thrown, and the handler still receives the record every other surface gets.
+    expect(reports[0]?.failure).toEqual({
+      code: "runtime.unexpected",
+      message: "projection exploded",
+    })
     expect(reports[0]?.context).toEqual({
+      cause: "projection exploded",
       type: "run.failed",
       notificationId:
         "project:error-reporting-tests:run:projection:projection-run-1:failed:2026-01-02T03:04:05.000Z",
@@ -56,9 +64,9 @@ describe("Sixb error reporting", () => {
 
   test("reports delivery failures with envelope IDs only", async () => {
     const host = {}
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    attachSixbErrorReporter(host, (error, context) => {
-      reports.push({ error, context })
+    const reports: Report[] = []
+    attachSixbErrorReporter(host, (failure, context) => {
+      reports.push({ failure, context })
     })
 
     reportEventDeliveryFailure(host, new Error("broker unavailable"), {
@@ -71,6 +79,7 @@ describe("Sixb error reporting", () => {
     await flushSixbErrors(host)
 
     expect(reports[0]?.context).toEqual({
+      cause: expect.any(Error),
       type: "event.delivery.failed",
       notificationId: "project:error-reporting-tests:event-delivery:events:event-a:attempt:3",
       projectId: PROJECT_ID,
@@ -85,8 +94,8 @@ describe("Sixb error reporting", () => {
 
   test("two concurrent losses of the same event types are two notifications", async () => {
     const host = {}
-    const reports: SixbErrorContext[] = []
-    attachSixbErrorReporter(host, (_error, context) => {
+    const reports: Array<Report["context"]> = []
+    attachSixbErrorReporter(host, (_failure, context) => {
       reports.push(context)
     })
 
@@ -110,8 +119,8 @@ describe("Sixb error reporting", () => {
 
   test("a delivery failure key is reproducible when the occurrence id is given", async () => {
     const host = {}
-    const reports: SixbErrorContext[] = []
-    attachSixbErrorReporter(host, (_error, context) => {
+    const reports: Array<Report["context"]> = []
+    attachSixbErrorReporter(host, (_failure, context) => {
       reports.push(context)
     })
 
@@ -128,9 +137,9 @@ describe("Sixb error reporting", () => {
 
   test("reports rule evaluation failures without event payloads", async () => {
     const host = {}
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    attachSixbErrorReporter(host, (error, context) => {
-      reports.push({ error, context })
+    const reports: Report[] = []
+    attachSixbErrorReporter(host, (failure, context) => {
+      reports.push({ failure, context })
     })
 
     reportRuleEvaluationFailure(host, new Error("rule storage unavailable"), {
@@ -142,6 +151,7 @@ describe("Sixb error reporting", () => {
     await flushSixbErrors(host)
 
     expect(reports[0]?.context).toEqual({
+      cause: expect.any(Error),
       type: "rule.evaluation.failed",
       notificationId:
         "project:error-reporting-tests:rule-evaluation:live:event-a:failed:2026-01-02T03:04:05.000Z",
@@ -153,23 +163,96 @@ describe("Sixb error reporting", () => {
     expect(JSON.stringify(reports[0]?.context)).not.toContain("payload")
   })
 
-  test("preserves Error identity", () => {
-    const original = new Error("boom")
-    expect(normalizeReportedError(original)).toBe(original)
+  test("a runtime with no handler prints every failure it reports", async () => {
+    // The guard: remove the default in `SixbErrorReporter` (back to `if (!this.handler) return`) and
+    // this fails. It is the difference between an unconfigured project seeing its dispatcher die and
+    // seeing nothing at all, which is what the whole channel exists to fix.
+    const host = {}
+    const consoleError = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      attachSixbErrorReporter(host)
+      const cause = new Error("could not reach the store")
+
+      reportBackgroundTaskFailure(host, cause, {
+        projectId: PROJECT_ID,
+        task: "ontology.outbox",
+      })
+      await flushSixbErrors(host)
+
+      expect(consoleError).toHaveBeenCalledWith(
+        "[Sixb] background task 'ontology.outbox' failed — runtime.unexpected: could not reach the store",
+        cause
+      )
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
-  test("normalizes cross-realm-like errors and hostile thrown values", () => {
-    const errorLike = normalizeReportedError({ name: "ProviderError", message: "offline" })
-    expect(errorLike.name).toBe("ProviderError")
-    expect(errorLike.message).toBe("offline")
+  test("a configured handler replaces the printer rather than adding to it", async () => {
+    const host = {}
+    const consoleError = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      attachSixbErrorReporter(host, () => {})
+      reportBackgroundTaskFailure(host, new Error("boom"), {
+        projectId: PROJECT_ID,
+        task: "queue.lease",
+      })
+      await flushSixbErrors(host)
 
-    const hostile = Object.create(null) as Record<string, unknown>
-    Object.defineProperty(hostile, "message", {
-      get() {
-        throw new Error("getter failed")
-      },
+      expect(consoleError).not.toHaveBeenCalled()
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  test("a background task failure carries the task and what it was working on", async () => {
+    const host = {}
+    const reports: Report[] = []
+    attachSixbErrorReporter(host, (failure, context) => {
+      reports.push({ failure, context })
     })
-    expect(normalizeReportedError(hostile).message).toBe("Unknown thrown value")
+
+    reportBackgroundTaskFailure(host, new SixbError("queue.unavailable", "queue is down"), {
+      projectId: PROJECT_ID,
+      task: "agent.dispatch",
+      subject: "agent-run-1",
+      occurredAt: OCCURRED_AT,
+    })
+    await flushSixbErrors(host)
+
+    expect(reports[0]?.failure.code).toBe("queue.unavailable")
+    expect(reports[0]?.context).toEqual({
+      cause: expect.any(SixbError),
+      type: "background.task.failed",
+      notificationId: `project:${PROJECT_ID}:background:agent.dispatch:agent-run-1:failed:${OCCURRED_AT}`,
+      projectId: PROJECT_ID,
+      occurredAt: OCCURRED_AT,
+      task: "agent.dispatch",
+      subject: "agent-run-1",
+    })
+  })
+
+  test("every background task is a distinct notification for the same moment", async () => {
+    // Two loops failing in the same broker outage land in the same millisecond. Collapsing them into
+    // one notification would hide the second outage behind the first.
+    const host = {}
+    const reports: Array<Report["context"]> = []
+    attachSixbErrorReporter(host, (_failure, context) => {
+      reports.push(context)
+    })
+
+    for (const task of SIXB_BACKGROUND_TASKS) {
+      reportBackgroundTaskFailure(host, new Error("broker unavailable"), {
+        projectId: PROJECT_ID,
+        task,
+        occurredAt: OCCURRED_AT,
+      })
+    }
+    await flushSixbErrors(host)
+
+    expect(new Set(reports.map((context) => context.notificationId)).size).toBe(
+      SIXB_BACKGROUND_TASKS.length
+    )
   })
 
   test("isolates callback rejection from framework execution", async () => {
@@ -194,9 +277,9 @@ describe("Sixb error reporting", () => {
   test("flush drains reports added while a handler is running", async () => {
     const host = {}
     const messages: string[] = []
-    attachSixbErrorReporter(host, (error) => {
-      messages.push(error.message)
-      if (error.message === "first") {
+    attachSixbErrorReporter(host, (failure) => {
+      messages.push(failure.message)
+      if (failure.message === "first") {
         reportRunFailure(host, new Error("second"), {
           projectId: PROJECT_ID,
           run: { kind: "sync", runId: "sync-run-2", syncId: "customers" },
@@ -241,9 +324,9 @@ describe("Sixb error reporting", () => {
 
   test("a rule failure is correlated by candidate, since it has no run id", async () => {
     const host = {}
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    attachSixbErrorReporter(host, (error, context) => {
-      reports.push({ error, context })
+    const reports: Report[] = []
+    attachSixbErrorReporter(host, (failure, context) => {
+      reports.push({ failure, context })
     })
 
     reportRuleEvaluationFailure(host, new Error("predicate exploded"), {
@@ -265,9 +348,9 @@ describe("Sixb error reporting", () => {
 
   test("a rule failure with no attributable candidate falls back to the batch", async () => {
     const host = {}
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    attachSixbErrorReporter(host, (error, context) => {
-      reports.push({ error, context })
+    const reports: Report[] = []
+    attachSixbErrorReporter(host, (failure, context) => {
+      reports.push({ failure, context })
     })
 
     reportRuleEvaluationFailure(host, new Error("reconciliation exploded"), {
@@ -286,9 +369,9 @@ describe("Sixb error reporting", () => {
     const consoleError = spyOn(console, "error").mockImplementation(() => {})
     try {
       const host = {}
-      const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-      attachSixbErrorReporter(host, (error, context) => {
-        reports.push({ error, context })
+      const reports: Report[] = []
+      attachSixbErrorReporter(host, (failure, context) => {
+        reports.push({ failure, context })
       })
       const appendFailure = new Error("broker unavailable")
       const events = eventsRuntimeFor(host)
@@ -308,16 +391,16 @@ describe("Sixb error reporting", () => {
       await flushSixbErrors(host)
 
       expect(reports).toHaveLength(1)
-      expect(reports[0]?.error).toBe(appendFailure)
+      // The thrown value reaches the handler alive, stack included, beside the portable record.
+      expect(reports[0]?.context.cause).toBe(appendFailure)
       const context = reports[0]?.context
       if (context?.type !== "event.delivery.failed") throw new Error("expected a delivery failure")
       expect(context.eventTypes).toEqual(["sync.run.finished"])
+      expect(context.source).toBe("SixbTestWorker")
       expect(context.notificationId).toStartWith(`project:${PROJECT_ID}:event-delivery:emit:`)
-      // The console line stays for local debugging; the report is what makes it visible in prod.
-      expect(consoleError).toHaveBeenCalledWith(
-        "[SixbTestWorker] Failed to emit sync.run.finished:",
-        appendFailure
-      )
+      // The emit site prints nothing of its own: a handler is configured, so the escalation is the
+      // only trace, which is the whole point of there being one channel.
+      expect(consoleError).not.toHaveBeenCalled()
     } finally {
       consoleError.mockRestore()
     }
@@ -357,8 +440,8 @@ describe("Sixb error reporting", () => {
 
   test("an emit that reaches the broker reports nothing", async () => {
     const host = {}
-    const reports: SixbErrorContext[] = []
-    attachSixbErrorReporter(host, (_error, context) => {
+    const reports: Array<Report["context"]> = []
+    attachSixbErrorReporter(host, (_failure, context) => {
       reports.push(context)
     })
     const events = eventsRuntimeFor(host)

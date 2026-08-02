@@ -805,13 +805,16 @@ export {
 
 // ── Runtime ─────────────────────────────────────────────────
 
-export type {
-  SixbErrorContext,
-  SixbErrorHandler,
-  SixbEventDeliveryFailedContext,
-  SixbFailedRun,
-  SixbRuleEvaluationFailedContext,
-  SixbRunFailedContext,
+export {
+  SIXB_BACKGROUND_TASKS,
+  type SixbBackgroundTask,
+  type SixbBackgroundTaskFailedContext,
+  type SixbErrorContext,
+  type SixbErrorHandler,
+  type SixbEventDeliveryFailedContext,
+  type SixbFailedRun,
+  type SixbRuleEvaluationFailedContext,
+  type SixbRunFailedContext,
 } from "./error-reporting/types"
 export type {
   OntologyMaintenanceCleanupSnapshot,

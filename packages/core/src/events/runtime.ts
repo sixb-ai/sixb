@@ -112,7 +112,7 @@ export class EventsRuntime implements DomainEventLog, StableEventPublisher {
    * turn a successful run into a failed one. It is not a swallow either — every event Sixb publishes is
    * a potential trigger edge (a rule's `.when()`, an event schedule, a workflow's wait node), so a lost
    * batch is a handler that silently never runs. The loss is escalated to `onError` as
-   * `event.delivery.failed`; the console line is there for local debugging.
+   * `event.delivery.failed`, which prints when no handler is configured.
    *
    * Framework emit sites want this. Application code wants `append`, which reports failure to the
    * caller and returns the stored envelopes.
@@ -122,19 +122,16 @@ export class EventsRuntime implements DomainEventLog, StableEventPublisher {
       await this.append(input)
     } catch (error) {
       try {
-        const eventTypes = input.events.map((event) => event.type)
-        // Escalate before logging. `console` is replaceable and `onError` is the contract, so a
-        // replacement that throws must not be what loses the report.
         reportEventDeliveryFailure(this.host, error, {
           projectId: this.projectId,
-          eventTypes,
+          eventTypes: input.events.map((event) => event.type),
+          source: options.source,
         })
-        console.error(`[${options.source}] Failed to emit ${eventTypes.join(", ")}:`, error)
       } catch {
-        // The contract above is absolute, so escalation cannot be the thing that breaks it: a replaced
-        // `console` that throws would turn a run that already succeeded into a failed one. The loss is
-        // already unreported at this point — rejecting on top of it helps nobody. `SixbErrorReporter`
-        // guards its own console line the same way.
+        // The contract above is absolute, so escalation cannot be the thing that breaks it: a handler
+        // that throws would turn a run that already succeeded into a failed one. The loss is already
+        // unreported at this point — rejecting on top of it helps nobody. `SixbErrorReporter` guards
+        // its own last-resort console line the same way.
       }
     }
   }

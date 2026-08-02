@@ -13,6 +13,7 @@ import {
   prop,
   Sixb,
   type SixbErrorContext,
+  type SixbFailure,
   type Storage,
 } from "@sixb/core"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
@@ -22,6 +23,9 @@ import type { ActionRunRecord, ObjectRow } from "@sixb/core/storage"
 import { ActionWorker } from "../src"
 import { ActionWorkerError } from "../src/errors"
 import { waitFor } from "./helpers"
+
+/** What `onError` is handed: the portable record, and the live thrown value on the context. */
+type Report = { failure: SixbFailure; context: SixbErrorContext & { cause: unknown } }
 
 const Device = defineObjectType({
   id: "Device",
@@ -282,9 +286,9 @@ describe("ActionWorker", () => {
         throw originalError
       })
     const sixb = createSixb([fail])
-    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    const reporter = attachSixbErrorReporter(sixb, (error, context) => {
-      reports.push({ error, context })
+    const reports: Report[] = []
+    const reporter = attachSixbErrorReporter(sixb, (failure, context) => {
+      reports.push({ failure, context })
     })
     const worker = new ActionWorker(sixb)
     await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
@@ -299,7 +303,7 @@ describe("ActionWorker", () => {
 
     expect(failed.status).toBe("failed")
     expect(reports).toHaveLength(1)
-    expect(reports[0]?.error).toBe(originalError)
+    expect(reports[0]?.context.cause).toBe(originalError)
     expect(reports[0]?.context).toMatchObject({
       type: "run.failed",
       notificationId: `project:${sixb.id}:run:action:${failed.id}:failed:${failed.finishedAt?.toISOString()}`,

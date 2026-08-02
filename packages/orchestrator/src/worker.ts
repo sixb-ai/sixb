@@ -1,5 +1,6 @@
-import type { DomainEvent } from "@sixb/core"
+import type { DomainEvent, SixbBackgroundTask } from "@sixb/core"
 import { SYSTEM_PRINCIPAL } from "@sixb/core"
+import { reportBackgroundTaskFailure } from "@sixb/core/internal/error-reporting"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import { evaluateEventSchedule } from "@sixb/core/internal/schedules"
@@ -53,6 +54,7 @@ export class OrchestratorWorker extends Worker {
         runProjectionDispatchReconciler(
           {
             projectId: this.options.projectId,
+            host: this.options.host,
             queue: this.options.queues.projections,
             descriptors: this.projectionDescriptors,
             ...dispatch,
@@ -64,6 +66,24 @@ export class OrchestratorWorker extends Worker {
 
     await Promise.all(consumers)
   }
+}
+
+/**
+ * Every failure in this file leaves work un-queued and nothing recording it: the run that would have
+ * carried the failure is the one that was never created. Retained events are replayed, live ones are
+ * not, so the escalation is the only trace either way.
+ */
+function reportOrchestratorFailure(
+  options: OrchestratorRuntimeOptions,
+  task: SixbBackgroundTask,
+  error: unknown,
+  subject?: string
+): void {
+  reportBackgroundTaskFailure(options.host, error, {
+    projectId: options.projectId,
+    task,
+    ...(subject === undefined ? {} : { subject }),
+  })
 }
 
 function deriveSubscribedTypes(routes: OrchestratorRoutes): {
@@ -94,7 +114,7 @@ async function consumeLiveJobs(
     if (signal.aborted) return
     pending = pending
       .then(() => dispatchDirectJobs(options, events))
-      .catch((error) => console.error("[SixbOrchestrator] Dispatch failed:", error))
+      .catch((error) => reportOrchestratorFailure(options, "orchestrator.dispatch", error))
   })
 
   await waitForAbort(signal)
@@ -137,10 +157,7 @@ async function consumeRetainedEventSchedules(
     } catch (error) {
       signal.removeEventListener("abort", onAbort)
       if (signal.aborted) return
-      console.error(
-        `[SixbOrchestrator] Event schedule subscription failed for '${eventType}'; retrying:`,
-        error
-      )
+      reportOrchestratorFailure(options, "orchestrator.subscribe", error, eventType)
       await sleep(eventScheduleRetryDelay(retryAttempt), signal)
       retryAttempt += 1
       continue
@@ -156,10 +173,7 @@ async function consumeRetainedEventSchedules(
     await pending.catch(() => {})
     if (outcome.type === "aborted" || signal.aborted) return
 
-    console.error(
-      `[SixbOrchestrator] Event schedule dispatch failed for '${eventType}'; replaying retained events:`,
-      outcome.error
-    )
+    reportOrchestratorFailure(options, "orchestrator.dispatch", outcome.error, eventType)
     await sleep(eventScheduleRetryDelay(retryAttempt), signal)
     retryAttempt += 1
   }
@@ -178,9 +192,11 @@ async function dispatchDirectJobs(
           await enqueueDirectJob(options, event, item)
         } catch (error) {
           // One direct fan-out sibling must not prevent the others from being queued.
-          console.error(
-            `[SixbOrchestrator] Enqueue failed (queue=${item.queue}, eventId=${event.id}):`,
-            error
+          reportOrchestratorFailure(
+            options,
+            "orchestrator.dispatch",
+            error,
+            `${item.queue}:${event.id}`
           )
         }
       }

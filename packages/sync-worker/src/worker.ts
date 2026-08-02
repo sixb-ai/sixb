@@ -50,6 +50,7 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
       projectId: sixb.id,
       queue: sixb.queues.syncRuns,
       workerId: `sync-worker-${sixb.id}`,
+      host: sixb,
     })
 
     this.context = buildSyncContext(sixb)

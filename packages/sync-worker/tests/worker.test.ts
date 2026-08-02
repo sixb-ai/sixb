@@ -14,11 +14,15 @@ import {
   Sixb,
   type SixbErrorContext,
   type SixbErrorHandler,
+  type SixbFailure,
   type SyncDefinition,
 } from "@sixb/core"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import type { BeginDatasetWriteInput, LakeWriteSession } from "@sixb/core/lake-storage"
 import { SyncWorker } from "../src"
+
+/** What `onError` is handed: the portable record, and the live thrown value on the context. */
+type Report = { failure: SixbFailure; context: SixbErrorContext & { cause: unknown } }
 
 const Room = defineObjectType({
   id: "Room",
@@ -149,7 +153,7 @@ describe("SyncWorker", () => {
   })
 
   test("reports once when execution transitions the run to failed", async () => {
-    const reports: { error: Error; context: SixbErrorContext }[] = []
+    const reports: Report[] = []
     const originalError = new Error("sync source failed")
     const dataset = makeDataset("raw.erp.failed-orders")
     const sync = defineSync("sync-failed-orders")
@@ -158,8 +162,8 @@ describe("SyncWorker", () => {
         throw originalError
       })
       .intoDataset(dataset)
-    const sixb = createSixbForSync(sync, undefined, (error, context) => {
-      reports.push({ error, context })
+    const sixb = createSixbForSync(sync, undefined, (failure, context) => {
+      reports.push({ failure, context })
     })
     const worker = new SyncWorker(sixb)
 
@@ -185,8 +189,9 @@ describe("SyncWorker", () => {
       )
 
       expect(reports).toHaveLength(1)
-      expect(reports[0]?.error).toBe(originalError)
+      expect(reports[0]?.context.cause).toBe(originalError)
       expect(reports[0]?.context).toEqual({
+        cause: expect.anything(),
         type: "run.failed",
         notificationId: `project:${sixb.id}:run:sync:run-failed:failed:${run!.finishedAt!.toISOString()}`,
         projectId: sixb.id,

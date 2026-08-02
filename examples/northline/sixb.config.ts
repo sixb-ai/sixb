@@ -23,15 +23,6 @@ export const sixb = createSixb({
     process.env.SIXB_SANDBOX_PROVIDER === "smolvm"
       ? new SmolvmSandboxFactory({ image: process.env.SIXB_AGENT_IMAGE, timeout: 30_000 })
       : new LocalSandboxFactory({ timeout: 30_000 }),
-  onError(error, context) {
-    let failure: string
-    if (context.type === "run.failed") {
-      failure = `${context.run.kind} run '${context.run.runId}' failed`
-    } else if (context.type === "event.delivery.failed") {
-      failure = `event delivery failed after ${context.attempts} attempt(s)`
-    } else {
-      failure = `${context.source} rule evaluation failed`
-    }
-    console.error(`[Northline] ${failure} (${context.notificationId}):`, error)
-  },
+  // No `onError`: the runtime prints every failure it reports, which is what this project wants.
+  // A handler is for sending them somewhere — see docs/runtime/error-handling.md.
 })

@@ -107,8 +107,8 @@ describe("sixb.workflows.request", () => {
       id: "workflow-enqueue-failure",
       ontology: [Transaction, Invoice],
       workflows: [draftInvoice],
-      onError(error, context) {
-        reports.push(`${context.notificationId}:${error.message}`)
+      onError(failure, context) {
+        reports.push(`${context.notificationId}:${failure.message}`)
       },
       ...runtimeDeps,
     })

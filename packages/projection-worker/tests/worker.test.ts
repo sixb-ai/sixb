@@ -17,11 +17,15 @@ import {
   Sixb,
   type SixbErrorContext,
   type SixbErrorHandler,
+  type SixbFailure,
 } from "@sixb/core"
 import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
 import { createProjectionRunId, getProjectionRegistry } from "@sixb/core/internal/projections"
 import type { ProjectionRunStorage } from "@sixb/core/storage"
 import { ProjectionWorker } from "../src"
+
+/** What `onError` is handed: the portable record, and the live thrown value on the context. */
+type Report = { failure: SixbFailure; context: SixbErrorContext & { cause: unknown } }
 
 const Room = defineObjectType({
   id: "Room",
@@ -174,12 +178,12 @@ describe("ProjectionWorker", () => {
   })
 
   test("reports once when a claimed execution transitions the run to failed", async () => {
-    const reports: { error: Error; context: SixbErrorContext }[] = []
+    const reports: Report[] = []
     const sixb = createSixb({
       datasets: [roomsDataset],
       projections: [roomProjection],
-      onError(error, context) {
-        reports.push({ error, context })
+      onError(failure, context) {
+        reports.push({ failure, context })
       },
     })
     const version = await commitDatasetVersion(sixb.lakeStorage, roomsDataset, [
@@ -225,8 +229,9 @@ describe("ProjectionWorker", () => {
         (count) => count === 1
       )
       expect(reports).toHaveLength(1)
-      expect(reports[0]?.error.message).toContain("room_id")
+      expect(reports[0]?.failure.message).toContain("room_id")
       expect(reports[0]?.context).toEqual({
+        cause: expect.anything(),
         type: "run.failed",
         notificationId: `project:${sixb.id}:run:projection:${runId}:failed:${run!.finishedAt!.toISOString()}`,
         projectId: sixb.id,

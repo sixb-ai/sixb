@@ -143,6 +143,8 @@ export class OntologyOutboxDispatcher {
     this.random = options.random ?? Math.random
     this.createLeaseId = options.createLeaseId ?? randomUUID
     this.onDeliveryFailure = options.onDeliveryFailure
+    // A runtime fills this with the escalation channel, so the fallback is the standalone path —
+    // a dispatcher constructed directly, which is a test or an embedding, not a running project.
     this.onError =
       options.onError ?? ((error) => console.error("[Sixb] Outbox dispatcher error:", error))
   }

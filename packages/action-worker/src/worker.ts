@@ -38,6 +38,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       projectId: sixb.id,
       queue: sixb.queues.actions,
       workerId: `action-worker-${sixb.id}`,
+      host: sixb,
       claimLimit: 1,
       leaseMs: options.leaseMs,
       idlePollMs: options.idlePollMs,

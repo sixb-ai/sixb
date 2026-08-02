@@ -36,6 +36,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
       projectId: sixb.id,
       queue: sixb.queues.pipelines,
       workerId: `pipeline-worker-${sixb.id}`,
+      host: sixb,
     })
 
     this.context = buildPipelineContext(sixb, pipelineRunsStorage)

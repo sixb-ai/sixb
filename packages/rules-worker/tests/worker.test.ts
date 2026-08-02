@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import type { DomainEvent, RuleDefinition, SixbErrorContext, Storage } from "@sixb/core"
+import type {
+  DomainEvent,
+  RuleDefinition,
+  SixbErrorContext,
+  SixbFailure,
+  Storage,
+} from "@sixb/core"
 import {
   defineObjectType,
   InMemoryBroker,
@@ -16,6 +22,9 @@ import { InMemoryRulesStorage } from "@sixb/core/storage"
 import { createMaterializerTestFixture, type MaterializerTestFixture } from "@sixb/core/testing"
 import type { RulesWorkerSixb } from "../src"
 import { RulesWorker } from "../src"
+
+/** What `onError` is handed: the portable record, and the live thrown value on the context. */
+type Report = { failure: SixbFailure; context: SixbErrorContext & { cause: unknown } }
 
 const projectId = "project-a"
 
@@ -157,22 +166,21 @@ describe("RulesWorker", () => {
     expect(await ruleEventTypes(events)).toEqual([])
   })
 
-  test("evaluation errors are logged and do not stop later events", async () => {
+  test("evaluation errors are reported and do not stop later events", async () => {
+    // The worker no longer prints beside the report: with a handler configured the escalation is the
+    // only trace, and without one the channel's own default prints it.
     const originalError = console.error
-    const errors: unknown[][] = []
-    console.error = (...args: unknown[]) => {
-      errors.push(args)
-    }
+    console.error = () => {}
 
     try {
       const events = createEventsRuntime()
       const storage = createStorage()
       const objects = new ThrowOnceObjectStorage(storage.objects)
       replaceObjectStorage(storage, objects.storage)
-      const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+      const reports: Report[] = []
       const runtime = createRuntime({ events, storage })
-      attachSixbErrorReporter(runtime, (error, context) => {
-        reports.push({ error, context })
+      attachSixbErrorReporter(runtime, (failure, context) => {
+        reports.push({ failure, context })
       })
       await seedCurrentObject(storage, "posted")
       await seedCurrentObject(storage, "posted", "tx-2")
@@ -180,7 +188,7 @@ describe("RulesWorker", () => {
       await worker.start()
 
       await events.publishEnvelopes([objectUpdatedEvent("posted")])
-      await waitFor(() => errors.length === 1)
+      await waitFor(() => reports.length === 1)
 
       await events.publishEnvelopes([objectUpdatedEvent("posted", "tx-2")])
       await worker.stop()
@@ -188,9 +196,6 @@ describe("RulesWorker", () => {
 
       // The candidate is isolated, so the report names the rule and subject that actually failed
       // instead of only the batch it belonged to.
-      expect(String(errors[0]?.[0])).toContain(
-        "[SixbRulesWorker] Rule 'transaction.posted' on transaction:tx-1 failed:"
-      )
       expect(reports).toHaveLength(1)
       expect(reports[0]?.context).toMatchObject({
         type: "rule.evaluation.failed",
@@ -332,7 +337,7 @@ describe("RulesWorker", () => {
     console.error = () => {}
 
     try {
-      const reports: { error: Error; context: SixbErrorContext }[] = []
+      const reports: Report[] = []
       const events = createEventsRuntime()
       const storage = createStorage()
       const objects = new FailOneSubjectObjectStorage(storage.objects, "tx-1")
@@ -341,8 +346,8 @@ describe("RulesWorker", () => {
       await seedCurrentObject(storage, "posted", "tx-2")
 
       const runtime = createRuntime({ events, storage })
-      attachSixbErrorReporter(runtime, (error, context) => {
-        reports.push({ error, context })
+      attachSixbErrorReporter(runtime, (failure, context) => {
+        reports.push({ failure, context })
       })
       const worker = track(new RulesWorker(runtime))
       await worker.start()

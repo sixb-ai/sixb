@@ -830,8 +830,8 @@ describe("requestAction", () => {
       id: "action-enqueue-retry-test",
       ontology: [Room],
       actions: [actionDefinition(setTemperature)],
-      onError(error, context) {
-        reports.push(`${context.notificationId}:${error.message}`)
+      onError(failure, context) {
+        reports.push(`${context.notificationId}:${failure.message}`)
       },
       ...runtimeDeps,
     })
