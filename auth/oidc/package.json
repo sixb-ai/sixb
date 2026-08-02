@@ -1,6 +1,6 @@
 {
   "name": "@sixb/auth-oidc",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "OpenID Connect authentication strategy for Sixb",
   "keywords": [
     "sixb",

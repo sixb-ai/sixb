@@ -3,11 +3,12 @@
  *
  *   bun scripts/publish.ts --dry-run
  *   bun scripts/publish.ts --tag next
- *   bun scripts/publish.ts --tag latest --otp 123456
- *   bun scripts/publish.ts --registry http://localhost:4873    # full rehearsal, local registry
+ *   bun scripts/publish.ts --tag next --otp 123456
+ *   bun scripts/publish.ts --tag next --registry http://localhost:4873  # local rehearsal
  *
  * Run `bun run release` first: it installs from the lockfile, rebuilds from clean, and runs the
- * publish gate. This script only publishes.
+ * publish gate. This script only publishes. Preview 0.0.x versions must use `--tag next`; `latest`
+ * starts at 0.1.0.
  *
  * Publishing 46 packages is 46 separate registry writes, so it is resumable by design: a version
  * already on the registry is skipped rather than retried, and a failure stops the run naming exactly
@@ -23,6 +24,7 @@ import {
   packageName,
   topologicalPublishOrder,
 } from "./publishable-packages"
+import { assertReleaseTagAllowed, isPreviewRelease } from "./release-policy"
 
 const root = process.cwd()
 const options = parseOptions(process.argv.slice(2))
@@ -36,6 +38,7 @@ if (versions.size !== 1) {
 }
 const [version] = [...versions]
 if (!version) throw new Error("[SixbPublish] Packages have no version.")
+assertReleaseTagAllowed(version, options.tag)
 
 console.log(
   `[SixbPublish] ${options.dryRun ? "Dry run: " : ""}publishing ${ordered.length} packages at ${version} to tag "${options.tag}".`
@@ -63,12 +66,19 @@ console.log(
   `[SixbPublish] Done. ${published.length} published, ${skipped.length} already on the registry.`
 )
 if (options.tag !== "latest" && !options.dryRun && published.length > 0) {
-  console.log(
-    `[SixbPublish] Nothing is on "latest" yet. Promote once you have verified the tag:\n` +
-      ordered
-        .map((packageInfo) => `  npm dist-tag add ${packageName(packageInfo)}@${version} latest`)
-        .join("\n")
-  )
+  if (isPreviewRelease(version)) {
+    console.log(
+      `[SixbPublish] ${version} remains on "${options.tag}". ` +
+        'The "latest" tag is reserved for 0.1.0 and later.'
+    )
+  } else {
+    console.log(
+      `[SixbPublish] Nothing is on "latest" yet. Promote once you have verified the tag:\n` +
+        ordered
+          .map((packageInfo) => `  npm dist-tag add ${packageName(packageInfo)}@${version} latest`)
+          .join("\n")
+    )
+  }
 }
 
 async function publishPackage(packageInfo: PublishablePackage, name: string): Promise<void> {

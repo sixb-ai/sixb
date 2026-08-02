@@ -172,11 +172,11 @@ ontology transaction -> durable ontology_outbox -> immediate drain -> 60s recove
 
 Broker failure delays subscribers but never rolls back or loses the committed ontology change.
 Consumers deduplicate with stable event IDs when required. CDC/WAL change streams are not part of
-V0.1.0.
+the pre-0.1 line.
 
 An envelope that the broker repeatedly rejects remains durable and retryable; it is never silently
-dropped. After repeated failures `/api/status` stays `degraded` until delivery succeeds. V0.1.0 does
-not provide automatic quarantine or operator requeue.
+dropped. After repeated failures `/api/status` stays `degraded` until delivery succeeds. The
+pre-0.1 line does not provide automatic quarantine or operator requeue.
 
 ### HTTP: GET /api/events
 

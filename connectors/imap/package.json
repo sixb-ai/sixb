@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-imap",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Read-only IMAP connector for Sixb built on ImapFlow",
   "keywords": [
     "sixb",

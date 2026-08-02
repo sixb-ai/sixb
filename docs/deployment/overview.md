@@ -293,7 +293,7 @@ sixb worker-group   # all registered queue workers
 
 ## Scaling roles
 
-The data plane scales horizontally. The control plane does not: in 0.1.0 the
+The data plane scales horizontally. The control plane does not: in the pre-0.1 line the
 orchestrator, scheduler, and rules roles must each run as a **single process**.
 
 | Role                               | Replicas | Why                                                    |

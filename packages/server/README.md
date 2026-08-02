@@ -69,8 +69,8 @@ origins are shown as invitation destinations and participate in `can.access(appl
 | `GET` | `/api/objects/:objectTypeId/:objectKey/files/content` | Download a `fileRef` property (`?path=/properties/scan`) |
 
 Upload sessions default to an in-memory store: neither `@sixb/pg` nor `@sixb/sqlite` implements
-`fileUploadSessions` in 0.1.0, so a session does not survive a restart and is not shared across
-replicas. Single-request `POST /api/files` is unaffected.
+`fileUploadSessions` in the pre-0.1 line, so a session does not survive a restart and is not shared
+across replicas. Single-request `POST /api/files` is unaffected.
 
 ### WebSocket
 

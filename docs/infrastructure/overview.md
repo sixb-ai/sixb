@@ -115,7 +115,7 @@ catches the outbox up.
 | `ontology_commits`     | **nothing** — it grows with every commit   | —       |
 
 Pending outbox rows and nonterminal sources are live data and are never purged by age.
-Size the disk with `ontology_commits` in mind: 0.1.0 has no purge for it.
+Size the disk with `ontology_commits` in mind: the pre-0.1 line has no purge for it.
 
 ```ts
 export const sixb = await createSixb({
