@@ -926,19 +926,50 @@ export function LakeCleanupView({
   )
 }
 
+export function CreateView({
+  name,
+  targetDir,
+  commands,
+}: {
+  name: string
+  targetDir: string
+  commands: readonly string[]
+}) {
+  return (
+    <Box flexDirection="column">
+      <Text color="cyan" bold>
+        sixb
+      </Text>
+      <Spacer />
+      <Text>
+        <Text color="green" bold>
+          Success!
+        </Text>{" "}
+        Created {name}
+      </Text>
+      <Text dimColor>{targetDir}</Text>
+      <Spacer />
+      <SectionTitle>Next steps</SectionTitle>
+      <CommandList commands={commands} />
+    </Box>
+  )
+}
+
 export function InitView({
   name,
   targetDir,
   files,
+  commands,
 }: {
   name: string
   targetDir: string
   files: string[]
+  commands: readonly string[]
 }) {
   return (
     <Box flexDirection="column">
       <Text color="green" bold>
-        Sixb created
+        Sixb initialized
       </Text>
       <Text dimColor>{name}</Text>
       <Text dimColor>{targetDir}</Text>
@@ -947,7 +978,19 @@ export function InitView({
       <BulletList items={files} />
       <Spacer />
       <SectionTitle>Next steps</SectionTitle>
-      <BulletList dim items={[`cd ${name}`, "bun install", "sixb dev"]} />
+      <CommandList commands={commands} />
+    </Box>
+  )
+}
+
+function CommandList({ commands }: { commands: readonly string[] }) {
+  return (
+    <Box flexDirection="column">
+      {commands.map((command) => (
+        <Text key={command} color="cyan">
+          {`  ${command}`}
+        </Text>
+      ))}
     </Box>
   )
 }

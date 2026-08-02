@@ -40,7 +40,9 @@
     "@tanstack/react-query": "^5.0.0",
     "@types/bun": "latest",
     "@types/react": "^19.0.0",
+    "cobe": "^2.0.1",
     "react": "^19.0.0",
+    "satellite.js": "^7.1.0",
     "typescript": "^5.7.0"
   },
   "license": "MIT",
