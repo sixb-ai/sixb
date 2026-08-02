@@ -3,6 +3,7 @@ import { LocalBlobStorage } from "@sixb/blob-local"
 import { createSixb, InMemoryBroker, InMemoryQueues } from "@sixb/core"
 import { DuckLakeStorage } from "@sixb/ducklake"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
+import { SmolvmSandboxFactory } from "@sixb/sandboxes-smolvm"
 import { SqliteStorage } from "@sixb/sqlite"
 
 const localLakePath = ".sixb/lake"
@@ -18,7 +19,10 @@ export const sixb = createSixb({
   }),
   blobStorage: new LocalBlobStorage({ basePath: ".sixb" }),
   queues: new InMemoryQueues(),
-  sandboxes: new LocalSandboxFactory({ timeout: 30_000 }),
+  sandboxes:
+    process.env.SIXB_SANDBOX_PROVIDER === "smolvm"
+      ? new SmolvmSandboxFactory({ image: process.env.SIXB_AGENT_IMAGE, timeout: 30_000 })
+      : new LocalSandboxFactory({ timeout: 30_000 }),
   onError(error, context) {
     let failure: string
     if (context.type === "run.failed") {

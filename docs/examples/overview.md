@@ -47,7 +47,7 @@ alarm -> coverage -> dispatch -> diagnosis -> quote -> repair -> recovery -> clo
 | `actions/` | Contract-aware lifecycle commands with idempotent source writeback — see [Actions](../actions/overview.md) |
 | `rules/` | Dispatch, SLA, assignment, and recovery attention state — see [Rules](../rules/overview.md) |
 | `workflows/` | Deterministic dispatch and repair-quote reviews with human interventions — see [Workflows](../workflows/overview.md) |
-| `agents/` | An optional Vercel AI Gateway operations assistant backed by a local sandbox — see [Agents](../agents/overview.md) |
+| `agents/` | An optional Vercel AI Gateway operations assistant backed by a local development sandbox or hosted smolvm — see [Agents](../agents/overview.md) |
 | `app/` | Northline Operations: a compact desktop shell, mobile technician route, and contextual agent panel — see [Apps](../apps/overview.md) |
 | `tests/` | Fixed-clock scenario, source persistence, and business identity checks — see [Testing](../testing/overview.md) |
 
@@ -59,6 +59,7 @@ import { LocalBlobStorage } from "@sixb/blob-local"
 import { createSixb, InMemoryBroker, InMemoryQueues } from "@sixb/core"
 import { DuckLakeStorage } from "@sixb/ducklake"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
+import { SmolvmSandboxFactory } from "@sixb/sandboxes-smolvm"
 import { SqliteStorage } from "@sixb/sqlite"
 
 const localLakePath = ".sixb/lake"
@@ -74,7 +75,10 @@ export const sixb = createSixb({
   }),
   blobStorage: new LocalBlobStorage({ basePath: ".sixb" }),
   queues: new InMemoryQueues(),
-  sandboxes: new LocalSandboxFactory({ timeout: 30_000 }),
+  sandboxes:
+    process.env.SIXB_SANDBOX_PROVIDER === "smolvm"
+      ? new SmolvmSandboxFactory({ image: process.env.SIXB_AGENT_IMAGE, timeout: 30_000 })
+      : new LocalSandboxFactory({ timeout: 30_000 }),
 })
 ```
 

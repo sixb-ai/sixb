@@ -1,122 +1,82 @@
 <div align="center">
 
-<!-- Relative paths, not absolute `main` URLs: GitHub resolves them against the ref being viewed, so
-     the images render on a branch and in a pull request instead of 404ing until the commit lands on
-     `main`. This file is never published to npm — the root package is private and every package
-     carries its own README — so npm's inability to resolve relative paths does not apply here.
-     The alt text carries the name and the tagline, which live inside the image and are otherwise
-     invisible to search engines and screen readers. -->
-<img alt="Sixb — the open-source operational layer for enterprise AI" src="docs/brand/sixb-banner.png" width="100%">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/sixb-wordmark-white.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/brand/sixb-wordmark-black.svg">
+  <img alt="Sixb" src="docs/brand/sixb-wordmark-black.svg" width="330">
+</picture>
 
-**Build internal apps shared by teams and AI agents.**
-
-Sixb connects company data, rules, permissions, and workflows so teams and AI operate in the same
-governed environment.
+**Build a live model of your operations that teams and AI agents can act on together.**
 
 [Documentation](https://docs.sixb.ai) ·
 [Quickstart](#quickstart) ·
-[Example app](#northline-operations) ·
+[Atlas](#meet-atlas) ·
 [Contributing](https://github.com/sixb-ai/sixb/blob/main/CONTRIBUTING.md)
 
 [![npm](https://img.shields.io/npm/v/@sixb/core?color=black&label=version)](https://www.npmjs.com/package/@sixb/core)
 [![CI](https://github.com/sixb-ai/sixb/actions/workflows/ci.yml/badge.svg)](https://github.com/sixb-ai/sixb/actions/workflows/ci.yml)
-[![Docs](https://img.shields.io/badge/docs-docs.sixb.ai-black)](https://docs.sixb.ai)
 [![License](https://img.shields.io/badge/license-MIT-black)](https://github.com/sixb-ai/sixb/blob/main/LICENSE)
 
 </div>
 
----
+## See what you can build
 
-## See Sixb in action
+Northline Mechanical is a reference application built with Sixb.
 
-<div align="center">
-<img alt="People, tools, approvals, documents, knowledge, and data on the left become concepts, rules, processes, permissions, and actions in the Sixb operational layer, which becomes the Northline Operations app on the right" src="docs/brand/sixb-in-action.gif" width="100%">
-</div>
+[Open the app](https://northline.sixb.ai) ·
+[Explore in Atlas](https://atlas.northline.sixb.ai) ·
+[View the API](https://northline.sixb.ai/docs)
 
-## Why Sixb
+<p align="center">
+  <img alt="Northline Mechanical dashboard showing active service cases, decisions, equipment signals, and today's work" src="docs/brand/northline-dashboard.png" width="100%">
+</p>
 
-- AI assistants lack the context required to operate reliably.
-- Tool access — MCP included — carries the tools, not the business rules, permissions, or processes
-  around them.
-- Sixb gives teams and agents the same operational context and the same controlled actions.
+## What is Sixb?
 
-## What you can build
+Sixb is a TypeScript framework that turns operational data into typed objects, relationships, and
+actions for apps, people, and AI agents.
 
-| | |
-| --- | --- |
-| **Internal operational applications** | Typed React apps on your own objects, with Atlas as the admin surface from the start |
-| **Event-driven agent workflows** | Agents and workflows that react to data changes and run controlled actions |
-| **Human approval interfaces** | Flows that pause for a person to decide, with every run recorded and inspectable |
+With Sixb, you can:
+
+- Build typed operational apps around your own ontology.
+- Connect existing systems and respond when their data changes.
+- Run actions, workflows, and agents with built-in permissions, approvals, and history.
 
 ## Quickstart
+
+You'll need [Bun 1.3 or later](https://bun.sh/docs/installation).
 
 ```bash
 bun create sixb my-app
 cd my-app
+bun install
 bun run dev
 ```
 
-A new project runs on SQLite and local files — nothing to install, no service to start. Atlas, the
-built-in operations UI, comes up alongside your app.
+The starter runs on SQLite and local files, so no external services are required.
 
-To run the reference example instead:
+Once it starts:
 
-```bash
-git clone https://github.com/sixb-ai/sixb.git
-cd sixb
-bun install
-bun --filter @sixb/example-northline dev
-```
+<table>
+  <tr>
+    <td>Starter app</td>
+    <td><a href="http://localhost:3001">http://localhost:3001</a></td>
+  </tr>
+  <tr>
+    <td>Atlas</td>
+    <td><a href="http://localhost:3000">http://localhost:3000</a></td>
+  </tr>
+  <tr>
+    <td>API documentation</td>
+    <td><a href="http://localhost:3002/docs">http://localhost:3002/docs</a></td>
+  </tr>
+</table>
 
-| | |
-| --- | --- |
-| Northline Operations | <http://localhost:3001> |
-| Atlas | <http://localhost:3000> |
-| API documentation | <http://localhost:3002/docs> |
-
-## Northline Operations
-
-Northline is a fictional commercial building-services company that connects its business system,
-its field-service platform, and its building-controls data through Sixb.
-
-<div align="center">
-<img alt="The Quotes page in Northline Operations: three repair quotes awaiting an internal review, a customer decision, and a recorded approval" src="docs/brand/northline-operations.png" width="100%">
-</div>
-
-One service case carries the whole journey:
-
-```text
-alarm ─▶ coverage ─▶ dispatch ─▶ diagnosis ─▶ quote ─▶ repair ─▶ recovery ─▶ closure
-```
-
-Each step is a real action, rule, or workflow — and the objects, runs, rule state, datasets, and
-projections behind it stay inspectable in Atlas.
-
-```bash
-bun run demo:reset          # recreate source and runtime state
-bun run demo:sync           # reconcile every source through the data plane
-bun run demo:alarm          # deliver the signed RTU-7 alarm webhook
-bun run demo:approve-quote  # approve a pending source-system quote
-```
-
-Read it end to end: [`examples/northline`](https://github.com/sixb-ai/sixb/tree/main/examples/northline).
+[Follow the complete getting-started guide →](https://docs.sixb.ai/get-started)
 
 ## How it works
 
-```text
-Connect ─▶ Store ─▶ Transform ─▶ Model ─▶ Govern ─▶ Execute
-```
-
-| | |
-| --- | --- |
-| **Connect** | Reach company systems through connectors |
-| **Store** | Land raw rows in typed datasets |
-| **Transform** | Shape them with SQL pipelines |
-| **Model** | Project them onto business objects and links |
-| **Govern** | Apply rules and permissions |
-| **Execute** | Run actions and workflows from apps, people, and agents |
-
-Modeling is where you start. Define a type, and the rest is derived from it.
+Model your operations as typed objects and relationships.
 
 ```ts
 // ontology/invoice.ts
@@ -128,14 +88,14 @@ export const Invoice = defineObjectType({
   name: "Invoice",
   properties: [
     prop("id", "string", { required: true, primary: true }),
-    prop("amount", "double", { required: true, query: { filterable: true, sortable: true } }),
-    prop("status", stringEnum(["draft", "sent", "paid"]), { query: { facet: true } }),
+    prop("amount", "double", { required: true }),
+    prop("status", stringEnum(["draft", "sent", "paid"]), { query: { filterable: true } }),
   ],
   links: [link("customer", Customer, { cardinality: "one" })],
 })
 ```
 
-Changes go through actions, so there is one governed path to a write:
+Control how they change with actions.
 
 ```ts
 // actions/settle-invoice.ts
@@ -150,46 +110,75 @@ export const settleInvoice = defineAction("settleInvoice")
   })
 ```
 
-`createSixb()` discovers the folders, so those two files are the whole registration. You now have a
-typed runtime, an HTTP and WebSocket API, generated client hooks, and Atlas pages for `Invoice` — plus
-an action that people, apps, and agents all request the same way.
+Query the same model from your app.
 
 ```ts
-// In an app: the typed query builder reads across links in one request.
-const openInvoices = objects(Invoice)
+// app/queries/invoices.ts
+import { objects } from "@sixb/client/query"
+import { Invoice } from "../../ontology/invoice"
+
+export const sentInvoices = objects(Invoice)
   .query()
   .where((invoice) => invoice.p.status.eq("sent"))
   .expand(Invoice.l.customer)
-
-// In a workflow or action step: nothing runs inline — the run is queued and recorded.
-await sixb.objects(Invoice).byId("inv_1").requestAction({ action: settleInvoice, params: {} })
 ```
+
+Rules, permissions, workflows, and agents build on the same objects and actions.
+
+## Meet Atlas
+
+Every Sixb project includes Atlas, a built-in workspace for exploring your model and following the
+work running through it.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/brand/atlas-ontology.png" alt="Atlas ontology view showing the properties, links, actions, and projections of the Service Case object type" width="100%"><br>
+      <sub><strong>Browse the model.</strong> See your object types, properties, relationships, and actions in one place.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/brand/atlas-pipeline.png" alt="Atlas pipeline view showing source datasets flowing into service cases alongside the rows in the equipment dataset" width="100%"><br>
+      <sub><strong>Trace the data.</strong> Follow datasets through transformations and see how they become operational objects.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" valign="top">
+      <img src="docs/brand/atlas-workflow.png" alt="Atlas service-response workflow run waiting for human dispatch review before a controlled dispatch action" width="100%"><br>
+      <sub><strong>Inspect the work.</strong> Follow every workflow step, including human decisions and controlled actions.</sub>
+    </td>
+  </tr>
+</table>
+
+<sub>Shown with data from the <a href="examples/northline">Northline reference project</a>.</sub>
 
 ## Architecture
 
 ```text
-   connectors            reach company systems
-        │
-        ▼
-   syncs ─▶ datasets     typed tables, in DuckLake or local files
-        │
-        ▼
-   pipelines             SQL transformations, executed in DuckDB
-        │
-        ▼
-   projections           objects · links · telemetry, in PostgreSQL or SQLite
-        │
-        ▼
-   rules · permissions · actions · workflows · agents
-        │
-        ▼
-   Atlas · custom apps · HTTP + WebSocket API · typed client
+ External systems                           Apps · Atlas · API clients
+   connectors                                   HTTP + WebSocket
+        │                                               │
+┌───────┴───────────────────────────────────────────────┴─────────────────┐
+│ Sixb                                                                    │
+│                                                                         │
+│ Data       syncs → datasets → pipelines → projections                   │
+│ Model      ontology · objects · links · telemetry                       │
+│ Control    permissions · rules · actions · workflows · agents           │
+│ Execution  schedules · events · orchestrator · workers · run history    │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │
+┌────────────────────────────────────┴────────────────────────────────────┐
+│ Providers                                                               │
+│ operational storage · lake storage · blob storage · broker · queues     │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-Infrastructure is a set of slots you pass to `createSixb()`. Swapping one is a config change; nothing
-above it moves.
+Locally, `sixb dev` runs everything together. In production, the API and background roles can run
+independently against the same durable providers.
 
-| Slot | Ships with |
+<details>
+<summary><strong>Provider options</strong></summary>
+
+| Slot | Implementations |
 | --- | --- |
 | `storage` | SQLite · PostgreSQL |
 | `lakeStorage` | Local files · DuckLake |
@@ -198,60 +187,45 @@ above it moves.
 | `queues` | In-memory · BullMQ |
 | `sandboxes` *(optional)* | Local · Apple Container · smolVM · Vercel |
 
-## Core concepts
+</details>
 
-| | | |
-| --- | --- | --- |
-| **Concepts** | Business objects and their relationships | `defineObjectType` · `link` · `prop` |
-| **Rules** | Business constraints and derived state | `defineRule` |
-| **Processes** | Structured operational flows, including human approval | `defineWorkflow` · `defineIntervention` |
-| **Permissions** | What each person and agent may see and do | `defineRole` · `defineGroup` · `defineMembershipPolicy` |
-| **Actions** | The controlled ways data changes | `defineAction` |
+<details>
+<summary><strong>Repository map</strong></summary>
 
-## Repository structure
-
-| | |
+| Path | Contains |
 | --- | --- |
-| `packages/` | Core runtime, server, CLI, Atlas, typed client, scaffolder |
-| `storage/` `broker/` `queues/` `sandboxes/` `auth/` | Provider implementations for the slots above |
-| `connectors/` | 13 first-party connectors — Google, GitHub, SQL, SFTP, REST, and more |
-| `examples/` | Runnable projects, `northline` first |
+| `packages/` | Runtime, server, CLI, Atlas, client, UI, and workers |
+| `storage/`, `broker/`, `queues/`, `sandboxes/`, `auth/` | Infrastructure providers |
+| `connectors/` | First-party integrations |
+| `examples/` | Runnable reference projects |
 | `docs/` | Source for [docs.sixb.ai](https://docs.sixb.ai) |
+
+</details>
 
 ## Learn more
 
-- [Documentation](https://docs.sixb.ai) · [Project structure](https://docs.sixb.ai/fundamentals/project-structure)
-- [Ontology](https://docs.sixb.ai/ontology) · [Objects](https://docs.sixb.ai/objects) · [Actions](https://docs.sixb.ai/actions) · [Workflows](https://docs.sixb.ai/workflows) · [Agents](https://docs.sixb.ai/agents)
-- [Data](https://docs.sixb.ai/data) · [Apps](https://docs.sixb.ai/apps) · [Server & API](https://docs.sixb.ai/server) · [Infrastructure](https://docs.sixb.ai/infrastructure)
-- [Examples](https://docs.sixb.ai/examples) · [Deployment](https://docs.sixb.ai/deployment)
+- **Start:** [Getting started](https://docs.sixb.ai/get-started) ·
+  [Project structure](https://docs.sixb.ai/fundamentals/project-structure)
+- **Core:** [Ontology](https://docs.sixb.ai/ontology) ·
+  [Objects](https://docs.sixb.ai/objects) · [Actions](https://docs.sixb.ai/actions) ·
+  [Workflows](https://docs.sixb.ai/workflows) · [Agents](https://docs.sixb.ai/agents)
+- **Build:** [Data](https://docs.sixb.ai/data) · [Apps](https://docs.sixb.ai/apps) ·
+  [Server & API](https://docs.sixb.ai/server)
+- **Operate:** [Infrastructure](https://docs.sixb.ai/infrastructure) ·
+  [Deployment](https://docs.sixb.ai/deployment)
+- **Explore:** [Examples](https://docs.sixb.ai/examples) ·
+  [Northline Mechanical](examples/northline)
 
 ## Status
 
-**0.1.0 — first public release.** All packages ship on one version.
-
-This is 0.x and carries no compatibility guarantee; public API will move between minor versions. The
-database schema is one migration whose checksum is verified at startup, and before 1.0 a schema
-change **replaces** it rather than adding another — so a 0.x upgrade can require recreating the
-database. There is no downgrade path.
-
-Bun 1.3 or newer is required. These packages import Bun APIs directly and do not run on Node.
-
-See [CHANGELOG.md](https://github.com/sixb-ai/sixb/blob/main/CHANGELOG.md).
+Sixb is currently `0.1.0`. APIs may change between minor releases, and database upgrades may require
+manual migration before 1.0. See the [changelog](CHANGELOG.md) for compatibility notes.
 
 ## Contributing
 
-Contributions are welcome — start with
-[CONTRIBUTING.md](https://github.com/sixb-ai/sixb/blob/main/CONTRIBUTING.md).
-
-Bun is the only package manager and runtime this repository uses.
-
-```bash
-bun run build
-bun run typecheck
-bun run test
-bun run check
-```
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development and review
+workflow.
 
 ## License
 
-[MIT](https://github.com/sixb-ai/sixb/blob/main/LICENSE)
+[MIT](LICENSE)
