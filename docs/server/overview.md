@@ -87,8 +87,9 @@ All JSON routes are prefixed with `/api` and mirror the runtime's typed APIs; se
 | Auth           | `/api/auth/session`, `/auth/sign-in`, `/auth/callback`, `/api/auth/...`              | [Auth](../auth/overview.md)                     |
 | Project/Status | `GET /api/project`, `GET /api/status`, `GET /health`, `GET /ready`                   | —                                               |
 
-Every route enforces the caller's grants. Reads are filtered; the object, link, and telemetry writes
-require `edit:object` or `append:telemetry` and answer `403` without it. See
+Object data routes enforce the caller's grants: reads are filtered, and the object, link, and
+telemetry writes require `edit:object` or `append:telemetry` and answer `403` without it. File and
+auth-administration routes are **authenticated-only** — neither has a grant family yet. See
 [Authorization](../auth/authorization.md).
 
 Status endpoints have distinct meanings:
