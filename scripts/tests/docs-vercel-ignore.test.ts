@@ -12,7 +12,22 @@ import { tmpdir } from "node:os"
 import { join, relative, resolve } from "node:path"
 import { docsConfig } from "../../apps/docs/src/docs/config"
 import { decideDocsBuild, type GitProbe, gitProbe, WATCHED_PATHS } from "../docs-vercel-ignore"
-import { internalDependencies, type PackageJson } from "../publishable-packages"
+import {
+  type DependencyField,
+  internalDependencies,
+  type PackageJson,
+} from "../publishable-packages"
+
+/**
+ * Every field a build reads, `devDependencies` included — `shiki` and `tailwindcss` are declared
+ * there and are as load-bearing to the rendered page as anything the site ships.
+ */
+const BUILD_DEPENDENCY_FIELDS = [
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "optionalDependencies",
+] as const satisfies readonly DependencyField[]
 
 /**
  * A skipped deployment is invisible: the site keeps serving, the commit is green, and the page
@@ -126,6 +141,9 @@ describe("gitProbe", () => {
     Bun.spawnSync(["git", "init", "-q"], { cwd })
     Bun.spawnSync(["git", "config", "user.email", "test@sixb.local"], { cwd })
     Bun.spawnSync(["git", "config", "user.name", "Sixb Test"], { cwd })
+    // A contributor who signs every commit globally would otherwise get `gpg: no secret key`
+    // out of a test about pathspecs, since nothing here has a key for `test@sixb.local`.
+    Bun.spawnSync(["git", "config", "commit.gpgsign", "false"], { cwd })
     mkdirSync(join(cwd, "docs"), { recursive: true })
     mkdirSync(join(cwd, "apps", "docs"), { recursive: true })
     writeFileSync(join(cwd, "docs", "overview.md"), "# one\n")
@@ -193,7 +211,7 @@ describe("the watched paths cover what the site is built from", () => {
     expect({ unwatched }).toEqual({ unwatched: [] })
   })
 
-  test("every workspace dependency of the site lives under a watched path", () => {
+  test("every workspace package the site is built from lives under a watched path", () => {
     const dependencies = transitiveWorkspaceDependencies("apps/docs")
     expect(dependencies.length).toBeGreaterThan(0)
 
@@ -211,7 +229,7 @@ function transitiveWorkspaceDependencies(startDir: string): string[] {
     const dir = queue.pop()
     if (dir === undefined) continue
 
-    for (const name of internalDependencies(readManifest(dir))) {
+    for (const name of internalDependencies(readManifest(dir), BUILD_DEPENDENCY_FIELDS)) {
       const dependencyDir = byName.get(name)
       if (dependencyDir === undefined || found.has(dependencyDir)) continue
       found.add(dependencyDir)

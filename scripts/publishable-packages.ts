@@ -17,9 +17,26 @@ export type PackageJson = {
   license?: string
   publishConfig?: { access?: string }
   dependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
   peerDependencies?: Record<string, string>
   optionalDependencies?: Record<string, string>
 }
+
+export type DependencyField =
+  | "dependencies"
+  | "devDependencies"
+  | "peerDependencies"
+  | "optionalDependencies"
+
+/**
+ * The fields a published package carries with it. `devDependencies` is not one: it never ships,
+ * so it constrains neither the publish order nor what a consumer installs.
+ */
+const SHIPPED_DEPENDENCY_FIELDS = [
+  "dependencies",
+  "peerDependencies",
+  "optionalDependencies",
+] as const satisfies readonly DependencyField[]
 
 export interface PublishablePackage {
   readonly dir: string
@@ -72,11 +89,18 @@ export function packageName(packageInfo: PublishablePackage): string {
   return packageInfo.packageJson.name ?? packageInfo.dir
 }
 
-/** Names of the sibling workspace packages this one depends on, across every dependency field. */
-export function internalDependencies(packageJson: PackageJson): Set<string> {
+/**
+ * Names of the sibling workspace packages this one depends on. Defaults to the fields that ship,
+ * which is what publishing has to order. Pass `fields` to ask a different question: what a package
+ * is *built* from includes its `devDependencies`.
+ */
+export function internalDependencies(
+  packageJson: PackageJson,
+  fields: readonly DependencyField[] = SHIPPED_DEPENDENCY_FIELDS
+): Set<string> {
   const names = new Set<string>()
 
-  for (const field of ["dependencies", "peerDependencies", "optionalDependencies"] as const) {
+  for (const field of fields) {
     for (const dependency of Object.keys(packageJson[field] ?? {})) {
       if (dependency.startsWith("@sixb/") || dependency === "create-sixb") names.add(dependency)
     }
