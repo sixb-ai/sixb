@@ -71,6 +71,12 @@
       "import": "./dist/broker/index.js",
       "default": "./dist/broker/index.js"
     },
+    "./errors": {
+      "types": "./dist/errors/index.d.ts",
+      "bun": "./src/errors/index.ts",
+      "import": "./dist/errors/index.js",
+      "default": "./dist/errors/index.js"
+    },
     "./events/scope": {
       "types": "./dist/events/scope.d.ts",
       "bun": "./src/events/scope.ts",

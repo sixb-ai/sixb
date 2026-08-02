@@ -44,6 +44,7 @@
       "@sixb/core/blob-storage": ["./packages/core/src/blob-storage/browser.ts"],
       "@sixb/core/blob-storage/server": ["./packages/core/src/blob-storage/index.ts"],
       "@sixb/core/broker": ["./packages/core/src/broker/index.ts"],
+      "@sixb/core/errors": ["./packages/core/src/errors/index.ts"],
       "@sixb/core/events/scope": ["./packages/core/src/events/scope.ts"],
       "@sixb/core/events/selectors": ["./packages/core/src/events/selectors/index.ts"],
       "@sixb/core/internal/actions": ["./packages/core/src/actions/index.ts"],

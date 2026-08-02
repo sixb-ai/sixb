@@ -766,6 +766,43 @@ export {
   WorkflowValidationError,
 } from "./workflows"
 
+// ── Errors ──────────────────────────────────────────────────
+
+/**
+ * The failure vocabulary. App code catches with `isSixbError(error, code)` and branches on the
+ * code; the five classes are there for the coarser `instanceof` a caller sometimes wants instead.
+ */
+export {
+  isSixbError,
+  isSixbErrorCode,
+  SIXB_AUTHORIZATION_ERROR_CODES,
+  SIXB_CONFLICT_ERROR_CODES,
+  SIXB_ERROR_CODES,
+  SIXB_ERROR_RETRYABLE,
+  SIXB_PROVIDER_ERROR_CODES,
+  SIXB_TIMEOUT_ERROR_CODES,
+  SIXB_VALIDATION_ERROR_CODES,
+  SixbAuthorizationError,
+  type SixbAuthorizationErrorCode,
+  SixbConflictError,
+  type SixbConflictErrorCode,
+  SixbError,
+  type SixbErrorCode,
+  type SixbErrorNamespace,
+  type SixbErrorOptions,
+  type SixbFailure,
+  type SixbFailureDetails,
+  SixbProviderError,
+  type SixbProviderErrorCode,
+  SixbTimeoutError,
+  type SixbTimeoutErrorCode,
+  SixbValidationError,
+  type SixbValidationErrorCode,
+  sixbErrorNamespace,
+  type ToSixbFailureOptions,
+  toSixbFailure,
+} from "./errors"
+
 // ── Runtime ─────────────────────────────────────────────────
 
 export type {
