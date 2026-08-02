@@ -29,7 +29,10 @@ Northline Mechanical is a reference application built with Sixb.
 [View the API](https://northline.sixb.ai/docs)
 
 <p align="center">
-  <img alt="Northline Mechanical dashboard showing active service cases, decisions, equipment signals, and today's work" src="docs/brand/northline-dashboard.png" width="100%">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/brand/northline-dashboard.png">
+    <img alt="A terminal runs bun create sixb northline-mechanical and bun run dev, then the Northline Mechanical dashboard it starts, showing active service cases, decisions, equipment signals, and today's work" src="docs/brand/hero.gif" width="100%">
+  </picture>
 </p>
 
 ## What is Sixb?
