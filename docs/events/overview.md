@@ -58,7 +58,7 @@ event's `type`, `topic`, `partitionKey`, `payload`, and a broker `cursor`.
 | `correlationId` | `string?` | Groups related events |
 | `causationId` | `string?` | The event that caused this one |
 | `idempotencyKey` | `string?` | De-duplicates appends |
-| `actor` | `{ type, id }?` | Who made the write: `user`, `service`, or `system`. Absent when a privileged caller wrote it — a worker, a sync, or startup code |
+| `actor` | `{ type, id }?` | Who made the write: `user`, `serviceAccount`, or `system`. Absent when a privileged caller wrote it — a worker, a sync, or startup code |
 | `metadata` | `Record<string, JsonValue>?` | Free-form context |
 | `origin` | `{ kind, ... }?` | What produced the event: an `action`, a `runtime` write, a `projection`, or a `telemetry` append |
 | `commitId` | `string?` | Groups every object, link, and telemetry event that came from the same write |
