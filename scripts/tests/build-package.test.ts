@@ -36,8 +36,10 @@ describe("build-package", () => {
 
     const consumerRoot = join(fixtureRoot, "packages", "consumer")
     const dependencyRoot = join(fixtureRoot, "packages", "dependency")
+    const thirdPartyRoot = join(fixtureRoot, "packages", "third-party")
     await mkdir(join(consumerRoot, "src"), { recursive: true })
     await mkdir(join(dependencyRoot, "src"), { recursive: true })
+    await mkdir(thirdPartyRoot, { recursive: true })
 
     await writeJson(join(fixtureRoot, "package.json"), {
       private: true,
@@ -81,6 +83,7 @@ describe("build-package", () => {
         ".": { bun: "./src/index.ts", import: "./dist/index.js" },
         "./subpath": { bun: "./src/subpath.ts", import: "./dist/subpath.js" },
       },
+      dependencies: { "fixture-third-party": "workspace:*" },
     })
     await writeFile(
       join(dependencyRoot, "src", "index.ts"),
@@ -98,13 +101,6 @@ describe("build-package", () => {
       join(dependencyRoot, "src", "subpath.ts"),
       'export const subpathValue = "subpath"\n'
     )
-
-    await runBounded([process.execPath, "install"], fixtureRoot)
-
-    // Only the dependency can resolve this, which is the whole point: absorbed source keeps the
-    // import and loses the node_modules that satisfies it.
-    const thirdPartyRoot = join(dependencyRoot, "node_modules", "fixture-third-party")
-    await mkdir(thirdPartyRoot, { recursive: true })
     await writeJson(join(thirdPartyRoot, "package.json"), {
       name: "fixture-third-party",
       type: "module",
@@ -112,13 +108,40 @@ describe("build-package", () => {
     })
     await writeFile(join(thirdPartyRoot, "index.js"), 'export const thirdPartyValue = "root"\n')
 
+    await runBounded([process.execPath, "install"], fixtureRoot)
+
+    await runBounded([process.execPath, "run", buildPackageScript], dependencyRoot)
+    await writeFile(
+      join(dependencyRoot, "src", "value.ts"),
+      'export const rootValue = "source-only-after-build"\n'
+    )
     await runBounded([process.execPath, "run", buildPackageScript], consumerRoot)
 
+    const browserBundlePath = join(fixtureRoot, "browser.js")
+    const browserBuildScript = join(fixtureRoot, "build-browser.ts")
+    await writeFile(
+      browserBuildScript,
+      [
+        `const result = await Bun.build({ entrypoints: [${JSON.stringify(join(consumerRoot, "dist", "index.js"))}], target: "browser" })`,
+        'if (!result.success) throw new Error(result.logs.map(String).join("\\n"))',
+        `await Bun.write(${JSON.stringify(browserBundlePath)}, result.outputs[0])`,
+        "",
+      ].join("\n")
+    )
+    await runBounded([process.execPath, "run", browserBuildScript], fixtureRoot)
+
     const output = await readFile(join(consumerRoot, "dist", "index.js"), "utf-8")
+    const browserBundle = await readFile(browserBundlePath, "utf-8")
     expect(output).toContain('from "@sixb/fixture-dependency"')
     expect(output).toContain('from "@sixb/fixture-dependency/subpath"')
     expect(output).not.toContain('from "fixture-third-party"')
     expect(output).not.toContain('subpathValue = "subpath"')
+    // Delete the dist tsconfig write in build-package.ts to verify this follows the consumer's
+    // source alias instead, bundling "source-only-after-build" and failing this assertion.
+    expect(browserBundle).not.toContain("source-only-after-build")
+    expect(browserBundle).toContain('thirdPartyValue = "root"')
+    const distTsconfig = await readFile(join(consumerRoot, "dist", "tsconfig.json"), "utf-8")
+    expect(JSON.parse(distTsconfig)).toEqual({ compilerOptions: { paths: {} } })
   }, 20_000)
 })
 
