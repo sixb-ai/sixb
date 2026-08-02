@@ -1,4 +1,5 @@
 import type { SixbBrowserOrigin } from "@sixb/server"
+import { configuredOrigin } from "./public-origin"
 
 /**
  * The process resolving the topology. One answer settles what used to be four options: whether
@@ -251,16 +252,6 @@ export function apiEventsUrl(topology: BrowserTopology): string {
   return url.toString()
 }
 
-/** The origin the flag or the environment set, normalized. `null` when neither did. */
-function configuredOrigin(
-  value: string | undefined,
-  envName: string,
-  label: string
-): string | null {
-  const configured = value ?? process.env[envName]
-  return configured ? normalizeOrigin(configured, label) : null
-}
-
 /** The local default, or `null` outside `sixb dev`, where an origin behind a proxy is a guess. */
 function localOrigin(role: BrowserRole, port: number): string | null {
   return role === "dev" ? `http://localhost:${port}` : null
@@ -283,25 +274,6 @@ function parsePort(value: string | undefined, label: string, fallback: number): 
   }
 
   return port
-}
-
-function normalizeOrigin(value: string, label: string): string {
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    throw new Error(`[SixbCLI] Invalid ${label}: '${value}'.`)
-  }
-
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(`[SixbCLI] ${label} must use http or https.`)
-  }
-
-  if (url.pathname !== "/" || url.search || url.hash) {
-    throw new Error(`[SixbCLI] ${label} must be an origin, not a full URL.`)
-  }
-
-  return url.origin
 }
 
 function toKebabCase(value: string): string {
