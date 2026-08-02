@@ -1,7 +1,7 @@
 import type { Dirent } from "node:fs"
-import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises"
+import { cp, mkdir, readdir, rm } from "node:fs/promises"
 import { extname, join, relative, resolve } from "node:path"
-import { workspaceBoundaryPlugins } from "./package-boundaries"
+import { workspaceBoundaryPlugins, writeResolutionBoundary } from "./package-boundaries"
 
 type PackageJson = {
   name?: string
@@ -45,10 +45,12 @@ const packageName = packageJson.name ?? relative(process.cwd(), packageRoot)
 // styles, and copied assets cannot leak into a later tarball.
 await cleanRuntimeOutputs(distRoot)
 await mkdir(distRoot, { recursive: true })
-// Dist is a package-consumer boundary. Without a nearer config, Bun can apply this workspace's
-// root source aliases to imports inside dist and mix source with built modules in one browser
-// bundle, duplicating stateful singletons such as the generated SDK client.
-await writeFile(join(distRoot, "tsconfig.json"), '{"compilerOptions":{"paths":{}}}\n')
+// Whoever bundles this output resolves its imports through their own `paths` map unless something
+// nearer says otherwise, and `dist` is close enough to the package to inherit ours. One custom-app
+// dev bundle already ended up with two copies of the generated SDK client that way: one configured
+// at bootstrap, one reached through here and left pointing at the page origin. See
+// `package-boundaries.ts`.
+await writeResolutionBoundary(distRoot)
 
 await ensureDeclarations()
 

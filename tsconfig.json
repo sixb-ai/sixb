@@ -29,7 +29,9 @@
       "@sixb/connector-imap": ["./connectors/imap/src/index.ts"],
       "@sixb/connector-mercury": ["./connectors/mercury/src/index.ts"],
       "@sixb/connector-meta": ["./connectors/meta/src/index.ts"],
+      "@sixb/connector-pandadoc": ["./connectors/pandadoc/src/index.ts"],
       "@sixb/connector-pennylane": ["./connectors/pennylane/src/index.ts"],
+      "@sixb/connector-pipedrive": ["./connectors/pipedrive/src/index.ts"],
       "@sixb/connector-rest": ["./connectors/rest/src/index.ts"],
       "@sixb/connector-sftp": ["./connectors/sftp/src/index.ts"],
       "@sixb/connector-sql": ["./connectors/sql/src/index.ts"],
@@ -60,6 +62,9 @@
       "@sixb/core/internal/ontology": ["./packages/core/src/ontology/internal.ts"],
       "@sixb/core/internal/ontology-storage-provider": [
         "./packages/core/src/storage/ontology/provider.ts"
+      ],
+      "@sixb/core/internal/projection-run-storage-provider": [
+        "./packages/core/src/storage/projection-runs/lifecycle.ts"
       ],
       "@sixb/core/internal/projections": ["./packages/core/src/projections/internal.ts"],
       "@sixb/core/internal/query": ["./packages/core/src/objects/query/index.ts"],

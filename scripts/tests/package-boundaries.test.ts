@@ -4,12 +4,14 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import {
   artifactScope,
+  findAliasDrift,
   findUndeclaredImports,
   type ManifestDependencies,
   siblingSpecifierPattern,
   sourceScope,
   workspaceBoundaryPlugins,
 } from "../package-boundaries"
+import type { ExportTarget, PublishablePackage } from "../publishable-packages"
 
 /**
  * These cover the rule itself. `build-package.test.ts` covers the wiring — that the bundler is
@@ -178,6 +180,94 @@ describe("findUndeclaredImports", () => {
     expect(await findUndeclaredImports(packageRoot, manifest, artifactScope)).toEqual([])
   })
 })
+
+describe("findAliasDrift", () => {
+  test("says nothing while the map names the same file as exports.bun", () => {
+    const packages = [
+      packageAt("packages/client", "@sixb/client", {
+        ".": { bun: "./src/index.ts", import: "./dist/index.js" },
+        "./query": { bun: "./src/query.ts", import: "./dist/query.js" },
+      }),
+    ]
+
+    expect(
+      findAliasDrift(packages, {
+        "@sixb/client": ["./packages/client/src/index.ts"],
+        "@sixb/client/query": ["./packages/client/src/query.ts"],
+      })
+    ).toEqual([])
+  })
+
+  test("reports a subpath the map never learned about", () => {
+    // How `@sixb/client/logs` shipped: the subpath existed, the alias did not, and the Atlas
+    // bundle resolved it through `exports.import` into a dist that had not been built.
+    const packages = [
+      packageAt("packages/client", "@sixb/client", {
+        ".": { bun: "./src/index.ts", import: "./dist/index.js" },
+        "./logs": { bun: "./src/logs.ts", import: "./dist/logs.js" },
+      }),
+    ]
+
+    expect(
+      findAliasDrift(packages, { "@sixb/client": ["./packages/client/src/index.ts"] })
+    ).toEqual([
+      { specifier: "@sixb/client/logs", expected: "./packages/client/src/logs.ts", actual: null },
+    ])
+  })
+
+  test("reports a map entry that points somewhere else", () => {
+    const packages = [packageAt("storage/pg", "@sixb/pg", { ".": { bun: "./src/index.ts" } })]
+
+    expect(findAliasDrift(packages, { "@sixb/pg": ["./storage/pg/src/client.ts"] })).toEqual([
+      {
+        specifier: "@sixb/pg",
+        expected: "./storage/pg/src/index.ts",
+        actual: "./storage/pg/src/client.ts",
+      },
+    ])
+  })
+
+  test("leaves alone what has no source to mirror", () => {
+    // `create-sixb` publishes only `dist` and points every condition there, and a stylesheet is
+    // not resolved by the module resolver at all.
+    const packages = [
+      packageAt("packages/create-sixb", "create-sixb", {
+        "./scaffold": { bun: "./dist/scaffold.js", import: "./dist/scaffold.js" },
+      }),
+      packageAt("packages/ui", "@sixb/ui", { "./globals.css": "./src/styles/globals.css" }),
+    ]
+
+    expect(findAliasDrift(packages, {})).toEqual([])
+  })
+
+  test("keeps a wildcard subpath's fallback list in order", () => {
+    const packages = [
+      packageAt("packages/ui", "@sixb/ui", {
+        "./hooks/*": { bun: ["./src/hooks/*.ts", "./src/hooks/*.tsx"] },
+      }),
+    ]
+
+    expect(
+      findAliasDrift(packages, {
+        "@sixb/ui/hooks/*": ["./packages/ui/src/hooks/*.tsx", "./packages/ui/src/hooks/*.ts"],
+      })
+    ).toEqual([
+      {
+        specifier: "@sixb/ui/hooks/*",
+        expected: "./packages/ui/src/hooks/*.ts, ./packages/ui/src/hooks/*.tsx",
+        actual: "./packages/ui/src/hooks/*.tsx, ./packages/ui/src/hooks/*.ts",
+      },
+    ])
+  })
+})
+
+function packageAt(
+  dir: string,
+  name: string,
+  exports: Record<string, ExportTarget>
+): PublishablePackage {
+  return { dir, packageJson: { name, exports } }
+}
 
 function patternFor(manifest: ManifestDependencies): RegExp {
   const pattern = siblingSpecifierPattern(manifest)
