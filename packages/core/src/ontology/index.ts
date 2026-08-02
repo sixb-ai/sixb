@@ -60,7 +60,7 @@ export { OntologyRegistry } from "./registry"
 
 // ── Errors ─────────────────────────────────────────────────
 
-export { OntologyValidationError } from "./errors"
+export { OntologyNotFoundError, OntologyValidationError } from "./errors"
 
 // ── Helpers ─────────────────────────────────────────────────
 

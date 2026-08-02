@@ -826,6 +826,7 @@ export {
   createSixb,
   ObjectError,
   ObjectNotFoundError,
+  OntologyNotFoundError,
   OntologyValidationError,
   ProjectionValidationError,
   RuntimeError,
