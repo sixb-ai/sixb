@@ -41,7 +41,7 @@ export async function runApp(options: AppOptions = {}) {
     const topology = resolveBrowserTopology({
       role: "app",
       host: options.host,
-      appPort: options.port,
+      port: options.port,
       apiPublicOrigin: options.apiPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
     })

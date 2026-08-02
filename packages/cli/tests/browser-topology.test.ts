@@ -101,11 +101,11 @@ describe("browser topology", () => {
       hasCustomApp: true,
     })
 
+    // The API role binds one port. It resolves the other surfaces' *origins*, because they are
+    // its CORS allowlist, but never their ports — so those are not asserted here.
     expect(topology).toMatchObject({
       host: "127.0.0.1",
       apiHost: "127.0.0.2",
-      atlasPort: 8080,
-      appPort: 8081,
       apiPort: 8082,
       atlasPublicOrigin: "https://atlas.example.com",
       appPublicOrigin: "https://app.example.com",
@@ -168,6 +168,63 @@ describe("browser topology", () => {
     // `sixb atlas` ships a bundle that calls the API. Guessing that address serves a UI
     // that cannot talk to anything, which is worse than not starting.
     expect(() => resolveBrowserTopology({ role: "atlas" })).toThrow("SIXB_API_PUBLIC_ORIGIN")
+  })
+
+  test("gives --port to the surface the role actually binds", () => {
+    process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
+    process.env.SIXB_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
+
+    // `--port` used to name Atlas's port whatever the role was, and each command translated it
+    // on the way in. Only `sixb app` translated to a different field, so writing it the way its
+    // three neighbours do bound the app one port past where the operator asked.
+    //
+    // To see this fail, drop the role checks in `resolveBrowserPorts` — `appPort: base +
+    // DEFAULT_APP_PORT_OFFSET` alone puts the app on 4001 and the API back on 3002.
+    expect(resolveBrowserTopology({ role: "app", port: "4000" }).appPort).toBe(4000)
+    expect(resolveBrowserTopology({ role: "atlas", port: "4000" }).atlasPort).toBe(4000)
+    expect(resolveBrowserTopology({ role: "api", hasCustomApp: false, port: "4000" }).apiPort).toBe(
+      4000
+    )
+  })
+
+  test("keeps the offsets a role that binds every surface depends on", () => {
+    const dev = resolveBrowserTopology({ role: "dev", hasCustomApp: true, port: "8080" })
+
+    // `sixb dev` is the one role that binds all three, so its `--port` still moves the block.
+    expect(dev).toMatchObject({ atlasPort: 8080, appPort: 8081, apiPort: 8082 })
+  })
+
+  test("leaves each single-surface role on its usual port with no flag", () => {
+    process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
+    process.env.SIXB_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
+
+    // Unflagged, a role lands where `sixb dev` would have put it — the addresses the README and
+    // the deployment page print. Making `--port` mean "mine" must not move these.
+    expect(resolveBrowserTopology({ role: "atlas" }).atlasPort).toBe(3000)
+    expect(resolveBrowserTopology({ role: "app" }).appPort).toBe(3001)
+    expect(resolveBrowserTopology({ role: "api", hasCustomApp: false }).apiPort).toBe(3002)
+  })
+
+  test("lets --api-port win over --port on the role that takes both", () => {
+    process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
+    process.env.SIXB_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
+
+    const topology = resolveBrowserTopology({
+      role: "api",
+      hasCustomApp: false,
+      port: "8080",
+      apiPort: "9000",
+    })
+
+    expect(topology.apiPort).toBe(9000)
+  })
+
+  test("names the flag the operator typed when a port is invalid", () => {
+    // The error said `--app-port`, a flag no command accepts, to anyone who mistyped
+    // `sixb app --port`.
+    expect(() => resolveBrowserTopology({ role: "app", port: "abc" })).toThrow(
+      "--port must be a valid TCP port"
+    )
   })
 
   test("rejects full URLs where public origins are expected", () => {

@@ -57,7 +57,7 @@ export async function runApi(options: ApiOptions = {}) {
       host: options.host,
       apiHost: options.apiHost,
       port: options.port,
-      apiPort: options.apiPort ?? options.port,
+      apiPort: options.apiPort,
       apiPublicOrigin: options.apiPublicOrigin,
       atlasPublicOrigin: options.atlasPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,

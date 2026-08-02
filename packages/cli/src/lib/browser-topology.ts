@@ -13,9 +13,10 @@ export type BrowserSurface = "atlas" | "app"
 
 interface BrowserBindOptions {
   readonly host?: string
-  readonly apiHost?: string
+  /** `--port`: the port this role binds. See {@link resolveBrowserPorts}. */
   readonly port?: string
-  readonly appPort?: string
+  /** `--api-host` and `--api-port`, which only the two roles that bind the API accept. */
+  readonly apiHost?: string
   readonly apiPort?: string
   readonly apiPublicOrigin?: string
   readonly atlasPublicOrigin?: string
@@ -128,15 +129,24 @@ function resolveBrowserHosts(options: BrowserTopologyOptions): BrowserHosts {
   }
 }
 
+/**
+ * `--port` is the port the role binds. `sixb dev` binds all three surfaces, so there it moves the
+ * whole block and the others keep their offsets from it. Every other role binds exactly one, and
+ * `--port` moves only that one — which is why `sixb app --port 4000` listens on 4000 and not one
+ * past it. The ports a role does not bind keep their defaults and are read by nobody.
+ */
 function resolveBrowserPorts(options: BrowserTopologyOptions): BrowserPorts {
-  const atlasPort = parsePort(options.port, "port", DEFAULT_ATLAS_PORT)
-  const appPort = parsePort(options.appPort, "app-port", atlasPort + DEFAULT_APP_PORT_OFFSET)
-  const apiPort = parsePort(options.apiPort, "api-port", atlasPort + DEFAULT_API_PORT_OFFSET)
+  const requested = parsePort(options.port, "port")
+  const base = options.role === "dev" ? (requested ?? DEFAULT_ATLAS_PORT) : DEFAULT_ATLAS_PORT
+  const bound = options.role === "dev" ? undefined : requested
 
   return {
-    atlasPort,
-    appPort,
-    apiPort,
+    atlasPort: (options.role === "atlas" ? bound : undefined) ?? base,
+    appPort: (options.role === "app" ? bound : undefined) ?? base + DEFAULT_APP_PORT_OFFSET,
+    apiPort:
+      parsePort(options.apiPort, "api-port") ??
+      (options.role === "api" ? bound : undefined) ??
+      base + DEFAULT_API_PORT_OFFSET,
   }
 }
 
@@ -263,9 +273,10 @@ function refusePublicOrigin(envName: string): never {
   )
 }
 
-function parsePort(value: string | undefined, label: string, fallback: number): number {
+/** The port a flag set, or `undefined` when it did not. `label` names the flag in the error. */
+function parsePort(value: string | undefined, label: string): number | undefined {
   if (!value) {
-    return fallback
+    return undefined
   }
 
   const port = Number.parseInt(value, 10)
