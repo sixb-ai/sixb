@@ -2359,7 +2359,7 @@ describe("in-memory ontology storage", () => {
     getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
       beforeWrite(boundary) {
         if (boundary === "finalize" && failures++ === 0) {
-          throw new StorageTransactionError("retry", { code: "serialization_failure" })
+          throw new StorageTransactionError("retry", { reason: "serialization_failure" })
         }
       },
     })

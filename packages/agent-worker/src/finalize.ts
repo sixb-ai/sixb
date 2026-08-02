@@ -19,9 +19,9 @@ const FINALIZE_BACKOFF_MS = [50, 200, 600] as const
 export function isTerminalOrExecutionGone(error: unknown): boolean {
   return (
     error instanceof AgentStorageError &&
-    (error.code === "execution_lost" ||
-      error.code === "invalid_state" ||
-      error.code === "run_not_found")
+    (error.reason === "execution_lost" ||
+      error.reason === "invalid_state" ||
+      error.reason === "run_not_found")
   )
 }
 

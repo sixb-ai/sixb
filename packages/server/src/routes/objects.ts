@@ -149,7 +149,8 @@ function handleObjectQueryError(error: unknown, set: { status?: number | string 
       issues: [
         {
           path: error.path ?? "$",
-          code: error.code,
+          // The issue keeps the planner's own discriminant; `error.code` is the framework-wide one.
+          code: error.reason,
           message: error.message,
         },
       ],

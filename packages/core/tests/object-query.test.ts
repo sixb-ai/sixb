@@ -1432,7 +1432,7 @@ describe("object query planner and executor", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(ObjectQueryExecutionError)
       if (error instanceof ObjectQueryExecutionError) {
-        expect(error.code).toBe("fallback_row_limit_exceeded")
+        expect(error.reason).toBe("fallback_row_limit_exceeded")
       }
     }
   })

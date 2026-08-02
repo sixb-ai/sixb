@@ -44,13 +44,13 @@ export function assertTransactionActive(isActive: () => boolean): void {
   if (!isActive()) {
     throw new StorageTransactionError(
       "[Sixb] Transaction storage cannot be used after transaction completion.",
-      { code: "transaction_inactive" }
+      { reason: "transaction_inactive" }
     )
   }
 }
 
 export function throwNestedStorageTransaction(): never {
   throw new StorageTransactionError("[Sixb] Nested storage transactions are not supported yet.", {
-    code: "nested_transaction",
+    reason: "nested_transaction",
   })
 }

@@ -194,3 +194,27 @@ export function isSixbErrorCode(value: unknown): value is SixbErrorCode {
 export function sixbErrorNamespace(code: SixbErrorCode): SixbErrorNamespace {
   return code.slice(0, code.indexOf(".")) as SixbErrorNamespace
 }
+
+export type ConnectorResponseErrorCode =
+  | "connector.rate_limited"
+  | "connector.request_failed"
+  | "connector.unauthorized"
+  | "connector.unavailable"
+
+/**
+ * Classifies an upstream HTTP status into the `connector.*` namespace.
+ *
+ * Every connector wraps a REST API and every one of them faces the same four questions — is this a
+ * credential problem, a rate limit, the far side being down, or a bad request? The answer is a
+ * property of HTTP, not of the vendor, so the rule lives here once instead of as a `switch`
+ * duplicated per connector and drifting.
+ *
+ * 408 and 425 join the 5xx family: both mean the request never got a verdict, so retrying it is
+ * the same bet as retrying a 503.
+ */
+export function connectorCodeForStatus(status: number): ConnectorResponseErrorCode {
+  if (status === 401 || status === 403) return "connector.unauthorized"
+  if (status === 429) return "connector.rate_limited"
+  if (status >= 500 || status === 408 || status === 425) return "connector.unavailable"
+  return "connector.request_failed"
+}

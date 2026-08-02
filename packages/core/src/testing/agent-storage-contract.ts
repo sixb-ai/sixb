@@ -5,7 +5,7 @@ import {
   type AgentRunExecution,
   type AgentStorage,
   AgentStorageError,
-  type AgentStorageErrorCode,
+  type AgentStorageErrorReason,
   type CreateAgentRunInput,
   type CreateAgentThreadInput,
   type StartAgentRunInput,
@@ -32,10 +32,10 @@ function at(value: string): Date {
 
 async function expectAgentError(
   promise: Promise<unknown>,
-  code: AgentStorageErrorCode
+  reason: AgentStorageErrorReason
 ): Promise<void> {
   await expect(promise).rejects.toBeInstanceOf(AgentStorageError)
-  await expect(promise).rejects.toMatchObject({ code })
+  await expect(promise).rejects.toMatchObject({ reason })
 }
 
 function threadInput(overrides: Partial<CreateAgentThreadInput> = {}): CreateAgentThreadInput {
@@ -324,8 +324,9 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         )
         expect(fulfilled).toHaveLength(1)
         expect(rejected).toHaveLength(1)
-        expect(rejected[0].reason).toBeInstanceOf(AgentStorageError)
-        expect(rejected[0].reason.code).toBe("active_run_exists")
+        const loser: unknown = rejected[0].reason
+        expect(loser).toBeInstanceOf(AgentStorageError)
+        expect((loser as AgentStorageError).reason).toBe("active_run_exists")
       })
     })
 

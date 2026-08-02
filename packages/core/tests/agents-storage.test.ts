@@ -142,7 +142,8 @@ describe("InMemoryStorage agents", () => {
 
   test("exposes the AgentStorageError code surface", () => {
     const error = new AgentStorageError("execution_lost", "[Sixb] gone")
-    expect(error.code).toBe("execution_lost")
+    expect(error.reason).toBe("execution_lost")
+    expect(error.code).toBe("agent.execution_lost")
     expect(error.name).toBe("AgentStorageError")
   })
 })

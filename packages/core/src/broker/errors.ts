@@ -1,8 +1,15 @@
-export class BrokerError extends Error {
-  readonly name: string = "BrokerError"
+import { SixbError, type SixbErrorCode, type SixbErrorOptions } from "../errors"
 
-  constructor(message: string, options?: ErrorOptions) {
-    super(`[Broker] ${message}`, options)
+export interface BrokerErrorOptions extends SixbErrorOptions {
+  /** Subclasses narrow the failure; direct callers of `BrokerError` leave this alone. */
+  readonly code?: Extract<SixbErrorCode, `broker.${string}`>
+}
+
+export class BrokerError extends SixbError {
+  override readonly name: string = "BrokerError"
+
+  constructor(message: string, options: BrokerErrorOptions = {}) {
+    super(options.code ?? "broker.unavailable", `[Broker] ${message}`, options)
   }
 }
 
@@ -12,4 +19,8 @@ export class BrokerError extends Error {
  */
 export class BrokerCursorExpiredError extends BrokerError {
   override readonly name = "BrokerCursorExpiredError"
+
+  constructor(message: string, options: SixbErrorOptions = {}) {
+    super(message, { ...options, code: "broker.cursor_expired" })
+  }
 }

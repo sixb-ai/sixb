@@ -63,7 +63,7 @@ export type {
   AuthOidcAuthorizationAttemptStore,
   AuthSessionStore,
   AuthStorage,
-  AuthStorageErrorCode,
+  AuthStorageErrorReason,
   AuthUserIdentityStore,
   AuthUserStore,
   CompleteAuthSessionInput,
@@ -97,7 +97,7 @@ export type {
   UserStatus,
 } from "./auth"
 export { AuthStorageError } from "./auth"
-export type { StorageTransactionErrorCode, StorageTransactionErrorOptions } from "./errors"
+export type { StorageTransactionErrorOptions, StorageTransactionErrorReason } from "./errors"
 export {
   isStorageSerializationFailure,
   ObjectStorageError,

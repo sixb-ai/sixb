@@ -1,4 +1,5 @@
 import { type OntologySource, resolveAuthorizationContext, type Sixb } from "@sixb/core"
+import { SixbValidationError } from "@sixb/core/errors"
 import {
   AGENT_API_GATEWAY_PREFIX,
   AGENT_API_ROUTES,
@@ -257,4 +258,8 @@ function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status })
 }
 
-class PayloadTooLargeError extends Error {}
+class PayloadTooLargeError extends SixbValidationError {
+  constructor(message: string) {
+    super("runtime.payload_too_large", message)
+  }
+}

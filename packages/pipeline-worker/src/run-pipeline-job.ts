@@ -1,3 +1,4 @@
+import { SixbConflictError } from "@sixb/core/errors"
 import { resolveLogsRuntime } from "@sixb/core/internal/logging"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { PipelineRunRecord } from "@sixb/core/storage"
@@ -12,11 +13,15 @@ import {
 import { runStep } from "./run-step"
 import type { PipelineRunResult, PipelineStepRunResult, RunPipelineJobInput } from "./types"
 
-export class PipelineRunAlreadyStartedError extends Error {
+export class PipelineRunAlreadyStartedError extends SixbConflictError {
   override readonly name = "PipelineRunAlreadyStartedError"
 
   constructor(readonly run: PipelineRunRecord) {
-    super(`[SixbPipelineWorker] Pipeline run '${run.id}' has already started.`)
+    super(
+      "pipeline.already_running",
+      `[SixbPipelineWorker] Pipeline run '${run.id}' has already started.`,
+      { details: { runId: run.id, pipelineId: run.pipelineId } }
+    )
   }
 }
 

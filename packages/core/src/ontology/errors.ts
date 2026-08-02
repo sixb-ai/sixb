@@ -1,11 +1,22 @@
+import { type SixbErrorCode, type SixbErrorOptions, SixbValidationError } from "../errors"
+
+export interface OntologyValidationErrorOptions extends SixbErrorOptions {
+  /** Subclasses narrow the failure; direct callers leave this alone. */
+  readonly code?: Extract<SixbErrorCode, `ontology.${string}`>
+}
+
 /**
  * Thrown when input violates an ontology constraint
  * (unknown property, missing required, invalid value, invalid target type, etc.).
  */
-export class OntologyValidationError extends Error {
+export class OntologyValidationError extends SixbValidationError {
   // Widened from the literal so subclasses (notably MaterializationValidationError) can name
   // themselves while still being caught by `instanceof OntologyValidationError`.
-  readonly name: string = "OntologyValidationError"
+  override readonly name: string = "OntologyValidationError"
+
+  constructor(message: string, options: OntologyValidationErrorOptions = {}) {
+    super(options.code ?? "ontology.invalid_value", message, options)
+  }
 }
 
 /**
@@ -17,7 +28,11 @@ export class OntologyValidationError extends Error {
  * covers — unknown property, missing required, bad value, wrong target type — is a 400.
  */
 export class OntologyNotFoundError extends OntologyValidationError {
-  readonly name: string = "OntologyNotFoundError"
+  override readonly name: string = "OntologyNotFoundError"
+
+  constructor(message: string, options: SixbErrorOptions = {}) {
+    super(message, { ...options, code: "ontology.type_not_found" })
+  }
 }
 
 export function formatUnknownObjectTypeMessage(objectTypeId: string): string {

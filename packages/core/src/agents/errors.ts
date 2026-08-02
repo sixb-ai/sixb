@@ -1,9 +1,20 @@
+import {
+  SixbError,
+  type SixbErrorCode,
+  type SixbErrorOptions,
+  SixbValidationError,
+} from "../errors"
+
 /**
  * Base error for the agents module. Specific subclasses extend this so callers
  * can catch any agent-scoped failure with a single `instanceof AgentDefinitionError` check.
  */
-export class AgentDefinitionError extends Error {
-  readonly name: string = "AgentDefinitionError"
+export class AgentDefinitionError extends SixbValidationError {
+  override readonly name: string = "AgentDefinitionError"
+
+  constructor(message: string, options?: SixbErrorOptions) {
+    super("runtime.invalid_definition", message, options)
+  }
 }
 
 /**
@@ -12,11 +23,15 @@ export class AgentDefinitionError extends Error {
  * {@link AgentMessage} part union must be extended. It also fires on transient/streaming parts that
  * must never be persisted, and on out-of-contract (non-JSON) payloads.
  */
-export class AgentMessageAdapterError extends Error {
-  readonly name = "AgentMessageAdapterError"
+export class AgentMessageAdapterError extends SixbValidationError {
+  override readonly name = "AgentMessageAdapterError"
+
+  constructor(message: string, options?: SixbErrorOptions) {
+    super("runtime.invalid_input", message, options)
+  }
 }
 
-export type AgentRequestErrorCode =
+export type AgentRequestErrorReason =
   | "agent_not_found"
   | "thread_not_found"
   | "thread_agent_mismatch"
@@ -24,17 +39,30 @@ export type AgentRequestErrorCode =
   | "invalid_context"
   | "storage_unavailable"
 
+const CODE_BY_REASON: Record<AgentRequestErrorReason, SixbErrorCode> = {
+  agent_not_found: "agent.not_found",
+  thread_not_found: "agent.thread_not_found",
+  thread_agent_mismatch: "runtime.invalid_input",
+  active_run_exists: "agent.run_conflict",
+  invalid_context: "runtime.invalid_input",
+  storage_unavailable: "storage.unavailable",
+}
+
 /**
- * Raised by {@link requestAgentRun} (the trigger). Callers branch on `code` rather than message text
- * — e.g. the HTTP layer maps `active_run_exists` to 409 and `agent_not_found` to 404.
+ * Raised by {@link requestAgentRun} (the trigger). Callers branch on `code` rather than message
+ * text — e.g. the HTTP layer answers `agent.run_conflict` with 409 and `agent.not_found` with 404.
  */
-export class AgentRequestError extends Error {
-  readonly name = "AgentRequestError"
+export class AgentRequestError extends SixbError {
+  override readonly name = "AgentRequestError"
 
   constructor(
-    readonly code: AgentRequestErrorCode,
-    message: string
+    readonly reason: AgentRequestErrorReason,
+    message: string,
+    options: SixbErrorOptions = {}
   ) {
-    super(message)
+    super(CODE_BY_REASON[reason], message, {
+      ...options,
+      details: { reason, ...options.details },
+    })
   }
 }

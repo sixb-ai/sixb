@@ -1,10 +1,15 @@
 import type { DatasetDefinition, PipelineDefinition } from "@sixb/core"
+import { SixbError, type SixbErrorOptions } from "@sixb/core/errors"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { PipelineRunFailure, PipelineRunStatus } from "@sixb/core/storage"
 import type { PipelineJob } from "./types"
 
-export class PipelineWorkerError extends Error {
-  readonly name = "PipelineWorkerError"
+export class PipelineWorkerError extends SixbError {
+  override readonly name = "PipelineWorkerError"
+
+  constructor(message: string, options?: SixbErrorOptions) {
+    super("pipeline.failed", message, options)
+  }
 }
 
 export function toPipelineRunFailure(error: unknown): PipelineRunFailure {

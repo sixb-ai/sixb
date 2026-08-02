@@ -1,8 +1,14 @@
-export class ImapConnectorError extends Error {
-  readonly name: string = "ImapConnectorError"
+import { SixbError, type SixbErrorCode, type SixbErrorOptions } from "@sixb/core/errors"
+export interface ImapConnectorErrorOptions extends SixbErrorOptions {
+  /** Subclasses narrow the failure; direct callers leave this alone. */
+  readonly code?: SixbErrorCode
+}
 
-  constructor(message: string, options?: ErrorOptions) {
-    super(`[SixbImap] ${message}`, options)
+export class ImapConnectorError extends SixbError {
+  override readonly name: string = "ImapConnectorError"
+
+  constructor(message: string, options: ImapConnectorErrorOptions = {}) {
+    super(options.code ?? "connector.unavailable", `[SixbImap] ${message}`, options)
   }
 }
 
@@ -10,7 +16,7 @@ export class ImapAbortedError extends ImapConnectorError {
   override readonly name = "ImapAbortedError"
 
   constructor() {
-    super("Operation aborted.")
+    super("Operation aborted.", { code: "runtime.cancelled" })
   }
 }
 
@@ -24,7 +30,9 @@ export class ImapDownloadTooLargeError extends ImapConnectorError {
     readonly expectedSize?: number
   ) {
     const expected = expectedSize === undefined ? "" : ` (expected ${expectedSize} bytes)`
-    super(`Message ${uid} part ${part} exceeds the ${maxBytes}-byte limit${expected}.`)
+    super(`Message ${uid} part ${part} exceeds the ${maxBytes}-byte limit${expected}.`, {
+      code: "connector.request_failed",
+    })
   }
 }
 
@@ -35,7 +43,9 @@ export class ImapPartUnavailableError extends ImapConnectorError {
     readonly uid: number,
     readonly part: string
   ) {
-    super(`Message ${uid} part ${part} is unavailable: the server returned no content.`)
+    super(`Message ${uid} part ${part} is unavailable: the server returned no content.`, {
+      code: "connector.request_failed",
+    })
   }
 }
 

@@ -1,16 +1,26 @@
+import { SixbError, type SixbErrorOptions, SixbTimeoutError } from "@sixb/core/errors"
+
 /** Infra-level failure in the agent worker (unknown agent, missing storage, malformed job). */
-export class AgentWorkerError extends Error {
-  readonly name = "AgentWorkerError"
-  constructor(message: string, options?: ErrorOptions) {
-    super(`[SixbAgentWorker] ${message}`, options)
+export class AgentWorkerError extends SixbError {
+  override readonly name = "AgentWorkerError"
+
+  constructor(message: string, options?: SixbErrorOptions) {
+    super("agent.failed", `[SixbAgentWorker] ${message}`, options)
   }
 }
 
 /** This delivery's execution token is stale, so it must make no further durable writes. */
-export class AgentExecutionLostError extends Error {
-  readonly name = "AgentExecutionLostError"
+export class AgentExecutionLostError extends SixbError {
+  override readonly name = "AgentExecutionLostError"
+
   constructor(readonly runId: string) {
-    super(`[SixbAgentWorker] Lost execution ownership of agent run '${runId}'.`)
+    super(
+      "agent.execution_lost",
+      `[SixbAgentWorker] Lost execution ownership of agent run '${runId}'.`,
+      {
+        details: { runId },
+      }
+    )
   }
 }
 
@@ -20,15 +30,17 @@ export class AgentExecutionLostError extends Error {
  * **not** acknowledge the job: it lets the queue redeliver it, so a later delivery can finalize the
  * run once storage recovers. Distinct from {@link AgentExecutionLostError} (run no longer ours → ack).
  */
-export class AgentFinalizationError extends Error {
-  readonly name = "AgentFinalizationError"
+export class AgentFinalizationError extends SixbError {
+  override readonly name = "AgentFinalizationError"
+
   constructor(
     readonly runId: string,
-    options?: ErrorOptions
+    options: SixbErrorOptions = {}
   ) {
     super(
+      "storage.unavailable",
       `[SixbAgentWorker] Could not finalize agent run '${runId}'; storage is unavailable.`,
-      options
+      { ...options, details: { runId, ...options.details } }
     )
   }
 }
@@ -39,12 +51,17 @@ export class AgentFinalizationError extends Error {
  * forever). The name is intentionally **not** `AbortError`, so it routes through the normal failure
  * path rather than the worker's shutdown-abort path.
  */
-export class AgentTurnTimeoutError extends Error {
-  readonly name = "AgentTurnTimeoutError"
+export class AgentTurnTimeoutError extends SixbTimeoutError {
+  override readonly name = "AgentTurnTimeoutError"
+
   constructor(
     readonly runId: string,
     readonly timeoutMs: number
   ) {
-    super(`[SixbAgentWorker] Agent run '${runId}' exceeded its ${timeoutMs}ms turn budget.`)
+    super(
+      "agent.timed_out",
+      `[SixbAgentWorker] Agent run '${runId}' exceeded its ${timeoutMs}ms turn budget.`,
+      { details: { runId, timeoutMs } }
+    )
   }
 }

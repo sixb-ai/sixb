@@ -1098,7 +1098,7 @@ describe("ontology materializer projection replacement", () => {
       beforeWrite(boundary) {
         if (boundary === "finalize" && finalizeAttempts++ === 0) {
           throw new StorageTransactionError("retry projection", {
-            code: "serialization_failure",
+            reason: "serialization_failure",
           })
         }
       },
@@ -1142,7 +1142,7 @@ describe("ontology materializer projection replacement", () => {
       beforeWrite(boundary) {
         if (boundary === "finalize" && finalizeAttempts++ === 0) {
           throw new StorageTransactionError("retry slow projection", {
-            code: "serialization_failure",
+            reason: "serialization_failure",
           })
         }
       },

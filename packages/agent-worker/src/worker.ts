@@ -491,7 +491,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       })
       return { kind: "run", run: reclaimed }
     } catch (error) {
-      if (error instanceof AgentStorageError && error.code === "invalid_state") {
+      if (error instanceof AgentStorageError && error.reason === "invalid_state") {
         return { kind: "skip" }
       }
       throw error
@@ -623,9 +623,9 @@ function freshExecution(queueLeaseExpiresAt: string): AgentRunExecution {
 function isExecutionGone(error: unknown): boolean {
   return (
     error instanceof AgentStorageError &&
-    (error.code === "execution_lost" ||
-      error.code === "invalid_state" ||
-      error.code === "run_not_found")
+    (error.reason === "execution_lost" ||
+      error.reason === "invalid_state" ||
+      error.reason === "run_not_found")
   )
 }
 

@@ -1,3 +1,5 @@
+import { SixbValidationError } from "@sixb/core/errors"
+
 /**
  * Reads a request body fully into memory while enforcing a hard byte ceiling.
  *
@@ -6,14 +8,14 @@
  * `content-length` header, when present, only provides an early fast-path. This
  * is the single bounded-reader used by request handlers that need the raw bytes.
  */
-export class RequestBodyTooLargeError extends Error {
-  readonly name = "RequestBodyTooLargeError"
+export class RequestBodyTooLargeError extends SixbValidationError {
+  override readonly name = "RequestBodyTooLargeError"
 
   constructor(
     readonly limitBytes: number,
     message = `Request body exceeds the ${limitBytes} byte limit.`
   ) {
-    super(message)
+    super("runtime.payload_too_large", message, { details: { limitBytes } })
   }
 }
 

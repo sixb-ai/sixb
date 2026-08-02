@@ -39,7 +39,11 @@ export interface CreateQueueDeliveryOptions<TJob extends QueueJob> {
 
 const MIN_RENEWAL_INTERVAL_MS = 1
 
-export class QueueDeliveryLeaseLostError extends WorkerAbortError {}
+export class QueueDeliveryLeaseLostError extends WorkerAbortError {
+  constructor(message?: string) {
+    super(message, { code: "queue.lease_lost" })
+  }
+}
 
 type RenewalAttempt<TJob extends QueueJob> =
   | { readonly kind: "renewed"; readonly claimed: ClaimedQueueJob<TJob> | null }

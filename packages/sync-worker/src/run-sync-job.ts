@@ -7,17 +7,20 @@ import {
   isFileRef,
   type JsonValue,
 } from "@sixb/core"
+import { SixbConflictError } from "@sixb/core/errors"
 import { resolveLogsRuntime } from "@sixb/core/internal/logging"
 import type { DatasetVersion, LakeWriteSession } from "@sixb/core/lake-storage"
 import type { SyncRunFailure, SyncRunRecord } from "@sixb/core/storage"
 import { assertDatasetRow, normalizeReadResult, throwIfAborted } from "./normalize"
 import type { RunSyncJobInput, SyncRunResult } from "./types"
 
-export class SyncRunAlreadyStartedError extends Error {
+export class SyncRunAlreadyStartedError extends SixbConflictError {
   override readonly name = "SyncRunAlreadyStartedError"
 
   constructor(readonly run: SyncRunRecord) {
-    super(`[SixbSyncWorker] Sync run '${run.id}' has already started.`)
+    super("sync.already_running", `[SixbSyncWorker] Sync run '${run.id}' has already started.`, {
+      details: { runId: run.id, syncId: run.syncId },
+    })
   }
 }
 

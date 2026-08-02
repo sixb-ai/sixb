@@ -1,5 +1,6 @@
-export class PennylaneApiError extends Error {
-  readonly name = "PennylaneApiError"
+import { connectorCodeForStatus, SixbProviderError } from "@sixb/core/errors"
+export class PennylaneApiError extends SixbProviderError {
+  override readonly name = "PennylaneApiError"
   readonly headers: Headers
   readonly retryAfterMs: number | null
   readonly requestId: string | null
@@ -9,7 +10,9 @@ export class PennylaneApiError extends Error {
     readonly responseBody: unknown,
     headers: HeadersInit = {}
   ) {
-    super(formatPennylaneApiError(status, responseBody))
+    super(connectorCodeForStatus(status), formatPennylaneApiError(status, responseBody), {
+      details: { status },
+    })
     this.headers = new Headers(headers)
     this.retryAfterMs = parseRetryAfter(this.headers.get("retry-after"))
     this.requestId =

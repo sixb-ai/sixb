@@ -5,6 +5,7 @@ import {
   isValidAuthSessionAudience,
   resolveAuthSessionAudience,
 } from "@sixb/core"
+import { SixbAuthorizationError } from "@sixb/core/errors"
 
 export interface SixbBrowserOrigin {
   readonly origin: string
@@ -70,8 +71,12 @@ export type ResolveAuthRedirectContext = (
   input: AuthRedirectInput
 ) => AuthRedirectContext
 
-export class BrowserOriginError extends Error {
-  readonly name = "BrowserOriginError"
+export class BrowserOriginError extends SixbAuthorizationError {
+  override readonly name = "BrowserOriginError"
+
+  constructor(message: string) {
+    super("auth.origin_rejected", message)
+  }
 }
 
 export function resolveApiBrowserPolicy(

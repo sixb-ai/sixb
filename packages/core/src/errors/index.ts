@@ -1,4 +1,6 @@
 export {
+  type ConnectorResponseErrorCode,
+  connectorCodeForStatus,
   isSixbErrorCode,
   SIXB_ERROR_CODES,
   SIXB_ERROR_RETRYABLE,

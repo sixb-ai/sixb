@@ -899,7 +899,7 @@ export type {
   AgentModelToolResultPart,
   AgentReasoningLevel,
   AgentReasoningPart,
-  AgentRequestErrorCode,
+  AgentRequestErrorReason,
   AgentStepStartPart,
   AgentTextPart,
   AgentToolCallPart,

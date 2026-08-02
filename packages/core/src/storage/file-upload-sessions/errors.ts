@@ -1,3 +1,5 @@
+import { SixbError, type SixbErrorOptions } from "../../errors"
+
 /**
  * Transport-agnostic reasons a file upload session operation can fail. Mapping a
  * reason to an HTTP status (or any other transport) is the responsibility of the
@@ -12,13 +14,17 @@ export type FileUploadSessionErrorReason =
 /**
  * Error for file upload session invariants and invalid state transitions.
  */
-export class FileUploadSessionError extends Error {
-  readonly name = "FileUploadSessionError"
+export class FileUploadSessionError extends SixbError {
+  override readonly name = "FileUploadSessionError"
 
   constructor(
     readonly reason: FileUploadSessionErrorReason,
-    message: string
+    message: string,
+    options: SixbErrorOptions = {}
   ) {
-    super(message)
+    super("storage.upload_invalid", message, {
+      ...options,
+      details: { reason, ...options.details },
+    })
   }
 }

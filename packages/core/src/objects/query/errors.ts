@@ -1,3 +1,4 @@
+import { SixbError, type SixbErrorOptions, SixbValidationError } from "../../errors"
 import type { ObjectQueryValidationIssue } from "./validate"
 
 export interface ObjectQueryPlanningIssue {
@@ -6,34 +7,41 @@ export interface ObjectQueryPlanningIssue {
   message: string
 }
 
-export class ObjectQueryValidationError extends Error {
-  readonly name = "ObjectQueryValidationError"
+export class ObjectQueryValidationError extends SixbValidationError {
+  override readonly name = "ObjectQueryValidationError"
   readonly issues: readonly ObjectQueryValidationIssue[]
 
+  // `issues` stays on the class and out of `details`: the message already names every one of them,
+  // the route that answers a query serializes them in full, and the failure record's details are
+  // flat scalars for a reader, not a second copy of a typed field.
   constructor(issues: readonly ObjectQueryValidationIssue[]) {
-    super(formatQueryValidationMessage(issues))
+    super("storage.query_invalid", formatQueryValidationMessage(issues))
     this.issues = issues
   }
 }
 
-export class ObjectQueryPlanningError extends Error {
-  readonly name = "ObjectQueryPlanningError"
+export class ObjectQueryPlanningError extends SixbError {
+  override readonly name = "ObjectQueryPlanningError"
   readonly issues: readonly ObjectQueryPlanningIssue[]
 
   constructor(issues: readonly ObjectQueryPlanningIssue[]) {
-    super(formatQueryPlanningMessage(issues))
+    super("storage.query_unsupported", formatQueryPlanningMessage(issues))
     this.issues = issues
   }
 }
 
-export class ObjectQueryExecutionError extends Error {
-  readonly name = "ObjectQueryExecutionError"
-  readonly code: string
+export class ObjectQueryExecutionError extends SixbError {
+  override readonly name = "ObjectQueryExecutionError"
+  /** The planner's own finer discriminant, e.g. `fallback_row_limit_exceeded`. */
+  readonly reason: string
   readonly path?: string
 
-  constructor(code: string, message: string, path?: string) {
-    super(`[Sixb] Object query execution failed: ${message}`)
-    this.code = code
+  constructor(reason: string, message: string, path?: string, options?: SixbErrorOptions) {
+    super("storage.query_failed", `[Sixb] Object query execution failed: ${message}`, {
+      ...options,
+      details: { reason, ...(path ? { path } : {}), ...options?.details },
+    })
+    this.reason = reason
     this.path = path
   }
 }

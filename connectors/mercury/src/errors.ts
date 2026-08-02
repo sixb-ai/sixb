@@ -1,5 +1,6 @@
-export class MercuryApiError extends Error {
-  readonly name = "MercuryApiError"
+import { connectorCodeForStatus, SixbProviderError } from "@sixb/core/errors"
+export class MercuryApiError extends SixbProviderError {
+  override readonly name = "MercuryApiError"
   readonly headers: Headers
   readonly retryAfterMs: number | null
   readonly requestId: string | null
@@ -9,7 +10,9 @@ export class MercuryApiError extends Error {
     readonly responseBody: unknown,
     headers: HeadersInit = {}
   ) {
-    super(formatMercuryApiError(status, responseBody))
+    super(connectorCodeForStatus(status), formatMercuryApiError(status, responseBody), {
+      details: { status },
+    })
     this.headers = new Headers(headers)
     this.retryAfterMs = parseRetryAfter(this.headers.get("retry-after"))
     this.requestId =

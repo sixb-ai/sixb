@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type {
   AuthStorage,
-  AuthStorageErrorCode,
+  AuthStorageErrorReason,
   CompleteAuthSessionInput,
   UserRecord,
 } from "../storage/auth"
@@ -39,10 +39,10 @@ function sessionInput(
 
 async function expectAuthError(
   promise: Promise<unknown>,
-  code: AuthStorageErrorCode
+  reason: AuthStorageErrorReason
 ): Promise<void> {
   await expect(promise).rejects.toBeInstanceOf(AuthStorageError)
-  await expect(promise).rejects.toMatchObject({ code })
+  await expect(promise).rejects.toMatchObject({ reason })
 }
 
 async function createUser(

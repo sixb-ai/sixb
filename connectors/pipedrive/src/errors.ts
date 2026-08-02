@@ -1,11 +1,14 @@
-export class PipedriveApiError extends Error {
-  readonly name = "PipedriveApiError"
+import { connectorCodeForStatus, SixbProviderError } from "@sixb/core/errors"
+export class PipedriveApiError extends SixbProviderError {
+  override readonly name = "PipedriveApiError"
 
   constructor(
     readonly status: number,
     readonly responseBody: unknown
   ) {
-    super(formatPipedriveApiError(status, responseBody))
+    super(connectorCodeForStatus(status), formatPipedriveApiError(status, responseBody), {
+      details: { status },
+    })
   }
 }
 

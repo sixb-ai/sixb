@@ -255,7 +255,7 @@ export class PostgresStorage implements MigrationCapableStorage {
       if (isRetryableTransactionConflict(error)) {
         throw new StorageTransactionError(
           "[SixbPg] Storage transaction failed due to a serialization conflict or deadlock and may be retried.",
-          { cause: error, code: "serialization_failure" }
+          { cause: error, reason: "serialization_failure" }
         )
       }
       throw error

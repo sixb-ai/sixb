@@ -2161,19 +2161,19 @@ function escapeHtml(value: string): string {
 
 function authRouteErrorResponse(error: unknown): Response {
   if (error instanceof AuthRuntimeError) {
-    if (error.code === "authentication_required") {
+    if (error.reason === "authentication_required") {
       return jsonResponse({ error: error.message }, 401)
     }
 
-    if (error.code === "authorization_denied") {
+    if (error.reason === "authorization_denied") {
       return jsonResponse({ error: error.message }, 403)
     }
 
-    if (error.code === "invalid_auth_input") {
+    if (error.reason === "invalid_auth_input") {
       return jsonResponse({ error: error.message }, 400)
     }
 
-    if (error.code === "rate_limited") {
+    if (error.reason === "rate_limited") {
       return jsonResponse({ error: error.message }, 429)
     }
 
@@ -2182,10 +2182,10 @@ function authRouteErrorResponse(error: unknown): Response {
 
   if (error instanceof AuthStorageError) {
     if (
-      error.code === "missing_invitation" ||
-      error.code === "missing_access_token" ||
-      error.code === "missing_service_account" ||
-      error.code === "missing_user"
+      error.reason === "missing_invitation" ||
+      error.reason === "missing_access_token" ||
+      error.reason === "missing_service_account" ||
+      error.reason === "missing_user"
     ) {
       return jsonResponse({ error: error.message }, 404)
     }
@@ -2213,7 +2213,7 @@ function logAuthCallbackError(kind: string, error: unknown): void {
 
   const detail =
     error instanceof AuthStorageError
-      ? `${error.name}(${error.code}): ${error.message}`
+      ? `${error.name}(${error.reason}): ${error.message}`
       : error instanceof Error
         ? `${error.name}: ${error.message}`
         : String(error)

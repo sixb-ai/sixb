@@ -34,7 +34,7 @@ export {
   isCsrfExemptMethod,
   verifyDoubleSubmitCsrf,
 } from "./csrf"
-export type { AuthRuntimeErrorCode } from "./errors"
+export type { AuthRuntimeErrorReason } from "./errors"
 export { AuthRuntimeError } from "./errors"
 export type { AuthRuntimeOptions } from "./runtime"
 export {

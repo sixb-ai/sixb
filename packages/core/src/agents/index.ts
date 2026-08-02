@@ -58,7 +58,7 @@ export {
   AgentDefinitionError,
   AgentMessageAdapterError,
   AgentRequestError,
-  type AgentRequestErrorCode,
+  type AgentRequestErrorReason,
 } from "./errors"
 export {
   createAgentMessageId,

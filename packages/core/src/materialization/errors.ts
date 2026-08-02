@@ -1,4 +1,5 @@
-import { OntologyValidationError } from "../ontology/errors"
+import { SixbConflictError, SixbError, type SixbErrorOptions } from "../errors"
+import { OntologyValidationError, type OntologyValidationErrorOptions } from "../ontology/errors"
 
 export type MaterializationConflictKind =
   | "idempotency"
@@ -22,10 +23,10 @@ function prefixMessage(message: string): string {
  * `instanceof` branch to catch the identical error.
  */
 export class MaterializationValidationError extends OntologyValidationError {
-  readonly name: string = "MaterializationValidationError"
+  override readonly name: string = "MaterializationValidationError"
 
-  constructor(message: string) {
-    super(prefixMessage(message))
+  constructor(message: string, options: OntologyValidationErrorOptions = {}) {
+    super(prefixMessage(message), options)
   }
 }
 
@@ -37,7 +38,9 @@ export class MaterializationObjectNotFoundError extends MaterializationValidatio
     readonly objectTypeId: string,
     readonly primaryId: string
   ) {
-    super(`Cannot append telemetry to missing object '${objectTypeId}:${primaryId}'.`)
+    super(`Cannot append telemetry to missing object '${objectTypeId}:${primaryId}'.`, {
+      details: { objectTypeId, primaryId },
+    })
   }
 }
 
@@ -47,22 +50,26 @@ export class MaterializationObjectNotFoundError extends MaterializationValidatio
  * Generic aborts (worker shutdown, delivery loss, timeout) remain retryable and preserve staged
  * source state. Passing this error as an AbortSignal reason authorizes that state to be abandoned.
  */
-export class MaterializationCancellationError extends Error {
-  readonly name = "AbortError"
+export class MaterializationCancellationError extends SixbError {
+  override readonly name = "AbortError"
 
-  constructor(message = "Materialization explicitly cancelled.", options?: ErrorOptions) {
-    super(prefixMessage(message), options)
+  constructor(message = "Materialization explicitly cancelled.", options: SixbErrorOptions = {}) {
+    super("runtime.cancelled", prefixMessage(message), options)
   }
 }
 
-export class MaterializationConflictError extends Error {
-  readonly name: string = "MaterializationConflictError"
+export class MaterializationConflictError extends SixbConflictError {
+  override readonly name: string = "MaterializationConflictError"
 
   constructor(
     readonly kind: MaterializationConflictKind,
-    message: string
+    message: string,
+    options: SixbErrorOptions = {}
   ) {
-    super(prefixMessage(message))
+    super("storage.conflict", prefixMessage(message), {
+      ...options,
+      details: { kind, ...options.details },
+    })
   }
 }
 

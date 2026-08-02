@@ -118,7 +118,7 @@ export async function requestAgentRun(
       })
     })
   } catch (error) {
-    if (error instanceof AgentStorageError && error.code === "active_run_exists") {
+    if (error instanceof AgentStorageError && error.reason === "active_run_exists") {
       throw new AgentRequestError("active_run_exists", error.message)
     }
     throw error

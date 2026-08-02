@@ -1,25 +1,28 @@
+import { connectorCodeForStatus, type SixbErrorOptions, SixbProviderError } from "@sixb/core/errors"
 /**
  * Raised when a Google API request fails. Parses the standard Google error
  * envelope (`{ error: { code, message, status, ... } }`) shared by every
  * Google API surface.
  */
-export class GoogleApiError extends Error {
-  readonly name = "GoogleApiError"
+export class GoogleApiError extends SixbProviderError {
+  override readonly name = "GoogleApiError"
 
   constructor(
     readonly status: number,
     readonly responseBody: unknown
   ) {
-    super(formatGoogleApiError(status, responseBody))
+    super(connectorCodeForStatus(status), formatGoogleApiError(status, responseBody), {
+      details: { status },
+    })
   }
 }
 
 /** Raised when resolving or refreshing Google authentication credentials fails. */
-export class GoogleAuthError extends Error {
-  readonly name = "GoogleAuthError"
+export class GoogleAuthError extends SixbProviderError {
+  override readonly name = "GoogleAuthError"
 
-  constructor(message: string, options?: ErrorOptions) {
-    super(`[SixbGoogle] ${message}`, options)
+  constructor(message: string, options?: SixbErrorOptions) {
+    super("connector.unauthorized", `[SixbGoogle] ${message}`, options)
   }
 }
 

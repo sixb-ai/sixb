@@ -1,14 +1,17 @@
+import { connectorCodeForStatus, SixbProviderError } from "@sixb/core/errors"
 import type { TeamleaderApiErrorItem } from "./types"
 
-export class TeamleaderApiError extends Error {
-  readonly name = "TeamleaderApiError"
+export class TeamleaderApiError extends SixbProviderError {
+  override readonly name = "TeamleaderApiError"
 
   constructor(
     readonly status: number,
     readonly errors: readonly TeamleaderApiErrorItem[],
     readonly responseBody: unknown
   ) {
-    super(formatTeamleaderApiError(status, errors))
+    super(connectorCodeForStatus(status), formatTeamleaderApiError(status, errors), {
+      details: { status },
+    })
   }
 }
 

@@ -206,17 +206,17 @@ function handleAgentRouteError(
 ): { error: string } {
   // A duplicate id is a conflict, not a bad request. Map it to a generic 409 rather than echoing the
   // provider's raw message (which leaks the id, project, and storage prefix).
-  if (error instanceof AgentStorageError && error.code === "duplicate_id") {
+  if (error instanceof AgentStorageError && error.reason === "duplicate_id") {
     set.status = 409
     return { error: "Agent thread already exists" }
   }
-  if (error instanceof AgentStorageError && error.code === "active_run_exists") {
+  if (error instanceof AgentStorageError && error.reason === "active_run_exists") {
     set.status = 409
     return { error: "This conversation already has a response in progress" }
   }
 
   if (error instanceof AgentRequestError) {
-    switch (error.code) {
+    switch (error.reason) {
       case "agent_not_found":
       case "thread_not_found":
         set.status = 404
@@ -698,7 +698,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
               })
               cancelledWhileQueued = true
             } catch (error) {
-              if (!(error instanceof AgentStorageError) || error.code !== "invalid_state") {
+              if (!(error instanceof AgentStorageError) || error.reason !== "invalid_state") {
                 throw error
               }
 

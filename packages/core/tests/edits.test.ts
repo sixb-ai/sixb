@@ -472,7 +472,7 @@ describe("Action commit retries", () => {
             if (!armed) return result
             armed = false
             throw new StorageTransactionError("forced serialization failure", {
-              code: "serialization_failure",
+              reason: "serialization_failure",
             })
           }, options as never)
       },

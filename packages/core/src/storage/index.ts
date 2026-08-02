@@ -57,7 +57,7 @@ export type {
   AgentRunStore,
   AgentRunUsage,
   AgentStorage,
-  AgentStorageErrorCode,
+  AgentStorageErrorReason,
   AgentThreadRecord,
   AgentThreadStatus,
   AgentThreadStore,
@@ -95,7 +95,7 @@ export type {
   AuthServiceAccountStore,
   AuthSessionStore,
   AuthStorage,
-  AuthStorageErrorCode,
+  AuthStorageErrorReason,
   AuthUserIdentityStore,
   AuthUserStore,
   CompleteAuthSessionInput,
@@ -141,8 +141,8 @@ export type {
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
 export type {
-  StorageTransactionErrorCode,
   StorageTransactionErrorOptions,
+  StorageTransactionErrorReason,
 } from "./errors"
 export {
   isStorageSerializationFailure,

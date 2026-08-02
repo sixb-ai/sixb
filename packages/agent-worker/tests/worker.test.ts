@@ -2791,7 +2791,10 @@ describe("AgentWorker", () => {
       threadId: first.run.threadId,
     })
     await expect(promise).rejects.toBeInstanceOf(AgentRequestError)
-    await expect(promise).rejects.toMatchObject({ code: "active_run_exists" })
+    await expect(promise).rejects.toMatchObject({
+      reason: "active_run_exists",
+      code: "agent.run_conflict",
+    })
   })
 
   test("reclaims a crashed run on redelivery and completes it (attempt++)", async () => {
