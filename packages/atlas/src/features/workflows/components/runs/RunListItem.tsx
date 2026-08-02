@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom"
+import { RunFailure } from "../../../../components/common"
 import {
   formatDate,
   formatRunDuration,
@@ -45,7 +46,7 @@ export function RunListItem({
             </p>
           ) : null}
           {run.error ? (
-            <p className="break-words text-xs text-destructive">{run.error.message}</p>
+            <RunFailure failure={run.error} variant="inline" className="text-xs" />
           ) : null}
         </div>
         <StatusBadge status={run.status} />

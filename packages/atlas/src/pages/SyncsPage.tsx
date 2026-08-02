@@ -40,6 +40,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { RunFailure } from "../components/common"
 import {
   isUnconfiguredStorageError,
   UnrecordedHistoryState,
@@ -446,9 +447,7 @@ function SyncRunCard({ run }: { run: DisplayRun }) {
           <p className="mt-0.5 truncate text-foreground">{run.rowsRead ?? 0}</p>
         </div>
       </div>
-      {run.error && (
-        <p className="mt-3 break-words text-xs text-destructive">{run.error.message}</p>
-      )}
+      {run.error && <RunFailure failure={run.error} className="mt-3 text-xs" />}
     </div>
   )
 }
@@ -518,7 +517,7 @@ function SyncRunList({ runs, queuedRun }: { runs: SyncRun[]; queuedRun: QueuedRu
                     </p>
                   )}
                   {run.error && (
-                    <p className="mt-1 text-xs text-destructive">{run.error.message}</p>
+                    <RunFailure failure={run.error} variant="inline" className="mt-1 text-xs" />
                   )}
                 </td>
                 <td className="px-3 py-3">

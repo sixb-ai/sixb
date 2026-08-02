@@ -43,6 +43,7 @@ import {
 } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { RunFailure } from "../components/common"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
@@ -476,7 +477,7 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
                     {run.identity.datasetVersion.versionId}
                   </p>
                   {run.error && (
-                    <p className="mt-1 break-words text-xs text-destructive">{run.error.message}</p>
+                    <RunFailure failure={run.error} variant="inline" className="mt-1 text-xs" />
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
@@ -527,9 +528,7 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
                 </span>
               ))}
             </div>
-            {run.error && (
-              <p className="mt-2 break-words text-xs text-destructive">{run.error.message}</p>
-            )}
+            {run.error && <RunFailure failure={run.error} className="mt-2 text-xs" />}
           </div>
         ))}
       </div>

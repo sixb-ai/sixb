@@ -9,6 +9,7 @@ import {
 } from "@sixb/ui/components"
 import { ArrowRight } from "lucide-react"
 import { Link } from "react-router-dom"
+import { RunFailure } from "../../../../components/common"
 import {
   formatDate,
   formatRunDuration,
@@ -101,7 +102,7 @@ function RunHistoryCard({ run }: { run: WorkflowRunSummary }) {
         <RunMetric label="Status" value={run.status} />
       </div>
       {run.error ? (
-        <p className="mt-3 break-words text-xs text-destructive">{run.error.message}</p>
+        <RunFailure failure={run.error} variant="inline" className="mt-3 text-xs" />
       ) : null}
     </article>
   )
@@ -151,9 +152,7 @@ function RunHistoryTableRow({ run }: { run: WorkflowRunSummary }) {
       </TableCell>
       <TableCell className="max-w-[16rem]">
         {run.error ? (
-          <p className="truncate text-xs text-destructive" title={run.error.message}>
-            {run.error.message}
-          </p>
+          <RunFailure failure={run.error} variant="inline" className="truncate text-xs" />
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
         )}

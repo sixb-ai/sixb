@@ -69,6 +69,7 @@ import {
 } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { RunFailure } from "../components/common"
 import {
   isUnconfiguredStorageError,
   UnrecordedHistoryState,
@@ -952,9 +953,11 @@ function RunsListPanel({
                       {formatRelativeTime(run.startedAt)} · {runDuration(run)}
                     </p>
                     {run.error ? (
-                      <p className="mt-1 break-words text-[11px] text-destructive">
-                        {run.error.message}
-                      </p>
+                      <RunFailure
+                        failure={run.error}
+                        variant="inline"
+                        className="mt-1 text-[11px]"
+                      />
                     ) : null}
                   </div>
                   <RunStatusBadge status={run.status} />
@@ -1016,8 +1019,8 @@ function RunSummaryPanel({
             </div>
 
             {run.error ? (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-                {run.error.message}
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs">
+                <RunFailure failure={run.error} />
               </div>
             ) : null}
 
@@ -1075,9 +1078,11 @@ function RunSummaryPanel({
                         </button>
                       ) : null}
                       {step.error ? (
-                        <p className="mt-2 break-words text-[11px] text-destructive">
-                          {step.error.message}
-                        </p>
+                        <RunFailure
+                          failure={step.error}
+                          variant="inline"
+                          className="mt-2 text-[11px]"
+                        />
                       ) : null}
                     </li>
                   ))}

@@ -257,3 +257,85 @@ export function ErrorPage({ title, description }: { title: string; description: 
     </div>
   )
 }
+
+/**
+ * A failure as a run recorded it.
+ *
+ * Structural rather than the generated type: a code this build of Atlas does not know still has to
+ * render, which is what the closed enum promises — an unknown code shows as its raw string instead
+ * of breaking the page.
+ */
+export interface RunFailureRecord {
+  readonly code: string
+  readonly message: string
+  readonly details?: Readonly<Record<string, string | number | boolean>>
+  readonly cause?: string
+  readonly phase?: string
+}
+
+/**
+ * The one rendering of a failed run, for the ten places that each had their own.
+ *
+ * `inline` is for a row in a list, where the message is all that fits and the rest belongs in the
+ * tooltip. `block` is for a run's own page, which has room for what a message leaves out: the code
+ * to branch on, the phase it died in, the call that actually refused, and whatever the failure
+ * named for itself.
+ *
+ * Neither adds a container. Every call site already sits in one, and the sizes differ — a table
+ * cell is not a panel — so `className` carries the type scale and the spacing while this decides
+ * what a reader is shown.
+ */
+export function RunFailure({
+  failure,
+  variant = "block",
+  className,
+}: {
+  failure: RunFailureRecord
+  variant?: "inline" | "block"
+  className?: string
+}) {
+  if (variant === "inline") {
+    return (
+      <p className={cn("break-words text-destructive", className)} title={failureTooltip(failure)}>
+        {failure.message}
+      </p>
+    )
+  }
+
+  const details = Object.entries(failure.details ?? {})
+
+  return (
+    <div className={cn("min-w-0 space-y-1.5 text-destructive", className)}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <code className="rounded bg-destructive/15 px-1.5 py-0.5 font-mono text-[11px]">
+          {failure.code}
+        </code>
+        {failure.phase ? (
+          <span className="text-[11px] font-medium uppercase tracking-wider opacity-70">
+            {failure.phase}
+          </span>
+        ) : null}
+      </div>
+      <p className="break-words">{failure.message}</p>
+      {failure.cause ? (
+        <p className="break-words font-mono text-[11px] opacity-80">{failure.cause}</p>
+      ) : null}
+      {details.length > 0 ? (
+        <dl className="grid gap-x-3 gap-y-0.5 text-[11px] opacity-80 sm:grid-cols-[auto_minmax(0,1fr)]">
+          {details.map(([key, value]) => (
+            <div key={key} className="flex min-w-0 gap-1.5 sm:contents">
+              <dt className="font-medium">{key}</dt>
+              <dd className="min-w-0 break-words font-mono">{String(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </div>
+  )
+}
+
+/** Everything the truncated line cannot show, for the hover that reveals it. */
+function failureTooltip(failure: RunFailureRecord): string {
+  const details = Object.entries(failure.details ?? {}).map(([key, value]) => `${key}: ${value}`)
+  return [failure.code, failure.message, failure.cause, ...details].filter(Boolean).join("\n")
+}
