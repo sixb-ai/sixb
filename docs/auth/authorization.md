@@ -329,7 +329,7 @@ handles, and `listLinks` stay on the privileged runtime.
 
 | Method | Gated by |
 | --- | --- |
-| `objects(Type)`, `list`, `getObject` | `view:object` |
+| `objects(Type)`, `list`, `getObject`, `getPrimaryPropertyId` | `view:object` |
 | `upsertObject`, `upsertObjectBatch`, `byId().delete()`, `byId().restore()` | `view:object` + `edit:object` |
 | `upsertLink`, `upsertLinkBatch`, `removeLink`, `byId().link()`, `byId().unlink()` | `edit:object` on the source, `view:object` on the target |
 | `appendTelemetry`, `appendTelemetryBatch`, `byId().telemetry().append()` | `append:telemetry` |
