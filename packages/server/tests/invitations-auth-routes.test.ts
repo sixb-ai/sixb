@@ -326,7 +326,10 @@ describe("auth invitation routes", () => {
       defaultDestinationId: "atlas",
     })
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: "Invitation destination is not allowed" })
+    expect(await response.json()).toEqual({
+      error: "Invitation destination is not allowed",
+      code: "runtime.invalid_input",
+    })
   })
 
   test("rejects a return target outside the selected destination", async () => {
@@ -352,7 +355,10 @@ describe("auth invitation routes", () => {
     )
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: "Invitation destination is not allowed" })
+    expect(await response.json()).toEqual({
+      error: "Invitation destination is not allowed",
+      code: "runtime.invalid_input",
+    })
   })
 
   test("rejects invitation groups without access to a controlled destination", async () => {
@@ -383,6 +389,7 @@ describe("auth invitation routes", () => {
     expect(response.status).toBe(403)
     expect(await response.json()).toEqual({
       error: "[Sixb] Invitation groups do not grant access to application 'app'.",
+      code: "auth.permission_denied",
     })
   })
 
@@ -519,7 +526,10 @@ describe("auth invitation routes", () => {
     )
 
     expect(response.status).toBe(500)
-    expect(await response.json()).toEqual({ error: "Email provider unavailable" })
+    expect(await response.json()).toEqual({
+      error: "Email provider unavailable",
+      code: "runtime.unexpected",
+    })
     await expect(
       storage.auth.invitations.getActiveByEmail({
         projectId,
@@ -560,6 +570,7 @@ describe("auth invitation routes", () => {
     expect(await response.json()).toEqual({
       error:
         "[Sixb] Invitation email 'oidc-user@example.com' is not allowed by the active auth strategy.",
+      code: "runtime.invalid_input",
     })
     await expect(storage.auth.invitations.list({ projectId })).resolves.toMatchObject({ total: 0 })
   })
@@ -719,6 +730,7 @@ describe("auth invitation routes", () => {
     expect(await response.json()).toEqual({
       error:
         "[Sixb] Invitation email 'ava@example.com' is not allowed by the active auth strategy.",
+      code: "runtime.invalid_input",
     })
     expect(messages).toHaveLength(0)
     await expect(storage.auth.invitations.list({ projectId })).resolves.toMatchObject({ total: 0 })

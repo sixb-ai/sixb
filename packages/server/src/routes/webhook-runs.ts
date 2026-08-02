@@ -27,7 +27,7 @@ function serializeWebhookRun(run: WebhookRunRecord) {
     responseStatus: run.responseStatus,
     idempotencyKey: run.idempotencyKey,
     deliveryClaimResult: run.deliveryClaimResult,
-    error: run.error?.message,
+    error: run.error,
   }
 }
 

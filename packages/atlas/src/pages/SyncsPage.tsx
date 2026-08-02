@@ -447,10 +447,7 @@ function SyncRunCard({ run }: { run: DisplayRun }) {
         </div>
       </div>
       {run.error && (
-        <p className="mt-3 break-words text-xs text-destructive">
-          {run.error.name ? `${run.error.name}: ` : ""}
-          {run.error.message}
-        </p>
+        <p className="mt-3 break-words text-xs text-destructive">{run.error.message}</p>
       )}
     </div>
   )
@@ -521,10 +518,7 @@ function SyncRunList({ runs, queuedRun }: { runs: SyncRun[]; queuedRun: QueuedRu
                     </p>
                   )}
                   {run.error && (
-                    <p className="mt-1 text-xs text-destructive">
-                      {run.error.name ? `${run.error.name}: ` : ""}
-                      {run.error.message}
-                    </p>
+                    <p className="mt-1 text-xs text-destructive">{run.error.message}</p>
                   )}
                 </td>
                 <td className="px-3 py-3">

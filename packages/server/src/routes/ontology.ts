@@ -5,6 +5,7 @@ import { requestAuthState } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ObjectTypeParamsSchema, ObjectTypeSchema } from "../schemas/ontology"
+import { errorResponse } from "../utils/http"
 
 function serializeProperty(
   property: ReturnType<
@@ -118,8 +119,7 @@ export function registerOntologyRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           !objectType ||
           !isAllowed(authz, { kind: "object.view", objectTypeId: objectType.id })
         ) {
-          set.status = 404
-          return { error: "Object type not found" }
+          return errorResponse(set, "ontology.type_not_found", "Object type not found")
         }
 
         return serializeObjectType(sixb, objectType, authz)

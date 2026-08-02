@@ -344,7 +344,9 @@ function WebhookRunCard({ run }: { run: WebhookRun }) {
           {formatClaimResult(run.deliveryClaimResult)} · {run.idempotencyKey}
         </p>
       )}
-      {run.error && <p className="mt-3 break-words text-xs text-destructive">{run.error}</p>}
+      {run.error && (
+        <p className="mt-3 break-words text-xs text-destructive">{run.error.message}</p>
+      )}
     </div>
   )
 }
@@ -394,7 +396,7 @@ function WebhookRunsList({ runs }: { runs: WebhookRun[] }) {
                     </p>
                     {run.error && (
                       <p className="mt-1 max-w-[260px] break-words text-xs text-destructive">
-                        {run.error}
+                        {run.error.message}
                       </p>
                     )}
                   </div>

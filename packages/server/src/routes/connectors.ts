@@ -3,6 +3,7 @@ import type { Elysia } from "elysia"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ConnectorParamsSchema, ConnectorSchema } from "../schemas/connectors"
+import { errorResponse } from "../utils/http"
 
 function serializeConnector(
   connector: ReturnType<Sixb<readonly OntologySource[]>["listConnectors"]>[number],
@@ -50,8 +51,7 @@ export function registerConnectorRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
       ({ params, set }) => {
         const connector = sixb.getConnectorById(params.connectorId)
         if (!connector) {
-          set.status = 404
-          return { error: "Connector not found" }
+          return errorResponse(set, "connector.not_found", "Connector not found")
         }
 
         return serializeConnector(connector, sixb)

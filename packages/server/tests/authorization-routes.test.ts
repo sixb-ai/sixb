@@ -394,13 +394,19 @@ describe("authorized object routes", () => {
       new Request("http://localhost/api/objects/invoice/i1", { headers: session.headers })
     )
     expect(forbidden.status).toBe(404)
-    expect(await forbidden.json()).toEqual({ error: "Object not found" })
+    expect(await forbidden.json()).toEqual({
+      error: "Object not found",
+      code: "storage.object_not_found",
+    })
 
     const missing = await app.fetch(
       new Request("http://localhost/api/objects/contract/missing", { headers: session.headers })
     )
     expect(missing.status).toBe(404)
-    expect(await missing.json()).toEqual({ error: "Object not found" })
+    expect(await missing.json()).toEqual({
+      error: "Object not found",
+      code: "storage.object_not_found",
+    })
   })
 
   test("bulk telemetry history follows object view grants", async () => {

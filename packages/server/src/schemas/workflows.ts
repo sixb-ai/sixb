@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { SixbFailureSchema } from "./common"
 
 export const WorkflowParamsSchema = z.object({
   workflowId: z.string().min(1),
@@ -119,7 +120,7 @@ export const WorkflowRunSchema = z.object({
   queuedAt: z.string().optional(),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
-  error: z.string().optional(),
+  error: SixbFailureSchema.optional(),
   requestedBy: WorkflowInterventionActorSchema,
 })
 
@@ -140,7 +141,7 @@ export const WorkflowAgentNodeExecutionSchema = WorkflowAgentNodeExecutionSummar
   executionPrincipal: WorkflowInterventionActorSchema.optional(),
   trace: z.array(z.unknown()).optional(),
   diagnostics: z.array(z.unknown()).optional(),
-  error: z.string().optional(),
+  error: SixbFailureSchema.optional(),
   createdAt: z.string(),
 })
 
@@ -158,7 +159,7 @@ export const WorkflowNodeRunSchema = z.object({
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   output: z.record(z.unknown()).optional(),
-  error: z.string().optional(),
+  error: SixbFailureSchema.optional(),
   agentExecution: WorkflowAgentNodeExecutionSummarySchema.optional(),
 })
 

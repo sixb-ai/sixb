@@ -1,6 +1,7 @@
 import { type BlobInfo, type BlobStorage, type FileRef, isFileRef } from "@sixb/core"
 import { BlobStorageError, supportsRangeRead } from "@sixb/core/blob-storage/server"
 import { ZodError } from "zod"
+import { type ErrorResponseBody, errorResponse } from "../utils/http"
 
 export type FileContentDisposition = "inline" | "attachment"
 
@@ -180,7 +181,7 @@ export async function createFileContentResponse(
  */
 export async function createContextualFileContentResponse<TQuery extends FileContentQuery>(
   input: ContextualFileContentResponseInput<TQuery>
-): Promise<Response | { readonly error: string }> {
+): Promise<Response | ErrorResponseBody> {
   const missingMessage = input.missingMessage ?? "File not found"
   const invalidQueryMessage = input.invalidQueryMessage ?? "Invalid file content query"
 
@@ -210,8 +211,7 @@ export async function createContextualFileContentResponse<TQuery extends FileCon
     return response
   } catch (error) {
     if (error instanceof ZodError) {
-      input.set.status = 400
-      return { error: invalidQueryMessage }
+      return errorResponse(input.set, "runtime.invalid_input", invalidQueryMessage)
     }
 
     if (input.hideError?.(error)) {
@@ -230,9 +230,8 @@ export function resolveFileRefAtPath(root: unknown, path: string): FileRef | nul
 function fileContentNotFound(
   set: { status?: number | string },
   message: string
-): { readonly error: string } {
-  set.status = 404
-  return { error: message }
+): ErrorResponseBody {
+  return errorResponse(set, "storage.file_not_found", message)
 }
 
 function blobMatchesFileRef(stat: BlobInfo, fileRef: FileRef): boolean {

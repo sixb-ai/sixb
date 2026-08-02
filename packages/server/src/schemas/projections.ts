@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { SixbFailureSchema } from "./common"
 
 export const ProjectionKindSchema = z.enum(["object", "link", "telemetry"])
 export const ProjectionRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"])
@@ -26,7 +27,7 @@ const ProjectionRunBaseSchema = z.object({
   }),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
-  errorMessage: z.string().optional(),
+  error: SixbFailureSchema.optional(),
 })
 
 const ObjectProjectionRunSchema = ProjectionRunBaseSchema.extend({

@@ -634,6 +634,7 @@ export type {
   SignOutErrors,
   SignOutResponse,
   SignOutResponses,
+  SixbErrorCode,
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionError,
   SubmitWorkflowInterventionErrors,

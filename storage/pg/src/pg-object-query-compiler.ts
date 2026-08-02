@@ -1424,7 +1424,12 @@ function decodePageToken(
 }
 
 function throwInvalidPageToken(message: string): never {
-  throw new ObjectQueryExecutionError("invalid_page_token", message, "$.pageToken")
+  throw new ObjectQueryExecutionError(
+    "storage.query_invalid",
+    "invalid_page_token",
+    message,
+    "$.pageToken"
+  )
 }
 
 function isEncodedPageToken(value: unknown): value is EncodedPageToken {

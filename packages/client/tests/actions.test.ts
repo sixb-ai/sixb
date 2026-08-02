@@ -348,7 +348,7 @@ describe("action wait helpers", () => {
             status: "failed",
             phase: "writeback",
             finishedAt: "2026-06-29T12:00:02.000Z",
-            error: { name: "WritebackError", message: "Writeback failed", phase: "writeback" },
+            error: { code: "action.failed", message: "Writeback failed", phase: "writeback" },
           })
         )
       }
@@ -377,7 +377,11 @@ describe("action wait helpers", () => {
             status: "cancelled",
             phase: "cancelled",
             finishedAt: "2026-06-29T12:00:02.000Z",
-            error: { message: "Action was cancelled", phase: "cancelled" },
+            error: {
+              code: "runtime.cancelled",
+              message: "Action was cancelled",
+              phase: "cancelled",
+            },
           })
         )
       }
@@ -400,7 +404,7 @@ describe("action wait helpers", () => {
     const failed = createActionRun({
       status: "failed",
       finishedAt: "2026-06-29T12:00:02.000Z",
-      error: { message: "Handled manually", phase: "effects" },
+      error: { code: "action.failed", message: "Handled manually", phase: "effects" },
     })
     const { client } = createTestClient((request) => {
       const url = new URL(request.url)

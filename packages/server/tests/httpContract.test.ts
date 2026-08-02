@@ -626,7 +626,10 @@ describe("SixbServer HTTP contract", () => {
 
       const missingConnectorResponse = await fetch(`${baseUrl}/api/connectors/missing`)
       expect(missingConnectorResponse.status).toBe(404)
-      expect(await missingConnectorResponse.json()).toEqual({ error: "Connector not found" })
+      expect(await missingConnectorResponse.json()).toEqual({
+        error: "Connector not found",
+        code: "connector.not_found",
+      })
 
       const webhookRunsResponse = await fetch(
         `${baseUrl}/api/webhook-runs?connectorId=github&webhookId=events&limit=5`
@@ -700,7 +703,10 @@ describe("SixbServer HTTP contract", () => {
 
       const missingDatasetResponse = await fetch(`${baseUrl}/api/datasets/missing`)
       expect(missingDatasetResponse.status).toBe(404)
-      expect(await missingDatasetResponse.json()).toEqual({ error: "Dataset not found" })
+      expect(await missingDatasetResponse.json()).toEqual({
+        error: "Dataset not found",
+        code: "dataset.not_found",
+      })
 
       const versionsResponse = await fetch(
         `${baseUrl}/api/datasets/raw.github.events/versions?limit=5`
@@ -749,14 +755,16 @@ describe("SixbServer HTTP contract", () => {
       expect(uncommittedRowsResponse.status).toBe(404)
       expect(await uncommittedRowsResponse.json()).toEqual({
         error: "Dataset version not found",
+        code: "dataset.version_not_found",
       })
 
       const invalidRowsResponse = await fetch(
         `${baseUrl}/api/datasets/raw.github.events/rows?columns=missing`
       )
       expect(invalidRowsResponse.status).toBe(400)
-      expect((await invalidRowsResponse.json()) as { error: string }).toEqual({
+      expect((await invalidRowsResponse.json()) as { error: string; code: string }).toEqual({
         error: `Dataset 'raw.github.events' does not have column 'missing' at version '${versionId}'`,
+        code: "runtime.invalid_input",
       })
 
       const invalidOffsetResponse = await fetch(
@@ -765,6 +773,7 @@ describe("SixbServer HTTP contract", () => {
       expect(invalidOffsetResponse.status).toBe(400)
       expect(await invalidOffsetResponse.json()).toEqual({
         error: "Offset must be greater than or equal to 0",
+        code: "runtime.invalid_input",
       })
 
       const syncsResponse = await fetch(`${baseUrl}/api/syncs`)
@@ -818,7 +827,10 @@ describe("SixbServer HTTP contract", () => {
 
       const missingSyncResponse = await fetch(`${baseUrl}/api/syncs/missing`)
       expect(missingSyncResponse.status).toBe(404)
-      expect(await missingSyncResponse.json()).toEqual({ error: "Sync not found" })
+      expect(await missingSyncResponse.json()).toEqual({
+        error: "Sync not found",
+        code: "sync.not_found",
+      })
 
       const syncRunsResponse = await fetch(
         `${baseUrl}/api/sync-runs?syncId=sync-github-events&limit=5`
@@ -919,7 +931,10 @@ describe("SixbServer HTTP contract", () => {
 
       const missingPipelineResponse = await fetch(`${baseUrl}/api/pipelines/missing`)
       expect(missingPipelineResponse.status).toBe(404)
-      expect(await missingPipelineResponse.json()).toEqual({ error: "Pipeline not found" })
+      expect(await missingPipelineResponse.json()).toEqual({
+        error: "Pipeline not found",
+        code: "pipeline.not_found",
+      })
 
       const pipelineRunsResponse = await fetch(
         `${baseUrl}/api/pipeline-runs?pipelineId=github-events-pipeline&limit=5`
@@ -1028,7 +1043,10 @@ describe("SixbServer HTTP contract", () => {
 
       const missingWorkflowResponse = await fetch(`${baseUrl}/api/workflows/missing`)
       expect(missingWorkflowResponse.status).toBe(404)
-      expect(await missingWorkflowResponse.json()).toEqual({ error: "Workflow not found" })
+      expect(await missingWorkflowResponse.json()).toEqual({
+        error: "Workflow not found",
+        code: "workflow.not_found",
+      })
 
       const workflowRunsResponse = await fetch(
         `${baseUrl}/api/workflow-runs?workflowId=inspect-device-workflow&limit=5`
@@ -1114,7 +1132,10 @@ describe("SixbServer HTTP contract", () => {
 
       const missingRuleResponse = await fetch(`${baseUrl}/api/rules/missing`)
       expect(missingRuleResponse.status).toBe(404)
-      expect(await missingRuleResponse.json()).toEqual({ error: "Rule not found" })
+      expect(await missingRuleResponse.json()).toEqual({
+        error: "Rule not found",
+        code: "rule.not_found",
+      })
 
       const ruleStatesResponse = await fetch(
         `${baseUrl}/api/rule-states?ruleId=device.high-rpm&limit=5`
@@ -1258,7 +1279,10 @@ describe("SixbServer HTTP contract", () => {
 
       const missingActionResponse = await fetch(`${baseUrl}/api/actions/missing`)
       expect(missingActionResponse.status).toBe(404)
-      expect(await missingActionResponse.json()).toEqual({ error: "Action not found" })
+      expect(await missingActionResponse.json()).toEqual({
+        error: "Action not found",
+        code: "action.not_found",
+      })
 
       const objectsResponse = await fetch(`${baseUrl}/api/objects?objectTypeId=device`)
       expect(objectsResponse.status).toBe(200)
@@ -1280,12 +1304,14 @@ describe("SixbServer HTTP contract", () => {
       expect(unknownObjectTypeResponse.status).toBe(400)
       expect(await unknownObjectTypeResponse.json()).toEqual({
         error: "Unknown object type 'Device'. Object type IDs are case-sensitive.",
+        code: "runtime.invalid_input",
       })
 
       const emptyObjectTypeResponse = await fetch(`${baseUrl}/api/objects?objectTypeId=`)
       expect(emptyObjectTypeResponse.status).toBe(400)
       expect(await emptyObjectTypeResponse.json()).toEqual({
         error: "Unknown object type ''. Object type IDs are case-sensitive.",
+        code: "runtime.invalid_input",
       })
 
       const invalidObjectListQueries: {
@@ -1355,7 +1381,10 @@ describe("SixbServer HTTP contract", () => {
         const search = new URLSearchParams(invalid.query)
         const response = await fetch(`${baseUrl}/api/objects?${search}`)
         expect(response.status).toBe(400)
-        expect(await response.json()).toEqual({ error: invalid.error })
+        expect(await response.json()).toEqual({
+          error: invalid.error,
+          code: "runtime.invalid_input",
+        })
       }
 
       const zeroLimitResponse = await fetch(
@@ -2081,6 +2110,7 @@ describe("SixbServer HTTP contract", () => {
           status: "failed",
           completedAt: "2026-02-18T09:12:04.000Z",
           error: {
+            code: "runtime.unexpected",
             message: "Notification failed",
             phase: "effects",
           },
@@ -2091,7 +2121,10 @@ describe("SixbServer HTTP contract", () => {
 
       const missingActionRunResponse = await fetch(`${baseUrl}/api/action-runs/missing`)
       expect(missingActionRunResponse.status).toBe(404)
-      expect(await missingActionRunResponse.json()).toEqual({ error: "Action run not found" })
+      expect(await missingActionRunResponse.json()).toEqual({
+        error: "Action run not found",
+        code: "action.run_not_found",
+      })
 
       const missingSubjectResponse = await fetch(`${baseUrl}/api/actions/setSpeed`, {
         method: "POST",
@@ -2101,6 +2134,7 @@ describe("SixbServer HTTP contract", () => {
       expect(missingSubjectResponse.status).toBe(400)
       expect(await missingSubjectResponse.json()).toEqual({
         error: "Action 'setSpeed' requires an object subject.",
+        code: "ontology.invalid_value",
       })
 
       const upsertLinkResponse = await fetch(`${baseUrl}/api/objects/space/system/links/contains`, {

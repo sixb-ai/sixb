@@ -57,7 +57,7 @@ const CODE_BY_REASON: Record<AuthStorageErrorReason, SixbErrorCode> = {
   missing_access_token: "auth.record_not_found",
   missing_service_account: "auth.record_not_found",
   missing_session: "auth.session_expired",
-  missing_user: "auth.invalid_credentials",
+  missing_user: "auth.record_not_found",
   suspended_service_account: "auth.permission_denied",
   suspended_user: "auth.permission_denied",
   user_creation_not_allowed: "auth.permission_denied",

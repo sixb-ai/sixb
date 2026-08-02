@@ -1,4 +1,4 @@
-import { SixbError, type SixbErrorOptions } from "../../errors"
+import { SixbError, type SixbErrorCode, type SixbErrorOptions } from "../../errors"
 
 /**
  * Transport-agnostic reasons a file upload session operation can fail. Mapping a
@@ -12,6 +12,18 @@ export type FileUploadSessionErrorReason =
   | "already_aborted"
 
 /**
+ * One code per reason, because a boundary that can only read one of them cannot tell an unknown
+ * session from a finished one — and those are a 404 and a 409. The reason stays on the error for
+ * callers inside the runtime; the code is what survives the trip out.
+ */
+const CODE_BY_REASON: Record<FileUploadSessionErrorReason, SixbErrorCode> = {
+  not_found: "storage.upload_not_found",
+  expired: "storage.upload_expired",
+  already_completed: "storage.upload_conflict",
+  already_aborted: "storage.upload_conflict",
+}
+
+/**
  * Error for file upload session invariants and invalid state transitions.
  */
 export class FileUploadSessionError extends SixbError {
@@ -22,7 +34,7 @@ export class FileUploadSessionError extends SixbError {
     message: string,
     options: SixbErrorOptions = {}
   ) {
-    super("storage.upload_invalid", message, {
+    super(CODE_BY_REASON[reason], message, {
       ...options,
       details: { reason, ...options.details },
     })

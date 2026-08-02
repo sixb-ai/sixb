@@ -100,7 +100,9 @@ function RunHistoryCard({ run }: { run: WorkflowRunSummary }) {
         <RunMetric label="Duration" value={formatRunDuration(run)} />
         <RunMetric label="Status" value={run.status} />
       </div>
-      {run.error ? <p className="mt-3 break-words text-xs text-destructive">{run.error}</p> : null}
+      {run.error ? (
+        <p className="mt-3 break-words text-xs text-destructive">{run.error.message}</p>
+      ) : null}
     </article>
   )
 }
@@ -149,8 +151,8 @@ function RunHistoryTableRow({ run }: { run: WorkflowRunSummary }) {
       </TableCell>
       <TableCell className="max-w-[16rem]">
         {run.error ? (
-          <p className="truncate text-xs text-destructive" title={run.error}>
-            {run.error}
+          <p className="truncate text-xs text-destructive" title={run.error.message}>
+            {run.error.message}
           </p>
         ) : (
           <span className="text-xs text-muted-foreground">—</span>

@@ -261,7 +261,10 @@ describe("run file content routes", () => {
     ]) {
       const response = await app.fetch(contentRequest(path))
       expect(response.status).toBe(404)
-      expect(await response.json()).toEqual({ error: "File not found" })
+      expect(await response.json()).toEqual({
+        error: "File not found",
+        code: "storage.file_not_found",
+      })
     }
   })
 
@@ -275,7 +278,10 @@ describe("run file content routes", () => {
     ]) {
       const response = await app.fetch(contentRequest(path))
       expect(response.status).toBe(400)
-      expect(await response.json()).toEqual({ error: "Invalid file content query" })
+      expect(await response.json()).toEqual({
+        error: "Invalid file content query",
+        code: "runtime.invalid_input",
+      })
     }
   })
 
@@ -298,7 +304,10 @@ describe("run file content routes", () => {
       })
     )
     expect(deniedAction.status).toBe(404)
-    expect(await deniedAction.json()).toEqual({ error: "File not found" })
+    expect(await deniedAction.json()).toEqual({
+      error: "File not found",
+      code: "storage.file_not_found",
+    })
 
     const allowedWorkflow = await app.fetch(
       contentRequest("/api/workflow-runs/workflow_run_1/files/content?path=/input/document", {
@@ -314,6 +323,9 @@ describe("run file content routes", () => {
       })
     )
     expect(deniedWorkflow.status).toBe(404)
-    expect(await deniedWorkflow.json()).toEqual({ error: "File not found" })
+    expect(await deniedWorkflow.json()).toEqual({
+      error: "File not found",
+      code: "storage.file_not_found",
+    })
   })
 })

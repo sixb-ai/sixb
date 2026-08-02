@@ -574,6 +574,7 @@ function compileExpansionOrder(
     if (field.kind !== "property") continue
     if (field.scalarKind === "decimal") {
       throw new ObjectQueryExecutionError(
+        "storage.query_unsupported",
         "exact_decimal_not_supported",
         "SQLite object storage cannot push down exact decimal expansion sorting",
         "$.expand.orderBy"
@@ -749,6 +750,7 @@ function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
       predicate.op === "gte")
   ) {
     throw new ObjectQueryExecutionError(
+      "storage.query_unsupported",
       "exact_decimal_not_supported",
       "SQLite object storage cannot push down exact decimal predicates",
       "$.predicate"
@@ -950,6 +952,7 @@ function sortOrderFields(fields: readonly ObjectQuerySortField[]): readonly Comp
     }
     if (field.scalarKind === "decimal") {
       throw new ObjectQueryExecutionError(
+        "storage.query_unsupported",
         "exact_decimal_not_supported",
         "SQLite object storage cannot push down exact decimal sorting",
         "$.sort"
@@ -1099,7 +1102,12 @@ function decodePageToken(
 }
 
 function throwInvalidPageToken(message: string): never {
-  throw new ObjectQueryExecutionError("invalid_page_token", message, "$.pageToken")
+  throw new ObjectQueryExecutionError(
+    "storage.query_invalid",
+    "invalid_page_token",
+    message,
+    "$.pageToken"
+  )
 }
 
 function isEncodedPageToken(value: unknown): value is EncodedPageToken {

@@ -15,8 +15,8 @@ import {
   PipelineSchema,
   RequestPipelineRunResponseSchema,
 } from "../schemas/pipelines"
-import { toWireFailure } from "../utils/failure"
 import {
+  errorResponse,
   handleRouteError,
   parseDate,
   parseOptionalInt,
@@ -33,7 +33,7 @@ function serializePipelineRun(run: PipelineRunRecord) {
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
     output: run.output,
-    error: toWireFailure(run.error),
+    error: run.error,
   }
 }
 
@@ -54,7 +54,7 @@ function serializePipelineStepRun(step: PipelineStepRunRecord) {
     inputs: step.inputs,
     output: step.output,
     rowsWritten: step.rowsWritten,
-    error: toWireFailure(step.error),
+    error: step.error,
   }
 }
 
@@ -168,8 +168,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           ? scoped.getPipelineById(params.pipelineId)
           : sixb.getPipelineById(params.pipelineId)
         if (!pipeline) {
-          set.status = 404
-          return { error: "Pipeline not found" }
+          return errorResponse(set, "pipeline.not_found", "Pipeline not found")
         }
 
         return serializePipeline(pipeline, await getLatestPipelineRun(sixb, pipeline.id))
@@ -254,8 +253,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           // A run the principal cannot run is hidden as 404, never surfaced as a
           // distinct 403, mirroring the catalog and run-history routes.
           if (!run || !canViewPipelineRun(authz, run)) {
-            set.status = 404
-            return { error: "Pipeline run not found" }
+            return errorResponse(set, "pipeline.run_not_found", "Pipeline run not found")
           }
 
           const steps = await storage.listSteps({
@@ -295,8 +293,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         try {
           const pipeline = sixb.getPipelineById(params.pipelineId)
           if (!pipeline) {
-            set.status = 404
-            return { error: "Pipeline not found" }
+            return errorResponse(set, "pipeline.not_found", "Pipeline not found")
           }
 
           const result = scoped

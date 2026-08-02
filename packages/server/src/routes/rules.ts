@@ -12,7 +12,12 @@ import {
   RuleStateSchema,
   RuleStatesQuerySchema,
 } from "../schemas/rules"
-import { handleRouteError, parseOptionalInt, unconfiguredStorageResponse } from "../utils/http"
+import {
+  errorResponse,
+  handleRouteError,
+  parseOptionalInt,
+  unconfiguredStorageResponse,
+} from "../utils/http"
 
 function serializeRule(rule: RuleDefinition): ReturnType<typeof RuleSchema.parse> {
   return RuleSchema.parse({
@@ -46,8 +51,7 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       ({ params, set }) => {
         const rule = sixb.getRuleById(params.ruleId)
         if (!rule) {
-          set.status = 404
-          return { error: "Rule not found" }
+          return errorResponse(set, "rule.not_found", "Rule not found")
         }
 
         return serializeRule(rule)

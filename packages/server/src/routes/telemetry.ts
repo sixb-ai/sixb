@@ -14,7 +14,13 @@ import {
   TelemetryParamsSchema,
   TelemetryPointSchema,
 } from "../schemas/telemetry"
-import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
+import {
+  errorResponse,
+  handleRouteError,
+  parseDate,
+  parseOptionalInt,
+  toIsoString,
+} from "../utils/http"
 
 function serializeTelemetryPoint(point: TimeseriesPoint) {
   return {
@@ -125,8 +131,7 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         try {
           const parsedQuery = TelemetryHistoryQuerySchema.parse(query)
           if (!isAllowed(authz, { kind: "object.view", objectTypeId: params.objectTypeId })) {
-            set.status = 404
-            return { error: "Object not found" }
+            return errorResponse(set, "storage.object_not_found", "Object not found")
           }
 
           const history = await sixb.storage.timeseries.getHistory({
@@ -168,8 +173,7 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         const { authz } = requestAuthState(context)
         try {
           if (!isAllowed(authz, { kind: "object.view", objectTypeId: params.objectTypeId })) {
-            set.status = 404
-            return { error: "Object not found" }
+            return errorResponse(set, "storage.object_not_found", "Object not found")
           }
 
           const latest = await sixb.storage.timeseries.getLatest({
@@ -180,8 +184,7 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
           })
 
           if (!latest) {
-            set.status = 404
-            return { error: "Telemetry point not found" }
+            return errorResponse(set, "telemetry.point_not_found", "Telemetry point not found")
           }
 
           return serializeTelemetryPoint(latest)

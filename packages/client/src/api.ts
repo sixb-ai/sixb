@@ -1,3 +1,4 @@
+import type { SixbErrorCode } from "@sixb/core/errors"
 import { type Auth, type Client, type Config, createClient, createConfig } from "./generated/client"
 
 export const SIXB_CSRF_HEADER_NAME = "x-sixb-csrf"
@@ -32,6 +33,7 @@ export interface SixbApiErrorInit {
   readonly url?: string
   readonly method?: string
   readonly body?: unknown
+  readonly code?: SixbErrorCode
 }
 
 /**
@@ -48,6 +50,14 @@ export class SixbApiError extends Error {
   readonly url: string
   readonly method: string
   readonly body: unknown
+  /**
+   * The failure's code, lifted out of the body.
+   *
+   * Absent only when the response did not come from Sixb — a proxy's own 502, a gateway timeout
+   * page. Every error the API itself returns carries one, and it is finer than the status: two
+   * conditions answer 409 and only the code says which.
+   */
+  readonly code?: SixbErrorCode
 
   constructor(message: string, init: SixbApiErrorInit) {
     super(message)
@@ -57,6 +67,7 @@ export class SixbApiError extends Error {
     this.url = init.url ?? ""
     this.method = init.method ?? ""
     this.body = init.body
+    this.code = init.code
   }
 }
 
@@ -177,13 +188,27 @@ function sixbErrorInterceptor(
 
   const method = request?.method ?? ""
   const url = response.url || request?.url || ""
+  const code = extractErrorCode(error)
   return new SixbApiError(buildSixbApiErrorMessage(method, url, response, error), {
     status: response.status,
     statusText: response.statusText,
     url,
     method,
     body: error,
+    ...(code ? { code } : {}),
   })
+}
+
+/**
+ * Read structurally rather than against `SIXB_ERROR_CODES`: a client older than a code would drop
+ * it, which is worse than surfacing a string the caller's `switch` happens not to match.
+ */
+function extractErrorCode(body: unknown): SixbErrorCode | undefined {
+  if (!body || typeof body !== "object" || !("code" in body)) {
+    return undefined
+  }
+  const code = (body as { code: unknown }).code
+  return typeof code === "string" && code.includes(".") ? (code as SixbErrorCode) : undefined
 }
 
 function buildSixbApiErrorMessage(

@@ -44,7 +44,9 @@ export function RunListItem({
               {formatDate(run.queuedAt ?? run.startedAt)}
             </p>
           ) : null}
-          {run.error ? <p className="break-words text-xs text-destructive">{run.error}</p> : null}
+          {run.error ? (
+            <p className="break-words text-xs text-destructive">{run.error.message}</p>
+          ) : null}
         </div>
         <StatusBadge status={run.status} />
       </div>

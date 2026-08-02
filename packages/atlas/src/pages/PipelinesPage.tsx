@@ -953,7 +953,6 @@ function RunsListPanel({
                     </p>
                     {run.error ? (
                       <p className="mt-1 break-words text-[11px] text-destructive">
-                        {run.error.name ? `${run.error.name}: ` : ""}
                         {run.error.message}
                       </p>
                     ) : null}
@@ -1018,7 +1017,6 @@ function RunSummaryPanel({
 
             {run.error ? (
               <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-                {run.error.name ? `${run.error.name}: ` : ""}
                 {run.error.message}
               </div>
             ) : null}
@@ -1078,7 +1076,6 @@ function RunSummaryPanel({
                       ) : null}
                       {step.error ? (
                         <p className="mt-2 break-words text-[11px] text-destructive">
-                          {step.error.name ? `${step.error.name}: ` : ""}
                           {step.error.message}
                         </p>
                       ) : null}

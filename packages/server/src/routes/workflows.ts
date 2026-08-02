@@ -55,6 +55,7 @@ import {
   WorkflowSchema,
 } from "../schemas/workflows"
 import {
+  errorResponse,
   handleRouteError,
   parseDate,
   parseOptionalInt,
@@ -99,7 +100,7 @@ function serializeWorkflowRun(run: WorkflowRunRecord) {
     queuedAt: run.queuedAt ? toIsoString(run.queuedAt) : undefined,
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
-    error: run.error?.message,
+    error: run.error,
     requestedBy: serializePrincipal(run.requestedByPrincipal),
   }
 }
@@ -124,7 +125,7 @@ function serializeWorkflowNodeRun(
     startedAt: toIsoString(node.startedAt),
     finishedAt: node.finishedAt ? toIsoString(node.finishedAt) : undefined,
     output: node.output,
-    error: node.error?.message,
+    error: node.error,
     ...(agentExecution
       ? { agentExecution: serializeWorkflowAgentExecutionSummary(agentExecution) }
       : {}),
@@ -158,7 +159,7 @@ function serializeWorkflowAgentExecution(execution: WorkflowAgentNodeRunRecord) 
       : undefined,
     trace: execution.trace,
     diagnostics: execution.diagnostics,
-    error: execution.error?.message,
+    error: execution.error,
     createdAt: toIsoString(execution.createdAt),
   }
 }
@@ -578,8 +579,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           ? scoped.getWorkflowById(params.workflowId)
           : sixb.workflows.getById(params.workflowId)
         if (!workflow) {
-          set.status = 404
-          return { error: "Workflow not found" }
+          return errorResponse(set, "workflow.not_found", "Workflow not found")
         }
 
         return serializeWorkflow(workflow, await getLatestWorkflowRun(sixb, workflow.id))
@@ -674,8 +674,11 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             !canViewWorkflowIntervention(authz, intervention) ||
             (scoped && !scoped.getWorkflowById(intervention.workflowId))
           ) {
-            set.status = 404
-            return { error: "Workflow intervention not found" }
+            return errorResponse(
+              set,
+              "workflow.intervention_not_found",
+              "Workflow intervention not found"
+            )
           }
 
           return WorkflowInterventionSchema.parse(serializeWorkflowIntervention(intervention))
@@ -718,15 +721,17 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             !canViewWorkflowIntervention(authz, intervention) ||
             (scoped && !scoped.getWorkflowById(intervention.workflowId))
           ) {
-            set.status = 404
-            return { error: "Workflow intervention not found" }
+            return errorResponse(
+              set,
+              "workflow.intervention_not_found",
+              "Workflow intervention not found"
+            )
           }
           assertPendingIntervention(intervention)
 
           const workflow = sixb.workflows.getById(intervention.workflowId)
           if (!workflow) {
-            set.status = 404
-            return { error: "Workflow not found" }
+            return errorResponse(set, "workflow.not_found", "Workflow not found")
           }
 
           const node = requireRegisteredInterventionNode(workflow, intervention)
@@ -777,6 +782,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           202: SubmitWorkflowInterventionResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
@@ -812,15 +818,17 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             !canViewWorkflowIntervention(authz, intervention) ||
             (scoped && !scoped.getWorkflowById(intervention.workflowId))
           ) {
-            set.status = 404
-            return { error: "Workflow intervention not found" }
+            return errorResponse(
+              set,
+              "workflow.intervention_not_found",
+              "Workflow intervention not found"
+            )
           }
           assertPendingIntervention(intervention)
 
           const workflow = sixb.workflows.getById(intervention.workflowId)
           if (!workflow) {
-            set.status = 404
-            return { error: "Workflow not found" }
+            return errorResponse(set, "workflow.not_found", "Workflow not found")
           }
           requireRegisteredInterventionNode(workflow, intervention)
 
@@ -829,12 +837,10 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             id: intervention.workflowRunId,
           })
           if (!run) {
-            set.status = 404
-            return { error: "Workflow run not found" }
+            return errorResponse(set, "workflow.run_not_found", "Workflow run not found")
           }
           if (run.status !== "waiting") {
-            set.status = 400
-            return { error: "Workflow run is not waiting" }
+            return errorResponse(set, "workflow.run_conflict", "Workflow run is not waiting")
           }
 
           const nodeRun = await runStorage.nodes.getById({
@@ -842,12 +848,10 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             id: intervention.nodeRunId,
           })
           if (!nodeRun) {
-            set.status = 404
-            return { error: "Workflow node run not found" }
+            return errorResponse(set, "workflow.node_run_not_found", "Workflow node run not found")
           }
           if (nodeRun.status !== "waiting") {
-            set.status = 400
-            return { error: "Workflow node run is not waiting" }
+            return errorResponse(set, "workflow.run_conflict", "Workflow node run is not waiting")
           }
 
           CancelWorkflowInterventionBodySchema.parse(body ?? {})
@@ -903,6 +907,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           200: CancelWorkflowInterventionResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
@@ -980,8 +985,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
 
           const run = await storage.getById({ projectId: sixb.id, id: params.runId })
           if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
-            set.status = 404
-            return { error: "Workflow run not found" }
+            return errorResponse(set, "workflow.run_not_found", "Workflow run not found")
           }
 
           const nodes = await storage.nodes.list({
@@ -1027,8 +1031,11 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           }
           const run = await storage.getById({ projectId: sixb.id, id: params.runId })
           if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
-            set.status = 404
-            return { error: "Workflow agent execution not found" }
+            return errorResponse(
+              set,
+              "workflow.agent_execution_not_found",
+              "Workflow agent execution not found"
+            )
           }
           const listed = await storage.nodes.list({
             projectId: sixb.id,
@@ -1039,16 +1046,22 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           })
           const node = listed.nodes[0]
           if (!node || node.nodeType !== "agent") {
-            set.status = 404
-            return { error: "Workflow agent execution not found" }
+            return errorResponse(
+              set,
+              "workflow.agent_execution_not_found",
+              "Workflow agent execution not found"
+            )
           }
           const execution = await storage.agentNodes.getByNodeRunId({
             projectId: sixb.id,
             nodeRunId: node.id,
           })
           if (!execution) {
-            set.status = 404
-            return { error: "Workflow agent execution not found" }
+            return errorResponse(
+              set,
+              "workflow.agent_execution_not_found",
+              "Workflow agent execution not found"
+            )
           }
           return WorkflowAgentNodeExecutionSchema.parse(serializeWorkflowAgentExecution(execution))
         } catch (error) {
@@ -1084,13 +1097,11 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           }
           const existing = await storage.getById({ projectId: sixb.id, id: params.runId })
           if (!existing || !canAccessWorkflowRun(authz, scoped, existing)) {
-            set.status = 404
-            return { error: "Workflow run not found" }
+            return errorResponse(set, "workflow.run_not_found", "Workflow run not found")
           }
           const workflow = sixb.workflows.getById(existing.workflowId)
           if (!workflow) {
-            set.status = 404
-            return { error: "Workflow not found" }
+            return errorResponse(set, "workflow.not_found", "Workflow not found")
           }
           const listed = await storage.nodes.list({
             projectId: sixb.id,
@@ -1106,8 +1117,11 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             })
           }
           if (existing.status === "succeeded" || existing.status === "failed") {
-            set.status = 400
-            return { error: `Workflow run is already ${existing.status}` }
+            return errorResponse(
+              set,
+              "workflow.run_conflict",
+              `Workflow run is already ${existing.status}`
+            )
           }
 
           const cancelledAt = new Date()
@@ -1215,6 +1229,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           200: CancelWorkflowRunResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
@@ -1293,8 +1308,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         try {
           const workflow = sixb.workflows.getById(params.workflowId)
           if (!workflow) {
-            set.status = 404
-            return { error: "Workflow not found" }
+            return errorResponse(set, "workflow.not_found", "Workflow not found")
           }
 
           if (!sixb.storage.workflowRuns) {

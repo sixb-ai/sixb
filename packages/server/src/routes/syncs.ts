@@ -13,8 +13,8 @@ import {
   SyncRunsQuerySchema,
   SyncSchema,
 } from "../schemas/syncs"
-import { toWireFailure } from "../utils/failure"
 import {
+  errorResponse,
   handleRouteError,
   parseDate,
   parseOptionalInt,
@@ -36,7 +36,7 @@ function serializeSyncRun(run: SyncRunRecord) {
     output: run.output,
     expectedLatestVersionId: run.expectedLatestVersionId,
     commitMessage: run.commitMessage,
-    error: toWireFailure(run.error),
+    error: run.error,
   }
 }
 
@@ -127,8 +127,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         const { scoped } = requestAuthState(context)
         const sync = scoped ? scoped.getSyncById(params.syncId) : sixb.getSyncById(params.syncId)
         if (!sync) {
-          set.status = 404
-          return { error: "Sync not found" }
+          return errorResponse(set, "sync.not_found", "Sync not found")
         }
 
         return serializeSync(sync, await getLatestSyncRun(sixb, sync.id))
@@ -204,8 +203,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         try {
           const sync = sixb.getSyncById(params.syncId)
           if (!sync) {
-            set.status = 404
-            return { error: "Sync not found" }
+            return errorResponse(set, "sync.not_found", "Sync not found")
           }
 
           const parsedBody = RequestSyncRunBodySchema.parse(body)

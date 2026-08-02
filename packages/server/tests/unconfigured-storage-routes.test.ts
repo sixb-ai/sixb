@@ -105,6 +105,7 @@ describe("routes whose storage role is not configured", () => {
       expect(response.status).toBe(501)
       expect(await response.json()).toEqual({
         error: `[SixbServer] ${route.role} is not configured on this runtime.`,
+        code: "runtime.not_configured",
       })
     })
   }

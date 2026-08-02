@@ -335,10 +335,11 @@ const objectExpansionRef = { $ref: "#/components/schemas/ObjectExpansion" }
 export const ObjectQueryOpenApiSchemas = {
   ErrorResponse: {
     type: "object",
-    required: ["error"],
+    required: ["error", "code"],
     additionalProperties: false,
     properties: {
       error: { type: "string" },
+      code: { $ref: "#/components/schemas/SixbErrorCode" },
     },
   },
   ObjectQueryObject: {
@@ -478,10 +479,11 @@ export const ObjectQueryOpenApiSchemas = {
   },
   ObjectQueryErrorResponse: {
     type: "object",
-    required: ["error"],
+    required: ["error", "code"],
     additionalProperties: false,
     properties: {
       error: { type: "string" },
+      code: { $ref: "#/components/schemas/SixbErrorCode" },
       issues: {
         type: "array",
         items: { $ref: "#/components/schemas/ObjectQueryIssue" },

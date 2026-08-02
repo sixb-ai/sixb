@@ -28,7 +28,7 @@ import {
   FileUploadPartParamsSchema,
   SignedFileUploadPartSchema,
 } from "../schemas/files"
-import { handleRouteError } from "../utils/http"
+import { type ErrorResponseBody, errorResponse, handleRouteError } from "../utils/http"
 import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
 // The simple-upload ceiling lives in @sixb/core so the client staged-switch
 // threshold and this server limit stay a single source of truth. The body limit
@@ -55,8 +55,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES
           )
           if (requestSizeError) {
-            set.status = 413
-            return { error: requestSizeError }
+            return errorResponse(set, "runtime.payload_too_large", requestSizeError)
           }
 
           const form = await request.formData()
@@ -64,20 +63,27 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           const logicalPath = form.get("logicalPath")
 
           if (!(file instanceof File)) {
-            set.status = 400
-            return { error: "Expected multipart field 'file' to be a file." }
+            return errorResponse(
+              set,
+              "runtime.invalid_input",
+              "Expected multipart field 'file' to be a file."
+            )
           }
 
           if (logicalPath !== null && typeof logicalPath !== "string") {
-            set.status = 400
-            return { error: "Expected multipart field 'logicalPath' to be a string." }
+            return errorResponse(
+              set,
+              "runtime.invalid_input",
+              "Expected multipart field 'logicalPath' to be a string."
+            )
           }
 
           if (file.size > DEFAULT_SIMPLE_FILE_UPLOAD_BYTES) {
-            set.status = 413
-            return {
-              error: `File upload exceeds the ${DEFAULT_SIMPLE_FILE_UPLOAD_BYTES} byte limit.`,
-            }
+            return errorResponse(
+              set,
+              "runtime.payload_too_large",
+              `File upload exceeds the ${DEFAULT_SIMPLE_FILE_UPLOAD_BYTES} byte limit.`
+            )
           }
 
           const fileRef = await sixb.blobStorage.put({
@@ -199,33 +205,32 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           }
 
           if (session.strategy !== "server") {
-            set.status = 400
-            return { error: "Upload content is only accepted for server staged uploads." }
+            return errorResponse(
+              set,
+              "storage.upload_invalid",
+              "Upload content is only accepted for server staged uploads."
+            )
           }
 
           const contentLengthSizeError = expectedContentLengthError(session, request)
           if (contentLengthSizeError) {
-            set.status = 400
-            return { error: contentLengthSizeError }
+            return errorResponse(set, "storage.upload_invalid", contentLengthSizeError)
           }
 
           const uploadBytes = readParsedUploadBytes(context)
           if (uploadBytes.byteLength === 0) {
-            set.status = 400
-            return { error: "Expected upload content body." }
+            return errorResponse(set, "runtime.invalid_input", "Expected upload content body.")
           }
 
           const sizeError = expectedSizeBytesError(session, uploadBytes.byteLength)
           if (sizeError) {
-            set.status = 400
-            return { error: sizeError }
+            return errorResponse(set, "storage.upload_invalid", sizeError)
           }
 
           const digest = computeBlobDigest(uploadBytes)
           const digestError = expectedDigestError(session.expectedDigest, digest)
           if (digestError) {
-            set.status = 400
-            return { error: digestError }
+            return errorResponse(set, "storage.upload_invalid", digestError)
           }
 
           const fileRef = await sixb.blobStorage.put({
@@ -291,13 +296,19 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             session.strategy !== "multipart" ||
             session.providerUpload?.strategy !== "multipart"
           ) {
-            set.status = 400
-            return { error: "Upload session does not use multipart strategy." }
+            return errorResponse(
+              set,
+              "storage.upload_invalid",
+              "Upload session does not use multipart strategy."
+            )
           }
 
           if (!supportsDirectUpload(sixb.blobStorage)) {
-            set.status = 400
-            return { error: "Blob storage does not support direct uploads." }
+            return errorResponse(
+              set,
+              "runtime.unsupported",
+              "Blob storage does not support direct uploads."
+            )
           }
 
           const signedPart = await sixb.blobStorage.signUploadPart({
@@ -422,8 +433,11 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
 
           if (session.status === "pending" && session.providerUpload) {
             if (!supportsDirectUpload(sixb.blobStorage)) {
-              set.status = 400
-              return { error: "Blob storage does not support direct uploads." }
+              return errorResponse(
+                set,
+                "runtime.unsupported",
+                "Blob storage does not support direct uploads."
+              )
             }
 
             await sixb.blobStorage.abortUpload({
@@ -450,6 +464,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
           410: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Abort a staged file upload",
@@ -505,11 +520,10 @@ function readParsedUploadBytes(context: { body?: unknown }): Uint8Array {
 function mapUploadContentError(context: {
   error: unknown
   set: { status?: number | string }
-}): { error: string } | undefined {
+}): ErrorResponseBody | undefined {
   const tooLarge = asRequestBodyTooLarge(context.error)
   if (tooLarge) {
-    context.set.status = 413
-    return { error: tooLarge.message }
+    return errorResponse(context.set, "runtime.payload_too_large", tooLarge.message)
   }
   return undefined
 }

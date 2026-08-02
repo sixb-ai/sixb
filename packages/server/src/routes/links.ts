@@ -13,7 +13,7 @@ import {
   RemoveLinkQuerySchema,
   UpsertLinkBodySchema,
 } from "../schemas/links"
-import { handleRouteError, toIsoString } from "../utils/http"
+import { errorResponse, handleRouteError, toIsoString } from "../utils/http"
 
 function canViewLink(authz: ReturnType<typeof requestAuthState>["authz"], link: ObjectLinkRow) {
   return (
@@ -32,8 +32,7 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         try {
           const parsedQuery = LinkQuerySchema.parse(query)
           if (!isAllowed(authz, { kind: "object.view", objectTypeId: params.objectTypeId })) {
-            set.status = 404
-            return { error: "Object not found" }
+            return errorResponse(set, "storage.object_not_found", "Object not found")
           }
 
           const links = await sixb.storage.objects.listLinks({
@@ -52,8 +51,7 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
               updatedAt: toIsoString(link.updatedAt),
             }))
         } catch (error) {
-          set.status = 400
-          return { error: error instanceof Error ? error.message : String(error) }
+          return handleRouteError(error, set)
         }
       },
       {

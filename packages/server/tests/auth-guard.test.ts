@@ -253,7 +253,10 @@ describe("server auth guard", () => {
     const response = await app.fetch(new Request("http://localhost/api/project"))
 
     expect(response.status).toBe(401)
-    expect(await response.json()).toEqual({ error: "Authentication required" })
+    expect(await response.json()).toEqual({
+      error: "Authentication required",
+      code: "auth.authentication_required",
+    })
   })
 
   test("protects a route registered outside the known prefixes", async () => {
@@ -270,7 +273,10 @@ describe("server auth guard", () => {
     const response = await app.fetch(new Request("http://localhost/internal/metrics"))
 
     expect(response.status).toBe(401)
-    expect(await response.json()).toEqual({ error: "Authentication required" })
+    expect(await response.json()).toEqual({
+      error: "Authentication required",
+      code: "auth.authentication_required",
+    })
   })
 
   test("accepts bearer tokens only on the access token route boundary", async () => {
@@ -565,7 +571,10 @@ describe("server auth guard", () => {
       applicationAccess: { audience: "atlas", allowed: false },
     })
     expect(deniedApi.status).toBe(403)
-    expect(await deniedApi.json()).toEqual({ error: "Application access is not allowed" })
+    expect(await deniedApi.json()).toEqual({
+      error: "Application access is not allowed",
+      code: "auth.permission_denied",
+    })
   })
 
   test("application grants allow Atlas for a matching group", async () => {
@@ -678,7 +687,10 @@ describe("server auth guard", () => {
 
     expect(response.status).toBe(403)
     expect(response.headers.get("access-control-allow-origin")).toBeNull()
-    expect(await response.json()).toEqual({ error: "Browser origin is not allowed" })
+    expect(await response.json()).toEqual({
+      error: "Browser origin is not allowed",
+      code: "auth.origin_rejected",
+    })
   })
 
   test("handles API browser preflights with an exact origin allowlist", async () => {
@@ -877,7 +889,10 @@ describe("server auth guard", () => {
     )
 
     expect(response.status).toBe(401)
-    expect(await response.json()).toEqual({ error: "Webhook verification failed" })
+    expect(await response.json()).toEqual({
+      error: "Webhook verification failed",
+      code: "webhook.unverified",
+    })
   })
 
   test("rejects WebSocket route access before subscription handling", async () => {

@@ -1,6 +1,5 @@
 import {
   type AgentDefinition,
-  AgentRequestError,
   type AuthorizationContext,
   type FileRef,
   type OntologySource,
@@ -63,6 +62,8 @@ import {
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
 import {
+  type ErrorResponseBody,
+  errorResponse,
   handleRouteError,
   parseOptionalInt,
   toIsoString,
@@ -139,7 +140,7 @@ export function serializeAgentRun(run: AgentRunRecord): ReturnType<typeof AgentR
     finishReason: run.finishReason,
     usage: run.usage,
     diagnostics: run.diagnostics,
-    error: run.error?.message,
+    error: run.error,
     attempt: run.attempt,
     streamId: agentRunStreamId(run.id),
     createdAt: toIsoString(run.createdAt),
@@ -200,43 +201,32 @@ async function publishQueuedRunCancellation(
   }
 }
 
+/**
+ * Only the storage errors whose message cannot be shown as-is are handled here. `AgentRequestError`
+ * used to need a `switch` over its reasons to pick a status; the reason maps to a code in core now,
+ * and the code carries the status the switch was spelling out.
+ */
 function handleAgentRouteError(
   error: unknown,
   set: { status?: number | string }
-): { error: string } {
-  // A duplicate id is a conflict, not a bad request. Map it to a generic 409 rather than echoing the
-  // provider's raw message (which leaks the id, project, and storage prefix).
+): ErrorResponseBody {
+  // A generic message rather than the provider's raw one, which leaks the id, project, and storage
+  // prefix.
   if (error instanceof AgentStorageError && error.reason === "duplicate_id") {
-    set.status = 409
-    return { error: "Agent thread already exists" }
+    return errorResponse(set, "agent.thread_conflict", "Agent thread already exists")
   }
   if (error instanceof AgentStorageError && error.reason === "active_run_exists") {
-    set.status = 409
-    return { error: "This conversation already has a response in progress" }
-  }
-
-  if (error instanceof AgentRequestError) {
-    switch (error.reason) {
-      case "agent_not_found":
-      case "thread_not_found":
-        set.status = 404
-        break
-      case "active_run_exists":
-        set.status = 409
-        break
-      case "storage_unavailable":
-      case "thread_agent_mismatch":
-      case "invalid_context":
-        set.status = 400
-        break
-    }
-    return { error: error.message }
+    return errorResponse(
+      set,
+      "agent.run_conflict",
+      "This conversation already has a response in progress"
+    )
   }
 
   return handleRouteError(error, set)
 }
 
-function missingAgentStorageResponse(set: { status?: number | string }): { error: string } {
+function missingAgentStorageResponse(set: { status?: number | string }): ErrorResponseBody {
   return unconfiguredStorageResponse(set, "Agent storage")
 }
 
@@ -266,8 +256,7 @@ async function agentMessageFileContentResponse(
       threadId: context.params.threadId,
     })
     if (!thread) {
-      context.set.status = 404
-      return { error: "File not found" }
+      return errorResponse(context.set, "storage.file_not_found", "File not found")
     }
 
     const message = await storage.messages.getById({
@@ -275,14 +264,12 @@ async function agentMessageFileContentResponse(
       id: context.params.messageId,
     })
     if (!message || message.threadId !== thread.id) {
-      context.set.status = 404
-      return { error: "File not found" }
+      return errorResponse(context.set, "storage.file_not_found", "File not found")
     }
 
     const fileRef = resolveFileRefAtPath(serializeMessage(message), parsed.path)
     if (!fileRef) {
-      context.set.status = 404
-      return { error: "File not found" }
+      return errorResponse(context.set, "storage.file_not_found", "File not found")
     }
 
     const response = await createFileContentResponse({
@@ -293,15 +280,13 @@ async function agentMessageFileContentResponse(
       rangeHeader: context.request.headers.get("range"),
     })
     if (!response) {
-      context.set.status = 404
-      return { error: "File not found" }
+      return errorResponse(context.set, "storage.file_not_found", "File not found")
     }
 
     return response
   } catch (error) {
     if (error instanceof ZodError) {
-      context.set.status = 400
-      return { error: "Invalid file content query" }
+      return errorResponse(context.set, "runtime.invalid_input", "Invalid file content query")
     }
 
     throw error
@@ -335,8 +320,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           ? scoped.getAgentById(params.agentId)
           : sixb.agents.getById(params.agentId)
         if (!agent) {
-          set.status = 404
-          return { error: "Agent not found" }
+          return errorResponse(set, "agent.not_found", "Agent not found")
         }
 
         return serializeAgent(agent)
@@ -412,8 +396,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             ? scoped.getAgentById(parsed.agentId)
             : sixb.agents.getById(parsed.agentId)
           if (!agent) {
-            set.status = 404
-            return { error: "Agent not found" }
+            return errorResponse(set, "agent.not_found", "Agent not found")
           }
 
           const storage = sixb.storage.agents
@@ -472,8 +455,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             threadId: params.threadId,
           })
           if (!thread) {
-            set.status = 404
-            return { error: "Agent thread not found" }
+            return errorResponse(set, "agent.thread_not_found", "Agent thread not found")
           }
 
           return serializeThread(thread)
@@ -514,8 +496,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             threadId: params.threadId,
           })
           if (!thread) {
-            set.status = 404
-            return { error: "Agent thread not found" }
+            return errorResponse(set, "agent.thread_not_found", "Agent thread not found")
           }
 
           const parsed = AgentMessagesQuerySchema.parse(query)
@@ -616,8 +597,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             threadId: params.threadId,
           })
           if (!thread) {
-            set.status = 404
-            return { error: "Agent thread not found" }
+            return errorResponse(set, "agent.thread_not_found", "Agent thread not found")
           }
 
           const parsed = PostAgentMessageBodySchema.parse(body)
@@ -677,15 +657,13 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             threadId: params.threadId,
           })
           if (!thread) {
-            set.status = 404
-            return { error: "Agent thread not found" }
+            return errorResponse(set, "agent.thread_not_found", "Agent thread not found")
           }
 
           const parsed = CancelAgentRunBodySchema.parse(body)
           const run = await storage.runs.getById({ projectId: sixb.id, id: parsed.runId })
           if (!run || run.threadId !== thread.id) {
-            set.status = 404
-            return { error: "Agent run not found" }
+            return errorResponse(set, "agent.run_not_found", "Agent run not found")
           }
           let current = run
           let cancelledWhileQueued = false
@@ -708,8 +686,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
               // not attached its cancel subscription yet.
               const refreshed = await storage.runs.getById({ projectId: sixb.id, id: current.id })
               if (!refreshed || refreshed.threadId !== thread.id) {
-                set.status = 404
-                return { error: "Agent run not found" }
+                return errorResponse(set, "agent.run_not_found", "Agent run not found")
               }
               current = refreshed
             }
@@ -720,8 +697,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           } else if (current.status === "running") {
             await publishAgentRunCancel(sixb.broker, { projectId: sixb.id, runId: current.id })
           } else {
-            set.status = 409
-            return { error: "Agent run is not active" }
+            return errorResponse(set, "agent.run_conflict", "Agent run is not active")
           }
 
           set.status = 202
@@ -766,18 +742,15 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             threadId: params.threadId,
           })
           if (!thread) {
-            set.status = 404
-            return { error: "Agent thread not found" }
+            return errorResponse(set, "agent.thread_not_found", "Agent thread not found")
           }
 
           const failedRun = await storage.runs.getById({ projectId: sixb.id, id: params.runId })
           if (!failedRun || failedRun.threadId !== thread.id) {
-            set.status = 404
-            return { error: "Agent run not found" }
+            return errorResponse(set, "agent.run_not_found", "Agent run not found")
           }
           if (failedRun.status !== "failed") {
-            set.status = 409
-            return { error: "Only failed agent runs can be retried" }
+            return errorResponse(set, "agent.run_conflict", "Only failed agent runs can be retried")
           }
 
           const run = await storage.runs.create({
@@ -853,8 +826,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             threadId: params.threadId,
           })
           if (!thread) {
-            set.status = 404
-            return { error: "Agent thread not found" }
+            return errorResponse(set, "agent.thread_not_found", "Agent thread not found")
           }
 
           const parsed = AgentRunListQuerySchema.parse(query)
@@ -905,8 +877,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
 
           const run = await storage.runs.getById({ projectId: sixb.id, id: params.runId })
           if (!run) {
-            set.status = 404
-            return { error: "Agent run not found" }
+            return errorResponse(set, "agent.run_not_found", "Agent run not found")
           }
 
           const thread = await getAccessibleThread({
@@ -916,8 +887,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             threadId: run.threadId,
           })
           if (!thread) {
-            set.status = 404
-            return { error: "Agent run not found" }
+            return errorResponse(set, "agent.run_not_found", "Agent run not found")
           }
 
           return serializeAgentRun(run)

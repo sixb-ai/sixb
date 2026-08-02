@@ -30,14 +30,26 @@ export class ObjectQueryPlanningError extends SixbError {
   }
 }
 
+/**
+ * Either the query cannot be run as written, or the store cannot run it at all. Both answer 400 and
+ * a caller acts on them differently: drop the bad page token, or narrow the query.
+ */
+export type ObjectQueryExecutionErrorCode = "storage.query_invalid" | "storage.query_unsupported"
+
 export class ObjectQueryExecutionError extends SixbError {
   override readonly name = "ObjectQueryExecutionError"
   /** The planner's own finer discriminant, e.g. `fallback_row_limit_exceeded`. */
   readonly reason: string
   readonly path?: string
 
-  constructor(reason: string, message: string, path?: string, options?: SixbErrorOptions) {
-    super("storage.query_failed", `[Sixb] Object query execution failed: ${message}`, {
+  constructor(
+    code: ObjectQueryExecutionErrorCode,
+    reason: string,
+    message: string,
+    path?: string,
+    options?: SixbErrorOptions
+  ) {
+    super(code, `[Sixb] Object query execution failed: ${message}`, {
       ...options,
       details: { reason, ...(path ? { path } : {}), ...options?.details },
     })

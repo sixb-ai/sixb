@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { SixbFailureSchema } from "./common"
 
 export const PipelineParamsSchema = z.object({
   pipelineId: z.string().min(1),
@@ -73,12 +74,7 @@ export const PipelineRunSchema = z.object({
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   output: DatasetVersionRefSchema.optional(),
-  error: z
-    .object({
-      name: z.string().optional(),
-      message: z.string(),
-    })
-    .optional(),
+  error: SixbFailureSchema.optional(),
 })
 
 export const PipelineStepRunSchema = z.object({
@@ -95,12 +91,7 @@ export const PipelineStepRunSchema = z.object({
   inputs: z.array(DatasetVersionRefSchema),
   output: DatasetVersionRefSchema.optional(),
   rowsWritten: z.number().optional(),
-  error: z
-    .object({
-      name: z.string().optional(),
-      message: z.string(),
-    })
-    .optional(),
+  error: SixbFailureSchema.optional(),
 })
 
 export const PipelineStepSchema = z.object({

@@ -170,7 +170,10 @@ describe("webhook routes", () => {
     )
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: "value must be a number" })
+    expect(await response.json()).toEqual({
+      error: "value must be a number",
+      code: "runtime.invalid_input",
+    })
     expect(calls).toBe(0)
 
     const runs = await storage.webhookRuns.list({ projectId: "test-project" })

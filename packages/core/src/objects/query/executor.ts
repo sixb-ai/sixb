@@ -680,6 +680,7 @@ async function evaluateFallbackQuery(
     case "traverse":
     case "set":
       throw new ObjectQueryExecutionError(
+        "storage.query_unsupported",
         "fallback_node_not_supported",
         `Fallback execution does not support query node '${query.kind}'`
       )
@@ -993,6 +994,7 @@ async function evaluateFallbackStart(
   // within its bound even when the storage backend does not return total counts.
   if (result.objects.length > maxRows || result.hasMore || result.total > maxRows) {
     throw new ObjectQueryExecutionError(
+      "storage.query_unsupported",
       "fallback_row_limit_exceeded",
       `Fallback start '${query.objectTypeId}' exceeded maxFallbackRows=${maxRows}`,
       "$.start"
@@ -1325,6 +1327,7 @@ function decodePageOffset(token: string | undefined): number {
   if (!token) return 0
   if (!token.startsWith(PAGE_TOKEN_PREFIX)) {
     throw new ObjectQueryExecutionError(
+      "storage.query_invalid",
       "invalid_page_token",
       "Fallback page token must use the offset token format"
     )
@@ -1333,6 +1336,7 @@ function decodePageOffset(token: string | undefined): number {
   const offset = Number(token.slice(PAGE_TOKEN_PREFIX.length))
   if (!Number.isInteger(offset) || offset < 0) {
     throw new ObjectQueryExecutionError(
+      "storage.query_invalid",
       "invalid_page_token",
       "Fallback page token contains an invalid offset"
     )

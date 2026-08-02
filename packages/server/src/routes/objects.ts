@@ -1,6 +1,7 @@
 import {
   AuthorizationError,
   isAllowed,
+  isSixbError,
   type ObjectQuery,
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
@@ -46,7 +47,7 @@ import {
   TwinObjectSchema,
   UpsertObjectBodySchema,
 } from "../schemas/objects"
-import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
+import { errorResponse, handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
 
 const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
   path: z
@@ -116,16 +117,14 @@ function serializePlan(plan: Awaited<ReturnType<typeof executeObjectQuery>>["pla
   }
 }
 
+/**
+ * The query routes answer with the shared error body plus the issue list that says which parts of
+ * the query are at fault — the one place a Sixb error response carries more than the record.
+ */
 function handleObjectQueryError(error: unknown, set: { status?: number | string }) {
-  if (error instanceof AuthorizationError) {
-    set.status = 403
-    return { error: error.message }
-  }
-
   if (error instanceof ZodError) {
-    set.status = 400
     return {
-      error: "Invalid object query request",
+      ...errorResponse(set, "storage.query_invalid", "Invalid object query request"),
       issues: error.issues.map((issue) => ({
         path: formatZodIssuePath(issue.path),
         code: issue.code,
@@ -135,17 +134,12 @@ function handleObjectQueryError(error: unknown, set: { status?: number | string 
   }
 
   if (error instanceof ObjectQueryValidationError || error instanceof ObjectQueryPlanningError) {
-    set.status = 400
-    return {
-      error: error.message,
-      issues: error.issues,
-    }
+    return { ...errorResponse(set, error.code, error.message), issues: error.issues }
   }
 
   if (error instanceof ObjectQueryExecutionError) {
-    set.status = 400
     return {
-      error: error.message,
+      ...errorResponse(set, error.code, error.message),
       issues: [
         {
           path: error.path ?? "$",
@@ -157,8 +151,8 @@ function handleObjectQueryError(error: unknown, set: { status?: number | string 
     }
   }
 
-  set.status = 500
-  return { error: error instanceof Error ? error.message : String(error) }
+  // A query that failed for none of the above failed unexpectedly, and says so with a 500.
+  return handleRouteError(error, set, "runtime.unexpected")
 }
 
 function formatZodIssuePath(path: readonly (string | number)[]): string {
@@ -313,8 +307,11 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           const parsed = ObjectSearchQuerySchema.parse(query)
           const limit = Math.min(parseOptionalInt(parsed.limit) ?? 20, 50)
           if (limit < 1) {
-            set.status = 400
-            return { error: "Object search limit must be positive" }
+            return errorResponse(
+              set,
+              "runtime.invalid_input",
+              "Object search limit must be positive"
+            )
           }
           const items = await searchObjects(sixb, requestAuthState(context), parsed.q, limit)
           return ObjectSearchResponseSchema.parse({ items })
@@ -365,13 +362,14 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             total: result.total,
           }
         } catch (error) {
-          if (error instanceof AuthorizationError) {
-            set.status = 403
-            return { error: error.message }
+          // `objectTypeId` is a filter here, not the resource: `/api/objects` exists whatever it
+          // names, so an unregistered type is a bad request. The identity route addresses the type
+          // and answers 404 for the same condition.
+          if (isSixbError(error, "ontology.type_not_found")) {
+            return errorResponse(set, "runtime.invalid_input", error.message)
           }
 
-          set.status = 400
-          return { error: error instanceof Error ? error.message : String(error) }
+          return handleRouteError(error, set)
         }
       },
       {
@@ -381,11 +379,15 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
         },
+        // `code` is Elysia's own error kind here, not a `SixbErrorCode`.
         error: ({ code, error, set }) => {
           if (code !== "VALIDATION" || error.type !== "query") return
 
-          set.status = 400
-          return { error: error.all[0]?.message ?? "Invalid object list query parameters." }
+          return errorResponse(
+            set,
+            "runtime.invalid_input",
+            error.all[0]?.message ?? "Invalid object list query parameters."
+          )
         },
         detail: {
           summary: "List objects",
@@ -769,16 +771,14 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         try {
           const row = await getObjectRow(sixb, scoped, params)
           if (!row) {
-            set.status = 404
-            return { error: "Object not found" }
+            return errorResponse(set, "storage.object_not_found", "Object not found")
           }
 
           return serializeObject(row)
         } catch (error) {
           // Identity reads hide existence: forbidden and missing look the same.
           if (error instanceof AuthorizationError) {
-            set.status = 404
-            return { error: "Object not found" }
+            return errorResponse(set, "storage.object_not_found", "Object not found")
           }
 
           throw error
@@ -814,8 +814,8 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           return serializeObject(object)
         } catch (error) {
           // Was a local catch mapping every error to 404/400, which turned a missing grant into
-          // "bad request". `handleRouteError` answers 403 for AuthorizationError, like the link and
-          // telemetry writes already did.
+          // "bad request". The status is the code's now, so a denied write answers 403 like the
+          // link and telemetry writes already did.
           return handleRouteError(error, set)
         }
       },

@@ -311,7 +311,10 @@ describe("access token management routes", () => {
     )
 
     expect(response.status).toBe(403)
-    await expect(response.json()).resolves.toEqual({ error: "User authentication is required" })
+    await expect(response.json()).resolves.toEqual({
+      error: "User authentication is required",
+      code: "auth.permission_denied",
+    })
 
     const serviceAccountsResponse = await app.fetch(
       jsonRequest("/api/auth/service-accounts", "GET", {
@@ -321,6 +324,7 @@ describe("access token management routes", () => {
     expect(serviceAccountsResponse.status).toBe(403)
     await expect(serviceAccountsResponse.json()).resolves.toEqual({
       error: "User authentication is required",
+      code: "auth.permission_denied",
     })
   })
 

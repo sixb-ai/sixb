@@ -254,7 +254,10 @@ describe("object file content routes", () => {
     ]) {
       const response = await app.fetch(contentRequest(path))
       expect(response.status).toBe(404)
-      expect(await response.json()).toEqual({ error: "File not found" })
+      expect(await response.json()).toEqual({
+        error: "File not found",
+        code: "storage.file_not_found",
+      })
     }
   })
 
@@ -265,7 +268,10 @@ describe("object file content routes", () => {
       contentRequest("/api/objects/document/doc-1/files/content?path=/pdf")
     )
     expect(getResponse.status).toBe(400)
-    expect(await getResponse.json()).toEqual({ error: "Invalid file content query" })
+    expect(await getResponse.json()).toEqual({
+      error: "Invalid file content query",
+      code: "runtime.invalid_input",
+    })
 
     const headResponse = await app.fetch(
       contentRequest("/api/objects/document/doc-1/files/content?path=/pdf", {
@@ -294,6 +300,9 @@ describe("object file content routes", () => {
       })
     )
     expect(forbidden.status).toBe(404)
-    expect(await forbidden.json()).toEqual({ error: "File not found" })
+    expect(await forbidden.json()).toEqual({
+      error: "File not found",
+      code: "storage.file_not_found",
+    })
   })
 })

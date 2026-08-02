@@ -475,8 +475,8 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
                   >
                     {run.identity.datasetVersion.versionId}
                   </p>
-                  {run.errorMessage && (
-                    <p className="mt-1 break-words text-xs text-destructive">{run.errorMessage}</p>
+                  {run.error && (
+                    <p className="mt-1 break-words text-xs text-destructive">{run.error.message}</p>
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
@@ -527,8 +527,8 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
                 </span>
               ))}
             </div>
-            {run.errorMessage && (
-              <p className="mt-2 break-words text-xs text-destructive">{run.errorMessage}</p>
+            {run.error && (
+              <p className="mt-2 break-words text-xs text-destructive">{run.error.message}</p>
             )}
           </div>
         ))}

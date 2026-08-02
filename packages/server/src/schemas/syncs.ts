@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { SixbFailureSchema } from "./common"
 import { DatasetDefinitionSchema } from "./datasets"
 
 export const SyncParamsSchema = z.object({
@@ -46,12 +47,7 @@ export const SyncRunSchema = z.object({
     .optional(),
   expectedLatestVersionId: z.string().optional(),
   commitMessage: z.string().optional(),
-  error: z
-    .object({
-      name: z.string().optional(),
-      message: z.string(),
-    })
-    .optional(),
+  error: SixbFailureSchema.optional(),
 })
 
 export const SyncSchema = z.object({

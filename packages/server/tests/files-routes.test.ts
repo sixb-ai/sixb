@@ -167,6 +167,7 @@ describe("file routes", () => {
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
       error: "Expected multipart field 'file' to be a file.",
+      code: "runtime.invalid_input",
     })
   })
 
@@ -180,6 +181,7 @@ describe("file routes", () => {
     expect(response.status).toBe(413)
     expect(await response.json()).toEqual({
       error: `File upload exceeds the ${DEFAULT_SIMPLE_FILE_UPLOAD_BYTES} byte limit.`,
+      code: "runtime.payload_too_large",
     })
   })
 
@@ -191,6 +193,7 @@ describe("file routes", () => {
     expect(response.status).toBe(413)
     expect(await response.json()).toEqual({
       error: `File upload request exceeds the ${DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES} byte limit.`,
+      code: "runtime.payload_too_large",
     })
   })
 
@@ -324,6 +327,7 @@ describe("file routes", () => {
     expect(completeResponse.status).toBe(400)
     expect(await completeResponse.json()).toEqual({
       error: "Upload content has not been received.",
+      code: "runtime.invalid_input",
     })
   })
 
@@ -344,6 +348,7 @@ describe("file routes", () => {
     expect(completeResponse.status).toBe(409)
     expect(await completeResponse.json()).toEqual({
       error: "File upload session is already aborted.",
+      code: "storage.upload_conflict",
     })
   })
 
@@ -361,6 +366,7 @@ describe("file routes", () => {
     expect(contentResponse.status).toBe(400)
     expect(await contentResponse.json()).toEqual({
       error: "File upload size mismatch: expected 12 bytes, received 11.",
+      code: "storage.upload_invalid",
     })
 
     const digest = computeBlobDigest(new TextEncoder().encode("hello large"))
@@ -384,6 +390,7 @@ describe("file routes", () => {
     expect(contentResponse.status).toBe(400)
     expect(await contentResponse.json()).toEqual({
       error: `File upload digest mismatch: expected ${expectedDigest}, received ${actualDigest}.`,
+      code: "storage.upload_invalid",
     })
     expect(await blobStorage.stat(blobIdFromDigest(actualDigest))).toBeNull()
   })
@@ -428,6 +435,7 @@ describe("file routes", () => {
     expect(abortResponse.status).toBe(409)
     expect(await abortResponse.json()).toEqual({
       error: "File upload session is already completed.",
+      code: "storage.upload_conflict",
     })
   })
 
@@ -454,6 +462,7 @@ describe("file routes", () => {
     expect(contentResponse.status).toBe(409)
     expect(await contentResponse.json()).toEqual({
       error: "File upload session is already aborted.",
+      code: "storage.upload_conflict",
     })
   })
 

@@ -1,4 +1,5 @@
 import type { DatasetDefinition, OntologySource, Sixb } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type {
   DatasetCatalogState,
   DatasetLatestVersionSummary,
@@ -18,7 +19,7 @@ import {
   DatasetVersionSchema,
   DatasetVersionsQuerySchema,
 } from "../schemas/datasets"
-import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
+import { errorResponse, handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
 
 const DEFAULT_VERSION_LIMIT = 20
 const MAX_VERSION_LIMIT = 100
@@ -176,7 +177,7 @@ function requireDataset(
 ) {
   const dataset = scoped ? scoped.getDatasetById(datasetId) : sixb.getDatasetById(datasetId)
   if (!dataset) {
-    throw new Error("Dataset not found")
+    throw new SixbError("dataset.not_found", "Dataset not found")
   }
   return dataset
 }
@@ -226,8 +227,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
           const definitions = scoped ? scoped.listDatasets() : sixb.listDatasets()
           return await serializeDatasetCatalogItems(sixb, definitions, scoped)
         } catch (error) {
-          set.status = 400
-          return { error: error instanceof Error ? error.message : String(error) }
+          return handleRouteError(error, set)
         }
       },
       {
@@ -310,8 +310,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
           requireDataset(sixb, scoped, params.datasetId)
           const version = await sixb.lakeStorage.getVersion(params.datasetId, params.versionId)
           if (!version) {
-            set.status = 404
-            return { error: "Dataset version not found" }
+            return errorResponse(set, "dataset.version_not_found", "Dataset version not found")
           }
 
           return serializeDatasetVersion(version)
@@ -348,8 +347,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
             : await sixb.lakeStorage.getLatestVersion(params.datasetId)
 
           if (!version) {
-            set.status = 404
-            return { error: "Dataset version not found" }
+            return errorResponse(set, "dataset.version_not_found", "Dataset version not found")
           }
 
           const requestedColumns = parseColumns(parsed.columns)

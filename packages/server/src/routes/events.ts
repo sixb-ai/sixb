@@ -1,11 +1,11 @@
-import { AuthorizationError, type OntologySource, type Sixb } from "@sixb/core"
+import type { OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { EventsQuerySchema, EventsResponseSchema } from "../schemas/events"
-import { parseOptionalInt } from "../utils/http"
+import { handleRouteError, parseOptionalInt } from "../utils/http"
 export function registerEventRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app.get(
     "/api/events",
@@ -28,13 +28,7 @@ export function registerEventRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           events: [...events],
         }
       } catch (error) {
-        if (error instanceof AuthorizationError) {
-          set.status = 403
-          return { error: error.message }
-        }
-
-        set.status = 400
-        return { error: error instanceof Error ? error.message : String(error) }
+        return handleRouteError(error, set)
       }
     },
     {

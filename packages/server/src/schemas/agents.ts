@@ -1,7 +1,7 @@
 import { AGENT_REASONING_LEVELS, MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
 import { AGENT_RUN_DIAGNOSTIC_CODES } from "@sixb/core/storage"
 import { z } from "zod"
-import { JsonValueSchema } from "./common"
+import { JsonValueSchema, SixbFailureSchema } from "./common"
 import { FileRefSchema } from "./files"
 
 export const AgentIdParamsSchema = z.object({
@@ -259,7 +259,7 @@ export const AgentRunSchema = z.object({
   finishReason: AgentRunFinishReasonSchema.optional(),
   usage: AgentRunUsageSchema.optional(),
   diagnostics: z.array(AgentRunDiagnosticSchema).optional(),
-  error: z.string().optional(),
+  error: SixbFailureSchema.optional(),
   attempt: z.number(),
   streamId: z.string(),
   createdAt: z.string(),

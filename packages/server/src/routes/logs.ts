@@ -5,6 +5,7 @@ import { requestAuthState } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { DEFAULT_LOGS_PAGE_LIMIT, LogsQuerySchema, LogsResponseSchema } from "../schemas/logs"
+import { errorResponse, handleRouteError } from "../utils/http"
 
 export function registerLogRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app.get(
@@ -14,8 +15,11 @@ export function registerLogRoutes(app: Elysia, sixb: Sixb<readonly OntologySourc
       const { authz } = requestAuthState(context)
 
       if (!isAllowed(authz, { kind: "logs.observe" })) {
-        set.status = 403
-        return { error: "Missing required capability 'observe:logs'." }
+        return errorResponse(
+          set,
+          "auth.permission_denied",
+          "Missing required capability 'observe:logs'."
+        )
       }
 
       try {
@@ -43,8 +47,7 @@ export function registerLogRoutes(app: Elysia, sixb: Sixb<readonly OntologySourc
           hasMore: page.hasMore,
         }
       } catch (error) {
-        set.status = 400
-        return { error: error instanceof Error ? error.message : String(error) }
+        return handleRouteError(error, set)
       }
     },
     {

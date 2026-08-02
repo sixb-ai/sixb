@@ -395,10 +395,12 @@ describe("auth member routes", () => {
     expect(removeOwnGroups.status).toBe(403)
     expect(await removeOwnGroups.json()).toEqual({
       error: "[Sixb] The current user cannot remove their own groups.",
+      code: "auth.permission_denied",
     })
     expect(suspendSelf.status).toBe(403)
     expect(await suspendSelf.json()).toEqual({
       error: "[Sixb] The current user cannot suspend themselves.",
+      code: "auth.permission_denied",
     })
   })
 })

@@ -1,16 +1,23 @@
 import type { AuthSessionAudience } from "@sixb/core"
+import type { SixbErrorCode } from "@sixb/core/errors"
+import { statusForErrorCode } from "../utils/http"
 import { returnToForRequest } from "./return-to"
 
 export function jsonAuthRequiredResponse(): Response {
-  return jsonResponse({ error: "Authentication required" }, 401)
+  return jsonErrorResponse("auth.authentication_required", "Authentication required")
 }
 
 export function jsonCsrfFailedResponse(): Response {
-  return jsonResponse({ error: "CSRF verification failed" }, 403)
+  return jsonErrorResponse("auth.csrf_rejected", "CSRF verification failed")
 }
 
 export function jsonForbiddenResponse(message = "Forbidden"): Response {
-  return jsonResponse({ error: message }, 403)
+  return jsonErrorResponse("auth.permission_denied", message)
+}
+
+/** An error body and the status its code answers with, for the auth routes that build a `Response`. */
+export function jsonErrorResponse(code: SixbErrorCode, message: string): Response {
+  return jsonResponse({ error: message, code }, statusForErrorCode(code))
 }
 
 export function htmlAuthRedirectResponse(

@@ -39,8 +39,9 @@ import { registerHttpRoutes } from "./registerRoutes"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerWebhookRoutes } from "./routes/webhooks"
 import { registerWebSocketRoutes } from "./routes/ws"
-import { jsonValueOpenApiOverride } from "./schemas/common"
+import { jsonValueOpenApiOverride, SharedOpenApiSchemas } from "./schemas/common"
 import { ObjectQueryOpenApiSchemas } from "./schemas/objects"
+import { statusForErrorCode } from "./utils/http"
 
 export interface SixbServerOptions {
   sixb: Sixb<readonly OntologySource[]>
@@ -253,7 +254,7 @@ export function createSixbApi(server: SixbServer) {
             [SIXB_CSRF_SECURITY_SCHEME_ID]: SIXB_CSRF_SECURITY_SCHEME,
             [SIXB_BEARER_SECURITY_SCHEME_ID]: SIXB_BEARER_SECURITY_SCHEME,
           },
-          schemas: ObjectQueryOpenApiSchemas,
+          schemas: { ...SharedOpenApiSchemas, ...ObjectQueryOpenApiSchemas },
         },
         tags: OPENAPI_TAG_METADATA,
       },
@@ -341,13 +342,16 @@ function rejectDisallowedBrowserOrigin(
     }
   }
 
-  return new Response(JSON.stringify({ error: "Browser origin is not allowed" }), {
-    status: 403,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  })
+  return new Response(
+    JSON.stringify({ error: "Browser origin is not allowed", code: "auth.origin_rejected" }),
+    {
+      status: statusForErrorCode("auth.origin_rejected"),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+      },
+    }
+  )
 }
 
 export type SixbApp = ReturnType<typeof createSixbApi>

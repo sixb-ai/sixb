@@ -334,7 +334,10 @@ describe("agent routes", () => {
 
     const missingResponse = await app.fetch(new Request("http://localhost/api/agents/missing"))
     expect(missingResponse.status).toBe(404)
-    expect(await missingResponse.json()).toEqual({ error: "Agent not found" })
+    expect(await missingResponse.json()).toEqual({
+      error: "Agent not found",
+      code: "agent.not_found",
+    })
   })
 
   test("narrows the agent catalog and rejects thread creation without can.run", async () => {
@@ -632,6 +635,7 @@ describe("agent routes", () => {
     expect(response.status).toBe(409)
     expect(await response.json()).toEqual({
       error: `[Sixb] Agent thread '${thread.id}' already has an active run 'run-active'.`,
+      code: "agent.run_conflict",
     })
   })
 

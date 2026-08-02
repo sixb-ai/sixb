@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { SixbFailureSchema } from "./common"
 
 export const WebhookRunStatusSchema = z.enum(["running", "succeeded", "failed", "skipped"])
 
@@ -30,7 +31,7 @@ export const WebhookRunSchema = z.object({
   responseStatus: z.number().optional(),
   idempotencyKey: z.string().optional(),
   deliveryClaimResult: WebhookDeliveryClaimResultSchema.optional(),
-  error: z.string().optional(),
+  error: SixbFailureSchema.optional(),
 })
 
 export const WebhookRunListResponseSchema = z.object({

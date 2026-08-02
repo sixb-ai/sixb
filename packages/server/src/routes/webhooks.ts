@@ -20,6 +20,7 @@ import type {
 } from "@sixb/core/storage"
 import { type SixbFailure, toSixbFailure } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
+import { type ErrorResponseBody, errorResponse } from "../utils/http"
 import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
 
 const DEFAULT_WEBHOOK_BODY_LIMIT_BYTES = 1024 * 1024
@@ -68,8 +69,7 @@ export function registerWebhookRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
       const registered = sixb.getWebhookById(params.connectorId, params.webhookId)
 
       if (!registered) {
-        set.status = 404
-        return { error: "Webhook not found" }
+        return errorResponse(set, "webhook.not_found", "Webhook not found")
       }
 
       return dispatchWebhook({ sixb, registered, request, set })
@@ -137,6 +137,7 @@ async function dispatchWebhookRun(
   const requestMethod = request.method.toUpperCase()
 
   if (requestMethod !== webhook.method) {
+    const failure = webhookFailure("runtime.invalid_input", "Method not allowed")
     set.status = 405
     setHeader(set, "allow", webhook.method)
     await finishWebhookRun({
@@ -144,9 +145,9 @@ async function dispatchWebhookRun(
       runId,
       status: "failed",
       responseStatus: 405,
-      error: webhookFailure("runtime.invalid_input", "Method not allowed"),
+      error: failure,
     })
-    return { error: "Method not allowed" }
+    return toErrorResponseBody(failure)
   }
 
   let rawBody: Uint8Array
@@ -154,16 +155,16 @@ async function dispatchWebhookRun(
     rawBody = await readRawBody(request, options.bodyLimitBytes ?? DEFAULT_WEBHOOK_BODY_LIMIT_BYTES)
   } catch (error) {
     const responseStatus = error instanceof RequestBodyTooLargeError ? 413 : 400
-    const message = error instanceof Error ? error.message : String(error)
+    const failure = toSixbFailure(error, { fallbackCode: "runtime.invalid_input" })
     set.status = responseStatus
     await finishWebhookRun({
       sixb,
       runId,
       status: "failed",
       responseStatus,
-      error: webhookFailure("runtime.invalid_input", message),
+      error: failure,
     })
-    return { error: message }
+    return toErrorResponseBody(failure)
   }
 
   const metadata = toWebhookMetadata(webhook, route)
@@ -182,6 +183,7 @@ async function dispatchWebhookRun(
   try {
     await webhook.verify?.(verifyContext)
   } catch {
+    const failure = webhookFailure("webhook.unverified", "Webhook verification failed")
     set.status = 401
     await finishWebhookRun({
       sixb,
@@ -189,16 +191,16 @@ async function dispatchWebhookRun(
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
       responseStatus: 401,
-      error: webhookFailure("webhook.unverified", "Webhook verification failed"),
+      error: failure,
     })
-    return { error: "Webhook verification failed" }
+    return toErrorResponseBody(failure)
   }
 
   let body: unknown
   try {
     body = parseWebhookBody(webhook, rawBody)
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const failure = toSixbFailure(error, { fallbackCode: "runtime.invalid_input" })
     set.status = 400
     await finishWebhookRun({
       sixb,
@@ -206,9 +208,9 @@ async function dispatchWebhookRun(
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
       responseStatus: 400,
-      error: webhookFailure("runtime.invalid_input", message),
+      error: failure,
     })
-    return { error: message }
+    return toErrorResponseBody(failure)
   }
 
   const handlerContext = {
@@ -247,6 +249,7 @@ async function dispatchWebhookRun(
     deliveryKey = claim.key
   } catch (error) {
     reportFailure(error)
+    const failure = webhookFailure("webhook.failed", "Webhook delivery claim failed")
     set.status = 500
     await finishWebhookRun({
       sixb,
@@ -254,9 +257,9 @@ async function dispatchWebhookRun(
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
       responseStatus: 500,
-      error: webhookFailure("webhook.failed", "Webhook delivery claim failed"),
+      error: failure,
     })
-    return { error: "Webhook delivery claim failed" }
+    return toErrorResponseBody(failure)
   }
 
   let response: unknown
@@ -274,6 +277,7 @@ async function dispatchWebhookRun(
       })
     }
 
+    const failure = webhookFailure("webhook.failed", "Webhook handler failed")
     set.status = 500
     await finishWebhookRun({
       sixb,
@@ -283,9 +287,9 @@ async function dispatchWebhookRun(
       responseStatus: 500,
       idempotencyKey,
       deliveryClaimResult,
-      error: webhookFailure("webhook.failed", "Webhook handler failed"),
+      error: failure,
     })
-    return { error: "Webhook handler failed" }
+    return toErrorResponseBody(failure)
   }
 
   const responseStatus = getWebhookResponseStatus(response)
@@ -313,6 +317,7 @@ async function dispatchWebhookRun(
     }
   } catch (error) {
     reportFailure(error)
+    const failure = webhookFailure("webhook.failed", "Webhook delivery completion failed")
     set.status = 500
     await finishWebhookRun({
       sixb,
@@ -322,9 +327,9 @@ async function dispatchWebhookRun(
       responseStatus: 500,
       idempotencyKey,
       deliveryClaimResult,
-      error: webhookFailure("webhook.failed", "Webhook delivery completion failed"),
+      error: failure,
     })
-    return { error: "Webhook delivery completion failed" }
+    return toErrorResponseBody(failure)
   }
 
   if (shouldRetryDelivery) {
@@ -374,6 +379,17 @@ async function startWebhookRun(
 /** A failure the route decided itself rather than caught: there is nothing to unwrap. */
 function webhookFailure(code: SixbErrorCode, message: string): SixbFailure {
   return { code, message }
+}
+
+/**
+ * The wire form of a failure this route already recorded.
+ *
+ * The status stays explicit here, unlike everywhere else: a webhook endpoint answers the provider
+ * that called it, so a method mismatch owes it a 405 with an `Allow` header and an oversized body a
+ * 413, neither of which the code alone would produce.
+ */
+function toErrorResponseBody(failure: SixbFailure): ErrorResponseBody {
+  return { error: failure.message, code: failure.code }
 }
 
 async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {

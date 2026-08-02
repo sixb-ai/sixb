@@ -22,6 +22,7 @@ import {
   ProjectionRunsQuerySchema,
 } from "../schemas/projections"
 import {
+  errorResponse,
   handleRouteError,
   parseDate,
   parseOptionalInt,
@@ -40,7 +41,7 @@ function serializeProjectionRun(run: ProjectionRunRecord) {
     progress: run.progress,
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
-    errorMessage: run.error?.message,
+    error: run.error,
   })
 }
 
@@ -144,8 +145,11 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
         const { authz } = requestAuthState(context)
         const found = sixb.getProjectionById(params.projectionId)
         if (!found || !canViewProjection(authz, found)) {
-          set.status = 404
-          return { error: `Projection '${params.projectionId}' not found` }
+          return errorResponse(
+            set,
+            "projection.not_found",
+            `Projection '${params.projectionId}' not found`
+          )
         }
 
         const latestRuns = await getLatestProjectionRuns(sixb, [found.id])
@@ -224,8 +228,7 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
 
           const run = await storage.getById({ projectId: sixb.id, id: params.runId })
           if (!run || !canViewProjectionRun(authz, run.target)) {
-            set.status = 404
-            return { error: "Projection run not found" }
+            return errorResponse(set, "projection.run_not_found", "Projection run not found")
           }
 
           return serializeProjectionRun(run)

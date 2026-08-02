@@ -10,7 +10,7 @@ import {
   RequestActionResponseSchema,
 } from "../schemas/actions"
 import { ErrorResponseSchema } from "../schemas/common"
-import { handleRouteError } from "../utils/http"
+import { errorResponse, handleRouteError } from "../utils/http"
 
 function serializeAction(
   action: ActionDefinition
@@ -66,8 +66,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           ? scoped.getActionById(params.actionId)
           : sixb.getActionById(params.actionId)
         if (!action) {
-          set.status = 404
-          return { error: "Action not found" }
+          return errorResponse(set, "action.not_found", "Action not found")
         }
 
         return serializeAction(action)

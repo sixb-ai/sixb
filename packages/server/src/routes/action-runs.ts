@@ -20,8 +20,8 @@ import {
 } from "../schemas/actions"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
-import { toWireFailure } from "../utils/failure"
 import {
+  errorResponse,
   handleRouteError,
   parseDate,
   parseOptionalInt,
@@ -49,7 +49,7 @@ function serializeActionRunSummary(
     queuedAt: toIsoString(run.queuedAt),
     startedAt: run.startedAt ? toIsoString(run.startedAt) : undefined,
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
-    error: toWireFailure(run.error),
+    error: run.error,
   })
 }
 
@@ -64,14 +64,14 @@ function serializeActionRunDetail(
           status: run.writeback.status,
           completedAt: toIsoString(run.writeback.completedAt),
           ...(run.writeback.result !== undefined ? { result: run.writeback.result } : {}),
-          error: toWireFailure(run.writeback.error),
+          error: run.writeback.error,
         }
       : undefined,
     effects: run.effects
       ? {
           status: run.effects.status,
           completedAt: toIsoString(run.effects.completedAt),
-          error: toWireFailure(run.effects.error),
+          error: run.effects.error,
         }
       : undefined,
   })
@@ -181,8 +181,7 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
 
           const run = await storage.getById({ projectId: sixb.id, id: params.runId })
           if (!run || !canViewActionRun(authz, run)) {
-            set.status = 404
-            return { error: "Action run not found" }
+            return errorResponse(set, "action.run_not_found", "Action run not found")
           }
 
           return serializeActionRunDetail(run)

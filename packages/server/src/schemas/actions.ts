@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { SixbFailureSchema } from "./common"
 import { ActionParamSchema } from "./ontology"
 
 export const ActionIdParamsSchema = z.object({
@@ -78,9 +79,7 @@ export const ActionRunsQuerySchema = z.object({
   order: z.enum(["asc", "desc"]).optional(),
 })
 
-export const ActionRunFailureSchema = z.object({
-  name: z.string().optional(),
-  message: z.string(),
+export const ActionRunFailureSchema = SixbFailureSchema.extend({
   phase: ActionRunPhaseSchema.optional(),
 })
 

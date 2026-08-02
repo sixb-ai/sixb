@@ -1,9 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
 import type { AuthSessionAudience, GroupDefinition, OntologySource, Sixb } from "@sixb/core"
+import { SixbValidationError, toSixbFailure } from "@sixb/core/errors"
 import {
   type AuthenticatedUserRequestSession,
   type AuthRequestResult,
-  AuthRuntimeError,
   clearCsrfCookieHeader,
   clearSessionCookieHeader,
   createCsrfCookieHeader,
@@ -39,6 +39,7 @@ import {
   type ResolveRequestAuthContext,
 } from "../auth/browser-origin"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../auth/csrf"
+import { jsonErrorResponse } from "../auth/responses"
 import { hasForegroundSessionActivity } from "../auth/session-activity"
 import { createSessionRenewalCookieHeaders } from "../auth/session-cookies"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
@@ -211,7 +212,7 @@ export function registerAuthRoutes(
             cookieName: cookieOptions.csrfCookieName,
           })
         ) {
-          return jsonResponse({ error: "CSRF verification failed" }, 403)
+          return jsonErrorResponse("auth.csrf_rejected", "CSRF verification failed")
         }
 
         if (session.authenticated) {
@@ -252,7 +253,7 @@ export function registerAuthRoutes(
         const authOptions = resolveAuthOptions(options, request)
         const session = await sixb.auth.getSession(request, authOptions)
         if (!session.authenticated) {
-          return jsonResponse({ error: "Authentication required" }, 401)
+          return jsonErrorResponse("auth.authentication_required", "Authentication required")
         }
 
         const sessions = await requireAuthStorage(sixb).sessions.listActiveByUserId({
@@ -296,10 +297,10 @@ export function registerAuthRoutes(
         const session = await sixb.auth.getSession(request, authOptions)
         const cookieOptions = sixb.auth.getCookieOptions(authOptions)
         if (!session.authenticated) {
-          return jsonResponse({ error: "Authentication required" }, 401)
+          return jsonErrorResponse("auth.authentication_required", "Authentication required")
         }
         if (!verifyDoubleSubmitCsrf(request, { cookieName: cookieOptions.csrfCookieName })) {
-          return jsonResponse({ error: "CSRF verification failed" }, 403)
+          return jsonErrorResponse("auth.csrf_rejected", "CSRF verification failed")
         }
 
         const { sessionId } = RevokeAuthSessionParamsSchema.parse(params)
@@ -308,7 +309,7 @@ export function registerAuthRoutes(
         // Only the caller's own sessions are revocable. A missing or foreign
         // session id returns the same 404 so it cannot probe other accounts.
         if (!target || target.userId !== session.user.id) {
-          return jsonResponse({ error: "Session not found" }, 404)
+          return jsonErrorResponse("auth.record_not_found", "Session not found")
         }
 
         await storage.sessions.revoke({ projectId: sixb.id, id: sessionId, revokedAt: new Date() })
@@ -349,10 +350,10 @@ export function registerAuthRoutes(
         const session = await sixb.auth.getSession(request, authOptions)
         const cookieOptions = sixb.auth.getCookieOptions(authOptions)
         if (!session.authenticated) {
-          return jsonResponse({ error: "Authentication required" }, 401)
+          return jsonErrorResponse("auth.authentication_required", "Authentication required")
         }
         if (!verifyDoubleSubmitCsrf(request, { cookieName: cookieOptions.csrfCookieName })) {
-          return jsonResponse({ error: "CSRF verification failed" }, 403)
+          return jsonErrorResponse("auth.csrf_rejected", "CSRF verification failed")
         }
 
         // Global sign-out: revoke every active session for the user across all
@@ -1715,7 +1716,7 @@ function resolveInvitationDeliveryContext(
     return options.resolveInvitationRedirectContext(request, input)
   } catch (error) {
     if (error instanceof BrowserOriginError) {
-      return jsonResponse({ error: "Invitation destination is not allowed" }, 400)
+      return jsonErrorResponse("runtime.invalid_input", "Invitation destination is not allowed")
     }
 
     throw error
@@ -2071,11 +2072,11 @@ function serializeServiceAccount(
 function parseRequiredFutureDate(value: string): Date {
   const date = parseDate(value)
   if (!date) {
-    throw new Error("Expiration is required.")
+    throw new SixbValidationError("runtime.invalid_input", "Expiration is required.")
   }
 
   if (date.getTime() <= Date.now()) {
-    throw new Error("Expiration must be in the future.")
+    throw new SixbValidationError("runtime.invalid_input", "Expiration must be in the future.")
   }
 
   return date
@@ -2095,11 +2096,11 @@ function requireAuthenticatedUserSession(
   session: AuthRequestResult
 ): AuthenticatedUserRequestSession | Response {
   if (!session.authenticated) {
-    return jsonResponse({ error: "Authentication required" }, 401)
+    return jsonErrorResponse("auth.authentication_required", "Authentication required")
   }
 
   if (!isAuthenticatedUserSession(session)) {
-    return jsonResponse({ error: "User authentication is required" }, 403)
+    return jsonErrorResponse("auth.permission_denied", "User authentication is required")
   }
 
   return session
@@ -2159,51 +2160,15 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;")
 }
 
+/**
+ * Two `reason` ladders and a read of the message text used to decide the status here. Every auth
+ * error carries a code now, and the code answers all three: a rejected magic link is the same 401
+ * as a rejected password, a duplicate invitation is a 409, and a suspended account is a 403 —
+ * distinctions the ladder collapsed into 400.
+ */
 function authRouteErrorResponse(error: unknown): Response {
-  if (error instanceof AuthRuntimeError) {
-    if (error.reason === "authentication_required") {
-      return jsonResponse({ error: error.message }, 401)
-    }
-
-    if (error.reason === "authorization_denied") {
-      return jsonResponse({ error: error.message }, 403)
-    }
-
-    if (error.reason === "invalid_auth_input") {
-      return jsonResponse({ error: error.message }, 400)
-    }
-
-    if (error.reason === "rate_limited") {
-      return jsonResponse({ error: error.message }, 429)
-    }
-
-    return jsonResponse({ error: error.message }, 500)
-  }
-
-  if (error instanceof AuthStorageError) {
-    if (
-      error.reason === "missing_invitation" ||
-      error.reason === "missing_access_token" ||
-      error.reason === "missing_service_account" ||
-      error.reason === "missing_user"
-    ) {
-      return jsonResponse({ error: error.message }, 404)
-    }
-
-    return jsonResponse({ error: error.message }, 400)
-  }
-
-  if (error instanceof Error) {
-    const status =
-      error.message.startsWith("Invalid date:") ||
-      error.message.startsWith("Invalid integer:") ||
-      error.message.startsWith("Expiration ")
-        ? 400
-        : 500
-    return jsonResponse({ error: error.message }, status)
-  }
-
-  return jsonResponse({ error: String(error) }, 500)
+  const failure = toSixbFailure(error, { fallbackCode: "runtime.unexpected" })
+  return jsonErrorResponse(failure.code, failure.message)
 }
 
 function logAuthCallbackError(kind: string, error: unknown): void {

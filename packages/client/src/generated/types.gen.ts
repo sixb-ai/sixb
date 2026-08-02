@@ -4,8 +4,103 @@ export type ClientOptions = {
   baseUrl: `${string}://${string}` | (string & {})
 }
 
+/**
+ * The stable machine code every Sixb failure carries.
+ */
+export type SixbErrorCode =
+  | "action.commit_failed"
+  | "action.failed"
+  | "action.not_found"
+  | "action.run_not_found"
+  | "action.timed_out"
+  | "agent.execution_lost"
+  | "agent.failed"
+  | "agent.not_found"
+  | "agent.run_conflict"
+  | "agent.run_not_found"
+  | "agent.thread_conflict"
+  | "agent.thread_not_found"
+  | "agent.timed_out"
+  | "auth.authentication_required"
+  | "auth.csrf_rejected"
+  | "auth.invalid_credentials"
+  | "auth.origin_rejected"
+  | "auth.permission_denied"
+  | "auth.rate_limited"
+  | "auth.record_not_found"
+  | "auth.session_expired"
+  | "broker.cursor_expired"
+  | "broker.unavailable"
+  | "connector.not_found"
+  | "connector.rate_limited"
+  | "connector.request_failed"
+  | "connector.unauthorized"
+  | "connector.unavailable"
+  | "dataset.not_found"
+  | "dataset.version_not_found"
+  | "event.append_failed"
+  | "event.delivery_failed"
+  | "ontology.invalid_value"
+  | "ontology.type_not_found"
+  | "pipeline.already_running"
+  | "pipeline.failed"
+  | "pipeline.not_found"
+  | "pipeline.run_not_found"
+  | "projection.failed"
+  | "projection.not_found"
+  | "projection.run_not_found"
+  | "provider.failed"
+  | "provider.unavailable"
+  | "queue.lease_lost"
+  | "queue.unavailable"
+  | "rule.evaluation_failed"
+  | "rule.not_found"
+  | "runtime.cancelled"
+  | "runtime.invalid_definition"
+  | "runtime.invalid_input"
+  | "runtime.invariant_violated"
+  | "runtime.not_configured"
+  | "runtime.payload_too_large"
+  | "runtime.unexpected"
+  | "runtime.unsupported"
+  | "sandbox.failed"
+  | "sandbox.isolation_unavailable"
+  | "sandbox.not_running"
+  | "sandbox.timed_out"
+  | "storage.blob_failed"
+  | "storage.conflict"
+  | "storage.edit_rejected"
+  | "storage.file_not_found"
+  | "storage.lake_failed"
+  | "storage.object_not_found"
+  | "storage.query_failed"
+  | "storage.query_invalid"
+  | "storage.query_unsupported"
+  | "storage.transaction_failed"
+  | "storage.unavailable"
+  | "storage.upload_conflict"
+  | "storage.upload_expired"
+  | "storage.upload_invalid"
+  | "storage.upload_not_found"
+  | "sync.already_running"
+  | "sync.failed"
+  | "sync.not_found"
+  | "telemetry.point_not_found"
+  | "webhook.failed"
+  | "webhook.not_found"
+  | "webhook.unverified"
+  | "workflow.agent_execution_not_found"
+  | "workflow.failed"
+  | "workflow.intervention_not_found"
+  | "workflow.intervention_required"
+  | "workflow.node_run_not_found"
+  | "workflow.not_found"
+  | "workflow.run_conflict"
+  | "workflow.run_not_found"
+
 export type ErrorResponse = {
   error: string
+  code: SixbErrorCode
 }
 
 export type ObjectQueryObject = {
@@ -78,6 +173,7 @@ export type ObjectQueryFacetsResponse = {
 
 export type ObjectQueryErrorResponse = {
   error: string
+  code: SixbErrorCode
   issues?: Array<ObjectQueryIssue>
 }
 
@@ -268,6 +364,7 @@ export type SignOutErrors = {
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -297,6 +394,7 @@ export type ListAuthSessionsErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -337,18 +435,21 @@ export type RevokeAuthSessionErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -378,12 +479,14 @@ export type SignOutAllErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -414,12 +517,14 @@ export type GetAuthAccessManagementOptionsErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -455,12 +560,14 @@ export type ListAuthAccessTokensErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -510,24 +617,28 @@ export type CreateAuthPersonalAccessTokenErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 401
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -577,24 +688,28 @@ export type RevokeAuthAccessTokenErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -641,18 +756,21 @@ export type ListAuthServiceAccountsErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -697,24 +815,28 @@ export type CreateAuthServiceAccountErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 401
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -756,24 +878,28 @@ export type DisableAuthServiceAccountErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -815,24 +941,28 @@ export type ListAuthServiceAccountAccessTokensErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -885,30 +1015,35 @@ export type CreateAuthServiceAccountAccessTokenErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 401
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -959,24 +1094,28 @@ export type RevokeAuthServiceAccountAccessTokenErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1029,30 +1168,35 @@ export type ListAuthInvitationsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 401
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1101,36 +1245,42 @@ export type CreateAuthInvitationErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 401
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 429
    */
   429: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1174,12 +1324,14 @@ export type GetAuthInvitationOptionsErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1233,30 +1385,35 @@ export type RevokeAuthInvitationErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 401
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1297,12 +1454,14 @@ export type GetAuthMembershipOptionsErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1347,18 +1506,21 @@ export type ListAuthMembersErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 401
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1410,30 +1572,35 @@ export type UpdateAuthMemberGroupsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 401
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1478,24 +1645,28 @@ export type SuspendAuthMemberErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1538,24 +1709,28 @@ export type ReactivateAuthMemberErrors = {
    */
   401: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 500
    */
   500: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1688,6 +1863,7 @@ export type GetConnectorErrors = {
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1727,6 +1903,7 @@ export type ListDatasetsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1789,12 +1966,14 @@ export type GetDatasetErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1859,12 +2038,14 @@ export type ListDatasetVersionsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -1932,12 +2113,14 @@ export type GetDatasetVersionErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -2005,12 +2188,14 @@ export type ListDatasetRowsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -2134,8 +2319,12 @@ export type ListSyncsResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        name?: string
+        code: SixbErrorCode
         message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
       }
     } | null
   }>
@@ -2158,6 +2347,7 @@ export type GetSyncErrors = {
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -2219,8 +2409,12 @@ export type GetSyncResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        name?: string
+        code: SixbErrorCode
         message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
       }
     } | null
   }
@@ -2250,12 +2444,14 @@ export type ListSyncRunsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -2283,8 +2479,12 @@ export type ListSyncRunsResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        name?: string
+        code: SixbErrorCode
         message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
       }
     }>
     hasMore: boolean
@@ -2312,18 +2512,21 @@ export type RequestSyncRunErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -2435,8 +2638,12 @@ export type ListPipelinesResponses = {
         versionId: string
       }
       error?: {
-        name?: string
+        code: SixbErrorCode
         message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
       }
     } | null
   }>
@@ -2459,6 +2666,7 @@ export type GetPipelineErrors = {
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -2549,8 +2757,12 @@ export type GetPipelineResponses = {
         versionId: string
       }
       error?: {
-        name?: string
+        code: SixbErrorCode
         message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
       }
     } | null
   }
@@ -2579,12 +2791,14 @@ export type ListPipelineRunsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -2607,8 +2821,12 @@ export type ListPipelineRunsResponses = {
         versionId: string
       }
       error?: {
-        name?: string
+        code: SixbErrorCode
         message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
       }
     }>
     hasMore: boolean
@@ -2633,18 +2851,21 @@ export type GetPipelineRunErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -2667,8 +2888,12 @@ export type GetPipelineRunResponses = {
         versionId: string
       }
       error?: {
-        name?: string
+        code: SixbErrorCode
         message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
       }
     }
     steps: Array<{
@@ -2692,8 +2917,12 @@ export type GetPipelineRunResponses = {
       }
       rowsWritten?: number
       error?: {
-        name?: string
+        code: SixbErrorCode
         message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
       }
     }>
   }
@@ -2716,18 +2945,21 @@ export type RequestPipelineRunErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -2825,7 +3057,14 @@ export type ListWorkflowsResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: SixbErrorCode
+        message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -2851,6 +3090,7 @@ export type GetWorkflowErrors = {
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -2926,7 +3166,14 @@ export type GetWorkflowResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: SixbErrorCode
+        message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -2963,12 +3210,14 @@ export type ListWorkflowInterventionsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -3037,18 +3286,21 @@ export type GetWorkflowInterventionErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -3117,18 +3369,28 @@ export type SubmitWorkflowInterventionErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -3198,18 +3460,28 @@ export type CancelWorkflowInterventionErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -3282,12 +3554,14 @@ export type ListWorkflowRunsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -3309,7 +3583,14 @@ export type ListWorkflowRunsResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: SixbErrorCode
+        message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -3337,18 +3618,21 @@ export type GetWorkflowRunErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -3370,7 +3654,14 @@ export type GetWorkflowRunResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: SixbErrorCode
+        message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -3394,7 +3685,14 @@ export type GetWorkflowRunResponses = {
       output?: {
         [key: string]: unknown
       }
-      error?: string
+      error?: {
+        code: SixbErrorCode
+        message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
+      }
       agentExecution?: {
         agentId: string
         status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -3429,18 +3727,21 @@ export type GetWorkflowAgentNodeExecutionErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -3470,7 +3771,14 @@ export type GetWorkflowAgentNodeExecutionResponses = {
     }
     trace?: Array<unknown>
     diagnostics?: Array<unknown>
-    error?: string
+    error?: {
+      code: SixbErrorCode
+      message: string
+      details?: {
+        [key: string]: string | number | boolean
+      }
+      cause?: string
+    }
     createdAt: string
   }
 }
@@ -3495,18 +3803,28 @@ export type CancelWorkflowRunErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -3528,7 +3846,14 @@ export type CancelWorkflowRunResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: SixbErrorCode
+        message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -3552,7 +3877,14 @@ export type CancelWorkflowRunResponses = {
       output?: {
         [key: string]: unknown
       }
-      error?: string
+      error?: {
+        code: SixbErrorCode
+        message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
+      }
       agentExecution?: {
         agentId: string
         status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -3778,24 +4110,28 @@ export type RequestWorkflowRunErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -3960,6 +4296,7 @@ export type GetRuleErrors = {
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -4107,12 +4444,14 @@ export type ListRuleStatesErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -4249,6 +4588,7 @@ export type GetObjectTypeErrors = {
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -4357,12 +4697,14 @@ export type SearchObjectsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -4410,12 +4752,14 @@ export type ListObjectsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -4676,6 +5020,7 @@ export type GetObjectErrors = {
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -4718,18 +5063,21 @@ export type UpsertObjectErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -4803,6 +5151,7 @@ export type GetActionErrors = {
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -4866,18 +5215,21 @@ export type RequestActionErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -4913,12 +5265,14 @@ export type UploadFileRawErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 413
    */
   413: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -4959,6 +5313,7 @@ export type CreateFileUploadErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -5011,24 +5366,28 @@ export type UploadFileContentErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 409
    */
   409: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 410
    */
   410: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -5061,24 +5420,28 @@ export type SignFileUploadPartErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 409
    */
   409: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 410
    */
   410: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -5124,24 +5487,28 @@ export type CompleteFileUploadErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 409
    */
   409: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 410
    */
   410: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -5179,24 +5546,35 @@ export type AbortFileUploadErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 409
    */
   409: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 410
    */
   410: {
     error: string
+    code: SixbErrorCode
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    code: SixbErrorCode
   }
 }
 
@@ -5236,12 +5614,14 @@ export type ListActionRunsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -5279,8 +5659,12 @@ export type ListActionRunsResponses = {
       startedAt?: string
       finishedAt?: string
       error?: {
-        name?: string
+        code: SixbErrorCode
         message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
         phase?:
           | "request"
           | "enqueue"
@@ -5314,18 +5698,21 @@ export type GetActionRunErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -5362,8 +5749,12 @@ export type GetActionRunResponses = {
     startedAt?: string
     finishedAt?: string
     error?: {
-      name?: string
+      code: SixbErrorCode
       message: string
+      details?: {
+        [key: string]: string | number | boolean
+      }
+      cause?: string
       phase?:
         | "request"
         | "enqueue"
@@ -5382,8 +5773,12 @@ export type GetActionRunResponses = {
       completedAt: string
       result?: unknown
       error?: {
-        name?: string
+        code: SixbErrorCode
         message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
         phase?:
           | "request"
           | "enqueue"
@@ -5399,8 +5794,12 @@ export type GetActionRunResponses = {
       status: "succeeded" | "failed"
       completedAt: string
       error?: {
-        name?: string
+        code: SixbErrorCode
         message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
         phase?:
           | "request"
           | "enqueue"
@@ -5553,6 +5952,7 @@ export type GetAgentErrors = {
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -5598,12 +5998,14 @@ export type ListAgentThreadsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -5654,24 +6056,28 @@ export type CreateAgentThreadErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 409
    */
   409: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -5718,18 +6124,21 @@ export type GetAgentThreadErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -5779,18 +6188,21 @@ export type ListAgentThreadMessagesErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -6072,30 +6484,35 @@ export type PostAgentThreadMessageErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 409
    */
   409: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -6151,7 +6568,14 @@ export type PostAgentThreadMessageResponses = {
         path?: string
         message: string
       }>
-      error?: string
+      error?: {
+        code: SixbErrorCode
+        message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
+      }
       attempt: number
       streamId: string
       createdAt: string
@@ -6276,24 +6700,28 @@ export type CancelAgentRunErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 409
    */
   409: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -6348,7 +6776,14 @@ export type CancelAgentRunResponses = {
         path?: string
         message: string
       }>
-      error?: string
+      error?: {
+        code: SixbErrorCode
+        message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
+      }
       attempt: number
       streamId: string
       createdAt: string
@@ -6376,24 +6811,28 @@ export type RetryAgentRunErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 409
    */
   409: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -6448,7 +6887,14 @@ export type RetryAgentRunResponses = {
         path?: string
         message: string
       }>
-      error?: string
+      error?: {
+        code: SixbErrorCode
+        message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
+      }
       attempt: number
       streamId: string
       createdAt: string
@@ -6480,18 +6926,21 @@ export type ListAgentThreadRunsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -6546,7 +6995,14 @@ export type ListAgentThreadRunsResponses = {
         path?: string
         message: string
       }>
-      error?: string
+      error?: {
+        code: SixbErrorCode
+        message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
+      }
       attempt: number
       streamId: string
       createdAt: string
@@ -6576,18 +7032,21 @@ export type GetAgentRunErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -6641,7 +7100,14 @@ export type GetAgentRunResponses = {
       path?: string
       message: string
     }>
-    error?: string
+    error?: {
+      code: SixbErrorCode
+      message: string
+      details?: {
+        [key: string]: string | number | boolean
+      }
+      cause?: string
+    }
     attempt: number
     streamId: string
     createdAt: string
@@ -6671,12 +7137,14 @@ export type ListObjectLinksErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -6723,18 +7191,21 @@ export type RemoveObjectLinkErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -6774,18 +7245,21 @@ export type UpsertObjectLinkErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -6823,18 +7297,21 @@ export type AppendTelemetryErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -6874,12 +7351,14 @@ export type GetBulkTelemetryHistoryErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -6933,12 +7412,14 @@ export type GetTelemetryHistoryErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -6979,12 +7460,14 @@ export type GetLatestTelemetryErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -7067,12 +7550,14 @@ export type ListEventsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -8015,12 +8500,14 @@ export type ListLogsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 403
    */
   403: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -8097,7 +8584,14 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: SixbErrorCode
+              message: string
+              details?: {
+                [key: string]: string | number | boolean
+              }
+              cause?: string
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8126,7 +8620,14 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: SixbErrorCode
+              message: string
+              details?: {
+                [key: string]: string | number | boolean
+              }
+              cause?: string
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8156,7 +8657,14 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: SixbErrorCode
+              message: string
+              details?: {
+                [key: string]: string | number | boolean
+              }
+              cause?: string
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8197,7 +8705,14 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: SixbErrorCode
+              message: string
+              details?: {
+                [key: string]: string | number | boolean
+              }
+              cause?: string
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8226,7 +8741,14 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: SixbErrorCode
+              message: string
+              details?: {
+                [key: string]: string | number | boolean
+              }
+              cause?: string
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8256,7 +8778,14 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: SixbErrorCode
+              message: string
+              details?: {
+                [key: string]: string | number | boolean
+              }
+              cause?: string
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8298,7 +8827,14 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: SixbErrorCode
+              message: string
+              details?: {
+                [key: string]: string | number | boolean
+              }
+              cause?: string
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8327,7 +8863,14 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: SixbErrorCode
+              message: string
+              details?: {
+                [key: string]: string | number | boolean
+              }
+              cause?: string
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8357,7 +8900,14 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: SixbErrorCode
+              message: string
+              details?: {
+                [key: string]: string | number | boolean
+              }
+              cause?: string
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8397,6 +8947,7 @@ export type GetProjectionErrors = {
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -8435,7 +8986,14 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: SixbErrorCode
+                message: string
+                details?: {
+                  [key: string]: string | number | boolean
+                }
+                cause?: string
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8464,7 +9022,14 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: SixbErrorCode
+                message: string
+                details?: {
+                  [key: string]: string | number | boolean
+                }
+                cause?: string
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8494,7 +9059,14 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: SixbErrorCode
+                message: string
+                details?: {
+                  [key: string]: string | number | boolean
+                }
+                cause?: string
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8535,7 +9107,14 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: SixbErrorCode
+                message: string
+                details?: {
+                  [key: string]: string | number | boolean
+                }
+                cause?: string
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8564,7 +9143,14 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: SixbErrorCode
+                message: string
+                details?: {
+                  [key: string]: string | number | boolean
+                }
+                cause?: string
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8594,7 +9180,14 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: SixbErrorCode
+                message: string
+                details?: {
+                  [key: string]: string | number | boolean
+                }
+                cause?: string
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8636,7 +9229,14 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: SixbErrorCode
+                message: string
+                details?: {
+                  [key: string]: string | number | boolean
+                }
+                cause?: string
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8665,7 +9265,14 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: SixbErrorCode
+                message: string
+                details?: {
+                  [key: string]: string | number | boolean
+                }
+                cause?: string
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8695,7 +9302,14 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: SixbErrorCode
+                message: string
+                details?: {
+                  [key: string]: string | number | boolean
+                }
+                cause?: string
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8743,12 +9357,14 @@ export type ListProjectionRunsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -8771,7 +9387,14 @@ export type ListProjectionRunsResponses = {
           }
           startedAt: string
           finishedAt?: string
-          errorMessage?: string
+          error?: {
+            code: SixbErrorCode
+            message: string
+            details?: {
+              [key: string]: string | number | boolean
+            }
+            cause?: string
+          }
           identity: {
             projectionId: string
             datasetVersion: {
@@ -8800,7 +9423,14 @@ export type ListProjectionRunsResponses = {
           }
           startedAt: string
           finishedAt?: string
-          errorMessage?: string
+          error?: {
+            code: SixbErrorCode
+            message: string
+            details?: {
+              [key: string]: string | number | boolean
+            }
+            cause?: string
+          }
           identity: {
             projectionId: string
             datasetVersion: {
@@ -8830,7 +9460,14 @@ export type ListProjectionRunsResponses = {
           }
           startedAt: string
           finishedAt?: string
-          errorMessage?: string
+          error?: {
+            code: SixbErrorCode
+            message: string
+            details?: {
+              [key: string]: string | number | boolean
+            }
+            cause?: string
+          }
           identity: {
             projectionId: string
             datasetVersion: {
@@ -8872,18 +9509,21 @@ export type GetProjectionRunErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 404
    */
   404: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -8905,7 +9545,14 @@ export type GetProjectionRunResponses = {
         }
         startedAt: string
         finishedAt?: string
-        errorMessage?: string
+        error?: {
+          code: SixbErrorCode
+          message: string
+          details?: {
+            [key: string]: string | number | boolean
+          }
+          cause?: string
+        }
         identity: {
           projectionId: string
           datasetVersion: {
@@ -8934,7 +9581,14 @@ export type GetProjectionRunResponses = {
         }
         startedAt: string
         finishedAt?: string
-        errorMessage?: string
+        error?: {
+          code: SixbErrorCode
+          message: string
+          details?: {
+            [key: string]: string | number | boolean
+          }
+          cause?: string
+        }
         identity: {
           projectionId: string
           datasetVersion: {
@@ -8964,7 +9618,14 @@ export type GetProjectionRunResponses = {
         }
         startedAt: string
         finishedAt?: string
-        errorMessage?: string
+        error?: {
+          code: SixbErrorCode
+          message: string
+          details?: {
+            [key: string]: string | number | boolean
+          }
+          cause?: string
+        }
         identity: {
           projectionId: string
           datasetVersion: {
@@ -9009,12 +9670,14 @@ export type ListWebhookRunsErrors = {
    */
   400: {
     error: string
+    code: SixbErrorCode
   }
   /**
    * Response for status 501
    */
   501: {
     error: string
+    code: SixbErrorCode
   }
 }
 
@@ -9039,7 +9702,14 @@ export type ListWebhookRunsResponses = {
       responseStatus?: number
       idempotencyKey?: string
       deliveryClaimResult?: "claimed" | "duplicate" | "in_progress"
-      error?: string
+      error?: {
+        code: SixbErrorCode
+        message: string
+        details?: {
+          [key: string]: string | number | boolean
+        }
+        cause?: string
+      }
     }>
     hasMore: boolean
     total: number

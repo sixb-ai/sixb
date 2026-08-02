@@ -59,8 +59,8 @@ and how many times, is a property of each worker.
 ## The failure record
 
 A code that is only ever thrown does not help the person looking at a run that failed an hour ago.
-So every failure Sixb records — in the `error` column of a run row, in an HTTP error response, in
-the event handed to the runtime observer — is the same four-field object:
+So every failure Sixb records — in the `error` column of a run row, in the run the API hands back,
+in the event handed to the runtime observer — is the same four-field object:
 
 ```ts
 interface SixbFailure {
@@ -82,6 +82,22 @@ record already has.
 
 `toSixbFailure(error)` builds one out of anything that was thrown, and never throws doing it.
 
+## On the wire
+
+A request that fails answers with the code and the message, under the key the API has always used:
+
+```json
+{ "error": "No sync is registered under 'crm-nightly'", "code": "sync.not_found" }
+```
+
+`code` is always there. Branch on it and never on the status, which is coarser: two conditions
+answer 409 and only the code says which. The status is a function of the code — one condition
+cannot answer 404 on one route and 400 on another — so there is nothing to reconcile between them.
+
+The four-field record is what you get when the failure is part of something the API *returns*
+rather than the reason it could not: the `error` of a failed sync run, pipeline step, workflow node,
+or action run is the record itself, `details` and `cause` included.
+
 ## The codes
 
 ### `action.*`
@@ -91,6 +107,7 @@ record already has.
 | `action.commit_failed` | no | The handler succeeded and its edits could not be committed. |
 | `action.failed` | no | The action handler threw. |
 | `action.not_found` | no | No action is registered under that id. |
+| `action.run_not_found` | no | No action run exists under that id. |
 | `action.timed_out` | yes | The action exceeded its timeout and was killed. |
 
 ### `agent.*`
@@ -102,6 +119,7 @@ record already has.
 | `agent.not_found` | no | No agent is registered under that id. |
 | `agent.run_conflict` | no | The thread already has a run in flight. |
 | `agent.run_not_found` | no | No run exists under that id. |
+| `agent.thread_conflict` | no | A thread already exists under that id. |
 | `agent.thread_not_found` | no | No thread exists under that id. |
 | `agent.timed_out` | yes | The agent turn exceeded its bound. |
 
@@ -110,11 +128,12 @@ record already has.
 | Code | Retryable | Raised when |
 | --- | --- | --- |
 | `auth.authentication_required` | no | The request carried no usable credential. |
+| `auth.csrf_rejected` | no | A cookie-authenticated write arrived without a matching CSRF token. |
 | `auth.invalid_credentials` | no | A credential was presented and rejected. |
 | `auth.origin_rejected` | no | The browser origin is not allowed to call this API. |
 | `auth.permission_denied` | no | The principal is authenticated but lacks the grant. |
 | `auth.rate_limited` | yes | Too many authentication attempts from this caller. |
-| `auth.record_not_found` | no | An auth record — an invitation, an access token, a service account — does not exist. |
+| `auth.record_not_found` | no | An auth record — an invitation, an access token, a service account, a session — does not exist. |
 | `auth.session_expired` | no | The session was valid and no longer is. |
 
 ### `broker.*`
@@ -133,6 +152,13 @@ record already has.
 | `connector.request_failed` | no | The upstream API rejected the request. |
 | `connector.unauthorized` | no | The connector's credential is missing, expired, or refused. |
 | `connector.unavailable` | yes | The upstream API was unreachable or failed on its side. |
+
+### `dataset.*`
+
+| Code | Retryable | Raised when |
+| --- | --- | --- |
+| `dataset.not_found` | no | No dataset is registered under that id. |
+| `dataset.version_not_found` | no | No version of that dataset exists under that id. |
 
 ### `event.*`
 
@@ -155,12 +181,15 @@ record already has.
 | `pipeline.already_running` | no | A run is already in flight for that pipeline. |
 | `pipeline.failed` | no | The pipeline run failed. |
 | `pipeline.not_found` | no | No pipeline is registered under that id. |
+| `pipeline.run_not_found` | no | No pipeline run exists under that id. |
 
 ### `projection.*`
 
 | Code | Retryable | Raised when |
 | --- | --- | --- |
 | `projection.failed` | no | The projection run failed. |
+| `projection.not_found` | no | No projection is registered under that id. |
+| `projection.run_not_found` | no | No projection run exists under that id. |
 
 ### `provider.*`
 
@@ -184,6 +213,7 @@ names itself in `details.provider`. See [Third-party providers](#third-party-pro
 | Code | Retryable | Raised when |
 | --- | --- | --- |
 | `rule.evaluation_failed` | no | A rule threw while evaluating an event. |
+| `rule.not_found` | no | No rule is registered under that id. |
 
 ### `runtime.*`
 
@@ -218,6 +248,7 @@ be wrong. A failure you see often under this code is worth a real code — open 
 | `storage.blob_failed` | yes | A blob-storage operation failed. |
 | `storage.conflict` | yes | A concurrent write won the race. Re-read, then retry. |
 | `storage.edit_rejected` | no | An edit batch violated a constraint and none of it was applied. |
+| `storage.file_not_found` | no | The record exists and holds no file at the requested path, or its blob is gone. |
 | `storage.lake_failed` | yes | A lake-storage operation failed. |
 | `storage.object_not_found` | no | No object exists under that type and primary id. |
 | `storage.query_failed` | no | The query was valid and planned, and the store failed to run it. |
@@ -225,7 +256,10 @@ be wrong. A failure you see often under this code is worth a real code — open 
 | `storage.query_unsupported` | no | The query is valid, and this provider cannot express it. |
 | `storage.transaction_failed` | no | A transaction was used incorrectly — nested, or after it closed. |
 | `storage.unavailable` | yes | The object store could not be reached. |
-| `storage.upload_invalid` | no | The upload session is unknown, expired, or already finished. |
+| `storage.upload_conflict` | no | The upload session was already completed or aborted. |
+| `storage.upload_expired` | no | The upload session's window closed before the content arrived. |
+| `storage.upload_invalid` | no | The content does not match what the session was opened for — size, digest, or strategy. |
+| `storage.upload_not_found` | no | No upload session exists under that id. |
 
 ### `sync.*`
 
@@ -234,6 +268,12 @@ be wrong. A failure you see often under this code is worth a real code — open 
 | `sync.already_running` | no | A run is already in flight for that sync. |
 | `sync.failed` | no | The sync run failed. |
 | `sync.not_found` | no | No sync is registered under that id. |
+
+### `telemetry.*`
+
+| Code | Retryable | Raised when |
+| --- | --- | --- |
+| `telemetry.point_not_found` | no | The object has no telemetry point for that property. |
 
 ### `webhook.*`
 
@@ -247,9 +287,14 @@ be wrong. A failure you see often under this code is worth a real code — open 
 
 | Code | Retryable | Raised when |
 | --- | --- | --- |
+| `workflow.agent_execution_not_found` | no | No agent execution exists for that run and node. |
 | `workflow.failed` | no | The workflow run failed. |
+| `workflow.intervention_not_found` | no | No intervention exists under that id. |
 | `workflow.intervention_required` | no | The workflow is waiting on a human decision. |
+| `workflow.node_run_not_found` | no | No node run exists under that id. |
 | `workflow.not_found` | no | No workflow is registered under that id. |
+| `workflow.run_conflict` | no | The run's state refuses the request — it is already finished, or not waiting. |
+| `workflow.run_not_found` | no | No workflow run exists under that id. |
 
 ## Third-party providers
 

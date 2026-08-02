@@ -1266,7 +1266,9 @@ function RunsListPanel({
                       {runTimeLabel(run)} · {formatRunDuration(run)}
                     </p>
                     {run.error ? (
-                      <p className="mt-1 break-words text-[11px] text-destructive">{run.error}</p>
+                      <p className="mt-1 break-words text-[11px] text-destructive">
+                        {run.error.message}
+                      </p>
                     ) : null}
                   </div>
                   <StatusBadge status={run.status} />
@@ -1321,7 +1323,7 @@ function RunSummaryPanel({
 
         {run.error ? (
           <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-            {run.error}
+            {run.error.message}
           </div>
         ) : null}
 
@@ -1488,7 +1490,7 @@ function RunNodePanel({
 
             {runNode.error ? (
               <PanelBlock label="Error" icon={<X className={cn(SECTION_ICON, "text-red-500")} />}>
-                <p className="break-words text-sm text-destructive">{runNode.error}</p>
+                <p className="break-words text-sm text-destructive">{runNode.error.message}</p>
               </PanelBlock>
             ) : (
               <PanelBlock
@@ -1563,7 +1565,7 @@ function AgentExecutionPanel({
             </div>
           ) : null}
           {execution?.error ? (
-            <p className="break-words text-sm text-destructive">{execution.error}</p>
+            <p className="break-words text-sm text-destructive">{execution.error.message}</p>
           ) : null}
         </div>
       ) : loading ? (
