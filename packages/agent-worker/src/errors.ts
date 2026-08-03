@@ -48,3 +48,18 @@ export class AgentTurnTimeoutError extends Error {
     super(`[SixbAgentWorker] Agent run '${runId}' exceeded its ${timeoutMs}ms turn budget.`)
   }
 }
+
+/** A selected agent tool returned a value that cannot cross the durable JSON message boundary. */
+export class AgentToolOutputError extends Error {
+  readonly name = "AgentToolOutputError"
+  constructor(
+    readonly toolName: string,
+    reason: string,
+    options?: ErrorOptions
+  ) {
+    super(
+      `[SixbAgentWorker] Agent tool '${toolName}' returned a non-JSON result; ${reason}.`,
+      options
+    )
+  }
+}

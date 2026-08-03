@@ -13,7 +13,6 @@ import { AgentWorker } from "@sixb/agent-worker"
 
 const worker = new AgentWorker(sixb, {
   apiBaseUrl: "http://localhost:3002",
-  tools,
 })
 
 await worker.start()
@@ -66,7 +65,6 @@ The terminal run state is stored on the run record:
 
 ## Options
 
-- `tools`: additional AI SDK tools exposed to the model alongside the built-in `bash` tool.
 - `apiBaseUrl`: required Sixb server origin that hosts the agent API gateway. The worker injects a
   run-scoped gateway URL into sandboxes as `SIXB_API_BASE_URL`, writes Agent Skills into
   `SIXB_SKILLS_DIR`, and creates the sandbox with a restricted network policy allowing the server

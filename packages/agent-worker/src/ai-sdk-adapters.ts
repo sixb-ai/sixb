@@ -1,8 +1,99 @@
-import type { AgentInboundUiMessagePart, AgentMessagePart } from "@sixb/core"
+import {
+  type AgentInboundUiMessagePart,
+  type AgentMessagePart,
+  type AgentToolDefinition,
+  type AgentToolRunContext,
+  type AgentToolRunInfo,
+  getInvalidJsonValueReason,
+  type JsonValue,
+  type Logger,
+  type ValueType,
+} from "@sixb/core"
 import { fromAiSdk } from "@sixb/core/internal/agents"
+import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import type { AgentRunUsage } from "@sixb/core/storage"
-import type { LanguageModelUsage } from "ai"
-import { AgentWorkerError } from "./errors"
+import { jsonSchema, type LanguageModelUsage, type Tool, type ToolSet, tool } from "ai"
+import { AgentToolOutputError, AgentWorkerError } from "./errors"
+
+const NEVER_ABORTED_SIGNAL = new AbortController().signal
+
+interface AiSdkToolsFromAgentDefinitionsInput {
+  readonly definitions: readonly AgentToolDefinition[]
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+  readonly run: AgentToolRunInfo
+  readonly connector: AgentToolRunContext["connector"]
+  readonly logger: Logger
+}
+
+/** Adapt one agent's explicitly selected Sixb definitions to executable AI SDK tools. */
+export function aiSdkToolsFromAgentDefinitions(
+  input: AiSdkToolsFromAgentDefinitionsInput
+): ToolSet {
+  const tools = emptyToolSet()
+  for (const definition of input.definitions) {
+    if (Object.hasOwn(tools, definition.name)) {
+      throw new AgentWorkerError(
+        `Agent '${input.run.agentId}' has duplicate selected tool name '${definition.name}'.`
+      )
+    }
+    tools[definition.name] = aiSdkToolFromAgentDefinition(definition, input)
+  }
+  return tools
+}
+
+function aiSdkToolFromAgentDefinition(
+  definition: AgentToolDefinition,
+  context: Omit<AiSdkToolsFromAgentDefinitionsInput, "definitions">
+): Tool<Record<string, unknown>, JsonValue> {
+  const inputSchema = schemaRecordToJsonSchema({
+    shape: definition.input,
+    valueTypesById: context.valueTypesById,
+  })
+
+  return tool({
+    description: definition.description,
+    inputSchema: jsonSchema<Record<string, unknown>>(
+      inputSchema as Parameters<typeof jsonSchema>[0]
+    ),
+    async execute(input, { abortSignal }) {
+      let result: JsonValue
+      try {
+        result = await definition.handler({
+          input,
+          signal: abortSignal ?? NEVER_ABORTED_SIGNAL,
+          run: context.run,
+          connector: context.connector,
+          logger: context.logger,
+        })
+      } catch (error) {
+        const reason = coreResultValidationReason(error, definition.name)
+        if (reason) {
+          throw new AgentToolOutputError(definition.name, reason, { cause: error })
+        }
+        throw error
+      }
+      const reason = getInvalidJsonValueReason(result, "result")
+      if (reason) {
+        throw new AgentToolOutputError(definition.name, reason)
+      }
+      return result
+    },
+  })
+}
+
+function coreResultValidationReason(error: unknown, toolName: string): string | null {
+  if (!(error instanceof Error)) return null
+  const prefix = `[Sixb] Agent tool '${toolName}' result must be a JSON value; `
+  if (!error.message.startsWith(prefix)) return null
+  const reason = error.message.slice(prefix.length)
+  const resultLabel = `Agent tool '${toolName}' `
+  return reason.startsWith(resultLabel) ? reason.slice(resultLabel.length) : reason
+}
+
+function emptyToolSet(): ToolSet {
+  // Tool names may legally be `__proto__`; a null prototype keeps every valid name an own property.
+  return Object.create(null) as ToolSet
+}
 
 /** Minimal structural boundary implemented by AI SDK StepResult content. */
 export interface AiSdkTraceStep {
