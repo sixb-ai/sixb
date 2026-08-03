@@ -551,6 +551,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
   private reportFailure(error: unknown, run: AgentRunRecord, attempt: number): void {
     reportRunFailure(this.sixb, error, {
       projectId: this.sixb.id,
+      failure: run.error ?? toSixbFailure(error, { fallbackCode: "agent.failed" }),
       occurredAt: run.completedAt,
       attempt,
       run: {

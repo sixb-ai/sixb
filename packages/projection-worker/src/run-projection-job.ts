@@ -12,7 +12,7 @@ import {
   type ProjectionRunRecord,
   toSixbFailure,
 } from "@sixb/core/storage"
-import { isPermanentProjectionWorkerError, projectionWorkerPermanentError } from "./errors"
+import { isPermanentProjectionWorkerError, projectionJobStale } from "./errors"
 import {
   assertProjectionJobId,
   type ValidatedProjectionJob,
@@ -94,7 +94,7 @@ async function findMatchingTerminalRun(
   assertRunMatchesJob(run, input.job)
   if (run.status === "running") return null
   if (run.status === "succeeded") return run
-  throw projectionWorkerPermanentError(
+  throw projectionJobStale(
     `[SixbProjectionWorker] Projection run '${run.id}' is already '${run.status}'.`
   )
 }
@@ -246,7 +246,7 @@ function assertRunMatchesJob(run: ProjectionRunRecord, job: ProjectionJob): void
     run.identity.projectionRevision === job.projectionRevision &&
     run.identity.ownershipHash === job.ownershipHash
   if (matches) return
-  throw projectionWorkerPermanentError(
+  throw projectionJobStale(
     `[SixbProjectionWorker] Projection run '${run.id}' has a different durable identity.`
   )
 }

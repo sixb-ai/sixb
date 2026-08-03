@@ -317,7 +317,7 @@ describe("requestAction", () => {
         id: "room:1",
         actionId: "nonexistent",
       })
-    ).rejects.toHaveProperty("code", "ontology.invalid_value")
+    ).rejects.toHaveProperty("code", "action.not_found")
     await expect(
       sixb.objects(Room).requestAction({
         id: "room:1",

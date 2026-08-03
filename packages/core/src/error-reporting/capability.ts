@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { type SixbFailure, toSixbFailure } from "../errors"
 import { SixbErrorReporter } from "./reporter"
 import type { SixbBackgroundTask, SixbErrorHandler, SixbFailedRun } from "./types"
 
@@ -37,6 +38,17 @@ export function shareSixbErrorReporter(source: object, target: object): void {
 export interface ReportRunFailureInput {
   readonly projectId: string
   readonly run: SixbFailedRun
+  /**
+   * The failure that was written to the run row — not the thrown value, and not something rebuilt
+   * from it.
+   *
+   * Rebuilding is what this replaces, and the two do not agree: a bare `throw new Error(...)` inside
+   * an action is stored as `action.failed` with the `phase` it died in, while `toSixbFailure(error)`
+   * on its own can only call it `runtime.unexpected` with no phase. A handler that got the second
+   * could not correlate its alert with the row an operator is looking at, which is the one promise
+   * this channel makes.
+   */
+  readonly failure: SixbFailure
   readonly occurredAt?: Date | string
   readonly attempt?: number
 }
@@ -50,7 +62,7 @@ export function reportRunFailure(
   if (!reporter) return
 
   const occurredAt = resolveOccurredAt(input.occurredAt)
-  reporter.report(error, {
+  reporter.report(input.failure, error, {
     type: "run.failed",
     notificationId: `project:${input.projectId}:run:${input.run.kind}:${input.run.runId}:failed:${occurredAt}`,
     projectId: input.projectId,
@@ -108,7 +120,7 @@ export function reportEventDeliveryFailure(
   const occurrence = firstEventId
     ? `events:${firstEventId}:attempt:${attempts}`
     : `emit:${input.occurrenceId ?? randomUUID()}`
-  reporter.report(error, {
+  reporter.report(toSixbFailure(error, { fallbackCode: "event.delivery_failed" }), error, {
     type: "event.delivery.failed",
     notificationId: `project:${input.projectId}:event-delivery:${occurrence}`,
     projectId: input.projectId,
@@ -146,7 +158,7 @@ export function reportRuleEvaluationFailure(
     input.ruleId && input.subject
       ? `${input.ruleId}:${input.subject.objectTypeId}:${input.subject.primaryId}`
       : (eventIds[0] ?? "current-state")
-  reporter.report(error, {
+  reporter.report(toSixbFailure(error, { fallbackCode: "rule.evaluation_failed" }), error, {
     type: "rule.evaluation.failed",
     notificationId: `project:${input.projectId}:rule-evaluation:${input.source}:${occurrence}:failed:${occurredAt}`,
     projectId: input.projectId,
@@ -184,7 +196,7 @@ export function reportBackgroundTaskFailure(
 
   const occurredAt = resolveOccurredAt(input.occurredAt)
   const subject = input.subject ? `:${input.subject}` : ""
-  reporter.report(error, {
+  reporter.report(toSixbFailure(error), error, {
     type: "background.task.failed",
     notificationId: `project:${input.projectId}:background:${input.task}${subject}:failed:${occurredAt}`,
     projectId: input.projectId,

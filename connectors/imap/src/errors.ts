@@ -1,9 +1,4 @@
-import {
-  isSixbError,
-  SixbError,
-  type SixbErrorCode,
-  type SixbErrorOptions,
-} from "@sixb/core/errors"
+import { SixbError, type SixbErrorCode, type SixbErrorOptions } from "@sixb/core/errors"
 
 export interface ImapConnectorErrorOptions extends SixbErrorOptions {
   /** Narrows the failure past the module default; most callers leave this alone. */
@@ -28,7 +23,9 @@ export function imapOperationError(
   error: unknown,
   secrets: readonly string[] = []
 ): SixbError {
-  if (isSixbError(error)) {
+  // Identity, not meaning: skip re-wrapping what this module already raised. The result is thrown,
+  // so it has to be a live error.
+  if (error instanceof SixbError) {
     return error
   }
 

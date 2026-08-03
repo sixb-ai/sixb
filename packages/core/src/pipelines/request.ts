@@ -41,18 +41,12 @@ export async function requestPipelineRun(
 ): Promise<PipelineRunRequestResult> {
   assertAuthorized(runtime, { kind: "pipeline.run", pipelineId: pipeline.id })
   if (!runtime.storage.pipelineRuns) {
-    throw new SixbError(
-      "runtime.invalid_definition",
-      "[Sixb] Pipeline run storage is not configured."
-    )
+    throw new SixbError("runtime.not_configured", "[Sixb] Pipeline run storage is not configured.")
   }
 
   const queue = runtime.queues.pipelines
   if (!queue) {
-    throw new SixbError(
-      "runtime.invalid_definition",
-      "[Sixb] Pipeline run queue is not configured."
-    )
+    throw new SixbError("runtime.not_configured", "[Sixb] Pipeline run queue is not configured.")
   }
 
   const runId = createPipelineRunId(options.runId)

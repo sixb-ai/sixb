@@ -88,12 +88,13 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   const { sixb, registered } = options
   const logSession = sixb.logs.startExecution({ kind: "webhook", id: runId })
   let failureReported = false
-  const reportFailure = (error: unknown) => {
+  const reportFailure = (failure: SixbFailure, cause: unknown) => {
     if (failureReported) return
 
     failureReported = true
-    reportRunFailure(sixb, error, {
+    reportRunFailure(sixb, cause, {
       projectId: sixb.id,
+      failure,
       run: {
         kind: "webhook",
         runId,
@@ -113,14 +114,15 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
       reportFailure
     )
   } catch (error) {
+    const failure = toSixbFailure(error, { fallbackCode: "webhook.failed" })
     await finishWebhookRun({
       sixb,
       runId,
       status: "failed",
       responseStatus: 500,
-      error: toSixbFailure(error, { fallbackCode: "webhook.failed" }),
+      error: failure,
     })
-    reportFailure(error)
+    reportFailure(failure, error)
     throw error
   } finally {
     await logSession.flush()
@@ -131,7 +133,7 @@ async function dispatchWebhookRun(
   options: DispatchWebhookOptions,
   runId: string,
   loggerForPhase: (phase: string) => Logger,
-  reportFailure: (error: unknown) => void
+  reportFailure: (failure: SixbFailure, cause: unknown) => void
 ): Promise<unknown> {
   const { sixb, registered, request, set } = options
   const { connector, webhook, route } = registered
@@ -249,8 +251,8 @@ async function dispatchWebhookRun(
     }
     deliveryKey = claim.key
   } catch (error) {
-    reportFailure(error)
     const failure = webhookFailure("webhook.failed", "Webhook delivery claim failed")
+    reportFailure(failure, error)
     set.status = 500
     await finishWebhookRun({
       sixb,
@@ -267,7 +269,7 @@ async function dispatchWebhookRun(
   try {
     response = await webhook.handle(handlerContext as never)
   } catch (error) {
-    reportFailure(error)
+    reportFailure(webhookFailure("webhook.failed", "Webhook handler failed"), error)
     // Handler failures mark the key failed so the provider's next retry can
     // attempt the delivery again.
     if (deliveryKey) {
@@ -317,8 +319,8 @@ async function dispatchWebhookRun(
       }
     }
   } catch (error) {
-    reportFailure(error)
     const failure = webhookFailure("webhook.failed", "Webhook delivery completion failed")
+    reportFailure(failure, error)
     set.status = 500
     await finishWebhookRun({
       sixb,
@@ -334,7 +336,7 @@ async function dispatchWebhookRun(
   }
 
   if (shouldRetryDelivery) {
-    reportFailure(new Error(failureMessage))
+    reportFailure(webhookFailure("webhook.failed", failureMessage), new Error(failureMessage))
   }
   await finishWebhookRun({
     sixb,

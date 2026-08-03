@@ -37,7 +37,7 @@ if (sixbErrorKind(error) === "conflict") return retryAfterReread()
 | --- | --- | --- |
 | `validation` | the input is wrong and nothing was written | `ontology.invalid_value`, `ontology.type_not_found`, `runtime.invalid_definition`, `runtime.invalid_input`, `runtime.payload_too_large`, `storage.edit_rejected`, `storage.query_invalid` |
 | `authorization` | the caller may not do this, or is not who they claim to be | `auth.authentication_required`, `auth.invalid_credentials`, `auth.origin_rejected`, `auth.permission_denied`, `auth.session_expired` |
-| `conflict` | the state moved underneath the caller | `agent.run_conflict`, `pipeline.already_running`, `queue.lease_lost`, `storage.conflict`, `sync.already_running` |
+| `conflict` | the state moved underneath the caller | `agent.run_conflict`, `agent.thread_conflict`, `pipeline.already_running`, `queue.lease_lost`, `storage.conflict`, `storage.upload_conflict`, `sync.already_running`, `workflow.run_conflict` |
 | `timeout` | a bound was exceeded and the work was abandoned | `action.timed_out`, `agent.timed_out`, `sandbox.timed_out` |
 | `provider` | something Sixb does not own failed | `broker.unavailable`, `connector.rate_limited`, `connector.request_failed`, `connector.unauthorized`, `connector.unavailable`, `provider.failed`, `provider.unavailable`, `queue.unavailable`, `storage.blob_failed`, `storage.lake_failed`, `storage.unavailable` |
 
@@ -203,8 +203,10 @@ or action run is the record itself, `details` and `cause` included.
 | Code | Retryable | Raised when |
 | --- | --- | --- |
 | `projection.failed` | no | The projection run failed. |
+| `projection.job_stale` | no | The queued job no longer matches durable state: its run is already terminal, its projection or dataset is gone, or its pinned identity has moved. Redelivering it cannot fix it. |
 | `projection.not_found` | no | No projection is registered under that id. |
 | `projection.run_not_found` | no | No projection run exists under that id. |
+| `projection.schema_mismatch` | no | A projection references a column its dataset version does not have, or has under another type. Redelivering the job cannot fix it. |
 
 ### `provider.*`
 

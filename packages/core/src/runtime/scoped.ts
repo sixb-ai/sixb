@@ -400,8 +400,7 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
       // may not run has to report "forbidden", the same as `requestAction`. Only a genuinely unknown
       // id is "unknown". `requestSyncRun` asserts the grant.
       const sync = deps.syncs.getById(input.syncId)
-      if (!sync)
-        throw new SixbError("runtime.invalid_definition", `[Sixb] Unknown sync '${input.syncId}'`)
+      if (!sync) throw new SixbError("sync.not_found", `[Sixb] Unknown sync '${input.syncId}'`)
       return requestSyncRun(runtime, sync, input)
     },
 
@@ -410,10 +409,7 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
     requestPipelineRun: async (input: RequestPipelineRunInput) => {
       const pipeline = deps.pipelines.getById(input.pipelineId)
       if (!pipeline)
-        throw new SixbError(
-          "runtime.invalid_definition",
-          `[Sixb] Unknown pipeline '${input.pipelineId}'`
-        )
+        throw new SixbError("pipeline.not_found", `[Sixb] Unknown pipeline '${input.pipelineId}'`)
       return requestPipelineRun(runtime, pipeline, input)
     },
 

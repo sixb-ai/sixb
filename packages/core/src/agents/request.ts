@@ -88,7 +88,7 @@ export async function requestAgentRun(
     run = await runtime.storage.transaction(async (tx) => {
       const agents = tx.agents
       if (!agents) {
-        throw agentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
+        throw agentRequestError("storage_not_configured", "[Sixb] Agent storage is not configured.")
       }
       await agents.messages.append({
         id: triggerMessageId,
@@ -184,7 +184,7 @@ async function resolveThread(
 function requireAgentStorage(runtime: SixbRuntimeContext): AgentStorage {
   const agents = runtime.storage.agents
   if (!agents) {
-    throw agentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
+    throw agentRequestError("storage_not_configured", "[Sixb] Agent storage is not configured.")
   }
   return agents
 }

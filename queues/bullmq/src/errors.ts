@@ -1,4 +1,4 @@
-import { isSixbError, SixbError } from "@sixb/core/errors"
+import { SixbError } from "@sixb/core/errors"
 
 /**
  * Wraps a BullMQ lock/token rejection as `runtime.invalid_input`. BullMQ throws generic `Error`s
@@ -7,7 +7,9 @@ import { isSixbError, SixbError } from "@sixb/core/errors"
  * while preserving the original via `cause` for debugging.
  */
 export function wrapLeaseError(error: unknown, jobId: string): SixbError {
-  if (isSixbError(error, "runtime.invalid_input")) return error
+  // Identity, not meaning: skip re-wrapping what this adapter already raised. The result is thrown,
+  // so it has to be a live error and not merely something code-shaped.
+  if (error instanceof SixbError && error.code === "runtime.invalid_input") return error
   const message = error instanceof Error ? error.message : String(error)
   return new SixbError(
     "runtime.invalid_input",

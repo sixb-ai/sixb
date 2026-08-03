@@ -1,5 +1,5 @@
 import { type DatasetDefinition, isJsonValue, type ObjectProjectionDefinition } from "@sixb/core"
-import { isSixbError, SixbError } from "@sixb/core/errors"
+import { SixbError } from "@sixb/core/errors"
 import type { ProjectionSourceEntry } from "@sixb/core/internal/materialization"
 import {
   buildObjectProjectionPlan,
@@ -51,7 +51,8 @@ export function mapObjectProjectionEntries(input: {
         try {
           entry = toSourceEntry(projection, plan.primaryPropertyId, projected.row)
         } catch (error) {
-          if (isSixbError(error, "ontology.invalid_value")) {
+          // `instanceof`, because `failCurrentRow` rethrows this value: it has to be a live error.
+          if (error instanceof SixbError && error.code === "ontology.invalid_value") {
             await failCurrentRow(progress, error)
           }
           throw error

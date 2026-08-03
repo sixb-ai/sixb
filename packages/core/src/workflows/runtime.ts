@@ -60,7 +60,7 @@ export class WorkflowsRuntime {
   ): Promise<WorkflowRunRequestResult> {
     const workflow = this.getById(input.workflowId)
     if (!workflow) {
-      throw new SixbError("runtime.invalid_input", `[Sixb] Unknown workflow '${input.workflowId}'`)
+      throw new SixbError("workflow.not_found", `[Sixb] Unknown workflow '${input.workflowId}'`)
     }
 
     return requestWorkflowRun(runtime, workflow, input)

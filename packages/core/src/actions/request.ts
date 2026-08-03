@@ -70,7 +70,7 @@ function clearTimer(timer: ReturnType<typeof setTimeout> | undefined): void {
 function getActionDefinition(runtime: SixbRuntimeContext, actionId: string): ActionDefinition {
   const action = runtime.actionRegistry.getById(actionId)
   if (!action) {
-    throw new SixbError("ontology.invalid_value", `Unknown action '${actionId}'`)
+    throw new SixbError("action.not_found", `[Sixb] Unknown action '${actionId}'`)
   }
   return action
 }
@@ -191,15 +191,17 @@ async function enqueueActionRunJob(
     })
     jobId = job?.id
   } catch (error) {
+    const failure = toActionRunFailure(error, "enqueue")
     const failed = await params.actionRuns.finish({
       projectId: runtime.projectId,
       id: params.runId,
       status: "failed",
       phase: "enqueue",
-      error: toActionRunFailure(error, "enqueue"),
+      error: failure,
     })
     reportRunFailure(runtime, error, {
       projectId: runtime.projectId,
+      failure,
       occurredAt: failed.finishedAt,
       run: {
         kind: "action",
@@ -366,7 +368,7 @@ export async function waitForActionRun(
 function requireActionRunStorage(runtime: SixbRuntimeContext): ActionRunStorage {
   const actionRuns = runtime.storage.actionRuns
   if (!actionRuns) {
-    throw materializationConflict("run-correlation", "[Sixb] Action run storage is not configured.")
+    throw new SixbError("runtime.not_configured", "[Sixb] Action run storage is not configured.")
   }
   return actionRuns
 }

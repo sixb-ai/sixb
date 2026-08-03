@@ -1,3 +1,4 @@
+import { toSixbFailure } from "@sixb/core/errors"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { isMaterializationCancellation } from "@sixb/core/internal/materialization"
 import { shareProjectionRegistry } from "@sixb/core/internal/projections"
@@ -50,6 +51,7 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
       onRunFailed: (error, run) => {
         reportRunFailure(this.sixb, error, {
           projectId: this.sixb.projectId,
+          failure: run.error ?? toSixbFailure(error, { fallbackCode: "projection.failed" }),
           occurredAt: run.finishedAt,
           attempt: job.attempt,
           run: {

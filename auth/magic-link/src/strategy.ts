@@ -13,6 +13,7 @@ import type {
   MagicLinkRequestInput,
   MagicLinkRequestResult,
 } from "@sixb/core/auth/strategy"
+import { SixbError } from "@sixb/core/errors"
 import type { AuthStorage } from "@sixb/core/storage"
 import { createMagicLinkEmail, type SendMagicLinkInput } from "./email"
 import { magicLinkError } from "./errors"
@@ -213,7 +214,11 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
     })
 
     if (!magicLink || !this.isAllowedEmail(magicLink.email)) {
-      throw magicLinkError("Magic link is invalid or expired.")
+      // Not `magicLinkError`: every other throw in this package is a wrong `magicLink(...)` option,
+      // which is `runtime.invalid_definition`. This one is a person clicking a stale link, so it is
+      // a credential failure — and a code that claims the project's definition is wrong would send
+      // whoever reads the failure looking in the wrong place.
+      throw new SixbError("auth.invalid_credentials", "[Sixb] Magic link is invalid or expired.")
     }
 
     // Every email in the configured bootstrap allowlist may self-provision

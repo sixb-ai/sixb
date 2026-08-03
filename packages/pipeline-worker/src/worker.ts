@@ -1,4 +1,4 @@
-import { isSixbError } from "@sixb/core/errors"
+import { isSixbError, toSixbFailure } from "@sixb/core/errors"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
@@ -64,6 +64,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
         onRunFailed: (error, run) => {
           reportRunFailure(this.sixb, error, {
             projectId: this.sixb.id,
+            failure: run.error ?? toSixbFailure(error, { fallbackCode: "pipeline.failed" }),
             occurredAt: run.finishedAt,
             attempt: job.attempt,
             run: {

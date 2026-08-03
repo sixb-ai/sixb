@@ -10,7 +10,7 @@ import type {
   Storage,
   SyncDefinition,
 } from "@sixb/core"
-import { isSixbError } from "@sixb/core/errors"
+import { isSixbError, toSixbFailure } from "@sixb/core/errors"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
@@ -80,6 +80,7 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
         onRunFailed: (error, run) => {
           reportRunFailure(this.sixb, error, {
             projectId: this.sixb.id,
+            failure: run.error ?? toSixbFailure(error, { fallbackCode: "sync.failed" }),
             occurredAt: run.finishedAt,
             attempt: job.attempt,
             run: {

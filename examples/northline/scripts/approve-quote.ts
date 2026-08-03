@@ -32,7 +32,11 @@ await waitUntil("quote approval", async () => {
   const run = await apiRequest(`/action-runs/${encodeURIComponent(response.runId as string)}`)
   if (!isRecord(run)) return false
   if (run.status === "failed") {
-    throw new Error(`[Northline] Quote approval failed: ${String(run.error)}`)
+    // `run.error` is the failure record, not a string: printing it whole gives `[object Object]`.
+    const failure = isRecord(run.error) ? run.error : undefined
+    throw new Error(
+      `[Northline] Quote approval failed: ${failure?.code ?? "unknown"} — ${failure?.message ?? String(run.error)}`
+    )
   }
   return run.status === "succeeded"
 })

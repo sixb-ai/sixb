@@ -1,6 +1,6 @@
 import { isActionDefinition } from "../actions"
 import { isAgentDefinition } from "../agents"
-import { isSixbError, SixbError } from "../errors"
+import { SixbError } from "../errors"
 import type { SchemaOrRef, ValueType } from "../ontology"
 import { validateSchemaOrRefValue } from "../ontology"
 import type { ScheduleDefinition } from "../schedules"
@@ -609,7 +609,10 @@ export function isInterventionResponseFieldRequired(field: unknown): boolean {
 }
 
 function toWorkflowValidationError(error: unknown): SixbError {
-  if (isSixbError(error, "runtime.invalid_input")) {
+  // `instanceof` and not `isSixbError`, because the question here is object identity — did *this*
+  // module already wrap it — and not what the failure means. The result is thrown, so it has to be
+  // a live error; a code-shaped plain object would satisfy the guard and not be throwable.
+  if (error instanceof SixbError && error.code === "runtime.invalid_input") {
     return error
   }
 

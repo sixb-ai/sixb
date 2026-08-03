@@ -26,8 +26,17 @@ describe("Sixb error reporting", () => {
       reports.push({ failure, context })
     })
 
+    // The record the run row was given. `cause` is a bare string, so a reporter deriving the record
+    // itself could only have said `runtime.unexpected` with no `details` — which is exactly what this
+    // channel used to hand a handler while the row said something else.
+    const stored = {
+      code: "projection.failed",
+      message: "projection exploded",
+      details: { phase: "replace" },
+    } as const
     reportRunFailure(host, "projection exploded", {
       projectId: PROJECT_ID,
+      failure: stored,
       occurredAt: "2026-01-02T03:04:05.000Z",
       attempt: 2,
       run: {
@@ -40,11 +49,7 @@ describe("Sixb error reporting", () => {
     await flushSixbErrors(host)
 
     expect(reports).toHaveLength(1)
-    // A bare string was thrown, and the handler still receives the record every other surface gets.
-    expect(reports[0]?.failure).toEqual({
-      code: "runtime.unexpected",
-      message: "projection exploded",
-    })
+    expect(reports[0]?.failure).toEqual(stored)
     expect(reports[0]?.context).toEqual({
       cause: "projection exploded",
       type: "run.failed",
@@ -265,6 +270,7 @@ describe("Sixb error reporting", () => {
     expect(() =>
       reportRunFailure(host, new Error("run failed"), {
         projectId: PROJECT_ID,
+        failure: { code: "sync.failed", message: "run failed" },
         run: { kind: "sync", runId: "sync-run-1", syncId: "customers" },
       })
     ).not.toThrow()
@@ -282,6 +288,7 @@ describe("Sixb error reporting", () => {
       if (failure.message === "first") {
         reportRunFailure(host, new Error("second"), {
           projectId: PROJECT_ID,
+          failure: { code: "sync.failed", message: "second" },
           run: { kind: "sync", runId: "sync-run-2", syncId: "customers" },
         })
       }
@@ -289,6 +296,7 @@ describe("Sixb error reporting", () => {
 
     reportRunFailure(host, new Error("first"), {
       projectId: PROJECT_ID,
+      failure: { code: "sync.failed", message: "first" },
       run: { kind: "sync", runId: "sync-run-1", syncId: "customers" },
     })
     await flushSixbErrors(host)
@@ -302,6 +310,7 @@ describe("Sixb error reporting", () => {
     attachSixbErrorReporter(host, () => new Promise<void>(() => {}))
     reportRunFailure(host, new Error("run failed"), {
       projectId: PROJECT_ID,
+      failure: { code: "agent.failed", message: "run failed" },
       run: { kind: "agent", runId: "agent-run-1", agentId: "assistant" },
     })
 
@@ -317,6 +326,7 @@ describe("Sixb error reporting", () => {
     const host = {}
     reportRunFailure(host, new Error("ignored"), {
       projectId: PROJECT_ID,
+      failure: { code: "workflow.failed", message: "ignored" },
       run: { kind: "workflow", runId: "workflow-run-1", workflowId: "approval" },
     })
     await expect(flushSixbErrors(host)).resolves.toBeUndefined()

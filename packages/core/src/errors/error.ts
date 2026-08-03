@@ -76,10 +76,13 @@ export const SIXB_AUTHORIZATION_ERROR_CODES = [
 /** The state moved underneath the caller. Re-read, then retry or reconcile. */
 export const SIXB_CONFLICT_ERROR_CODES = [
   "agent.run_conflict",
+  "agent.thread_conflict",
   "pipeline.already_running",
   "queue.lease_lost",
   "storage.conflict",
+  "storage.upload_conflict",
   "sync.already_running",
+  "workflow.run_conflict",
 ] as const satisfies readonly SixbErrorCode[]
 
 /** A bound was exceeded and the work was abandoned mid-flight. */
@@ -105,6 +108,22 @@ export const SIXB_PROVIDER_ERROR_CODES = [
 ] as const satisfies readonly SixbErrorCode[]
 
 /**
+ * Exactly what {@link isSixbError} verified, and no more.
+ *
+ * Narrower than {@link SixbError} on purpose: the guard exists to recognize a failure that came out
+ * of another copy of the runtime, a run row, or the client, and none of those carries `retryable` —
+ * that field only ever lives on the thrown class. Narrowing to the class instead promised a
+ * `boolean` that is `undefined` at runtime on the very path the guard was written for, and
+ * `undefined === false` reads as *retryable*, which is the wrong way to fail. A caller that holds a
+ * live `SixbError` still reads `.retryable` off it directly.
+ */
+export interface SixbErrorLike {
+  readonly code: SixbErrorCode
+  readonly message: string
+  readonly details?: SixbFailureDetails
+}
+
+/**
  * Identifies a Sixb error across bundle boundaries, optionally narrowing to one code.
  *
  * Structural, for the same reason `isSixbApiError` is: a custom app, the client, and the server
@@ -113,9 +132,10 @@ export const SIXB_PROVIDER_ERROR_CODES = [
  *
  * The fallback recognizes a *known* code rather than a name pattern. That is the stronger signal —
  * a name can be anything, while `SIXB_ERROR_CODES` is the vocabulary this build understands — and
- * it keeps the guard honest: it never claims to recognize a code it cannot also branch on.
+ * it keeps the guard honest: it never claims to recognize a code it cannot also branch on. The
+ * narrowed type is {@link SixbErrorLike} for the same reason.
  */
-export function isSixbError(value: unknown, code?: SixbErrorCode): value is SixbError {
+export function isSixbError(value: unknown, code?: SixbErrorCode): value is SixbErrorLike {
   if (value instanceof SixbError) {
     return code === undefined || value.code === code
   }

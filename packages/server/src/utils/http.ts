@@ -95,8 +95,14 @@ const STATUS_BY_CODE: Record<SixbErrorCode, number> = {
   "pipeline.not_found": 404,
   "pipeline.run_not_found": 404,
   "projection.failed": 500,
+  // The queued job disagrees with durable state, so it is a conflict — but not one the caller
+  // resolves by re-reading and retrying, which is why the code stays out of the `conflict` kind.
+  "projection.job_stale": 409,
   "projection.not_found": 404,
   "projection.run_not_found": 404,
+  // The caller did nothing wrong: a projection references a column its dataset version no longer
+  // has, which only an edit to one of the two definitions can fix.
+  "projection.schema_mismatch": 500,
   "provider.failed": 500,
   "provider.unavailable": 503,
   "queue.lease_lost": 500,

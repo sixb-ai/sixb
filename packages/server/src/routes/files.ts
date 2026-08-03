@@ -8,8 +8,7 @@ import {
   type Sixb,
 } from "@sixb/core"
 import { computeBlobDigest, supportsDirectUpload } from "@sixb/core/blob-storage/server"
-import type { SixbError } from "@sixb/core/errors"
-import { isSixbError } from "@sixb/core/errors"
+import { SixbError } from "@sixb/core/errors"
 import {
   createFileUploadId,
   createUploadExpiresAt,
@@ -533,11 +532,15 @@ function mapUploadContentError(context: {
 // The cap runs in the `parse` phase, so Elysia surfaces it wrapped in a
 // ParseError; the original error is carried on `cause`.
 function asRequestBodyTooLarge(error: unknown): SixbError | undefined {
-  if (isSixbError(error, "runtime.payload_too_large")) {
+  // `instanceof` and not `isSixbError`: the cap is raised by this process one stack frame down, so
+  // the only value that can arrive here is the live instance, and the caller wants a real error.
+  if (error instanceof SixbError && error.code === "runtime.payload_too_large") {
     return error
   }
   const cause = (error as { cause?: unknown } | null | undefined)?.cause
-  return isSixbError(cause, "runtime.payload_too_large") ? cause : undefined
+  return cause instanceof SixbError && cause.code === "runtime.payload_too_large"
+    ? cause
+    : undefined
 }
 
 // A non-pending session is terminal; surface which terminal state so the route

@@ -17,6 +17,7 @@ export {
   SIXB_TIMEOUT_ERROR_CODES,
   SIXB_VALIDATION_ERROR_CODES,
   SixbError,
+  type SixbErrorLike,
   type SixbErrorOptions,
   sixbErrorKind,
   sixbFailureReason,

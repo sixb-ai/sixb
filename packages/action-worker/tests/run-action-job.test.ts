@@ -18,7 +18,7 @@ import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import type { EventsRuntime } from "@sixb/core/internal/events"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
-import type { ActionRunParams, ObjectRow } from "@sixb/core/storage"
+import type { ActionRunFailure, ActionRunParams, ObjectRow } from "@sixb/core/storage"
 import { runActionJob } from "../src/run-action-job"
 import type { ActionWorkerContext } from "../src/types"
 
@@ -214,6 +214,10 @@ describe("runActionJob", () => {
       })
 
     const sixb = createSixb([failWriteback])
+    const reported: ActionRunFailure[] = []
+    const reporter = attachSixbErrorReporter(sixb, (failure) => {
+      reported.push(failure as ActionRunFailure)
+    })
     await sixb.upsertObject("Device", {
       id: "device-1",
       name: "Device 1",
@@ -245,6 +249,20 @@ describe("runActionJob", () => {
 
     const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
     expect(run?.writeback?.status).toBe("failed")
+
+    // One failure, one record: `onError` gets the row, not a second reading of the thrown value.
+    // The writeback threw a bare `Error`, so a reporter that rebuilt the record from it could only
+    // have said `runtime.unexpected` with no phase — while the row, the API and Atlas all said
+    // `action.failed` / `writeback`. To reproduce that, drop `failure` from the `reportRunFailure`
+    // call in `run-action-job.ts` and let the reporter derive it: this goes red.
+    await reporter.flush()
+    expect(reported).toHaveLength(1)
+    expect(run?.error).toEqual(reported[0])
+    expect(reported[0]).toEqual({
+      code: "action.failed",
+      message: "external API failed",
+      phase: "writeback",
+    })
     expect(
       await findActionEditCommit({ storage: sixb.storage, projectId: sixb.id, runId: "act_1" })
     ).toBeNull()

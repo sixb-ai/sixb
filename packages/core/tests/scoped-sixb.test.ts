@@ -554,6 +554,23 @@ describe("sixb.as() operational access", () => {
       "code",
       "auth.permission_denied"
     )
+
+    // And a genuinely unknown id is missing, under the same code the HTTP route answers with. Both
+    // said `runtime.invalid_definition` before — a 500 claiming the app's own `define*()` was wrong,
+    // for a caller who had simply asked for something that is not there.
+    expect(runner.requestSyncRun({ syncId: "nope" })).rejects.toHaveProperty(
+      "code",
+      "sync.not_found"
+    )
+    expect(runner.requestPipelineRun({ pipelineId: "nope" })).rejects.toHaveProperty(
+      "code",
+      "pipeline.not_found"
+    )
+    expect(sixb.requestSyncRun({ syncId: "nope" })).rejects.toHaveProperty("code", "sync.not_found")
+    expect(sixb.requestPipelineRun({ pipelineId: "nope" })).rejects.toHaveProperty(
+      "code",
+      "pipeline.not_found"
+    )
   })
 
   test("pipeline catalog narrows to runnable pipelines", () => {

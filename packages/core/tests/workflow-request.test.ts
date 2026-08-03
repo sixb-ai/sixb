@@ -157,6 +157,12 @@ describe("sixb.workflows.request", () => {
   test("throws for an unknown workflow", async () => {
     const sixb = createSixb()
 
+    // The code and not just the message: `workflow.not_found` is what the HTTP route answers for the
+    // same condition, and this door used to say `runtime.invalid_input` instead — a 400 for
+    // something that is a 404.
+    await expect(
+      sixb.workflows.requestById({ workflowId: "missing", input: {} })
+    ).rejects.toHaveProperty("code", "workflow.not_found")
     await expect(sixb.workflows.requestById({ workflowId: "missing", input: {} })).rejects.toThrow(
       "[Sixb] Unknown workflow 'missing'"
     )

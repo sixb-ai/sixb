@@ -729,8 +729,9 @@ export {
 
 export type { SixbErrorKind } from "./errors"
 /**
- * The failure vocabulary. App code catches with `isSixbError(error, code)` and branches on the
- * code; the five classes are there for the coarser `instanceof` a caller sometimes wants instead.
+ * The failure vocabulary. There is one error type: app code catches with
+ * `isSixbError(error, code)` and branches on the code. The five `SIXB_*_ERROR_CODES` sets are the
+ * coarser grouping a caller sometimes wants instead, read through `sixbErrorKind(error)`.
  */
 export {
   isSixbError,
@@ -744,6 +745,7 @@ export {
   SIXB_VALIDATION_ERROR_CODES,
   SixbError,
   type SixbErrorCode,
+  type SixbErrorLike,
   type SixbErrorNamespace,
   type SixbErrorOptions,
   type SixbFailure,

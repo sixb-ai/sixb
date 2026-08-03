@@ -525,7 +525,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   async requestSyncRun(input: RequestSyncRunInput): Promise<SyncRunRequestResult> {
     const sync = this.getSyncById(input.syncId)
     if (!sync) {
-      throw new SixbError("runtime.invalid_definition", `[Sixb] Unknown sync '${input.syncId}'`)
+      throw new SixbError("sync.not_found", `[Sixb] Unknown sync '${input.syncId}'`)
     }
     return requestSyncRun(this.runtimeContext, sync, input)
   }
@@ -533,10 +533,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   async requestPipelineRun(input: RequestPipelineRunInput): Promise<PipelineRunRequestResult> {
     const pipeline = this.getPipelineById(input.pipelineId)
     if (!pipeline) {
-      throw new SixbError(
-        "runtime.invalid_definition",
-        `[Sixb] Unknown pipeline '${input.pipelineId}'`
-      )
+      throw new SixbError("pipeline.not_found", `[Sixb] Unknown pipeline '${input.pipelineId}'`)
     }
     return requestPipelineRun(this.runtimeContext, pipeline, input)
   }

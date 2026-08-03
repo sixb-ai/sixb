@@ -43,12 +43,12 @@ export async function requestWorkflowRun(
   assertAuthorized(runtime, { kind: "workflow.run", workflowId: workflow.id })
   const storage = runtime.storage.workflowRuns
   if (!storage) {
-    throw new SixbError("runtime.invalid_input", "[Sixb] Workflow run storage is not configured.")
+    throw new SixbError("runtime.not_configured", "[Sixb] Workflow run storage is not configured.")
   }
 
   const queue = runtime.queues.workflows
   if (!queue) {
-    throw new SixbError("runtime.invalid_input", "[Sixb] Workflow run queue is not configured.")
+    throw new SixbError("runtime.not_configured", "[Sixb] Workflow run queue is not configured.")
   }
 
   const runId = createWorkflowRunId(options.runId)
@@ -103,14 +103,16 @@ export async function requestWorkflowRun(
       ],
     })
   } catch (error) {
+    const failure = toSixbFailure(error, { fallbackCode: "workflow.failed" })
     const failed = await storage.finish({
       projectId: runtime.projectId,
       id: runId,
       status: "failed",
-      error: toSixbFailure(error, { fallbackCode: "workflow.failed" }),
+      error: failure,
     })
     reportRunFailure(runtime, error, {
       projectId: runtime.projectId,
+      failure,
       occurredAt: failed.finishedAt,
       run: {
         kind: "workflow",

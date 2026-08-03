@@ -188,9 +188,10 @@ export type SixbErrorContext =
 /**
  * Observes runtime failures without changing their outcome.
  *
- * The first argument is the same {@link SixbFailure} the run row stores and the API returns, so a
- * handler branches on `failure.code` — the one identifier that survives a reworded message, a
- * process boundary, and a serialization. The second is where the failure happened.
+ * The first argument is the same {@link SixbFailure} the run row stores and the API returns — the
+ * record itself, handed over, not a second reading of the thrown value — so a handler branches on
+ * `failure.code` knowing it is the code an operator sees on the run, and reads a primitive's typed
+ * extension (an action's `phase`) off the same object. The second is where the failure happened.
  *
  * `context.cause` is the value that was actually thrown, alive and with its stack. It is deliberately
  * not part of the record: `failure.cause` is the string an operator reads, and this is the object a

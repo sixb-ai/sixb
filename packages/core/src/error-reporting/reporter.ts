@@ -1,4 +1,4 @@
-import { type SixbFailure, toSixbFailure } from "../errors"
+import type { SixbFailure } from "../errors"
 import type { SixbErrorContext, SixbErrorHandler } from "./types"
 
 const DEFAULT_FLUSH_TIMEOUT_MS = 5_000
@@ -12,11 +12,15 @@ export class SixbErrorReporter {
     this.handler = handler ?? printFailure
   }
 
-  report(error: unknown, context: SixbErrorContext): void {
-    const failure = toSixbFailure(error)
-
+  /**
+   * `failure` is handed in rather than derived from `cause`, and that is the whole point: the record
+   * a handler receives has to be the record that was written. A caller that built one — every failed
+   * run does, under the primitive's own code and with its typed extension — passes it; a caller with
+   * no record builds one from the thrown value and says which code stands in for an unlabeled throw.
+   */
+  report(failure: SixbFailure, cause: unknown, context: SixbErrorContext): void {
     const invocation = Promise.resolve()
-      .then(() => this.handler(failure, { ...context, cause: error }))
+      .then(() => this.handler(failure, { ...context, cause }))
       .then(() => undefined)
       .catch((handlerError) => {
         try {

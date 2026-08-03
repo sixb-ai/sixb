@@ -51,12 +51,12 @@ export async function requestSyncRun(
 ): Promise<SyncRunRequestResult> {
   assertAuthorized(runtime, { kind: "sync.run", syncId: sync.id })
   if (!runtime.storage.syncRuns) {
-    throw new SixbError("runtime.invalid_definition", "[Sixb] Sync run storage is not configured.")
+    throw new SixbError("runtime.not_configured", "[Sixb] Sync run storage is not configured.")
   }
 
   const queue = runtime.queues.syncRuns
   if (!queue) {
-    throw new SixbError("runtime.invalid_definition", "[Sixb] Sync run queue is not configured.")
+    throw new SixbError("runtime.not_configured", "[Sixb] Sync run queue is not configured.")
   }
 
   const runId = createSyncRunId(options.runId)

@@ -1,4 +1,4 @@
-import { isSixbError, type SixbError } from "@sixb/core/errors"
+import { SixbError } from "@sixb/core/errors"
 import { GoogleAuth } from "google-auth-library"
 import { googleAuthError } from "../errors"
 import type { TokenSource } from "./types"
@@ -87,7 +87,9 @@ async function loadApplicationDefaultClient(
 }
 
 function wrapAuthError(message: string, cause: unknown): SixbError {
-  if (isSixbError(cause, "connector.unauthorized")) {
+  // Identity, not meaning: this only skips re-wrapping an error this module already raised, and the
+  // result is thrown, so it must be a live error rather than anything code-shaped.
+  if (cause instanceof SixbError && cause.code === "connector.unauthorized") {
     return cause
   }
   const detail = cause instanceof Error ? cause.message : String(cause)

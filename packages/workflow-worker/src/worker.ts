@@ -1,3 +1,4 @@
+import { toSixbFailure } from "@sixb/core/errors"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
@@ -122,6 +123,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
   ): void {
     reportRunFailure(this.sixb, error, {
       projectId: this.sixb.projectId,
+      failure: run.error ?? toSixbFailure(error, { fallbackCode: "workflow.failed" }),
       occurredAt: run.finishedAt,
       attempt: claimed.job.attempt,
       run: {

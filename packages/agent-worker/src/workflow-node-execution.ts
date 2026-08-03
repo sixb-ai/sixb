@@ -134,6 +134,7 @@ export async function executeWorkflowAgentNode(
     if (status === "failed") {
       reportRunFailure(input.sixb, error, {
         projectId: context.id,
+        failure: failed.run.error ?? toSixbFailure(error, { fallbackCode: "workflow.failed" }),
         occurredAt: failed.run.finishedAt,
         attempt: job.attempt,
         run: {

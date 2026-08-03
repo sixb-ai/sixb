@@ -6,7 +6,7 @@ const AGENT_REQUEST_ERROR_REASONS = [
   "thread_agent_mismatch",
   "active_run_exists",
   "invalid_context",
-  "storage_unavailable",
+  "storage_not_configured",
 ] as const
 
 export type AgentRequestErrorReason = (typeof AGENT_REQUEST_ERROR_REASONS)[number]
@@ -17,7 +17,7 @@ const CODE_BY_REASON: Record<AgentRequestErrorReason, SixbErrorCode> = {
   thread_agent_mismatch: "runtime.invalid_input",
   active_run_exists: "agent.run_conflict",
   invalid_context: "runtime.invalid_input",
-  storage_unavailable: "storage.unavailable",
+  storage_not_configured: "runtime.not_configured",
 }
 
 /**

@@ -15,7 +15,7 @@ import {
   projectionTargetOf,
 } from "@sixb/core/internal/projections"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import { isPermanentProjectionWorkerError, projectionWorkerPermanentError } from "./errors"
+import { isPermanentProjectionWorkerError, projectionJobStale } from "./errors"
 import {
   assertDatasetVersionMatchesDefinition,
   assertProjectionCompatibleWithDataset,
@@ -113,7 +113,7 @@ function correlateValidatedProjection(
 }
 
 function invalidProjectionKind(job: ProjectionJob): SixbError {
-  return permanent(
+  return stale(
     `Projection '${job.projectionId}' does not match queued kind '${job.projectionKind}'.`
   )
 }
@@ -129,7 +129,7 @@ function validatePinnedSchema(input: {
     assertProjectionCompatibleWithDataset({ ...input, ontology: input.runtime.ontology })
   } catch (error) {
     if (isPermanentProjectionWorkerError(error)) throw error
-    throw permanent(
+    throw stale(
       `Projection '${input.projection.id}' is incompatible with its pinned dataset version: ${errorMessage(error)}`,
       error
     )
@@ -139,7 +139,7 @@ function validatePinnedSchema(input: {
 export function assertProjectionJobId(projectId: string, job: ProjectionJob): void {
   const expected = createProjectionRunId(projectId, job)
   if (job.id === expected) return
-  throw permanent(`Projection job id '${job.id}' does not match its pinned semantic identity.`)
+  throw stale(`Projection job id '${job.id}' does not match its pinned semantic identity.`)
 }
 
 function resolveDescriptor(
@@ -149,7 +149,7 @@ function resolveDescriptor(
   try {
     return registry.resolveDispatch(projectionId)
   } catch (error) {
-    throw permanent(`Projection '${projectionId}' is not registered.`, error)
+    throw stale(`Projection '${projectionId}' is not registered.`, error)
   }
 }
 
@@ -167,21 +167,19 @@ function assertDescriptorMatchesJob(
     descriptor.ownershipHash === job.ownershipHash
 
   if (matches) return
-  throw permanent(
-    `Projection '${job.projectionId}' no longer matches the queued semantic identity.`
-  )
+  throw stale(`Projection '${job.projectionId}' no longer matches the queued semantic identity.`)
 }
 
 function requireProjection(runtime: ProjectionWorkerContext, projectionId: string) {
   const projection = runtime.getProjectionById(projectionId)
   if (projection) return projection
-  throw permanent(`Projection '${projectionId}' is not registered.`)
+  throw stale(`Projection '${projectionId}' is not registered.`)
 }
 
 function requireDataset(runtime: ProjectionWorkerContext, datasetId: string) {
   const dataset = runtime.getDatasetById(datasetId)
   if (dataset) return dataset
-  throw permanent(`Projection references unknown dataset '${datasetId}'.`)
+  throw stale(`Projection references unknown dataset '${datasetId}'.`)
 }
 
 async function requirePinnedVersion(
@@ -194,21 +192,21 @@ async function requirePinnedVersion(
     runtime.lakeStorage.getVersion(datasetId, versionId),
   ])
   if (!lakeDataset) {
-    throw permanent(`Dataset '${datasetId}' is not registered in lake storage.`)
+    throw stale(`Dataset '${datasetId}' is not registered in lake storage.`)
   }
   if (!version) {
-    throw permanent(`Dataset '${datasetId}' version '${versionId}' was not found.`)
+    throw stale(`Dataset '${datasetId}' version '${versionId}' was not found.`)
   }
   if (version.datasetId !== datasetId || version.createdAt.toISOString() !== createdAt) {
-    throw permanent(
+    throw stale(
       `Dataset '${datasetId}' version '${versionId}' does not match its queued immutable metadata.`
     )
   }
   return version
 }
 
-function permanent(message: string, cause?: unknown): SixbError {
-  return projectionWorkerPermanentError(`[SixbProjectionWorker] ${message}`, { cause })
+function stale(message: string, cause?: unknown): SixbError {
+  return projectionJobStale(`[SixbProjectionWorker] ${message}`, { cause })
 }
 
 function errorMessage(error: unknown): string {
