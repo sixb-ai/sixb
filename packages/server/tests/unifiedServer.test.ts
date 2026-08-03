@@ -194,8 +194,11 @@ describe("SixbServer API serving", () => {
         type: "connected",
         channel: "events",
       })
+      // The code is what a client branches on; a socket frame carries it for the same reason an HTTP
+      // error body does.
       expect(messages[1]).toEqual({
         type: "error",
+        code: "runtime.invalid_input",
         message: "Message must be a JSON object.",
       })
     })

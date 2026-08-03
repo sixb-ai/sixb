@@ -3,6 +3,7 @@ import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
 // in node-only runtime (e.g. `node:crypto`), which breaks the Atlas browser bundle.
 import { AGENT_RUN_STREAM_SCHEMA_VERSION } from "@sixb/core/agents/streams"
 import type { BrokerRecord } from "@sixb/core/broker"
+import { isSixbErrorCode, type SixbErrorCode } from "@sixb/core/errors"
 import type { GetAgentRunResponses } from "./generated/types.gen"
 import {
   createReconnectingSocket,
@@ -53,7 +54,17 @@ export type AgentRunStreamServerMessage =
       readonly count: number
     }
   | { readonly type: "unsubscribed"; readonly runId?: string | null }
-  | { readonly type: "error"; readonly message: string }
+  | {
+      readonly type: "error"
+      /**
+       * The failure's code. Branch on it rather than on `message`, which is prose and may be reworded.
+       *
+       * Falls back to `runtime.unexpected` for a frame that carries no code or one this build does not
+       * know — a server older than this client, or newer.
+       */
+      readonly code: SixbErrorCode
+      readonly message: string
+    }
   | { readonly type: "run.snapshot"; readonly run: AgentRunSnapshot }
   | { readonly type: "record"; readonly record: AgentRunStreamRecord }
 
@@ -144,7 +155,11 @@ export function parseAgentRunStreamServerMessage(
   }
 
   if (parsed.type === "error") {
-    return { type: "error", message: String(parsed.message ?? "Agent stream error.") }
+    return {
+      type: "error",
+      code: isSixbErrorCode(parsed.code) ? parsed.code : "runtime.unexpected",
+      message: String(parsed.message ?? "Agent stream error."),
+    }
   }
 
   if (parsed.type === "connected") {

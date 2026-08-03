@@ -264,6 +264,7 @@ describe("canAccessAgentRunStream", () => {
     })
     await expect(canAccessAgentRunStream(sixb, { runId, authz: authz(owner) })).resolves.toEqual({
       ok: false,
+      code: "agent.run_not_found",
       message: "Agent run not found.",
     })
     await expect(
@@ -271,7 +272,11 @@ describe("canAccessAgentRunStream", () => {
         runId,
         authz: authz({ type: "user", id: "usr_other" }, [agentId]),
       })
-    ).resolves.toEqual({ ok: false, message: "Agent run not found." })
+    ).resolves.toEqual({
+      ok: false,
+      code: "agent.run_not_found",
+      message: "Agent run not found.",
+    })
   })
 
   test("rejects unknown run ids instead of authorizing them through a supplied thread", async () => {
@@ -298,7 +303,11 @@ describe("canAccessAgentRunStream", () => {
         runId: "agt_run_missing",
         authz: authz(owner, [agentId]),
       })
-    ).resolves.toEqual({ ok: false, message: "Agent run not found." })
+    ).resolves.toEqual({
+      ok: false,
+      code: "agent.run_not_found",
+      message: "Agent run not found.",
+    })
   })
 })
 

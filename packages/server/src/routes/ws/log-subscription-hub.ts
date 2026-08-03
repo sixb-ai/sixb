@@ -6,7 +6,8 @@ import type {
   SixbRunKind,
   StoredLogLine,
 } from "@sixb/core"
-import { isSixbError } from "@sixb/core/errors"
+import { isSixbError, type SixbErrorCode } from "@sixb/core/errors"
+import { wsError } from "../../utils/ws"
 
 const MAX_CLIENT_RECORDS = 1_000
 const MAX_CLIENT_BYTES = 1_048_576
@@ -14,6 +15,13 @@ const MAX_SOCKET_BUFFERED_BYTES = 1_048_576
 const MAX_BATCH_RECORDS = 100
 const FLUSH_DELAY_MS = 10
 const READ_PAGE_SIZE = 500
+
+/**
+ * What a client is told when it cannot keep up. `runtime.cancelled` because that is what happened:
+ * the server abandoned this subscription mid-flight. The client's move is to resubscribe from the
+ * last cursor it saw, which the message says and the code lets it decide without reading the message.
+ */
+const TOO_SLOW = "Log stream client is too slow; reconnect from the last cursor."
 
 interface LogSocket {
   send(message: string): unknown
@@ -212,16 +220,12 @@ export class LogSubscriptionHub {
             cursor: latest.lines.at(-1)?.cursor ?? latest.cursor,
           })
         } catch (resetError) {
-          this.fail(
-            state,
-            resetError instanceof Error ? resetError.message : String(resetError),
-            1011
-          )
+          this.fail(state, "runtime.unexpected", errorMessage(resetError), 1011)
         }
         return
       }
 
-      this.fail(state, error instanceof Error ? error.message : String(error), 1011)
+      this.fail(state, "runtime.unexpected", errorMessage(error), 1011)
     }
   }
 
@@ -229,7 +233,7 @@ export class LogSubscriptionHub {
     if (state.closed || state.queuedCursors.has(line.cursor)) return
     const bytes = encodedBytes(line)
     if (!hasQueueCapacity(state, bytes)) {
-      this.fail(state, "Log stream client is too slow; reconnect from the last cursor.", 1013)
+      this.fail(state, "runtime.cancelled", TOO_SLOW, 1013)
       return
     }
 
@@ -246,7 +250,7 @@ export class LogSubscriptionHub {
       // batches drain. Pending live records cannot drain until replay finishes,
       // so a queue containing only pending live records has no forward progress.
       if (state.queue.length === 0 || socketBufferedAmount(state.ws) > MAX_SOCKET_BUFFERED_BYTES) {
-        this.fail(state, "Log stream client is too slow; reconnect from the last cursor.", 1013)
+        this.fail(state, "runtime.cancelled", TOO_SLOW, 1013)
         return false
       }
       this.scheduleFlush(state)
@@ -269,7 +273,7 @@ export class LogSubscriptionHub {
     if (state.closed || state.pendingCursors.has(line.cursor)) return
     const bytes = encodedBytes(line)
     if (!hasQueueCapacity(state, bytes)) {
-      this.fail(state, "Log stream client is too slow; reconnect from the last cursor.", 1013)
+      this.fail(state, "runtime.cancelled", TOO_SLOW, 1013)
       return
     }
     state.pendingLive.push(line)
@@ -317,14 +321,14 @@ export class LogSubscriptionHub {
     try {
       state.ws.send(JSON.stringify(payload))
     } catch (error) {
-      this.fail(state, error instanceof Error ? error.message : String(error), 1011)
+      this.fail(state, "runtime.unexpected", errorMessage(error), 1011)
     }
   }
 
-  private fail(state: ClientState, message: string, closeCode: number): void {
+  private fail(state: ClientState, code: SixbErrorCode, message: string, closeCode: number): void {
     if (state.closed) return
     try {
-      state.ws.send(JSON.stringify({ type: "error", message }))
+      state.ws.send(JSON.stringify(wsError(code, message)))
     } catch {
       // The close below is still required when the error frame cannot be sent.
     }
@@ -372,4 +376,8 @@ function socketBufferedAmount(ws: LogSocket): number {
   if (!raw || typeof raw !== "object" || !("bufferedAmount" in raw)) return 0
   const bufferedAmount = (raw as { bufferedAmount?: unknown }).bufferedAmount
   return typeof bufferedAmount === "number" ? bufferedAmount : 0
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

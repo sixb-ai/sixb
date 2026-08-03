@@ -8,6 +8,7 @@
  * and the hooks alike. React is an optional peer of `@sixb/client`; nothing here
  * may import it.
  */
+import { isSixbErrorCode, type SixbErrorCode } from "@sixb/core/errors"
 import {
   isSixbEvent,
   type SixbEvent,
@@ -54,7 +55,17 @@ export interface EventSocket {
 
 type EventStreamServerMessage =
   | { readonly type: "connected" | "subscribed" | "unsubscribed" }
-  | { readonly type: "error"; readonly message: string }
+  | {
+      readonly type: "error"
+      /**
+       * The failure's code. Branch on it rather than on `message`, which is prose and may be reworded.
+       *
+       * Falls back to `runtime.unexpected` for a frame that carries no code or one this build does not
+       * know — a server older than this client, or newer.
+       */
+      readonly code: SixbErrorCode
+      readonly message: string
+    }
   | { readonly type: "event"; readonly event: SixbEvent }
 
 /**
@@ -158,7 +169,11 @@ export function parseEventStreamMessage(value: unknown): EventStreamServerMessag
   }
 
   if (parsed.type === "error") {
-    return { type: "error", message: String(parsed.message ?? "Event stream error.") }
+    return {
+      type: "error",
+      code: isSixbErrorCode(parsed.code) ? parsed.code : "runtime.unexpected",
+      message: String(parsed.message ?? "Event stream error."),
+    }
   }
 
   if (

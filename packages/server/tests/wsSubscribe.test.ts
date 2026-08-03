@@ -232,6 +232,7 @@ describe("/ws/events subscriptions", () => {
         try {
           expect(await nextWsMessage(ws)).toEqual({
             type: "error",
+            code: "runtime.unexpected",
             message: "[SixbServer] Failed to initialize event websocket: latest cursor unavailable",
           })
           await closed

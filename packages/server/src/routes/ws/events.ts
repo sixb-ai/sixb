@@ -5,7 +5,14 @@ import type { Elysia } from "elysia"
 import { z } from "zod"
 import { EVENT_TOPICS, EVENT_TYPES } from "../../schemas/events"
 import type { SixbServer } from "../../server"
-import { decodeWsMessage, safeSend, wsAuthz, wsStateKey } from "../../utils/ws"
+import {
+  decodeWsMessage,
+  safeSend,
+  wsAuthz,
+  wsError,
+  wsErrorFrom,
+  wsStateKey,
+} from "../../utils/ws"
 
 interface EventSubscriptionState {
   topics?: DomainEvent["topic"][]
@@ -98,10 +105,10 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
     } catch (error) {
       if (state.initializationFailureHandled) return false
       state.initializationFailureHandled = true
-      const message = error instanceof Error ? error.message : String(error)
+      const failure = wsErrorFrom(error, "runtime.unexpected")
       safeSend(ws, {
-        type: "error",
-        message: `[SixbServer] Failed to initialize event websocket: ${message}`,
+        ...failure,
+        message: `[SixbServer] Failed to initialize event websocket: ${failure.message}`,
       })
       ws.close()
       return false
@@ -161,8 +168,7 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
           state.afterCursor = last.cursor
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        safeSend(ws, { type: "error", message })
+        safeSend(ws, wsErrorFrom(error, "runtime.unexpected"))
       } finally {
         state.polling = false
       }
@@ -192,13 +198,14 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
       const decoded = await decodeWsMessage(message)
       const parsed = parseSubscriptionMessage(decoded)
       if (!parsed.ok) {
-        safeSend(ws, { type: "error", message: parsed.error })
+        safeSend(ws, wsError("runtime.invalid_input", parsed.error))
         return
       }
 
       const state = states.get(wsStateKey(ws))
       if (!state) {
-        safeSend(ws, { type: "error", message: "Subscription state not found." })
+        // The server lost track of a connection it is holding, which is its own invariant.
+        safeSend(ws, wsError("runtime.invariant_violated", "Subscription state not found."))
         return
       }
 

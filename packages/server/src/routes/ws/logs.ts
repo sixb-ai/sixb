@@ -3,7 +3,14 @@ import type { Elysia } from "elysia"
 import { z } from "zod"
 import { LOG_LEVELS, LogRunIdSchema, SIXB_RUN_KINDS } from "../../schemas/logs"
 import type { SixbServer } from "../../server"
-import { decodeWsMessage, safeSend, wsAuthz, wsStateKey } from "../../utils/ws"
+import {
+  decodeWsMessage,
+  safeSend,
+  wsAuthz,
+  wsError,
+  wsErrorFrom,
+  wsStateKey,
+} from "../../utils/ws"
 import { LogSubscriptionHub } from "./log-subscription-hub"
 
 const SubscribeSchema = z
@@ -69,7 +76,7 @@ export function registerLogStreamRoutes(app: Elysia, server: SixbServer) {
 
       const parsed = parseLogSubscriptionMessage(await decodeWsMessage(message))
       if (!parsed.ok) {
-        safeSend(ws, { type: "error", message: parsed.error })
+        safeSend(ws, wsError("runtime.invalid_input", parsed.error))
         return
       }
 
@@ -102,10 +109,7 @@ export function registerLogStreamRoutes(app: Elysia, server: SixbServer) {
             })
         )
       } catch (error) {
-        safeSend(ws, {
-          type: "error",
-          message: error instanceof Error ? error.message : String(error),
-        })
+        safeSend(ws, wsErrorFrom(error, "runtime.unexpected"))
         ws.close(1011, "Log stream setup failed")
       }
     },

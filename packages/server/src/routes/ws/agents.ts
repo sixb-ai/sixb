@@ -1,10 +1,18 @@
 import type { AuthorizationContext, OntologySource, Sixb } from "@sixb/core"
 import { agentRunStreamDefinition, agentRunStreamId } from "@sixb/core/agents/streams"
 import type { BrokerRecord } from "@sixb/core/broker"
+import type { SixbErrorCode } from "@sixb/core/errors"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import type { SixbServer } from "../../server"
-import { decodeWsMessage, safeSend, wsAuthz, wsStateKey } from "../../utils/ws"
+import {
+  decodeWsMessage,
+  safeSend,
+  wsAuthz,
+  wsError,
+  wsErrorFrom,
+  wsStateKey,
+} from "../../utils/ws"
 import { serializeAgentRun } from "../agents"
 
 interface AgentStreamSubscriptionState {
@@ -66,15 +74,19 @@ export async function canAccessAgentRunStream(
     readonly runId: string
     readonly authz: AuthorizationContext | null
   }
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<{ ok: true } | { ok: false; code: SixbErrorCode; message: string }> {
   const storage = sixb.storage.agents
   if (!storage) {
-    return { ok: false, message: "Agent storage is not configured." }
+    return {
+      ok: false,
+      code: "runtime.not_configured",
+      message: "Agent storage is not configured.",
+    }
   }
 
   const run = await storage.runs.getById({ projectId: sixb.id, id: input.runId })
   if (!run) {
-    return { ok: false, message: "Agent run not found." }
+    return { ok: false, code: "agent.run_not_found", message: "Agent run not found." }
   }
 
   // Auth-disabled development runtimes are privileged, matching the existing HTTP agent routes.
@@ -86,7 +98,9 @@ export async function canAccessAgentRunStream(
   // returns null for a thread the caller may not read (absent, not owner, or ungranted).
   const thread = await sixb.as(input.authz).getThread(run.threadId)
   if (!thread) {
-    return { ok: false, message: "Agent run not found." }
+    // Deliberately the same answer as an absent run: a caller who may not read the thread must not
+    // learn that the run exists.
+    return { ok: false, code: "agent.run_not_found", message: "Agent run not found." }
   }
 
   return { ok: true }
@@ -105,7 +119,7 @@ export function registerAgentStreamRoutes(app: Elysia, server: SixbServer) {
       const decoded = await decodeWsMessage(message)
       const parsed = parseAgentStreamMessage(decoded)
       if (!parsed.ok) {
-        safeSend(ws, { type: "error", message: parsed.error })
+        safeSend(ws, wsError("runtime.invalid_input", parsed.error))
         return
       }
 
@@ -141,7 +155,7 @@ async function subscribeAgentStream(
     authz: wsAuthz(ws),
   })
   if (!access.ok) {
-    safeSend(ws, { type: "error", message: access.message })
+    safeSend(ws, wsError(access.code, access.message))
     return
   }
 
@@ -152,7 +166,7 @@ async function subscribeAgentStream(
       stream: agentRunStreamDefinition(message.runId),
     })
   } catch (error) {
-    safeSend(ws, { type: "error", message: errorMessage(error) })
+    safeSend(ws, wsErrorFrom(error, "runtime.unexpected"))
     return
   }
 
@@ -183,7 +197,7 @@ async function subscribeAgentStream(
   } catch (error) {
     state.unsubscribe = null
     state.runId = null
-    safeSend(ws, { type: "error", message: errorMessage(error) })
+    safeSend(ws, wsErrorFrom(error, "runtime.unexpected"))
     return
   }
 
@@ -212,7 +226,7 @@ async function replayAgentStream(
     authz: wsAuthz(ws),
   })
   if (!access.ok) {
-    safeSend(ws, { type: "error", message: access.message })
+    safeSend(ws, wsError(access.code, access.message))
     return
   }
 
@@ -237,7 +251,7 @@ async function replayAgentStream(
     })
     await sendRunSnapshot(sixb, ws, message.runId)
   } catch (error) {
-    safeSend(ws, { type: "error", message: errorMessage(error) })
+    safeSend(ws, wsErrorFrom(error, "runtime.unexpected"))
   }
 }
 
@@ -276,13 +290,13 @@ async function sendRunSnapshot(
   try {
     const run = await sixb.storage.agents?.runs.getById({ projectId: sixb.id, id: runId })
     if (!run) {
-      safeSend(ws, { type: "error", message: "Agent run not found." })
+      safeSend(ws, wsError("agent.run_not_found", "Agent run not found."))
       return false
     }
     safeSend(ws, { type: "run.snapshot", run: serializeAgentRun(run) })
     return true
   } catch (error) {
-    safeSend(ws, { type: "error", message: errorMessage(error) })
+    safeSend(ws, wsErrorFrom(error, "runtime.unexpected"))
     return false
   }
 }
@@ -294,8 +308,4 @@ function sendRecords(
   for (const record of records) {
     safeSend(ws, { type: "record", record })
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

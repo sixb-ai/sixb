@@ -1,3 +1,4 @@
+import { isSixbErrorCode, type SixbErrorCode } from "@sixb/core/errors"
 import {
   isStoredLogLine,
   type LogLevel,
@@ -34,7 +35,17 @@ export interface LogSocket {
 
 type LogStreamServerMessage =
   | { readonly type: "connected" | "subscribed" | "unsubscribed" }
-  | { readonly type: "error"; readonly message: string }
+  | {
+      readonly type: "error"
+      /**
+       * The failure's code. Branch on it rather than on `message`, which is prose and may be reworded.
+       *
+       * Falls back to `runtime.unexpected` for a frame that carries no code or one this build does not
+       * know — a server older than this client, or newer.
+       */
+      readonly code: SixbErrorCode
+      readonly message: string
+    }
   | { readonly type: "logs"; readonly logs: readonly StoredLogLine[] }
   | { readonly type: "reset"; readonly reason: "cursor_expired"; readonly cursor?: string }
 
@@ -99,7 +110,11 @@ export function parseLogStreamMessage(value: unknown): LogStreamServerMessage | 
     }
   }
   if (parsed.type === "error") {
-    return { type: "error", message: String(parsed.message ?? "Log stream error.") }
+    return {
+      type: "error",
+      code: isSixbErrorCode(parsed.code) ? parsed.code : "runtime.unexpected",
+      message: String(parsed.message ?? "Log stream error."),
+    }
   }
   if (["connected", "subscribed", "unsubscribed"].includes(parsed.type)) {
     return { type: parsed.type as "connected" | "subscribed" | "unsubscribed" }
