@@ -91,6 +91,18 @@
         "typescript": "^5.7.0",
       },
     },
+    "connectors/exa": {
+      "name": "@sixb/connector-exa",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:*",
+        "@sixb/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
     "connectors/github": {
       "name": "@sixb/connector-github",
       "version": "0.1.0",
@@ -391,6 +403,7 @@
       },
       "devDependencies": {
         "@ai-sdk/provider": "^4.0.0",
+        "@sixb/connector-exa": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
       },
@@ -1251,6 +1264,8 @@
     "@sixb/client": ["@sixb/client@workspace:packages/client"],
 
     "@sixb/connector-companycam": ["@sixb/connector-companycam@workspace:connectors/companycam"],
+
+    "@sixb/connector-exa": ["@sixb/connector-exa@workspace:connectors/exa"],
 
     "@sixb/connector-github": ["@sixb/connector-github@workspace:connectors/github"],
 

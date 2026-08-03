@@ -1,11 +1,14 @@
 {
-  "name": "@sixb/agent-worker",
+  "name": "@sixb/connector-exa",
   "version": "0.1.0",
-  "description": "Worker that runs Sixb agent threads",
+  "description": "Exa web search connector and bounded agent tools for Sixb",
   "keywords": [
     "sixb",
     "bun",
-    "worker"
+    "connector",
+    "integration",
+    "exa",
+    "search"
   ],
   "homepage": "https://sixb.ai",
   "bugs": {
@@ -14,7 +17,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sixb-ai/sixb.git",
-    "directory": "packages/agent-worker"
+    "directory": "connectors/exa"
   },
   "author": "Sixb contributors",
   "type": "module",
@@ -26,6 +29,12 @@
       "bun": "./src/index.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./agent-tools": {
+      "types": "./dist/agent-tools.d.ts",
+      "bun": "./src/agent-tools.ts",
+      "import": "./dist/agent-tools.js",
+      "default": "./dist/agent-tools.js"
     }
   },
   "scripts": {
@@ -34,21 +43,11 @@
     "test": "bun test",
     "prepack": "bun run build"
   },
-  "sixbBuild": {
-    "assets": [
-      {
-        "from": "./src/skills",
-        "to": "./dist/skills"
-      }
-    ]
-  },
   "dependencies": {
-    "@sixb/core": "workspace:*",
-    "ai": "^7.0.4"
+    "@sixb/connector-rest": "workspace:*",
+    "@sixb/core": "workspace:*"
   },
   "devDependencies": {
-    "@ai-sdk/provider": "^4.0.0",
-    "@sixb/connector-exa": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },
