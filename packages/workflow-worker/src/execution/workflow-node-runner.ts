@@ -1,6 +1,6 @@
+import { SixbError } from "@sixb/core/errors"
 import type { WorkflowNodeDefinition } from "@sixb/core/internal/workflows"
 import type { WorkflowRunRecord } from "@sixb/core/storage"
-import { WorkflowWorkerError } from "../errors"
 import { throwIfAborted } from "../normalize"
 import type { WorkflowRunRecorder } from "../recorder"
 import type {
@@ -49,7 +49,8 @@ export class WorkflowNodeRunner {
     if (outcome.status === "waiting") {
       if ("agentExecution" in outcome) {
         if (outcome.agentExecution.nodeRunId !== nodeRun.id || outcome.nodeRun.id !== nodeRun.id) {
-          throw new WorkflowWorkerError(
+          throw new SixbError(
+            "workflow.failed",
             `[SixbWorkflowWorker] Workflow '${input.context.workflow.id}' agent node '${input.node.id}' parked a different node run.`
           )
         }
@@ -62,7 +63,8 @@ export class WorkflowNodeRunner {
       }
 
       if (outcome.intervention.nodeRunId !== nodeRun.id) {
-        throw new WorkflowWorkerError(
+        throw new SixbError(
+          "workflow.failed",
           `[SixbWorkflowWorker] Workflow '${input.context.workflow.id}' intervention node '${input.node.id}' returned an intervention for a different node run.`
         )
       }

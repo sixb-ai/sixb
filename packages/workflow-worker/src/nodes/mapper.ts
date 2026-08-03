@@ -1,5 +1,5 @@
 import type { WorkflowStepOutputs } from "@sixb/core"
-import { WorkflowWorkerError } from "../errors"
+import { SixbError } from "@sixb/core/errors"
 import { isRecord } from "../normalize"
 
 type RuntimeWorkflowMapper = (context: {
@@ -15,7 +15,8 @@ export function callWorkflowMapper(input: {
   readonly steps: WorkflowStepOutputs
 }): unknown {
   if (typeof input.mapper !== "function") {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow '${input.workflowId}' node '${input.nodeId}' mapper must be a function.`
     )
   }
@@ -32,7 +33,8 @@ export function requireRecordInput(input: {
   readonly nodeId: string
 }): Readonly<Record<string, unknown>> {
   if (!isRecord(input.value)) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow '${input.workflowId}' node '${input.nodeId}' input must be an object.`
     )
   }

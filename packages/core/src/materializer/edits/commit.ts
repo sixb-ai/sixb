@@ -1,4 +1,4 @@
-import { MaterializationValidationError } from "../../materialization/errors"
+import { isSixbError, SixbError } from "../../errors"
 import type {
   EditCommitResult,
   OntologyEditCommit,
@@ -76,8 +76,9 @@ async function lockActionRunForMaterialization(
 ): Promise<void> {
   if (input.source.kind !== "action") return
   if (!storage.actionRuns) {
-    throw new MaterializationValidationError(
-      "Storage does not provide Action run capabilities required by this commit."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Storage does not provide Action run capabilities required by this commit."
     )
   }
   await storage.actionRuns.lockForMaterialization({
@@ -287,9 +288,9 @@ function failedEditGroup(
 function isRecoverableEditValidation(
   input: NormalizedEditCommit,
   error: unknown
-): error is MaterializationValidationError {
+): error is SixbError {
   if (input.mode === "atomic") return false
-  return error instanceof MaterializationValidationError
+  return isSixbError(error, "ontology.invalid_value")
 }
 
 function editPlanContext(command: PreparedEditCommit) {

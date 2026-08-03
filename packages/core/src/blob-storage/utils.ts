@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { BlobStorageError } from "./errors"
+import { SixbError } from "../errors"
 import type { BlobBody, BlobDigest, BlobInfo, FileRef, PutBlobInput } from "./types"
 
 /** Normalize every supported blob body to the streaming representation used by providers. */
@@ -88,7 +88,8 @@ export function assertExpectedBlobSize(
   }
 
   if (actualSizeBytes !== expectedSizeBytes) {
-    throw new BlobStorageError(
+    throw new SixbError(
+      "storage.blob_failed",
       `[${provider}] Blob size mismatch: expected ${expectedSizeBytes} bytes, received ${actualSizeBytes}.`
     )
   }
@@ -103,7 +104,8 @@ export function assertValidExpectedBlobSize(
   }
 
   if (!Number.isSafeInteger(expectedSizeBytes) || expectedSizeBytes < 0) {
-    throw new BlobStorageError(
+    throw new SixbError(
+      "storage.blob_failed",
       `[${provider}] expectedSizeBytes must be a non-negative safe integer.`
     )
   }

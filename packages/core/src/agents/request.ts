@@ -1,19 +1,16 @@
+import { agentRequestError } from "../agents/errors"
 import type { Principal } from "../auth"
 import { SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
 import { reportBackgroundTaskFailure } from "../error-reporting/capability"
+import { isSixbError } from "../errors"
 import type { SixbRuntimeContext } from "../runtime/types"
-import {
-  type AgentRunRecord,
-  type AgentStorage,
-  AgentStorageError,
-  type AgentThreadRecord,
-} from "../storage/agents"
+import type { AgentRunRecord, AgentStorage, AgentThreadRecord } from "../storage/agents"
+import { agentStorageErrorReason } from "../storage/agents"
 import type { AgentContextEntryInput } from "./context"
 import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
-import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
 import type { AgentDefinition } from "./types"
 
@@ -78,7 +75,7 @@ export async function requestAgentRun(
 
   // Fast single-flight check for a clear error. `runs.create` below is the atomic authority.
   if (thread.activeRunId !== null) {
-    throw new AgentRequestError(
+    throw agentRequestError(
       "active_run_exists",
       `[Sixb] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
     )
@@ -91,10 +88,7 @@ export async function requestAgentRun(
     run = await runtime.storage.transaction(async (tx) => {
       const agents = tx.agents
       if (!agents) {
-        throw new AgentRequestError(
-          "storage_unavailable",
-          "[Sixb] Agent storage is not configured."
-        )
+        throw agentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
       }
       await agents.messages.append({
         id: triggerMessageId,
@@ -119,8 +113,8 @@ export async function requestAgentRun(
       })
     })
   } catch (error) {
-    if (error instanceof AgentStorageError && error.reason === "active_run_exists") {
-      throw new AgentRequestError("active_run_exists", error.message)
+    if (isSixbError(error) && agentStorageErrorReason(error) === "active_run_exists") {
+      throw agentRequestError("active_run_exists", error.message)
     }
     throw error
   }
@@ -168,7 +162,7 @@ async function resolveThread(
     })
     if (existing) {
       if (existing.agentId !== params.agentId) {
-        throw new AgentRequestError(
+        throw agentRequestError(
           "thread_agent_mismatch",
           `[Sixb] Agent thread '${existing.id}' belongs to agent '${existing.agentId}', not '${params.agentId}'.`
         )
@@ -190,7 +184,7 @@ async function resolveThread(
 function requireAgentStorage(runtime: SixbRuntimeContext): AgentStorage {
   const agents = runtime.storage.agents
   if (!agents) {
-    throw new AgentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
+    throw agentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
   }
   return agents
 }

@@ -1,5 +1,5 @@
 import type { BrokerRetention, BrokerStreamDefinition } from "@sixb/core/broker"
-import { RedisBrokerError } from "./errors"
+import { redisBrokerError } from "./errors"
 
 export interface NormalizedRetention {
   readonly maxAgeMs?: number
@@ -9,7 +9,7 @@ export interface NormalizedRetention {
 
 export function assertStream(stream: BrokerStreamDefinition): void {
   if (stream.id.trim().length === 0) {
-    throw new RedisBrokerError("stream.id must be a non-empty string")
+    throw redisBrokerError("stream.id must be a non-empty string")
   }
 }
 

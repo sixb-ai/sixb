@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
-import { InMemoryWorkflowRunStorage, WorkflowRunError } from "../src/storage"
+import { InMemoryWorkflowRunStorage } from "../src/storage"
 
 describe("InMemoryWorkflowRunStorage", () => {
   test("starts and finishes a successful workflow run", async () => {
@@ -214,7 +214,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         projectId: "my-app",
         status: "succeeded",
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     const resumedRun = await storage.resume({
       id: "wf-run-waiting",
@@ -519,7 +519,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         workflowId: "reconcile-transaction",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     await expect(
       storage.finish({
@@ -528,7 +528,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         status: "failed",
         error: { code: "workflow.failed", message: "boom" },
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_not_found")
 
     await expect(
       storage.nodes.start({
@@ -542,7 +542,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         nodeKey: "missing-parent",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_not_found")
 
     await expect(
       storage.nodes.start({
@@ -556,7 +556,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         nodeKey: "bad-index",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     await expect(
       storage.nodes.start({
@@ -570,7 +570,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         nodeKey: "wrong-workflow",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     await storage.nodes.start({
       id: "node-1",
@@ -596,7 +596,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         nodeKey: "duplicate",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     await storage.nodes.finish({
       id: "node-1",
@@ -612,7 +612,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         status: "failed",
         error: { code: "runtime.cancelled", message: "Too late" },
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     await storage.finish({
       id: "wf-run-1",
@@ -633,7 +633,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         nodeKey: "too-late",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     await expect(
       storage.finish({
@@ -642,7 +642,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         status: "failed",
         error: { code: "runtime.cancelled", message: "Too late" },
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
   })
 
   test("InMemoryStorage includes workflow run storage", () => {

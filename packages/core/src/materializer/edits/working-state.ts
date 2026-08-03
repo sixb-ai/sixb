@@ -1,4 +1,4 @@
-import { MaterializationValidationError } from "../../materialization/errors"
+import { SixbError } from "../../errors"
 import type {
   LinkOverride,
   ObjectOverride,
@@ -163,8 +163,9 @@ export function validateWorkingCardinality(
       .resolveObjectType(source.objectTypeId)
       .links.find((candidate) => candidate.id === linkId)
     if (link?.cardinality === "one") {
-      throw new MaterializationValidationError(
-        `Link scope '${source.objectTypeId}.${linkId}' has cardinality one.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Link scope '${source.objectTypeId}.${linkId}' has cardinality one.`
       )
     }
   }

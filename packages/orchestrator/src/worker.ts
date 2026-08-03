@@ -5,7 +5,7 @@ import type { StoredDomainEvent } from "@sixb/core/internal/events"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import { evaluateEventSchedule } from "@sixb/core/internal/schedules"
 import { Worker } from "@sixb/core/internal/workers"
-import { OrchestratorError } from "./errors"
+import { orchestratorError } from "./errors"
 import { runProjectionDispatchReconciler } from "./projection-dispatch-reconciler"
 import { buildProjectionJob } from "./projection-job"
 import { routeKeysForEvent } from "./route-key"
@@ -26,13 +26,13 @@ export class OrchestratorWorker extends Worker {
 
   constructor(options: OrchestratorRuntimeOptions) {
     if (!options.projectId) {
-      throw new OrchestratorError("projectId is required.")
+      throw orchestratorError("projectId is required.")
     }
     super()
     this.options = options
     this.projectionDescriptors = projectionDescriptors(options.routes)
     if (this.projectionDescriptors.length > 0 && !options.projectionDispatch) {
-      throw new OrchestratorError(
+      throw orchestratorError(
         "Projection routes require lake and projection-run storage for durable dispatch."
       )
     }
@@ -273,12 +273,12 @@ async function enqueueDirectJob(
       return
     case "projections": {
       if (sourceEvent.type !== "dataset.version.committed") {
-        throw new OrchestratorError(
+        throw orchestratorError(
           `Projection jobs can only be dispatched from dataset.version.committed events, got '${sourceEvent.type}'.`
         )
       }
       if (item.job.payload.datasetId !== sourceEvent.payload.datasetId) {
-        throw new OrchestratorError(
+        throw orchestratorError(
           `Projection route for dataset '${item.job.payload.datasetId}' received dataset '${sourceEvent.payload.datasetId}'.`
         )
       }
@@ -375,7 +375,7 @@ async function enqueueEventScheduleTarget(
     case "workflows": {
       const input = target.mapper ? target.mapper({ event } as never) : {}
       if (!isRecord(input)) {
-        throw new OrchestratorError(
+        throw orchestratorError(
           `Workflow '${target.workflowId}' schedule mapper must return an input object.`
         )
       }
@@ -515,7 +515,7 @@ function projectionDescriptors(
       if (item.queue !== "projections") continue
       const existing = descriptors.get(item.job.payload.projectionId)
       if (existing && !projectionDescriptorsEqual(existing, item.job.payload)) {
-        throw new OrchestratorError(
+        throw orchestratorError(
           `Projection '${item.job.payload.projectionId}' has conflicting dispatch routes.`
         )
       }

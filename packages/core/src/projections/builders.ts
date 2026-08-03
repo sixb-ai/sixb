@@ -10,9 +10,9 @@ import type {
   DatasetColumnTypeOf,
   DatasetDefinition,
 } from "../datasets"
+import { SixbError } from "../errors"
 import type { LinkToken, PropertyToken } from "../ontology/tokens"
 import type { ObjectLink, ObjectType, Property, Schema } from "../ontology/types"
-import { ProjectionValidationError } from "./errors"
 import type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
@@ -33,13 +33,16 @@ import {
 
 function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
-    throw new ProjectionValidationError(`Projection ${field} must not be empty.`)
+    throw new SixbError("runtime.invalid_definition", `Projection ${field} must not be empty.`)
   }
 }
 
 function assertProjectionDataset(dataset: DatasetDefinition): void {
   if (!dataset || dataset.kind !== "dataset" || typeof dataset.id !== "string") {
-    throw new ProjectionValidationError("Projection dataset must be a dataset definition.")
+    throw new SixbError(
+      "runtime.invalid_definition",
+      "Projection dataset must be a dataset definition."
+    )
   }
   assertNonEmpty(dataset.id, "dataset id")
 }
@@ -463,7 +466,8 @@ function buildTelemetryProjection<const TPropertyToken extends TelemetryProperty
 
 function validateTelemetryProjectionProperty(propertyToken: PropertyToken): void {
   if (propertyToken.property.mode !== "telemetry") {
-    throw new ProjectionValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Projection property '${propertyToken.objectTypeId}.${propertyToken.id}' must be telemetry-enabled.`
     )
   }
@@ -483,20 +487,30 @@ function lowerTelemetryPointMapping(mapping: {
   const allowedKeys = new Set(["objectId", "at", "value", "unit"])
   for (const key of Object.keys(mapping)) {
     if (!allowedKeys.has(key)) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Telemetry projection point mapping contains unknown key '${key}'.`
       )
     }
   }
 
   if (mapping.objectId === undefined) {
-    throw new ProjectionValidationError("Telemetry projection point mapping requires objectId.")
+    throw new SixbError(
+      "runtime.invalid_definition",
+      "Telemetry projection point mapping requires objectId."
+    )
   }
   if (mapping.at === undefined) {
-    throw new ProjectionValidationError("Telemetry projection point mapping requires at.")
+    throw new SixbError(
+      "runtime.invalid_definition",
+      "Telemetry projection point mapping requires at."
+    )
   }
   if (mapping.value === undefined) {
-    throw new ProjectionValidationError("Telemetry projection point mapping requires value.")
+    throw new SixbError(
+      "runtime.invalid_definition",
+      "Telemetry projection point mapping requires value."
+    )
   }
 
   assertNonEmpty(mapping.objectId, "objectId field")
@@ -575,7 +589,7 @@ export function fromForeignKey<
   }
 
   if (input.sourceField === undefined) {
-    throw new ProjectionValidationError("Foreign key sourceField is required.")
+    throw new SixbError("runtime.invalid_definition", "Foreign key sourceField is required.")
   }
   assertNonEmpty(input.sourceField, "source field")
   return {

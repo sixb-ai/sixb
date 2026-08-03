@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import { decimal } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core/lake-storage"
 import { DUCKDB_COLUMN_TYPES } from "../src/internal/duckdb-column-types"
 import { normalizeDuckDbDecimalValue } from "../src/internal/duckdb-decimal"
 
@@ -24,7 +23,9 @@ describe("DuckDB decimal values", () => {
   })
 
   test("rejects invalid runtime values with a provider error", () => {
-    expect(() => normalizeDuckDbDecimalValue(1.25, "amount")).toThrow(LakeStorageError)
+    expect(() => normalizeDuckDbDecimalValue(1.25, "amount")).toThrow(
+      expect.objectContaining({ code: "storage.lake_failed" })
+    )
     expect(() => normalizeDuckDbDecimalValue("not-a-decimal", "amount")).toThrow(
       "must be an exact decimal string"
     )

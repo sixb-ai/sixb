@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { SyncRunError } from "@sixb/core/storage"
 import { SqliteSyncRunStorage } from "../src/sync-run-storage"
 
 describe("SqliteSyncRunStorage", () => {
@@ -217,7 +216,7 @@ describe("SqliteSyncRunStorage", () => {
         datasetId: "raw.erp.orders",
         mode: "snapshot",
       })
-    ).rejects.toBeInstanceOf(SyncRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await expect(
       storage.finish({
@@ -229,7 +228,7 @@ describe("SqliteSyncRunStorage", () => {
           message: "boom",
         },
       })
-    ).rejects.toBeInstanceOf(SyncRunError)
+    ).rejects.toHaveProperty("code", "sync.run_not_found")
 
     await expect(
       storage.finish({
@@ -242,6 +241,6 @@ describe("SqliteSyncRunStorage", () => {
           versionId: "ver_1",
         },
       })
-    ).rejects.toBeInstanceOf(SyncRunError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
   })
 })

@@ -1,3 +1,4 @@
+import { agentRequestError } from "../agents/errors"
 import { principalsEqual } from "../auth"
 import { isAllowed } from "../authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -6,7 +7,6 @@ import type {
   ListAgentThreadsInput,
   ListAgentThreadsResult,
 } from "../storage/agents"
-import { AgentRequestError } from "./errors"
 import { type RequestAgentRunInput, type RequestAgentRunResult, requestAgentRun } from "./request"
 import type { AgentDefinition } from "./types"
 
@@ -75,7 +75,7 @@ export class AgentsRuntime {
   ): Promise<RequestAgentRunResult> {
     const agent = this.getById(input.agentId)
     if (!agent) {
-      throw new AgentRequestError("agent_not_found", `[Sixb] Unknown agent '${input.agentId}'.`)
+      throw agentRequestError("agent_not_found", `[Sixb] Unknown agent '${input.agentId}'.`)
     }
     return requestAgentRun(runtime, agent, input)
   }

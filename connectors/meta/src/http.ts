@@ -1,5 +1,5 @@
 import type { RestClient } from "@sixb/connector-rest"
-import { connectorCodeForStatus, SixbProviderError } from "@sixb/core/errors"
+import { connectorCodeForStatus, SixbError } from "@sixb/core/errors"
 import type { InsightsQuery, MetaInsight, MetaPage } from "./types/common"
 
 export interface MetaHttpContext {
@@ -7,7 +7,7 @@ export interface MetaHttpContext {
 }
 
 /** Raised when the Graph API returns a non-2xx response. The raw error body is preserved. */
-export class MetaApiError extends SixbProviderError {
+export class MetaApiError extends SixbError {
   override readonly name = "MetaApiError"
 
   constructor(

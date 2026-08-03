@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite"
 import {
   type AgentRunRecord,
   type AgentRunStore,
-  AgentStorageError,
+  agentStorageError,
   type ConfirmAgentRunExecutionOwnershipInput,
   type CreateAgentRunInput,
   type FinishAgentRunInput,
@@ -36,14 +36,14 @@ export class SqliteAgentRunStore implements AgentRunStore {
         .get(input.projectId, input.threadId) as { active_run_id: string | null } | null
 
       if (!thread) {
-        throw new AgentStorageError(
+        throw agentStorageError(
           "thread_not_found",
           `[SixbSqlite] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
         )
       }
 
       if (thread.active_run_id !== null) {
-        throw new AgentStorageError(
+        throw agentStorageError(
           "active_run_exists",
           `[SixbSqlite] Agent thread '${input.threadId}' already has an active run '${thread.active_run_id}'.`
         )
@@ -79,7 +79,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
           )
       } catch (error) {
         if (isUniqueConstraintError(error)) {
-          throw new AgentStorageError(
+          throw agentStorageError(
             "duplicate_id",
             `[SixbSqlite] Agent run '${input.id}' already exists for project '${input.projectId}'.`
           )
@@ -188,7 +188,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
     return this.db.transaction(() => {
       const run = this.requireRunning(input.projectId, input.id)
       if (run.execution_token !== input.executionToken) {
-        throw new AgentStorageError(
+        throw agentStorageError(
           "execution_lost",
           `[SixbSqlite] Execution token is no longer current on agent run '${input.id}'.`
         )
@@ -215,7 +215,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
       const run = this.requireRunning(input.projectId, input.id)
 
       if (run.execution_token !== input.executionToken) {
-        throw new AgentStorageError(
+        throw agentStorageError(
           "execution_lost",
           `[SixbSqlite] Execution token is no longer current on agent run '${input.id}'.`
         )
@@ -345,14 +345,14 @@ export class SqliteAgentRunStore implements AgentRunStore {
       .get(projectId, id) as AgentRunRow | null
 
     if (!row) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "run_not_found",
         `[SixbSqlite] Agent run '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (row.status !== status) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "invalid_state",
         `[SixbSqlite] Agent run '${id}' is not ${status} (status '${row.status}').`
       )
@@ -379,7 +379,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
       .get(projectId, id) as AgentRunRow | null
 
     if (!row) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "run_not_found",
         `[SixbSqlite] Agent run '${id}' not found for project '${projectId}'.`
       )

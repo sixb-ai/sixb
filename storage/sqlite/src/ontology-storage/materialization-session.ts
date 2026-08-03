@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite"
 import {
   linkRefKey,
-  MaterializationConflictError,
+  materializationConflict,
   objectRefKey,
 } from "@sixb/core/internal/materialization"
 import {
@@ -50,7 +50,7 @@ export class SqliteMaterializationSessions {
 
   create(header: MaterializationPlanHeader): SqliteMaterializationSessionState {
     if (!this.context?.active) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         "Materialization sessions require an active storage transaction."
       )
@@ -71,10 +71,7 @@ export class SqliteMaterializationSessions {
       !this.context?.active ||
       value.transactionId !== this.context.id
     ) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Materialization session is inactive."
-      )
+      throw materializationConflict("effective-state", "Materialization session is inactive.")
     }
     return value
   }
@@ -130,7 +127,7 @@ export class SqliteMaterializationSessions {
     const session = this.require(input.session)
     const stream = session.workStreams[input.order]
     if (stream.started) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         `Materialization ${input.order} work may only be streamed once per session.`
       )

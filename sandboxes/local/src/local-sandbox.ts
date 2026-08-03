@@ -2,17 +2,16 @@ import { randomUUID } from "node:crypto"
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
-import {
-  type CommandResult,
-  type CreateSandboxOptions,
-  type RunCommandOptions,
-  type Sandbox,
-  type SandboxFileRecord,
-  SandboxIsolationUnavailableError,
-  type SandboxNetworkPolicy,
-  SandboxNotRunningError,
-  type SandboxStatus,
+import type {
+  CommandResult,
+  CreateSandboxOptions,
+  RunCommandOptions,
+  Sandbox,
+  SandboxFileRecord,
+  SandboxNetworkPolicy,
+  SandboxStatus,
 } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import { exec } from "@sixb/core/sandboxes"
 import { buildBwrapArgv } from "./isolation/bwrap"
 import {
@@ -115,7 +114,8 @@ export class LocalSandbox implements Sandbox {
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
     if (this.currentStatus !== "running") {
-      throw new SandboxNotRunningError(
+      throw new SixbError(
+        "sandbox.not_running",
         `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot run commands`
       )
     }
@@ -149,7 +149,8 @@ export class LocalSandbox implements Sandbox {
 
   async writeFiles(files: readonly SandboxFileRecord[]): Promise<void> {
     if (this.currentStatus !== "running") {
-      throw new SandboxNotRunningError(
+      throw new SixbError(
+        "sandbox.not_running",
         `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot write files`
       )
     }
@@ -219,7 +220,8 @@ export class LocalSandbox implements Sandbox {
       })
       return buildSeatbeltArgv({ profile, command, args })
     }
-    throw new SandboxIsolationUnavailableError(
+    throw new SixbError(
+      "sandbox.isolation_unavailable",
       `[Sandbox] isolation backend '${this.backend}' is not implemented`
     )
   }
@@ -254,7 +256,8 @@ async function resolveBackend(requested: LocalIsolation): Promise<ResolvedIsolat
     return requested
   }
 
-  throw new SandboxIsolationUnavailableError(
+  throw new SixbError(
+    "sandbox.isolation_unavailable",
     `[Sandbox] isolation '${requested}' is not available on this host (${probe.message})`
   )
 }

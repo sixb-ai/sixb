@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+import type { SixbError } from "@sixb/core/errors"
 import type {
   AuthStorage,
   CompleteMagicLinkSignInInput,
@@ -11,7 +12,7 @@ import type {
   UserIdentityRecord,
   UserRecord,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "../migrations"
 import {
   closeSqliteStoreConnection,
@@ -52,7 +53,7 @@ import {
 import { SqliteAuthUserStore } from "./users"
 
 interface AuthTransactionError {
-  readonly error: AuthStorageError
+  readonly error: SixbError
 }
 
 export interface SqliteAuthStorageOptions {
@@ -138,7 +139,7 @@ export class SqliteAuthStorage implements AuthStorage {
             consumedAt: completedAt,
           })
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "suspended_user",
               `[Sixb] User '${existingUserRow.id}' is suspended for project '${projectId}'.`
             ),
@@ -153,7 +154,7 @@ export class SqliteAuthStorage implements AuthStorage {
             consumedAt: completedAt,
           })
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "user_creation_not_allowed",
               `[Sixb] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
             ),
@@ -174,7 +175,7 @@ export class SqliteAuthStorage implements AuthStorage {
             consumedAt: completedAt,
           })
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "user_creation_not_allowed",
               `[Sixb] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
             ),
@@ -188,7 +189,7 @@ export class SqliteAuthStorage implements AuthStorage {
         if (shouldCreateUser) {
           newUserId = assertNonEmpty(input.newUserId, "User id")
           if (getUserRowById(this.db, { projectId, id: newUserId })) {
-            throw new AuthStorageError(
+            throw authStorageError(
               "duplicate_user",
               `[Sixb] User '${newUserId}' already exists for project '${projectId}'.`
             )
@@ -291,7 +292,7 @@ export class SqliteAuthStorage implements AuthStorage {
         if (identity && !userRow) {
           this.consumeOidcAttempt(input, completedAt, projectId)
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "missing_user",
               `[Sixb] User '${identity.user_id}' not found for linked OIDC identity.`
             ),
@@ -301,7 +302,7 @@ export class SqliteAuthStorage implements AuthStorage {
         if (!identity && userRow && (!input.autoLinkByVerifiedEmail || !input.emailVerified)) {
           this.consumeOidcAttempt(input, completedAt, projectId)
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "email_link_not_allowed",
               `[Sixb] OIDC identity cannot auto-link to user '${userRow.id}' for project '${projectId}'.`
             ),
@@ -311,7 +312,7 @@ export class SqliteAuthStorage implements AuthStorage {
         if (userRow?.status === "suspended") {
           this.consumeOidcAttempt(input, completedAt, projectId)
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "suspended_user",
               `[Sixb] User '${userRow.id}' is suspended for project '${projectId}'.`
             ),
@@ -321,7 +322,7 @@ export class SqliteAuthStorage implements AuthStorage {
         if (shouldCreateUser && !input.emailVerified) {
           this.consumeOidcAttempt(input, completedAt, projectId)
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "user_creation_not_allowed",
               `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
             ),
@@ -331,7 +332,7 @@ export class SqliteAuthStorage implements AuthStorage {
         if (shouldCreateUser && !activeInvitation && !input.allowUserCreationWithoutInvitation) {
           this.consumeOidcAttempt(input, completedAt, projectId)
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "user_creation_not_allowed",
               `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
             ),
@@ -347,7 +348,7 @@ export class SqliteAuthStorage implements AuthStorage {
         ) {
           this.consumeOidcAttempt(input, completedAt, projectId)
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "user_creation_not_allowed",
               `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
             ),
@@ -361,7 +362,7 @@ export class SqliteAuthStorage implements AuthStorage {
         if (shouldCreateUser) {
           newUserId = assertNonEmpty(input.newUserId, "User id")
           if (getUserRowById(this.db, { projectId, id: newUserId })) {
-            throw new AuthStorageError(
+            throw authStorageError(
               "duplicate_user",
               `[Sixb] User '${newUserId}' already exists for project '${projectId}'.`
             )
@@ -448,7 +449,7 @@ export class SqliteAuthStorage implements AuthStorage {
       })
 
       if (!existing) {
-        throw new AuthStorageError(
+        throw authStorageError(
           "missing_user",
           `[Sixb] User '${input.userId}' not found for project '${input.projectId}'.`
         )
@@ -491,21 +492,21 @@ export class SqliteAuthStorage implements AuthStorage {
     row: SqliteAuthMagicLinkRow | null
   ): asserts row is SqliteAuthMagicLinkRow {
     if (!row) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_magic_link",
         `[Sixb] Magic link '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (row.token_hash !== tokenHash || row.consumed_at || row.revoked_at) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "invalid_magic_link",
         `[Sixb] Magic link '${id}' is not valid for project '${projectId}'.`
       )
     }
 
     if (new Date(row.expires_at) <= completedAt) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "expired_magic_link",
         `[Sixb] Magic link '${id}' is expired for project '${projectId}'.`
       )
@@ -520,21 +521,21 @@ export class SqliteAuthStorage implements AuthStorage {
     row: SqliteAuthOidcAttemptRow | null
   ): asserts row is SqliteAuthOidcAttemptRow {
     if (!row) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_oidc_attempt",
         `[Sixb] OIDC authorization attempt '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (row.state_hash !== stateHash || row.consumed_at) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "invalid_oidc_attempt",
         `[Sixb] OIDC authorization attempt '${id}' is not valid for project '${projectId}'.`
       )
     }
 
     if (new Date(row.expires_at) <= completedAt) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "expired_oidc_attempt",
         `[Sixb] OIDC authorization attempt '${id}' is expired for project '${projectId}'.`
       )
@@ -777,7 +778,7 @@ function assertSignInSessionAudience(
     return
   }
 
-  throw new AuthStorageError(
+  throw authStorageError(
     "invalid_input",
     `[Sixb] Sign-in session audience '${sessionAudience}' does not match stored auth audience '${storedAudience}' for project '${projectId}'.`
   )

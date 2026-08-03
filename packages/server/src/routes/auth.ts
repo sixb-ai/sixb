@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
 import type { AuthSessionAudience, GroupDefinition, OntologySource, Sixb } from "@sixb/core"
-import { SixbValidationError, toSixbFailure } from "@sixb/core/errors"
+import { isSixbError, SixbError, toSixbFailure } from "@sixb/core/errors"
 import {
   type AuthenticatedUserRequestSession,
   type AuthRequestResult,
@@ -18,25 +18,23 @@ import {
   shouldUseSecureCookies,
   verifyDoubleSubmitCsrf,
 } from "@sixb/core/internal/auth"
-import {
-  type AccessTokenRecord,
-  type AuthStorage,
-  AuthStorageError,
-  type InvitationRecord,
-  type ServiceAccountRecord,
-  type UserRecord,
+import type {
+  AccessTokenRecord,
+  AuthStorage,
+  InvitationRecord,
+  ServiceAccountRecord,
+  UserRecord,
 } from "@sixb/core/storage"
 import { type Elysia, t } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { sessionCanAccessApplication } from "../auth/application-access"
-import {
-  type AuthInvitationDestinationOptions,
-  type AuthInvitationRedirectContext,
-  type AuthInvitationRedirectInput,
-  type AuthRedirectContext,
-  BrowserOriginError,
-  type ResolveAuthRedirectContext,
-  type ResolveRequestAuthContext,
+import type {
+  AuthInvitationDestinationOptions,
+  AuthInvitationRedirectContext,
+  AuthInvitationRedirectInput,
+  AuthRedirectContext,
+  ResolveAuthRedirectContext,
+  ResolveRequestAuthContext,
 } from "../auth/browser-origin"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../auth/csrf"
 import { jsonErrorResponse } from "../auth/responses"
@@ -1699,7 +1697,7 @@ function resolveAuthRedirectContext(
   try {
     return options.resolveAuthRedirectContext(request, input)
   } catch (error) {
-    if (error instanceof BrowserOriginError) {
+    if (isSixbError(error, "auth.origin_rejected")) {
       return htmlMessageResponse("This sign-in request is invalid.", 400)
     }
 
@@ -1715,7 +1713,7 @@ function resolveInvitationDeliveryContext(
   try {
     return options.resolveInvitationRedirectContext(request, input)
   } catch (error) {
-    if (error instanceof BrowserOriginError) {
+    if (isSixbError(error, "auth.origin_rejected")) {
       return jsonErrorResponse("runtime.invalid_input", "Invitation destination is not allowed")
     }
 
@@ -2072,11 +2070,11 @@ function serializeServiceAccount(
 function parseRequiredFutureDate(value: string): Date {
   const date = parseDate(value)
   if (!date) {
-    throw new SixbValidationError("runtime.invalid_input", "Expiration is required.")
+    throw new SixbError("runtime.invalid_input", "Expiration is required.")
   }
 
   if (date.getTime() <= Date.now()) {
-    throw new SixbValidationError("runtime.invalid_input", "Expiration must be in the future.")
+    throw new SixbError("runtime.invalid_input", "Expiration must be in the future.")
   }
 
   return date
@@ -2176,12 +2174,11 @@ function logAuthCallbackError(kind: string, error: unknown): void {
     return
   }
 
-  const detail =
-    error instanceof AuthStorageError
-      ? `${error.name}(${error.reason}): ${error.message}`
-      : error instanceof Error
-        ? `${error.name}: ${error.message}`
-        : String(error)
+  const detail = isSixbError(error)
+    ? `${error.code}(${error.details?.reason ?? "-"}): ${error.message}`
+    : error instanceof Error
+      ? `${error.name}: ${error.message}`
+      : String(error)
 
   console.error(`[SixbServer] ${kind} auth callback failed: ${detail}`)
 }

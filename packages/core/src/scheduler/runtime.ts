@@ -1,7 +1,7 @@
+import { SixbError } from "../errors"
 import type { DomainEventLog } from "../events"
 import type { CronScheduleDefinition, ScheduleDefinition } from "../schedules"
 import { nextCronOccurrence } from "../schedules"
-import { SchedulerValidationError } from "./errors"
 
 /** Matches the `onError` flush budget: long enough for a healthy broker, short enough to shut down. */
 const DEFAULT_EMIT_DRAIN_TIMEOUT_MS = 5_000
@@ -48,7 +48,7 @@ export class SchedulerRuntime {
     const seenIds = new Set<string>()
     for (const schedule of this.schedules) {
       if (seenIds.has(schedule.id)) {
-        throw new SchedulerValidationError(`Duplicate schedule id '${schedule.id}'.`)
+        throw new SixbError("runtime.invalid_definition", `Duplicate schedule id '${schedule.id}'.`)
       }
       seenIds.add(schedule.id)
     }

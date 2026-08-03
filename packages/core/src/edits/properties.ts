@@ -1,5 +1,5 @@
+import { SixbError } from "../errors"
 import type { ObjectLink, Property, ValueType } from "../ontology"
-import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import {
   assertKnownProperties,
@@ -7,7 +7,6 @@ import {
   validateObjectProperties,
   validatePropertyValue,
 } from "../ontology/validation"
-import { EditBatchError } from "./errors"
 import type { EditObjectProperties } from "./types"
 
 export function normalizeObjectEditProperties(params: {
@@ -34,7 +33,8 @@ export function normalizeLinkEditProperties(params: {
   const linkProperties = linkDefinition.properties ?? []
 
   if (linkProperties.length === 0 && Object.keys(properties).length > 0) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Link ${sourceObjectTypeId}.${linkId} does not define link properties`
     )
   }
@@ -42,7 +42,8 @@ export function normalizeLinkEditProperties(params: {
   const knownPropertyIds = new Set(linkProperties.map((property) => property.id))
   for (const propertyId of Object.keys(properties)) {
     if (!knownPropertyIds.has(propertyId)) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Unknown link property '${propertyId}' for link '${sourceObjectTypeId}.${linkId}'`
       )
     }
@@ -72,7 +73,8 @@ export function normalizeLinkEditProperties(params: {
 export function getPrimaryProperty(objectType: ObjectTypeWithPropertyTokens): Property {
   const primaryProperty = objectType.properties.find((property) => property.primary)
   if (!primaryProperty) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Object type '${objectType.id}' has no primary property`
     )
   }
@@ -85,7 +87,8 @@ export function assertPrimaryPropertyNotUpdated(
 ): void {
   const primaryProperty = getPrimaryProperty(objectType)
   if (Object.hasOwn(properties, primaryProperty.id)) {
-    throw new EditBatchError(
+    throw new SixbError(
+      "storage.edit_rejected",
       `[Sixb] EditBatch cannot update primary property '${objectType.id}.${primaryProperty.id}'.`
     )
   }
@@ -104,23 +107,27 @@ export function normalizeEditablePropertyIds(params: {
 
   for (const propertyId of propertyIds) {
     if (typeof propertyId !== "string" || !propertyId.trim()) {
-      throw new EditBatchError(
+      throw new SixbError(
+        "storage.edit_rejected",
         `[Sixb] EditBatch ${objectType.id}.${operation} property id must be a non-empty string.`
       )
     }
     const property = objectType.properties.find((candidate) => candidate.id === propertyId)
     if (!property) {
-      throw new EditBatchError(
+      throw new SixbError(
+        "storage.edit_rejected",
         `[Sixb] EditBatch ${operation} references unknown property '${objectType.id}.${propertyId}'.`
       )
     }
     if (property.id === primaryProperty.id) {
-      throw new EditBatchError(
+      throw new SixbError(
+        "storage.edit_rejected",
         `[Sixb] EditBatch cannot ${operation} primary property '${objectType.id}.${propertyId}'.`
       )
     }
     if (property.mode === "telemetry") {
-      throw new EditBatchError(
+      throw new SixbError(
+        "storage.edit_rejected",
         `[Sixb] EditBatch cannot ${operation} telemetry property '${objectType.id}.${propertyId}'.`
       )
     }
@@ -130,7 +137,8 @@ export function normalizeEditablePropertyIds(params: {
   }
 
   if (normalized.length === 0) {
-    throw new EditBatchError(
+    throw new SixbError(
+      "storage.edit_rejected",
       `[Sixb] EditBatch ${objectType.id}.${operation} requires at least one property id.`
     )
   }
@@ -145,7 +153,8 @@ function assertNoTelemetryProperties(
   for (const propertyId of Object.keys(properties)) {
     const property = definitions.find((candidate) => candidate.id === propertyId)
     if (property?.mode === "telemetry") {
-      throw new EditBatchError(
+      throw new SixbError(
+        "storage.edit_rejected",
         `[Sixb] EditBatch cannot edit telemetry property '${path}.${propertyId}' in the MVP.`
       )
     }

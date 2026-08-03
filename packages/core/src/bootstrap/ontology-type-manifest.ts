@@ -1,9 +1,9 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, extname, join, relative, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
+import { SixbError } from "../errors"
 import type { OntologyDocumentInput } from "../ontology/registry"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
-import { RuntimeError } from "../runtime/errors"
 
 const moduleExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"])
 
@@ -178,7 +178,8 @@ function addManifestEntry(input: {
     return
   }
 
-  throw new RuntimeError(
+  throw new SixbError(
+    "runtime.invalid_definition",
     `[Sixb] Duplicate ontology object type id "${input.objectType.id}" while generating `.concat(
       `the type manifest: ${relative(process.cwd(), existing.modulePath)} and `,
       `${relative(process.cwd(), input.modulePath)}.`
@@ -224,7 +225,10 @@ async function loadOntologyModule(input: {
   } catch (error) {
     const relPath = relative(input.projectRoot, input.modulePath)
     const reason = error instanceof Error ? error.message : String(error)
-    throw new RuntimeError(`Failed to load ontology module '${relPath}': ${reason}`)
+    throw new SixbError(
+      "runtime.invalid_definition",
+      `Failed to load ontology module '${relPath}': ${reason}`
+    )
   }
 }
 

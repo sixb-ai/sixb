@@ -1,7 +1,5 @@
-import {
-  MaterializationConflictError,
-  MaterializationValidationError,
-} from "@sixb/core/internal/materialization"
+import { SixbError } from "@sixb/core/errors"
+import { materializationConflict } from "@sixb/core/internal/materialization"
 import type {
   ClaimedOntologyOutboxRow,
   ClaimOntologyOutboxInput,
@@ -32,8 +30,9 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
       const leaseExpiry = assertTimestamp(input.leaseExpiresAt, "Ontology outbox lease expiry")
       assertNonblank(input.leaseId, "Ontology outbox lease id")
       if (leaseExpiry <= now) {
-        throw new MaterializationValidationError(
-          "Ontology outbox lease expiry must be later than the claim time."
+        throw new SixbError(
+          "ontology.invalid_value",
+          "[Sixb] Ontology outbox lease expiry must be later than the claim time."
         )
       }
 
@@ -65,7 +64,7 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
       return rows.map((row) => {
         const record = outboxRecord(row)
         if (record.leaseId === null || record.leaseExpiresAt === null) {
-          throw new MaterializationConflictError(
+          throw materializationConflict(
             "outbox-lease",
             "Ontology outbox claim returned an unpaired lease."
           )
@@ -195,7 +194,10 @@ function validateLeaseIds(ids: readonly string[]): string[] {
   for (const id of ids) {
     assertNonblank(id, "Ontology outbox event id")
     if (seen.has(id)) {
-      throw new MaterializationValidationError(`Ontology outbox lease batch repeats event '${id}'.`)
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Ontology outbox lease batch repeats event '${id}'.`
+      )
     }
     seen.add(id)
   }
@@ -211,6 +213,6 @@ function assertLeaseInput(input: {
   assertNonblank(input.leaseId, "Ontology outbox lease id")
 }
 
-function leaseConflict(): MaterializationConflictError {
-  return new MaterializationConflictError("outbox-lease", "Ontology outbox lease does not match.")
+function leaseConflict(): SixbError {
+  return materializationConflict("outbox-lease", "Ontology outbox lease does not match.")
 }

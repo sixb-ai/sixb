@@ -4,7 +4,7 @@ import type {
   CreateOidcAuthorizationAttemptInput,
   OidcAuthorizationAttemptRecord,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import { type PgStoreClient, runPgTransaction } from "../transactions"
 import type { PgAuthOidcAttemptRow } from "./rows"
 import { rowToOidcAuthorizationAttemptRecord } from "./rows"
@@ -31,7 +31,7 @@ export class PgAuthOidcAuthorizationAttemptStore implements AuthOidcAuthorizatio
     const codeVerifier = assertNonEmpty(input.codeVerifier, "OIDC code verifier")
 
     if (await getOidcAttemptRowById(this.sql, { projectId, id })) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "duplicate_oidc_attempt",
         `[Sixb] OIDC authorization attempt '${id}' already exists for project '${projectId}'.`
       )

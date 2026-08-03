@@ -7,7 +7,7 @@ import {
   type OntologyRegistry,
   type Schema,
 } from "@sixb/core"
-import { ProjectionWorkerError } from "./errors"
+import { projectionWorkerError } from "./errors"
 import { resolveProjectionSchema } from "./projection-schema"
 import { normalizeProjectedValue } from "./projection-value-coercion"
 import { isPlainObject } from "./utils"
@@ -108,7 +108,7 @@ function buildProjectedPropertyPlans(input: {
   const { ontology, projection, dataset } = input
   const objectType = ontology.getObjectTypeById(projection.objectTypeId)
   if (!objectType) {
-    throw new ProjectionWorkerError(
+    throw projectionWorkerError(
       `[SixbProjectionWorker] Projection '${projection.id}' references unknown object type '${projection.objectTypeId}'.`
     )
   }
@@ -121,14 +121,14 @@ function buildProjectedPropertyPlans(input: {
   for (const [propertyId, columnName] of Object.entries(projection.properties)) {
     const property = propertiesById.get(propertyId)
     if (!property) {
-      throw new ProjectionWorkerError(
+      throw projectionWorkerError(
         `[SixbProjectionWorker] Projection '${projection.id}' references unknown property '${propertyId}' on object type '${objectType.id}'.`
       )
     }
 
     const column = columnsByName.get(columnName)
     if (!column) {
-      throw new ProjectionWorkerError(
+      throw projectionWorkerError(
         `[SixbProjectionWorker] Projection '${projection.id}' references unknown dataset column '${columnName}' on dataset '${dataset.id}'.`
       )
     }

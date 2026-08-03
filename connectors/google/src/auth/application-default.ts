@@ -1,5 +1,6 @@
+import { isSixbError, type SixbError } from "@sixb/core/errors"
 import { GoogleAuth } from "google-auth-library"
-import { GoogleAuthError } from "../errors"
+import { googleAuthError } from "../errors"
 import type { TokenSource } from "./types"
 
 export interface ApplicationDefaultClient {
@@ -71,7 +72,7 @@ function extractBearerToken(headers: Headers): string {
   const match = authorization?.match(/^Bearer\s+(.+)$/i)
   const token = match?.[1]
   if (!token?.trim()) {
-    throw new GoogleAuthError(
+    throw googleAuthError(
       "Application Default Credentials did not return a bearer Authorization header."
     )
   }
@@ -85,10 +86,10 @@ async function loadApplicationDefaultClient(
   return auth.getClient()
 }
 
-function wrapAuthError(message: string, cause: unknown): GoogleAuthError {
-  if (cause instanceof GoogleAuthError) {
+function wrapAuthError(message: string, cause: unknown): SixbError {
+  if (isSixbError(cause, "connector.unauthorized")) {
     return cause
   }
   const detail = cause instanceof Error ? cause.message : String(cause)
-  return new GoogleAuthError(`${message}: ${detail}`, { cause })
+  return googleAuthError(`${message}: ${detail}`, { cause })
 }

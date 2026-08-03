@@ -1,5 +1,6 @@
 import type { EditBatch } from "../edits"
 import { lowerEditBatch } from "../edits"
+import { SixbError } from "../errors"
 import type { EventActor } from "../events/envelope"
 import type {
   EditCommitResult,
@@ -12,7 +13,6 @@ import type {
 } from "../materializer"
 import type { OntologyMutationRuntime } from "../runtime/ontology-mutations"
 import type { Storage } from "../storage/types"
-import { ActionEditCommitError } from "./errors"
 
 /** Exact reads an Action handler depended on, protected by row-level CAS at commit time. */
 export interface ActionReadDependencies {
@@ -91,7 +91,8 @@ export async function findActionEditCommit(
   })
   if (!record) return null
   if (record.result.kind !== "edit") {
-    throw new ActionEditCommitError(
+    throw new SixbError(
+      "action.commit_failed",
       `[Sixb] Action run '${input.runId}' resolved a '${record.result.kind}' commit instead of an edit commit.`
     )
   }

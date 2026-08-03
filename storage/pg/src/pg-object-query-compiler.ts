@@ -1,10 +1,10 @@
 import {
   type ObjectExpansion,
   type ObjectQuery,
-  ObjectQueryExecutionError,
   type ObjectQueryPredicate,
   type ObjectQuerySetOperation,
   type ObjectQuerySortField,
+  objectQueryExecutionFailed,
   type QueryScalarKind,
 } from "@sixb/core"
 
@@ -1424,7 +1424,7 @@ function decodePageToken(
 }
 
 function throwInvalidPageToken(message: string): never {
-  throw new ObjectQueryExecutionError(
+  throw objectQueryExecutionFailed(
     "storage.query_invalid",
     "invalid_page_token",
     message,

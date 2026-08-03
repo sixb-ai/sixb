@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { CreateWorkflowInterventionInput } from "@sixb/core/storage"
-import { WorkflowInterventionError } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import { SqliteWorkflowInterventionStorage } from "../src/workflow-intervention-storage"
 
@@ -134,10 +133,10 @@ describe("SqliteWorkflowInterventionStorage", () => {
         id: "submit-me",
         projectId: "my-app",
       })
-    ).rejects.toBeInstanceOf(WorkflowInterventionError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
     await expect(
       storage.create(createInterventionInput({ id: "submit-me" }))
-    ).rejects.toBeInstanceOf(WorkflowInterventionError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
     await expect(
       storage.create(
         createInterventionInput({
@@ -145,7 +144,7 @@ describe("SqliteWorkflowInterventionStorage", () => {
           nodeIndex: -1,
         })
       )
-    ).rejects.toBeInstanceOf(WorkflowInterventionError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
   })
 
   test("SqliteStorage includes workflow intervention storage", () => {

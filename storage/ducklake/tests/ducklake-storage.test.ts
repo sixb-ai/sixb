@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import type { DatasetDefinition } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core/lake-storage"
 import { DuckLakeStorage } from "../src"
 import { createDuckDbRuntime } from "../src/internal/duckdb-runtime"
 
@@ -18,7 +17,7 @@ describe("DuckLakeStorage", () => {
       id: "raw.erp.orders",
     } as DatasetDefinition)
 
-    await expect(rejected).rejects.toBeInstanceOf(LakeStorageError)
+    await expect(rejected).rejects.toHaveProperty("code", "storage.lake_failed")
     await expect(rejected).rejects.toThrow(
       "Dataset 'raw.erp.orders' requires a schema for DuckLake storage"
     )
@@ -36,7 +35,7 @@ describe("DuckLakeStorage", () => {
     await storage.close()
 
     const rejected = storage.listDatasets()
-    await expect(rejected).rejects.toBeInstanceOf(LakeStorageError)
+    await expect(rejected).rejects.toHaveProperty("code", "storage.lake_failed")
     await expect(rejected).rejects.toThrow("closed")
   })
 
@@ -49,7 +48,7 @@ describe("DuckLakeStorage", () => {
     })
 
     const rejected = storage.getVersion("missing.dataset", "not-a-ducklake-version")
-    await expect(rejected).rejects.toBeInstanceOf(LakeStorageError)
+    await expect(rejected).rejects.toHaveProperty("code", "storage.lake_failed")
     await expect(rejected).rejects.toThrow("Invalid DuckLake version id")
   })
 

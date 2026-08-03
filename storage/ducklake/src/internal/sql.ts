@@ -1,4 +1,4 @@
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
 import type {
   AzureSecretOptions,
   DuckDbSecretOptions,
@@ -83,7 +83,10 @@ export function duckLakeMetadataTableName(
  */
 export function quoteIdentifier(identifier: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
-    throw new LakeStorageError(`[SixbDuckLake] Invalid SQL identifier '${identifier}'.`)
+    throw new SixbError(
+      "storage.lake_failed",
+      `[SixbDuckLake] Invalid SQL identifier '${identifier}'.`
+    )
   }
 
   return `"${identifier}"`
@@ -401,7 +404,7 @@ function optionalIdentifierParameter(name: string, value: string | undefined): r
   }
 
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
-    throw new LakeStorageError(`[SixbDuckLake] Invalid SQL identifier '${value}'.`)
+    throw new SixbError("storage.lake_failed", `[SixbDuckLake] Invalid SQL identifier '${value}'.`)
   }
 
   return [`${name} ${value}`]
@@ -418,12 +421,18 @@ function appendPostgresConnectionParameter(
   }
 
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    throw new LakeStorageError(`[SixbDuckLake] Invalid PostgreSQL catalog parameter '${name}'.`)
+    throw new SixbError(
+      "storage.lake_failed",
+      `[SixbDuckLake] Invalid PostgreSQL catalog parameter '${name}'.`
+    )
   }
 
   const normalizedName = name.toLowerCase()
   if (names.has(normalizedName)) {
-    throw new LakeStorageError(`[SixbDuckLake] Duplicate PostgreSQL catalog parameter '${name}'.`)
+    throw new SixbError(
+      "storage.lake_failed",
+      `[SixbDuckLake] Duplicate PostgreSQL catalog parameter '${name}'.`
+    )
   }
 
   names.add(normalizedName)

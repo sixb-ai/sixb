@@ -14,11 +14,11 @@
 import type { ActionDefinition } from "../actions/types"
 import type { AgentDefinition } from "../agents/types"
 import type { DatasetDefinition } from "../datasets"
+import { SixbError } from "../errors"
 import type { ObjectType } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows/types"
-import { SecurityValidationError } from "./errors"
 import type { ApplicationDefinition } from "./types"
 
 /** Capability targets a breadth selector can range over. */
@@ -69,7 +69,10 @@ export function isBreadthSelector(value: unknown): value is BreadthSelector {
 
 export function definitionIdOf(item: { readonly id?: unknown }, label: string): string {
   if (typeof item?.id !== "string" || !item.id.trim()) {
-    throw new SecurityValidationError(`[Sixb] ${label} requires definitions with a non-empty id.`)
+    throw new SixbError(
+      "runtime.invalid_definition",
+      `[Sixb] ${label} requires definitions with a non-empty id.`
+    )
   }
   return item.id
 }

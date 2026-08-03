@@ -1,4 +1,4 @@
-import { AuthStorageError } from "../errors"
+import { authStorageError } from "../../../storage/auth/errors"
 import type {
   AuthServiceAccountGroupMembershipStore,
   ReconcileAuthServiceAccountGroupMembershipsInput,
@@ -33,7 +33,7 @@ export class InMemoryAuthServiceAccountGroupMembershipStore
     const projectId = assertNonEmpty(input.projectId, "Project id")
     const serviceAccountId = assertNonEmpty(input.serviceAccountId, "Service account id")
     if (!this.state.serviceAccounts.has(serviceAccountKey(projectId, serviceAccountId))) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_service_account",
         `[Sixb] Service account '${serviceAccountId}' not found for project '${projectId}'.`
       )

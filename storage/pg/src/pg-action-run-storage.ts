@@ -1,4 +1,5 @@
 import type { ActionSubject, JsonValue } from "@sixb/core"
+import { materializationConflict } from "@sixb/core/internal/materialization"
 import type {
   ActionRunEffectsRecord,
   ActionRunParams,
@@ -17,7 +18,6 @@ import type {
   StartActionRunInput,
 } from "@sixb/core/storage"
 import {
-  ActionRunError,
   actionRunPhaseRecordsEqual,
   canRequeueActionRunAfterEnqueueFailure,
   finishActionRunPhase,
@@ -40,17 +40,20 @@ export class PgActionRunStorage implements ActionRunStorage {
       FOR UPDATE
     `
     if (!row) {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[SixbPg] Action run '${input.runId}' not found for project '${input.projectId}'.`
       )
     }
     if (row.action_id !== input.actionId) {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[SixbPg] Action run '${input.runId}' does not belong to action '${input.actionId}'.`
       )
     }
     if (row.status !== "running") {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[SixbPg] Action run '${input.runId}' cannot materialize from status '${row.status}'.`
       )
     }
@@ -130,7 +133,8 @@ export class PgActionRunStorage implements ActionRunStorage {
         !existing ||
         !canRequeueActionRunAfterEnqueueFailure(rowToActionRunRecord(existing), input)
       ) {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[SixbPg] Action run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
@@ -179,12 +183,14 @@ export class PgActionRunStorage implements ActionRunStorage {
 
     const existing = await this.getById({ projectId: input.projectId, id: input.id })
     if (!existing) {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[SixbPg] Action run '${input.id}' not found for project '${input.projectId}'.`
       )
     }
 
-    throw new ActionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[SixbPg] Action run '${input.id}' cannot start from status '${existing.status}'.`
     )
   }
@@ -220,7 +226,8 @@ export class PgActionRunStorage implements ActionRunStorage {
           return rowToActionRunRecord(existing)
         }
 
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[SixbPg] Action run '${input.id}' already has a different writeback record.`
         )
       }
@@ -252,7 +259,8 @@ export class PgActionRunStorage implements ActionRunStorage {
           return rowToActionRunRecord(existing)
         }
 
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[SixbPg] Action run '${input.id}' already has a different effects record.`
         )
       }
@@ -281,13 +289,15 @@ export class PgActionRunStorage implements ActionRunStorage {
       `
 
       if (!existing) {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[SixbPg] Action run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (isTerminalActionRun({ status: existing.status })) {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[SixbPg] Action run '${input.id}' cannot finish from terminal status '${existing.status}'.`
         )
       }
@@ -445,11 +455,15 @@ export class PgActionRunStorage implements ActionRunStorage {
     `
 
     if (!existing) {
-      throw new ActionRunError(`[SixbPg] Action run '${id}' not found for project '${projectId}'.`)
+      throw materializationConflict(
+        "run-correlation",
+        `[SixbPg] Action run '${id}' not found for project '${projectId}'.`
+      )
     }
 
     if (existing.status !== "running") {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[SixbPg] Action run '${id}' cannot ${operation} from status '${existing.status}'.`
       )
     }
@@ -567,7 +581,10 @@ function rowToActionSubject(row: DatabaseRow): ActionSubject {
   }
 
   if (!row.object_type_id || !row.primary_id) {
-    throw new ActionRunError(`[SixbPg] Action run '${row.id}' has an invalid object subject.`)
+    throw materializationConflict(
+      "run-correlation",
+      `[SixbPg] Action run '${row.id}' has an invalid object subject.`
+    )
   }
 
   return {

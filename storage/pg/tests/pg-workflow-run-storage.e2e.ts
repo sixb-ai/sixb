@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { WorkflowRunError } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { PgWorkflowRunStorage } from "../src/pg-workflow-run-storage"
 import { createTestStorage } from "./helpers"
@@ -171,7 +170,7 @@ describe("PgWorkflowRunStorage", () => {
         projectId: "my-app",
         status: "succeeded",
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     const resumedRun = await storage.workflowRuns.resume({
       id: "wf-run-waiting",
@@ -444,7 +443,7 @@ describe("PgWorkflowRunStorage", () => {
         workflowId: "reconcile-transaction",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     await expect(
       storage.workflowRuns.finish({
@@ -453,7 +452,7 @@ describe("PgWorkflowRunStorage", () => {
         status: "failed",
         error: { code: "workflow.failed", message: "boom" },
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_not_found")
 
     await expect(
       storage.workflowRuns.nodes.start({
@@ -467,7 +466,7 @@ describe("PgWorkflowRunStorage", () => {
         nodeKey: "bad-index",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     await expect(
       storage.workflowRuns.nodes.start({
@@ -481,7 +480,7 @@ describe("PgWorkflowRunStorage", () => {
         nodeKey: "wrong-workflow",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     await storage.workflowRuns.nodes.start({
       id: "node-1",
@@ -507,7 +506,7 @@ describe("PgWorkflowRunStorage", () => {
         nodeKey: "duplicate",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     await storage.workflowRuns.nodes.finish({
       id: "node-1",
@@ -523,7 +522,7 @@ describe("PgWorkflowRunStorage", () => {
         status: "failed",
         error: { code: "runtime.cancelled", message: "Too late" },
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     await storage.workflowRuns.finish({
       id: "wf-run-1",
@@ -544,7 +543,7 @@ describe("PgWorkflowRunStorage", () => {
         nodeKey: "too-late",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     await expect(
       storage.workflowRuns.finish({
@@ -553,7 +552,7 @@ describe("PgWorkflowRunStorage", () => {
         status: "failed",
         error: { code: "runtime.cancelled", message: "Too late" },
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
   })
 
   test("fences stale workflow deliveries after reclaim", async () => {

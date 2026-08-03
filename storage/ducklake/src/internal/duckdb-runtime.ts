@@ -4,7 +4,7 @@ import {
   type DuckDBValue,
   type DuckDBAppender as NodeDuckDBAppender,
 } from "@duckdb/node-api"
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
 import type { DuckDbRuntimeOptions, DuckLakeStorageOptions } from "../types"
 import { sixbDuckDbValueConverter } from "./duckdb-value-converter"
 import {
@@ -200,13 +200,13 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
 
   private assertAcceptingOperations(): void {
     if (this.closing || this.closed) {
-      throw new LakeStorageError("[SixbDuckLake] DuckDB runtime is closed.")
+      throw new SixbError("storage.lake_failed", "[SixbDuckLake] DuckDB runtime is closed.")
     }
   }
 
   private assertNotClosed(): void {
     if (this.closed) {
-      throw new LakeStorageError("[SixbDuckLake] DuckDB runtime is closed.")
+      throw new SixbError("storage.lake_failed", "[SixbDuckLake] DuckDB runtime is closed.")
     }
   }
 }

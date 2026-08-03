@@ -1,4 +1,4 @@
-import { ActionValidationError } from "../objects/action/errors"
+import { SixbError } from "../errors"
 import type { ActionDefinition, ActionSubject, ActionTargetObject } from "./types"
 import { isObjectActionDefinition } from "./validation"
 
@@ -19,9 +19,8 @@ export async function runActionValidators<TBaseContext extends object>(input: {
     for (const validator of validators) {
       const result = await validator(input.baseContext)
       if (isValidatorErrorResult(result)) {
-        throw new ActionValidationError(result.error, {
-          actionId: input.action.id,
-          subject: input.subject,
+        throw new SixbError("runtime.invalid_input", result.error, {
+          details: { actionId: input.action.id, ...subjectDetails(input.subject) },
         })
       }
     }
@@ -38,9 +37,8 @@ export async function runActionValidators<TBaseContext extends object>(input: {
       target: input.target,
     })
     if (isValidatorErrorResult(result)) {
-      throw new ActionValidationError(result.error, {
-        actionId: input.action.id,
-        subject: input.subject,
+      throw new SixbError("runtime.invalid_input", result.error, {
+        details: { actionId: input.action.id, ...subjectDetails(input.subject) },
       })
     }
   }
@@ -53,4 +51,10 @@ function isValidatorErrorResult(value: unknown): value is { readonly error: stri
     "error" in value &&
     typeof value.error === "string"
   )
+}
+
+function subjectDetails(subject: ActionSubject): Record<string, string> {
+  return subject.kind === "object"
+    ? { objectTypeId: subject.objectTypeId, primaryId: subject.primaryId }
+    : {}
 }

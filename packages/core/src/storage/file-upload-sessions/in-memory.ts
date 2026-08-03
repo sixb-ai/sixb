@@ -1,6 +1,6 @@
 import type { Principal } from "../../auth"
 import type { FileRef, SignedBlobUploadPart } from "../../blob-storage"
-import { FileUploadSessionError } from "./errors"
+import { fileUploadSessionError } from "../../storage/file-upload-sessions/errors"
 import type {
   CreateFileUploadSessionInput,
   FileUploadSession,
@@ -68,18 +68,18 @@ export class InMemoryFileUploadSessions implements FileUploadSessionStore {
   async getForPrincipal(uploadId: string, principal: Principal): Promise<FileUploadSession> {
     const session = this.sessionsById.get(uploadId)
     if (!session || session.principalKey !== principalKey(principal)) {
-      throw new FileUploadSessionError("not_found", "File upload session not found.")
+      throw fileUploadSessionError("not_found", "File upload session not found.")
     }
 
     const nowMs = Date.now()
     if (isFileUploadSessionExpired(session, nowMs)) {
       this.sessionsById.delete(uploadId)
-      throw new FileUploadSessionError("expired", "File upload session has expired.")
+      throw fileUploadSessionError("expired", "File upload session has expired.")
     }
 
     if (isTerminalFileUploadSessionExpired(session, nowMs)) {
       this.sessionsById.delete(uploadId)
-      throw new FileUploadSessionError("not_found", "File upload session not found.")
+      throw fileUploadSessionError("not_found", "File upload session not found.")
     }
 
     return session
@@ -146,11 +146,11 @@ export class InMemoryFileUploadSessions implements FileUploadSessionStore {
   private requirePending(uploadId: string): FileUploadSession {
     const session = this.sessionsById.get(uploadId)
     if (!session) {
-      throw new FileUploadSessionError("not_found", "File upload session not found.")
+      throw fileUploadSessionError("not_found", "File upload session not found.")
     }
 
     if (session.status !== "pending") {
-      throw new FileUploadSessionError(
+      throw fileUploadSessionError(
         session.status === "completed" ? "already_completed" : "already_aborted",
         `File upload session is already ${session.status}.`
       )

@@ -1,4 +1,4 @@
-import { EventsError } from "./errors"
+import { SixbError } from "../errors"
 import type { ActionEvent } from "./types/actions"
 import type { DatasetEvent } from "./types/datasets"
 import type { DomainEvent, DomainEventDraft } from "./types/index"
@@ -230,7 +230,7 @@ export function resolveEventStorage(event: DomainEventDraft): {
 } {
   const eventType = event.type as string
   if (!isDomainEventType(eventType)) {
-    throw new EventsError(`Unknown event type: ${eventType}`)
+    throw new SixbError("runtime.invariant_violated", `Unknown event type: ${eventType}`)
   }
 
   const definition = EVENT_DEFINITIONS[eventType] as EventDefinition

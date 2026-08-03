@@ -2,9 +2,8 @@ import { randomUUID } from "node:crypto"
 import { SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
 import { reportRunFailure } from "../error-reporting/capability"
-import { toSixbFailure } from "../errors"
+import { SixbError, toSixbFailure } from "../errors"
 import type { SixbRuntimeContext } from "../runtime/types"
-import { WorkflowValidationError } from "./errors"
 import { snapshotWorkflowInput } from "./snapshot"
 import type { WorkflowDefinition, WorkflowRunSource } from "./types"
 
@@ -44,12 +43,12 @@ export async function requestWorkflowRun(
   assertAuthorized(runtime, { kind: "workflow.run", workflowId: workflow.id })
   const storage = runtime.storage.workflowRuns
   if (!storage) {
-    throw new WorkflowValidationError("[Sixb] Workflow run storage is not configured.")
+    throw new SixbError("runtime.invalid_input", "[Sixb] Workflow run storage is not configured.")
   }
 
   const queue = runtime.queues.workflows
   if (!queue) {
-    throw new WorkflowValidationError("[Sixb] Workflow run queue is not configured.")
+    throw new SixbError("runtime.invalid_input", "[Sixb] Workflow run queue is not configured.")
   }
 
   const runId = createWorkflowRunId(options.runId)
@@ -65,7 +64,8 @@ export async function requestWorkflowRun(
   const existing = await storage.getById({ projectId: runtime.projectId, id: runId })
   if (existing) {
     if (existing.workflowId !== workflow.id) {
-      throw new WorkflowValidationError(
+      throw new SixbError(
+        "runtime.invalid_input",
         `[Sixb] Workflow run '${runId}' already exists for a different workflow '${existing.workflowId}'.`
       )
     }
@@ -153,7 +153,7 @@ export async function requestWorkflowRun(
 function createWorkflowRunId(runId: string | undefined): string {
   if (runId !== undefined) {
     if (!runId.trim()) {
-      throw new WorkflowValidationError("[Sixb] Workflow run id must not be empty")
+      throw new SixbError("runtime.invalid_input", "[Sixb] Workflow run id must not be empty")
     }
     return runId
   }

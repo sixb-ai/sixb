@@ -1,6 +1,6 @@
+import { SixbError } from "../../errors"
 import type { EventActor } from "../../events/envelope"
 import { assertJsonValue, cloneJsonValue, compareStrings, stableJsonStringify } from "../../json"
-import { MaterializationValidationError } from "../../materialization/errors"
 import type {
   ExpectedLinkRevision,
   ExpectedLinkScopeRevision,
@@ -32,20 +32,21 @@ export function normalizeJsonProperties(
   label = "Properties"
 ): Readonly<Record<string, import("../../json").JsonValue>> {
   if (typeof properties !== "object" || properties === null || Array.isArray(properties)) {
-    throw new MaterializationValidationError(`${label} must be a JSON object.`)
+    throw new SixbError("ontology.invalid_value", `[Sixb] ${label} must be a JSON object.`)
   }
 
   const normalized: Record<string, import("../../json").JsonValue> = {}
   for (const propertyId of Object.keys(properties).sort(compareStrings)) {
     if (propertyId.trim().length === 0) {
-      throw new MaterializationValidationError(`${label} contains a blank property id.`)
+      throw new SixbError("ontology.invalid_value", `[Sixb] ${label} contains a blank property id.`)
     }
     const value = properties[propertyId]
     try {
       assertJsonValue(value, `${label}.${propertyId}`)
     } catch (error) {
-      throw new MaterializationValidationError(
-        error instanceof Error ? error.message : `${label}.${propertyId} must be JSON.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] ${error instanceof Error ? error.message : `${label}.${propertyId} must be JSON.`}`
       )
     }
     normalized[propertyId] = cloneJsonValue(value)
@@ -55,18 +56,19 @@ export function normalizeJsonProperties(
 
 function normalizeNonblank(value: string, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new MaterializationValidationError(`${label} must be a nonblank string.`)
+    throw new SixbError("ontology.invalid_value", `[Sixb] ${label} must be a nonblank string.`)
   }
   return value
 }
 
 function normalizeEventActor(actor: EventActor): EventActor {
   if (typeof actor !== "object" || actor === null || Array.isArray(actor)) {
-    throw new MaterializationValidationError("Event actor must be an object.")
+    throw new SixbError("ontology.invalid_value", "[Sixb] Event actor must be an object.")
   }
   if (actor.type !== "user" && actor.type !== "serviceAccount" && actor.type !== "system") {
-    throw new MaterializationValidationError(
-      "Event actor type must be 'user', 'serviceAccount', or 'system'."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Event actor type must be 'user', 'serviceAccount', or 'system'."
     )
   }
   return Object.freeze({
@@ -78,7 +80,7 @@ function normalizeEventActor(actor: EventActor): EventActor {
 function normalizeTimestamp(value: string, label: string): string {
   const milliseconds = Date.parse(value)
   if (!Number.isFinite(milliseconds)) {
-    throw new MaterializationValidationError(`${label} must be a valid timestamp.`)
+    throw new SixbError("ontology.invalid_value", `[Sixb] ${label} must be a valid timestamp.`)
   }
   return new Date(milliseconds).toISOString()
 }
@@ -89,7 +91,10 @@ function normalizePropertyIds(values: readonly string[], label: string): readonl
   for (const value of values) {
     normalizeNonblank(value, label)
     if (seen.has(value)) {
-      throw new MaterializationValidationError(`${label} contains duplicate '${value}'.`)
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] ${label} contains duplicate '${value}'.`
+      )
     }
     seen.add(value)
     normalized.push(value)
@@ -114,15 +119,17 @@ function normalizeOperation(operation: OntologyEditOperation): OntologyEditOpera
     const setIds = new Set(Object.keys(set))
     for (const propertyId of [...unset, ...reset]) {
       if (setIds.has(propertyId)) {
-        throw new MaterializationValidationError(
-          `Operation '${operation.id}' property '${propertyId}' appears in set and unset/reset.`
+        throw new SixbError(
+          "ontology.invalid_value",
+          `[Sixb] Operation '${operation.id}' property '${propertyId}' appears in set and unset/reset.`
         )
       }
     }
     for (const propertyId of unset) {
       if (reset.includes(propertyId)) {
-        throw new MaterializationValidationError(
-          `Operation '${operation.id}' property '${propertyId}' appears in unset and reset.`
+        throw new SixbError(
+          "ontology.invalid_value",
+          `[Sixb] Operation '${operation.id}' property '${propertyId}' appears in unset and reset.`
         )
       }
     }
@@ -159,7 +166,7 @@ function normalizeOperation(operation: OntologyEditOperation): OntologyEditOpera
       ref: normalizeLinkRef(operation.ref),
     })
   }
-  throw new MaterializationValidationError("Unknown ontology edit operation kind.")
+  throw new SixbError("ontology.invalid_value", "[Sixb] Unknown ontology edit operation kind.")
 }
 
 function deduplicateExpectations<T>(
@@ -172,7 +179,10 @@ function deduplicateExpectations<T>(
     const key = keyOf(value)
     const existing = byKey.get(key)
     if (existing && stableJsonStringify(existing) !== stableJsonStringify(value)) {
-      throw new MaterializationValidationError(`${label} has contradictory values for ${key}.`)
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] ${label} has contradictory values for ${key}.`
+      )
     }
     byKey.set(key, value)
   }
@@ -187,7 +197,10 @@ function normalizeExpectedObject(value: ExpectedObjectRevision): ExpectedObjectR
   const ref = normalizeObjectRef(value.ref)
   if (!value.exists) return Object.freeze({ ref, exists: false })
   if (!Number.isSafeInteger(value.version) || value.version < 1) {
-    throw new MaterializationValidationError("Expected object version must be a positive integer.")
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Expected object version must be a positive integer."
+    )
   }
   return Object.freeze({
     ref,
@@ -228,21 +241,24 @@ function normalizeOperationGroups(
   const grouped = new Set<string>()
   const normalized = groups.map((group) => {
     if (group.length < 2) {
-      throw new MaterializationValidationError(
-        "Operation groups must contain at least two operations."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Operation groups must contain at least two operations."
       )
     }
 
     const positions = group.map((id) => {
       const position = operationIds.get(id)
       if (position === undefined) {
-        throw new MaterializationValidationError(
-          `Operation group references unknown operation id '${id}'.`
+        throw new SixbError(
+          "ontology.invalid_value",
+          `[Sixb] Operation group references unknown operation id '${id}'.`
         )
       }
       if (grouped.has(id)) {
-        throw new MaterializationValidationError(
-          `Operation id '${id}' appears in more than one operation group.`
+        throw new SixbError(
+          "ontology.invalid_value",
+          `[Sixb] Operation id '${id}' appears in more than one operation group.`
         )
       }
       grouped.add(id)
@@ -251,8 +267,9 @@ function normalizeOperationGroups(
 
     const first = positions[0]!
     if (positions.some((position, index) => position !== first + index)) {
-      throw new MaterializationValidationError(
-        "Operation groups must list a contiguous run in operation order."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Operation groups must list a contiguous run in operation order."
       )
     }
     return { first, ids: Object.freeze([...group]) }
@@ -267,7 +284,10 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
   const operations = input.operations.map((operation, index) => {
     const normalized = normalizeOperation(operation)
     if (operationIds.has(normalized.id)) {
-      throw new MaterializationValidationError(`Duplicate operation id '${normalized.id}'.`)
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Duplicate operation id '${normalized.id}'.`
+      )
     }
     operationIds.set(normalized.id, index)
     return normalized
@@ -384,22 +404,27 @@ export function normalizeProjectionSourceEntry(
     const normalized = normalizeProjectionAssertion(assertion)
     const key = projectionEntityKey(normalized)
     if (seen.has(key)) {
-      throw new MaterializationValidationError(`Projection entry repeats asserted entity ${key}.`)
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Projection entry repeats asserted entity ${key}.`
+      )
     }
     seen.add(key)
     return normalized
   })
   const rootKey = projectionEntityKey(root)
   if (!seen.has(rootKey)) {
-    throw new MaterializationValidationError(
-      `Projection entry must contain an assertion matching root ${rootKey}.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Projection entry must contain an assertion matching root ${rootKey}.`
     )
   }
   if (root.kind === "object") {
     const objectAssertions = assertions.filter((assertion) => assertion.kind === "object")
     if (objectAssertions.length !== 1 || projectionEntityKey(objectAssertions[0]) !== rootKey) {
-      throw new MaterializationValidationError(
-        "An object projection root must contain exactly its matching object assertion plus links."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] An object projection root must contain exactly its matching object assertion plus links."
       )
     }
     for (const assertion of assertions) {
@@ -407,8 +432,9 @@ export function normalizeProjectionSourceEntry(
         assertion.kind === "link" &&
         objectRefKey(assertion.ref.source) !== objectRefKey(root.ref)
       ) {
-        throw new MaterializationValidationError(
-          "An object projection root may contain only links sourced from that root."
+        throw new SixbError(
+          "ontology.invalid_value",
+          "[Sixb] An object projection root may contain only links sourced from that root."
         )
       }
     }
@@ -417,8 +443,9 @@ export function normalizeProjectionSourceEntry(
     assertions[0].kind !== "link" ||
     projectionEntityKey(assertions[0]) !== rootKey
   ) {
-    throw new MaterializationValidationError(
-      "A link projection root must contain exactly its matching link assertion."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] A link projection root must contain exactly its matching link assertion."
     )
   }
   return Object.freeze({
@@ -442,8 +469,9 @@ function normalizeTelemetryPoint(point: TelemetryPointWrite): TelemetryPointWrit
   try {
     assertJsonValue(point.value, "Telemetry point value")
   } catch (error) {
-    throw new MaterializationValidationError(
-      error instanceof Error ? error.message : "Telemetry point value must be JSON."
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] ${error instanceof Error ? error.message : "Telemetry point value must be JSON."}`
     )
   }
   return Object.freeze({
@@ -467,7 +495,10 @@ export function normalizeTelemetryAppend(input: TelemetryAppend): TelemetryAppen
       existing &&
       stableJsonStringify(existing) !== stableJsonStringify(normalized)
     ) {
-      throw new MaterializationValidationError(`Conflicting telemetry points for ${key}.`)
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Conflicting telemetry points for ${key}.`
+      )
     }
     // Projection batches follow stable physical source order: the last occurrence wins. Runtime
     // callers remain strict because contradictory points usually indicate a request bug.
@@ -494,28 +525,33 @@ export function normalizeTelemetryAppend(input: TelemetryAppend): TelemetryAppen
         })
   if (source.kind === "projection") {
     if (!Number.isSafeInteger(source.batchOrdinal) || source.batchOrdinal < 0) {
-      throw new MaterializationValidationError(
-        "Telemetry projection batch ordinal must be a nonnegative safe integer."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Telemetry projection batch ordinal must be a nonnegative safe integer."
       )
     }
     if (!Number.isSafeInteger(source.sourceRowCount) || source.sourceRowCount < 0) {
-      throw new MaterializationValidationError(
-        "Telemetry projection sourceRowCount must be a nonnegative safe integer."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Telemetry projection sourceRowCount must be a nonnegative safe integer."
       )
     }
     if (!Number.isSafeInteger(source.sourceRowsSkipped) || source.sourceRowsSkipped < 0) {
-      throw new MaterializationValidationError(
-        "Telemetry projection sourceRowsSkipped must be a nonnegative safe integer."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Telemetry projection sourceRowsSkipped must be a nonnegative safe integer."
       )
     }
     if (source.sourceRowsSkipped > source.sourceRowCount) {
-      throw new MaterializationValidationError(
-        "Telemetry projection sourceRowsSkipped cannot exceed sourceRowCount."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Telemetry projection sourceRowsSkipped cannot exceed sourceRowCount."
       )
     }
     if (typeof source.inputExhausted !== "boolean") {
-      throw new MaterializationValidationError(
-        "Telemetry projection inputExhausted must be a boolean."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Telemetry projection inputExhausted must be a boolean."
       )
     }
   }

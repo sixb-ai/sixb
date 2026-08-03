@@ -7,15 +7,15 @@ import {
   ProjectionRegistry,
 } from "../src/materializer"
 import { planWork } from "../src/materializer/execution/work-records"
-import {
-  type MaterializationPlanChunk,
-  type MaterializationPlanFinalization,
-  type MaterializationPlanHeader,
-  type MaterializationPlanWorkItem,
-  type OntologyCommitRecord,
-  type OntologyCommitWrite,
-  StorageTransactionError,
+import type {
+  MaterializationPlanChunk,
+  MaterializationPlanFinalization,
+  MaterializationPlanHeader,
+  MaterializationPlanWorkItem,
+  OntologyCommitRecord,
+  OntologyCommitWrite,
 } from "../src/storage"
+import { storageTransactionError } from "../src/storage/errors"
 import { getInMemoryStorageTestingAdapter } from "../src/storage/in-memory/testing"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import {
@@ -2359,7 +2359,7 @@ describe("in-memory ontology storage", () => {
     getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
       beforeWrite(boundary) {
         if (boundary === "finalize" && failures++ === 0) {
-          throw new StorageTransactionError("retry", { reason: "serialization_failure" })
+          throw storageTransactionError("retry", { reason: "serialization_failure" })
         }
       },
     })
@@ -2422,7 +2422,7 @@ async function expectLogicalOriginDuplicateRejected(
         expected: { sources: [], objects: [], links: [], linkScopes: [], points: [] },
       })
     })
-  ).rejects.toMatchObject({ kind: "run-correlation" })
+  ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "run-correlation" } })
 }
 
 type DeepMutable<T> = T extends readonly (infer TValue)[]

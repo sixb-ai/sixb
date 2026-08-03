@@ -5,7 +5,7 @@ import type {
   ListAuthAccessTokensInput,
   ListAuthAccessTokensResult,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import type { PgStoreClient } from "../transactions"
 import type { PgAuthAccessTokenRow, PgAuthServiceAccountRow, PgAuthUserRow } from "./rows"
 import { rowToAccessTokenRecord, serializeOptionalStringArray } from "./rows"
@@ -173,7 +173,7 @@ export class PgAuthAccessTokenStore implements AuthAccessTokenStore {
       RETURNING *
     `
     if (!row) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_access_token",
         `[Sixb] Access token '${params.id}' not found for project '${params.projectId}'.`
       )
@@ -198,7 +198,7 @@ export class PgAuthAccessTokenStore implements AuthAccessTokenStore {
       RETURNING *
     `
     if (!row) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_access_token",
         `[Sixb] Access token '${params.id}' not found for project '${params.projectId}'.`
       )
@@ -219,7 +219,7 @@ export class PgAuthAccessTokenStore implements AuthAccessTokenStore {
           AND id = ${subjectId}
       `
       if (row) return
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_user",
         `[Sixb] User '${subjectId}' not found for project '${projectId}'.`
       )
@@ -232,7 +232,7 @@ export class PgAuthAccessTokenStore implements AuthAccessTokenStore {
         AND id = ${subjectId}
     `
     if (row) return
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_service_account",
       `[Sixb] Service account '${subjectId}' not found for project '${projectId}'.`
     )
@@ -247,7 +247,7 @@ function assertKindMatchesSubject(input: CreateAuthAccessTokenInput): void {
     return
   }
 
-  throw new AuthStorageError(
+  throw authStorageError(
     "invalid_input",
     `[Sixb] Access token kind '${input.kind}' cannot target subject type '${input.subjectType}'.`
   )

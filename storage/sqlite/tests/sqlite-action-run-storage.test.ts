@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { ActionRunError } from "@sixb/core/storage"
 import { SqliteActionRunStorage } from "../src/action-run-storage"
 
 describe("SqliteActionRunStorage", () => {
@@ -128,7 +127,7 @@ describe("SqliteActionRunStorage", () => {
         params: {},
         idempotencyKey: "action:my-app:act_1",
       })
-    ).rejects.toBeInstanceOf(ActionRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await storage.start({
       id: "act_1",
@@ -140,7 +139,7 @@ describe("SqliteActionRunStorage", () => {
         id: "act_1",
         projectId: "my-app",
       })
-    ).rejects.toBeInstanceOf(ActionRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await expect(
       storage.finish({
@@ -152,7 +151,7 @@ describe("SqliteActionRunStorage", () => {
           message: "boom",
         },
       })
-    ).rejects.toBeInstanceOf(ActionRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 
   test("rejects finishing terminal runs", async () => {
@@ -185,7 +184,7 @@ describe("SqliteActionRunStorage", () => {
         projectId: "my-app",
         status: "succeeded",
       })
-    ).rejects.toBeInstanceOf(ActionRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 
   test("requeues matching runs that failed during enqueue", async () => {
@@ -238,7 +237,7 @@ describe("SqliteActionRunStorage", () => {
         params: { amount: 60_000 },
         idempotencyKey: "action:my-app:act_1",
       })
-    ).rejects.toBeInstanceOf(ActionRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 
   test("persists V2 lifecycle records and recomposes relational commit diffs", async () => {

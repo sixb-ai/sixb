@@ -1,5 +1,5 @@
+import { SixbError } from "../errors"
 import type { OntologyEditOperation } from "../materialization/model"
-import { EditBatchError } from "./errors"
 import type { EditBatch, EditObjectRef, EditOperation } from "./types"
 
 /**
@@ -68,7 +68,8 @@ function lowerEditOperation(operation: EditOperation, id: string): OntologyEditO
     case "link.reset":
       return { id, kind: "link.reset", ref: linkRef(operation) }
     default:
-      throw new EditBatchError(
+      throw new SixbError(
+        "storage.edit_rejected",
         `[Sixb] Unknown EditBatch operation kind '${String((operation as { kind?: unknown }).kind)}'.`
       )
   }

@@ -1,4 +1,4 @@
-import { MaterializationValidationError } from "../../materialization/errors"
+import { SixbError } from "../../errors"
 import type {
   PinnedDatasetVersion,
   ProjectionMaterializationIdentity,
@@ -56,6 +56,9 @@ export function createProjectionRunMaterializationIdentity(
     case "TelemetryProjectionDefinition":
       return { ...base, projectionKind: "telemetry", protocol: "telemetry" }
     default:
-      throw new MaterializationValidationError("Expected a supported projection definition.")
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Expected a supported projection definition."
+      )
   }
 }

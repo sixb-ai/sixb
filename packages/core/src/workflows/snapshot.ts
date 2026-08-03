@@ -1,7 +1,7 @@
 import type { ActionSubject } from "../actions"
+import { SixbError } from "../errors"
 import type { JsonValue } from "../json"
 import { isObjectRefSchema, type Schema, type SchemaOrRef, type ValueType } from "../ontology"
-import { WorkflowValidationError } from "./errors"
 import type {
   AgentStepDefinition,
   InterventionDefinition,
@@ -310,7 +310,8 @@ function snapshotSchemaValue(params: {
   if (schema.type === "valueTypeRef") {
     const valueType = valueTypesById.get(schema.valueTypeId)
     if (!valueType) {
-      throw new WorkflowValidationError(
+      throw new SixbError(
+        "runtime.invalid_input",
         `[Sixb] Unknown valueTypeRef '${schema.valueTypeId}' at ${path}`
       )
     }
@@ -365,8 +366,11 @@ function snapshotDate(value: Date, path: string): string {
   return value.toISOString()
 }
 
-function cannotSerialize(path: string): WorkflowValidationError {
-  return new WorkflowValidationError(`[Sixb] ${path} cannot be serialized as workflow IO`)
+function cannotSerialize(path: string): SixbError {
+  return new SixbError(
+    "runtime.invalid_input",
+    `[Sixb] ${path} cannot be serialized as workflow IO`
+  )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

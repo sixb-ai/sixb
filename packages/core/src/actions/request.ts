@@ -1,11 +1,10 @@
 import { assertAuthorized } from "../authorization"
 import { reportRunFailure } from "../error-reporting/capability"
-import { ActionRunTimeoutError } from "../objects/action/errors"
-import { OntologyValidationError } from "../ontology/errors"
+import { SixbError } from "../errors"
+import { materializationConflict } from "../materialization/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
-  ActionRunError,
   type ActionRunParams,
   type ActionRunRecord,
   type ActionRunStorage,
@@ -71,7 +70,7 @@ function clearTimer(timer: ReturnType<typeof setTimeout> | undefined): void {
 function getActionDefinition(runtime: SixbRuntimeContext, actionId: string): ActionDefinition {
   const action = runtime.actionRegistry.getById(actionId)
   if (!action) {
-    throw new OntologyValidationError(`Unknown action '${actionId}'`)
+    throw new SixbError("ontology.invalid_value", `Unknown action '${actionId}'`)
   }
   return action
 }
@@ -329,7 +328,13 @@ export async function waitForActionRun(
 
     timer = setTimeout(
       () => {
-        rejectWith(new ActionRunTimeoutError({ runId: input.runId, timeoutMs }))
+        rejectWith(
+          new SixbError(
+            "action.timed_out",
+            `Action run '${input.runId}' did not finish within ${timeoutMs}ms.`,
+            { details: { runId: input.runId, timeoutMs } }
+          )
+        )
       },
       Math.max(0, timeoutMs - (Date.now() - startedAt))
     )
@@ -361,7 +366,7 @@ export async function waitForActionRun(
 function requireActionRunStorage(runtime: SixbRuntimeContext): ActionRunStorage {
   const actionRuns = runtime.storage.actionRuns
   if (!actionRuns) {
-    throw new ActionRunError("[Sixb] Action run storage is not configured.")
+    throw materializationConflict("run-correlation", "[Sixb] Action run storage is not configured.")
   }
   return actionRuns
 }
@@ -380,7 +385,8 @@ function assertExistingRunMatchesRequest(
     actionRunParamsEqual(existing.params, request.params)
 
   if (!matches) {
-    throw new ActionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Action run '${existing.id}' already exists with a different request payload.`
     )
   }

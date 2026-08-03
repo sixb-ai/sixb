@@ -1,7 +1,7 @@
+import { SixbError } from "../../errors"
 import { assertJsonValue, cloneJsonValue, type JsonValue } from "../../json"
 import type { ObjectFieldSchema, Property, Schema, ValueType } from ".."
 import { normalizeDecimalValue } from "../decimal"
-import { OntologyValidationError } from "../errors"
 import { resolveValueTypeSchema } from "./schema"
 
 /**
@@ -66,7 +66,7 @@ export function normalizeSchemaValue(
 
   if (schema.type === "array") {
     if (!Array.isArray(value)) {
-      throw new OntologyValidationError(`[Sixb] Property ${path} must be an array`)
+      throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} must be an array`)
     }
     return (value as readonly unknown[]).map((entry, index) =>
       normalizeSchemaValue(schema.items, entry, `${path}[${index}]`, valueTypesById)
@@ -115,7 +115,7 @@ function normalizeObjectFieldValue(
 
 function assertPlainRecord(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new OntologyValidationError(`[Sixb] Property ${path} must be an object`)
+    throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} must be an object`)
   }
   return value as Record<string, unknown>
 }
@@ -131,20 +131,26 @@ function normalizeTimestampValue(value: unknown, path: string): string {
 
 function normalizeDecimal(value: unknown, path: string): string {
   if (typeof value !== "string") {
-    throw new OntologyValidationError(`[Sixb] Property ${path} must be an exact decimal string`)
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Property ${path} must be an exact decimal string`
+    )
   }
 
   try {
     return normalizeDecimalValue(value)
   } catch {
-    throw new OntologyValidationError(`[Sixb] Property ${path} must be an exact decimal string`)
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Property ${path} must be an exact decimal string`
+    )
   }
 }
 
 function normalizeDateLike(value: unknown, path: string): Date {
   const date = value instanceof Date ? value : new Date(String(value))
   if (Number.isNaN(date.getTime())) {
-    throw new OntologyValidationError(`[Sixb] Property ${path} must be a valid date`)
+    throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} must be a valid date`)
   }
   return date
 }

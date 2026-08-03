@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { LakeStorageError } from "@sixb/core/lake-storage"
 import { renderDuckLakeSqlTransformSql } from "../src/internal/sql-transform-relations"
 
 describe("DuckLake SQL transform relations", () => {
@@ -96,7 +95,7 @@ describe("DuckLake SQL transform relations", () => {
         },
         sql: ({ customers }) => `select * from ${String(customers).replace("_0__", "_1__")}`,
       })
-    ).toThrow(LakeStorageError)
+    ).toThrow(expect.objectContaining({ code: "storage.lake_failed" }))
   })
 
   test("rejects malformed unresolved relation placeholders", () => {

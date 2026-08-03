@@ -1,4 +1,3 @@
-export { PipelineRunError } from "./errors"
 export { InMemoryPipelineRunStorage } from "./in-memory"
 export type {
   FinishPipelineRunInput,

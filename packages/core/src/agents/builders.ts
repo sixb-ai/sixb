@@ -1,4 +1,4 @@
-import { AgentDefinitionError } from "./errors"
+import { SixbError } from "../errors"
 import type { AgentDefinition, DefineAgentConfig } from "./types"
 import {
   assertNonEmpty,
@@ -24,7 +24,7 @@ export function defineAgent<const TId extends string>(
   assertNonEmpty(config.instructions, "instructions")
 
   if (config.model === undefined || config.model === null) {
-    throw new AgentDefinitionError("[Sixb] Agent model is required.")
+    throw new SixbError("runtime.invalid_definition", "[Sixb] Agent model is required.")
   }
   assertValidReasoningLevel(config.reasoning)
   assertValidProviderOptions(config.providerOptions)

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import type { SixbError } from "@sixb/core/errors"
 import { createTokenSource } from "../src/auth"
-import { GoogleAuthError } from "../src/errors"
+import { googleAuthError } from "../src/errors"
 import {
   decodeJwtClaims,
   generateServiceAccountKey,
@@ -136,11 +137,11 @@ describe("createTokenSource — Application Default Credentials mode", () => {
       await source.get()
       throw new Error("expected ADC discovery to fail")
     } catch (error) {
-      expect(error).toBeInstanceOf(GoogleAuthError)
-      expect((error as GoogleAuthError).message).toContain(
+      expect(error).toHaveProperty("code", "connector.unauthorized")
+      expect((error as SixbError).message).toContain(
         "could not load Application Default Credentials"
       )
-      expect((error as GoogleAuthError).cause).toBe(discoveryError)
+      expect((error as SixbError).cause).toBe(discoveryError)
     }
 
     expect(await source.get()).toBe("recovered")
@@ -170,9 +171,9 @@ describe("createTokenSource — Application Default Credentials mode", () => {
       await source.get()
       throw new Error("expected ADC token refresh to fail")
     } catch (error) {
-      expect(error).toBeInstanceOf(GoogleAuthError)
-      expect((error as GoogleAuthError).message).toContain("could not obtain ADC request headers")
-      expect((error as GoogleAuthError).cause).toBe(refreshError)
+      expect(error).toHaveProperty("code", "connector.unauthorized")
+      expect((error as SixbError).message).toContain("could not obtain ADC request headers")
+      expect((error as SixbError).cause).toBe(refreshError)
     }
 
     expect(await source.get()).toBe("refreshed")
@@ -197,7 +198,7 @@ describe("createTokenSource — Application Default Credentials mode", () => {
 describe("createTokenSource — service-account mode", () => {
   test("validates the key and scopes early", () => {
     expect(() => createTokenSource({ serviceAccountKey: "not json", scopes: ["s"] })).toThrow(
-      GoogleAuthError
+      expect.objectContaining({ code: "connector.unauthorized" })
     )
     expect(() =>
       createTokenSource({
@@ -291,14 +292,14 @@ describe("createTokenSource — service-account mode", () => {
         exchange: async () => {
           attempt++
           if (attempt === 1) {
-            throw new GoogleAuthError("boom")
+            throw googleAuthError("boom")
           }
           return { accessToken: "recovered", expiresInSec: 3600 }
         },
       }
     )
 
-    await expect(source.get()).rejects.toThrow(GoogleAuthError)
+    await expect(source.get()).rejects.toHaveProperty("code", "connector.unauthorized")
     expect(await source.get()).toBe("recovered")
   })
 })

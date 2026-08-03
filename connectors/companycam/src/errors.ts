@@ -1,6 +1,6 @@
-import { connectorCodeForStatus, SixbProviderError } from "@sixb/core/errors"
+import { connectorCodeForStatus, SixbError } from "@sixb/core/errors"
 /** Raised when the CompanyCam API returns a non-2xx response. */
-export class CompanyCamApiError extends SixbProviderError {
+export class CompanyCamApiError extends SixbError {
   override readonly name = "CompanyCamApiError"
 
   constructor(

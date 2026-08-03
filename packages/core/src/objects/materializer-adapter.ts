@@ -8,6 +8,7 @@
  */
 
 import { randomUUID } from "node:crypto"
+import { SixbError } from "../errors"
 import type { EventActor } from "../events/envelope"
 import type { JsonValue } from "../json"
 import type {
@@ -21,7 +22,6 @@ import type {
 } from "../materialization/model"
 import { normalizeJsonProperties } from "../materializer"
 import type { ObjectLink, ValueType } from "../ontology"
-import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import {
   assertKnownProperties,
@@ -34,7 +34,6 @@ import {
 import { getOntologyMutationRuntime } from "../runtime/ontology-mutations"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { ObjectRow } from "../storage"
-import { ObjectError } from "./errors"
 
 /** The runtime pieces one commit needs. */
 // `authorization` is here only so a commit can name its actor; it stays optional, so every existing
@@ -171,7 +170,8 @@ export function normalizeRuntimeObject(input: {
 
   const primaryValue = properties[primaryPropertyId]
   if (primaryValue === undefined || primaryValue === null) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Missing primary property '${primaryPropertyId}' in upsert for '${objectType.id}'`
     )
   }
@@ -261,7 +261,10 @@ export function requireItemOutcomes(
 ): readonly OntologyOperationOutcome[] {
   const outcomes = commit.outcomes.get(index)
   if (!outcomes || outcomes.length === 0) {
-    throw new ObjectError(`[Sixb] Materializer returned no outcome for batch item ${index}.`)
+    throw new SixbError(
+      "runtime.invariant_violated",
+      `[Sixb] Materializer returned no outcome for batch item ${index}.`
+    )
   }
   return outcomes
 }
@@ -269,7 +272,10 @@ export function requireItemOutcomes(
 /** Reads the effective object an ok outcome produced; runtime object writes always resolve one. */
 export function requireEffectiveObject(outcome: OntologyOperationOutcome): EffectiveObjectSnapshot {
   if (!outcome.ok || !outcome.object) {
-    throw new ObjectError(`[Sixb] Materializer returned no effective object for '${outcome.id}'.`)
+    throw new SixbError(
+      "runtime.invariant_violated",
+      `[Sixb] Materializer returned no effective object for '${outcome.id}'.`
+    )
   }
   return outcome.object
 }
@@ -291,7 +297,7 @@ export function toObjectRow(projectId: string, snapshot: EffectiveObjectSnapshot
 export function toItemError(error: MaterializationItemError): Error {
   switch (error.code) {
     case "validation":
-      return new OntologyValidationError(error.message)
+      return new SixbError("ontology.invalid_value", error.message)
   }
 }
 
@@ -301,7 +307,10 @@ function requireOutcome(
 ): OntologyOperationOutcome {
   const outcome = outcomes.get(id)
   if (!outcome) {
-    throw new ObjectError(`[Sixb] Materializer returned no outcome for '${id}'.`)
+    throw new SixbError(
+      "runtime.invariant_violated",
+      `[Sixb] Materializer returned no outcome for '${id}'.`
+    )
   }
   return outcome
 }

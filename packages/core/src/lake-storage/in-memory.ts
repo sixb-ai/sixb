@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
 import type { DatasetDefinition, DatasetSchema } from "../datasets"
 import { getDatasetRowValidationError } from "../datasets/validation"
+import { SixbError } from "../errors"
 import { mergeStrictDatasetDefinition } from "./definition-updates"
-import { LakeStorageError } from "./errors"
 import type {
   BeginDatasetWriteInput,
   CommitDatasetWriteInput,
@@ -64,7 +64,7 @@ function sameRowContent(left: readonly string[], right: readonly string[]): bool
 
 function assertDatasetId(datasetId: string): void {
   if (datasetId.trim().length === 0) {
-    throw new LakeStorageError("[LakeStorage] Dataset id must not be empty")
+    throw new SixbError("storage.lake_failed", "[LakeStorage] Dataset id must not be empty")
   }
 }
 
@@ -87,7 +87,7 @@ class InMemoryLakeWriteSession implements LakeWriteSession {
     for await (const row of rows) {
       const validationError = getDatasetRowValidationError(row, this.input.dataset)
       if (validationError) {
-        throw new LakeStorageError(`[LakeStorage] ${validationError}`)
+        throw new SixbError("storage.lake_failed", `[LakeStorage] ${validationError}`)
       }
 
       this.rows.push(cloneRow(row))
@@ -111,7 +111,7 @@ class InMemoryLakeWriteSession implements LakeWriteSession {
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new LakeStorageError("[LakeStorage] Write session is already closed")
+      throw new SixbError("storage.lake_failed", "[LakeStorage] Write session is already closed")
     }
   }
 }
@@ -157,7 +157,8 @@ export class InMemoryLakeStorage implements LakeStorage {
 
     if (failures.length > 0) {
       const details = failures.join("\n")
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbLake] Lake dataset definition check failed for ${failures.length} dataset(s).\n${details}`
       )
     }
@@ -210,7 +211,10 @@ export class InMemoryLakeStorage implements LakeStorage {
   async beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession> {
     const definition = await this.getDataset(input.dataset.id)
     if (!definition) {
-      throw new LakeStorageError(`[LakeStorage] Unknown dataset '${input.dataset.id}'`)
+      throw new SixbError(
+        "storage.lake_failed",
+        `[LakeStorage] Unknown dataset '${input.dataset.id}'`
+      )
     }
 
     return new InMemoryLakeWriteSession(this, {
@@ -238,7 +242,10 @@ export class InMemoryLakeStorage implements LakeStorage {
   async *readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {
     const definition = this.datasets.get(input.datasetId)
     if (!definition) {
-      throw new LakeStorageError(`[LakeStorage] Unknown dataset '${input.datasetId}'`)
+      throw new SixbError(
+        "storage.lake_failed",
+        `[LakeStorage] Unknown dataset '${input.datasetId}'`
+      )
     }
 
     const version =
@@ -247,7 +254,8 @@ export class InMemoryLakeStorage implements LakeStorage {
         : await this.getVersion(input.datasetId, input.versionId)
 
     if (!version) {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[LakeStorage] No committed version found for dataset '${input.datasetId}'`
       )
     }
@@ -270,7 +278,10 @@ export class InMemoryLakeStorage implements LakeStorage {
   }): Promise<DatasetWriteCommitResult> {
     const definition = this.datasets.get(options.write.dataset.id)
     if (!definition) {
-      throw new LakeStorageError(`[LakeStorage] Unknown dataset '${options.write.dataset.id}'`)
+      throw new SixbError(
+        "storage.lake_failed",
+        `[LakeStorage] Unknown dataset '${options.write.dataset.id}'`
+      )
     }
 
     const mode = options.write.mode ?? "snapshot"
@@ -279,7 +290,8 @@ export class InMemoryLakeStorage implements LakeStorage {
     if (options.commit?.expectedLatestVersionId !== undefined) {
       const actual = latestVersion?.versionId
       if (actual !== options.commit.expectedLatestVersionId) {
-        throw new LakeStorageError(
+        throw new SixbError(
+          "storage.lake_failed",
           `[LakeStorage] Optimistic commit failed for dataset '${options.write.dataset.id}': expected latest version '${options.commit.expectedLatestVersionId}', found '${actual ?? "none"}'`
         )
       }

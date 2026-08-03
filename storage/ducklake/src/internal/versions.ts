@@ -1,5 +1,5 @@
+import { SixbError } from "@sixb/core/errors"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import { LakeStorageError } from "@sixb/core/lake-storage"
 
 export interface SixbSchemaChangeMetadata {
   readonly addColumns?: readonly string[]
@@ -18,12 +18,18 @@ export interface SixbCommitMetadata {
 
 export function parseVersionId(versionId: string): string {
   if (!versionId.startsWith("ducklake:")) {
-    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
+    throw new SixbError(
+      "storage.lake_failed",
+      `[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`
+    )
   }
 
   const snapshotId = versionId.slice("ducklake:".length)
   if (!/^\d+$/.test(snapshotId)) {
-    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
+    throw new SixbError(
+      "storage.lake_failed",
+      `[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`
+    )
   }
 
   return snapshotId

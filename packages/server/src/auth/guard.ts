@@ -1,11 +1,12 @@
 import type { OntologySource, Sixb } from "@sixb/core"
+import { isSixbError } from "@sixb/core/errors"
 import {
   type AuthenticatedRequestAuthSession,
   verifyDoubleSubmitCsrf,
 } from "@sixb/core/internal/auth"
 import { isAccessTokenRoute, shouldVerifyCsrfForAuthSource } from "./access-token-boundary"
 import { sessionCanAccessApplication } from "./application-access"
-import { BrowserOriginError, type ResolveRequestAuthContext } from "./browser-origin"
+import type { ResolveRequestAuthContext } from "./browser-origin"
 import { classifyRoute } from "./public-routes"
 import {
   htmlAuthRedirectResponse,
@@ -159,7 +160,7 @@ export class ServerAuthGuard {
     try {
       return this.resolveAuthContext(request)
     } catch (error) {
-      if (error instanceof BrowserOriginError) {
+      if (isSixbError(error, "auth.origin_rejected")) {
         return jsonForbiddenResponse("Browser origin is not allowed")
       }
 

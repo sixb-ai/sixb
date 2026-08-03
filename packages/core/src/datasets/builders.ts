@@ -1,4 +1,4 @@
-import { DatasetValidationError } from "./errors"
+import { SixbError } from "../errors"
 import type {
   DatasetColumnDefinition,
   DatasetColumnNameOf,
@@ -119,13 +119,16 @@ export function col(
     ...(options?.nullable !== undefined ? { nullable: options.nullable } : {}),
   }
 
-  assertDatasetColumnDefinition(column, (message) => new DatasetValidationError(message))
+  assertDatasetColumnDefinition(
+    column,
+    (message) => new SixbError("runtime.invalid_definition", message)
+  )
   return column
 }
 
 function assertDatasetId(id: string): void {
   if (!id.trim()) {
-    throw new DatasetValidationError("Dataset id must not be empty.")
+    throw new SixbError("runtime.invalid_definition", "Dataset id must not be empty.")
   }
 }
 
@@ -140,18 +143,24 @@ function createDatasetDefinition(id: string, options: DefineDatasetOptions): Dat
     ...(options.description !== undefined ? { description: options.description } : {}),
   }
 
-  assertDatasetDefinition(definition, (message) => new DatasetValidationError(message))
+  assertDatasetDefinition(
+    definition,
+    (message) => new SixbError("runtime.invalid_definition", message)
+  )
   return definition
 }
 
 function assertStringArray(value: unknown, field: string): asserts value is readonly string[] {
   if (!Array.isArray(value)) {
-    throw new DatasetValidationError(`${field} must be an array of column names.`)
+    throw new SixbError("runtime.invalid_definition", `${field} must be an array of column names.`)
   }
 
   for (const item of value) {
     if (typeof item !== "string" || !item.trim()) {
-      throw new DatasetValidationError(`${field} must contain only non-empty column names.`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `${field} must contain only non-empty column names.`
+      )
     }
   }
 }
@@ -161,14 +170,17 @@ function deriveDatasetDefinition(
   parent: DatasetDefinition,
   options: DeriveDatasetOptions<DatasetDefinition> = {}
 ): DatasetDefinition {
-  assertDatasetDefinition(parent, (message) => new DatasetValidationError(message))
+  assertDatasetDefinition(parent, (message) => new SixbError("runtime.invalid_definition", message))
 
   if (options.pick !== undefined) {
     assertStringArray(options.pick, "Dataset derive pick")
   }
 
   if (options.add !== undefined && !Array.isArray(options.add)) {
-    throw new DatasetValidationError("Dataset derive add must be an array of columns.")
+    throw new SixbError(
+      "runtime.invalid_definition",
+      "Dataset derive add must be an array of columns."
+    )
   }
 
   const parentColumnsByName = new Map(
@@ -180,7 +192,8 @@ function deriveDatasetDefinition(
       : options.pick.map((columnName) => {
           const column = parentColumnsByName.get(columnName)
           if (column === undefined) {
-            throw new DatasetValidationError(
+            throw new SixbError(
+              "runtime.invalid_definition",
               `Dataset derive pick column '${columnName}' is not declared on parent dataset '${parent.id}'.`
             )
           }

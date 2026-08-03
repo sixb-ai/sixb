@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
-import { AgentStorageError, InMemoryAgentStorage } from "../src/storage"
+import { agentStorageErrorReason, InMemoryAgentStorage } from "../src/storage"
+import { agentStorageError } from "../src/storage/agents/errors"
 import { runAgentStorageContractSuite } from "../src/testing"
 
 runAgentStorageContractSuite("InMemoryAgentStorage", {
@@ -140,10 +141,9 @@ describe("InMemoryStorage agents", () => {
     })()
   })
 
-  test("exposes the AgentStorageError code surface", () => {
-    const error = new AgentStorageError("execution_lost", "[Sixb] gone")
-    expect(error.reason).toBe("execution_lost")
+  test("files the agent-storage reason in details and maps it onto a code", () => {
+    const error = agentStorageError("execution_lost", "[Sixb] gone")
     expect(error.code).toBe("agent.execution_lost")
-    expect(error.name).toBe("AgentStorageError")
+    expect(agentStorageErrorReason(error)).toBe("execution_lost")
   })
 })

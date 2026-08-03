@@ -25,17 +25,32 @@ try {
 `isSixbError` is structural: it recognizes a Sixb failure that crossed a bundle boundary — a custom
 app and the client are bundled separately from the runtime — where `instanceof` would not.
 
-For the coarser question, catch a class instead. Each one owns a closed set of codes:
+For the coarser question — *is this a conflict?* — ask for the kind instead of listing its codes:
 
-| Class | Means | Codes |
+```ts
+import { sixbErrorKind } from "@sixb/core"
+
+if (sixbErrorKind(error) === "conflict") return retryAfterReread()
+```
+
+| Kind | Means | Codes |
 | --- | --- | --- |
-| `SixbValidationError` | the input is wrong and nothing was written | `ontology.invalid_value`, `ontology.type_not_found`, `runtime.invalid_definition`, `runtime.invalid_input`, `runtime.payload_too_large`, `storage.edit_rejected`, `storage.query_invalid` |
-| `SixbAuthorizationError` | the caller may not do this, or is not who they claim to be | `auth.authentication_required`, `auth.invalid_credentials`, `auth.origin_rejected`, `auth.permission_denied`, `auth.session_expired` |
-| `SixbConflictError` | the state moved underneath the caller | `agent.run_conflict`, `pipeline.already_running`, `queue.lease_lost`, `storage.conflict`, `sync.already_running` |
-| `SixbTimeoutError` | a bound was exceeded and the work was abandoned | `action.timed_out`, `agent.timed_out`, `sandbox.timed_out` |
-| `SixbProviderError` | something Sixb does not own failed | `broker.unavailable`, `connector.rate_limited`, `connector.request_failed`, `connector.unauthorized`, `connector.unavailable`, `provider.failed`, `provider.unavailable`, `queue.unavailable`, `storage.blob_failed`, `storage.lake_failed`, `storage.unavailable` |
+| `validation` | the input is wrong and nothing was written | `ontology.invalid_value`, `ontology.type_not_found`, `runtime.invalid_definition`, `runtime.invalid_input`, `runtime.payload_too_large`, `storage.edit_rejected`, `storage.query_invalid` |
+| `authorization` | the caller may not do this, or is not who they claim to be | `auth.authentication_required`, `auth.invalid_credentials`, `auth.origin_rejected`, `auth.permission_denied`, `auth.session_expired` |
+| `conflict` | the state moved underneath the caller | `agent.run_conflict`, `pipeline.already_running`, `queue.lease_lost`, `storage.conflict`, `sync.already_running` |
+| `timeout` | a bound was exceeded and the work was abandoned | `action.timed_out`, `agent.timed_out`, `sandbox.timed_out` |
+| `provider` | something Sixb does not own failed | `broker.unavailable`, `connector.rate_limited`, `connector.request_failed`, `connector.unauthorized`, `connector.unavailable`, `provider.failed`, `provider.unavailable`, `queue.unavailable`, `storage.blob_failed`, `storage.lake_failed`, `storage.unavailable` |
 
-A code may belong to no class. It never belongs to two.
+A code may belong to no kind — `sixbErrorKind` then answers `undefined`. It never belongs to two.
+
+`SixbError` is what the framework throws, whatever failed: the code says which condition it was, and
+`details` carries the context. There is no subclass to import and nothing that stops working when a
+failure crosses a bundle boundary.
+
+Two failures carry more than a code, and only because a flat `details` cannot hold what they carry:
+an invalid or unsupported object query answers with a full `issues` list, and a connector failure
+carries the third-party HTTP response it got. Both are still `SixbError`s with a code — branch on the
+code, and reach for `objectQueryIssues(error)` when you want the list.
 
 ## Retryable
 
@@ -45,7 +60,7 @@ maps every code to its answer — rather than being re-decided at each `throw`. 
 better information overrides it on the instance:
 
 ```ts
-throw new SixbProviderError("provider.failed", message, { retryable: true })
+throw new SixbError("provider.failed", message, { retryable: true })
 ```
 
 The verdict lives on the thrown error, where a `catch` can act on it, and stops there: it is not
@@ -309,9 +324,9 @@ provider reports `provider.failed` or `provider.unavailable`; a connector report
 Both name themselves in `details`:
 
 ```ts
-import { SixbProviderError } from "@sixb/core/errors"
+import { SixbError } from "@sixb/core/errors"
 
-throw new SixbProviderError("provider.unavailable", "Redis connection refused", {
+throw new SixbError("provider.unavailable", "Redis connection refused", {
   details: { provider: "@sixb/queue-bullmq", host },
   cause: error,
 })

@@ -1,5 +1,6 @@
+import { SixbError } from "../../errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
-import { ActionDefinitionError, effectsWithoutEditsMessage } from "../errors"
+import { effectsWithoutEditsMessage } from "../errors"
 import type {
   ActionBuilder,
   ActionEditsHandler,
@@ -173,7 +174,7 @@ function createGlobalDefinition(input: {
       },
       effects(handler: GlobalActionEffectsHandler<Record<string, unknown>, unknown>) {
         if (!input.edits) {
-          throw new ActionDefinitionError(effectsWithoutEditsMessage(input.id))
+          throw new SixbError("runtime.invalid_definition", effectsWithoutEditsMessage(input.id))
         }
         return createGlobalDefinition({
           ...input,
@@ -226,7 +227,7 @@ function createObjectDefinition(input: {
         >
       ) {
         if (!input.edits) {
-          throw new ActionDefinitionError(effectsWithoutEditsMessage(input.id))
+          throw new SixbError("runtime.invalid_definition", effectsWithoutEditsMessage(input.id))
         }
         return createObjectDefinition({
           ...input,

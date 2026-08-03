@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { SyncRunError } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -219,7 +218,7 @@ describe("PgSyncRunStorage", () => {
         datasetId: "raw.erp.orders",
         mode: "snapshot",
       })
-    ).rejects.toBeInstanceOf(SyncRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await expect(
       storage.syncRuns.finish({
@@ -231,7 +230,7 @@ describe("PgSyncRunStorage", () => {
           message: "boom",
         },
       })
-    ).rejects.toBeInstanceOf(SyncRunError)
+    ).rejects.toHaveProperty("code", "sync.run_not_found")
 
     await expect(
       storage.syncRuns.finish({
@@ -244,6 +243,6 @@ describe("PgSyncRunStorage", () => {
           versionId: "ver_1",
         },
       })
-    ).rejects.toBeInstanceOf(SyncRunError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
   })
 })

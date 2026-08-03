@@ -1,14 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { FileRef } from "../src"
-import {
-  defineObjectType,
-  defineValueType,
-  link,
-  OntologyRegistry,
-  OntologyValidationError,
-  prop,
-  stringEnum,
-} from "../src"
+import { defineObjectType, defineValueType, link, OntologyRegistry, prop, stringEnum } from "../src"
 import type { Property, ValueType } from "../src/ontology"
 import {
   assertKnownProperties,
@@ -37,7 +29,7 @@ describe("validateSchemaValue", () => {
 
   test("string schema rejects non-strings", () => {
     expect(() => validateSchemaValue("string", 42, "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue("string", 42, "test", emptyMap)).toThrow("must be a string")
   })
@@ -48,7 +40,7 @@ describe("validateSchemaValue", () => {
 
   test("boolean schema rejects non-booleans", () => {
     expect(() => validateSchemaValue("boolean", "yes", "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue("boolean", "yes", "test", emptyMap)).toThrow(
       "must be a boolean"
@@ -61,7 +53,7 @@ describe("validateSchemaValue", () => {
 
   test("integer schema rejects floats", () => {
     expect(() => validateSchemaValue("integer", 3.14, "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue("integer", 3.14, "test", emptyMap)).toThrow(
       "must be an integer"
@@ -74,7 +66,7 @@ describe("validateSchemaValue", () => {
 
   test("double schema rejects NaN", () => {
     expect(() => validateSchemaValue("double", NaN, "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue("double", NaN, "test", emptyMap)).toThrow("must be numeric")
   })
@@ -96,7 +88,7 @@ describe("validateSchemaValue", () => {
 
   test("date schema rejects numbers", () => {
     expect(() => validateSchemaValue("date", 12345, "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue("date", 12345, "test", emptyMap)).toThrow(
       "must be a Date or ISO string"
@@ -119,7 +111,7 @@ describe("validateSchemaValue", () => {
 
   test("fileRef schema rejects invalid refs", () => {
     expect(() => validateSchemaValue("fileRef", { blobId: "missing" }, "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue("fileRef", { blobId: "missing" }, "test", emptyMap)).toThrow(
       "must be a fileRef"
@@ -134,7 +126,7 @@ describe("validateSchemaValue", () => {
   test("enum schema rejects invalid values", () => {
     const schema = { type: "enum" as const, valueType: "string" as const, values: ["a", "b", "c"] }
     expect(() => validateSchemaValue(schema, "d", "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue(schema, "d", "test", emptyMap)).toThrow(
       "must be one of: a, b, c"
@@ -149,7 +141,7 @@ describe("validateSchemaValue", () => {
   test("array schema rejects non-arrays", () => {
     const schema = { type: "array" as const, items: "string" as const }
     expect(() => validateSchemaValue(schema, "not-array", "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue(schema, "not-array", "test", emptyMap)).toThrow(
       "must be an array"
@@ -159,7 +151,7 @@ describe("validateSchemaValue", () => {
   test("array schema validates item types", () => {
     const schema = { type: "array" as const, items: "integer" as const }
     expect(() => validateSchemaValue(schema, [1, "two"], "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue(schema, [1, "two"], "test", emptyMap)).toThrow(
       "must be an integer"
@@ -182,7 +174,7 @@ describe("validateSchemaValue", () => {
       valueSchema: "string" as const,
     }
     expect(() => validateSchemaValue(schema, "not-obj", "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue(schema, "not-obj", "test", emptyMap)).toThrow(
       "must be an object map"
@@ -196,7 +188,7 @@ describe("validateSchemaValue", () => {
       valueSchema: "string" as const,
     }
     expect(() => validateSchemaValue(schema, ["a"], "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue(schema, ["a"], "test", emptyMap)).toThrow(
       "must be an object map"
@@ -210,7 +202,7 @@ describe("validateSchemaValue", () => {
       valueSchema: "integer" as const,
     }
     expect(() => validateSchemaValue(schema, { a: "nope" }, "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue(schema, { a: "nope" }, "test", emptyMap)).toThrow(
       "must be an integer"
@@ -235,7 +227,9 @@ describe("validateSchemaValue", () => {
         name: { schema: "string" as const, required: true },
       },
     }
-    expect(() => validateSchemaValue(schema, {}, "test", emptyMap)).toThrow(OntologyValidationError)
+    expect(() => validateSchemaValue(schema, {}, "test", emptyMap)).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => validateSchemaValue(schema, {}, "test", emptyMap)).toThrow(
       "Missing required field"
     )
@@ -249,7 +243,7 @@ describe("validateSchemaValue", () => {
       },
     }
     expect(() => validateSchemaValue(schema, { name: "A", extra: true }, "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue(schema, { name: "A", extra: true }, "test", emptyMap)).toThrow(
       "Unknown field"
@@ -274,7 +268,7 @@ describe("validateSchemaValue", () => {
       },
     }
     expect(() => validateSchemaValue(schema, { label: null }, "test", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateSchemaValue(schema, { label: null }, "test", emptyMap)).toThrow(
       "cannot be null"
@@ -293,13 +287,17 @@ describe("validateSchemaValue", () => {
     const schema = { type: "valueTypeRef" as const, valueTypeId: "Temperature" }
 
     expect(() => validateSchemaValue(schema, 22.5, "test", vtMap)).not.toThrow()
-    expect(() => validateSchemaValue(schema, "hot", "test", vtMap)).toThrow(OntologyValidationError)
+    expect(() => validateSchemaValue(schema, "hot", "test", vtMap)).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => validateSchemaValue(schema, "hot", "test", vtMap)).toThrow("must be numeric")
   })
 
   test("valueTypeRef throws for unknown value type", () => {
     const schema = { type: "valueTypeRef" as const, valueTypeId: "Unknown" }
-    expect(() => validateSchemaValue(schema, 1, "test", emptyMap)).toThrow(OntologyValidationError)
+    expect(() => validateSchemaValue(schema, 1, "test", emptyMap)).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => validateSchemaValue(schema, 1, "test", emptyMap)).toThrow("Unknown valueTypeRef")
   })
 })
@@ -315,7 +313,7 @@ describe("validatePropertyValue", () => {
 
   test("rejects undefined", () => {
     expect(() => validatePropertyValue(stringProp, undefined, "test.name", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validatePropertyValue(stringProp, undefined, "test.name", emptyMap)).toThrow(
       "cannot be undefined"
@@ -329,7 +327,7 @@ describe("validatePropertyValue", () => {
 
   test("rejects null for non-nullable properties", () => {
     expect(() => validatePropertyValue(stringProp, null, "test.name", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validatePropertyValue(stringProp, null, "test.name", emptyMap)).toThrow(
       "cannot be null"
@@ -338,7 +336,7 @@ describe("validatePropertyValue", () => {
 
   test("validates value against schema", () => {
     expect(() => validatePropertyValue(stringProp, 42, "test.name", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validatePropertyValue(stringProp, 42, "test.name", emptyMap)).toThrow(
       "must be a string"
@@ -362,7 +360,7 @@ describe("assertKnownProperties", () => {
 
   test("rejects unknown properties", () => {
     expect(() => assertKnownProperties(objectType, { unknown: "value" })).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => assertKnownProperties(objectType, { unknown: "value" })).toThrow(
       "Unknown property 'unknown'"
@@ -386,7 +384,9 @@ describe("assertRequiredProperties", () => {
   })
 
   test("fails when required properties are missing", () => {
-    expect(() => assertRequiredProperties(objectType, {})).toThrow(OntologyValidationError)
+    expect(() => assertRequiredProperties(objectType, {})).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => assertRequiredProperties(objectType, {})).toThrow("Missing required property 'id'")
   })
 })
@@ -399,7 +399,9 @@ describe("ontology startup validation", () => {
       properties: [prop("id", "fileRef", { required: true, primary: true })],
     })
 
-    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
       'must have schema "string"'
     )
@@ -415,7 +417,9 @@ describe("ontology startup validation", () => {
       ],
     })
 
-    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow("cannot use fileRef")
   })
 
@@ -496,7 +500,9 @@ describe("ontology startup validation", () => {
       ],
     })
 
-    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
       "must set query.searchable: true"
     )
@@ -512,7 +518,9 @@ describe("ontology startup validation", () => {
       ],
     })
 
-    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
       "schema is not string-like"
     )
@@ -526,7 +534,9 @@ describe("ontology startup validation", () => {
       search: { title: "name", defaultText: ["name"] },
     })
 
-    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
       "must set query.searchable: true and query.text: true"
     )
@@ -546,7 +556,9 @@ describe("ontology startup validation", () => {
       search: { title: "currentStatus", defaultText: ["currentStatus"] },
     })
 
-    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
       "can only reference static properties"
     )
@@ -568,7 +580,9 @@ describe("ontology startup validation", () => {
       },
     })
 
-    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
       "schema is not a numeric array"
     )
@@ -609,12 +623,14 @@ describe("ontology startup validation", () => {
       },
     })
 
-    expect(() => new OntologyRegistry({ sources: [emptySource] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [emptySource] })).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => new OntologyRegistry({ sources: [emptySource] })).toThrow(
       "search.vector.source must include at least one source property"
     )
     expect(() => new OntologyRegistry({ sources: [nonTextSource] })).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => new OntologyRegistry({ sources: [nonTextSource] })).toThrow(
       "must set query.searchable: true and query.text: true"
@@ -641,7 +657,7 @@ describe("validateLinkProperties", () => {
   test("rejects properties on links that don't define them", () => {
     expect(() =>
       validateLinkProperties(objectType, neighborLink, { foo: "bar" }, undefined, emptyMap)
-    ).toThrow(OntologyValidationError)
+    ).toThrow(expect.objectContaining({ code: "ontology.invalid_value" }))
     expect(() =>
       validateLinkProperties(objectType, neighborLink, { foo: "bar" }, undefined, emptyMap)
     ).toThrow("does not define link properties")
@@ -656,7 +672,7 @@ describe("validateLinkProperties", () => {
   test("rejects unknown link properties", () => {
     expect(() =>
       validateLinkProperties(objectType, deviceLink, { unknown: "val" }, undefined, emptyMap)
-    ).toThrow(OntologyValidationError)
+    ).toThrow(expect.objectContaining({ code: "ontology.invalid_value" }))
     expect(() =>
       validateLinkProperties(objectType, deviceLink, { unknown: "val" }, undefined, emptyMap)
     ).toThrow("Unknown link property 'unknown'")
@@ -678,7 +694,7 @@ describe("validateLinkProperties", () => {
   test("fails when required link property is missing from merged state", () => {
     expect(() =>
       validateLinkProperties(objectType, deviceLink, { notes: "test" }, undefined, emptyMap)
-    ).toThrow(OntologyValidationError)
+    ).toThrow(expect.objectContaining({ code: "ontology.invalid_value" }))
     expect(() =>
       validateLinkProperties(objectType, deviceLink, { notes: "test" }, undefined, emptyMap)
     ).toThrow("Missing required link property 'installedBy'")
@@ -694,7 +710,9 @@ describe("telemetry validation", () => {
       required: true,
       mode: "static",
     }
-    expect(() => assertTelemetryProperty(staticProp)).toThrow(OntologyValidationError)
+    expect(() => assertTelemetryProperty(staticProp)).toThrow(
+      expect.objectContaining({ code: "ontology.invalid_value" })
+    )
     expect(() => assertTelemetryProperty(staticProp)).toThrow("not telemetry-enabled")
   })
 
@@ -719,7 +737,7 @@ describe("telemetry validation", () => {
       semanticType: "Temperature",
     }
     expect(() => validateTelemetryUnit(telProp, "test.temp", undefined, emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateTelemetryUnit(telProp, "test.temp", undefined, emptyMap)).toThrow(
       "Missing unit"
@@ -736,7 +754,7 @@ describe("telemetry validation", () => {
       semanticType: "Temperature",
     }
     expect(() => validateTelemetryUnit(telProp, "test.temp", "millibar", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateTelemetryUnit(telProp, "test.temp", "millibar", emptyMap)).toThrow(
       "Invalid unit"
@@ -766,7 +784,7 @@ describe("telemetry validation", () => {
       mode: "telemetry",
     }
     expect(() => validateTelemetryUnit(telProp, "test.count", "degreeCelsius", emptyMap)).toThrow(
-      OntologyValidationError
+      expect.objectContaining({ code: "ontology.invalid_value" })
     )
     expect(() => validateTelemetryUnit(telProp, "test.count", "degreeCelsius", emptyMap)).toThrow(
       "does not define semanticType"

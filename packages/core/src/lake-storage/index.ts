@@ -15,7 +15,6 @@ export {
   mergeStrictDatasetDefinition,
   planDatasetDefinitionUpdate,
 } from "./definition-updates"
-export { LakeStorageError } from "./errors"
 export { InMemoryLakeStorage } from "./in-memory"
 export type {
   ExecuteSqlTransformInput,

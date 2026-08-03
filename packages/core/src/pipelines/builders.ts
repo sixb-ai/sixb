@@ -1,9 +1,9 @@
 import type { DatasetDefinition } from "../datasets"
+import { SixbError } from "../errors"
 import type { DatasetWriteMode } from "../lake-storage"
 import { SQL_DIALECT } from "../lake-storage/sql-transforms"
 import type { ScheduleDefinition, ScheduleReference } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
-import { PipelineError } from "./errors"
 import type {
   PipelineBuilder,
   PipelineDefinition,
@@ -18,7 +18,7 @@ import type {
 
 function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
-    throw new PipelineError(`Pipeline ${field} must not be empty.`)
+    throw new SixbError("runtime.invalid_definition", `Pipeline ${field} must not be empty.`)
   }
 }
 
@@ -28,14 +28,20 @@ function assertDataset(dataset: DatasetDefinition, field: string): void {
 
 function assertDatasetWriteMode(mode: DatasetWriteMode): void {
   if (mode !== "snapshot" && mode !== "append") {
-    throw new PipelineError(`Pipeline step output mode '${mode}' is not supported.`)
+    throw new SixbError(
+      "runtime.invalid_definition",
+      `Pipeline step output mode '${mode}' is not supported.`
+    )
   }
 }
 
 function assertInputs(inputs: Readonly<Record<string, DatasetDefinition>>): void {
   const entries = Object.entries(inputs)
   if (entries.length === 0) {
-    throw new PipelineError("Pipeline step input dataset must contain at least one entry.")
+    throw new SixbError(
+      "runtime.invalid_definition",
+      "Pipeline step input dataset must contain at least one entry."
+    )
   }
 
   for (const [name, dataset] of entries) {
@@ -46,7 +52,7 @@ function assertInputs(inputs: Readonly<Record<string, DatasetDefinition>>): void
 
 function scheduleReference(schedule: ScheduleDefinition): ScheduleReference {
   if (!isScheduleDefinition(schedule)) {
-    throw new PipelineError("Pipeline .when(...) only accepts schedules.")
+    throw new SixbError("runtime.invalid_definition", "Pipeline .when(...) only accepts schedules.")
   }
   return { type: "schedule", scheduleId: schedule.id }
 }

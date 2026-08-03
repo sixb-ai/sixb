@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { WorkflowRunError } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import { SqliteWorkflowRunStorage } from "../src/workflow-run-storage"
 
@@ -169,7 +168,7 @@ describe("SqliteWorkflowRunStorage", () => {
         projectId: "my-app",
         status: "succeeded",
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     const resumedRun = await storage.resume({
       id: "wf-run-waiting",
@@ -442,7 +441,7 @@ describe("SqliteWorkflowRunStorage", () => {
         workflowId: "reconcile-transaction",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     await expect(
       storage.finish({
@@ -451,7 +450,7 @@ describe("SqliteWorkflowRunStorage", () => {
         status: "failed",
         error: { code: "workflow.failed", message: "boom" },
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_not_found")
 
     await expect(
       storage.nodes.start({
@@ -465,7 +464,7 @@ describe("SqliteWorkflowRunStorage", () => {
         nodeKey: "bad-index",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     await expect(
       storage.nodes.start({
@@ -479,7 +478,7 @@ describe("SqliteWorkflowRunStorage", () => {
         nodeKey: "wrong-workflow",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     await storage.nodes.start({
       id: "node-1",
@@ -505,7 +504,7 @@ describe("SqliteWorkflowRunStorage", () => {
         nodeKey: "duplicate",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     await storage.nodes.finish({
       id: "node-1",
@@ -521,7 +520,7 @@ describe("SqliteWorkflowRunStorage", () => {
         status: "failed",
         error: { code: "runtime.cancelled", message: "Too late" },
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     await storage.finish({
       id: "wf-run-1",
@@ -542,7 +541,7 @@ describe("SqliteWorkflowRunStorage", () => {
         nodeKey: "too-late",
         input: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
 
     await expect(
       storage.finish({
@@ -551,7 +550,7 @@ describe("SqliteWorkflowRunStorage", () => {
         status: "failed",
         error: { code: "runtime.cancelled", message: "Too late" },
       })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
+    ).rejects.toHaveProperty("code", "workflow.run_conflict")
   })
 
   test("SqliteStorage includes workflow run storage", () => {

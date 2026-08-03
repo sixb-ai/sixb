@@ -1,6 +1,5 @@
 import type { Database } from "bun:sqlite"
 import type { ProjectionEntityRef } from "@sixb/core/internal/materialization"
-import { MaterializationConflictError } from "@sixb/core/internal/materialization"
 import type {
   AssertSourceMaterializationExecutionInput,
   OntologyCommitRecord,
@@ -22,6 +21,11 @@ export {
   originWhere,
   sourceEntityKey,
 } from "@sixb/core/internal/ontology-storage-provider"
+
+import {
+  type MaterializationConflictKind,
+  materializationConflict,
+} from "@sixb/core/internal/materialization"
 
 export type SqliteRootOperation = <T>(run: () => Promise<T> | T) => Promise<T>
 
@@ -209,19 +213,19 @@ export function assertProjectionExecution(
     ownership_hash: string | null
   } | null
   if (!run || run.status !== "running") {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "run-correlation",
       `Projection run '${input.projectionRunId}' is missing or is not running.`
     )
   }
   if (run.projection_id !== input.sourceId || run.materialization_protocol !== "replacement") {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "run-correlation",
       `Projection run '${input.projectionRunId}' does not own replacement source '${input.sourceId}'.`
     )
   }
   if (run.execution_token !== input.executionToken) {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "execution-lost",
       `Projection run '${input.projectionRunId}' execution token is stale.`
     )
@@ -238,7 +242,7 @@ export function assertProjectionExecution(
       run.projection_revision !== identity.projectionRevision ||
       run.ownership_hash !== identity.ownershipHash)
   ) {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "run-correlation",
       `Projection run '${input.projectionRunId}' immutable source identity does not match.`
     )
@@ -247,10 +251,10 @@ export function assertProjectionExecution(
 
 export function requireChanges(
   changes: number,
-  kind: ConstructorParameters<typeof MaterializationConflictError>[0],
+  kind: MaterializationConflictKind,
   message: string
 ): void {
-  if (changes !== 1) throw new MaterializationConflictError(kind, message)
+  if (changes !== 1) throw materializationConflict(kind, message)
 }
 
 export function isSqliteConstraintError(error: unknown): boolean {

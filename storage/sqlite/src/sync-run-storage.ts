@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type { JsonValue } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
@@ -10,7 +11,7 @@ import type {
   SyncRunRecord,
   SyncRunStorage,
 } from "@sixb/core/storage"
-import { parseSixbFailure, SyncRunError, serializeSixbFailure } from "@sixb/core/storage"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
@@ -78,7 +79,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        throw new SyncRunError(
+        throw new SixbError(
           "storage.conflict",
           `[SixbSqlite] Sync run '${input.id}' already exists for project '${input.projectId}'.`
         )
@@ -89,7 +90,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
 
     const record = await this.getById({ projectId: input.projectId, id: input.id })
     if (!record) {
-      throw new SyncRunError(
+      throw new SixbError(
         "runtime.invalid_input",
         `[SixbSqlite] Failed to load sync run '${input.id}' for project '${input.projectId}'.`
       )
@@ -105,7 +106,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
         .get(input.projectId, input.id) as DatabaseRow | null
 
       if (!existing) {
-        throw new SyncRunError(
+        throw new SixbError(
           "sync.run_not_found",
           `[SixbSqlite] Sync run '${input.id}' not found for project '${input.projectId}'.`
         )
@@ -113,13 +114,13 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
 
       if (input.status === "succeeded") {
         if (input.output && input.output.datasetId !== existing.dataset_id) {
-          throw new SyncRunError(
+          throw new SixbError(
             "runtime.invalid_input",
             `[SixbSqlite] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
           )
         }
         if (!input.output && (existing.mode !== "append" || input.rowsRead !== 0)) {
-          throw new SyncRunError(
+          throw new SixbError(
             "runtime.invalid_input",
             `[SixbSqlite] Sync run '${input.id}' may omit its output only for an empty append.`
           )

@@ -1,4 +1,4 @@
-import { AuthRuntimeError } from "./errors"
+import { authRuntimeError } from "../auth/errors"
 
 export const DEFAULT_AUTH_SESSION_AUDIENCE = "atlas"
 
@@ -18,7 +18,7 @@ export function resolveAuthSessionAudience(
   const audience = value ?? DEFAULT_AUTH_SESSION_AUDIENCE
 
   if (!isValidAuthSessionAudience(audience)) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_config",
       `[Sixb] Auth session audience '${audience}' is invalid. Expected 'atlas' or 'app'.`
     )

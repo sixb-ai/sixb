@@ -60,8 +60,6 @@ export { OntologyRegistry } from "./registry"
 
 // ── Errors ─────────────────────────────────────────────────
 
-export { OntologyNotFoundError, OntologyValidationError } from "./errors"
-
 // ── Helpers ─────────────────────────────────────────────────
 
 export type { DirectLinkResult, DirectLinkTarget } from "./builders"

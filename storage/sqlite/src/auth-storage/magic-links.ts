@@ -5,7 +5,7 @@ import type {
   CreateAuthMagicLinkInput,
   MagicLinkRecord,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthMagicLinkRow } from "./rows"
 import { rowToMagicLinkRecord } from "./rows"
@@ -33,7 +33,7 @@ export class SqliteAuthMagicLinkStore implements AuthMagicLinkStore {
       const tokenHash = assertNonEmpty(input.tokenHash, "Magic link token hash")
 
       if (getMagicLinkRowById(this.db, { projectId, id })) {
-        throw new AuthStorageError(
+        throw authStorageError(
           "duplicate_magic_link",
           `[Sixb] Magic link '${id}' already exists for project '${projectId}'.`
         )

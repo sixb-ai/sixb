@@ -1,5 +1,5 @@
+import { SixbError } from "../errors"
 import { blobIdFromDigest } from "./derive"
-import { BlobStorageError } from "./errors"
 import type {
   BlobByteRange,
   BlobInfo,
@@ -66,7 +66,7 @@ export class InMemoryBlobStorage implements BlobStorage, RangeReadableBlobStorag
   private requireStoredBlob(blobId: string): StoredBlob {
     const stored = this.blobsById.get(blobId)
     if (!stored) {
-      throw new BlobStorageError(`[BlobStorage] Unknown blob '${blobId}'`)
+      throw new SixbError("storage.blob_failed", `[BlobStorage] Unknown blob '${blobId}'`)
     }
 
     return stored

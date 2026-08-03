@@ -1,5 +1,5 @@
+import { SixbError } from "../../errors"
 import type { ObjectType, Property, Schema, ValueType } from ".."
-import { OntologyValidationError } from "../errors"
 
 type QueryFeature = "filterable" | "sortable" | "text" | "exact" | "facet" | "vector"
 
@@ -49,19 +49,22 @@ function validatePropertyQueryMetadata(
 
   const enabledFeatures = queryFeatures.filter((feature) => query[feature] === true)
   if ((enabledFeatures.length > 0 || query.weight !== undefined) && query.searchable !== true) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' must set query.searchable: true before enabling query features`
     )
   }
 
   if (query.weight !== undefined) {
     if (!Number.isFinite(query.weight) || query.weight <= 0) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' has invalid text weight. Expected a positive finite number.`
       )
     }
     if (query.text !== true) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' can only set weight when query.text is true`
       )
     }
@@ -72,37 +75,43 @@ function validatePropertyQueryMetadata(
   const schema = resolveQueryableSchema(property, ownerPath, valueTypesById)
 
   if (query.text && !isTextSearchableSchema(schema)) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' enables text search, but its schema is not string-like`
     )
   }
 
   if (query.exact && !isExactSearchableSchema(schema)) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' enables exact search, but its schema cannot be exact-matched`
     )
   }
 
   if (query.filterable && !isFilterableSchema(schema)) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' enables filtering, but its schema cannot be filtered`
     )
   }
 
   if (query.sortable && !isSortableSchema(schema)) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' enables sorting, but its schema is not orderable`
     )
   }
 
   if (query.facet && !isFacetSchema(schema)) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' enables faceting, but its schema cannot be faceted`
     )
   }
 
   if (query.vector && !isVectorSchema(schema, valueTypesById)) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' enables vector search, but its schema is not a numeric array`
     )
   }
@@ -123,7 +132,8 @@ function validateObjectSearchMetadata(
     assertStaticSearchProfileProperty(typeId, title, "search.title")
     const schema = resolveQueryableSchema(title, typeId, valueTypesById)
     if (!isTextSearchableSchema(schema)) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Object type '${typeId}' search.title references '${title.id}', but title fields must be string-like`
       )
     }
@@ -154,7 +164,8 @@ function validateObjectSearchMetadata(
     assertPropertyQueryFlag(typeId, vectorProperty, "vector", "search.vector.property")
 
     if (search.vector.source.length === 0) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Object type '${typeId}' search.vector.source must include at least one source property`
       )
     }
@@ -180,7 +191,8 @@ function requireObjectProperty(
 ): Property {
   const property = objectType.properties.find((candidate) => candidate.id === propertyId)
   if (!property) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Object type '${typeId}' ${metadataPath} references unknown property '${propertyId}'`
     )
   }
@@ -193,7 +205,8 @@ function assertStaticSearchProfileProperty(
   metadataPath: string
 ): void {
   if (property.mode === "telemetry") {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Object type '${typeId}' ${metadataPath} references telemetry property '${property.id}'. Search profiles can only reference static properties because telemetry latest values are not object-query indexed.`
     )
   }
@@ -209,7 +222,8 @@ function assertPropertyQueryFlag(
     return
   }
 
-  throw new OntologyValidationError(
+  throw new SixbError(
+    "ontology.invalid_value",
     `[Sixb] Object type '${typeId}' ${metadataPath} references property '${property.id}', but that property must set query.searchable: true and query.${flag}: true`
   )
 }
@@ -237,14 +251,16 @@ function resolveSchema(
   }
 
   if (seenValueTypeIds.has(schema.valueTypeId)) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Circular valueTypeRef '${schema.valueTypeId}' in query metadata at ${path}`
     )
   }
 
   const resolved = schema._resolved ?? valueTypesById.get(schema.valueTypeId)?.schema
   if (!resolved) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Query metadata for ${path} references unknown valueTypeRef '${schema.valueTypeId}'`
     )
   }

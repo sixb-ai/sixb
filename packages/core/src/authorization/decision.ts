@@ -17,7 +17,7 @@
  */
 
 import type { AuthSessionAudience } from "../auth/audience"
-import { AuthorizationError } from "./errors"
+import { SixbError } from "../errors"
 import type { GrantKind } from "./grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "./types"
 
@@ -121,10 +121,9 @@ export function assertAuthorized(runtime: AuthorizedRuntime, request: AuthzReque
     return
   }
 
-  throw new AuthorizationError(
-    decision.missing[0] ?? request.kind,
-    deniedMessage(runtime.authorization, request)
-  )
+  throw new SixbError("auth.permission_denied", deniedMessage(runtime.authorization, request), {
+    details: { grantKey: decision.missing[0] ?? request.kind },
+  })
 }
 
 /**
@@ -170,9 +169,10 @@ export function assertPrivileged(runtime: AuthorizedRuntime, operation: string):
     return
   }
 
-  throw new AuthorizationError(
-    `privileged:${operation}`,
-    `[Sixb] Operation '${operation}' is not covered by scoped authorization grants.`
+  throw new SixbError(
+    "auth.permission_denied",
+    `[Sixb] Operation '${operation}' is not covered by scoped authorization grants.`,
+    { details: { grantKey: `privileged:${operation}` } }
   )
 }
 

@@ -1,4 +1,4 @@
-import { MaterializationValidationError } from "../../materialization/errors"
+import { SixbError } from "../../errors"
 import type { OntologyEditOperation, OntologyOperationOutcome } from "../../materialization/model"
 import { linkRefKey, objectRefKey } from "../../materialization/refs"
 import type { MaterializationLinkScopeState } from "../../storage/ontology"
@@ -114,7 +114,7 @@ function applyObjectOperation(
 
 function requireWorkingObject(state: EditWorkingState, operation: ObjectOperation): WorkingObject {
   const working = state.objects.get(objectRefKey(operation.ref))
-  if (!working) throw new MaterializationValidationError("Object state was not loaded.")
+  if (!working) throw new SixbError("ontology.invalid_value", "[Sixb] Object state was not loaded.")
   return working
 }
 
@@ -197,7 +197,10 @@ function objectOperationOutcome(
   })
   const object = change?.after ?? working.before
   if (!object) {
-    throw new MaterializationValidationError("Effective object outcome could not be resolved.")
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Effective object outcome could not be resolved."
+    )
   }
   return { ...outcome, object }
 }
@@ -226,7 +229,7 @@ function applyLinkOperation(
 
 function requireWorkingLink(state: EditWorkingState, operation: LinkOperation): WorkingLink {
   const working = state.links.get(linkRefKey(operation.ref))
-  if (!working) throw new MaterializationValidationError("Link state was not loaded.")
+  if (!working) throw new SixbError("ontology.invalid_value", "[Sixb] Link state was not loaded.")
   return working
 }
 
@@ -241,7 +244,10 @@ function validateLinkEndpoints(
   const sourceExists = source && resolveObject(context.ontology, source)
   const targetExists = target && resolveObject(context.ontology, target)
   if (sourceExists && targetExists) return
-  throw new MaterializationValidationError("Link upsert requires both endpoints to be effective.")
+  throw new SixbError(
+    "ontology.invalid_value",
+    "[Sixb] Link upsert requires both endpoints to be effective."
+  )
 }
 
 function validateLinkOperation(

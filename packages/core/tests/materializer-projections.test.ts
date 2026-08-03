@@ -11,15 +11,11 @@ import {
 import {
   createEventId,
   createOntologyMaterializer,
-  MaterializationCancellationError,
+  materializationCancelled,
   ProjectionRegistry,
 } from "../src/materializer"
-import {
-  type SourceReplacementLinkState,
-  type Storage,
-  StorageTransactionError,
-  type StorageTransactionOptions,
-} from "../src/storage"
+import type { SourceReplacementLinkState, Storage, StorageTransactionOptions } from "../src/storage"
+import { storageTransactionError } from "../src/storage/errors"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import {
@@ -108,7 +104,7 @@ describe("ontology materializer projection replacement", () => {
         execution: run.execution,
         entries: shouldNotBeConsumed(),
       })
-    ).rejects.toMatchObject({ kind: "run-correlation" })
+    ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "run-correlation" } })
     expect(consumed).toBe(false)
   })
 
@@ -383,10 +379,10 @@ describe("ontology materializer projection replacement", () => {
 
     await expect(
       materializer.projections.replace(replacement("older", "2026-01-01T00:00:00Z", []))
-    ).rejects.toMatchObject({ kind: "projection-fence" })
+    ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "projection-fence" } })
     await expect(
       materializer.projections.replace(replacement("ambiguous", "2026-01-02T00:00:00Z", []))
-    ).rejects.toMatchObject({ kind: "projection-fence" })
+    ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "projection-fence" } })
     await expect(
       materializer.projections.replace(
         replacement("v1", "2026-01-03T00:00:00Z", [], "run-v1-metadata")
@@ -447,7 +443,7 @@ describe("ontology materializer projection replacement", () => {
         execution: reclaimedExecution,
         entries: entries([]),
       })
-    ).rejects.toMatchObject({ kind: "projection-fence" })
+    ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "projection-fence" } })
     expect(
       [
         ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
@@ -578,7 +574,10 @@ describe("ontology materializer projection replacement", () => {
     })
     resume()
 
-    await expect(losing).rejects.toMatchObject({ kind: "run-correlation" })
+    await expect(losing).rejects.toMatchObject({
+      code: "storage.conflict",
+      details: { kind: "run-correlation" },
+    })
     const loser = [
       ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
         .snapshot()
@@ -641,7 +640,7 @@ describe("ontology materializer projection replacement", () => {
     const explicitController = new AbortController()
     async function* explicitlyCancelling() {
       yield sourceEntry("one", "one")
-      explicitController.abort(new MaterializationCancellationError("Projection run cancelled."))
+      explicitController.abort(materializationCancelled("Projection run cancelled."))
       yield sourceEntry("two", "two")
     }
     await expect(
@@ -656,7 +655,7 @@ describe("ontology materializer projection replacement", () => {
         entries: explicitlyCancelling(),
         signal: explicitController.signal,
       })
-    ).rejects.toBeInstanceOf(MaterializationCancellationError)
+    ).rejects.toHaveProperty("code", "runtime.cancelled")
     expect(
       [
         ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
@@ -1097,7 +1096,7 @@ describe("ontology materializer projection replacement", () => {
     getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
       beforeWrite(boundary) {
         if (boundary === "finalize" && finalizeAttempts++ === 0) {
-          throw new StorageTransactionError("retry projection", {
+          throw storageTransactionError("retry projection", {
             reason: "serialization_failure",
           })
         }
@@ -1141,7 +1140,7 @@ describe("ontology materializer projection replacement", () => {
     getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
       beforeWrite(boundary) {
         if (boundary === "finalize" && finalizeAttempts++ === 0) {
-          throw new StorageTransactionError("retry slow projection", {
+          throw storageTransactionError("retry slow projection", {
             reason: "serialization_failure",
           })
         }

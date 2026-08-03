@@ -5,7 +5,6 @@ export {
   defineWorkflowStep,
   interventionField,
 } from "./builders"
-export { WorkflowDefinitionError, WorkflowValidationError } from "./errors"
 export type {
   RequestWorkflowRunInput,
   WorkflowRunRequestOptions,

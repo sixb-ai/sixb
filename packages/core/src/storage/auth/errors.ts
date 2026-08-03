@@ -1,31 +1,34 @@
 import { SixbError, type SixbErrorCode, type SixbErrorOptions } from "../../errors"
 
-export type AuthStorageErrorReason =
-  | "duplicate_access_token"
-  | "duplicate_identity"
-  | "duplicate_invitation"
-  | "duplicate_magic_link"
-  | "duplicate_oidc_attempt"
-  | "duplicate_service_account"
-  | "duplicate_session"
-  | "duplicate_user"
-  | "email_link_not_allowed"
-  | "expired_magic_link"
-  | "expired_oidc_attempt"
-  | "invalid_input"
-  | "invalid_magic_link"
-  | "invalid_oidc_attempt"
-  | "missing_identity"
-  | "missing_invitation"
-  | "missing_magic_link"
-  | "missing_oidc_attempt"
-  | "missing_access_token"
-  | "missing_service_account"
-  | "missing_session"
-  | "missing_user"
-  | "suspended_service_account"
-  | "suspended_user"
-  | "user_creation_not_allowed"
+const AUTH_STORAGE_ERROR_REASONS = [
+  "duplicate_access_token",
+  "duplicate_identity",
+  "duplicate_invitation",
+  "duplicate_magic_link",
+  "duplicate_oidc_attempt",
+  "duplicate_service_account",
+  "duplicate_session",
+  "duplicate_user",
+  "email_link_not_allowed",
+  "expired_magic_link",
+  "expired_oidc_attempt",
+  "invalid_input",
+  "invalid_magic_link",
+  "invalid_oidc_attempt",
+  "missing_identity",
+  "missing_invitation",
+  "missing_magic_link",
+  "missing_oidc_attempt",
+  "missing_access_token",
+  "missing_service_account",
+  "missing_session",
+  "missing_user",
+  "suspended_service_account",
+  "suspended_user",
+  "user_creation_not_allowed",
+] as const
+
+export type AuthStorageErrorReason = (typeof AUTH_STORAGE_ERROR_REASONS)[number]
 
 /**
  * Twenty-five reasons collapse onto five codes, and the collapse is the point: a caller outside
@@ -66,17 +69,13 @@ const CODE_BY_REASON: Record<AuthStorageErrorReason, SixbErrorCode> = {
 /**
  * Error for auth storage invariants and invalid auth state transitions.
  */
-export class AuthStorageError extends SixbError {
-  override readonly name = "AuthStorageError"
-
-  constructor(
-    readonly reason: AuthStorageErrorReason,
-    message: string,
-    options: SixbErrorOptions = {}
-  ) {
-    super(CODE_BY_REASON[reason], message, {
-      ...options,
-      details: { reason, ...options.details },
-    })
-  }
+export function authStorageError(
+  reason: AuthStorageErrorReason,
+  message: string,
+  options: SixbErrorOptions = {}
+): SixbError {
+  return new SixbError(CODE_BY_REASON[reason], message, {
+    ...options,
+    details: { reason, ...options.details },
+  })
 }

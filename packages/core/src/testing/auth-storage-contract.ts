@@ -5,7 +5,6 @@ import type {
   CompleteAuthSessionInput,
   UserRecord,
 } from "../storage/auth"
-import { AuthStorageError } from "../storage/auth"
 
 export interface AuthStorageContractSuiteOptions<TStorage extends AuthStorage = AuthStorage> {
   /** Factory that produces a fresh `AuthStorage` instance for each test case. */
@@ -41,8 +40,7 @@ async function expectAuthError(
   promise: Promise<unknown>,
   reason: AuthStorageErrorReason
 ): Promise<void> {
-  await expect(promise).rejects.toBeInstanceOf(AuthStorageError)
-  await expect(promise).rejects.toMatchObject({ reason })
+  await expect(promise).rejects.toHaveProperty("details.reason", reason)
 }
 
 async function createUser(

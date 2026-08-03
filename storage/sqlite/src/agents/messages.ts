@@ -3,8 +3,8 @@ import { AGENT_MESSAGE_CONTENT_VERSION } from "@sixb/core/internal/agents"
 import {
   type AgentMessageRecord,
   type AgentMessageStore,
-  AgentStorageError,
   type AppendAgentMessageInput,
+  agentStorageError,
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
 } from "@sixb/core/storage"
@@ -24,7 +24,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
         .get(input.projectId, input.threadId) as { present: number } | null
 
       if (!thread) {
-        throw new AgentStorageError(
+        throw agentStorageError(
           "thread_not_found",
           `[SixbSqlite] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
         )
@@ -36,7 +36,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
           .get(input.projectId, input.runId) as { present: number } | null
 
         if (!run) {
-          throw new AgentStorageError(
+          throw agentStorageError(
             "run_not_found",
             `[SixbSqlite] Agent run '${input.runId}' not found for project '${input.projectId}'.`
           )
@@ -87,7 +87,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
           )
       } catch (error) {
         if (isUniqueConstraintError(error)) {
-          throw new AgentStorageError(
+          throw agentStorageError(
             "duplicate_id",
             `[SixbSqlite] Agent message '${input.id}' already exists for project '${input.projectId}'.`
           )
@@ -151,7 +151,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
       .get(projectId, id) as AgentMessageRow | null
 
     if (!row) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "invalid_state",
         `[SixbSqlite] Failed to load agent message '${id}' for project '${projectId}'.`
       )

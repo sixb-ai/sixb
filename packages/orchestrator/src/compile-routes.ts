@@ -1,6 +1,6 @@
 import type { DomainEvent, ScheduleDefinition, ScheduleReference } from "@sixb/core"
 import { eventScheduleSubscribedEventTypes } from "@sixb/core/internal/schedules"
-import { OrchestratorError } from "./errors"
+import { orchestratorError } from "./errors"
 import { eventScheduleRouteKeyForSelector } from "./route-key"
 import type {
   CompileRoutesDiagnostic,
@@ -135,7 +135,7 @@ function addScheduleTarget(input: {
   for (const eventType of eventScheduleSubscribedEventTypes(eventSchedule)) {
     const key = eventScheduleRouteKeyForSelector(eventType, eventSchedule.trigger.source)
     if (!key) {
-      throw new OrchestratorError(
+      throw orchestratorError(
         `Schedule '${schedule.id}' source cannot be compiled into a scoped route.`
       )
     }

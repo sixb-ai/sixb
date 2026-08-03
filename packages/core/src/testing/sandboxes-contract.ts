@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { realpath } from "node:fs/promises"
-import { type SandboxFactory, SandboxNotRunningError } from "../sandboxes"
+import type { SandboxFactory } from "../sandboxes"
 
 /**
  * Capability flags letting a provider declare which contract slices are
@@ -110,8 +110,9 @@ export function runSandboxesContractSuite(
         try {
           await sandbox.stop()
           expect(sandbox.status).toBe("stopped")
-          await expect(sandbox.runCommand("echo", ["nope"])).rejects.toBeInstanceOf(
-            SandboxNotRunningError
+          await expect(sandbox.runCommand("echo", ["nope"])).rejects.toHaveProperty(
+            "code",
+            "sandbox.not_running"
           )
         } finally {
           await sandbox.destroy()
@@ -122,8 +123,9 @@ export function runSandboxesContractSuite(
         const sandbox = await factory.create()
         await sandbox.destroy()
         await sandbox.destroy()
-        await expect(sandbox.runCommand("echo", ["x"])).rejects.toBeInstanceOf(
-          SandboxNotRunningError
+        await expect(sandbox.runCommand("echo", ["x"])).rejects.toHaveProperty(
+          "code",
+          "sandbox.not_running"
         )
       })
     })
@@ -323,7 +325,7 @@ export function runSandboxesContractSuite(
         try {
           await expect(
             sandbox.writeFiles([{ path: `${sandbox.workingDirectory}/x.txt`, contents: "x" }])
-          ).rejects.toThrow(SandboxNotRunningError)
+          ).rejects.toHaveProperty("code", "sandbox.not_running")
         } finally {
           await sandbox.destroy()
         }

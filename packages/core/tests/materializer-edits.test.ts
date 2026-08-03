@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { createEventId, MaterializationConflictError } from "../src/materializer"
+import { createEventId } from "../src/materializer"
 import { InMemoryStorage, type Storage } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
@@ -199,7 +199,7 @@ describe("ontology materializer edits", () => {
         ...input,
         operations: [{ id: "different", kind: "object.delete", ref: ref("action-replayed") }],
       })
-    ).rejects.toMatchObject({ kind: "idempotency" })
+    ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "idempotency" } })
   })
 
   test("rechecks the Action run inside the transaction before ontology work", async () => {
@@ -828,7 +828,7 @@ describe("ontology materializer edits", () => {
         expectedLinks: [],
         expectedLinkScopes: [],
       })
-    ).rejects.toBeInstanceOf(MaterializationConflictError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     const first = await materializer.edits.commit(atomic("replay", []))
     const replay = await materializer.edits.commit(atomic("replay", []))
@@ -838,7 +838,7 @@ describe("ontology materializer edits", () => {
       materializer.edits.commit(
         atomic("replay", [{ id: "different", kind: "object.delete", ref: ref("one") }])
       )
-    ).rejects.toMatchObject({ kind: "idempotency" })
+    ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "idempotency" } })
   })
 
   test("continue mode rethrows provider failures and rolls back prior successes", async () => {

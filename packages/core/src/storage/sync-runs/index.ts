@@ -1,4 +1,3 @@
-export { SyncRunError } from "./errors"
 export { InMemorySyncRunStorage } from "./in-memory"
 export type {
   FinishSyncRunInput,

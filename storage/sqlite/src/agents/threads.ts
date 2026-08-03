@@ -1,8 +1,8 @@
 import type { Database } from "bun:sqlite"
 import {
-  AgentStorageError,
   type AgentThreadRecord,
   type AgentThreadStore,
+  agentStorageError,
   type CreateAgentThreadInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
@@ -51,7 +51,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        throw new AgentStorageError(
+        throw agentStorageError(
           "duplicate_id",
           `[SixbSqlite] Agent thread '${input.id}' already exists for project '${input.projectId}'.`
         )
@@ -122,7 +122,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
       .get(projectId, id) as AgentThreadRow | null
 
     if (!row) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "invalid_state",
         `[SixbSqlite] Failed to load agent thread '${id}' for project '${projectId}'.`
       )

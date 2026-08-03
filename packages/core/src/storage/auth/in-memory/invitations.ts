@@ -1,5 +1,5 @@
+import { authStorageError } from "../../../storage/auth/errors"
 import { paginate } from "../../pagination"
-import { AuthStorageError } from "../errors"
 import type {
   AuthInvitationStore,
   CreateOrUpdateAuthInvitationInput,
@@ -47,7 +47,7 @@ export class InMemoryAuthInvitationStore implements AuthInvitationStore {
 
     const key = invitationKey(projectId, id)
     if (this.state.invitations.has(key)) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "duplicate_invitation",
         `[Sixb] Invitation '${id}' already exists but is not active for project '${projectId}'.`
       )
@@ -122,7 +122,7 @@ export class InMemoryAuthInvitationStore implements AuthInvitationStore {
     const existing = this.state.invitations.get(key)
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_invitation",
         `[Sixb] Invitation '${params.id}' not found for project '${params.projectId}'.`
       )
@@ -147,7 +147,7 @@ export class InMemoryAuthInvitationStore implements AuthInvitationStore {
     const existing = this.state.invitations.get(key)
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_invitation",
         `[Sixb] Invitation '${params.id}' not found for project '${params.projectId}'.`
       )

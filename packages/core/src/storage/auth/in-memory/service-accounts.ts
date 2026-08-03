@@ -1,4 +1,4 @@
-import { AuthStorageError } from "../errors"
+import { authStorageError } from "../../../storage/auth/errors"
 import type {
   AuthServiceAccountStore,
   CreateAuthServiceAccountInput,
@@ -41,7 +41,7 @@ export class InMemoryAuthServiceAccountStore implements AuthServiceAccountStore 
     const existing = this.state.serviceAccounts.get(key)
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_service_account",
         `[Sixb] Service account '${id}' not found for project '${projectId}'.`
       )

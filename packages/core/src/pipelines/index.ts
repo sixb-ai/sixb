@@ -1,5 +1,4 @@
 export { definePipeline, definePipelineStep } from "./builders"
-export { PipelineError } from "./errors"
 export type {
   PipelineRunRequestOptions,
   PipelineRunRequestResult,

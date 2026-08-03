@@ -1,7 +1,5 @@
-import {
-  MaterializationConflictError,
-  MaterializationValidationError,
-} from "../../materialization/errors"
+import { SixbError } from "../../errors"
+import { materializationConflict } from "../../materialization/errors"
 import type { ProjectionMaterializationIdentity } from "../../materialization/model"
 import type { ProjectionDefinition, ResolvedProjection } from "../../projections/types"
 import type { ProjectionRunRecord, ProjectionRunStorage, Storage } from "../../storage"
@@ -27,9 +25,9 @@ export async function lockProjectionRunForMaterialization(
 ): Promise<LockedProjectionExecution> {
   const projectionRuns = storage.projectionRuns
   if (!projectionRuns) {
-    throw new MaterializationValidationError(
-      input.capabilityErrorMessage ??
-        "Storage transaction does not provide projection run capabilities."
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] ${input.capabilityErrorMessage ?? "Storage transaction does not provide projection run capabilities."}`
     )
   }
 
@@ -49,7 +47,7 @@ export function assertProjectionRunTargets(
 ): void {
   if (projectionRunTargetsMatch(run, resolved.definition)) return
 
-  throw new MaterializationConflictError(
+  throw materializationConflict(
     "run-correlation",
     `Projection run '${run.id}' target object types do not match projection '${resolved.projectionId}'.`
   )

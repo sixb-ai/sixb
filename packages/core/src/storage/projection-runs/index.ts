@@ -1,4 +1,3 @@
-export { ProjectionRunError } from "./errors"
 export { InMemoryProjectionRunStorage } from "./in-memory"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,

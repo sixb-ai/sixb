@@ -8,7 +8,7 @@ import {
   linkRefKey,
   linkRefSortKey,
   linkScopeSortKey,
-  MaterializationConflictError,
+  materializationConflict,
   objectRefKey,
   objectRefSortKey,
   telemetryPointKey,
@@ -124,7 +124,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       const linkScopes = await reader.linkScopes(input.expected.linkScopes)
       for (const [index, expected] of input.expected.linkScopes.entries()) {
         if (linkScopes[index]?.fingerprint !== expected.fingerprint) {
-          throw new MaterializationConflictError(
+          throw materializationConflict(
             "effective-state",
             `Expected link scope changed for ${expected.source.objectTypeId}:${expected.source.primaryId}.${expected.linkId}.`
           )
@@ -141,7 +141,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
           (pointRevisions.get(telemetryPointKey(expected.series, expected.at)) ?? null) !==
           expected.lastCommitId
         ) {
-          throw new MaterializationConflictError(
+          throw materializationConflict(
             "timeseries-point",
             `Telemetry point ${telemetryPointKey(expected.series, expected.at)} changed.`
           )
@@ -218,13 +218,13 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     const reader = new PgMaterializationStateReader(this.sql, session.header.commit.projectId)
     if (input.entityKind === "object") {
       if (replacement.projectionKind !== "object") {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "source-materialization",
           "Link projection replacement cannot stream object state."
         )
       }
       if (replacement.objectStreamStarted) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           "Replacement object state may only be streamed once per session."
         )
@@ -258,13 +258,13 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     }
 
     if (replacement.projectionKind === "object" && !replacement.objectStreamCompleted) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         "Object projection replacement must fully stream object state before link state."
       )
     }
     if (replacement.linkStreamStarted) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         "Replacement link state may only be streamed once per session."
       )
@@ -351,7 +351,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         session.replacement.sourceId !== input.source.projectionId ||
         session.replacement.candidateMaterializationId !== input.candidateMaterializationId
       ) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "source-materialization",
           "Materialization session already owns another replacement union."
         )
@@ -366,7 +366,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       true
     )
     if (!candidate || candidate.status !== "ready" || candidate.execution_token === null) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "source-materialization",
         `Candidate source materialization '${input.candidateMaterializationId}' is missing or is not ready.`
       )
@@ -384,7 +384,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         (previous.protocol !== candidate.protocol ||
           previous.projection_kind !== candidate.projection_kind))
     ) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "source-materialization",
         "Source replacement kind or protocol does not match its active materialization."
       )
@@ -415,7 +415,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       FOR UPDATE
     `
     if (duplicateIdentity) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "idempotency",
         duplicateIdentity.id === header.commit.id
           ? `Ontology commit '${header.commit.id}' already exists.`
@@ -446,7 +446,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
             FOR UPDATE
           `
     if (duplicateOrigin) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "run-correlation",
         "Ontology commit origin already has an authoritative commit."
       )
@@ -481,7 +481,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       (active?.materialization_id ?? null) !== expected.activeMaterializationId ||
       (active?.last_commit_id ?? null) !== expected.lastCommitId
     ) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "projection-fence",
         `Source '${expected.source.projectionId}' changed.`
       )
@@ -494,7 +494,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
   ): void {
     if (!expected.exists) {
       if (row) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           `Expected object ${objectRefKey(expected.ref)} to be absent.`
         )
@@ -502,7 +502,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       return
     }
     if (!row || row.version !== expected.version || row.lastCommitId !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         `Expected object ${objectRefKey(expected.ref)} changed.`
       )
@@ -515,7 +515,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
   ): void {
     if (!expected.exists) {
       if (lastCommitId !== undefined) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           `Expected link ${linkRefKey(expected.ref)} to be absent.`
         )
@@ -523,7 +523,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       return
     }
     if (lastCommitId === undefined || lastCommitId !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         `Expected link ${linkRefKey(expected.ref)} changed.`
       )
@@ -732,7 +732,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       true
     )
     if (!candidate || candidate.status !== "ready" || candidate.execution_token === null) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "source-materialization",
         "Source activation candidate is missing or is not ready."
       )
@@ -790,7 +790,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         RETURNING materialization_id
       `
       if (superseded.length !== 1) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "projection-fence",
           `Source '${activation.source.projectionId}' changed.`
         )
@@ -812,7 +812,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       `
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "projection-fence",
           `Source '${activation.source.projectionId}' changed.`
         )
@@ -820,7 +820,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       throw error
     }
     if (activated.length !== 1) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "source-materialization",
         "Source activation candidate changed."
       )
@@ -853,10 +853,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     `
     if (!rows[0]) {
       await this.assertCommitAbsent(header)
-      throw new MaterializationConflictError(
-        "idempotency",
-        "Ontology commit identity already exists."
-      )
+      throw materializationConflict("idempotency", "Ontology commit identity already exists.")
     }
     return commitRecord(rows[0])
   }

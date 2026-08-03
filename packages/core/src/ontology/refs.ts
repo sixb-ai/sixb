@@ -1,4 +1,4 @@
-import { OntologyValidationError } from "./errors"
+import { SixbError } from "../errors"
 import type { InferSchema } from "./inference"
 import type { ObjectType, Schema, ValueType } from "./types"
 import { isRecord, validateSchemaValue } from "./validation"
@@ -58,23 +58,27 @@ export function validateSchemaOrRefValue(
 
 function validateObjectRefValue(schema: ObjectRefSchema, value: unknown, path: string): void {
   if (!isRecord(value)) {
-    throw new OntologyValidationError(`[Sixb] Property ${path} must be an objectRef`)
+    throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} must be an objectRef`)
   }
 
   const allowedFields = new Set(["objectTypeId", "primaryId"])
   for (const fieldId of Object.keys(value)) {
     if (!allowedFields.has(fieldId)) {
-      throw new OntologyValidationError(`[Sixb] Unknown field '${path}.${fieldId}'`)
+      throw new SixbError("ontology.invalid_value", `[Sixb] Unknown field '${path}.${fieldId}'`)
     }
   }
 
   if (value.objectTypeId !== schema.objectTypeId) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Property ${path}.objectTypeId must be "${schema.objectTypeId}"`
     )
   }
 
   if (typeof value.primaryId !== "string") {
-    throw new OntologyValidationError(`[Sixb] Property ${path}.primaryId must be a string`)
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Property ${path}.primaryId must be a string`
+    )
   }
 }

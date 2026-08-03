@@ -1,6 +1,7 @@
+import type { SixbError } from "@sixb/core/errors"
 import {
   linkRefKey,
-  MaterializationConflictError,
+  materializationConflict,
   objectRefKey,
   telemetryPointKey,
 } from "@sixb/core/internal/materialization"
@@ -448,7 +449,7 @@ function overrideWrite(
   }
 }
 
-function overrideConflict(kind: "object" | "link"): MaterializationConflictError {
+function overrideConflict(kind: "object" | "link"): SixbError {
   return effectiveConflict(`Expected ${kind} override changed.`)
 }
 
@@ -476,7 +477,7 @@ function linkIdentityKey(item: {
 function effectiveObjectConflict(item: {
   readonly objectTypeId: string
   readonly primaryId: string
-}): MaterializationConflictError {
+}): SixbError {
   return effectiveConflict(`Expected object ${objectIdentityKey(item)} changed.`)
 }
 
@@ -486,7 +487,7 @@ function effectiveLinkConflict(item: {
   readonly linkId: string
   readonly targetTypeId: string
   readonly targetId: string
-}): MaterializationConflictError {
+}): SixbError {
   return effectiveConflict(`Expected link ${linkIdentityKey(item)} changed.`)
 }
 
@@ -495,8 +496,8 @@ function pointConflict(item: {
   readonly objectId: string
   readonly propertyId: string
   readonly at: string
-}): MaterializationConflictError {
-  return new MaterializationConflictError(
+}): SixbError {
+  return materializationConflict(
     "timeseries-point",
     `Telemetry point ${telemetryPointKey(
       {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
-import { InMemoryPipelineRunStorage, PipelineRunError } from "../src/storage"
+import { InMemoryPipelineRunStorage } from "../src/storage"
 
 describe("InMemoryPipelineRunStorage", () => {
   test("starts and finishes a successful pipeline run", async () => {
@@ -336,7 +336,7 @@ describe("InMemoryPipelineRunStorage", () => {
         projectId: "my-app",
         pipelineId: "customers",
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await expect(
       storage.finish({
@@ -348,7 +348,7 @@ describe("InMemoryPipelineRunStorage", () => {
           message: "boom",
         },
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "pipeline.run_not_found")
 
     await storage.startStep({
       id: "step_1",
@@ -371,7 +371,7 @@ describe("InMemoryPipelineRunStorage", () => {
           versionId: "ver_wrong",
         },
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     await storage.finishStep({
       id: "step_1",
@@ -393,7 +393,7 @@ describe("InMemoryPipelineRunStorage", () => {
           message: "Too late",
         },
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await storage.finish({
       id: "piperun_1",
@@ -416,7 +416,7 @@ describe("InMemoryPipelineRunStorage", () => {
         mode: "snapshot",
         inputs: [],
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await expect(
       storage.finish({
@@ -428,7 +428,7 @@ describe("InMemoryPipelineRunStorage", () => {
           message: "Too late",
         },
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 
   test("InMemoryStorage includes pipeline run storage", () => {

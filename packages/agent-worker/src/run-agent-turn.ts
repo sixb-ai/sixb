@@ -5,18 +5,19 @@ import type {
   AgentMessagePart,
   Storage,
 } from "@sixb/core"
+import { isSixbError } from "@sixb/core/errors"
 import {
   buildAgentSystemPrompt,
   createAgentMessageId,
   fromAiSdk,
   toModelMessages,
 } from "@sixb/core/internal/agents"
-import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
+import { isAbortError } from "@sixb/core/internal/workers"
 import type { AgentRunRecord, AgentStorage } from "@sixb/core/storage"
 import { type ModelMessage, stepCountIs, streamText, toUIMessageStream } from "ai"
 import { agentRunUsageFromAiSdk } from "./ai-sdk-adapters"
 import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
-import { AgentTurnTimeoutError, AgentWorkerError } from "./errors"
+import { agentTurnTimeout, agentWorkerError } from "./errors"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import {
   type AgentOutputAttachmentResult,
@@ -52,7 +53,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const runId = run.id
   const executionToken = run.execution?.token
   if (!executionToken) {
-    throw new AgentWorkerError(`Agent run '${runId}' has no execution token.`)
+    throw agentWorkerError(`Agent run '${runId}' has no execution token.`)
   }
   const agents = storage.agents
 
@@ -158,7 +159,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   }
 
   const finalizeIfInterrupted = async (error?: unknown): Promise<AgentRunRecord | null> => {
-    if (signal.reason instanceof QueueDeliveryLeaseLostError) {
+    if (isSixbError(signal.reason, "queue.lease_lost")) {
       throw signal.reason
     }
     // A sandbox failure and a timeout take precedence over the abort-shaped error they cause.
@@ -166,7 +167,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       throw provisionError
     }
     if (timedOut) {
-      throw new AgentTurnTimeoutError(runId, turnTimeoutMs)
+      throw agentTurnTimeout(runId, turnTimeoutMs)
     }
     if (!streamAborted && !abortSignal.aborted && (error === undefined || !isAbortError(error))) {
       return null
@@ -196,7 +197,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       throw drainError
     }
     if (!responseMessage) {
-      throw new AgentWorkerError(`Agent run '${runId}' produced no response message.`)
+      throw agentWorkerError(`Agent run '${runId}' produced no response message.`)
     }
 
     const finishReason = await result.finishReason

@@ -1,9 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
 import { stableJsonStringify } from "../../json"
-import {
-  MaterializationConflictError,
-  MaterializationValidationError,
-} from "../../materialization/errors"
 import type {
   EffectiveLinkSnapshot,
   OntologyLinkRef,
@@ -59,6 +55,9 @@ export {
   materializationPlanItems,
   workUniquenessKey,
 } from "./provider-work"
+
+import { SixbError } from "../../errors"
+import { materializationConflict } from "../../materialization/errors"
 
 export interface LinkScopeAccumulator {
   readonly scopeSortKey: string
@@ -167,8 +166,9 @@ export class ProviderMaterializationTransactionLifecycle {
 
   register(sessionToken: object): void {
     if (!this.active) {
-      throw new MaterializationValidationError(
-        "Cannot open a materialization session on an inactive storage transaction."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Cannot open a materialization session on an inactive storage transaction."
       )
     }
     this.openSessions.add(sessionToken)
@@ -180,8 +180,9 @@ export class ProviderMaterializationTransactionLifecycle {
 
   assertCommittable(): void {
     if (this.openSessions.size === 0) return
-    throw new MaterializationValidationError(
-      `Storage transaction has ${this.openSessions.size} unfinished materialization session${
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Storage transaction has ${this.openSessions.size} unfinished materialization session${
         this.openSessions.size === 1 ? "" : "s"
       }; every session returned by begin() must be finalized.`
     )
@@ -204,7 +205,7 @@ export function prepareMaterializationWork(
   input: StageMaterializationWorkInput
 ): readonly PreparedMaterializationWork[] {
   if (state.workSealed) {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "effective-state",
       "Materialization work cannot be staged after draining begins."
     )
@@ -221,7 +222,7 @@ export function prepareMaterializationWork(
       record.kind === "incident-object" &&
       (!state.replacement || state.replacement.linkStreamStarted)
     ) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         "Incident replacement work must be staged before link state is streamed."
       )
@@ -404,7 +405,7 @@ export function assertSourceActivationCorrelation(
 }
 
 function invalidMaterializationCorrelation(message: string): never {
-  throw new MaterializationValidationError(message)
+  throw new SixbError("ontology.invalid_value", `[Sixb] ${message}`)
 }
 
 export function uniqueSorted<T>(
@@ -466,8 +467,8 @@ export function sameNonnegativeCounts(actual: object, expected: object): boolean
   )
 }
 
-export function effectiveConflict(message: string): MaterializationConflictError {
-  return new MaterializationConflictError("effective-state", message)
+export function effectiveConflict(message: string): SixbError {
+  return materializationConflict("effective-state", message)
 }
 
 export function materializationWorkColumns(record: MaterializationWorkRecord): {
@@ -530,11 +531,8 @@ function materializationPlanKindRank(kind: MaterializationPlanWorkItem["kind"]):
   }
 }
 
-export function duplicateMaterializationWork(key: string): MaterializationConflictError {
-  return new MaterializationConflictError(
-    "effective-state",
-    `Duplicate materialization work key '${key}'.`
-  )
+export function duplicateMaterializationWork(key: string): SixbError {
+  return materializationConflict("effective-state", `Duplicate materialization work key '${key}'.`)
 }
 
 export function canonicalJson(value: unknown): string {
@@ -652,14 +650,16 @@ export function reconcileSourceStageRows(
     const { entityKey, rootKey, row } = staged
     const rootOrdinal = rootOrdinals.get(rootKey)
     if (rootOrdinal !== undefined && rootOrdinal !== row.stagingOrdinal) {
-      throw new MaterializationValidationError(
-        `Source materialization repeats root ${rootKey} at a different stream ordinal.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Source materialization repeats root ${rootKey} at a different stream ordinal.`
       )
     }
     const ordinalRoot = ordinalRoots.get(row.stagingOrdinal)
     if (ordinalRoot !== undefined && ordinalRoot !== rootKey) {
-      throw new MaterializationValidationError(
-        `Source materialization repeats stream ordinal ${row.stagingOrdinal} for another root.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Source materialization repeats stream ordinal ${row.stagingOrdinal} for another root.`
       )
     }
 
@@ -669,8 +669,9 @@ export function reconcileSourceStageRows(
         unchanged += 1
         continue
       }
-      throw new MaterializationValidationError(
-        `Source materialization repeats asserted entity ${entityKey}.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Source materialization repeats asserted entity ${entityKey}.`
       )
     }
 
@@ -698,11 +699,15 @@ export function sourceMaterializationIdentity(
 export function assertSourceBeginInput(input: BeginSourceMaterializationInput): void {
   assertSourceWriteIdentity(input)
   if (input.projectionKind !== "object" && input.projectionKind !== "link") {
-    throw new MaterializationValidationError("Source projection kind must be 'object' or 'link'.")
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Source projection kind must be 'object' or 'link'."
+    )
   }
   if (input.protocol !== "replacement") {
-    throw new MaterializationValidationError(
-      "Source materialization protocol must be 'replacement'."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Source materialization protocol must be 'replacement'."
     )
   }
   assertNonblank(input.projectionRevision, "Source projection revision")
@@ -757,20 +762,23 @@ export function assertSourceStagedRow(
   row: StageSourceAssertion
 ): void {
   if (!Number.isSafeInteger(row.stagingOrdinal) || row.stagingOrdinal < 0) {
-    throw new MaterializationValidationError(
-      "Source staging ordinal must be a nonnegative safe integer."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Source staging ordinal must be a nonnegative safe integer."
     )
   }
   assertSourceEntity(row.root, "Source root")
   assertSourceEntity(row.assertion, "Source assertion")
   if (projectionKind === "object" && row.root.kind !== "object") {
-    throw new MaterializationValidationError(
-      "Object projection source rows require an object root."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Object projection source rows require an object root."
     )
   }
   if (projectionKind === "link" && (row.root.kind !== "link" || row.assertion.kind !== "link")) {
-    throw new MaterializationValidationError(
-      "Link projection source rows require a link root and link assertion."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Link projection source rows require a link root and link assertion."
     )
   }
 }
@@ -847,6 +855,6 @@ export function isExactStagingManifest(
   )
 }
 
-export function sourceConflict(message: string): MaterializationConflictError {
-  return new MaterializationConflictError("source-materialization", message)
+export function sourceConflict(message: string): SixbError {
+  return materializationConflict("source-materialization", message)
 }

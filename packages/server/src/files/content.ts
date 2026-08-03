@@ -1,5 +1,6 @@
 import { type BlobInfo, type BlobStorage, type FileRef, isFileRef } from "@sixb/core"
-import { BlobStorageError, supportsRangeRead } from "@sixb/core/blob-storage/server"
+import { supportsRangeRead } from "@sixb/core/blob-storage/server"
+import { isSixbError } from "@sixb/core/errors"
 import { ZodError } from "zod"
 import { type ErrorResponseBody, errorResponse } from "../utils/http"
 
@@ -151,7 +152,7 @@ export async function createFileContentResponse(
       const stream = await input.blobStorage.openRange(input.fileRef.blobId, range)
       return new Response(stream, { status: 206, headers: partialHeaders })
     } catch (error) {
-      if (error instanceof BlobStorageError) {
+      if (isSixbError(error, "storage.blob_failed")) {
         return null
       }
 
@@ -167,7 +168,7 @@ export async function createFileContentResponse(
     const stream = await input.blobStorage.open(input.fileRef.blobId)
     return new Response(stream, { headers })
   } catch (error) {
-    if (error instanceof BlobStorageError) {
+    if (isSixbError(error, "storage.blob_failed")) {
       return null
     }
 

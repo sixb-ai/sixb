@@ -1,5 +1,5 @@
 import type { Schema, ValueType } from "@sixb/core"
-import { ProjectionWorkerError } from "./errors"
+import { projectionWorkerError } from "./errors"
 
 export function resolveProjectionSchema(
   schema: Schema,
@@ -15,7 +15,7 @@ export function resolveProjectionSchema(
   }
 
   if (seen.has(schema.valueTypeId)) {
-    throw new ProjectionWorkerError(
+    throw projectionWorkerError(
       `[SixbProjectionWorker] Circular valueTypeRef '${schema.valueTypeId}' in projection schema.`
     )
   }
@@ -29,7 +29,7 @@ export function resolveProjectionSchema(
 
   const valueType = valueTypesById.get(schema.valueTypeId)
   if (!valueType) {
-    throw new ProjectionWorkerError(
+    throw projectionWorkerError(
       `[SixbProjectionWorker] Unknown valueTypeRef '${schema.valueTypeId}' in projection schema.`
     )
   }

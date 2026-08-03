@@ -1,4 +1,4 @@
-import { MaterializationConflictError } from "../../../materialization/errors"
+import { materializationConflict } from "../../../materialization/errors"
 import type {
   EffectiveLinkSnapshot,
   EffectiveObjectSnapshot,
@@ -48,7 +48,7 @@ export function uniqueBy<T>(values: readonly T[], keyOf: (value: T) => string): 
 
 export function objectSnapshot(row: ObjectRow): EffectiveObjectSnapshot {
   if (!row.lastCommitId)
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "effective-state",
       `Effective object ${row.objectTypeId}:${row.primaryId} lacks materializer provenance.`
     )
@@ -64,7 +64,7 @@ export function objectSnapshot(row: ObjectRow): EffectiveObjectSnapshot {
 
 export function linkSnapshot(row: ObjectLinkRow): EffectiveLinkSnapshot {
   if (!row.lastCommitId)
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "effective-state",
       `Effective link lacks materializer provenance.`
     )
@@ -89,7 +89,7 @@ export function linkRef(row: ObjectLinkRow): OntologyLinkRef {
 
 export function storedPoint(point: TimeseriesPoint): StoredTelemetryPoint {
   if (!point.lastCommitId)
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "timeseries-point",
       "Telemetry point lacks materializer provenance."
     )
@@ -120,7 +120,7 @@ export function findActiveSourceMaterialization(
       continue
     }
     if (active) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "source-materialization",
         `Source '${sourceId}' has more than one active materialization.`
       )

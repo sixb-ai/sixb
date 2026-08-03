@@ -1,4 +1,4 @@
-import { ActionRunError } from "./errors"
+import { materializationConflict } from "../../materialization/errors"
 import {
   actionRunPhaseRecordsEqual,
   actionSubjectsEqual,
@@ -33,7 +33,10 @@ function actionRunKey(projectId: string, id: string): string {
 
 function assertNonBlank(value: string, fieldName: string): void {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new ActionRunError(`[Sixb] Action materialization ${fieldName} must be nonblank.`)
+    throw materializationConflict(
+      "run-correlation",
+      `[Sixb] Action materialization ${fieldName} must be nonblank.`
+    )
   }
 }
 
@@ -133,7 +136,8 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       const key = actionRunKey(input.projectId, input.id)
       const existing = this.rows.get(key)
       if (existing && !canRequeueActionRunAfterEnqueueFailure(existing, input)) {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[Sixb] Action run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
@@ -177,13 +181,15 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       const existing = this.rows.get(key)
 
       if (!existing) {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[Sixb] Action run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "queued") {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[Sixb] Action run '${input.id}' cannot start from status '${existing.status}'.`
         )
       }
@@ -226,7 +232,8 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
           return cloneActionRunRecord(existing)
         }
 
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[Sixb] Action run '${input.id}' already has a different writeback record.`
         )
       }
@@ -253,7 +260,8 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
           return cloneActionRunRecord(existing)
         }
 
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[Sixb] Action run '${input.id}' already has a different effects record.`
         )
       }
@@ -275,13 +283,15 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       const existing = this.rows.get(key)
 
       if (!existing) {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[Sixb] Action run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (isTerminalActionRun(existing)) {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[Sixb] Action run '${input.id}' cannot finish from terminal status '${existing.status}'.`
         )
       }
@@ -323,11 +333,15 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
     const existing = this.rows.get(key)
 
     if (!existing) {
-      throw new ActionRunError(`[Sixb] Action run '${id}' not found for project '${projectId}'.`)
+      throw materializationConflict(
+        "run-correlation",
+        `[Sixb] Action run '${id}' not found for project '${projectId}'.`
+      )
     }
 
     if (existing.status !== "running") {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[Sixb] Action run '${id}' cannot ${operation} from status '${existing.status}'.`
       )
     }
@@ -399,17 +413,20 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
 
     const existing = this.rows.get(actionRunKey(input.projectId, input.runId))
     if (!existing) {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[Sixb] Action run '${input.runId}' not found for project '${input.projectId}'.`
       )
     }
     if (existing.actionId !== input.actionId) {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[Sixb] Action run '${input.runId}' does not belong to action '${input.actionId}'.`
       )
     }
     if (existing.status !== "running") {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[Sixb] Action run '${input.runId}' cannot materialize from status '${existing.status}'.`
       )
     }

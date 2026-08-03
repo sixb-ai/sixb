@@ -1,4 +1,4 @@
-import { AuthStorageError } from "../errors"
+import { authStorageError } from "../../../storage/auth/errors"
 import type {
   AccessTokenRecord,
   AuthAccessTokenStore,
@@ -80,7 +80,7 @@ export class InMemoryAuthAccessTokenStore implements AuthAccessTokenStore {
     const existing = this.state.accessTokens.get(key)
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_access_token",
         `[Sixb] Access token '${params.id}' not found for project '${params.projectId}'.`
       )
@@ -105,7 +105,7 @@ export class InMemoryAuthAccessTokenStore implements AuthAccessTokenStore {
     const existing = this.state.accessTokens.get(key)
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_access_token",
         `[Sixb] Access token '${params.id}' not found for project '${params.projectId}'.`
       )

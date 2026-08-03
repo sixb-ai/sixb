@@ -6,7 +6,7 @@ import type {
   ListAuthAccessTokensInput,
   ListAuthAccessTokensResult,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import type {
   SqliteAuthAccessTokenRow,
   SqliteAuthServiceAccountRow,
@@ -81,7 +81,7 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
 
     const token = await this.getById({ projectId, id })
     if (!token) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_access_token",
         `[Sixb] Access token '${id}' not found for project '${projectId}'.`
       )
@@ -182,7 +182,7 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
   }): Promise<AccessTokenRecord> {
     const existing = await this.getById(params)
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_access_token",
         `[Sixb] Access token '${params.id}' not found for project '${params.projectId}'.`
       )
@@ -211,7 +211,7 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
   }): Promise<AccessTokenRecord> {
     const existing = await this.getById(params)
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_access_token",
         `[Sixb] Access token '${params.id}' not found for project '${params.projectId}'.`
       )
@@ -257,7 +257,7 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
         .query("SELECT * FROM auth_users WHERE project_id = ? AND id = ?")
         .get(projectId, subjectId) as SqliteAuthUserRow | null
       if (row) return
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_user",
         `[Sixb] User '${subjectId}' not found for project '${projectId}'.`
       )
@@ -267,7 +267,7 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
       .query("SELECT * FROM auth_service_accounts WHERE project_id = ? AND id = ?")
       .get(projectId, subjectId) as SqliteAuthServiceAccountRow | null
     if (row) return
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_service_account",
       `[Sixb] Service account '${subjectId}' not found for project '${projectId}'.`
     )
@@ -282,7 +282,7 @@ function assertKindMatchesSubject(input: CreateAuthAccessTokenInput): void {
     return
   }
 
-  throw new AuthStorageError(
+  throw authStorageError(
     "invalid_input",
     `[Sixb] Access token kind '${input.kind}' cannot target subject type '${input.subjectType}'.`
   )

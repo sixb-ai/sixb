@@ -1,9 +1,9 @@
-import { ConnectorError } from "./errors"
+import { SixbError } from "../errors"
 import type { ConnectorAdapter, ConnectorDefinition } from "./types"
 
 function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
-    throw new ConnectorError(`Connector ${field} must not be empty.`)
+    throw new SixbError("runtime.invalid_definition", `Connector ${field} must not be empty.`)
   }
 }
 
@@ -22,7 +22,10 @@ export function defineConnector<TId extends string, TAdapter extends ConnectorAd
   assertNonEmpty(adapter.type, "type")
 
   if (typeof adapter.connect !== "function") {
-    throw new ConnectorError("Connector adapter connect must be a function.")
+    throw new SixbError(
+      "runtime.invalid_definition",
+      "Connector adapter connect must be a function."
+    )
   }
 
   return {

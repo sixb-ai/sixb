@@ -1,4 +1,4 @@
-import { ConnectorError, ConnectorNotFoundError } from "./errors"
+import { SixbError } from "../errors"
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "./types"
 
 type ConnectorConnectionState = {
@@ -16,7 +16,10 @@ export class ConnectorRuntime {
   ) {
     for (const definition of definitions) {
       if (this.definitionsById.has(definition.id)) {
-        throw new ConnectorError(`Duplicate connector id: ${definition.id}`)
+        throw new SixbError(
+          "runtime.invalid_definition",
+          `Duplicate connector id: ${definition.id}`
+        )
       }
 
       this.definitionsById.set(definition.id, definition)
@@ -37,11 +40,14 @@ export class ConnectorRuntime {
     const registeredDefinition = this.definitionsById.get(definition.id)
 
     if (!registeredDefinition) {
-      throw new ConnectorNotFoundError(definition.id)
+      throw new SixbError("connector.not_found", `[Sixb] Unknown connector '${definition.id}'`, {
+        details: { connectorId: definition.id },
+      })
     }
 
     if (registeredDefinition !== definition) {
-      throw new ConnectorError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Connector '${definition.id}' is not the registered definition instance.`
       )
     }

@@ -1,4 +1,4 @@
-import { SixbValidationError } from "@sixb/core/errors"
+import { SixbError } from "@sixb/core/errors"
 
 /**
  * Reads a request body fully into memory while enforcing a hard byte ceiling.
@@ -8,15 +8,12 @@ import { SixbValidationError } from "@sixb/core/errors"
  * `content-length` header, when present, only provides an early fast-path. This
  * is the single bounded-reader used by request handlers that need the raw bytes.
  */
-export class RequestBodyTooLargeError extends SixbValidationError {
-  override readonly name = "RequestBodyTooLargeError"
-
-  constructor(
-    readonly limitBytes: number,
-    message = `Request body exceeds the ${limitBytes} byte limit.`
-  ) {
-    super("runtime.payload_too_large", message, { details: { limitBytes } })
-  }
+function requestBodyTooLarge(limitBytes: number, message?: string): SixbError {
+  return new SixbError(
+    "runtime.payload_too_large",
+    message ?? `Request body exceeds the ${limitBytes} byte limit.`,
+    { details: { limitBytes } }
+  )
 }
 
 export async function readRequestBodyWithLimit(
@@ -28,7 +25,7 @@ export async function readRequestBodyWithLimit(
   if (contentLength !== null) {
     const declared = Number(contentLength)
     if (Number.isSafeInteger(declared) && declared > limitBytes) {
-      throw new RequestBodyTooLargeError(limitBytes, tooLargeMessage)
+      throw requestBodyTooLarge(limitBytes, tooLargeMessage)
     }
   }
 
@@ -48,7 +45,7 @@ export async function readRequestBodyWithLimit(
     total += value.byteLength
     if (total > limitBytes) {
       await reader.cancel()
-      throw new RequestBodyTooLargeError(limitBytes, tooLargeMessage)
+      throw requestBodyTooLarge(limitBytes, tooLargeMessage)
     }
 
     chunks.push(value)

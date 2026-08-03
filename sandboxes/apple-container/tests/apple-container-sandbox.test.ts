@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { SandboxNotRunningError } from "@sixb/core"
 import { AppleContainerSandbox } from "../src/apple-container-sandbox"
 import type { AppleContainerCliConfig } from "../src/cli"
 
@@ -110,8 +109,9 @@ describe("AppleContainerSandbox lifecycle", () => {
     await sandbox.stop()
     await sandbox.stop()
     expect(sandbox.status).toBe("stopped")
-    await expect(sandbox.runCommand("echo", ["nope"])).rejects.toBeInstanceOf(
-      SandboxNotRunningError
+    await expect(sandbox.runCommand("echo", ["nope"])).rejects.toHaveProperty(
+      "code",
+      "sandbox.not_running"
     )
 
     await sandbox.destroy()

@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { PipelineRunError } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { PgPipelineRunStorage } from "../src/pg-pipeline-run-storage"
 import { createTestStorage } from "./helpers"
@@ -328,7 +327,7 @@ describe("PgPipelineRunStorage", () => {
         projectId: "my-app",
         pipelineId: "customers",
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await expect(
       storage.pipelineRuns.finish({
@@ -340,7 +339,7 @@ describe("PgPipelineRunStorage", () => {
           message: "boom",
         },
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "pipeline.run_not_found")
 
     await storage.pipelineRuns.startStep({
       id: "step_1",
@@ -363,7 +362,7 @@ describe("PgPipelineRunStorage", () => {
           versionId: "ver_wrong",
         },
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     await storage.pipelineRuns.finishStep({
       id: "step_1",
@@ -385,7 +384,7 @@ describe("PgPipelineRunStorage", () => {
           message: "Too late",
         },
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await storage.pipelineRuns.finish({
       id: "piperun_1",
@@ -408,7 +407,7 @@ describe("PgPipelineRunStorage", () => {
         mode: "snapshot",
         inputs: [],
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 
   test("PostgresStorage includes pipeline run storage", () => {

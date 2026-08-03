@@ -28,7 +28,6 @@ import {
   type PipelineDefinition,
   prop,
   type RoleDefinition,
-  SecurityValidationError,
   Sixb,
   type SyncDefinition,
 } from "../src"
@@ -126,7 +125,7 @@ describe("security definitions", () => {
         scope: [],
         can: [],
       })
-    ).toThrow(SecurityValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
   })
 
   test("membership policy scopes combine applicable policies by operation", () => {
@@ -259,7 +258,7 @@ export const memberAdministration = defineMembershipPolicy("member-administratio
           { kind: "group", id: "security-admins" },
         ],
       })
-    ).toThrow(SecurityValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
   })
 
   test("runtime registration rejects duplicate membership policy ids", () => {
@@ -276,7 +275,7 @@ export const memberAdministration = defineMembershipPolicy("member-administratio
     }
 
     expect(() => createRuntime({ groups, membershipPolicies: [policy, policy] })).toThrow(
-      SecurityValidationError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
   })
 
@@ -566,13 +565,13 @@ describe("role definitions", () => {
 
   test("defineRole rejects roles granted to no groups", () => {
     expect(() => defineRole("empty", { grantedTo: [], grants: [can.view(Account)] })).toThrow(
-      SecurityValidationError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
   })
 
   test("defineRole rejects roles with no grants", () => {
     expect(() => defineRole("empty", { grantedTo: [commercial], grants: [] })).toThrow(
-      SecurityValidationError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
   })
 

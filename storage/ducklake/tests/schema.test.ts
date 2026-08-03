@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import { col, type DatasetColumnType } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core/lake-storage"
 import { DUCKDB_COLUMN_TYPES } from "../src/internal/duckdb-column-types"
 import {
   datasetColumnToDuckDbSql,
@@ -82,7 +81,7 @@ describe("DuckLake schema mapping", () => {
     expect(duckDbTypeToDatasetColumnType("JSON")).toBe("json")
     expect(() =>
       duckDbTypeToDatasetColumnType("STRUCT(blobId VARCHAR, digest VARCHAR, extra VARCHAR)")
-    ).toThrow(LakeStorageError)
+    ).toThrow(expect.objectContaining({ code: "storage.lake_failed" }))
   })
 
   test("rejects unknown DuckDB types with an actionable error", () => {

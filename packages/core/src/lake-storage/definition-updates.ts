@@ -1,5 +1,5 @@
 import type { DatasetColumnDefinition, DatasetDefinition } from "../datasets"
-import { LakeStorageError } from "./errors"
+import { SixbError } from "../errors"
 import type { LakeStorage } from "./types"
 
 export type DatasetSchemaUpdatePlan =
@@ -71,7 +71,8 @@ export function mergeStrictDatasetDefinition(options: {
 
   const plan = planDatasetDefinitionUpdate(options.existing, options.next)
   if (plan.schema.kind !== "none") {
-    throw new LakeStorageError(
+    throw new SixbError(
+      "storage.lake_failed",
       `[SixbLake] Dataset '${options.next.id}' cannot be redefined with an incompatible schema.`
     )
   }
@@ -92,7 +93,8 @@ export async function assertLakeDatasetDefinitionsCompatible(
 
 function assertSameDataset(existing: DatasetDefinition, requested: DatasetDefinition): void {
   if (existing.id !== requested.id) {
-    throw new LakeStorageError(
+    throw new SixbError(
+      "storage.lake_failed",
       `[SixbLake] Cannot update dataset '${existing.id}' with definition for '${requested.id}'.`
     )
   }
@@ -219,7 +221,8 @@ function assertCompatibleMetadataField(
     return
   }
 
-  throw new LakeStorageError(
+  throw new SixbError(
+    "storage.lake_failed",
     `[SixbLake] Dataset '${datasetId}' cannot be redefined with an incompatible ${field}.`
   )
 }
@@ -257,7 +260,8 @@ function cloneColumns(
 }
 
 function throwUnsupportedSchemaUpdate(datasetId: string, detail: string): never {
-  throw new LakeStorageError(
+  throw new SixbError(
+    "storage.lake_failed",
     `[SixbLake] Dataset '${datasetId}' cannot apply schema update because ${detail}. ${SCHEMA_UPDATE_V1_POLICY}`
   )
 }

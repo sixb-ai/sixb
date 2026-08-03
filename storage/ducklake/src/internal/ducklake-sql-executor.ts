@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto"
 import type { DatasetColumnDefinition, DatasetDefinition, DatasetRow } from "@sixb/core"
-import {
-  type DatasetVersionRef,
-  type DatasetWriteCommitResult,
-  type DatasetWriteMode,
-  type ExecuteSqlTransformInput,
-  type LakeSqlExecutor,
-  LakeStorageError,
-  type PreviewSqlTransformInput,
+import { SixbError } from "@sixb/core/errors"
+import type {
+  DatasetVersionRef,
+  DatasetWriteCommitResult,
+  DatasetWriteMode,
+  ExecuteSqlTransformInput,
+  LakeSqlExecutor,
+  PreviewSqlTransformInput,
 } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import {
@@ -149,7 +149,8 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
   ): Promise<DatasetDefinition> {
     const definition = await this.datasets.getDatasetOnRuntime(runtime, dataset.id)
     if (!definition) {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbDuckLake] Unknown SQL transform source dataset '${dataset.id}'.`
       )
     }
@@ -163,7 +164,8 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
   ): Promise<DatasetDefinition> {
     const definition = await this.datasets.getDatasetOnRuntime(runtime, dataset.id)
     if (!definition) {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbDuckLake] Unknown SQL transform target dataset '${dataset.id}'.`
       )
     }
@@ -322,13 +324,15 @@ function normalizePreviewValue(value: unknown): unknown {
 }
 
 function throwNoCommittedSourceVersion(datasetId: string): never {
-  throw new LakeStorageError(
+  throw new SixbError(
+    "storage.lake_failed",
     `[SixbDuckLake] No committed version found for SQL transform source dataset '${datasetId}'.`
   )
 }
 
 function throwResultSchemaMismatch(datasetId: string, detail: string): never {
-  throw new LakeStorageError(
+  throw new SixbError(
+    "storage.lake_failed",
     `[SixbDuckLake] SQL transform result schema does not match target dataset '${datasetId}': ${detail}.`
   )
 }

@@ -6,8 +6,9 @@
  * `ObjectQueryExecutor` — the server runtime executor or the HTTP client
  * executor — so the same builder serves both sides.
  */
+
+import { SixbError } from "../../errors"
 import type { ValueType } from "../../ontology"
-import { OntologyValidationError } from "../../ontology/errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
 import type {
   ListResult,
@@ -204,7 +205,8 @@ class ObjectQueryBuilderImpl<
 
   validate() {
     if (!this.params.executor.validate) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         "[Sixb] validate() requires ontology access and is not supported by this query executor. Execute the query to get server-side validation."
       )
     }
@@ -213,7 +215,8 @@ class ObjectQueryBuilderImpl<
 
   explain() {
     if (!this.params.executor.explain) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         "[Sixb] explain() requires ontology access and is not supported by this query executor."
       )
     }
@@ -379,7 +382,8 @@ function propertyTokenToId(token: PropertyToken): string {
 function requireSingleTargetObjectTypeId(link: LinkToken): void {
   const target = link.targetObjectTypeId
   if (target === "*" || typeof target !== "string") {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       "[Sixb] Object query traverse requires a single concrete outgoing target type"
     )
   }

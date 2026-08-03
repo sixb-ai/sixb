@@ -11,11 +11,10 @@ export {
 } from "./dataset-watermark"
 export type { MaterializationConflictKind } from "./errors"
 export {
-  isMaterializationConflictError,
-  MaterializationCancellationError,
-  MaterializationConflictError,
-  MaterializationObjectNotFoundError,
-  MaterializationValidationError,
+  isMaterializationCancellation,
+  materializationCancelled,
+  materializationConflict,
+  materializationConflictKind,
 } from "./errors"
 export type { OntologyMaterializationEvent, OntologyMaterializationEventDraft } from "./events"
 export type {

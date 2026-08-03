@@ -13,9 +13,9 @@ import type {
   MagicLinkRequestInput,
   MagicLinkRequestResult,
 } from "@sixb/core/auth/strategy"
-import { SixbError, type SixbErrorOptions } from "@sixb/core/errors"
 import type { AuthStorage } from "@sixb/core/storage"
 import { createMagicLinkEmail, type SendMagicLinkInput } from "./email"
+import { magicLinkError } from "./errors"
 import {
   MagicLinkRateLimiter,
   type MagicLinkRateLimitOptions,
@@ -43,15 +43,6 @@ export interface MagicLinkOptions {
   readonly sendMagicLink: (message: SendMagicLinkInput) => Promise<void>
   readonly from?: string
   readonly subject?: string
-}
-
-/** The project's `magicLink(...)` options are wrong; no sign-in attempt can fix it. */
-export class MagicLinkError extends SixbError {
-  override readonly name = "MagicLinkError"
-
-  constructor(message: string, options?: SixbErrorOptions) {
-    super("runtime.invalid_definition", `[Sixb] ${message}`, options)
-  }
 }
 
 export function magicLink(options: MagicLinkOptions): MagicLinkAuthStrategy {
@@ -222,7 +213,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
     })
 
     if (!magicLink || !this.isAllowedEmail(magicLink.email)) {
-      throw new MagicLinkError("Magic link is invalid or expired.")
+      throw magicLinkError("Magic link is invalid or expired.")
     }
 
     // Every email in the configured bootstrap allowlist may self-provision
@@ -307,7 +298,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
 function normalizeStrategyId(value: string | undefined): string {
   const id = value?.trim() || "magic-link"
   if (!id) {
-    throw new MagicLinkError("Magic-link auth id is required.")
+    throw magicLinkError("Magic-link auth id is required.")
   }
   return id
 }
@@ -317,11 +308,11 @@ function normalizeAllowedDomains(domains: readonly string[]): readonly string[] 
     Boolean
   )
   if (normalized.length === 0) {
-    throw new MagicLinkError("Magic-link auth allowedDomains must contain at least one domain.")
+    throw magicLinkError("Magic-link auth allowedDomains must contain at least one domain.")
   }
   for (const domain of normalized) {
     if (domain.includes("@") || domain.includes("/") || domain.includes(":")) {
-      throw new MagicLinkError(`Magic-link auth allowed domain '${domain}' is invalid.`)
+      throw magicLinkError(`Magic-link auth allowed domain '${domain}' is invalid.`)
     }
   }
   return normalized
@@ -332,7 +323,7 @@ function normalizeGroupRefs(groups: readonly MagicLinkGroupRef[] | undefined): r
     const groupId = typeof group === "string" ? group : group.id
     const normalized = groupId.trim()
     if (!normalized) {
-      throw new MagicLinkError("Magic-link auth bootstrapGroups must be non-empty.")
+      throw magicLinkError("Magic-link auth bootstrapGroups must be non-empty.")
     }
     return normalized
   })
@@ -343,7 +334,7 @@ function normalizeGroupRefs(groups: readonly MagicLinkGroupRef[] | undefined): r
 function normalizeMagicLinkTtlMs(value: number | undefined): number {
   const ttlMs = value ?? 15 * 60_000
   if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
-    throw new MagicLinkError("Magic-link auth magicLinkTtlMs must be positive.")
+    throw magicLinkError("Magic-link auth magicLinkTtlMs must be positive.")
   }
   return ttlMs
 }
@@ -351,7 +342,7 @@ function normalizeMagicLinkTtlMs(value: number | undefined): number {
 function normalizePublicOrigin(value: string): string {
   const url = new URL(value)
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new MagicLinkError("Magic-link auth publicUrl must use http or https.")
+    throw magicLinkError("Magic-link auth publicUrl must use http or https.")
   }
   return url.origin
 }
@@ -359,7 +350,7 @@ function normalizePublicOrigin(value: string): string {
 function assertEmail(value: string): string {
   const email = normalizeEmail(value)
   if (!email) {
-    throw new MagicLinkError(`Magic-link auth address '${value}' is invalid.`)
+    throw magicLinkError(`Magic-link auth address '${value}' is invalid.`)
   }
   return email
 }

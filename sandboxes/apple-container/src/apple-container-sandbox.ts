@@ -1,15 +1,14 @@
 import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
-import {
-  type CommandResult,
-  type CreateSandboxOptions,
-  type RunCommandOptions,
-  type Sandbox,
-  SandboxError,
-  type SandboxFileRecord,
-  SandboxNotRunningError,
-  type SandboxStatus,
+import type {
+  CommandResult,
+  CreateSandboxOptions,
+  RunCommandOptions,
+  Sandbox,
+  SandboxFileRecord,
+  SandboxStatus,
 } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import {
   type AppleContainerCliConfig,
   buildCreateArgv,
@@ -115,7 +114,8 @@ export class AppleContainerSandbox implements Sandbox {
           timeoutMs: setupTimeoutMs,
         })
         if (createdNetwork.exitCode !== 0) {
-          throw new SandboxError(
+          throw new SixbError(
+            "sandbox.failed",
             `[Sandbox] apple-container network create failed for ${network.ownedNetworkName}: ${errorText(createdNetwork)}`
           )
         }
@@ -134,7 +134,8 @@ export class AppleContainerSandbox implements Sandbox {
         timeoutMs: setupTimeoutMs,
       })
       if (created.exitCode !== 0) {
-        throw new SandboxError(
+        throw new SixbError(
+          "sandbox.failed",
           `[Sandbox] apple-container create failed for ${id}: ${errorText(created)}`
         )
       }
@@ -146,7 +147,8 @@ export class AppleContainerSandbox implements Sandbox {
         timeoutMs: setupTimeoutMs,
       })
       if (started.exitCode !== 0) {
-        throw new SandboxError(
+        throw new SixbError(
+          "sandbox.failed",
           `[Sandbox] apple-container start failed for ${id}: ${errorText(started)}`
         )
       }
@@ -230,7 +232,8 @@ export class AppleContainerSandbox implements Sandbox {
         stdin: Buffer.from(file.contents),
       })
       if (result.exitCode !== 0) {
-        throw new SandboxError(
+        throw new SixbError(
+          "sandbox.failed",
           `[Sandbox] apple-container writeFiles failed for ${this.id}: ${errorText(result)}`
         )
       }
@@ -270,7 +273,8 @@ export class AppleContainerSandbox implements Sandbox {
         timeoutMs: this.setupTimeoutMs,
       })
       if (deleted.exitCode !== 0) {
-        throw new SandboxError(
+        throw new SixbError(
+          "sandbox.failed",
           `[Sandbox] apple-container delete failed for ${this.id}: ${errorText(deleted)}`
         )
       }
@@ -285,7 +289,8 @@ export class AppleContainerSandbox implements Sandbox {
         timeoutMs: this.setupTimeoutMs,
       })
       if (deletedNetwork.exitCode !== 0) {
-        throw new SandboxError(
+        throw new SixbError(
+          "sandbox.failed",
           `[Sandbox] apple-container network delete failed for ${this.network.ownedNetworkName}: ${errorText(deletedNetwork)}`
         )
       }
@@ -298,7 +303,8 @@ export class AppleContainerSandbox implements Sandbox {
 
   private assertRunning(action: string): void {
     if (this.currentStatus !== "running") {
-      throw new SandboxNotRunningError(
+      throw new SixbError(
+        "sandbox.not_running",
         `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot ${action}`
       )
     }

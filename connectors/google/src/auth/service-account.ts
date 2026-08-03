@@ -1,4 +1,5 @@
-import { GoogleAuthError, isRecord } from "../errors"
+import { isSixbError } from "@sixb/core/errors"
+import { googleAuthError, isRecord } from "../errors"
 import type { ServiceAccountKey, TokenSource } from "./types"
 
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
@@ -95,20 +96,20 @@ async function exchangeToken(
       if (typeof accessToken === "string" && typeof expiresIn === "number") {
         return { accessToken, expiresInSec: expiresIn }
       }
-      throw new GoogleAuthError("token endpoint returned an unexpected response shape.")
+      throw googleAuthError("token endpoint returned an unexpected response shape.")
     }
 
     // 4xx (bad grant, malformed key, revoked) is terminal; only retry 429 / 5xx.
     if (response.status !== 429 && response.status < 500) {
-      throw new GoogleAuthError(describeTokenError(response.status, payload))
+      throw googleAuthError(describeTokenError(response.status, payload))
     }
-    lastError = new GoogleAuthError(describeTokenError(response.status, payload))
+    lastError = googleAuthError(describeTokenError(response.status, payload))
   }
 
-  if (lastError instanceof GoogleAuthError) {
+  if (isSixbError(lastError, "connector.unauthorized")) {
     throw lastError
   }
-  throw new GoogleAuthError(
+  throw googleAuthError(
     `token exchange failed after ${EXCHANGE_MAX_ATTEMPTS} attempts: ${String(lastError)}`
   )
 }
@@ -151,16 +152,14 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
       ["sign"]
     )
   } catch (error) {
-    throw new GoogleAuthError(
-      `service account private_key is not a valid PKCS#8 PEM: ${String(error)}`
-    )
+    throw googleAuthError(`service account private_key is not a valid PKCS#8 PEM: ${String(error)}`)
   }
 }
 
 function normalizeKey(input: string | ServiceAccountKey): ServiceAccountKey {
   const key = typeof input === "string" ? parseKey(input) : input
   if (!key.client_email || !key.private_key) {
-    throw new GoogleAuthError("serviceAccountKey must include client_email and private_key.")
+    throw googleAuthError("serviceAccountKey must include client_email and private_key.")
   }
   return key
 }
@@ -169,7 +168,7 @@ function parseKey(raw: string): ServiceAccountKey {
   try {
     return JSON.parse(raw) as ServiceAccountKey
   } catch {
-    throw new GoogleAuthError("serviceAccountKey string must be valid JSON.")
+    throw googleAuthError("serviceAccountKey string must be valid JSON.")
   }
 }
 
@@ -207,7 +206,7 @@ function pemToArrayBuffer(pem: string): ArrayBuffer {
     .replace(/-----END [^-]+-----/, "")
     .replace(/\s+/g, "")
   if (!body) {
-    throw new GoogleAuthError("service account private_key is empty.")
+    throw googleAuthError("service account private_key is empty.")
   }
   const binary = atob(body)
   const bytes = new Uint8Array(binary.length)

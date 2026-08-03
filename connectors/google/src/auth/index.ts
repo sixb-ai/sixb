@@ -1,4 +1,4 @@
-import { GoogleAuthError } from "../errors"
+import { googleAuthError } from "../errors"
 import {
   type ApplicationDefaultClientLoader,
   createApplicationDefaultTokenSource,
@@ -26,7 +26,7 @@ export function createTokenSource(
 
   if ("applicationDefault" in auth) {
     if (auth.applicationDefault !== true) {
-      throw new GoogleAuthError("applicationDefault must be true when ADC auth is selected.")
+      throw googleAuthError("applicationDefault must be true when ADC auth is selected.")
     }
     validateScopes(auth.scopes, "application-default")
     return createApplicationDefaultTokenSource(auth.scopes, deps.loadApplicationDefaultClient)
@@ -49,6 +49,6 @@ function createResolverTokenSource(resolve: () => string | Promise<string>): Tok
 
 function validateScopes(scopes: readonly string[], mode: string): void {
   if (scopes.length === 0 || scopes.some((scope) => !scope.trim())) {
-    throw new GoogleAuthError(`at least one non-empty scope is required for ${mode} auth.`)
+    throw googleAuthError(`at least one non-empty scope is required for ${mode} auth.`)
   }
 }

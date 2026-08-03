@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { PipelineRunError } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import { SqlitePipelineRunStorage } from "../src/pipeline-run-storage"
 
@@ -326,7 +325,7 @@ describe("SqlitePipelineRunStorage", () => {
         projectId: "my-app",
         pipelineId: "customers",
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await expect(
       storage.finish({
@@ -338,7 +337,7 @@ describe("SqlitePipelineRunStorage", () => {
           message: "boom",
         },
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "pipeline.run_not_found")
 
     await storage.startStep({
       id: "step_1",
@@ -361,7 +360,7 @@ describe("SqlitePipelineRunStorage", () => {
           versionId: "ver_wrong",
         },
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     await storage.finishStep({
       id: "step_1",
@@ -383,7 +382,7 @@ describe("SqlitePipelineRunStorage", () => {
           message: "Too late",
         },
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await storage.finish({
       id: "piperun_1",
@@ -406,7 +405,7 @@ describe("SqlitePipelineRunStorage", () => {
         mode: "snapshot",
         inputs: [],
       })
-    ).rejects.toBeInstanceOf(PipelineRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 
   test("SqliteStorage includes pipeline run storage", () => {

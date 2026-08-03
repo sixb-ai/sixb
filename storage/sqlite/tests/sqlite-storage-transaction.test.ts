@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { Storage } from "@sixb/core"
-import { type ActionRunStorage, StorageTransactionError } from "@sixb/core/storage"
+import type { ActionRunStorage } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import { closeSqliteStoreConnection, openSqliteStoreConnection } from "../src/transactions"
 
@@ -170,7 +170,7 @@ describe("SqliteStorage.transaction", () => {
 
   test("rejects nested transactions", async () => {
     await expect(storage.transaction((tx) => tx.transaction(() => undefined))).rejects.toThrow(
-      StorageTransactionError
+      expect.objectContaining({ code: "storage.transaction_failed" })
     )
   })
 
@@ -186,7 +186,9 @@ describe("SqliteStorage.transaction", () => {
       throw new Error("Expected transaction storage to be captured.")
     }
 
-    expect(() => transactionStorage.objects.queryCapabilities()).toThrow(StorageTransactionError)
+    expect(() => transactionStorage.objects.queryCapabilities()).toThrow(
+      expect.objectContaining({ code: "storage.transaction_failed" })
+    )
   })
 })
 

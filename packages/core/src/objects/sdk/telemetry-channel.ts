@@ -4,6 +4,8 @@
  * Creates a per-property channel that writes through the low-level `writeTelemetryBatch` leaf and
  * reads the same series back through `getTelemetryHistoryBatch`, both keyed by the property token.
  */
+
+import { SixbError } from "../../errors"
 import type { TelemetryPointWrite } from "../../materialization/model"
 import type { ValueType } from "../../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
@@ -11,7 +13,6 @@ import {
   assertPropertyTokenBelongsToObjectType,
   assertTelemetryProperty,
 } from "../../ontology/validation"
-import { RuntimeError } from "../../runtime/errors"
 import type {
   TelemetryChannel,
   TelemetryHistoryInput,
@@ -52,7 +53,10 @@ export function createTelemetryChannel<
       history: async (input: TelemetryHistoryInput = {}) => {
         const timeseries = ctx.storage.timeseries
         if (!timeseries) {
-          throw new RuntimeError("[Sixb] Reading telemetry requires storage.timeseries support.")
+          throw new SixbError(
+            "runtime.invalid_definition",
+            "[Sixb] Reading telemetry requires storage.timeseries support."
+          )
         }
 
         const [result] = await getTelemetryHistoryBatch(

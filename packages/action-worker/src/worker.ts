@@ -4,7 +4,7 @@ import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ActionRunRequestedQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
-import { ActionWorkerError } from "./errors"
+import { actionWorkerError } from "./errors"
 import { runActionJob } from "./run-action-job"
 import type {
   ActionJob,
@@ -75,12 +75,12 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
   ): Promise<void> {
     const context = this.context
     if (!context) {
-      throw new ActionWorkerError("No action definitions are registered.")
+      throw actionWorkerError("No action definitions are registered.")
     }
 
     const { job } = claimed
     if (job.type !== "action.run.requested") {
-      throw new ActionWorkerError(`Unsupported action job type '${job.type}'.`)
+      throw actionWorkerError(`Unsupported action job type '${job.type}'.`)
     }
 
     const actionJob: ActionJob = {
@@ -160,7 +160,7 @@ async function emitActionTerminalEvent(
 function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
   const actionRunsStorage = sixb.storage.actionRuns
   if (!actionRunsStorage) {
-    throw new ActionWorkerError("Action workers require storage.actionRuns support.")
+    throw actionWorkerError("Action workers require storage.actionRuns support.")
   }
   assertActionWorkerSixbFacade(sixb)
 
@@ -194,7 +194,7 @@ function assertActionWorkerSixbFacade(
   const candidate = sixb as Partial<Record<(typeof requiredFacadeMethods)[number], unknown>>
   for (const method of requiredFacadeMethods) {
     if (typeof candidate[method] !== "function") {
-      throw new ActionWorkerError(`Action worker runtime is missing sixb.${method}(...).`)
+      throw actionWorkerError(`Action worker runtime is missing sixb.${method}(...).`)
     }
   }
 
@@ -205,6 +205,6 @@ function assertActionWorkerSixbFacade(
     typeof blobStorage.open !== "function" ||
     typeof blobStorage.stat !== "function"
   ) {
-    throw new ActionWorkerError("Action worker runtime is missing sixb.blobStorage support.")
+    throw actionWorkerError("Action worker runtime is missing sixb.blobStorage support.")
   }
 }

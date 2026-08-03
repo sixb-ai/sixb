@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { Storage } from "@sixb/core"
-import { type ActionRunStorage, StorageTransactionError } from "@sixb/core/storage"
+import type { ActionRunStorage } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -59,7 +59,7 @@ describe("PostgresStorage.transaction", () => {
 
   test("rejects nested transactions", async () => {
     await expect(storage.transaction((tx) => tx.transaction(() => undefined))).rejects.toThrow(
-      StorageTransactionError
+      expect.objectContaining({ code: "storage.transaction_failed" })
     )
   })
 
@@ -75,7 +75,9 @@ describe("PostgresStorage.transaction", () => {
       throw new Error("Expected transaction storage to be captured.")
     }
 
-    expect(() => transactionStorage.objects.queryCapabilities()).toThrow(StorageTransactionError)
+    expect(() => transactionStorage.objects.queryCapabilities()).toThrow(
+      expect.objectContaining({ code: "storage.transaction_failed" })
+    )
   })
 })
 

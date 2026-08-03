@@ -1,3 +1,4 @@
+import { SixbError } from "../errors"
 import {
   allPredicates,
   anyPredicates,
@@ -6,7 +7,6 @@ import {
   notPredicate,
   type RuntimePropertyPredicateBuilder,
 } from "../predicates"
-import { RuleValidationError } from "./errors"
 import type {
   RuleBuilder,
   RuleDefinition,
@@ -37,7 +37,7 @@ type RuntimeRuleSubjectBuilder = {
 
 function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
-    throw new RuleValidationError(`Rule ${field} must not be empty.`)
+    throw new SixbError("runtime.invalid_definition", `Rule ${field} must not be empty.`)
   }
 }
 
@@ -45,7 +45,7 @@ function assertNonEmpty(value: string, field: string): void {
 function createPropertyPredicateBuilder(propertyId: string): RuntimeRulePropertyPredicateBuilder {
   return createSharedPropertyPredicateBuilder(propertyId, {
     subject: "Rule",
-    createError: (message) => new RuleValidationError(message),
+    createError: (message) => new SixbError("runtime.invalid_definition", message),
   })
 }
 

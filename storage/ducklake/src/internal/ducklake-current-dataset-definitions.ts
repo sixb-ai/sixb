@@ -1,5 +1,5 @@
 import type { DatasetDefinition } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
 import type { DuckLakeStorageOptions } from "../types"
 import {
   getBigIntLike,
@@ -194,7 +194,8 @@ async function readCurrentDatasetPartitions(
     } satisfies CurrentDatasetPartition
 
     if (partition.transform !== "identity") {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbDuckLake] Dataset table '${partition.tableName}' uses unsupported DuckLake partition transform '${partition.transform}'.`
       )
     }

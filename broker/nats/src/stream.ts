@@ -7,7 +7,7 @@ import {
 } from "@nats-io/jetstream"
 import type { BrokerRetention, BrokerStreamDefinition } from "@sixb/core/broker"
 import type { NatsConnectionManager } from "./connection"
-import { NatsBrokerError } from "./errors"
+import { natsBrokerError } from "./errors"
 import { validateProjectId } from "./project-id"
 import { buildStreamSubject, encodeSubjectToken } from "./subjects"
 
@@ -73,7 +73,7 @@ export class StreamManager {
       return name
     } catch (error) {
       if (!isStreamNotFoundError(error)) {
-        throw new NatsBrokerError(`Failed to inspect stream "${name}"`, { cause: error })
+        throw natsBrokerError(`Failed to inspect stream "${name}"`, { cause: error })
       }
     }
 
@@ -90,7 +90,7 @@ export class StreamManager {
       // A concurrent call may have created the stream between info() and add().
       // Accept that and proceed; genuine creation failures are rethrown.
       if (!isStreamAlreadyExistsError(error)) {
-        throw new NatsBrokerError(`Failed to create stream "${name}"`, { cause: error })
+        throw natsBrokerError(`Failed to create stream "${name}"`, { cause: error })
       }
     }
 
@@ -116,7 +116,7 @@ export class StreamManager {
       if (isStreamNotFoundError(error)) {
         return null
       }
-      throw new NatsBrokerError(`Failed to inspect stream "${name}"`, { cause: error })
+      throw natsBrokerError(`Failed to inspect stream "${name}"`, { cause: error })
     }
   }
 
@@ -139,13 +139,13 @@ export class StreamManager {
 
 function assertStream(stream: BrokerStreamDefinition): void {
   if (stream.id.trim().length === 0) {
-    throw new NatsBrokerError("stream.id must be a non-empty string")
+    throw natsBrokerError("stream.id must be a non-empty string")
   }
 }
 
 function assertStreamId(streamId: string): void {
   if (streamId.trim().length === 0) {
-    throw new NatsBrokerError("streamId must be a non-empty string")
+    throw natsBrokerError("streamId must be a non-empty string")
   }
 }
 

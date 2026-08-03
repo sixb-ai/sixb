@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite"
 import type { AuthSessionAudience } from "@sixb/core"
 import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthSessionRow } from "./rows"
 import { rowToSessionRecord } from "./rows"
@@ -165,7 +165,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
       const existing = getSessionRowById(this.db, params)
 
       if (!existing) {
-        throw new AuthStorageError(
+        throw authStorageError(
           "missing_session",
           `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
         )
@@ -219,7 +219,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
 
       const updated = getSessionById(this.db, params)
       if (!updated) {
-        throw new AuthStorageError(
+        throw authStorageError(
           "missing_session",
           `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
         )

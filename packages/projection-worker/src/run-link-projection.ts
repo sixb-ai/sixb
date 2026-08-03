@@ -2,8 +2,8 @@ import {
   type DatasetDefinition,
   getDatasetRowValidationError,
   type LinkProjectionDefinition,
-  MaterializationValidationError,
 } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type { ProjectionSourceEntry } from "@sixb/core/internal/materialization"
 import { ReplacementProgress } from "./replacement-progress"
 import type { ClaimedProjectionExecution, ProjectionWorkerContext } from "./types"
@@ -72,13 +72,20 @@ export function mapLinkProjectionEntries(input: {
 
 function requireIdentity(value: unknown, projectionId: string, column: string): string {
   if (typeof value === "string" && value.trim().length > 0) return value
-  throw new MaterializationValidationError(
-    `Projection '${projectionId}' dataset column '${column}' must produce a non-empty string identity.`
+  throw new SixbError(
+    "ontology.invalid_value",
+    `[Sixb] Projection '${projectionId}' dataset column '${column}' must produce a non-empty string identity.`
   )
 }
 
-async function failCurrentRow(progress: ReplacementProgress, message: string): Promise<never> {
+/** Records the row as failed, flushes the run's progress, then reports what went wrong. */
+async function failCurrentRow(
+  progress: ReplacementProgress,
+  failure: string | SixbError
+): Promise<never> {
   await progress.recordRow(false)
   await progress.flush()
-  throw new MaterializationValidationError(message)
+  throw typeof failure === "string"
+    ? new SixbError("ontology.invalid_value", `[Sixb] ${failure}`)
+    : failure
 }

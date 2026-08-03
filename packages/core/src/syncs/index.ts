@@ -1,5 +1,4 @@
 export { defineSync } from "./builders"
-export { SyncValidationError } from "./errors"
 export type {
   RequestSyncRunInput,
   SyncRunRequestOptions,

@@ -1,7 +1,5 @@
-import {
-  MaterializationConflictError,
-  MaterializationValidationError,
-} from "../../materialization/errors"
+import { SixbError } from "../../errors"
+import { materializationConflict } from "../../materialization/errors"
 import type {
   PinnedDatasetVersion,
   ProjectionMaterializationIdentity,
@@ -53,8 +51,9 @@ function prepareProjectionRunFinish(
       ? context.projectionRegistry.resolveSource(source.projectionId)
       : context.projectionRegistry.resolveTelemetry(source.projectionId)
   if (resolved.datasetId !== datasetVersion.datasetId) {
-    throw new MaterializationValidationError(
-      `Projection '${resolved.projectionId}' requires dataset '${resolved.datasetId}'.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Projection '${resolved.projectionId}' requires dataset '${resolved.datasetId}'.`
     )
   }
   const identity = createProjectionRunMaterializationIdentity({
@@ -99,21 +98,26 @@ async function finishProjectionRunTransaction(
 
 function assertValidTerminalDecision(input: ProjectionRunFinishInput): void {
   if (input.protocol !== "replacement" && input.protocol !== "telemetry") {
-    throw new MaterializationValidationError("Projection finish protocol is invalid.")
+    throw new SixbError("ontology.invalid_value", "[Sixb] Projection finish protocol is invalid.")
   }
   if (input.status !== "succeeded" && input.status !== "failed" && input.status !== "cancelled") {
-    throw new MaterializationValidationError("Projection finish status must be terminal.")
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Projection finish status must be terminal."
+    )
   }
   const inputExhausted = "inputExhausted" in input ? input.inputExhausted : undefined
   if (input.status === "succeeded" && input.protocol === "telemetry") {
     if (inputExhausted === true) return
-    throw new MaterializationValidationError(
-      "Telemetry projection success requires an explicit exhausted-input acknowledgement."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Telemetry projection success requires an explicit exhausted-input acknowledgement."
     )
   }
   if (inputExhausted !== undefined) {
-    throw new MaterializationValidationError(
-      "Only telemetry projection success can acknowledge exhausted input."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Only telemetry projection success can acknowledge exhausted input."
     )
   }
 }
@@ -145,7 +149,7 @@ async function assertReplacementTerminalDecision(
   })
   if (command.input.status === "succeeded") {
     if (!commit) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "run-correlation",
         `Projection replacement run '${command.input.execution.projectionRunId}' cannot succeed before its ontology commit exists.`
       )
@@ -154,7 +158,7 @@ async function assertReplacementTerminalDecision(
     return
   }
   if (commit) {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "run-correlation",
       `Projection replacement run '${command.input.execution.projectionRunId}' cannot finish as '${command.input.status}' after its ontology commit exists.`
     )
@@ -178,7 +182,7 @@ function assertReplacementCommitCorrelation(
     commit.projectionRevision !== identity.projectionRevision ||
     commit.ownershipHash !== identity.ownershipHash
   ) {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "run-correlation",
       `Projection replacement run '${input.execution.projectionRunId}' commit identity does not match.`
     )

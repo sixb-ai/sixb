@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Worker, WorkerUnhealthyError } from "../src/workers"
+import { Worker } from "../src/workers"
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void
@@ -126,10 +126,11 @@ describe("Worker", () => {
     await worker.start()
 
     const exit = worker.wait()
-    await expect(exit).rejects.toBeInstanceOf(WorkerUnhealthyError)
+    await expect(exit).rejects.toHaveProperty("code", "runtime.unexpected")
     await expect(exit).rejects.toMatchObject({
-      name: "WorkerUnhealthyError",
-      restartCount: 10,
+      // `details` is what a reader gets, on the wire and in the run row alike; the class name that
+      // used to carry this was never part of the contract.
+      details: { workerName: "TestWorker", restartCount: 10 },
       cause: expect.objectContaining({ message: "persistent failure" }),
     })
     expect(runs).toBe(11)

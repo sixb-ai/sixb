@@ -1,7 +1,6 @@
 export { defineWebhook } from "./builders"
 export type { WebhookConnectorClient } from "./connector"
 export { webhookConnector } from "./connector"
-export { WebhookValidationError } from "./errors"
 export { registerWebhooks, webhookRoute } from "./registry"
 export type {
   RegisteredWebhook,
@@ -18,8 +17,4 @@ export type {
   WebhookVerifyContext,
 } from "./types"
 export type { WebhookVerification, WebhookVerificationSubject } from "./unverified"
-export {
-  resolveWebhookVerification,
-  UnverifiedWebhookError,
-  warnUnverifiedWebhook,
-} from "./unverified"
+export { resolveWebhookVerification, warnUnverifiedWebhook } from "./unverified"

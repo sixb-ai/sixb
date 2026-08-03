@@ -1,13 +1,10 @@
 import {
-  AuthorizationError,
   isAllowed,
   isSixbError,
   type ObjectQuery,
-  ObjectQueryExecutionError,
-  ObjectQueryPlanningError,
-  ObjectQueryValidationError,
   type ObjectRef,
   type OntologySource,
+  objectQueryIssues,
   type Sixb,
 } from "@sixb/core"
 import {
@@ -133,22 +130,9 @@ function handleObjectQueryError(error: unknown, set: { status?: number | string 
     }
   }
 
-  if (error instanceof ObjectQueryValidationError || error instanceof ObjectQueryPlanningError) {
-    return { ...errorResponse(set, error.code, error.message), issues: error.issues }
-  }
-
-  if (error instanceof ObjectQueryExecutionError) {
-    return {
-      ...errorResponse(set, error.code, error.message),
-      issues: [
-        {
-          path: error.path ?? "$",
-          // The issue keeps the planner's own discriminant; `error.code` is the framework-wide one.
-          code: error.reason,
-          message: error.message,
-        },
-      ],
-    }
+  const issues = objectQueryIssues(error)
+  if (issues && isSixbError(error)) {
+    return { ...errorResponse(set, error.code, error.message), issues }
   }
 
   // A query that failed for none of the above failed unexpectedly, and says so with a 500.
@@ -285,7 +269,7 @@ async function objectFileContentResponse(
     request: context.request,
     set: context.set,
     head: options.head,
-    hideError: (error) => error instanceof AuthorizationError,
+    hideError: (error) => isSixbError(error, "auth.permission_denied"),
     resolveRoot: async () => {
       const row = await getObjectRow(sixb, scoped, context.params)
       if (!row) {
@@ -777,7 +761,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           return serializeObject(row)
         } catch (error) {
           // Identity reads hide existence: forbidden and missing look the same.
-          if (error instanceof AuthorizationError) {
+          if (isSixbError(error, "auth.permission_denied")) {
             return errorResponse(set, "storage.object_not_found", "Object not found")
           }
 

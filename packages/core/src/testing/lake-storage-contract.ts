@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { FileRef } from "../blob-storage"
 import { col, defineDataset } from "../datasets"
-import { LakeStorageError } from "../lake-storage/errors"
 import type { DatasetRow, LakeStorage } from "../lake-storage/types"
 
 export type LakeStorageSchemaEvolutionCapability = "strict" | "addNullableColumns"
@@ -146,8 +145,9 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
           await expect(
             storage.assertDatasetDefinitionsCompatible([changedDataset])
           ).rejects.toThrow("changing column 'orderId' type")
-          await expect(storage.createDataset(changedDataset)).rejects.toBeInstanceOf(
-            LakeStorageError
+          await expect(storage.createDataset(changedDataset)).rejects.toHaveProperty(
+            "code",
+            "storage.lake_failed"
           )
           expect(await storage.getDataset(definitionDataset.id)).toEqual(definitionDataset)
         })

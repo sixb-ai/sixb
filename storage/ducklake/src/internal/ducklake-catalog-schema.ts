@@ -1,5 +1,5 @@
 import type { DatasetColumnDefinition, DatasetSchema } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
 import { duckDbTypeToDatasetColumnType } from "./schema"
 
 export interface DuckLakeCatalogColumn {
@@ -74,7 +74,8 @@ function duckLakeCatalogColumnTypeToDatasetType(
     return "fileRef"
   }
 
-  throw new LakeStorageError(
+  throw new SixbError(
+    "storage.lake_failed",
     `[SixbDuckLake] DuckDB column type '${formatDuckLakeCatalogColumnType(
       column,
       children

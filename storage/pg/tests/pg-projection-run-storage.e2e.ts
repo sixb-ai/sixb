@@ -43,7 +43,7 @@ test("PgProjectionRunStorage serializes concurrent reclaims", async () => {
         identity: replacementIdentity,
         executionToken: stale.execution.executionToken,
       })
-    ).rejects.toMatchObject({ name: "ProjectionRunError", kind: "execution-lost" })
+    ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "execution-lost" } })
   } finally {
     await storage.dropSchema()
     await storage.close()

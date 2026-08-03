@@ -23,6 +23,7 @@ import type { Broker } from "../broker"
 import type { ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets"
 import type { SixbErrorHandler } from "../error-reporting/types"
+import { SixbError } from "../errors"
 import type { LakeStorage } from "../lake-storage"
 import type { LoggerProvider, ObservabilityOptions } from "../logging"
 import type { OntologyMaintenanceOptions } from "../maintenance"
@@ -36,7 +37,6 @@ import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows"
-import { RuntimeError } from "./errors"
 import { Sixb } from "./sixb"
 import type { OntologySource } from "./types"
 
@@ -93,7 +93,8 @@ export async function createSixb(
   const allSources = [...(options.ontologies ?? []), ...discovered]
 
   if (allSources.length === 0) {
-    throw new RuntimeError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       "No ontology found. Create an 'ontology/' folder or pass 'ontologies' to createSixb()."
     )
   }

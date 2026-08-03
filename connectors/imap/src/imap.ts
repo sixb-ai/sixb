@@ -1,5 +1,5 @@
 import { createImapClient } from "./client"
-import { ImapAbortedError, ImapConnectorError } from "./errors"
+import { imapConnectorError } from "./errors"
 import type { ImapConnection, ImapConnector } from "./types"
 
 /**
@@ -15,7 +15,7 @@ export function imap(connection: ImapConnection): ImapConnector {
     type: "imap",
     async connect(context) {
       if (context.signal.aborted) {
-        throw new ImapAbortedError()
+        throw imapConnectorError("Operation aborted.", { code: "runtime.cancelled" })
       }
       return createImapClient(normalizedConnection, context.signal)
     },
@@ -30,13 +30,13 @@ function normalizeConnection(connection: ImapConnection): ImapConnection {
   const user = connection.auth?.user?.trim()
 
   if (!host) {
-    throw new ImapConnectorError("host must not be empty.")
+    throw imapConnectorError("host must not be empty.")
   }
   if (!user) {
-    throw new ImapConnectorError("auth.user must not be empty.")
+    throw imapConnectorError("auth.user must not be empty.")
   }
   if (!connection.auth?.pass) {
-    throw new ImapConnectorError("auth.pass must not be empty.")
+    throw imapConnectorError("auth.pass must not be empty.")
   }
   validatePort(connection.port)
   validateTimeout("connectTimeoutMs", connection.connectTimeoutMs)
@@ -44,7 +44,7 @@ function normalizeConnection(connection: ImapConnection): ImapConnection {
 
   const servername = connection.tls?.servername?.trim()
   if (connection.tls?.servername !== undefined && !servername) {
-    throw new ImapConnectorError("tls.servername must not be empty when provided.")
+    throw imapConnectorError("tls.servername must not be empty when provided.")
   }
 
   return {
@@ -72,12 +72,12 @@ function normalizeConnection(connection: ImapConnection): ImapConnection {
 
 function validatePort(port: number | undefined): void {
   if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65_535)) {
-    throw new ImapConnectorError("port must be an integer between 1 and 65535.")
+    throw imapConnectorError("port must be an integer between 1 and 65535.")
   }
 }
 
 function validateTimeout(field: string, timeout: number | undefined): void {
   if (timeout !== undefined && (!Number.isSafeInteger(timeout) || timeout < 1)) {
-    throw new ImapConnectorError(`${field} must be a positive integer.`)
+    throw imapConnectorError(`${field} must be a positive integer.`)
   }
 }

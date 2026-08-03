@@ -1,5 +1,5 @@
-import { connectorCodeForStatus, SixbProviderError } from "@sixb/core/errors"
-export class PennylaneApiError extends SixbProviderError {
+import { connectorCodeForStatus, SixbError } from "@sixb/core/errors"
+export class PennylaneApiError extends SixbError {
   override readonly name = "PennylaneApiError"
   readonly headers: Headers
   readonly retryAfterMs: number | null

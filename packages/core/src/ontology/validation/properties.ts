@@ -1,5 +1,5 @@
+import { SixbError } from "../../errors"
 import type { ObjectLink, ObjectType, Property, Schema, ValueType } from ".."
-import { OntologyValidationError } from "../errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../tokens"
 import { validateSchemaValue } from "./schema"
 
@@ -8,7 +8,8 @@ export function assertObjectTypeRegistered(
   objectType: ObjectTypeWithPropertyTokens
 ): void {
   if (!objectTypesById.has(objectType.id)) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Object type is not registered in this runtime: ${objectType.id}`
     )
   }
@@ -19,7 +20,8 @@ export function assertPropertyTokenBelongsToObjectType(
   property: PropertyToken<string, string, Property>
 ): void {
   if (property.objectTypeId !== objectType.id) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Property token ${property.objectTypeId}.${property.id} cannot be used with ${objectType.id}`
     )
   }
@@ -30,13 +32,15 @@ export function assertLinkTokenBelongsToObjectType(
   link: unknown
 ): asserts link is LinkToken<string, string, string | readonly string[], ObjectLink> {
   if (!isLinkTokenLike(link)) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Expected a link token from ${objectType.id}.l.<linkId>, not a plain link id.`
     )
   }
 
   if (link.objectTypeId !== objectType.id) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Link token ${link.objectTypeId}.${link.id} cannot be used with ${objectType.id}`
     )
   }
@@ -79,7 +83,8 @@ export function assertKnownProperties(
   const knownIds = new Set(objectType.properties.map((property) => property.id))
   for (const propertyId of Object.keys(properties)) {
     if (!knownIds.has(propertyId)) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Unknown property '${propertyId}' for object type '${objectType.id}'`
       )
     }
@@ -92,7 +97,8 @@ export function assertRequiredProperties(
 ): void {
   for (const property of objectType.properties) {
     if (property.required && properties[property.id] === undefined) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Missing required property '${property.id}' for object type '${objectType.id}'`
       )
     }
@@ -129,25 +135,29 @@ export function validatePrimaryProperties(
     const primaries = objectType.properties.filter((p) => p.primary)
 
     if (primaries.length === 0) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Object type '${typeId}' has no primary property. ` +
           `Define one with prop("id", "string", { required: true, primary: true }).`
       )
     }
     if (primaries.length > 1) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Object type '${typeId}' has ${primaries.length} primary properties, expected 1`
       )
     }
 
     const primary = primaries[0]
     if (!primary.required) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Primary property '${primary.id}' on '${typeId}' must be required`
       )
     }
     if (primary.schema !== "string") {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Primary property '${primary.id}' on '${typeId}' must have schema "string", got "${String(primary.schema)}"`
       )
     }
@@ -166,7 +176,8 @@ export function validatePropertyDefinitions(
     for (const property of objectType.properties) {
       // Telemetry stores time-series samples, not blob references, even when fileRef is nested.
       if (property.mode === "telemetry" && schemaContainsFileRef(property.schema, valueTypesById)) {
-        throw new OntologyValidationError(
+        throw new SixbError(
+          "ontology.invalid_value",
           `[Sixb] Telemetry property '${property.id}' on '${typeId}' cannot use fileRef`
         )
       }
@@ -181,14 +192,14 @@ export function validatePropertyValue(
   valueTypesById: ReadonlyMap<string, ValueType>
 ): void {
   if (value === undefined) {
-    throw new OntologyValidationError(`[Sixb] Property ${path} cannot be undefined`)
+    throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} cannot be undefined`)
   }
 
   if (value === null) {
     if (property.nullable) {
       return
     }
-    throw new OntologyValidationError(`[Sixb] Property ${path} cannot be null`)
+    throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} cannot be null`)
   }
 
   validateSchemaValue(property.schema, value, path, valueTypesById)

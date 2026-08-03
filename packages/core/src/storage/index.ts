@@ -41,7 +41,6 @@ export type {
   StartActionRunInput,
 } from "./action-runs"
 export {
-  ActionRunError,
   actionRunParamsEqual,
   actionRunPhaseRecordsEqual,
   actionSubjectsEqual,
@@ -94,7 +93,8 @@ export type {
 export {
   AGENT_RUN_DIAGNOSTIC_CODES,
   AGENT_RUN_FINISH_REASONS,
-  AgentStorageError,
+  agentStorageError,
+  agentStorageErrorReason,
   coerceAgentRunFinishReason,
   InMemoryAgentStorage,
 } from "./agents"
@@ -154,15 +154,17 @@ export type {
   UserRecord,
   UserStatus,
 } from "./auth"
-export { AuthStorageError, InMemoryAuthStorage } from "./auth"
+export { authStorageError, InMemoryAuthStorage } from "./auth"
 export type {
+  MissingObjectRef,
   StorageTransactionErrorOptions,
   StorageTransactionErrorReason,
 } from "./errors"
 export {
   isStorageSerializationFailure,
-  ObjectNotFoundError,
-  StorageTransactionError,
+  missingObjectRef,
+  objectNotFound,
+  storageTransactionError,
 } from "./errors"
 export type {
   CreateFileUploadSessionInput,
@@ -177,7 +179,7 @@ export {
   createUploadExpiresAt,
   DEFAULT_FILE_UPLOAD_SESSION_TTL_MS,
   DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS,
-  FileUploadSessionError,
+  fileUploadSessionError,
   InMemoryFileUploadSessions,
 } from "./file-upload-sessions"
 export { InMemoryStorage } from "./in-memory"
@@ -347,7 +349,7 @@ export type {
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./pipeline-runs"
-export { InMemoryPipelineRunStorage, PipelineRunError } from "./pipeline-runs"
+export { InMemoryPipelineRunStorage } from "./pipeline-runs"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
   FinishProjectionRunInput,
@@ -377,7 +379,6 @@ export type {
 export {
   InMemoryProjectionRunStorage,
   PROJECTION_RUN_PROGRESS_KEYS,
-  ProjectionRunError,
   projectionRunObjectTypesVisible,
   zeroProjectionRunProgress,
 } from "./projection-runs"
@@ -404,7 +405,7 @@ export type {
   SyncRunStatus,
   SyncRunStorage,
 } from "./sync-runs"
-export { InMemorySyncRunStorage, SyncRunError } from "./sync-runs"
+export { InMemorySyncRunStorage } from "./sync-runs"
 export type {
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
@@ -437,7 +438,7 @@ export type {
   WebhookRunStatus,
   WebhookRunStorage,
 } from "./webhook-runs"
-export { InMemoryWebhookRunStorage, WebhookRunError } from "./webhook-runs"
+export { InMemoryWebhookRunStorage } from "./webhook-runs"
 export type {
   CancelWorkflowInterventionInput,
   CreateWorkflowInterventionInput,
@@ -450,10 +451,7 @@ export type {
   WorkflowInterventionStatus,
   WorkflowInterventionStorage,
 } from "./workflow-interventions"
-export {
-  InMemoryWorkflowInterventionStorage,
-  WorkflowInterventionError,
-} from "./workflow-interventions"
+export { InMemoryWorkflowInterventionStorage } from "./workflow-interventions"
 export type {
   CancelWorkflowAgentNodeRunInput,
   ConfirmWorkflowAgentNodeRunExecutionOwnershipInput,
@@ -497,5 +495,4 @@ export {
   InMemoryWorkflowAgentNodeRunStorage,
   InMemoryWorkflowNodeRunStorage,
   InMemoryWorkflowRunStorage,
-  WorkflowRunError,
 } from "./workflow-runs"

@@ -1,4 +1,4 @@
-import { CronValidationError } from "./errors"
+import { SixbError } from "../errors"
 
 export interface CronFieldMatcher {
   readonly isAny: boolean
@@ -8,7 +8,7 @@ export interface CronFieldMatcher {
 
 function parseInteger(input: string, fieldName: string): number {
   if (!/^\d+$/.test(input)) {
-    throw new CronValidationError(`Invalid ${fieldName}: '${input}'.`)
+    throw new SixbError("runtime.invalid_definition", `Invalid ${fieldName}: '${input}'.`)
   }
 
   return Number.parseInt(input, 10)
@@ -26,7 +26,7 @@ export function createCronFieldMatcher(params: {
   const input = field.trim()
 
   if (!input) {
-    throw new CronValidationError(`Empty cron ${fieldName} field.`)
+    throw new SixbError("runtime.invalid_definition", `Empty cron ${fieldName} field.`)
   }
 
   if (input === "*") {
@@ -42,12 +42,18 @@ export function createCronFieldMatcher(params: {
 
   for (const segment of segments) {
     if (!segment) {
-      throw new CronValidationError(`Invalid cron ${fieldName} field: '${input}'.`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `Invalid cron ${fieldName} field: '${input}'.`
+      )
     }
 
     const stepParts = segment.split("/")
     if (stepParts.length > 2) {
-      throw new CronValidationError(`Invalid cron ${fieldName} segment: '${segment}'.`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `Invalid cron ${fieldName} segment: '${segment}'.`
+      )
     }
 
     const base = stepParts[0]
@@ -57,7 +63,10 @@ export function createCronFieldMatcher(params: {
         : parseInteger(stepParts[1], `cron ${fieldName} step for '${segment}'`)
 
     if (step <= 0) {
-      throw new CronValidationError(`Cron ${fieldName} step must be > 0 in segment '${segment}'.`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `Cron ${fieldName} step must be > 0 in segment '${segment}'.`
+      )
     }
 
     let rangeStart: number
@@ -69,7 +78,10 @@ export function createCronFieldMatcher(params: {
     } else if (base.includes("-")) {
       const [rawStart, rawEnd] = base.split("-")
       if (!rawStart || !rawEnd) {
-        throw new CronValidationError(`Invalid cron ${fieldName} range: '${base}'.`)
+        throw new SixbError(
+          "runtime.invalid_definition",
+          `Invalid cron ${fieldName} range: '${base}'.`
+        )
       }
 
       rangeStart = parseInteger(rawStart, `cron ${fieldName} range start for '${base}'`)
@@ -81,7 +93,8 @@ export function createCronFieldMatcher(params: {
     }
 
     if (rangeStart > rangeEnd) {
-      throw new CronValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Cron ${fieldName} range start must be <= end in segment '${segment}'.`
       )
     }
@@ -89,7 +102,8 @@ export function createCronFieldMatcher(params: {
     for (let value = rangeStart; value <= rangeEnd; value += step) {
       const normalized = normalize(value)
       if (normalized < min || normalized > max) {
-        throw new CronValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `Cron ${fieldName} value ${value} is outside range ${min}-${max}.`
         )
       }
@@ -110,7 +124,8 @@ export function createCronFieldMatcher(params: {
 export function createCronMatcher(expression: string): (now: Date) => boolean {
   const parts = expression.trim().split(/\s+/)
   if (parts.length !== 5) {
-    throw new CronValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Invalid cron expression '${expression}'. Expected 5 fields (minute hour day month weekday).`
     )
   }

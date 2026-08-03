@@ -18,7 +18,6 @@ export {
   TELEMETRY_EVENT_DEFINITIONS,
   WORKFLOW_EVENT_DEFINITIONS,
 } from "./definitions"
-export { EventsError } from "./errors"
 export {
   OntologyOutboxDispatcher,
   type OntologyOutboxDispatcherOptions,

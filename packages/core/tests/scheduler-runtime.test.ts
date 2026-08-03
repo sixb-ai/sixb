@@ -4,7 +4,7 @@ import { InMemoryBroker } from "../src"
 import { attachSixbErrorReporter, flushSixbErrors } from "../src/error-reporting/internal"
 import type { StoredScheduleTriggeredEvent } from "../src/events"
 import { EventsRuntime } from "../src/events"
-import { SchedulerRuntime, SchedulerValidationError } from "../src/scheduler"
+import { SchedulerRuntime } from "../src/scheduler"
 import { defineSchedule } from "../src/schedules"
 
 /** What `onError` is handed: the portable record, and the live thrown value on the context. */
@@ -174,7 +174,7 @@ describe("SchedulerRuntime", () => {
       events: eventsRuntime,
     })
 
-    expect(runtime.start()).rejects.toThrow(SchedulerValidationError)
+    expect(runtime.start()).rejects.toHaveProperty("code", "runtime.invalid_definition")
   })
 
   test("start() is idempotent", async () => {

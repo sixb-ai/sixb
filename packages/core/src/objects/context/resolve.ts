@@ -5,8 +5,8 @@
  * receive all structural information pre-resolved.
  */
 
+import { SixbError } from "../../errors"
 import type { ObjectLink } from "../../ontology"
-import { OntologyNotFoundError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type { SixbRuntimeContext } from "../../runtime/types"
 import type { ResolvedLinkContext, ResolvedObjectContext } from "./types"
@@ -17,7 +17,8 @@ export function requireLinkDefinition(
   linkId: string
 ): ObjectLink {
   const def = objectType.links.find((l) => l.id === linkId)
-  if (!def) throw new OntologyNotFoundError(`Unknown link '${objectType.id}.${linkId}'`)
+  if (!def)
+    throw new SixbError("ontology.type_not_found", `Unknown link '${objectType.id}.${linkId}'`)
   return def
 }
 

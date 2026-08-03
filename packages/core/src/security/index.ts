@@ -5,7 +5,6 @@ export type {
   DefineRoleOptions,
 } from "./builders"
 export { defineGroup, defineMembershipPolicy, defineRole } from "./builders"
-export { SecurityValidationError } from "./errors"
 export type { BreadthSelector, BreadthTarget } from "./every"
 export { every } from "./every"
 export { can } from "./grants"

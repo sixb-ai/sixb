@@ -12,7 +12,7 @@ import {
   UploadPartCommand,
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
-import { BlobStorageError } from "@sixb/core/blob-storage/server"
+import { SixbError } from "@sixb/core/errors"
 import type { S3UploadApi } from "./s3-multipart-upload"
 import type { S3BlobStorageAcl, S3BlobStorageOptions } from "./types"
 
@@ -85,7 +85,10 @@ export function createAwsS3Api(options: AwsS3ApiOptions): S3Api {
 
   const requireBucket = () => {
     if (!bucket) {
-      throw new BlobStorageError("[BlobS3] S3 operations require a bucket configuration.")
+      throw new SixbError(
+        "storage.blob_failed",
+        "[BlobS3] S3 operations require a bucket configuration."
+      )
     }
     return bucket
   }
@@ -117,7 +120,10 @@ export function createAwsS3Api(options: AwsS3ApiOptions): S3Api {
         { abortSignal: input.signal }
       )
       if (!response.UploadId) {
-        throw new BlobStorageError("[BlobS3] S3 did not return a multipart upload id.")
+        throw new SixbError(
+          "storage.blob_failed",
+          "[BlobS3] S3 did not return a multipart upload id."
+        )
       }
       return response.UploadId
     },
@@ -136,7 +142,8 @@ export function createAwsS3Api(options: AwsS3ApiOptions): S3Api {
         { abortSignal: input.signal }
       )
       if (!response.ETag) {
-        throw new BlobStorageError(
+        throw new SixbError(
+          "storage.blob_failed",
           `[BlobS3] S3 did not return an ETag for multipart part ${input.partNumber}.`
         )
       }
@@ -182,7 +189,10 @@ export function createAwsS3Api(options: AwsS3ApiOptions): S3Api {
         })
       )
       if (!response.Body) {
-        throw new BlobStorageError(`[BlobS3] S3 returned no body for object '${input.key}'.`)
+        throw new SixbError(
+          "storage.blob_failed",
+          `[BlobS3] S3 returned no body for object '${input.key}'.`
+        )
       }
       return response.Body.transformToWebStream() as ReadableStream<Uint8Array>
     },
@@ -261,7 +271,8 @@ function explicitCredentials(
   const hasAccessKey = options.accessKeyId !== undefined
   const hasSecretKey = options.secretAccessKey !== undefined
   if (hasAccessKey !== hasSecretKey || (options.sessionToken !== undefined && !hasAccessKey)) {
-    throw new BlobStorageError(
+    throw new SixbError(
+      "storage.blob_failed",
       "[BlobS3] Explicit S3 credentials require both accessKeyId and secretAccessKey."
     )
   }
@@ -276,7 +287,8 @@ function explicitCredentials(
 
 function objectAcl(acl: S3BlobStorageAcl | undefined): ObjectCannedACL | undefined {
   if (acl === "log-delivery-write") {
-    throw new BlobStorageError(
+    throw new SixbError(
+      "storage.blob_failed",
       "[BlobS3] ACL 'log-delivery-write' is only valid for buckets, not S3 objects."
     )
   }

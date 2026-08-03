@@ -6,11 +6,8 @@
  * `Sixb` facade.
  */
 
-import {
-  formatUnknownObjectTypeMessage,
-  OntologyNotFoundError,
-  OntologyValidationError,
-} from "./errors"
+import { SixbError } from "../errors"
+import { formatUnknownObjectTypeMessage } from "./errors"
 import type { ObjectTypeWithPropertyTokens } from "./tokens"
 import { createLinkTokenMap, createPropertyTokenMap } from "./tokens"
 import type { ObjectType, Schema, ValueType } from "./types"
@@ -167,14 +164,14 @@ export class OntologyRegistry {
 
     for (const objectType of objectTypes) {
       if (this.objectTypesById.has(objectType.id)) {
-        throw new OntologyValidationError(`Duplicate object type id: ${objectType.id}`)
+        throw new SixbError("ontology.invalid_value", `Duplicate object type id: ${objectType.id}`)
       }
       this.objectTypesById.set(objectType.id, objectType)
     }
 
     for (const valueType of valueTypes) {
       if (this.valueTypesById.has(valueType.id)) {
-        throw new OntologyValidationError(`Duplicate value type id: ${valueType.id}`)
+        throw new SixbError("ontology.invalid_value", `Duplicate value type id: ${valueType.id}`)
       }
       this.valueTypesById.set(valueType.id, valueType)
     }
@@ -207,7 +204,7 @@ export class OntologyRegistry {
   resolveObjectType(objectTypeId: string): ObjectTypeWithPropertyTokens {
     const objectType = this.objectTypesById.get(objectTypeId)
     if (!objectType) {
-      throw new OntologyNotFoundError(formatUnknownObjectTypeMessage(objectTypeId))
+      throw new SixbError("ontology.type_not_found", formatUnknownObjectTypeMessage(objectTypeId))
     }
     return objectType
   }
@@ -215,7 +212,8 @@ export class OntologyRegistry {
   /** Get the primary property id for a given object type. Throws if unknown. */
   getPrimaryPropertyId(objectTypeId: string): string {
     const id = this.primaryByTypeId.get(objectTypeId)
-    if (!id) throw new OntologyNotFoundError(formatUnknownObjectTypeMessage(objectTypeId))
+    if (!id)
+      throw new SixbError("ontology.type_not_found", formatUnknownObjectTypeMessage(objectTypeId))
     return id
   }
 
@@ -242,7 +240,8 @@ export class OntologyRegistry {
 
     while (current) {
       if (seen.has(current.id)) {
-        throw new OntologyValidationError(
+        throw new SixbError(
+          "ontology.invalid_value",
           `Circular extends chain detected while resolving ancestors for "${objectType.id}".`
         )
       }
@@ -319,13 +318,15 @@ export class OntologyRegistry {
       const parentId = objectType.extends
 
       if (!this.objectTypesById.has(parentId)) {
-        throw new OntologyValidationError(
+        throw new SixbError(
+          "ontology.invalid_value",
           `ObjectType "${typeId}" extends unknown type "${parentId}". If "${parentId}" comes from an external ontology, add it to 'ontologies' in createSixb().`
         )
       }
 
       if (resolving.has(typeId)) {
-        throw new OntologyValidationError(
+        throw new SixbError(
+          "ontology.invalid_value",
           `Circular extends chain detected: ${[...chain, typeId].join(" → ")}`
         )
       }
@@ -348,7 +349,8 @@ export class OntologyRegistry {
       for (const parentId of objectType.parents) {
         if (parentId === objectType.extends) continue
         if (!this.objectTypesById.has(parentId)) {
-          throw new OntologyValidationError(
+          throw new SixbError(
+            "ontology.invalid_value",
             `ObjectType "${typeId}" lists unknown parent "${parentId}" in parents. If "${parentId}" comes from an external ontology, add it to 'ontologies' in createSixb().`
           )
         }

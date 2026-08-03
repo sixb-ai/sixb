@@ -1,4 +1,4 @@
-import { type SixbErrorCode, SixbValidationError, toSixbFailure } from "@sixb/core/errors"
+import { SixbError, type SixbErrorCode, toSixbFailure } from "@sixb/core/errors"
 
 export function toIsoString(value: Date): string {
   return value.toISOString()
@@ -11,7 +11,7 @@ export function parseDate(value: string | undefined): Date | undefined {
 
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) {
-    throw new SixbValidationError("runtime.invalid_input", `Invalid date: ${value}`)
+    throw new SixbError("runtime.invalid_input", `Invalid date: ${value}`)
   }
 
   return parsed
@@ -24,7 +24,7 @@ export function parseOptionalInt(value: string | undefined): number | undefined 
 
   const parsed = Number.parseInt(value, 10)
   if (!Number.isFinite(parsed)) {
-    throw new SixbValidationError("runtime.invalid_input", `Invalid integer: ${value}`)
+    throw new SixbError("runtime.invalid_input", `Invalid integer: ${value}`)
   }
 
   return parsed

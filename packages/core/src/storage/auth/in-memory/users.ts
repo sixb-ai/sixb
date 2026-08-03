@@ -1,5 +1,5 @@
+import { authStorageError } from "../../../storage/auth/errors"
 import { paginate } from "../../pagination"
-import { AuthStorageError } from "../errors"
 import type {
   AuthUserStore,
   CreateAuthUserInput,
@@ -32,14 +32,14 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     const key = userKey(projectId, id)
 
     if (this.state.users.has(key)) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "duplicate_user",
         `[Sixb] User '${id}' already exists for project '${projectId}'.`
       )
     }
 
     if (getUserByEmail(this.state, projectId, email)) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "duplicate_user",
         `[Sixb] User email '${email}' already exists for project '${projectId}'.`
       )
@@ -81,7 +81,7 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     const existing = this.state.users.get(key)
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_user",
         `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
       )
@@ -102,7 +102,7 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     const existing = this.state.users.get(key)
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_user",
         `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
       )

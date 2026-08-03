@@ -1,6 +1,6 @@
 import { getInvalidJsonValueReason, type JsonValue } from "@sixb/core"
 import type { BrokerRecord, BrokerRecordInput } from "@sixb/core/broker"
-import { NatsBrokerError } from "./errors"
+import { natsBrokerError } from "./errors"
 
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
@@ -39,16 +39,16 @@ export function decodeRecord(params: {
   try {
     parsed = JSON.parse(textDecoder.decode(params.data))
   } catch (error) {
-    throw new NatsBrokerError("Failed to decode broker record body as JSON", { cause: error })
+    throw natsBrokerError("Failed to decode broker record body as JSON", { cause: error })
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new NatsBrokerError("Decoded broker record body is not an object")
+    throw natsBrokerError("Decoded broker record body is not an object")
   }
 
   const record = parsed as Partial<WireBrokerRecord>
   if (!("payload" in record)) {
-    throw new NatsBrokerError("Decoded broker record body is missing payload")
+    throw natsBrokerError("Decoded broker record body is missing payload")
   }
   assertBrokerPayload(record.payload)
 
@@ -66,6 +66,6 @@ export function decodeRecord(params: {
 function assertBrokerPayload(payload: unknown): asserts payload is JsonValue {
   const reason = getInvalidJsonValueReason(payload, "record.payload")
   if (reason) {
-    throw new NatsBrokerError(`record.payload must be a JSON value; ${reason}`)
+    throw natsBrokerError(`record.payload must be a JSON value; ${reason}`)
   }
 }

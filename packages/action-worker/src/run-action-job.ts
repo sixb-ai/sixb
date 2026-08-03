@@ -7,7 +7,7 @@ import {
   requireFinishedAt,
   resolveRedeliveredRunningRun,
 } from "./action-execution/results"
-import { ActionWorkerError } from "./errors"
+import { actionWorkerError } from "./errors"
 import { throwIfAborted } from "./normalize"
 import type { ActionRunResult, RunActionJobInput } from "./types"
 
@@ -22,10 +22,10 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     id: job.id,
   })
   if (!existingRun) {
-    throw new ActionWorkerError(`Action run '${job.id}' was not found.`)
+    throw actionWorkerError(`Action run '${job.id}' was not found.`)
   }
   if (existingRun.actionId !== job.actionId) {
-    throw new ActionWorkerError(
+    throw actionWorkerError(
       `Action job '${job.id}' references action '${job.actionId}' but the stored run references '${existingRun.actionId}'.`
     )
   }
@@ -42,7 +42,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
 
   const action = runtime.getActionById(job.actionId)
   if (!action) {
-    const error = new ActionWorkerError(`Unknown action '${job.actionId}'.`)
+    const error = actionWorkerError(`Unknown action '${job.actionId}'.`)
     const failure = toActionRunFailure(error, "validation")
     const finishedRun = await runtime.actionRunsStorage.finish({
       projectId: runtime.id,
@@ -61,7 +61,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     existingRun = resolution.run
   }
   if (existingRun.status !== "queued" && existingRun.status !== "running") {
-    throw new ActionWorkerError(
+    throw actionWorkerError(
       `Action run '${job.id}' cannot execute from status '${existingRun.status}'.`
     )
   }

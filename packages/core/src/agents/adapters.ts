@@ -1,4 +1,5 @@
 import { type FileRef, isFileRef } from "../blob-storage"
+import { SixbError } from "../errors"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
 import {
   type AgentContextEntryInput,
@@ -7,7 +8,6 @@ import {
   normalizeAgentContextEntries,
 } from "./context"
 import { serializeAgentContextForModel } from "./context-model"
-import { AgentMessageAdapterError } from "./errors"
 import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "./message"
 
 // ── Inbound (write) — deliberately WIDE ────────────────────────────────────────────────────────
@@ -181,7 +181,7 @@ const TOOL_TYPE_PREFIX = "tool-"
 
 function assertAdapter(condition: unknown, message: string): asserts condition {
   if (!condition) {
-    throw new AgentMessageAdapterError(`[Sixb] ${message}`)
+    throw new SixbError("runtime.invalid_input", `[Sixb] ${message}`)
   }
 }
 
@@ -335,7 +335,8 @@ function fromUiContextPart(part: AgentInboundUiMessagePart): AgentMessagePart {
     ])
     return { type: "context", ...entry }
   } catch (error) {
-    throw new AgentMessageAdapterError(
+    throw new SixbError(
+      "runtime.invalid_input",
       error instanceof Error ? error.message : "[Sixb] Invalid agent context part."
     )
   }

@@ -7,7 +7,6 @@ export {
   isBlobDigest,
   isFileRef,
 } from "./browser"
-export { BlobStorageError } from "./errors"
 export { InMemoryBlobStorage } from "./in-memory"
 export type {
   AbortBlobUploadInput,

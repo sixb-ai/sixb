@@ -1,4 +1,4 @@
-import { NatsBrokerError } from "./errors"
+import { natsBrokerError } from "./errors"
 
 // Records without a name still need a concrete final subject token so they
 // live inside the stream subject filter and can be published consistently.
@@ -64,9 +64,7 @@ export function buildRecordFilters(params: {
 
 export function assertNamespace(namespace: string): void {
   if (!/^[A-Za-z0-9_-]+$/.test(namespace)) {
-    throw new NatsBrokerError(
-      "namespace must contain only letters, numbers, underscores, and hyphens"
-    )
+    throw natsBrokerError("namespace must contain only letters, numbers, underscores, and hyphens")
   }
 }
 

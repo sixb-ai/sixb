@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { assertAuthorized } from "../authorization"
+import { SixbError } from "../errors"
 import type { SixbRuntimeContext } from "../runtime/types"
-import { SyncValidationError } from "./errors"
 import type { SyncDefinition } from "./types"
 
 export interface SyncRunRequestOptions {
@@ -51,12 +51,12 @@ export async function requestSyncRun(
 ): Promise<SyncRunRequestResult> {
   assertAuthorized(runtime, { kind: "sync.run", syncId: sync.id })
   if (!runtime.storage.syncRuns) {
-    throw new SyncValidationError("[Sixb] Sync run storage is not configured.")
+    throw new SixbError("runtime.invalid_definition", "[Sixb] Sync run storage is not configured.")
   }
 
   const queue = runtime.queues.syncRuns
   if (!queue) {
-    throw new SyncValidationError("[Sixb] Sync run queue is not configured.")
+    throw new SixbError("runtime.invalid_definition", "[Sixb] Sync run queue is not configured.")
   }
 
   const runId = createSyncRunId(options.runId)
@@ -82,7 +82,7 @@ export async function requestSyncRun(
 function createSyncRunId(runId: string | undefined): string {
   if (runId !== undefined) {
     if (!runId.trim()) {
-      throw new SyncValidationError("[Sixb] Sync run id must not be empty")
+      throw new SixbError("runtime.invalid_definition", "[Sixb] Sync run id must not be empty")
     }
     return runId
   }

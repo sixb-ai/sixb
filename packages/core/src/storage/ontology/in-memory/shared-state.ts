@@ -1,4 +1,4 @@
-import { MaterializationValidationError } from "../../../materialization/errors"
+import { SixbError } from "../../../errors"
 import type { OntologyMaterializationOrigin } from "../../../materialization/model"
 import type { OntologyCommitOriginSelector, OntologyCommitRecord } from "../commits"
 import type {
@@ -148,14 +148,17 @@ export function insertBounded<T>(
 
 export function assertNonblank(value: string, label: string): void {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new MaterializationValidationError(`${label} must be nonblank.`)
+    throw new SixbError("ontology.invalid_value", `[Sixb] ${label} must be nonblank.`)
   }
 }
 
 export function assertTimestamp(value: string, label: string): number {
   const milliseconds = Date.parse(value)
   if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) {
-    throw new MaterializationValidationError(`${label} must be a canonical UTC timestamp.`)
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] ${label} must be a canonical UTC timestamp.`
+    )
   }
   return milliseconds
 }

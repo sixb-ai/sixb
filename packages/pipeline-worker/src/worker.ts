@@ -1,3 +1,4 @@
+import { isSixbError } from "@sixb/core/errors"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
@@ -10,7 +11,7 @@ import {
   emitPipelineRunStepFinished,
   emitPipelineRunStepStarted,
 } from "./events"
-import { PipelineRunAlreadyStartedError, runPipelineJob } from "./run-pipeline-job"
+import { runPipelineJob } from "./run-pipeline-job"
 import type {
   PipelineJob,
   PipelineRunResult,
@@ -79,7 +80,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
         onStepCommitted: (step) => emitDatasetVersionCommitted(this.sixb.events, pipelineJob, step),
       })
     } catch (error) {
-      if (error instanceof PipelineRunAlreadyStartedError) return
+      if (isSixbError(error, "pipeline.already_running")) return
       throw error
     }
 

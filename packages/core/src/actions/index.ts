@@ -6,7 +6,6 @@ export type {
   FindActionEditCommitInput,
 } from "./commit-edits"
 export { commitActionEdits, findActionEditCommit } from "./commit-edits"
-export { ActionDefinitionError, ActionEditCommitError } from "./errors"
 export type { ActionReadFacadeOptions, ActionReadObjectSetSource } from "./read-facade"
 export { ActionReadRecorder, createActionReadFacade } from "./read-facade"
 export { ActionRegistry } from "./registry"

@@ -3,7 +3,7 @@ import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projectio
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { ProjectionRunRequestedQueueJob, Queue } from "@sixb/core/queues"
 import type { ProjectionRunRecord } from "@sixb/core/storage"
-import { OrchestratorError } from "./errors"
+import { orchestratorError } from "./errors"
 import { buildProjectionJob } from "./projection-job"
 import type { ProjectionDispatchPorts } from "./types"
 
@@ -61,7 +61,7 @@ async function reconcileProjection(
   const run = await input.projectionRuns.getById({ projectId: input.projectId, id: job.id })
   if (run) {
     if (!runMatchesJob(run, job.payload)) {
-      throw new OrchestratorError(
+      throw orchestratorError(
         `Projection run '${run.id}' does not match its deterministic dispatch identity.`
       )
     }
@@ -101,7 +101,7 @@ async function findLatestDataVersion(
       return versions.find((candidate) => candidate.mode !== "schema") ?? null
     }
     if (visited.has(version.versionId)) {
-      throw new OrchestratorError(
+      throw orchestratorError(
         `Dataset '${datasetId}' version ancestry contains a cycle at '${version.versionId}'.`
       )
     }
@@ -109,7 +109,7 @@ async function findLatestDataVersion(
     const parentVersionId = version.parentVersionId
     version = await lakeStorage.getVersion(datasetId, parentVersionId)
     if (!version) {
-      throw new OrchestratorError(
+      throw orchestratorError(
         `Dataset '${datasetId}' schema version references missing parent '${parentVersionId}'.`
       )
     }

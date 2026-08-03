@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { Broker, BrokerCursor, BrokerRecord, BrokerStreamDefinition } from "../broker"
 import { reportEventDeliveryFailure } from "../error-reporting/capability"
+import { SixbError } from "../errors"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
 import type { OntologyMaterializationEvent } from "../materialization/events"
 import {
@@ -10,7 +11,6 @@ import {
   isOntologyFactType,
   resolveEventStorage,
 } from "./definitions"
-import { EventsError } from "./errors"
 import type {
   DomainEvent,
   EventActor,
@@ -142,7 +142,8 @@ export class EventsRuntime implements DomainEventLog, StableEventPublisher {
     }
     for (const event of input.events) {
       if (isOntologyFactType(event.type)) {
-        throw new EventsError(
+        throw new SixbError(
+          "runtime.invariant_violated",
           `Event type '${event.type}' is an authoritative ontology fact and cannot be appended directly.`
         )
       }
@@ -171,7 +172,8 @@ export class EventsRuntime implements DomainEventLog, StableEventPublisher {
     })
 
     if (records.length !== payloads.length) {
-      throw new EventsError(
+      throw new SixbError(
+        "runtime.invariant_violated",
         `Broker returned ${records.length} record(s) for ${payloads.length} appended event(s).`
       )
     }
@@ -189,15 +191,20 @@ export class EventsRuntime implements DomainEventLog, StableEventPublisher {
 
     for (const envelope of envelopes) {
       if (envelope.projectId !== this.projectId) {
-        throw new EventsError(
+        throw new SixbError(
+          "runtime.invariant_violated",
           `Event '${envelope.id}' belongs to project '${envelope.projectId}', not '${this.projectId}'.`
         )
       }
       if (!isDomainEventType(envelope.type)) {
-        throw new EventsError(`Event '${envelope.id}' has unknown event type.`)
+        throw new SixbError(
+          "runtime.invariant_violated",
+          `Event '${envelope.id}' has unknown event type.`
+        )
       }
       if (EVENT_DEFINITIONS[envelope.type].topic !== envelope.topic) {
-        throw new EventsError(
+        throw new SixbError(
+          "runtime.invariant_violated",
           `Event '${envelope.id}' topic '${envelope.topic}' does not match type '${envelope.type}'.`
         )
       }
@@ -216,7 +223,8 @@ export class EventsRuntime implements DomainEventLog, StableEventPublisher {
     })
 
     if (records.length !== envelopes.length) {
-      throw new EventsError(
+      throw new SixbError(
+        "runtime.invariant_violated",
         `Broker returned ${records.length} record(s) for ${envelopes.length} published event(s).`
       )
     }
@@ -337,7 +345,10 @@ function toStoredEventPayload(params: {
 function toBrokerRecordPayload(payload: StoredEventPayload | StableEventEnvelope): JsonValue {
   const reason = getInvalidJsonValueReason(payload, `event '${payload.type}' payload`)
   if (reason) {
-    throw new EventsError(`Event '${payload.type}' cannot be stored in broker; ${reason}`)
+    throw new SixbError(
+      "runtime.invariant_violated",
+      `Event '${payload.type}' cannot be stored in broker; ${reason}`
+    )
   }
 
   return payload as unknown as JsonValue
@@ -346,16 +357,23 @@ function toBrokerRecordPayload(payload: StoredEventPayload | StableEventEnvelope
 function hydrateEventRecord(record: BrokerRecord): StoredDomainEvent {
   const payload = record.payload
   if (!isObjectRecord(payload)) {
-    throw new EventsError(`Broker record at cursor '${record.cursor}' is not an event object.`)
+    throw new SixbError(
+      "runtime.invariant_violated",
+      `Broker record at cursor '${record.cursor}' is not an event object.`
+    )
   }
 
   const eventType = payload.type
   if (typeof eventType !== "string" || !isDomainEventType(eventType)) {
-    throw new EventsError(`Broker record at cursor '${record.cursor}' has unknown event type.`)
+    throw new SixbError(
+      "runtime.invariant_violated",
+      `Broker record at cursor '${record.cursor}' has unknown event type.`
+    )
   }
 
   if (record.name !== undefined && record.name !== eventType) {
-    throw new EventsError(
+    throw new SixbError(
+      "runtime.invariant_violated",
       `Broker record name '${record.name}' does not match event type '${eventType}'.`
     )
   }

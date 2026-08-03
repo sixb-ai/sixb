@@ -4,11 +4,10 @@ export {
 } from "../materialization/dataset-watermark"
 export type { MaterializationConflictKind } from "../materialization/errors"
 export {
-  isMaterializationConflictError,
-  MaterializationCancellationError,
-  MaterializationConflictError,
-  MaterializationObjectNotFoundError,
-  MaterializationValidationError,
+  isMaterializationCancellation,
+  materializationCancelled,
+  materializationConflict,
+  materializationConflictKind,
 } from "../materialization/errors"
 export type {
   BaseCommitResult,

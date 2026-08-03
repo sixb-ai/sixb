@@ -1,4 +1,4 @@
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
 import type {
   DuckLakeMaintenanceOptions,
   DuckLakeMaintenanceReport,
@@ -32,7 +32,8 @@ export class DuckLakeMaintenance {
     const dryRun = options.dryRun ?? false
 
     if (this.options.readOnly && !dryRun) {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         "[SixbDuckLake] DuckLake maintenance cannot run in read-only mode."
       )
     }

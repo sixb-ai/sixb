@@ -7,10 +7,11 @@ import type {
   Logger,
   ObjectTypeWithPropertyTokens,
 } from "@sixb/core"
-import { isObjectActionDefinition, ObjectNotFoundError } from "@sixb/core"
+import { isObjectActionDefinition } from "@sixb/core"
 import { coerceActionParamsToTyped } from "@sixb/core/internal/actions"
 import type { ActionRunRecord } from "@sixb/core/storage"
-import { ActionWorkerError } from "../errors"
+import { objectNotFound } from "@sixb/core/storage"
+import { actionWorkerError } from "../errors"
 import type { RunActionJobInput } from "../types"
 import type { LoadedObjectTarget } from "./types"
 
@@ -94,7 +95,7 @@ export async function loadObjectTarget(input: {
 }): Promise<LoadedObjectTarget | null> {
   if (!isObjectActionDefinition(input.action)) {
     if (input.run.subject.kind !== "none") {
-      throw new ActionWorkerError(`Action '${input.action.id}' does not accept a subject.`)
+      throw actionWorkerError(`Action '${input.action.id}' does not accept a subject.`)
     }
     return null
   }
@@ -105,7 +106,7 @@ export async function loadObjectTarget(input: {
     .listActionsForType(subjectObjectType)
     .some((candidate) => candidate.id === input.action.id)
   if (!actionAppliesToSubject) {
-    throw new ActionWorkerError(
+    throw actionWorkerError(
       `Action '${input.action.id}' is not valid for object type '${subjectObjectType.id}'.`
     )
   }
@@ -116,11 +117,7 @@ export async function loadObjectTarget(input: {
     primaryId: subject.primaryId,
   })
   if (!targetRow) {
-    throw new ObjectNotFoundError(
-      subject.objectTypeId,
-      subject.primaryId,
-      "Object not found for action run"
-    )
+    throw objectNotFound(subject.objectTypeId, subject.primaryId, "Object not found for action run")
   }
 
   return {
@@ -134,7 +131,7 @@ export function requireObjectSubject<
   TObjectType extends ObjectTypeWithPropertyTokens = ObjectTypeWithPropertyTokens,
 >(subject: ActionSubject, actionId: string): ActionObjectSubject<TObjectType> {
   if (subject.kind !== "object") {
-    throw new ActionWorkerError(`Action '${actionId}' requires an object subject.`)
+    throw actionWorkerError(`Action '${actionId}' requires an object subject.`)
   }
   return subject as ActionObjectSubject<TObjectType>
 }
@@ -144,7 +141,7 @@ export function requireObjectTarget(
   actionId: string
 ): LoadedObjectTarget {
   if (!target) {
-    throw new ActionWorkerError(`Action '${actionId}' requires an object target.`)
+    throw actionWorkerError(`Action '${actionId}' requires an object target.`)
   }
   return target
 }

@@ -20,7 +20,7 @@ import {
 } from "@sixb/core/internal/storage-operation-scope"
 import {
   createTransactionStorageProxy,
-  StorageTransactionError,
+  storageTransactionError,
   throwNestedStorageTransaction,
 } from "@sixb/core/storage"
 import { SqliteActionRunStorage } from "./action-run-storage"
@@ -222,7 +222,7 @@ export class SqliteStorage implements MigrationCapableStorage {
 
   private assertRootOperationAvailable(): void {
     if (!this.transactionScope.getStore()?.active) return
-    throw new StorageTransactionError(
+    throw storageTransactionError(
       "[SixbSqlite] Root storage cannot be used inside a transaction callback; use the provided tx storage."
     )
   }

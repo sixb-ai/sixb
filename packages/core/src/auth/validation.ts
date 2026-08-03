@@ -1,5 +1,4 @@
 import { resolveAuthCookieOptions } from "./cookies"
-import { AuthRuntimeError } from "./errors"
 import type {
   AuthSessionOptions,
   AuthStrategy,
@@ -23,6 +22,8 @@ export const MAX_AUTH_INVITATION_TTL_MS = 30 * DAY
 export const DEFAULT_AUTH_SESSION_CACHE_TTL_MS = 5_000
 
 export { resolveAuthSessionAudience } from "./audience"
+
+import { authRuntimeError } from "../auth/errors"
 
 export function resolveAuthConfig(config: SixbAuthConfig | undefined): ResolvedAuthConfig {
   if (!config) {
@@ -50,21 +51,21 @@ export function resolveInvitationExpiresAt(value: Date | undefined, now: Date): 
   const expiresAtTime = expiresAt.getTime()
 
   if (!Number.isFinite(expiresAtTime)) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_input",
       "[Sixb] Invitation expiresAt must be a valid date."
     )
   }
 
   if (expiresAtTime <= now.getTime()) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_input",
       "[Sixb] Invitation expiresAt must be in the future."
     )
   }
 
   if (expiresAtTime > now.getTime() + MAX_AUTH_INVITATION_TTL_MS) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_input",
       "[Sixb] Invitation expiresAt must be no more than 30 days in the future."
     )
@@ -93,7 +94,7 @@ export function sanitizeReturnTo(value: string | undefined): string {
 export function assertNonEmpty(value: string, label: string): string {
   const normalized = value.trim()
   if (!normalized) {
-    throw new AuthRuntimeError("invalid_auth_input", `[Sixb] ${label} must be a non-empty string.`)
+    throw authRuntimeError("invalid_auth_input", `[Sixb] ${label} must be a non-empty string.`)
   }
   return normalized
 }
@@ -103,14 +104,14 @@ export function normalizePagination(input: { readonly limit?: number; readonly o
   readonly offset: number
 } {
   if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 0)) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_input",
       "[Sixb] Invitation list limit must be a non-negative integer."
     )
   }
 
   if (input.offset !== undefined && (!Number.isInteger(input.offset) || input.offset < 0)) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_input",
       "[Sixb] Invitation list offset must be a non-negative integer."
     )
@@ -127,7 +128,7 @@ function resolveAuthSessionOptions(
 ): ResolvedAuthConfig["session"] {
   const idleTimeoutMs = options?.idleTimeoutMs ?? DEFAULT_AUTH_SESSION_IDLE_TIMEOUT_MS
   if (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_config",
       "[Sixb] Auth session idleTimeoutMs must be a positive finite number."
     )
@@ -135,13 +136,13 @@ function resolveAuthSessionOptions(
 
   const renewalWindowMs = options?.renewalWindowMs ?? DEFAULT_AUTH_SESSION_RENEWAL_WINDOW_MS
   if (!Number.isFinite(renewalWindowMs) || renewalWindowMs <= 0) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_config",
       "[Sixb] Auth session renewalWindowMs must be a positive finite number."
     )
   }
   if (renewalWindowMs >= idleTimeoutMs) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_config",
       "[Sixb] Auth session renewalWindowMs must be less than idleTimeoutMs."
     )
@@ -152,13 +153,13 @@ function resolveAuthSessionOptions(
     absoluteTimeoutMs !== undefined &&
     (!Number.isFinite(absoluteTimeoutMs) || absoluteTimeoutMs <= 0)
   ) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_config",
       "[Sixb] Auth session absoluteTimeoutMs must be a positive finite number when configured."
     )
   }
   if (absoluteTimeoutMs !== undefined && absoluteTimeoutMs < idleTimeoutMs) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_config",
       "[Sixb] Auth session absoluteTimeoutMs must be greater than or equal to idleTimeoutMs."
     )
@@ -166,13 +167,13 @@ function resolveAuthSessionOptions(
 
   const cacheTtlMs = options?.cacheTtlMs ?? DEFAULT_AUTH_SESSION_CACHE_TTL_MS
   if (!Number.isFinite(cacheTtlMs) || cacheTtlMs < 0) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_config",
       "[Sixb] Auth session cacheTtlMs must be a non-negative finite number."
     )
   }
   if (cacheTtlMs >= renewalWindowMs) {
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "invalid_auth_config",
       "[Sixb] Auth session cacheTtlMs must be less than renewalWindowMs."
     )
@@ -236,6 +237,6 @@ export function isOidcAuthStrategy(strategy: AuthStrategy | null): strategy is O
 
 function assertValidStrategy(strategy: AuthStrategy): void {
   if (!strategy.id.trim()) {
-    throw new AuthRuntimeError("invalid_auth_config", "[Sixb] Auth strategy id is required.")
+    throw authRuntimeError("invalid_auth_config", "[Sixb] Auth strategy id is required.")
   }
 }

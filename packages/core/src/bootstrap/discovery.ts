@@ -17,6 +17,7 @@ import { isConnectorDefinition } from "../connectors"
 import type { ConnectorDefinition } from "../connectors/types"
 import { isDatasetDefinition } from "../datasets"
 import type { DatasetDefinition } from "../datasets/types"
+import { SixbError } from "../errors"
 import type { OntologyDocumentInput, OntologySource } from "../ontology/registry"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { ValueType } from "../ontology/types"
@@ -26,7 +27,6 @@ import { isProjectionDefinition } from "../projections/builders"
 import type { ProjectionDefinition } from "../projections/types"
 import { isRuleDefinition } from "../rules"
 import type { RuleDefinition } from "../rules/types"
-import { RuntimeError } from "../runtime/errors"
 import type { ScheduleDefinition } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
 import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from "../security"
@@ -376,7 +376,10 @@ async function loadModuleExports(options: {
     } catch (error) {
       const relPath = relative(options.projectRoot, modulePath)
       const reason = error instanceof Error ? error.message : String(error)
-      throw new RuntimeError(`Failed to load ${options.kind} module '${relPath}': ${reason}`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `Failed to load ${options.kind} module '${relPath}': ${reason}`
+      )
     }
 
     for (const exportedValue of Object.values(moduleNamespace)) {

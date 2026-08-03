@@ -1,7 +1,7 @@
 import {
   type AgentRunRecord,
   type AgentRunStore,
-  AgentStorageError,
+  agentStorageError,
   type ConfirmAgentRunExecutionOwnershipInput,
   type CreateAgentRunInput,
   type FinishAgentRunInput,
@@ -35,14 +35,14 @@ export class PgAgentRunStore implements AgentRunStore {
         `
 
         if (!thread) {
-          throw new AgentStorageError(
+          throw agentStorageError(
             "thread_not_found",
             `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
           )
         }
 
         if (thread.active_run_id !== null) {
-          throw new AgentStorageError(
+          throw agentStorageError(
             "active_run_exists",
             `[SixbPg] Agent thread '${input.threadId}' already has an active run '${thread.active_run_id}'.`
           )
@@ -84,7 +84,7 @@ export class PgAgentRunStore implements AgentRunStore {
       })
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new AgentStorageError(
+        throw agentStorageError(
           "duplicate_id",
           `[SixbPg] Agent run '${input.id}' already exists for project '${input.projectId}'.`
         )
@@ -154,7 +154,7 @@ export class PgAgentRunStore implements AgentRunStore {
     return runPgTransaction(this.sql, async (tx) => {
       const run = await this.lockRunning(tx, input.projectId, input.id)
       if (run.execution_token !== input.executionToken) {
-        throw new AgentStorageError(
+        throw agentStorageError(
           "execution_lost",
           `[SixbPg] Execution token is no longer current on agent run '${input.id}'.`
         )
@@ -181,7 +181,7 @@ export class PgAgentRunStore implements AgentRunStore {
       const run = await this.lockRunning(tx, input.projectId, input.id)
 
       if (run.execution_token !== input.executionToken) {
-        throw new AgentStorageError(
+        throw agentStorageError(
           "execution_lost",
           `[SixbPg] Execution token is no longer current on agent run '${input.id}'.`
         )
@@ -306,14 +306,14 @@ export class PgAgentRunStore implements AgentRunStore {
     `
 
     if (!row) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "run_not_found",
         `[SixbPg] Agent run '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (row.status !== status) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "invalid_state",
         `[SixbPg] Agent run '${id}' is not ${status} (status '${row.status}').`
       )

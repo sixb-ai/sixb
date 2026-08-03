@@ -1,6 +1,6 @@
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../../agents/message"
 import { principalsEqual } from "../../auth"
-import { AgentStorageError } from "./errors"
+import { agentStorageError } from "../../storage/agents/errors"
 import type {
   AgentMessageRecord,
   AgentMessageStore,
@@ -89,7 +89,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
     const threadKey = key(input.projectId, input.id)
     if (this.state.threads.has(threadKey)) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "duplicate_id",
         `[Sixb] Agent thread '${input.id}' already exists for project '${input.projectId}'.`
       )
@@ -157,13 +157,13 @@ class InMemoryAgentRunStore implements AgentRunStore {
     const threadKey = key(input.projectId, input.threadId)
     const thread = this.state.threads.get(threadKey)
     if (!thread) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "thread_not_found",
         `[Sixb] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
       )
     }
     if (thread.activeRunId !== null) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "active_run_exists",
         `[Sixb] Agent thread '${input.threadId}' already has an active run '${thread.activeRunId}'.`
       )
@@ -171,7 +171,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
 
     const runKey = key(input.projectId, input.id)
     if (this.state.runs.has(runKey)) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "duplicate_id",
         `[Sixb] Agent run '${input.id}' already exists for project '${input.projectId}'.`
       )
@@ -249,7 +249,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
   ): Promise<AgentRunRecord> {
     const run = this.requireRunning(input.projectId, input.id)
     if (!run.execution || run.execution.token !== input.executionToken) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "execution_lost",
         `[Sixb] Execution token is no longer current on agent run '${input.id}'.`
       )
@@ -271,7 +271,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
   async finish(input: FinishAgentRunInput): Promise<AgentRunRecord> {
     const run = this.requireRunning(input.projectId, input.id)
     if (!run.execution || run.execution.token !== input.executionToken) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "execution_lost",
         `[Sixb] Execution token is no longer current on agent run '${input.id}'.`
       )
@@ -345,13 +345,13 @@ class InMemoryAgentRunStore implements AgentRunStore {
   ): AgentRunRecord {
     const run = this.state.runs.get(key(projectId, id))
     if (!run) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "run_not_found",
         `[Sixb] Agent run '${id}' not found for project '${projectId}'.`
       )
     }
     if (run.status !== status) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "invalid_state",
         `[Sixb] Agent run '${id}' is not ${status} (status '${run.status}').`
       )
@@ -380,7 +380,7 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     const threadKey = key(input.projectId, input.threadId)
     const thread = this.state.threads.get(threadKey)
     if (!thread) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "thread_not_found",
         `[Sixb] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
       )
@@ -388,14 +388,14 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
 
     const messageKey = key(input.projectId, input.id)
     if (this.state.messages.has(messageKey)) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "duplicate_id",
         `[Sixb] Agent message '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
 
     if (input.runId !== null && !this.state.runs.has(key(input.projectId, input.runId))) {
-      throw new AgentStorageError(
+      throw agentStorageError(
         "run_not_found",
         `[Sixb] Agent run '${input.runId}' not found for project '${input.projectId}'.`
       )

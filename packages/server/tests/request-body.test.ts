@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../src/utils/request-body"
+import { readRequestBodyWithLimit } from "../src/utils/request-body"
 
 function streamRequest(chunks: readonly Uint8Array[]): Request {
   const stream = new ReadableStream<Uint8Array>({
@@ -37,7 +37,7 @@ describe("readRequestBodyWithLimit", () => {
     const chunk = new Uint8Array(6)
     await expect(
       readRequestBodyWithLimit(streamRequest([chunk, chunk]), 10)
-    ).rejects.toBeInstanceOf(RequestBodyTooLargeError)
+    ).rejects.toHaveProperty("code", "runtime.payload_too_large")
   })
 
   test("rejects oversized bodies via the content-length fast path", async () => {
@@ -46,8 +46,9 @@ describe("readRequestBodyWithLimit", () => {
       headers: { "content-length": "100" },
       body: "tiny",
     })
-    await expect(readRequestBodyWithLimit(request, 10)).rejects.toBeInstanceOf(
-      RequestBodyTooLargeError
+    await expect(readRequestBodyWithLimit(request, 10)).rejects.toHaveProperty(
+      "code",
+      "runtime.payload_too_large"
     )
   })
 

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { LakeStorageError } from "@sixb/core/lake-storage"
 import {
   DATASET_TABLE_PREFIX,
   decodeDatasetTableName,
@@ -51,7 +50,9 @@ describe("DuckLake dataset table names", () => {
   })
 
   test("rejects empty dataset ids", () => {
-    expect(() => encodeDatasetTableName("")).toThrow(LakeStorageError)
+    expect(() => encodeDatasetTableName("")).toThrow(
+      expect.objectContaining({ code: "storage.lake_failed" })
+    )
     expect(() => encodeDatasetTableName(" ")).toThrow("Dataset id must not be empty")
   })
 })

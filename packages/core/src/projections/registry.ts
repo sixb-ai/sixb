@@ -1,7 +1,7 @@
 import type { DatasetDefinition } from "../datasets"
+import { SixbError } from "../errors"
 import type { OntologyRegistry } from "../ontology"
 import { isProjectionDefinition } from "./builders"
-import { ProjectionValidationError } from "./errors"
 import {
   computeOntologyRevision,
   computeProjectionOwnershipHash,
@@ -43,7 +43,7 @@ export class ProjectionRegistry {
     const telemetryProjections: TelemetryProjectionDefinition[] = []
     for (const projection of input.projections) {
       if (!isProjectionDefinition(projection)) {
-        throw new ProjectionValidationError("[Sixb] Invalid projection definition.")
+        throw new SixbError("runtime.invalid_definition", "[Sixb] Invalid projection definition.")
       }
       switch (projection._tag) {
         case "ObjectProjectionDefinition":
@@ -126,18 +126,25 @@ export class ProjectionRegistry {
   resolveDispatch(projectionId: string): ProjectionDispatchDescriptor {
     const descriptor = this.dispatchById.get(projectionId)
     if (descriptor) return descriptor
-    throw new ProjectionValidationError(`[Sixb] Unknown projection '${projectionId}'.`)
+    throw new SixbError(
+      "runtime.invalid_definition",
+      `[Sixb] Unknown projection '${projectionId}'.`
+    )
   }
 
   resolveSource(projectionId: string): ResolvedProjection<SourceProjectionDefinition> {
     const resolved = this.sourceById.get(projectionId)
     if (!resolved) {
       if (this.telemetryById.has(projectionId)) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `[Sixb] Projection '${projectionId}' is telemetry-only and cannot replace source state.`
         )
       }
-      throw new ProjectionValidationError(`[Sixb] Unknown source projection '${projectionId}'.`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `[Sixb] Unknown source projection '${projectionId}'.`
+      )
     }
     return resolved
   }
@@ -146,11 +153,15 @@ export class ProjectionRegistry {
     const resolved = this.telemetryById.get(projectionId)
     if (!resolved) {
       if (this.sourceById.has(projectionId)) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `[Sixb] Projection '${projectionId}' does not own a telemetry source.`
         )
       }
-      throw new ProjectionValidationError(`[Sixb] Unknown telemetry projection '${projectionId}'.`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `[Sixb] Unknown telemetry projection '${projectionId}'.`
+      )
     }
     return resolved
   }
@@ -182,7 +193,10 @@ function assertUniqueProjectionIds(projections: readonly ProjectionDefinition[])
   const ids = new Set<string>()
   for (const projection of projections) {
     if (ids.has(projection.id)) {
-      throw new ProjectionValidationError(`[Sixb] Duplicate projection id: ${projection.id}`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `[Sixb] Duplicate projection id: ${projection.id}`
+      )
     }
     ids.add(projection.id)
   }

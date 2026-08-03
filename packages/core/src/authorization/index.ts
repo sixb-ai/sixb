@@ -8,7 +8,6 @@ export {
   evaluate,
   isAllowed,
 } from "./decision"
-export { AuthorizationError } from "./errors"
 export { canViewEvent } from "./event-visibility"
 export type { GrantKind, GrantUniverse } from "./grant-kinds"
 export { resolveAuthorizationContext, resolveRoleGrants } from "./resolve"

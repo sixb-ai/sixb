@@ -1,3 +1,4 @@
+import { SixbError } from "@sixb/core/errors"
 import { workflowAgentNodeQueueJobId } from "@sixb/core/internal/agents"
 import { reportBackgroundTaskFailure } from "@sixb/core/internal/error-reporting"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
@@ -5,7 +6,6 @@ import {
   snapshotWorkflowAgentStepInput,
   validateWorkflowAgentStepInput,
 } from "@sixb/core/internal/workflows"
-import { WorkflowWorkerError } from "../errors"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { throwIfAborted } from "../normalize"
 import { callWorkflowMapper, requireRecordInput } from "./mapper"
@@ -54,7 +54,8 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
     })
     const prompt = await node.agentStep.prompt({ input })
     if (typeof prompt !== "string" || !prompt.trim()) {
-      throw new WorkflowWorkerError(
+      throw new SixbError(
+        "workflow.failed",
         `[SixbWorkflowWorker] Workflow '${context.workflow.id}' agent node '${node.id}' prompt must return a non-empty string.`
       )
     }
@@ -63,7 +64,8 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
     const parked = await context.runtime.storage.transaction(async (tx) => {
       const workflowRuns = tx.workflowRuns
       if (!workflowRuns) {
-        throw new WorkflowWorkerError(
+        throw new SixbError(
+          "workflow.failed",
           `[SixbWorkflowWorker] Workflow '${context.workflow.id}' agent node '${node.id}' requires storage.workflowRuns.`
         )
       }

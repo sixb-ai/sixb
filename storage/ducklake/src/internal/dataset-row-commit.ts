@@ -1,5 +1,6 @@
 import type { DatasetDefinition } from "@sixb/core"
-import { type DatasetWriteMode, LakeStorageError } from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
+import type { DatasetWriteMode } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { getBigIntLike } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
@@ -22,7 +23,8 @@ export function assertDatasetWriteMode(
   operation: string
 ): asserts mode is DatasetWriteMode {
   if (mode !== "snapshot" && mode !== "append") {
-    throw new LakeStorageError(
+    throw new SixbError(
+      "storage.lake_failed",
       `[SixbDuckLake] Invalid ${operation} mode '${String(mode)}'. Expected 'snapshot' or 'append'.`
     )
   }

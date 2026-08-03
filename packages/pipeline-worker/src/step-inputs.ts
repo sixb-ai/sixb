@@ -5,12 +5,13 @@ import type {
   PipelineStepInput,
   PipelineStepRunContext,
 } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type {
   DatasetVersion,
   DatasetVersionRef,
   ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
-import { PipelineWorkerError, requireRegisteredDataset } from "./errors"
+import { requireRegisteredDataset } from "./errors"
 import type { PipelineWorkerContext } from "./types"
 
 export interface ResolvedStepInput {
@@ -40,7 +41,8 @@ export async function resolveStepInputs(input: {
 
     const version = await runtime.lakeStorage.getLatestVersion(dataset.id)
     if (!version) {
-      throw new PipelineWorkerError(
+      throw new SixbError(
+        "pipeline.failed",
         `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' input '${name}' dataset '${dataset.id}' has no committed version.`
       )
     }

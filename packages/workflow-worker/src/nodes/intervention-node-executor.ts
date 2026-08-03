@@ -1,10 +1,10 @@
+import { SixbError } from "@sixb/core/errors"
 import type { WorkflowInterventionNodeDefinition } from "@sixb/core/internal/workflows"
 import {
   snapshotWorkflowInterventionDefaultResponse,
   snapshotWorkflowInterventionInput,
   validateWorkflowInterventionInput,
 } from "@sixb/core/internal/workflows"
-import { WorkflowWorkerError } from "../errors"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { throwIfAborted } from "../normalize"
 import { callWorkflowMapper, requireRecordInput } from "./mapper"
@@ -71,7 +71,8 @@ export const interventionNodeExecutor: WorkflowNodeExecutor<WorkflowIntervention
     const requestedAt = new Date()
     const workflowInterventions = context.runtime.storage.workflowInterventions
     if (!workflowInterventions) {
-      throw new WorkflowWorkerError(
+      throw new SixbError(
+        "workflow.failed",
         `[SixbWorkflowWorker] Workflow '${context.workflow.id}' intervention node '${node.id}' requires storage.workflowInterventions.`
       )
     }

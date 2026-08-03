@@ -22,11 +22,11 @@ import type { AgentDefinition, RequestAgentRunInput, RequestAgentRunResult } fro
 import { AgentsRuntime, validateAgentGroupReferences } from "../agents"
 import {
   AuthRuntime,
-  AuthRuntimeError,
   isMagicLinkAuthStrategy,
   isOidcAuthStrategy,
   type SixbAuthConfig,
 } from "../auth"
+import { authRuntimeError } from "../auth/errors"
 import type { AuthorizationContext } from "../authorization"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
@@ -41,6 +41,7 @@ import {
   shareSixbErrorReporter,
 } from "../error-reporting/capability"
 import type { SixbErrorHandler } from "../error-reporting/types"
+import { SixbError } from "../errors"
 import { type DomainEventLog, EventsRuntime, OntologyOutboxDispatcher } from "../events"
 import type { LakeStorage } from "../lake-storage"
 import { type LoggerProvider, LogsRuntime, type ObservabilityOptions } from "../logging"
@@ -60,7 +61,6 @@ import {
   type ValueType,
 } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
-import { PipelineError } from "../pipelines"
 import {
   type PipelineRunRequestResult,
   type RequestPipelineRunInput,
@@ -91,21 +91,19 @@ import type {
 import { createRuntimeSecurityRegistry } from "../security/runtime"
 import type { ActionRunRecord, ObjectRow, Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
-import { SyncValidationError } from "../syncs"
 import {
   type RequestSyncRunInput,
   requestSyncRun,
   type SyncRunRequestResult,
 } from "../syncs/request"
 import type { RegisteredWebhook } from "../webhooks"
-import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webhooks"
+import { registerWebhooks, webhookRoute } from "../webhooks"
 import type {
   RequestWorkflowRunInput,
   WorkflowDefinition,
   WorkflowRunRequestResult,
 } from "../workflows"
 import { validateWorkflowsAtStartup, WorkflowsRuntime } from "../workflows"
-import { RuntimeError } from "./errors"
 import {
   createOntologyMutationRuntime,
   registerOntologyMutationRuntime,
@@ -260,10 +258,13 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     // Register datasets first so sync and pipeline definitions can be validated
     // against the runtime dataset registry during startup.
     for (const dataset of options.datasets ?? []) {
-      assertDatasetDefinition(dataset, (message) => new RuntimeError(message))
+      assertDatasetDefinition(
+        dataset,
+        (message) => new SixbError("runtime.invalid_definition", message)
+      )
 
       if (this.datasetsById.has(dataset.id)) {
-        throw new RuntimeError(`Duplicate dataset id: ${dataset.id}`)
+        throw new SixbError("runtime.invalid_definition", `Duplicate dataset id: ${dataset.id}`)
       }
 
       this.datasetsById.set(dataset.id, dataset)
@@ -271,19 +272,20 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
     for (const schedule of options.schedules ?? []) {
       if (this.schedulesById.has(schedule.id)) {
-        throw new RuntimeError(`Duplicate schedule id: ${schedule.id}`)
+        throw new SixbError("runtime.invalid_definition", `Duplicate schedule id: ${schedule.id}`)
       }
       this.schedulesById.set(schedule.id, schedule)
     }
 
     for (const sync of options.syncs ?? []) {
       if (this.syncsById.has(sync.id)) {
-        throw new RuntimeError(`Duplicate sync id: ${sync.id}`)
+        throw new SixbError("runtime.invalid_definition", `Duplicate sync id: ${sync.id}`)
       }
 
       const dataset = this.datasetsById.get(sync.target.dataset.id)
       if (!dataset) {
-        throw new RuntimeError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `Sync '${sync.id}' targets unknown dataset '${sync.target.dataset.id}'. Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
         )
       }
@@ -293,18 +295,22 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
     for (const pipeline of options.pipelines ?? []) {
       if (this.pipelinesById.has(pipeline.id)) {
-        throw new RuntimeError(`Duplicate pipeline id: ${pipeline.id}`)
+        throw new SixbError("runtime.invalid_definition", `Duplicate pipeline id: ${pipeline.id}`)
       }
 
       if (pipeline.graph.nodes.length === 0) {
-        throw new RuntimeError(`Pipeline '${pipeline.id}' must contain at least one step.`)
+        throw new SixbError(
+          "runtime.invalid_definition",
+          `Pipeline '${pipeline.id}' must contain at least one step.`
+        )
       }
 
       const stepIds = new Set<string>()
       for (const node of pipeline.graph.nodes) {
         const { step } = node
         if (stepIds.has(step.id)) {
-          throw new RuntimeError(
+          throw new SixbError(
+            "runtime.invalid_definition",
             `Pipeline '${pipeline.id}' contains duplicate step id '${step.id}'.`
           )
         }
@@ -312,14 +318,16 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
         for (const [inputName, dataset] of Object.entries(step.inputs)) {
           if (!this.datasetsById.has(dataset.id)) {
-            throw new RuntimeError(
+            throw new SixbError(
+              "runtime.invalid_definition",
               `Pipeline '${pipeline.id}' step '${step.id}' input '${inputName}' references unknown dataset '${dataset.id}'. Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
             )
           }
         }
 
         if (!this.datasetsById.has(step.output.id)) {
-          throw new RuntimeError(
+          throw new SixbError(
+            "runtime.invalid_definition",
             `Pipeline '${pipeline.id}' step '${step.id}' outputs unknown dataset '${step.output.id}'. Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
           )
         }
@@ -359,7 +367,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     const workflowIds = new Set<string>()
     for (const workflow of workflows) {
       if (workflowIds.has(workflow.id)) {
-        throw new RuntimeError(`Duplicate workflow id: ${workflow.id}`)
+        throw new SixbError("runtime.invalid_definition", `Duplicate workflow id: ${workflow.id}`)
       }
       workflowIds.add(workflow.id)
     }
@@ -430,7 +438,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     const agentIds = new Set<string>()
     for (const agent of agents) {
       if (agentIds.has(agent.id)) {
-        throw new RuntimeError(`Duplicate agent id: ${agent.id}`)
+        throw new SixbError("runtime.invalid_definition", `Duplicate agent id: ${agent.id}`)
       }
       agentIds.add(agent.id)
     }
@@ -517,7 +525,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   async requestSyncRun(input: RequestSyncRunInput): Promise<SyncRunRequestResult> {
     const sync = this.getSyncById(input.syncId)
     if (!sync) {
-      throw new SyncValidationError(`[Sixb] Unknown sync '${input.syncId}'`)
+      throw new SixbError("runtime.invalid_definition", `[Sixb] Unknown sync '${input.syncId}'`)
     }
     return requestSyncRun(this.runtimeContext, sync, input)
   }
@@ -525,7 +533,10 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   async requestPipelineRun(input: RequestPipelineRunInput): Promise<PipelineRunRequestResult> {
     const pipeline = this.getPipelineById(input.pipelineId)
     if (!pipeline) {
-      throw new PipelineError(`[Sixb] Unknown pipeline '${input.pipelineId}'`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `[Sixb] Unknown pipeline '${input.pipelineId}'`
+      )
     }
     return requestPipelineRun(this.runtimeContext, pipeline, input)
   }
@@ -791,7 +802,8 @@ function validateScheduleReferences(
 ): void {
   for (const reference of references) {
     if (!schedulesById.has(reference.scheduleId)) {
-      throw new RuntimeError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${consumerKind} '${consumerId}' references unknown schedule '${reference.scheduleId}'. Add it to 'schedules' in createSixb() or export it from 'schedules/'.`
       )
     }
@@ -808,7 +820,7 @@ function validateAuthStrategySecurityReferences(
 
   for (const groupId of strategy.bootstrapGroupIds ?? []) {
     if (!security.getGroupById(groupId)) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "invalid_auth_config",
         `[Sixb] Auth bootstrapGroups references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
       )
@@ -831,7 +843,8 @@ function assertWebhookDeliveryStorage(
     }
 
     if (webhooks.some((webhook) => webhook.idempotencyKey !== undefined)) {
-      throw new WebhookValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         "[Sixb] Webhook idempotency requires storage.webhookDeliveries to be configured."
       )
     }

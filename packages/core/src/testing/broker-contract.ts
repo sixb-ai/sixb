@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { BrokerError } from "../broker/errors"
 import type {
   Broker,
   BrokerRecord,
@@ -137,7 +136,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               stream: eventsStream,
               records: [{ payload: { ok: true } }],
             })
-          ).rejects.toBeInstanceOf(BrokerError)
+          ).rejects.toHaveProperty("code", "broker.unavailable")
 
           await expect(
             appendRecords(broker, {
@@ -145,7 +144,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               stream: { id: "  " },
               records: [{ payload: { ok: true } }],
             })
-          ).rejects.toBeInstanceOf(BrokerError)
+          ).rejects.toHaveProperty("code", "broker.unavailable")
         })
       })
 
@@ -163,7 +162,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
                 },
               ],
             })
-          ).rejects.toBeInstanceOf(BrokerError)
+          ).rejects.toHaveProperty("code", "broker.unavailable")
 
           await expect(
             appendRecords(broker, {
@@ -171,7 +170,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               stream: eventsStream,
               records: [{ payload: { value: Number.NaN } as unknown as JsonValue }],
             })
-          ).rejects.toBeInstanceOf(BrokerError)
+          ).rejects.toHaveProperty("code", "broker.unavailable")
         })
       })
 
@@ -183,7 +182,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               streamId: "missing",
               records: [{ payload: "one" }],
             })
-          ).rejects.toBeInstanceOf(BrokerError)
+          ).rejects.toHaveProperty("code", "broker.unavailable")
         })
       })
     })
@@ -450,7 +449,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
         await withBroker(async (broker) => {
           await expect(
             broker.subscribe({ projectId: "project-a", streamId: "missing" }, () => {})
-          ).rejects.toBeInstanceOf(BrokerError)
+          ).rejects.toHaveProperty("code", "broker.unavailable")
         })
       })
 
@@ -696,7 +695,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               stream: retainedStream,
               afterCursor: first?.cursor,
             })
-          ).rejects.toBeInstanceOf(BrokerError)
+          ).rejects.toHaveProperty("code", "broker.cursor_expired")
 
           await expect(
             broker.tail({
@@ -704,7 +703,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               streamId: retainedStream.id,
               beforeCursor: first?.cursor,
             })
-          ).rejects.toBeInstanceOf(BrokerError)
+          ).rejects.toHaveProperty("code", "broker.cursor_expired")
         })
       })
 

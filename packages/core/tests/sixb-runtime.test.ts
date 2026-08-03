@@ -8,11 +8,8 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   link,
-  MaterializationValidationError,
-  ObjectNotFoundError,
   type ObjectQuery,
-  ObjectQueryPlanningError,
-  OntologyValidationError,
+  objectQueryIssues,
   optional,
   param,
   prop,
@@ -161,7 +158,7 @@ describe("Sixb runtime", () => {
           name: 101 as unknown as string,
         },
       })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
     await expect(
       sixb.objects(Room).upsert({
         properties: {
@@ -345,11 +342,14 @@ describe("Sixb runtime", () => {
         .list()
       throw new Error("Expected unbounded fallback query to fail")
     } catch (error) {
-      expect(error).toBeInstanceOf(ObjectQueryPlanningError)
-      if (error instanceof ObjectQueryPlanningError) {
-        expect(error.issues.map((issue) => issue.code)).toContain("fallback_requires_bound")
-        expect(error.message).toContain("Add .limit(n) or .page({ pageSize: n }) before .list().")
-      }
+      expect(error).toHaveProperty("code", "storage.query_unsupported")
+      expect(objectQueryIssues(error)?.map((issue) => issue.code)).toContain(
+        "fallback_requires_bound"
+      )
+      // The hint is restated on the issue that named the missing bound, not on the whole list.
+      expect(
+        objectQueryIssues(error)?.find((issue) => issue.code === "fallback_requires_bound")?.message
+      ).toContain("Add .limit(n) or .page({ pageSize: n }) before .list().")
     }
   })
 
@@ -401,7 +401,7 @@ describe("Sixb runtime", () => {
           file: { blobId: "blob_missing" } as unknown as typeof file,
         },
       })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
     await expect(
       sixb.objects(Document).upsert({
         properties: {
@@ -456,7 +456,7 @@ describe("Sixb runtime", () => {
           unit: "degreeCelsius",
           at: new Date(),
         })
-    ).rejects.toBeInstanceOf(MaterializationValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
     await expect(
       sixb
         .objects(Room)
@@ -479,7 +479,7 @@ describe("Sixb runtime", () => {
           unit: "millibar" as unknown as "degreeCelsius",
           at: new Date(),
         })
-    ).rejects.toBeInstanceOf(MaterializationValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
     await expect(
       sixb
         .objects(Room)
@@ -589,7 +589,7 @@ describe("Sixb runtime", () => {
         .link(Room.l.hasThermostat, tstat, {
           properties: { installedBy: "tech-a" },
         })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
     await expect(
       sixb
         .objects(Room)
@@ -889,7 +889,7 @@ describe("Sixb runtime", () => {
           properties: { currentTemperature: { value: 22.5, unit: "degreeCelsius" } },
         },
       ])
-    ).rejects.toBeInstanceOf(ObjectNotFoundError)
+    ).rejects.toHaveProperty("code", "storage.object_not_found")
     await expect(
       sixb.objects(Room).appendTelemetryBatch([
         {
@@ -897,7 +897,7 @@ describe("Sixb runtime", () => {
           properties: { currentTemperature: { value: 22.5, unit: "degreeCelsius" } },
         },
       ])
-    ).rejects.toThrow("Object not found")
+    ).rejects.toThrow("Cannot append telemetry to missing object")
 
     // Invalid unit should fail
     await expect(
@@ -909,7 +909,7 @@ describe("Sixb runtime", () => {
           },
         },
       ])
-    ).rejects.toBeInstanceOf(MaterializationValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
     await expect(
       sixb.objects(Room).appendTelemetryBatch([
         {
@@ -1168,7 +1168,7 @@ describe("Sixb runtime", () => {
           name: "Temp-bad",
           reading: { value: "hot", unit: "C" },
         })
-      ).rejects.toBeInstanceOf(OntologyValidationError)
+      ).rejects.toHaveProperty("code", "ontology.invalid_value")
       await expect(
         sixb.upsertObject("Sensor", {
           id: "sensor:bad",
@@ -1187,7 +1187,7 @@ describe("Sixb runtime", () => {
           name: "Temp-bad",
           reading: { value: 22.5, unit: "Rankine" },
         })
-      ).rejects.toBeInstanceOf(OntologyValidationError)
+      ).rejects.toHaveProperty("code", "ontology.invalid_value")
       await expect(
         sixb.upsertObject("Sensor", {
           id: "sensor:bad",
@@ -1236,7 +1236,7 @@ describe("Sixb runtime", () => {
           name: "test",
           data: { foo: "bar" },
         })
-      ).rejects.toBeInstanceOf(OntologyValidationError)
+      ).rejects.toHaveProperty("code", "ontology.invalid_value")
       expect(
         sixb.upsertObject("Orphan", {
           id: "orphan:1",

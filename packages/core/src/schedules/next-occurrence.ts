@@ -1,5 +1,5 @@
+import { SixbError } from "../errors"
 import { type CronFieldMatcher, createCronFieldMatcher } from "./cron"
-import { CronValidationError } from "./errors"
 
 const MAX_SEARCH_MS = 4 * 365.25 * 24 * 60 * 60 * 1000 // ~4 years
 
@@ -49,7 +49,11 @@ function getLocalComponents(date: Date, timezone: string | undefined): LocalComp
   const parts = formatter.formatToParts(date)
   const get = (type: Intl.DateTimeFormatPartTypes): string => {
     const part = parts.find((p) => p.type === type)
-    if (!part) throw new CronValidationError(`Failed to extract ${type} for timezone ${timezone}.`)
+    if (!part)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `Failed to extract ${type} for timezone ${timezone}.`
+      )
     return part.value
   }
 
@@ -99,7 +103,8 @@ function matchesDay(
 export function nextCronOccurrence(expression: string, after: Date, timezone?: string): Date {
   const parts = expression.trim().split(/\s+/)
   if (parts.length !== 5) {
-    throw new CronValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Invalid cron expression '${expression}'. Expected 5 fields (minute hour day month weekday).`
     )
   }
@@ -197,7 +202,10 @@ export function nextCronOccurrence(expression: string, after: Date, timezone?: s
     return candidate
   }
 
-  throw new CronValidationError(`No matching occurrence found for '${expression}' within 4 years.`)
+  throw new SixbError(
+    "runtime.invalid_definition",
+    `No matching occurrence found for '${expression}' within 4 years.`
+  )
 }
 
 function findNextMatchingMonth(current: Date, monthMatcher: CronFieldMatcher): Date {

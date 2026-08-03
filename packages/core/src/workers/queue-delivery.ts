@@ -1,5 +1,5 @@
 import type { ClaimedQueueJob, Queue, QueueJob, QueueJobError } from "../queues"
-import { WorkerAbortError } from "./errors"
+import { workerAbortError } from "./errors"
 
 export type QueueDeliveryState = "active" | "lost" | "settled"
 
@@ -38,12 +38,6 @@ export interface CreateQueueDeliveryOptions<TJob extends QueueJob> {
 }
 
 const MIN_RENEWAL_INTERVAL_MS = 1
-
-export class QueueDeliveryLeaseLostError extends WorkerAbortError {
-  constructor(message?: string) {
-    super(message, { code: "queue.lease_lost" })
-  }
-}
 
 type RenewalAttempt<TJob extends QueueJob> =
   | { readonly kind: "renewed"; readonly claimed: ClaimedQueueJob<TJob> | null }
@@ -278,9 +272,9 @@ class ManagedQueueDelivery<TJob extends QueueJob> implements QueueDelivery<TJob>
     if (this.currentState !== "active") return
     this.currentState = "lost"
     this.lossController.abort(
-      new QueueDeliveryLeaseLostError(
-        `[SixbQueueWorker] Queue job '${this.claimed.job.id}' lost its lease.`
-      )
+      workerAbortError(`[SixbQueueWorker] Queue job '${this.claimed.job.id}' lost its lease.`, {
+        code: "queue.lease_lost",
+      })
     )
     this.onLeaseLost?.()
   }

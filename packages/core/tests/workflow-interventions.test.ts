@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
 import type { CreateWorkflowInterventionInput } from "../src/storage"
-import { InMemoryWorkflowInterventionStorage, WorkflowInterventionError } from "../src/storage"
+import { InMemoryWorkflowInterventionStorage } from "../src/storage"
 
 describe("InMemoryWorkflowInterventionStorage", () => {
   test("creates pending interventions and lists them with filters", async () => {
@@ -129,17 +129,17 @@ describe("InMemoryWorkflowInterventionStorage", () => {
         id: "submit-me",
         projectId: "my-app",
       })
-    ).rejects.toBeInstanceOf(WorkflowInterventionError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
     await expect(
       storage.submit({
         id: "missing",
         projectId: "my-app",
         response: {},
       })
-    ).rejects.toBeInstanceOf(WorkflowInterventionError)
+    ).rejects.toHaveProperty("code", "workflow.intervention_not_found")
     await expect(
       storage.create(createInterventionInput({ id: "submit-me" }))
-    ).rejects.toBeInstanceOf(WorkflowInterventionError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
     await expect(
       storage.create(
         createInterventionInput({
@@ -147,7 +147,7 @@ describe("InMemoryWorkflowInterventionStorage", () => {
           nodeIndex: -1,
         })
       )
-    ).rejects.toBeInstanceOf(WorkflowInterventionError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
   })
 
   test("InMemoryStorage includes workflow intervention storage", () => {

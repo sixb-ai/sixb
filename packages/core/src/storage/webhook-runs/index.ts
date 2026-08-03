@@ -1,4 +1,3 @@
-export { WebhookRunError } from "./errors"
 export { InMemoryWebhookRunStorage } from "./in-memory"
 export type {
   FinishWebhookRunInput,

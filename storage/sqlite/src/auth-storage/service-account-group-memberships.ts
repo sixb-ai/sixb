@@ -5,7 +5,7 @@ import type {
   ServiceAccountGroupMembershipRecord,
   UpsertAuthServiceAccountGroupMembershipInput,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import type {
   SqliteAuthServiceAccountGroupMembershipRow,
   SqliteAuthServiceAccountRow,
@@ -28,7 +28,7 @@ export class SqliteAuthServiceAccountGroupMembershipStore
       .query("SELECT * FROM auth_service_accounts WHERE project_id = ? AND id = ?")
       .get(projectId, serviceAccountId) as SqliteAuthServiceAccountRow | null
     if (!serviceAccount) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_service_account",
         `[Sixb] Service account '${serviceAccountId}' not found for project '${projectId}'.`
       )
@@ -71,7 +71,7 @@ export class SqliteAuthServiceAccountGroupMembershipStore
       .query("SELECT * FROM auth_service_accounts WHERE project_id = ? AND id = ?")
       .get(projectId, serviceAccountId) as SqliteAuthServiceAccountRow | null
     if (!serviceAccount) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_service_account",
         `[Sixb] Service account '${serviceAccountId}' not found for project '${projectId}'.`
       )

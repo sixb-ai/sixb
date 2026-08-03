@@ -1,12 +1,15 @@
+import { SixbError } from "../../errors"
 import type { Property, ValueType } from ".."
-import { OntologyValidationError } from "../errors"
 import type { QuantitativeTypeId } from "../units"
 import { isValidUnit } from "../units"
 import { resolveValueTypeRef } from "./schema"
 
 export function assertTelemetryProperty(property: Property): void {
   if (property.mode !== "telemetry") {
-    throw new OntologyValidationError(`[Sixb] Property ${property.id} is not telemetry-enabled`)
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Property ${property.id} is not telemetry-enabled`
+    )
   }
 }
 
@@ -36,17 +39,20 @@ export function validateTelemetryUnit(
   const semanticType = resolveSemanticType(property, valueTypesById)
   if (semanticType) {
     if (!unit) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Missing unit for telemetry property ${propertyPath}`
       )
     }
     if (!isValidUnit(semanticType, unit)) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Invalid unit '${unit}' for ${propertyPath} (${semanticType})`
       )
     }
   } else if (unit) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Property ${propertyPath} does not define semanticType and cannot accept a unit`
     )
   }

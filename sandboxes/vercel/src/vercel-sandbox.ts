@@ -1,14 +1,13 @@
 import { posix } from "node:path"
-import {
-  type CommandResult,
-  type CreateSandboxOptions,
-  type RunCommandOptions,
-  type Sandbox,
-  SandboxError,
-  type SandboxFileRecord,
-  SandboxNotRunningError,
-  type SandboxStatus,
+import type {
+  CommandResult,
+  CreateSandboxOptions,
+  RunCommandOptions,
+  Sandbox,
+  SandboxFileRecord,
+  SandboxStatus,
 } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 
 const DEFAULT_WORKING_DIRECTORY = "/vercel/sandbox"
 const KILLED_EXIT_CODE = 137
@@ -122,7 +121,8 @@ export class VercelSandbox implements Sandbox {
         ...(timeoutMs !== undefined && timeoutMs > 0 ? { timeoutMs } : {}),
       })
     } catch (error) {
-      throw new SandboxError(
+      throw new SixbError(
+        "sandbox.failed",
         `[Sandbox] vercel runCommand failed for ${this.id}: ${errorMessage(error)}`
       )
     }
@@ -177,7 +177,8 @@ export class VercelSandbox implements Sandbox {
           ...(timedOut ? { timedOut: true } : {}),
         }
       }
-      throw new SandboxError(
+      throw new SixbError(
+        "sandbox.failed",
         `[Sandbox] vercel command failed for ${this.id}: ${errorMessage(error)}`
       )
     } finally {
@@ -204,7 +205,8 @@ export class VercelSandbox implements Sandbox {
     try {
       await this.client.writeFiles(mapped)
     } catch (error) {
-      throw new SandboxError(
+      throw new SixbError(
+        "sandbox.failed",
         `[Sandbox] vercel writeFiles failed for ${this.id}: ${errorMessage(error)}`
       )
     }
@@ -222,7 +224,10 @@ export class VercelSandbox implements Sandbox {
     try {
       await this.client.stop()
     } catch (error) {
-      throw new SandboxError(`[Sandbox] vercel stop failed for ${this.id}: ${errorMessage(error)}`)
+      throw new SixbError(
+        "sandbox.failed",
+        `[Sandbox] vercel stop failed for ${this.id}: ${errorMessage(error)}`
+      )
     }
   }
 
@@ -244,7 +249,8 @@ export class VercelSandbox implements Sandbox {
       this.destroyed = true
       this.currentStatus = "stopped"
     } catch (error) {
-      throw new SandboxError(
+      throw new SixbError(
+        "sandbox.failed",
         `[Sandbox] vercel delete failed for ${this.id}: ${errorMessage(error)}`
       )
     }
@@ -253,7 +259,8 @@ export class VercelSandbox implements Sandbox {
   private assertRunning(action: string): void {
     const status = this.status
     if (status !== "running") {
-      throw new SandboxNotRunningError(
+      throw new SixbError(
+        "sandbox.not_running",
         `[Sandbox] sandbox ${this.id} is ${status}; cannot ${action}`
       )
     }

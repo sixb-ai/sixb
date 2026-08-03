@@ -1,7 +1,5 @@
-import {
-  MaterializationConflictError,
-  MaterializationValidationError,
-} from "../../materialization/errors"
+import { SixbError } from "../../errors"
+import { materializationConflict } from "../../materialization/errors"
 import type {
   OntologyMaterializationOrigin,
   ProjectionMaterializationIdentity,
@@ -109,13 +107,15 @@ function telemetryInputPointCount(
 function validateTelemetryBatch(input: NormalizedTelemetryAppend, inputPointCount: number): void {
   if (input.source.kind === "projection") {
     if (input.source.sourceRowCount === 0) {
-      throw new MaterializationValidationError(
-        "Projection telemetry batches must consume at least one source row; an empty dataset produces no batch commit."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Projection telemetry batches must consume at least one source row; an empty dataset produces no batch commit."
       )
     }
     if (input.source.sourceRowCount !== inputPointCount + input.source.sourceRowsSkipped) {
-      throw new MaterializationValidationError(
-        "Projection telemetry sourceRowCount must equal input points plus skipped rows."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Projection telemetry sourceRowCount must equal input points plus skipped rows."
       )
     }
   }
@@ -179,8 +179,9 @@ function validateTelemetryProjectionDataset(
   source: ProjectionTelemetrySource
 ): void {
   if (resolved.datasetId === source.datasetVersion.datasetId) return
-  throw new MaterializationValidationError(
-    `Telemetry projection '${resolved.projectionId}' requires dataset '${resolved.datasetId}'.`
+  throw new SixbError(
+    "ontology.invalid_value",
+    `[Sixb] Telemetry projection '${resolved.projectionId}' requires dataset '${resolved.datasetId}'.`
   )
 }
 
@@ -196,8 +197,9 @@ function validateTelemetryOwnership(
   for (const point of input.points) {
     const scope = telemetryOwnershipKey(point.series.object.objectTypeId, point.series.propertyId)
     if (ownedSeries.has(scope)) continue
-    throw new MaterializationValidationError(
-      `Telemetry projection '${resolved.projectionId}' does not own series '${point.series.object.objectTypeId}.${point.series.propertyId}'.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Telemetry projection '${resolved.projectionId}' does not own series '${point.series.object.objectTypeId}.${point.series.propertyId}'.`
     )
   }
 }
@@ -256,36 +258,42 @@ function assertTelemetryBatchPosition(
 ): void {
   const checkpoint = run.telemetryCheckpoint
   if (!checkpoint) {
-    throw new MaterializationValidationError(
-      `Telemetry projection run '${run.id}' has incomplete checkpoint state.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Telemetry projection run '${run.id}' has incomplete checkpoint state.`
     )
   }
   if (batchOrdinal > checkpoint.nextBatchOrdinal) {
-    throw new MaterializationValidationError(
-      `Telemetry projection run '${run.id}' expected batch ordinal ${checkpoint.nextBatchOrdinal}, got ${batchOrdinal}.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Telemetry projection run '${run.id}' expected batch ordinal ${checkpoint.nextBatchOrdinal}, got ${batchOrdinal}.`
     )
   }
   if (checkpoint.inputExhausted && batchOrdinal >= checkpoint.nextBatchOrdinal) {
-    throw new MaterializationValidationError(
-      `Telemetry projection run '${run.id}' has already exhausted its input.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Telemetry projection run '${run.id}' has already exhausted its input.`
     )
   }
   if (sourceRowCount > checkpoint.fixedBatchSize) {
-    throw new MaterializationValidationError(
-      `Telemetry projection run '${run.id}' batch exceeds its fixed size.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Telemetry projection run '${run.id}' batch exceeds its fixed size.`
     )
   }
   if (!inputExhausted && sourceRowCount !== checkpoint.fixedBatchSize) {
-    throw new MaterializationValidationError(
-      `Telemetry projection run '${run.id}' cannot advance past a partial non-final batch.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Telemetry projection run '${run.id}' cannot advance past a partial non-final batch.`
     )
   }
 }
 
 function assertTelemetryReplayCheckpoint(run: ProjectionRunRecord, batchOrdinal: number): void {
   if (!run.telemetryCheckpoint || batchOrdinal >= run.telemetryCheckpoint.nextBatchOrdinal) {
-    throw new MaterializationValidationError(
-      `Telemetry commit batch ${batchOrdinal} exists without an advanced run checkpoint.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Telemetry commit batch ${batchOrdinal} exists without an advanced run checkpoint.`
     )
   }
 }
@@ -302,7 +310,7 @@ function telemetryProjectionReplayResult(
     origin.source.batchOrdinal !== command.source.batchOrdinal ||
     commit.result.kind !== "telemetry"
   ) {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "run-correlation",
       `Telemetry commit '${commit.id}' belongs to a different logical run or batch.`
     )
@@ -341,8 +349,9 @@ async function executeTelemetryTransaction(
       !execution?.run.telemetryCheckpoint ||
       execution.run.telemetryCheckpoint.nextBatchOrdinal !== command.source.batchOrdinal
     ) {
-      throw new MaterializationValidationError(
-        `Telemetry projection batch ${command.source.batchOrdinal} is behind its run checkpoint.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Telemetry projection batch ${command.source.batchOrdinal} is behind its run checkpoint.`
       )
     }
   }
@@ -486,7 +495,10 @@ async function finalizeTelemetryMaterialization(
   })
   if (command.kind === "projection") {
     if (!projectionRuns) {
-      throw new MaterializationValidationError("Expected an asserted telemetry projection run.")
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Expected an asserted telemetry projection run."
+      )
     }
     await projectionRuns.advanceTelemetryCheckpoint({
       id: command.source.execution.projectionRunId,

@@ -11,7 +11,6 @@ import {
   type SixbRuntimeContext,
   type Storage,
   type WorkflowDefinition,
-  WorkflowValidationError,
 } from "../src"
 import { flushSixbErrors } from "../src/error-reporting/internal"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -139,7 +138,7 @@ describe("sixb.workflows.request", () => {
 
     await expect(
       sixb.workflows.requestById({ workflowId: "draft-invoice", input: { bogus: true } })
-    ).rejects.toBeInstanceOf(WorkflowValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
   })
 
   test("rejects invalid input before any storage or queue write", async () => {
@@ -147,7 +146,7 @@ describe("sixb.workflows.request", () => {
 
     await expect(
       sixb.workflows.requestById({ workflowId: "draft-invoice", runId: "run_fixed", input: {} })
-    ).rejects.toBeInstanceOf(WorkflowValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     const run = await sixb.storage.workflowRuns?.getById({ projectId: sixb.id, id: "run_fixed" })
     expect(run).toBeNull()

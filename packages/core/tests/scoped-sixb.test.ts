@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
-  AuthorizationError,
   can,
   col,
   defineAction,
@@ -284,10 +283,19 @@ describe("sixb.as() object reads", () => {
     await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
     const scoped = sixb.as(contextFor(sixb, ["commercial"]))
 
-    expect(scoped.objects(Invoice).list()).rejects.toThrow(AuthorizationError)
-    expect(scoped.objects(Invoice).get("i1")).rejects.toThrow(AuthorizationError)
-    expect(scoped.objects(Invoice).byId("i1").get()).rejects.toThrow(AuthorizationError)
-    expect(scoped.objects(Invoice).query().list()).rejects.toThrow(AuthorizationError)
+    expect(scoped.objects(Invoice).list()).rejects.toHaveProperty("code", "auth.permission_denied")
+    expect(scoped.objects(Invoice).get("i1")).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
+    )
+    expect(scoped.objects(Invoice).byId("i1").get()).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
+    )
+    expect(scoped.objects(Invoice).query().list()).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
+    )
   })
 
   test("queries require every touched type, not just the result type", async () => {
@@ -297,7 +305,7 @@ describe("sixb.as() object reads", () => {
     // Starts at Invoice and ends at viewable Contract — still requires can.view(Invoice).
     const query = scoped.objects(Invoice).query()
 
-    expect(query.list()).rejects.toThrow(AuthorizationError)
+    expect(query.list()).rejects.toHaveProperty("code", "auth.permission_denied")
   })
 })
 
@@ -322,7 +330,10 @@ describe("sixb.as() cross-type list", () => {
     const sixb = await createSeededRuntime()
     const scoped = sixb.as(contextFor(sixb, ["commercial"]))
 
-    expect(scoped.list({ objectTypeIds: ["invoice"] })).rejects.toThrow(AuthorizationError)
+    expect(scoped.list({ objectTypeIds: ["invoice"] })).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
+    )
     expect(
       (await scoped.list({ objectTypeIds: ["contract"] })).objects.map((row) => row.primaryId)
     ).toEqual(["c1"])
@@ -352,7 +363,7 @@ describe("sixb.as() actions", () => {
     const viewerOnly = sixb.as(contextFor(sixb, ["finance"]))
     expect(
       viewerOnly.objects(Invoice).requestAction({ id: "i1", actionId: "archive-invoice" })
-    ).rejects.toThrow(AuthorizationError)
+    ).rejects.toHaveProperty("code", "auth.permission_denied")
 
     // apply without view
     const senderOnly = sixb.as(contextFor(sixb, ["ops"]))
@@ -360,7 +371,7 @@ describe("sixb.as() actions", () => {
     expect(senderOnly.getActionById("send-contract")).toBeNull()
     expect(
       senderOnly.objects(Contract).requestAction({ id: "c1", actionId: "send-contract" })
-    ).rejects.toThrow(AuthorizationError)
+    ).rejects.toHaveProperty("code", "auth.permission_denied")
   })
 })
 
@@ -390,7 +401,10 @@ describe("sixb.as() operational access", () => {
     expect(result.runId).toBeString()
 
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
-    expect(operator.requestWorkflowRun(input)).rejects.toThrow(AuthorizationError)
+    expect(operator.requestWorkflowRun(input)).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
+    )
   })
 
   test("event visibility is derived from grants", async () => {
@@ -442,7 +456,7 @@ describe("sixb.as() operational access", () => {
         actionId: "send-contract",
         subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
       })
-    ).rejects.toThrow(AuthorizationError)
+    ).rejects.toHaveProperty("code", "auth.permission_denied")
   })
 
   test("requestActionAndWait enforces the same grant as requestAction", async () => {
@@ -457,7 +471,7 @@ describe("sixb.as() operational access", () => {
         actionId: "send-contract",
         subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
       })
-    ).rejects.toThrow(AuthorizationError)
+    ).rejects.toHaveProperty("code", "auth.permission_denied")
   })
 
   test("workflow catalog narrows to runnable workflows", () => {
@@ -502,7 +516,7 @@ describe("sixb.as() operational access", () => {
         agentId: "contract-agent",
         text: "Review this contract.",
       })
-    ).rejects.toThrow(AuthorizationError)
+    ).rejects.toHaveProperty("code", "auth.permission_denied")
   })
 
   test("sync catalog narrows to runnable syncs", () => {
@@ -532,9 +546,13 @@ describe("sixb.as() operational access", () => {
     expect(pipeline.runId).toStartWith("run_")
 
     // An existing definition the principal may not run is forbidden, not missing.
-    expect(runner.requestSyncRun({ syncId: "sync-invoices" })).rejects.toThrow(AuthorizationError)
-    expect(runner.requestPipelineRun({ pipelineId: "invoice-pipeline" })).rejects.toThrow(
-      AuthorizationError
+    expect(runner.requestSyncRun({ syncId: "sync-invoices" })).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
+    )
+    expect(runner.requestPipelineRun({ pipelineId: "invoice-pipeline" })).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
     )
   })
 
@@ -580,7 +598,7 @@ describe("sixb.as() operational access", () => {
         agentId: "contract-agent",
         text: "Summarize this account.",
       })
-    ).rejects.toThrow(AuthorizationError)
+    ).rejects.toHaveProperty("code", "auth.permission_denied")
   })
 })
 
@@ -589,10 +607,14 @@ describe("sixb.as() object writes", () => {
     const sixb = createRuntime()
     const scoped = sixb.as(contextFor(sixb, ["commercial"]))
 
-    expect(scoped.objects(Contract).upsert({ properties: { id: "c2" } })).rejects.toThrow(
-      AuthorizationError
+    expect(scoped.objects(Contract).upsert({ properties: { id: "c2" } })).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
     )
-    expect(scoped.upsertObject("contract", { id: "c2" })).rejects.toThrow(AuthorizationError)
+    expect(scoped.upsertObject("contract", { id: "c2" })).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
+    )
   })
 
   test("view plus edit writes, and the write is readable back", async () => {
@@ -607,8 +629,9 @@ describe("sixb.as() object writes", () => {
     const sixb = createRuntime()
     const scoped = sixb.as(contextFor(sixb, ["blind-writers"]))
 
-    expect(scoped.objects(Contract).upsert({ properties: { id: "c2" } })).rejects.toThrow(
-      AuthorizationError
+    expect(scoped.objects(Contract).upsert({ properties: { id: "c2" } })).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
     )
   })
 
@@ -617,7 +640,10 @@ describe("sixb.as() object writes", () => {
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 
     const viewer = sixb.as(contextFor(sixb, ["commercial"]))
-    expect(viewer.objects(Contract).byId("c1").delete()).rejects.toThrow(AuthorizationError)
+    expect(viewer.objects(Contract).byId("c1").delete()).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
+    )
 
     const editor = sixb.as(contextFor(sixb, ["editors"]))
     await editor.objects(Contract).byId("c1").delete()
@@ -629,7 +655,10 @@ describe("sixb.as() object writes", () => {
     const sixb = createRuntime()
     const scoped = sixb.as(contextFor(sixb, ["editors"]))
 
-    expect(scoped.upsertObject("invoice", { id: "i1" })).rejects.toThrow(AuthorizationError)
+    expect(scoped.upsertObject("invoice", { id: "i1" })).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
+    )
   })
 
   test("edit does not expand to subtypes", async () => {
@@ -638,7 +667,10 @@ describe("sixb.as() object writes", () => {
 
     // `can.view(Contract)` covers `signed-contract` (view expands); `can.edit(Contract)` must not.
     expect(await scoped.objects(SignedContract).byId("s1").get()).toBeNull()
-    expect(scoped.upsertObject("signed-contract", { id: "s1" })).rejects.toThrow(AuthorizationError)
+    expect(scoped.upsertObject("signed-contract", { id: "s1" })).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
+    )
   })
 })
 
@@ -676,7 +708,7 @@ describe("sixb.as() link writes", () => {
         targetTypeId: "contract",
         targetId: "c1",
       })
-    ).rejects.toThrow(AuthorizationError)
+    ).rejects.toHaveProperty("code", "auth.permission_denied")
   })
 
   test("a refused item denies the whole link batch, before anything commits", async () => {
@@ -694,7 +726,7 @@ describe("sixb.as() link writes", () => {
           target: { targetTypeId: "contract", targetId: "c1" },
         },
       ])
-    ).rejects.toThrow(AuthorizationError)
+    ).rejects.toHaveProperty("code", "auth.permission_denied")
 
     expect(await sixb.objects(Invoice).byId("i1").listLinks()).toHaveLength(0)
   })
@@ -714,7 +746,7 @@ describe("sixb.as() telemetry appends", () => {
           at: new Date(),
         },
       ])
-    ).rejects.toThrow(AuthorizationError)
+    ).rejects.toHaveProperty("code", "auth.permission_denied")
   })
 
   test("append works without view — the write-only ingest principal", async () => {
@@ -739,7 +771,10 @@ describe("sixb.as() telemetry appends", () => {
       propertyId: "temperature",
     })
     expect(stored).toHaveLength(1)
-    expect(scoped.objects(Contract).byId("c1").get()).rejects.toThrow(AuthorizationError)
+    expect(scoped.objects(Contract).byId("c1").get()).rejects.toHaveProperty(
+      "code",
+      "auth.permission_denied"
+    )
   })
 
   test("the per-property channel enforces the same grant as the batch", async () => {
@@ -753,7 +788,7 @@ describe("sixb.as() telemetry appends", () => {
         unit: "degreeCelsius",
         at: new Date(),
       })
-    ).rejects.toThrow(AuthorizationError)
+    ).rejects.toHaveProperty("code", "auth.permission_denied")
   })
 })
 
@@ -827,7 +862,7 @@ describe("sixb.as() fails closed on ungranted surfaces", () => {
     const handle = scoped.objects(Contract).byId("c1") as unknown as {
       listLinks(): Promise<unknown>
     }
-    expect(handle.listLinks()).rejects.toThrow(AuthorizationError)
+    expect(handle.listLinks()).rejects.toHaveProperty("code", "auth.permission_denied")
   })
 
   test("the raw runtime stays privileged", async () => {

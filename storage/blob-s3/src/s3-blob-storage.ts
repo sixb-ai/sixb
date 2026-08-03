@@ -5,7 +5,6 @@ import {
   type AbortBlobUploadInput,
   assertExpectedBlobSize,
   assertValidExpectedBlobSize,
-  BlobStorageError,
   type BlobUploadSession,
   blobDigestHex,
   blobIdFromDigest,
@@ -19,6 +18,7 @@ import {
   type SignedBlobUploadPart,
   streamBlobBody,
 } from "@sixb/core/blob-storage/server"
+import { SixbError } from "@sixb/core/errors"
 import { createAwsS3Api, type S3Api } from "./aws-s3-api"
 import { uploadBlobStreamToS3 } from "./s3-multipart-upload"
 import type { S3BlobStorageOptions } from "./types"
@@ -203,7 +203,8 @@ export class S3BlobStorage
 
   async createUpload(input: CreateBlobUploadInput): Promise<BlobUploadSession> {
     if (!input.expectedDigest || input.sizeBytes === undefined) {
-      throw new BlobStorageError(
+      throw new SixbError(
+        "storage.blob_failed",
         "[BlobS3] Direct staged uploads require an expected digest and size."
       )
     }
@@ -229,23 +230,31 @@ export class S3BlobStorage
   }
 
   async signUploadPart(_input: SignBlobUploadPartInput): Promise<SignedBlobUploadPart> {
-    throw new BlobStorageError("[BlobS3] Multipart staged uploads are not supported yet.")
+    throw new SixbError(
+      "storage.blob_failed",
+      "[BlobS3] Multipart staged uploads are not supported yet."
+    )
   }
 
   async completeUpload(input: CompleteBlobUploadInput): Promise<FileRef> {
     if (input.parts && input.parts.length > 0) {
-      throw new BlobStorageError("[BlobS3] Multipart staged uploads are not supported yet.")
+      throw new SixbError(
+        "storage.blob_failed",
+        "[BlobS3] Multipart staged uploads are not supported yet."
+      )
     }
 
     if (!input.expectedDigest || input.expectedSizeBytes === undefined) {
-      throw new BlobStorageError(
+      throw new SixbError(
+        "storage.blob_failed",
         "[BlobS3] Completing a direct staged upload requires an expected digest and size."
       )
     }
 
     const staged = await this.headStagedObject(input.stagingKey)
     if (staged.sizeBytes !== input.expectedSizeBytes) {
-      throw new BlobStorageError(
+      throw new SixbError(
+        "storage.blob_failed",
         `[BlobS3] Staged upload '${input.uploadId}' size mismatch: expected ${input.expectedSizeBytes} bytes, received ${staged.sizeBytes}.`
       )
     }
@@ -256,12 +265,14 @@ export class S3BlobStorage
     // trusting unverified client input, which defeats the point of a content-addressed store.
     const expectedChecksum = checksumBase64(input.expectedDigest)
     if (staged.checksumSha256 === null) {
-      throw new BlobStorageError(
+      throw new SixbError(
+        "storage.blob_failed",
         `[BlobS3] Staged upload '${input.uploadId}' has no backend-verified sha256 checksum; refusing to promote unverified bytes.`
       )
     }
     if (staged.checksumSha256 !== expectedChecksum) {
-      throw new BlobStorageError(
+      throw new SixbError(
+        "storage.blob_failed",
         `[BlobS3] Staged upload '${input.uploadId}' checksum mismatch: the stored object does not match the expected digest.`
       )
     }
@@ -293,7 +304,7 @@ export class S3BlobStorage
   async open(blobId: string): Promise<ReadableStream<Uint8Array>> {
     const hex = s3BlobHexFromBlobId(blobId)
     if (!hex) {
-      throw new BlobStorageError(`[BlobS3] Invalid blob id '${blobId}'`)
+      throw new SixbError("storage.blob_failed", `[BlobS3] Invalid blob id '${blobId}'`)
     }
 
     return this.streamObject(blobId, this.contentKeyForHex(hex))
@@ -302,7 +313,7 @@ export class S3BlobStorage
   async openRange(blobId: string, range: BlobByteRange): Promise<ReadableStream<Uint8Array>> {
     const hex = s3BlobHexFromBlobId(blobId)
     if (!hex) {
-      throw new BlobStorageError(`[BlobS3] Invalid blob id '${blobId}'`)
+      throw new SixbError("storage.blob_failed", `[BlobS3] Invalid blob id '${blobId}'`)
     }
 
     return this.streamObject(blobId, this.contentKeyForHex(hex), range)
@@ -344,7 +355,7 @@ export class S3BlobStorage
       })
     } catch (error) {
       if (isMissingS3ObjectError(error)) {
-        throw new BlobStorageError(`[BlobS3] Unknown blob '${blobId}'`)
+        throw new SixbError("storage.blob_failed", `[BlobS3] Unknown blob '${blobId}'`)
       }
       throw error
     }
@@ -361,7 +372,10 @@ export class S3BlobStorage
       }
     } catch (error) {
       if (isMissingS3ObjectError(error)) {
-        throw new BlobStorageError(`[BlobS3] Staged upload object '${stagingKey}' was not found.`)
+        throw new SixbError(
+          "storage.blob_failed",
+          `[BlobS3] Staged upload object '${stagingKey}' was not found.`
+        )
       }
       throw error
     }
@@ -404,7 +418,8 @@ function requireIntegerOption(
   maximum = Number.MAX_SAFE_INTEGER
 ): number {
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
-    throw new BlobStorageError(
+    throw new SixbError(
+      "storage.blob_failed",
       `[BlobS3] ${name} must be an integer between ${minimum} and ${maximum}.`
     )
   }

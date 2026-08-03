@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { ActionRunError, InMemoryActionRunStorage } from "../src/storage"
+import { InMemoryActionRunStorage } from "../src/storage"
 
 describe("InMemoryActionRunStorage", () => {
   test("queues, starts, and finishes a successful action run", async () => {
@@ -71,7 +71,7 @@ describe("InMemoryActionRunStorage", () => {
         params: {},
         idempotencyKey: "action:my-app:act_1",
       })
-    ).rejects.toBeInstanceOf(ActionRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await storage.start({
       id: "act_1",
@@ -83,7 +83,7 @@ describe("InMemoryActionRunStorage", () => {
         id: "act_1",
         projectId: "my-app",
       })
-    ).rejects.toBeInstanceOf(ActionRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await expect(
       storage.finish({
@@ -96,7 +96,7 @@ describe("InMemoryActionRunStorage", () => {
           phase: "validation",
         },
       })
-    ).rejects.toBeInstanceOf(ActionRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 
   test("rejects finishing terminal runs", async () => {
@@ -131,7 +131,7 @@ describe("InMemoryActionRunStorage", () => {
         projectId: "my-app",
         status: "succeeded",
       })
-    ).rejects.toBeInstanceOf(ActionRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 
   test("stores failed runs and lists with filters, ordering, and paging", async () => {
@@ -331,6 +331,6 @@ describe("InMemoryActionRunStorage", () => {
           completedAt: "2026-04-29T10:02:00.000Z",
         },
       })
-    ).rejects.toBeInstanceOf(ActionRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 })

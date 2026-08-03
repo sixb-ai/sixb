@@ -3,14 +3,14 @@ import {
   type DatasetDefinition,
   getDatasetRowValidationError,
   isJsonValue,
-  MaterializationValidationError,
   type Schema,
   type TelemetryProjectionDefinition,
 } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type { TelemetryPointWrite } from "@sixb/core/internal/materialization"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import { ProjectionWorkerError } from "./errors"
+import { projectionWorkerError } from "./errors"
 import { resolveProjectionSchema } from "./projection-schema"
 import { normalizeProjectedValue } from "./projection-value-coercion"
 import type { ClaimedProjectionExecution, ProjectionWorkerContext } from "./types"
@@ -48,7 +48,7 @@ export async function runTelemetryProjection(input: {
   const { runtime, projection, dataset, version, execution, signal } = input
   const checkpoint = execution.run.telemetryCheckpoint
   if (!checkpoint) {
-    throw new ProjectionWorkerError(
+    throw projectionWorkerError(
       `[SixbProjectionWorker] Telemetry projection run '${execution.run.id}' has no checkpoint.`
     )
   }
@@ -117,7 +117,7 @@ function assertWithinPinnedInput(input: {
   readonly rowsRead: number
 }): void {
   if (input.expectedRows === undefined || input.rowsRead <= input.expectedRows) return
-  throw new ProjectionWorkerError(
+  throw projectionWorkerError(
     `[SixbProjectionWorker] Telemetry projection run '${input.projectionRunId}' read more than its ${input.expectedRows} pinned rows.`
   )
 }
@@ -128,7 +128,7 @@ function assertCompletePinnedInput(input: {
   readonly rowsRead: number
 }): void {
   if (input.expectedRows === undefined || input.rowsRead === input.expectedRows) return
-  throw new ProjectionWorkerError(
+  throw projectionWorkerError(
     `[SixbProjectionWorker] Telemetry projection run '${input.projectionRunId}' reached EOF after ${input.rowsRead} of ${input.expectedRows} pinned rows.`
   )
 }
@@ -150,7 +150,7 @@ async function appendPhysicalBatch(input: {
     throwIfAborted(signal)
     const projected = projectTelemetryRow(plan, row)
     if (projected.kind === "invalid") {
-      throw new MaterializationValidationError(projected.message)
+      throw new SixbError("ontology.invalid_value", `[Sixb] ${projected.message}`)
     }
     if (projected.kind === "skip") {
       sourceRowsSkipped += 1
@@ -191,7 +191,7 @@ function buildTelemetryProjectionPlan(input: {
   )
   const valueColumn = dataset.schema.columns.find((column) => column.name === projection.valueField)
   if (!objectType || !property || !valueColumn) {
-    throw new ProjectionWorkerError(
+    throw projectionWorkerError(
       `[SixbProjectionWorker] Telemetry projection '${projection.id}' was not validated before execution.`
     )
   }

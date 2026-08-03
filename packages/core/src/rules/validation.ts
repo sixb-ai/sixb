@@ -1,7 +1,7 @@
+import { SixbError } from "../errors"
 import type { OntologyRegistry } from "../ontology/registry"
 import type { ObjectType } from "../ontology/types"
 import { assertPredicateShape, isPredicateValue } from "../predicates"
-import { RuleValidationError } from "./errors"
 import type { RuleDefinition, RulePredicate, RuleValue } from "./types"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -31,7 +31,8 @@ export function isRuleValue(value: unknown): value is RuleValue {
  */
 export function assertRulePredicateShape(
   value: unknown,
-  createError: (message: string) => Error = (message) => new RuleValidationError(message)
+  createError: (message: string) => Error = (message) =>
+    new SixbError("runtime.invalid_definition", message)
 ): asserts value is RulePredicate {
   assertPredicateShape(value, { subject: "Rule", createError })
 }
@@ -39,7 +40,8 @@ export function assertRulePredicateShape(
 /** Validate the serializable rule envelope without consulting ontology state. */
 export function assertRuleDefinition(
   value: unknown,
-  createError: (message: string) => Error = (message) => new RuleValidationError(message)
+  createError: (message: string) => Error = (message) =>
+    new SixbError("runtime.invalid_definition", message)
 ): asserts value is RuleDefinition {
   if (!isRecord(value)) {
     throw createError("Rule definition must be an object.")
@@ -89,13 +91,14 @@ export function validateRulesAtStartup(
     assertRuleDefinition(rule)
 
     if (seenRuleIds.has(rule.id)) {
-      throw new RuleValidationError(`Duplicate rule id: ${rule.id}`)
+      throw new SixbError("runtime.invalid_definition", `Duplicate rule id: ${rule.id}`)
     }
     seenRuleIds.add(rule.id)
 
     const objectType = ontology.getObjectTypeById(rule.subject.objectTypeId)
     if (!objectType) {
-      throw new RuleValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Rule "${rule.id}": unknown object type "${rule.subject.objectTypeId}".`
       )
     }
@@ -112,7 +115,8 @@ function validatePredicateAgainstSubject(
 ): void {
   if (predicate.kind === "all" || predicate.kind === "any") {
     if (predicate.predicates.length === 0) {
-      throw new RuleValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Rule "${rule.id}": ${predicate.kind} predicate must contain at least one predicate.`
       )
     }
@@ -131,7 +135,8 @@ function validatePredicateAgainstSubject(
   if (predicate.kind === "property") {
     const propertyIds = new Set(objectType.properties.map((property) => property.id))
     if (!propertyIds.has(predicate.propertyId)) {
-      throw new RuleValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Rule "${rule.id}": unknown property "${predicate.propertyId}" on object type "${objectType.id}".`
       )
     }
@@ -139,14 +144,16 @@ function validatePredicateAgainstSubject(
   }
 
   if (predicate.kind === "field") {
-    throw new RuleValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Rule "${rule.id}": field predicates are not supported in rule conditions.`
     )
   }
 
   const linkIds = new Set(objectType.links.map((link) => link.id))
   if (!linkIds.has(predicate.linkId)) {
-    throw new RuleValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Rule "${rule.id}": unknown link "${predicate.linkId}" on object type "${objectType.id}".`
     )
   }

@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto"
 import type { DatasetRow } from "@sixb/core"
 import { getDatasetRowValidationError } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type {
   BeginDatasetWriteInput,
   CommitDatasetWriteInput,
   DatasetWriteCommitResult,
   LakeWriteSession,
 } from "@sixb/core/lake-storage"
-import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckDbRuntime } from "./duckdb-runtime"
 import { appendDatasetRow } from "./row-appender"
 import { datasetSchemaToDuckDbColumnsSql } from "./schema"
@@ -79,7 +79,7 @@ class DuckLakeWriteSession implements LakeWriteSession {
     for await (const row of rows) {
       const validationError = getDatasetRowValidationError(row, this.input.dataset)
       if (validationError) {
-        throw new LakeStorageError(`[SixbDuckLake] ${validationError}`)
+        throw new SixbError("storage.lake_failed", `[SixbDuckLake] ${validationError}`)
       }
 
       // Snapshot the validated row. Callers may reuse and mutate one row object
@@ -146,7 +146,7 @@ class DuckLakeWriteSession implements LakeWriteSession {
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new LakeStorageError("[SixbDuckLake] Write session is already closed.")
+      throw new SixbError("storage.lake_failed", "[SixbDuckLake] Write session is already closed.")
     }
   }
 

@@ -1,5 +1,5 @@
 export type { FileUploadSessionErrorReason } from "./errors"
-export { FileUploadSessionError } from "./errors"
+export { fileUploadSessionError } from "./errors"
 export { InMemoryFileUploadSessions } from "./in-memory"
 export type {
   CreateFileUploadSessionInput,

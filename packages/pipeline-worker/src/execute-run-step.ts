@@ -5,8 +5,9 @@ import type {
   PipelineStepDefinition,
   PipelineStepRunContext,
 } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import { PipelineWorkerError, throwIfAborted } from "./errors"
+import { throwIfAborted } from "./errors"
 import { createStepInputs, type ResolvedStepInput } from "./step-inputs"
 import type { PipelineJob, PipelineLogSession, PipelineWorkerContext } from "./types"
 
@@ -27,7 +28,8 @@ export async function executeRunStep(input: {
   const { runtime, pipeline, step, job, signal, outputDataset, resolvedInputs } = input
 
   if (step.executor.kind !== "run") {
-    throw new PipelineWorkerError(
+    throw new SixbError(
+      "pipeline.failed",
       `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' uses SQL execution, which is not supported by the run step executor.`
     )
   }

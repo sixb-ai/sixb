@@ -5,7 +5,7 @@ import {
   type JS,
   JSDuckDBValueConverter,
 } from "@duckdb/node-api"
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
 
 /**
  * Preserve DuckDB decimals as exact strings while retaining the driver's normal
@@ -18,7 +18,10 @@ export const sixbDuckDbValueConverter: DuckDBValueConverter<JS> = (value, type, 
 
   if (type.typeId === DuckDBTypeId.DECIMAL) {
     if (!(value instanceof DuckDBDecimalValue)) {
-      throw new LakeStorageError("[SixbDuckLake] DuckDB returned an invalid DECIMAL value.")
+      throw new SixbError(
+        "storage.lake_failed",
+        "[SixbDuckLake] DuckDB returned an invalid DECIMAL value."
+      )
     }
     return value.toString()
   }

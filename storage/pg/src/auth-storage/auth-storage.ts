@@ -1,3 +1,4 @@
+import type { SixbError } from "@sixb/core/errors"
 import type {
   AuthStorage,
   CompleteMagicLinkSignInInput,
@@ -10,7 +11,7 @@ import type {
   UserIdentityRecord,
   UserRecord,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 import {
   authLockKey,
@@ -57,7 +58,7 @@ import {
 import { PgAuthUserStore } from "./users"
 
 interface AuthTransactionError {
-  readonly error: AuthStorageError
+  readonly error: SixbError
 }
 
 export interface PgAuthStorageOptions {
@@ -106,7 +107,7 @@ export class PgAuthStorage implements AuthStorage {
         })
 
         if (!initialMagicLink) {
-          throw new AuthStorageError(
+          throw authStorageError(
             "missing_magic_link",
             `[Sixb] Magic link '${input.magicLinkId}' not found for project '${projectId}'.`
           )
@@ -165,7 +166,7 @@ export class PgAuthStorage implements AuthStorage {
             consumedAt: completedAt,
           })
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "suspended_user",
               `[Sixb] User '${existingUserRow.id}' is suspended for project '${projectId}'.`
             ),
@@ -180,7 +181,7 @@ export class PgAuthStorage implements AuthStorage {
             consumedAt: completedAt,
           })
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "user_creation_not_allowed",
               `[Sixb] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
             ),
@@ -201,7 +202,7 @@ export class PgAuthStorage implements AuthStorage {
             consumedAt: completedAt,
           })
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "user_creation_not_allowed",
               `[Sixb] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
             ),
@@ -215,7 +216,7 @@ export class PgAuthStorage implements AuthStorage {
         if (shouldCreateUser) {
           newUserId = assertNonEmpty(input.newUserId, "User id")
           if (await getUserRowById(tx, { projectId, id: newUserId })) {
-            throw new AuthStorageError(
+            throw authStorageError(
               "duplicate_user",
               `[Sixb] User '${newUserId}' already exists for project '${projectId}'.`
             )
@@ -340,7 +341,7 @@ export class PgAuthStorage implements AuthStorage {
         if (identity && !userRow) {
           await this.consumeOidcAttempt(input, completedAt, projectId, tx)
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "missing_user",
               `[Sixb] User '${identity.user_id}' not found for linked OIDC identity.`
             ),
@@ -350,7 +351,7 @@ export class PgAuthStorage implements AuthStorage {
         if (!identity && userRow && (!input.autoLinkByVerifiedEmail || !input.emailVerified)) {
           await this.consumeOidcAttempt(input, completedAt, projectId, tx)
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "email_link_not_allowed",
               `[Sixb] OIDC identity cannot auto-link to user '${userRow.id}' for project '${projectId}'.`
             ),
@@ -360,7 +361,7 @@ export class PgAuthStorage implements AuthStorage {
         if (userRow?.status === "suspended") {
           await this.consumeOidcAttempt(input, completedAt, projectId, tx)
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "suspended_user",
               `[Sixb] User '${userRow.id}' is suspended for project '${projectId}'.`
             ),
@@ -370,7 +371,7 @@ export class PgAuthStorage implements AuthStorage {
         if (shouldCreateUser && !input.emailVerified) {
           await this.consumeOidcAttempt(input, completedAt, projectId, tx)
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "user_creation_not_allowed",
               `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
             ),
@@ -380,7 +381,7 @@ export class PgAuthStorage implements AuthStorage {
         if (shouldCreateUser && !activeInvitation && !input.allowUserCreationWithoutInvitation) {
           await this.consumeOidcAttempt(input, completedAt, projectId, tx)
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "user_creation_not_allowed",
               `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
             ),
@@ -396,7 +397,7 @@ export class PgAuthStorage implements AuthStorage {
         ) {
           await this.consumeOidcAttempt(input, completedAt, projectId, tx)
           return {
-            error: new AuthStorageError(
+            error: authStorageError(
               "user_creation_not_allowed",
               `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
             ),
@@ -410,7 +411,7 @@ export class PgAuthStorage implements AuthStorage {
         if (shouldCreateUser) {
           newUserId = assertNonEmpty(input.newUserId, "User id")
           if (await getUserRowById(tx, { projectId, id: newUserId })) {
-            throw new AuthStorageError(
+            throw authStorageError(
               "duplicate_user",
               `[Sixb] User '${newUserId}' already exists for project '${projectId}'.`
             )
@@ -507,7 +508,7 @@ export class PgAuthStorage implements AuthStorage {
       )
 
       if (!existing) {
-        throw new AuthStorageError(
+        throw authStorageError(
           "missing_user",
           `[Sixb] User '${input.userId}' not found for project '${input.projectId}'.`
         )
@@ -540,7 +541,7 @@ export class PgAuthStorage implements AuthStorage {
     row: PgAuthMagicLinkRow | null
   ): asserts row is PgAuthMagicLinkRow {
     if (!row) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_magic_link",
         `[Sixb] Magic link '${id}' not found for project '${projectId}'.`
       )
@@ -557,7 +558,7 @@ export class PgAuthStorage implements AuthStorage {
     row: PgAuthOidcAttemptRow | null
   ): asserts row is PgAuthOidcAttemptRow {
     if (!row) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_oidc_attempt",
         `[Sixb] OIDC authorization attempt '${id}' not found for project '${projectId}'.`
       )
@@ -791,7 +792,7 @@ function assertSignInSessionAudience(
     return
   }
 
-  throw new AuthStorageError(
+  throw authStorageError(
     "invalid_input",
     `[Sixb] Sign-in session audience '${sessionAudience}' does not match stored auth audience '${storedAudience}' for project '${projectId}'.`
   )

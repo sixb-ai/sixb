@@ -1,5 +1,5 @@
 import { resolveAuthSessionAudience } from "../../../auth/audience"
-import { AuthStorageError } from "../errors"
+import { authStorageError } from "../../../storage/auth/errors"
 import type { AuthMagicLinkStore, CreateAuthMagicLinkInput, MagicLinkRecord } from "../types"
 import type { AuthStorageState } from "./shared"
 import {
@@ -28,7 +28,7 @@ export class InMemoryAuthMagicLinkStore implements AuthMagicLinkStore {
     const key = magicLinkKey(projectId, id)
 
     if (this.state.magicLinks.has(key)) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "duplicate_magic_link",
         `[Sixb] Magic link '${id}' already exists for project '${projectId}'.`
       )

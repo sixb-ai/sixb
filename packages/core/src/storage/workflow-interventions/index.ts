@@ -1,4 +1,3 @@
-export { WorkflowInterventionError } from "./errors"
 export { InMemoryWorkflowInterventionStorage } from "./in-memory"
 export type {
   CancelWorkflowInterventionInput,

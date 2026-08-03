@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { DatasetDefinition } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type {
   BeginDatasetWriteInput,
   DatasetVersion,
@@ -7,7 +8,6 @@ import type {
   DatasetWriteMode,
   LakeWriteSession,
 } from "@sixb/core/lake-storage"
-import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { localCatalogCoordinationKey } from "./catalog-key"
 import {
@@ -67,7 +67,10 @@ export class DuckLakeWriteCoordinator {
 
     const definition = await this.datasets.getDataset(input.dataset.id)
     if (!definition) {
-      throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.dataset.id}'.`)
+      throw new SixbError(
+        "storage.lake_failed",
+        `[SixbDuckLake] Unknown dataset '${input.dataset.id}'.`
+      )
     }
 
     this.datasets.assertSchema(definition)
@@ -93,7 +96,10 @@ export class DuckLakeWriteCoordinator {
   private async commitWrite(input: DuckLakeCommitWriteInput): Promise<DatasetWriteCommitResult> {
     const definition = await this.datasets.getDataset(input.write.dataset.id)
     if (!definition) {
-      throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.write.dataset.id}'.`)
+      throw new SixbError(
+        "storage.lake_failed",
+        `[SixbDuckLake] Unknown dataset '${input.write.dataset.id}'.`
+      )
     }
 
     const mode = input.write.mode ?? "snapshot"
@@ -269,7 +275,8 @@ export class DuckLakeWriteCoordinator {
         return { ...version, outcome: "created" }
       }
 
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbDuckLake] DuckLake committed snapshot '${ownSnapshotId}' for dataset '${input.dataset.id}', but Sixb could not hydrate it as a dataset version.`
       )
     }
@@ -282,12 +289,14 @@ export class DuckLakeWriteCoordinator {
     }
 
     if (input.committedWriteSnapshotId === input.previousWriteSnapshotId) {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbDuckLake] DuckLake commit for dataset '${input.dataset.id}' completed without producing a snapshot for this non-empty write.`
       )
     }
 
-    throw new LakeStorageError(
+    throw new SixbError(
+      "storage.lake_failed",
       `[SixbDuckLake] DuckLake commit for dataset '${input.dataset.id}' completed, but Sixb could not find a matching snapshot for this write.`
     )
   }
@@ -309,7 +318,8 @@ export class DuckLakeWriteCoordinator {
     })
 
     if (result.sourceRowCount !== input.rowsWritten) {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbDuckLake] Staged write for dataset '${input.write.dataset.id}' accepted ${input.rowsWritten} row(s), but DuckLake saw ${result.sourceRowCount} source row(s) at commit time.`
       )
     }
@@ -354,7 +364,8 @@ export class DuckLakeWriteCoordinator {
       return latestVersion
     }
 
-    throw new LakeStorageError(
+    throw new SixbError(
+      "storage.lake_failed",
       `[SixbDuckLake] No DuckLake changes were committed for dataset '${definition.id}', and no previous version exists.`
     )
   }
@@ -459,7 +470,8 @@ export class DuckLakeWriteCoordinator {
     }
 
     if (input.actualLatestVersionId !== input.expectedLatestVersionId) {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbDuckLake] Optimistic commit failed for dataset '${input.datasetId}': expected latest version '${input.expectedLatestVersionId}', found '${input.actualLatestVersionId ?? "none"}'.`
       )
     }
@@ -492,7 +504,10 @@ function commitRowCount(
 
 function assertDuckLakeSnapshotId(snapshotId: string): void {
   if (!/^\d+$/.test(snapshotId)) {
-    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`)
+    throw new SixbError(
+      "storage.lake_failed",
+      `[SixbDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`
+    )
   }
 }
 

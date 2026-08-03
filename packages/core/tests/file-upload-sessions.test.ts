@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { FileRef, Principal } from "../src"
 import { InMemoryFileUploadSessions, InMemoryStorage } from "../src"
 import type { FileUploadSessionErrorReason } from "../src/storage"
-import { DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS, FileUploadSessionError } from "../src/storage"
+import { DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS } from "../src/storage"
 
 const principal: Principal = { type: "system", id: "system" }
 
@@ -26,8 +26,7 @@ async function expectSessionError(
     await promise
     throw new Error("Expected FileUploadSessionError.")
   } catch (error) {
-    expect(error).toBeInstanceOf(FileUploadSessionError)
-    expect((error as FileUploadSessionError).reason).toBe(expected.reason)
+    expect(error).toHaveProperty("details.reason", expected.reason)
     expect((error as Error).message).toBe(expected.message)
   }
 }

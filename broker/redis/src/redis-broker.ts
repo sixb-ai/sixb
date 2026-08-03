@@ -1,10 +1,9 @@
 import { type Broker, cloneJsonValue } from "@sixb/core"
-import {
-  BrokerCursorExpiredError,
-  type BrokerPage,
-  type BrokerRecord,
-  type BrokerRecordInput,
-  type BrokerStreamDefinition,
+import type {
+  BrokerPage,
+  BrokerRecord,
+  BrokerRecordInput,
+  BrokerStreamDefinition,
 } from "@sixb/core/broker"
 import {
   type RedisBrokerClient,
@@ -12,7 +11,7 @@ import {
   RedisConnectionManager,
 } from "./connection"
 import { assertCursor, compareStreamIds } from "./cursor"
-import { RedisBrokerError } from "./errors"
+import { redisBrokerError } from "./errors"
 import { assertPrefix, assertStreamId, validateProjectId } from "./keys"
 import {
   APPEND_RECORDS_SCRIPT,
@@ -139,7 +138,7 @@ export class RedisBroker implements Broker {
     )
 
     if (appendResults.length !== encodedRecords.length) {
-      throw new RedisBrokerError(
+      throw redisBrokerError(
         `Redis append script returned ${appendResults.length} result(s) for ${encodedRecords.length} record(s).`
       )
     }
@@ -517,12 +516,9 @@ export class RedisBroker implements Broker {
         ...args,
       ])
     } catch (error) {
-      throw new RedisBrokerError(
-        `Failed to append records to stream "${params.ensured.streamId}"`,
-        {
-          cause: error,
-        }
-      )
+      throw redisBrokerError(`Failed to append records to stream "${params.ensured.streamId}"`, {
+        cause: error,
+      })
     }
 
     const results = parseAppendBatchReply(reply)
@@ -542,7 +538,7 @@ export class RedisBroker implements Broker {
         ensured.keys.metaKey,
       ])
     } catch (error) {
-      throw new RedisBrokerError(`Failed to trim stream "${ensured.streamId}"`, { cause: error })
+      throw redisBrokerError(`Failed to trim stream "${ensured.streamId}"`, { cause: error })
     }
   }
 
@@ -554,7 +550,7 @@ export class RedisBroker implements Broker {
     const entries = await this.readRange(client, ensured, cursor, 1, cursor)
     const entry = entries[0]
     if (entry === undefined || entry.id !== cursor) {
-      throw new RedisBrokerError(
+      throw redisBrokerError(
         `Redis deduplicated publish at cursor ${cursor}, but the retained record was not found.`
       )
     }
@@ -584,7 +580,7 @@ export class RedisBroker implements Broker {
         String(count),
       ])
     } catch (error) {
-      throw new RedisBrokerError(`Failed to read stream "${ensured.streamId}"`, { cause: error })
+      throw redisBrokerError(`Failed to read stream "${ensured.streamId}"`, { cause: error })
     }
     return parseStreamEntries(reply)
   }
@@ -606,7 +602,7 @@ export class RedisBroker implements Broker {
         lastSeenId,
       ])
     } catch (error) {
-      throw new RedisBrokerError(`Failed to subscribe to stream "${ensured.streamId}"`, {
+      throw redisBrokerError(`Failed to subscribe to stream "${ensured.streamId}"`, {
         cause: error,
       })
     }
@@ -627,7 +623,7 @@ export class RedisBroker implements Broker {
         ensured.keys.metaKey,
       ])
     } catch (error) {
-      throw new RedisBrokerError(`Failed to enforce retention for stream "${ensured.streamId}"`, {
+      throw redisBrokerError(`Failed to enforce retention for stream "${ensured.streamId}"`, {
         cause: error,
       })
     }
@@ -664,7 +660,7 @@ export class RedisBroker implements Broker {
         String(count),
       ])
     } catch (error) {
-      throw new RedisBrokerError(`Failed to read stream "${ensured.streamId}"`, { cause: error })
+      throw redisBrokerError(`Failed to read stream "${ensured.streamId}"`, { cause: error })
     }
     return parseStreamEntries(reply)
   }
@@ -691,9 +687,10 @@ export class RedisBroker implements Broker {
     // The append/trim scripts record the latest id removed from the logical
     // retained range; only cursors older than that represent unavailable history.
     if (lastTrimmedId !== undefined && compareStreamIds(afterCursor, lastTrimmedId) < 0) {
-      throw new BrokerCursorExpiredError(
+      throw redisBrokerError(
         `afterCursor '${afterCursor}' is outside the retained range for stream ` +
-          `'${streamId}'. The latest trimmed cursor is '${lastTrimmedId}'.`
+          `'${streamId}'. The latest trimmed cursor is '${lastTrimmedId}'.`,
+        { code: "broker.cursor_expired" }
       )
     }
   }
@@ -707,23 +704,24 @@ export class RedisBroker implements Broker {
       return
     }
     if (lastTrimmedId !== undefined && compareStreamIds(beforeCursor, lastTrimmedId) <= 0) {
-      throw new BrokerCursorExpiredError(
+      throw redisBrokerError(
         `beforeCursor '${beforeCursor}' is outside the retained range for stream ` +
-          `'${streamId}'. The latest trimmed cursor is '${lastTrimmedId}'.`
+          `'${streamId}'. The latest trimmed cursor is '${lastTrimmedId}'.`,
+        { code: "broker.cursor_expired" }
       )
     }
   }
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new RedisBrokerError("broker has been closed")
+      throw redisBrokerError("broker has been closed")
     }
   }
 }
 
 function positiveInteger(value: number): number {
   if (!Number.isFinite(value) || value <= 0 || !Number.isInteger(value)) {
-    throw new RedisBrokerError("broker numeric options must be positive finite integers")
+    throw redisBrokerError("broker numeric options must be positive finite integers")
   }
   return value
 }
@@ -741,7 +739,7 @@ function matchesFilters(
 
 function parseAppendBatchReply(reply: unknown): readonly AppendBatchResult[] {
   if (!Array.isArray(reply)) {
-    throw new RedisBrokerError("Redis append script returned a malformed reply")
+    throw redisBrokerError("Redis append script returned a malformed reply")
   }
 
   return reply.map(parseAppendBatchResult)
@@ -749,7 +747,7 @@ function parseAppendBatchReply(reply: unknown): readonly AppendBatchResult[] {
 
 function parseAppendBatchResult(item: unknown): AppendBatchResult {
   if (!Array.isArray(item) || item.length < 2) {
-    throw new RedisBrokerError("Redis append script returned a malformed item")
+    throw redisBrokerError("Redis append script returned a malformed item")
   }
 
   const status = toText(item[0])
@@ -764,7 +762,7 @@ function parseAppendBatchResult(item: unknown): AppendBatchResult {
     return { cursor, duplicate: true, duplicateBody }
   }
 
-  throw new RedisBrokerError(`Redis append script returned unknown status "${status}"`)
+  throw redisBrokerError(`Redis append script returned unknown status "${status}"`)
 }
 
 function optionalText(value: unknown): string | undefined {

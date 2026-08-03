@@ -10,7 +10,7 @@ import type {
   UpsertAuthGroupMembershipInput,
   UserRecord,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import { isUniqueConstraintError } from "../storage-errors"
 import type {
   SqliteAuthGroupMembershipRow,
@@ -35,7 +35,7 @@ export type SqliteValue = string | number | null
 export function assertNonEmpty(value: string, label: string): string {
   const normalized = value.trim()
   if (!normalized) {
-    throw new AuthStorageError("invalid_input", `[Sixb] ${label} must be a non-empty string.`)
+    throw authStorageError("invalid_input", `[Sixb] ${label} must be a non-empty string.`)
   }
   return normalized
 }
@@ -162,7 +162,7 @@ export function requireSessionById(
 ): ReturnType<typeof rowToSessionRecord> {
   const session = getSessionById(db, params)
   if (!session) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_session",
       `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
     )
@@ -206,7 +206,7 @@ export function requireInvitationById(
 ): InvitationRecord {
   const invitation = getInvitationById(db, params)
   if (!invitation) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_invitation",
       `[Sixb] Invitation '${params.id}' not found for project '${params.projectId}'.`
     )
@@ -299,21 +299,21 @@ export function consumeMagicLink(
   const row = getMagicLinkRowById(db, { projectId, id })
 
   if (!row) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_magic_link",
       `[Sixb] Magic link '${id}' not found for project '${projectId}'.`
     )
   }
 
   if (row.token_hash !== tokenHash || row.consumed_at || row.revoked_at) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "invalid_magic_link",
       `[Sixb] Magic link '${id}' is not valid for project '${projectId}'.`
     )
   }
 
   if (new Date(row.expires_at) <= params.consumedAt) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "expired_magic_link",
       `[Sixb] Magic link '${id}' is expired for project '${projectId}'.`
     )
@@ -366,21 +366,21 @@ export function consumeOidcAttempt(
   const row = getOidcAttemptRowById(db, { projectId, id })
 
   if (!row) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_oidc_attempt",
       `[Sixb] OIDC authorization attempt '${id}' not found for project '${projectId}'.`
     )
   }
 
   if (row.state_hash !== stateHash || row.consumed_at) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "invalid_oidc_attempt",
       `[Sixb] OIDC authorization attempt '${id}' is not valid for project '${projectId}'.`
     )
   }
 
   if (new Date(row.expires_at) <= params.consumedAt) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "expired_oidc_attempt",
       `[Sixb] OIDC authorization attempt '${id}' is expired for project '${projectId}'.`
     )
@@ -414,7 +414,7 @@ export function validateCompleteSessionInput(
 
 export function assertSessionIdAvailable(db: Database, projectId: string, sessionId: string): void {
   if (getSessionRowById(db, { projectId, id: sessionId })) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "duplicate_session",
       `[Sixb] Session '${sessionId}' already exists for project '${projectId}'.`
     )
@@ -466,7 +466,7 @@ export function createSession(
 
   const session = getSessionById(db, { projectId, id })
   if (!session) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_session",
       `[Sixb] Failed to load session '${id}' for project '${projectId}'.`
     )
@@ -538,7 +538,7 @@ export function upsertGroupMembership(
   const userId = assertNonEmpty(input.userId, "User id")
   const groupId = assertNonEmpty(input.groupId, "Group id")
   if (!getUserRowById(db, { projectId, id: userId })) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_user",
       `[Sixb] User '${userId}' not found for project '${projectId}'.`
     )
@@ -690,7 +690,7 @@ export function mapUniqueConstraintError(
   message: string
 ): never {
   if (isUniqueConstraintError(error)) {
-    throw new AuthStorageError(code, message)
+    throw authStorageError(code, message)
   }
 
   throw error

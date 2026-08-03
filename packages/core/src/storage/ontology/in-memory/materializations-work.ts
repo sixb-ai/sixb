@@ -1,5 +1,4 @@
 import { stableJsonStringify } from "../../../json"
-import { MaterializationConflictError } from "../../../materialization/errors"
 import type {
   MaterializationPlanChunk,
   StoredLinkOverride,
@@ -9,6 +8,8 @@ import { invalidCorrelation, materializationPlanItems } from "../provider-work"
 import type { SessionState } from "./materializations"
 
 export * from "../provider-work"
+
+import { materializationConflict } from "../../../materialization/errors"
 
 export function assertChunkSequence(session: SessionState, chunk: MaterializationPlanChunk): void {
   const planItems = materializationPlanItems(chunk)
@@ -57,6 +58,6 @@ export function assertLastCommit(
   label: string
 ): void {
   if ((value?.lastCommitId ?? null) !== expected) {
-    throw new MaterializationConflictError("effective-state", `Expected ${label} changed.`)
+    throw materializationConflict("effective-state", `Expected ${label} changed.`)
   }
 }

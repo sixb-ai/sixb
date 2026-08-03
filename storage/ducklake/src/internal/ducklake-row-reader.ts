@@ -1,6 +1,6 @@
 import type { DatasetColumnDefinition, DatasetRow } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type { DatasetVersion, ReadDatasetRowsInput } from "@sixb/core/lake-storage"
-import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
@@ -35,7 +35,10 @@ export class DuckLakeRowReader {
       // previews must not go through broad catalog introspection.
       const tableRef = await resolveDatasetTableRef(this.options, runtime, input.datasetId)
       if (!tableRef) {
-        throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.datasetId}'.`)
+        throw new SixbError(
+          "storage.lake_failed",
+          `[SixbDuckLake] Unknown dataset '${input.datasetId}'.`
+        )
       }
 
       const version = await this.resolveVersion(runtime, tableRef, input.versionId)
@@ -126,7 +129,8 @@ export class DuckLakeRowReader {
     return columns.map((columnName) => {
       const column = columnsByName.get(columnName)
       if (!column) {
-        throw new LakeStorageError(
+        throw new SixbError(
+          "storage.lake_failed",
           `[SixbDuckLake] Dataset '${datasetId}' does not have column '${columnName}' at the requested version.`
         )
       }
@@ -136,7 +140,8 @@ export class DuckLakeRowReader {
   }
 
   private throwNoCommittedVersion(datasetId: string): never {
-    throw new LakeStorageError(
+    throw new SixbError(
+      "storage.lake_failed",
       `[SixbDuckLake] No committed version found for dataset '${datasetId}'.`
     )
   }

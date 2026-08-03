@@ -1,3 +1,4 @@
+import { SixbError } from "@sixb/core/errors"
 import type {
   FinishWebhookRunInput,
   ListWebhookRunsInput,
@@ -6,7 +7,7 @@ import type {
   WebhookRunRecord,
   WebhookRunStorage,
 } from "@sixb/core/storage"
-import { parseSixbFailure, serializeSixbFailure, WebhookRunError } from "@sixb/core/storage"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
@@ -43,7 +44,7 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
       return rowToWebhookRunRecord(row)
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new WebhookRunError(
+        throw new SixbError(
           "storage.conflict",
           `[SixbPg] Webhook run '${input.id}' already exists for project '${input.projectId}'.`
         )
@@ -62,14 +63,14 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
       `
 
       if (!existing) {
-        throw new WebhookRunError(
+        throw new SixbError(
           "webhook.run_not_found",
           `[SixbPg] Webhook run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
-        throw new WebhookRunError(
+        throw new SixbError(
           "storage.conflict",
           `[SixbPg] Webhook run '${input.id}' for project '${input.projectId}' is already terminal.`
         )

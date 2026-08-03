@@ -13,6 +13,7 @@ import {
   existsObjects,
   facetObjects,
   ObjectQueryPlanningError,
+  objectQueryIssues,
 } from "../query"
 import { explainObjectQuery } from "../query/explain"
 import type { ObjectQuery } from "../query/ir"
@@ -36,10 +37,7 @@ export function createRuntimeQueryExecutor(params: {
           executorOptions
         )
       } catch (error) {
-        if (error instanceof ObjectQueryPlanningError) {
-          throw addSdkPlanningHints(error)
-        }
-        throw error
+        throw addSdkPlanningHints(error)
       }
     },
 
@@ -71,11 +69,16 @@ export function createRuntimeQueryExecutor(params: {
   }
 }
 
-function addSdkPlanningHints(error: ObjectQueryPlanningError): ObjectQueryPlanningError {
-  if (!error.issues.some((issue) => issue.code === "fallback_requires_bound")) return error
+/**
+ * Restates one planner issue in terms of the SDK builder the caller actually used. Anything that is
+ * not a planning rejection passes through untouched.
+ */
+function addSdkPlanningHints(error: unknown): unknown {
+  const issues = objectQueryIssues(error)
+  if (!issues?.some((issue) => issue.code === "fallback_requires_bound")) return error
 
   return new ObjectQueryPlanningError(
-    error.issues.map((issue) =>
+    issues.map((issue) =>
       issue.code === "fallback_requires_bound"
         ? {
             ...issue,

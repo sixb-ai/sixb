@@ -1,12 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { Queue } from "@sixb/core"
-import {
-  type ClaimedQueueJob,
-  type NewQueueJob,
-  QueueError,
-  type QueueJob,
-  type QueueJobError,
-} from "@sixb/core/queues"
+import { SixbError } from "@sixb/core/errors"
+import type { ClaimedQueueJob, NewQueueJob, QueueJob, QueueJobError } from "@sixb/core/queues"
 import {
   type Job as BullJob,
   Queue as BullQueue,
@@ -247,14 +242,14 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
       | BullJob<QueueJobData<TQueueJob>>
       | undefined
     if (!bullJob) {
-      throw new QueueError(`[Sixb] Unknown queue job '${jobId}'`)
+      throw new SixbError("runtime.invalid_input", `[Sixb] Unknown queue job '${jobId}'`)
     }
     return bullJob
   }
 
   private getQueue(projectId: string): BullQueue<QueueJobData<TQueueJob>> {
     if (this.closed) {
-      throw new QueueError("[Sixb] BullMqQueues has been closed")
+      throw new SixbError("runtime.invalid_input", "[Sixb] BullMqQueues has been closed")
     }
 
     const existing = this.queuesByProject.get(projectId)
@@ -275,7 +270,7 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
 
   private getWorker(projectId: string): BullWorker<QueueJobData<TQueueJob>> {
     if (this.closed) {
-      throw new QueueError("[Sixb] BullMqQueues has been closed")
+      throw new SixbError("runtime.invalid_input", "[Sixb] BullMqQueues has been closed")
     }
 
     const existing = this.workersByProject.get(projectId)

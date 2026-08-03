@@ -33,6 +33,7 @@ import {
   isAllowed,
 } from "../authorization"
 import type { DatasetDefinition } from "../datasets"
+import { SixbError } from "../errors"
 import type { EventsReadInput, StoredDomainEvent } from "../events"
 import { createObjectSet, objectService } from "../objects"
 import type { ListObjectsParams } from "../objects/service"
@@ -40,7 +41,6 @@ import type { ValueType } from "../ontology"
 import { assertObjectTypeRegistered } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { PipelineDefinition } from "../pipelines"
-import { PipelineError } from "../pipelines"
 import {
   type PipelineRunRequestResult,
   type RequestPipelineRunInput,
@@ -50,7 +50,6 @@ import type { ObjectRow } from "../storage"
 import type { ActionRunRecord } from "../storage/action-runs"
 import type { AgentThreadRecord, ListAgentThreadsResult } from "../storage/agents"
 import type { SyncDefinition } from "../syncs"
-import { SyncValidationError } from "../syncs"
 import {
   type RequestSyncRunInput,
   requestSyncRun,
@@ -401,7 +400,8 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
       // may not run has to report "forbidden", the same as `requestAction`. Only a genuinely unknown
       // id is "unknown". `requestSyncRun` asserts the grant.
       const sync = deps.syncs.getById(input.syncId)
-      if (!sync) throw new SyncValidationError(`[Sixb] Unknown sync '${input.syncId}'`)
+      if (!sync)
+        throw new SixbError("runtime.invalid_definition", `[Sixb] Unknown sync '${input.syncId}'`)
       return requestSyncRun(runtime, sync, input)
     },
 
@@ -409,7 +409,11 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
     getPipelineById: pipelines.getById,
     requestPipelineRun: async (input: RequestPipelineRunInput) => {
       const pipeline = deps.pipelines.getById(input.pipelineId)
-      if (!pipeline) throw new PipelineError(`[Sixb] Unknown pipeline '${input.pipelineId}'`)
+      if (!pipeline)
+        throw new SixbError(
+          "runtime.invalid_definition",
+          `[Sixb] Unknown pipeline '${input.pipelineId}'`
+        )
       return requestPipelineRun(runtime, pipeline, input)
     },
 

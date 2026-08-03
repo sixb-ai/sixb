@@ -1,6 +1,6 @@
 import { getInvalidJsonValueReason, type JsonValue } from "@sixb/core"
 import type { BrokerRecord, BrokerRecordInput } from "@sixb/core/broker"
-import { RedisBrokerError } from "./errors"
+import { redisBrokerError } from "./errors"
 
 interface WireBrokerRecord {
   readonly name?: string
@@ -34,16 +34,16 @@ export function decodeRecord(params: {
   try {
     parsed = JSON.parse(params.body)
   } catch (error) {
-    throw new RedisBrokerError("Failed to decode broker record body as JSON", { cause: error })
+    throw redisBrokerError("Failed to decode broker record body as JSON", { cause: error })
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new RedisBrokerError("Decoded broker record body is not an object")
+    throw redisBrokerError("Decoded broker record body is not an object")
   }
 
   const record = parsed as Partial<WireBrokerRecord>
   if (!("payload" in record)) {
-    throw new RedisBrokerError("Decoded broker record body is missing payload")
+    throw redisBrokerError("Decoded broker record body is missing payload")
   }
   assertBrokerPayload(record.payload)
 
@@ -61,6 +61,6 @@ export function decodeRecord(params: {
 function assertBrokerPayload(payload: unknown): asserts payload is JsonValue {
   const reason = getInvalidJsonValueReason(payload, "record.payload")
   if (reason) {
-    throw new RedisBrokerError(`record.payload must be a JSON value; ${reason}`)
+    throw redisBrokerError(`record.payload must be a JSON value; ${reason}`)
   }
 }

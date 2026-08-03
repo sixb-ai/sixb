@@ -1,66 +1,40 @@
-import { SixbError, type SixbErrorCode, type SixbErrorOptions } from "@sixb/core/errors"
+import {
+  isSixbError,
+  SixbError,
+  type SixbErrorCode,
+  type SixbErrorOptions,
+} from "@sixb/core/errors"
+
 export interface ImapConnectorErrorOptions extends SixbErrorOptions {
-  /** Subclasses narrow the failure; direct callers leave this alone. */
+  /** Narrows the failure past the module default; most callers leave this alone. */
   readonly code?: SixbErrorCode
 }
 
-export class ImapConnectorError extends SixbError {
-  override readonly name: string = "ImapConnectorError"
-
-  constructor(message: string, options: ImapConnectorErrorOptions = {}) {
-    super(options.code ?? "connector.unavailable", `[SixbImap] ${message}`, options)
-  }
+/** An IMAP failure, prefixed and defaulted to `connector.unavailable`. */
+export function imapConnectorError(
+  message: string,
+  options: ImapConnectorErrorOptions = {}
+): SixbError {
+  return new SixbError(options.code ?? "connector.unavailable", `[SixbImap] ${message}`, options)
 }
 
-export class ImapAbortedError extends ImapConnectorError {
-  override readonly name = "ImapAbortedError"
-
-  constructor() {
-    super("Operation aborted.", { code: "runtime.cancelled" })
-  }
-}
-
-export class ImapDownloadTooLargeError extends ImapConnectorError {
-  override readonly name = "ImapDownloadTooLargeError"
-
-  constructor(
-    readonly uid: number,
-    readonly part: string,
-    readonly maxBytes: number,
-    readonly expectedSize?: number
-  ) {
-    const expected = expectedSize === undefined ? "" : ` (expected ${expectedSize} bytes)`
-    super(`Message ${uid} part ${part} exceeds the ${maxBytes}-byte limit${expected}.`, {
-      code: "connector.request_failed",
-    })
-  }
-}
-
-export class ImapPartUnavailableError extends ImapConnectorError {
-  override readonly name = "ImapPartUnavailableError"
-
-  constructor(
-    readonly uid: number,
-    readonly part: string
-  ) {
-    super(`Message ${uid} part ${part} is unavailable: the server returned no content.`, {
-      code: "connector.request_failed",
-    })
-  }
-}
-
+/**
+ * Attributes a transport failure to the operation that raised it, with the account password
+ * scrubbed from whatever the server said. An IMAP failure passes through untouched: restating it
+ * would only bury the code and message the connector already chose.
+ */
 export function imapOperationError(
   operation: string,
   error: unknown,
   secrets: readonly string[] = []
-): ImapConnectorError {
-  if (error instanceof ImapConnectorError) {
+): SixbError {
+  if (isSixbError(error)) {
     return error
   }
 
   const detail = sanitizedErrorMessage(error, secrets)
   const suffix = detail ? `: ${detail}` : "."
-  return new ImapConnectorError(`${operation} failed${suffix}`, { cause: error })
+  return imapConnectorError(`${operation} failed${suffix}`, { cause: error })
 }
 
 function sanitizedErrorMessage(error: unknown, secrets: readonly string[]): string {

@@ -1,7 +1,5 @@
-import {
-  MaterializationConflictError,
-  MaterializationValidationError,
-} from "../../../materialization/errors"
+import { SixbError } from "../../../errors"
+import { materializationConflict } from "../../../materialization/errors"
 import type {
   ClaimedOntologyOutboxRow,
   ClaimOntologyOutboxInput,
@@ -38,8 +36,9 @@ export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
     const leaseExpiresAt = assertTimestamp(input.leaseExpiresAt, "Ontology outbox lease expiry")
     assertNonblank(input.leaseId, "Ontology outbox lease id")
     if (leaseExpiresAt <= now) {
-      throw new MaterializationValidationError(
-        "Ontology outbox lease expiry must be later than the claim time."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Ontology outbox lease expiry must be later than the claim time."
       )
     }
     const rows: OntologyOutboxRecord[] = []
@@ -152,10 +151,7 @@ export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
   private requireLease(key: string, leaseId: string) {
     const row = this.state.outbox.get(key)
     if (!row || row.leaseId !== leaseId || row.leaseExpiresAt === null) {
-      throw new MaterializationConflictError(
-        "outbox-lease",
-        "Ontology outbox lease does not match."
-      )
+      throw materializationConflict("outbox-lease", "Ontology outbox lease does not match.")
     }
     return row
   }
@@ -169,8 +165,9 @@ export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
     return ids.map((id) => {
       assertNonblank(id, "Ontology outbox event id")
       if (seen.has(id)) {
-        throw new MaterializationValidationError(
-          `Ontology outbox lease batch repeats event '${id}'.`
+        throw new SixbError(
+          "ontology.invalid_value",
+          `[Sixb] Ontology outbox lease batch repeats event '${id}'.`
         )
       }
       seen.add(id)
@@ -210,7 +207,7 @@ function comparePublishedRows(
 
 function assertPositiveLimit(limit: number): void {
   if (!Number.isSafeInteger(limit) || limit <= 0) {
-    throw new MaterializationValidationError("Ontology outbox limit must be positive.")
+    throw new SixbError("ontology.invalid_value", "[Sixb] Ontology outbox limit must be positive.")
   }
 }
 
@@ -219,7 +216,7 @@ function assertPairedLease(row: {
   readonly leaseExpiresAt: string | null
 }): void {
   if ((row.leaseId === null) !== (row.leaseExpiresAt === null)) {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "outbox-lease",
       "Ontology outbox row has an unpaired lease lifecycle."
     )

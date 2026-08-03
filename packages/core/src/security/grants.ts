@@ -10,11 +10,11 @@
 import type { ActionDefinition } from "../actions/types"
 import type { AgentDefinition } from "../agents/types"
 import type { DatasetDefinition } from "../datasets"
+import { SixbError } from "../errors"
 import type { ObjectType } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows/types"
-import { SecurityValidationError } from "./errors"
 import {
   type BreadthSelector,
   type BreadthTarget,
@@ -71,7 +71,8 @@ function targetOfDefinition<TTarget extends BreadthTarget>(
     if (!isAllowedTarget(discriminated, allowedTargets)) {
       // "one targeting x", not "a x definition": four of the eight targets start with a vowel, and
       // this string ships in a release. Same reason the selector branch below writes no article.
-      throw new SecurityValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `[Sixb] ${label} accepts ${allowedTargets.join(" or ")} definitions, but received one targeting ${discriminated}.`
       )
     }
@@ -82,7 +83,8 @@ function targetOfDefinition<TTarget extends BreadthTarget>(
   const only = candidates.length === 1 ? candidates[0] : undefined
   if (only) return only
 
-  throw new SecurityValidationError(
+  throw new SixbError(
+    "runtime.invalid_definition",
     `[Sixb] ${label} accepts ${allowedTargets.join(" or ")} definitions, but received one Sixb could not classify.`
   )
 }
@@ -112,7 +114,8 @@ function resolveGrant<TDefinition extends { readonly id?: unknown }, TTarget ext
 ): { readonly target: TTarget; readonly selection: Selection } {
   if (isBreadthSelector(input)) {
     if (!isAllowedTarget(input.target, allowedTargets)) {
-      throw new SecurityValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `[Sixb] ${label} accepts ${allowedTargets.join(" or ")} selectors, but received every.${input.target}().`
       )
     }
@@ -129,7 +132,8 @@ function resolveGrant<TDefinition extends { readonly id?: unknown }, TTarget ext
       continue
     }
     if (itemTarget !== target) {
-      throw new SecurityValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `[Sixb] ${label} requires one target per grant, but received both ${target} and ${itemTarget} definitions. Use one grant each.`
       )
     }
@@ -137,7 +141,10 @@ function resolveGrant<TDefinition extends { readonly id?: unknown }, TTarget ext
   // Checked after the loop rather than before it: an empty list leaves `target` unset, which is the
   // same condition, and proving it here is what lets the return type stay cast-free.
   if (target === undefined) {
-    throw new SecurityValidationError(`[Sixb] ${label} requires at least one definition.`)
+    throw new SixbError(
+      "runtime.invalid_definition",
+      `[Sixb] ${label} requires at least one definition.`
+    )
   }
 
   // Dedupe explicit ids up front; resolution would dedupe via Set anyway.

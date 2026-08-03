@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto"
-import {
-  type CreateSandboxOptions,
-  type Sandbox,
-  SandboxError,
-  type SandboxFactory,
-  type SandboxNetworkPolicy,
+import type {
+  CreateSandboxOptions,
+  Sandbox,
+  SandboxFactory,
+  SandboxNetworkPolicy,
 } from "@sixb/core"
+import { isSixbError, SixbError } from "@sixb/core/errors"
 import { Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import { toVercelNetworkPolicy } from "./network"
 import {
@@ -119,10 +119,13 @@ export class VercelSandboxFactory implements SandboxFactory {
       return sandbox
     } catch (error) {
       await client?.delete().catch(() => {})
-      if (error instanceof SandboxError) {
+      if (isSixbError(error, "sandbox.failed")) {
         throw error
       }
-      throw new SandboxError(`[Sandbox] vercel create failed: ${errorMessage(error)}`)
+      throw new SixbError(
+        "sandbox.failed",
+        `[Sandbox] vercel create failed: ${errorMessage(error)}`
+      )
     }
   }
 }
@@ -191,7 +194,8 @@ function validateSourceOptions(options: VercelSandboxFactoryOptions): void {
     options.runtime !== undefined ? "runtime" : undefined,
   ].filter((value): value is string => value !== undefined)
   if (conflicts.length > 0) {
-    throw new SandboxError(
+    throw new SixbError(
+      "sandbox.failed",
       `[Sandbox] Vercel snapshotId cannot be combined with ${conflicts.join(", ")}.`
     )
   }
@@ -204,7 +208,8 @@ function resolveCredentials(
     return {}
   }
   if (!credentials.token || !credentials.teamId || !credentials.projectId) {
-    throw new SandboxError(
+    throw new SixbError(
+      "sandbox.failed",
       "[Sandbox] Vercel sandbox credentials require token, teamId, and projectId. Omit credentials to let the Vercel SDK resolve OIDC/env credentials."
     )
   }
@@ -231,7 +236,8 @@ async function ensureWorkingDirectory(input: {
   })
   const finished = await command.wait()
   if (finished.exitCode !== 0) {
-    throw new SandboxError(
+    throw new SixbError(
+      "sandbox.failed",
       `[Sandbox] vercel working directory setup failed: ${await safeStderr(finished)}`
     )
   }

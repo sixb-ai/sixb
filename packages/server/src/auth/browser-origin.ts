@@ -5,7 +5,7 @@ import {
   isValidAuthSessionAudience,
   resolveAuthSessionAudience,
 } from "@sixb/core"
-import { SixbAuthorizationError } from "@sixb/core/errors"
+import { SixbError } from "@sixb/core/errors"
 
 export interface SixbBrowserOrigin {
   readonly origin: string
@@ -70,14 +70,6 @@ export type ResolveAuthRedirectContext = (
   request: Request,
   input: AuthRedirectInput
 ) => AuthRedirectContext
-
-export class BrowserOriginError extends SixbAuthorizationError {
-  override readonly name = "BrowserOriginError"
-
-  constructor(message: string) {
-    super("auth.origin_rejected", message)
-  }
-}
 
 export function resolveApiBrowserPolicy(
   policy: SixbApiBrowserPolicy
@@ -159,7 +151,10 @@ export function resolveApiBrowserAuthContext(
     return { audience: policy.apiOriginAudience, browserOrigin: origin, absoluteReturnTo: true }
   }
 
-  throw new BrowserOriginError(`[SixbServer] Browser origin '${origin}' is not allowed.`)
+  throw new SixbError(
+    "auth.origin_rejected",
+    `[SixbServer] Browser origin '${origin}' is not allowed.`
+  )
 }
 
 export function isAllowedApiBrowserOrigin(
@@ -227,7 +222,10 @@ export function resolveApiBrowserInvitationRedirectContext(
 
   const destination = policy.allowedOrigins.find((entry) => entry.audience === input.destinationId)
   if (!destination) {
-    throw new BrowserOriginError("[SixbServer] Invitation destination is not allowed.")
+    throw new SixbError(
+      "auth.origin_rejected",
+      "[SixbServer] Invitation destination is not allowed."
+    )
   }
   assertInvitationReturnToOrigin(input.returnTo, destination.origin)
 
@@ -273,13 +271,16 @@ function assertInvitationReturnToOrigin(
     // Fall through to the same public validation error as an origin mismatch.
   }
 
-  throw new BrowserOriginError("[SixbServer] Invitation return target is not allowed.")
+  throw new SixbError(
+    "auth.origin_rejected",
+    "[SixbServer] Invitation return target is not allowed."
+  )
 }
 
 function resolveRequiredAuthAudience(value: string | null | undefined): AuthSessionAudience {
   const audience = value?.trim()
   if (!audience || !isValidAuthSessionAudience(audience)) {
-    throw new BrowserOriginError("[SixbServer] Auth audience is invalid or missing.")
+    throw new SixbError("auth.origin_rejected", "[SixbServer] Auth audience is invalid or missing.")
   }
 
   return audience
@@ -300,23 +301,26 @@ function resolveApiBrowserReturnTo(
       : "")
 
   if (!value) {
-    throw new BrowserOriginError("[SixbServer] Auth return target is required.")
+    throw new SixbError("auth.origin_rejected", "[SixbServer] Auth return target is required.")
   }
 
   let url: URL
   try {
     url = new URL(value)
   } catch {
-    throw new BrowserOriginError("[SixbServer] Auth return target must be an absolute URL.")
+    throw new SixbError(
+      "auth.origin_rejected",
+      "[SixbServer] Auth return target must be an absolute URL."
+    )
   }
 
   if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
-    throw new BrowserOriginError("[SixbServer] Auth return target is not allowed.")
+    throw new SixbError("auth.origin_rejected", "[SixbServer] Auth return target is not allowed.")
   }
 
   const returnAudience = resolveReturnToAudience(policy, request, url.origin)
   if (returnAudience !== audience) {
-    throw new BrowserOriginError("[SixbServer] Auth return target is not allowed.")
+    throw new SixbError("auth.origin_rejected", "[SixbServer] Auth return target is not allowed.")
   }
 
   return url.toString()
@@ -348,7 +352,7 @@ function normalizeRequestOrigin(request: Request): string | null {
   try {
     return normalizeHttpOrigin(origin, "Origin header")
   } catch {
-    throw new BrowserOriginError("[SixbServer] Origin header is not allowed.")
+    throw new SixbError("auth.origin_rejected", "[SixbServer] Origin header is not allowed.")
   }
 }
 

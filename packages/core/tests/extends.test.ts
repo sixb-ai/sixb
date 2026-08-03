@@ -1,13 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { ObjectType } from "../src"
-import {
-  defineObjectType,
-  link,
-  MaterializationValidationError,
-  OntologyValidationError,
-  prop,
-  Sixb,
-} from "../src"
+import { defineObjectType, link, prop, Sixb } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 // ── Fixtures ────────────────────────────────────────────────
@@ -244,7 +237,7 @@ describe("Sixb extends validation", () => {
         ontology: [Orphan],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(OntologyValidationError)
+    }).toThrow(expect.objectContaining({ code: "ontology.invalid_value" }))
     expect(() => {
       new Sixb({
         ontology: [Orphan],
@@ -266,7 +259,7 @@ describe("Sixb extends validation", () => {
         ontology: [Orphan],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(OntologyValidationError)
+    }).toThrow(expect.objectContaining({ code: "ontology.invalid_value" }))
     expect(() => {
       new Sixb({
         ontology: [Orphan],
@@ -296,7 +289,7 @@ describe("Sixb extends validation", () => {
         ontology: [A, B],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(OntologyValidationError)
+    }).toThrow(expect.objectContaining({ code: "ontology.invalid_value" }))
     expect(() => {
       new Sixb({
         ontology: [A, B],
@@ -419,7 +412,7 @@ describe("multi-parent subtype queries", () => {
         ontology: [BadParent],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(OntologyValidationError)
+    }).toThrow(expect.objectContaining({ code: "ontology.invalid_value" }))
     expect(() => {
       new Sixb({
         ontology: [BadParent],
@@ -442,7 +435,7 @@ describe("multi-parent subtype queries", () => {
         ontology: [BadParent2],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(OntologyValidationError)
+    }).toThrow(expect.objectContaining({ code: "ontology.invalid_value" }))
     expect(() => {
       new Sixb({
         ontology: [BadParent2],
@@ -556,7 +549,7 @@ describe("link target validation", () => {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
     await expect(
       sixb.upsertLink("HVACEquipment", "hvac-1", "feeds", {
         targetTypeId: "Location",
@@ -667,7 +660,7 @@ describe("link target validation", () => {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
     await expect(
       sixb.removeLink("HVACEquipment", "hvac-1", "feeds", {
         targetTypeId: "Location",
@@ -692,7 +685,7 @@ describe("upsert with inherited properties", () => {
         // @ts-expect-error intentionally missing required 'name' property
         properties: { id: "hvac-1", capacity: 100 },
       })
-    ).rejects.toBeInstanceOf(MaterializationValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
     await expect(
       sixb.objects(HVACEquipment).upsert({
         // @ts-expect-error intentionally missing required 'name' property

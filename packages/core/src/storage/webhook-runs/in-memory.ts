@@ -1,3 +1,4 @@
+import { SixbError } from "../../errors"
 import {
   cloneRecord,
   compareStartedAt,
@@ -7,7 +8,6 @@ import {
   storageKey,
   toStatusSet,
 } from "../run-listing"
-import { WebhookRunError } from "./errors"
 import type {
   FinishWebhookRunInput,
   ListWebhookRunsInput,
@@ -34,7 +34,7 @@ export class InMemoryWebhookRunStorage implements WebhookRunStorage {
   async start(input: StartWebhookRunInput): Promise<WebhookRunRecord> {
     const key = storageKey(input.projectId, input.id)
     if (this.runs.has(key)) {
-      throw new WebhookRunError(
+      throw new SixbError(
         "storage.conflict",
         `[Sixb] Webhook run '${input.id}' already exists for project '${input.projectId}'.`
       )
@@ -116,14 +116,14 @@ export class InMemoryWebhookRunStorage implements WebhookRunStorage {
   private requireRunningWebhookRun(projectId: string, id: string): WebhookRunRecord {
     const record = this.runs.get(storageKey(projectId, id))
     if (!record) {
-      throw new WebhookRunError(
+      throw new SixbError(
         "webhook.run_not_found",
         `[Sixb] Webhook run '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (record.status !== "running") {
-      throw new WebhookRunError(
+      throw new SixbError(
         "storage.conflict",
         `[Sixb] Webhook run '${id}' for project '${projectId}' is already terminal.`
       )

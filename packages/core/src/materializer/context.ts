@@ -1,4 +1,4 @@
-import { MaterializationValidationError } from "../materialization/errors"
+import { SixbError } from "../errors"
 import type { OntologyRegistry } from "../ontology"
 import type { ProjectionRegistry } from "../projections/registry"
 import { computeOntologyRevision } from "../projections/revision"
@@ -39,21 +39,29 @@ export function createMaterializerContext(input: {
   readonly dependencies?: OntologyMaterializerDependencies
 }): MaterializerContext {
   if (input.projectId.trim().length === 0) {
-    throw new MaterializationValidationError("Materializer project id must be nonblank.")
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Materializer project id must be nonblank."
+    )
   }
   if (!input.storage?.ontology) {
-    throw new MaterializationValidationError("Storage does not provide ontology capabilities.")
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Storage does not provide ontology capabilities."
+    )
   }
   if (computeOntologyRevision(input.ontology) !== input.projections.ontologyRevision) {
-    throw new MaterializationValidationError(
-      "Materializer Ontology does not match the Ontology pinned by its projection registry."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Materializer Ontology does not match the Ontology pinned by its projection registry."
     )
   }
   const dependencies = input.dependencies ?? {}
   const maxSerializationRetries = dependencies.maxSerializationRetries ?? 2
   if (!Number.isSafeInteger(maxSerializationRetries) || maxSerializationRetries < 0) {
-    throw new MaterializationValidationError(
-      "Materializer serialization retry count must be a nonnegative safe integer."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Materializer serialization retry count must be a nonnegative safe integer."
     )
   }
   return {

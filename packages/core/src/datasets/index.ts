@@ -1,5 +1,4 @@
 export { col, defineDataset } from "./builders"
-export { DatasetValidationError } from "./errors"
 export type {
   DatasetColumnDefinition,
   DatasetColumnDefinitionOf,

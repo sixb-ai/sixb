@@ -1,5 +1,5 @@
 export type { AuthStorageErrorReason } from "./errors"
-export { AuthStorageError } from "./errors"
+export { authStorageError } from "./errors"
 export { InMemoryAuthStorage } from "./in-memory"
 export type {
   AccessTokenRecord,

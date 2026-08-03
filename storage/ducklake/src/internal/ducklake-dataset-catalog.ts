@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto"
 import type { DatasetDefinition, DatasetSchema } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type { DatasetDefinitionUpdatePlan, DatasetSchemaUpdatePlan } from "@sixb/core/lake-storage"
-import { LakeStorageError, planDatasetDefinitionUpdate } from "@sixb/core/lake-storage"
+import { planDatasetDefinitionUpdate } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { getBigIntLike, getBoolean, getOptionalBigIntLike, getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
@@ -114,7 +115,8 @@ export class DuckLakeDatasetCatalog {
 
     if (failures.length > 0) {
       const details = failures.join("\n")
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbLake] Lake dataset definition check failed for ${failures.length} dataset(s).\n${details}`
       )
     }
@@ -185,7 +187,8 @@ export class DuckLakeDatasetCatalog {
 
     const columns = await this.readDatasetColumnsAtSnapshot(runtime, tableName, tableId, snapshotId)
     if (columns.length === 0) {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbDuckLake] Could not reconstruct schema for dataset '${datasetId}' at DuckLake snapshot '${snapshotId}'.`
       )
     }
@@ -195,7 +198,8 @@ export class DuckLakeDatasetCatalog {
 
   assertSchema(definition: DatasetDefinition): void {
     if (!definition.schema) {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbDuckLake] Dataset '${definition.id}' requires a schema for DuckLake storage.`
       )
     }
@@ -283,7 +287,8 @@ export class DuckLakeDatasetCatalog {
       )
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbDuckLake] Dataset '${definition.id}' cannot apply partitionBy because DuckLake rejected ALTER TABLE SET PARTITIONED BY: ${message}`
       )
     }
@@ -358,6 +363,9 @@ export class DuckLakeDatasetCatalog {
 
 function assertDuckLakeSnapshotId(snapshotId: string): void {
   if (!/^\d+$/.test(snapshotId)) {
-    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`)
+    throw new SixbError(
+      "storage.lake_failed",
+      `[SixbDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`
+    )
   }
 }

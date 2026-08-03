@@ -1,16 +1,18 @@
+import type { ProjectionDefinition } from "@sixb/core"
+import { isSixbError } from "@sixb/core/errors"
 import {
-  isMaterializationConflictError,
-  MaterializationCancellationError,
-  MaterializationValidationError,
-  type ProjectionDefinition,
-} from "@sixb/core"
-import {
-  MaterializationObjectNotFoundError,
+  isMaterializationCancellation,
+  materializationConflictKind,
   type ProjectionRunTerminalDecision,
 } from "@sixb/core/internal/materialization"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
-import { type ProjectionRunRecord, toSixbFailure } from "@sixb/core/storage"
-import { ProjectionWorkerPermanentError } from "./errors"
+import {
+  type MissingObjectRef,
+  missingObjectRef,
+  type ProjectionRunRecord,
+  toSixbFailure,
+} from "@sixb/core/storage"
+import { isPermanentProjectionWorkerError, projectionWorkerPermanentError } from "./errors"
 import {
   assertProjectionJobId,
   type ValidatedProjectionJob,
@@ -44,7 +46,7 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
     const succeeded = await findSucceededRun(input)
     if (succeeded) return terminalResult(succeeded)
 
-    if (isExplicitCancellation(error)) {
+    if (isMaterializationCancellation(error)) {
       await finishProjection(input, execution, {
         protocol: input.job.protocol,
         status: "cancelled",
@@ -92,7 +94,7 @@ async function findMatchingTerminalRun(
   assertRunMatchesJob(run, input.job)
   if (run.status === "running") return null
   if (run.status === "succeeded") return run
-  throw new ProjectionWorkerPermanentError(
+  throw projectionWorkerPermanentError(
     `[SixbProjectionWorker] Projection run '${run.id}' is already '${run.status}'.`
   )
 }
@@ -244,7 +246,7 @@ function assertRunMatchesJob(run: ProjectionRunRecord, job: ProjectionJob): void
     run.identity.projectionRevision === job.projectionRevision &&
     run.identity.ownershipHash === job.ownershipHash
   if (matches) return
-  throw new ProjectionWorkerPermanentError(
+  throw projectionWorkerPermanentError(
     `[SixbProjectionWorker] Projection run '${run.id}' has a different durable identity.`
   )
 }
@@ -258,51 +260,37 @@ async function isPermanentFailure(
   execution: ClaimedProjectionExecution,
   error: unknown
 ): Promise<boolean> {
-  if (error instanceof MaterializationObjectNotFoundError) {
-    return missingTargetWaitedLongEnough(input, execution, error)
-  }
+  const missing = missingObjectRef(error)
+  if (missing) return missingTargetWaitedLongEnough(input, execution, missing)
   return isPermanentSyncFailure(error)
 }
 
 function isPermanentSyncFailure(error: unknown): boolean {
-  if (
-    error instanceof ProjectionWorkerPermanentError ||
-    error instanceof MaterializationValidationError
-  ) {
+  if (isPermanentProjectionWorkerError(error) || isSixbError(error, "ontology.invalid_value")) {
     return true
   }
-  if (!isMaterializationConflictError(error)) return false
-  return (
-    error.kind === "idempotency" ||
-    error.kind === "projection-fence" ||
-    error.kind === "run-correlation"
-  )
-}
-
-function isExplicitCancellation(error: unknown): error is MaterializationCancellationError {
-  return error instanceof MaterializationCancellationError
+  const kind = materializationConflictKind(error)
+  return kind === "idempotency" || kind === "projection-fence" || kind === "run-correlation"
 }
 
 /**
  * The worker's read, on the one path where no run exists — `failureDecision` reads the run first
  * and retries whatever it left `running`. A target cannot be missing from a run that never
- * started, so there is no wait to measure.
+ * started, so there is no wait to measure. Nothing excludes that case here because nothing has to:
+ * a missing target reports `storage.object_not_found`, which is not one of the codes above.
  */
 export function isPermanentProjectionFailure(error: unknown): boolean {
-  return (
-    (!(error instanceof MaterializationObjectNotFoundError) && isPermanentSyncFailure(error)) ||
-    isExplicitCancellation(error)
-  )
+  return isPermanentSyncFailure(error) || isMaterializationCancellation(error)
 }
 
 /**
  * Whether a telemetry target has been missing long enough to give up on.
  *
- * `MaterializationObjectNotFoundError` extends `MaterializationValidationError`, which is the
- * right reading for a caller appending telemetry by hand and the wrong one for a projection: its
- * dataset can legitimately be materialized before the objects it references. Failing on the first
- * delivery turned a wait of milliseconds into a permanent hole — nothing retries a failed run, and
- * re-running the sync produces no new version when the source has not changed.
+ * A missing target is a 404 the caller owns when it appends telemetry by hand, and not a verdict at
+ * all for a projection: its dataset can legitimately be materialized before the objects it
+ * references. Failing on the first delivery turned a wait of milliseconds into a permanent hole —
+ * nothing retries a failed run, and re-running the sync produces no new version when the source has
+ * not changed.
  *
  * The first delivery to find this object missing records the wait; later ones read it back and
  * compare. The batch it names is the run's own next ordinal, because the batch that failed is by
@@ -311,7 +299,7 @@ export function isPermanentProjectionFailure(error: unknown): boolean {
 async function missingTargetWaitedLongEnough(
   input: RunProjectionJobInput,
   execution: ClaimedProjectionExecution,
-  error: MaterializationObjectNotFoundError
+  target: MissingObjectRef
 ): Promise<boolean> {
   // Read and write both propagate. A storage failure here is not a wait that has run out: it
   // means the wait was never written down, and swallowing it would restart the window on every
@@ -327,22 +315,22 @@ async function missingTargetWaitedLongEnough(
   const waiting = run.missingTarget
   if (
     waiting &&
-    waiting.objectTypeId === error.objectTypeId &&
-    waiting.objectId === error.primaryId &&
+    waiting.objectTypeId === target.objectTypeId &&
+    waiting.objectId === target.primaryId &&
     waiting.batchOrdinal === checkpoint.nextBatchOrdinal
   ) {
     const now = input.now?.() ?? Date.now()
     return now - waiting.firstSeenAt.getTime() >= MISSING_TARGET_GRACE_MS
   }
 
-  await startMissingTargetWait(input, execution, error, checkpoint.nextBatchOrdinal)
+  await startMissingTargetWait(input, execution, target, checkpoint.nextBatchOrdinal)
   return false
 }
 
 async function startMissingTargetWait(
   input: RunProjectionJobInput,
   execution: ClaimedProjectionExecution,
-  error: MaterializationObjectNotFoundError,
+  target: MissingObjectRef,
   batchOrdinal: number
 ): Promise<void> {
   try {
@@ -352,8 +340,8 @@ async function startMissingTargetWait(
       executionToken: execution.execution.executionToken,
       identity: input.job,
       missingTarget: {
-        objectTypeId: error.objectTypeId,
-        objectId: error.primaryId,
+        objectTypeId: target.objectTypeId,
+        objectId: target.primaryId,
         batchOrdinal,
         firstSeenAt: new Date(input.now?.() ?? Date.now()),
       },
@@ -367,5 +355,5 @@ async function startMissingTargetWait(
 }
 
 function isLostExecution(error: unknown): boolean {
-  return isMaterializationConflictError(error) && error.kind === "execution-lost"
+  return materializationConflictKind(error) === "execution-lost"
 }

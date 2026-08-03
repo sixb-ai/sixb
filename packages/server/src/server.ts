@@ -1,6 +1,7 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
 import type { OntologyMaintenanceHandle, OntologySource, Sixb } from "@sixb/core"
+import { isSixbError } from "@sixb/core/errors"
 import { CSRF_HEADER_NAME } from "@sixb/core/internal/auth"
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
@@ -9,7 +10,6 @@ import {
   type AuthInvitationDestinationOptions,
   type AuthInvitationRedirectContext,
   type AuthInvitationRedirectInput,
-  BrowserOriginError,
   createApiBrowserAuthContextResolver,
   createApiBrowserAuthRedirectContextResolver,
   getApiBrowserInvitationDestinationOptions,
@@ -337,7 +337,7 @@ function rejectDisallowedBrowserOrigin(
       return undefined
     }
   } catch (error) {
-    if (!(error instanceof BrowserOriginError)) {
+    if (!isSixbError(error, "auth.origin_rejected")) {
       throw error
     }
   }

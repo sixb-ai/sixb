@@ -1,10 +1,7 @@
+import { SixbError } from "../errors"
 import type { ObjectType } from "../ontology"
 import type { OntologyRegistry } from "../ontology/registry"
-import {
-  ActionDefinitionError,
-  effectsWithoutEditsMessage,
-  missingActionMutationMessage,
-} from "./errors"
+import { effectsWithoutEditsMessage, missingActionMutationMessage } from "./errors"
 import type { ActionDefinition, ObjectActionDefinition } from "./types"
 import { isObjectActionDefinition } from "./validation"
 
@@ -22,12 +19,14 @@ export class ActionRegistry {
       if (previous) {
         const chainDuplicate = this.getInheritanceDuplicate(action, previous)
         if (chainDuplicate) {
-          throw new ActionDefinitionError(
+          throw new SixbError(
+            "runtime.invalid_definition",
             `Duplicate action id "${action.id}" in inheritance chain of "${chainDuplicate.objectTypeId}": defined on both "${chainDuplicate.firstTargetId}" and "${chainDuplicate.secondTargetId}".`
           )
         }
 
-        throw new ActionDefinitionError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `Duplicate action id "${action.id}" declared in multiple files.`
         )
       }
@@ -43,7 +42,8 @@ export class ActionRegistry {
       const objectType = action.binding.objectType
       const target = this.ontology.getObjectTypeById(objectType.id)
       if (!target) {
-        throw new ActionDefinitionError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `Action "${action.id}" targets unknown object type "${objectType.id}". Add the object type to ontology before registering the action.`
         )
       }
@@ -60,11 +60,11 @@ export class ActionRegistry {
     const hasEffects = action.phases.effects !== undefined
 
     if (!hasWriteback && !hasEdits) {
-      throw new ActionDefinitionError(missingActionMutationMessage(action.id))
+      throw new SixbError("runtime.invalid_definition", missingActionMutationMessage(action.id))
     }
 
     if (hasEffects && !hasEdits) {
-      throw new ActionDefinitionError(effectsWithoutEditsMessage(action.id))
+      throw new SixbError("runtime.invalid_definition", effectsWithoutEditsMessage(action.id))
     }
   }
 

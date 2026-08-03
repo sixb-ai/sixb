@@ -1,8 +1,9 @@
-export type { ObjectQueryPlanningIssue } from "./errors"
+export type { ObjectQueryIssue, ObjectQueryPlanningIssue } from "./errors"
 export {
-  ObjectQueryExecutionError,
   ObjectQueryPlanningError,
   ObjectQueryValidationError,
+  objectQueryExecutionFailed,
+  objectQueryIssues,
 } from "./errors"
 export type {
   ExecuteObjectCountInput,

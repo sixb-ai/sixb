@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { QueueError } from "../queues/errors"
 import type { Queues } from "../queues/types"
 
 export interface QueueContractSuiteOptions {
@@ -149,7 +148,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
               projectId: "   ",
               jobs: [{ type: "sync.run.requested", payload: { syncId: "sync-1" } }],
             })
-          ).rejects.toBeInstanceOf(QueueError)
+          ).rejects.toHaveProperty("code", "runtime.invalid_input")
         })
       })
     })
@@ -208,10 +207,10 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
 
           await expect(
             queues.syncRuns.claim({ projectId: "project-a", workerId: "w-1", leaseMs: 0 })
-          ).rejects.toBeInstanceOf(QueueError)
+          ).rejects.toHaveProperty("code", "runtime.invalid_input")
           await expect(
             queues.syncRuns.claim({ projectId: "project-a", workerId: "w-1", leaseMs: -1 })
-          ).rejects.toBeInstanceOf(QueueError)
+          ).rejects.toHaveProperty("code", "runtime.invalid_input")
         })
       })
 
@@ -404,7 +403,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
               jobId: job!.id,
               leaseId: "not-the-right-lease",
             })
-          ).rejects.toBeInstanceOf(QueueError)
+          ).rejects.toHaveProperty("code", "runtime.invalid_input")
         })
       })
     })
@@ -461,7 +460,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
               leaseId: claim!.leaseId,
               availableAt: "not-a-timestamp",
             })
-          ).rejects.toBeInstanceOf(QueueError)
+          ).rejects.toHaveProperty("code", "runtime.invalid_input")
         })
       })
     })
@@ -606,7 +605,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
               jobId: job!.id,
               leaseId: claim!.leaseId,
             })
-          ).rejects.toBeInstanceOf(QueueError)
+          ).rejects.toHaveProperty("code", "runtime.invalid_input")
         })
       })
     })

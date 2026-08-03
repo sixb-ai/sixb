@@ -633,8 +633,12 @@ describe("agent routes", () => {
     )
 
     expect(response.status).toBe(409)
+    // The generic message, not the provider's — that one names the thread id, the run id, and the
+    // project. `handleAgentRouteError` always meant to answer this way; before the reason moved into
+    // `details` it only recognized the failure the store threw, and `requestAgentRun` rewraps it, so
+    // this route relayed the raw text instead.
     expect(await response.json()).toEqual({
-      error: `[Sixb] Agent thread '${thread.id}' already has an active run 'run-active'.`,
+      error: "This conversation already has a response in progress",
       code: "agent.run_conflict",
     })
   })

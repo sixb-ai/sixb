@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { JsonValue } from "@sixb/core"
+import { materializationConflict } from "@sixb/core/internal/materialization"
 import {
   advanceProjectionTelemetry,
   assertGenericProgressDoesNotAdvanceTelemetry,
@@ -41,7 +42,7 @@ import type {
   TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
 } from "@sixb/core/storage"
-import { ProjectionRunError, parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { lockAdvisoryKeys, type PgStoreClient, runPgTransaction } from "./transactions"
@@ -486,7 +487,8 @@ function optionalDatabaseSafeInteger(
 function databaseSafeInteger(value: number | string | null, fieldName: string): number {
   const result = Number(value)
   if (!Number.isSafeInteger(result) || result < 0) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[SixbPg] Projection run persisted ${fieldName} is not a non-negative safe integer.`
     )
   }

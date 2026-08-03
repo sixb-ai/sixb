@@ -1,6 +1,6 @@
 import type { AuthSessionAudience } from "@sixb/core"
 import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import {
   authLockKey,
   lockAdvisoryKeys,
@@ -137,7 +137,7 @@ export class PgAuthSessionStore implements AuthSessionStore {
       const existing = await getSessionRowById(tx, params, { forUpdate: true })
 
       if (!existing) {
-        throw new AuthStorageError(
+        throw authStorageError(
           "missing_session",
           `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
         )

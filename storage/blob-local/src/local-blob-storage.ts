@@ -7,7 +7,6 @@ import type { BlobByteRange, BlobInfo, BlobStorage, FileRef } from "@sixb/core"
 import {
   assertExpectedBlobSize,
   assertValidExpectedBlobSize,
-  BlobStorageError,
   blobDigestHex,
   blobIdFromDigest,
   createFileRef,
@@ -15,6 +14,7 @@ import {
   type RangeReadableBlobStorage,
   streamBlobBody,
 } from "@sixb/core/blob-storage/server"
+import { SixbError } from "@sixb/core/errors"
 import type { LocalBlobStorageOptions } from "./types"
 
 async function pathExists(path: string): Promise<boolean> {
@@ -142,12 +142,12 @@ export class LocalBlobStorage implements BlobStorage, RangeReadableBlobStorage {
   private async requireContentPath(blobId: string): Promise<string> {
     const hex = hexFromBlobId(blobId)
     if (!hex) {
-      throw new BlobStorageError(`[BlobLocal] Invalid blob id '${blobId}'`)
+      throw new SixbError("storage.blob_failed", `[BlobLocal] Invalid blob id '${blobId}'`)
     }
 
     const contentPath = this.contentPathForHex(hex)
     if (!(await pathExists(contentPath))) {
-      throw new BlobStorageError(`[BlobLocal] Unknown blob '${blobId}'`)
+      throw new SixbError("storage.blob_failed", `[BlobLocal] Unknown blob '${blobId}'`)
     }
 
     return contentPath

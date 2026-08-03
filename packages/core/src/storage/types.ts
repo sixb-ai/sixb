@@ -33,7 +33,6 @@ export type {
   QueueActionRunInput,
   StartActionRunInput,
 } from "./action-runs"
-export { ActionRunError } from "./action-runs"
 export type {
   AgentMessageRecord,
   AgentRunExecution,
@@ -55,7 +54,7 @@ export type {
   ReclaimAgentRunInput,
   StartAgentRunInput,
 } from "./agents"
-export { AgentStorageError } from "./agents"
+export { agentStorageError, agentStorageErrorReason } from "./agents"
 export type {
   AuthGroupMembershipStore,
   AuthInvitationStore,
@@ -96,12 +95,9 @@ export type {
   UserRecord,
   UserStatus,
 } from "./auth"
-export { AuthStorageError } from "./auth"
+export { authStorageError } from "./auth"
 export type { StorageTransactionErrorOptions, StorageTransactionErrorReason } from "./errors"
-export {
-  isStorageSerializationFailure,
-  StorageTransactionError,
-} from "./errors"
+export { isStorageSerializationFailure, storageTransactionError } from "./errors"
 export type {
   CreateFileUploadSessionInput,
   FileUploadSession,
@@ -109,7 +105,7 @@ export type {
   FileUploadStatus,
   FileUploadStrategy,
 } from "./file-upload-sessions"
-export { FileUploadSessionError } from "./file-upload-sessions"
+export { fileUploadSessionError } from "./file-upload-sessions"
 export type {
   LinkDirection,
   ObjectLinkRow,
@@ -134,7 +130,6 @@ export type {
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./pipeline-runs"
-export { PipelineRunError } from "./pipeline-runs"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
   FinishProjectionRunInput,
@@ -157,7 +152,6 @@ export type {
   TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
 } from "./projection-runs"
-export { ProjectionRunError } from "./projection-runs"
 export type {
   ListActiveRuleStatesInput,
   ListActiveRuleStatesResult,
@@ -173,7 +167,6 @@ export type {
   SyncRunStatus,
   SyncRunStorage,
 } from "./sync-runs"
-export { SyncRunError } from "./sync-runs"
 export type {
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
@@ -199,7 +192,6 @@ export type {
   WebhookRunStatus,
   WebhookRunStorage,
 } from "./webhook-runs"
-export { WebhookRunError } from "./webhook-runs"
 export type {
   CancelWorkflowInterventionInput,
   CreateWorkflowInterventionInput,
@@ -212,7 +204,6 @@ export type {
   WorkflowInterventionStatus,
   WorkflowInterventionStorage,
 } from "./workflow-interventions"
-export { WorkflowInterventionError } from "./workflow-interventions"
 export type {
   CancelWorkflowAgentNodeRunInput,
   ConfirmWorkflowAgentNodeRunExecutionOwnershipInput,
@@ -250,7 +241,6 @@ export type {
   WorkflowRunStatus,
   WorkflowRunStorage,
 } from "./workflow-runs"
-export { WorkflowRunError } from "./workflow-runs"
 
 export interface StorageTransactionOptions {
   readonly isolation?: "default" | "serializable"

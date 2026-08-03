@@ -1,7 +1,7 @@
 import { isFileRef } from "../../blob-storage/validation"
+import { SixbError } from "../../errors"
 import type { ObjectFieldSchema, Schema, ValueType, ValueTypeRefSchema } from ".."
 import { isDecimalString } from "../decimal"
-import { OntologyValidationError } from "../errors"
 
 /** Recursive schema validator used by both object and link property validation. */
 export function validateSchemaValue(
@@ -15,31 +15,35 @@ export function validateSchemaValue(
       case "string":
       case "uuid": {
         if (typeof value !== "string") {
-          throw new OntologyValidationError(`[Sixb] Property ${path} must be a string`)
+          throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} must be a string`)
         }
         return
       }
       case "boolean": {
         if (typeof value !== "boolean") {
-          throw new OntologyValidationError(`[Sixb] Property ${path} must be a boolean`)
+          throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} must be a boolean`)
         }
         return
       }
       case "integer": {
         if (typeof value !== "number" || !Number.isInteger(value)) {
-          throw new OntologyValidationError(`[Sixb] Property ${path} must be an integer`)
+          throw new SixbError(
+            "ontology.invalid_value",
+            `[Sixb] Property ${path} must be an integer`
+          )
         }
         return
       }
       case "double": {
         if (typeof value !== "number" || !Number.isFinite(value)) {
-          throw new OntologyValidationError(`[Sixb] Property ${path} must be numeric`)
+          throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} must be numeric`)
         }
         return
       }
       case "decimal": {
         if (!isDecimalString(value)) {
-          throw new OntologyValidationError(
+          throw new SixbError(
+            "ontology.invalid_value",
             `[Sixb] Property ${path} must be an exact decimal string`
           )
         }
@@ -48,13 +52,16 @@ export function validateSchemaValue(
       case "date":
       case "timestamp": {
         if (!(value instanceof Date) && typeof value !== "string") {
-          throw new OntologyValidationError(`[Sixb] Property ${path} must be a Date or ISO string`)
+          throw new SixbError(
+            "ontology.invalid_value",
+            `[Sixb] Property ${path} must be a Date or ISO string`
+          )
         }
         return
       }
       case "fileRef": {
         if (!isFileRef(value)) {
-          throw new OntologyValidationError(`[Sixb] Property ${path} must be a fileRef`)
+          throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} must be a fileRef`)
         }
         return
       }
@@ -63,7 +70,8 @@ export function validateSchemaValue(
 
   if (schema.type === "enum") {
     if (!schema.values.includes(value as never)) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Property ${path} must be one of: ${schema.values.join(", ")}`
       )
     }
@@ -72,7 +80,7 @@ export function validateSchemaValue(
 
   if (schema.type === "array") {
     if (!Array.isArray(value)) {
-      throw new OntologyValidationError(`[Sixb] Property ${path} must be an array`)
+      throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} must be an array`)
     }
     for (let index = 0; index < value.length; index += 1) {
       validateSchemaValue(schema.items, value[index], `${path}[${index}]`, valueTypesById)
@@ -82,7 +90,7 @@ export function validateSchemaValue(
 
   if (schema.type === "map") {
     if (!isRecord(value)) {
-      throw new OntologyValidationError(`[Sixb] Property ${path} must be an object map`)
+      throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} must be an object map`)
     }
     for (const [key, entry] of Object.entries(value)) {
       validateSchemaValue(schema.valueSchema, entry, `${path}.${key}`, valueTypesById)
@@ -92,14 +100,14 @@ export function validateSchemaValue(
 
   if (schema.type === "object") {
     if (!isRecord(value)) {
-      throw new OntologyValidationError(`[Sixb] Property ${path} must be an object`)
+      throw new SixbError("ontology.invalid_value", `[Sixb] Property ${path} must be an object`)
     }
 
     const fields = schema.properties
     const fieldIds = new Set(Object.keys(fields))
     for (const fieldId of Object.keys(value)) {
       if (!fieldIds.has(fieldId)) {
-        throw new OntologyValidationError(`[Sixb] Unknown field '${path}.${fieldId}'`)
+        throw new SixbError("ontology.invalid_value", `[Sixb] Unknown field '${path}.${fieldId}'`)
       }
     }
 
@@ -107,7 +115,10 @@ export function validateSchemaValue(
       const fieldValue = value[fieldId]
       if (fieldValue === undefined) {
         if (field.required) {
-          throw new OntologyValidationError(`[Sixb] Missing required field '${path}.${fieldId}'`)
+          throw new SixbError(
+            "ontology.invalid_value",
+            `[Sixb] Missing required field '${path}.${fieldId}'`
+          )
         }
         continue
       }
@@ -137,7 +148,7 @@ function validateFieldValue(
     if (field.nullable) {
       return
     }
-    throw new OntologyValidationError(`[Sixb] Field ${path} cannot be null`)
+    throw new SixbError("ontology.invalid_value", `[Sixb] Field ${path} cannot be null`)
   }
 
   validateSchemaValue(field.schema, value, path, valueTypesById)
@@ -162,7 +173,8 @@ export function resolveValueTypeSchema(
 ): Schema {
   const resolved = schema._resolved ?? valueTypesById.get(schema.valueTypeId)?.schema
   if (!resolved) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Unknown valueTypeRef '${schema.valueTypeId}' at ${path}`
     )
   }

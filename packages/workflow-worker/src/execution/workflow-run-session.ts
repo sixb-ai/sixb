@@ -1,4 +1,5 @@
 import type { ValueType, WorkflowDefinition } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import { resolveLogsRuntime } from "@sixb/core/internal/logging"
 import type {
   WorkflowAgentNodeDefinition,
@@ -21,7 +22,6 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { WorkflowWorkerError } from "../errors"
 import { statusForFailure, throwIfAborted, toWorkflowRunError } from "../normalize"
 import { noopWorkflowRunObserver, WorkflowRunRecorder } from "../recorder"
 import type {
@@ -117,7 +117,8 @@ export class WorkflowRunSession {
   ): Promise<WorkflowRunSession> {
     const { runtime, job } = input
     if (!job.execution) {
-      throw new WorkflowWorkerError(
+      throw new SixbError(
+        "workflow.failed",
         `[SixbWorkflowWorker] Running workflow '${job.id}' can only be recovered by a queue-owned execution.`
       )
     }
@@ -133,7 +134,8 @@ export class WorkflowRunSession {
       id: job.id,
     })
     if (run.workflowId !== workflow.id || run.status !== "running") {
-      throw new WorkflowWorkerError(
+      throw new SixbError(
+        "workflow.failed",
         `[SixbWorkflowWorker] Workflow run '${job.id}' is not a running '${workflow.id}' execution.`
       )
     }
@@ -222,7 +224,8 @@ export class WorkflowRunSession {
         !execution ||
         execution.nodeRunId !== completedNode.id
       ) {
-        throw new WorkflowWorkerError(
+        throw new SixbError(
+          "workflow.failed",
           `[SixbWorkflowWorker] Agent node '${completedNode.id}' does not belong to workflow run '${run.id}'.`
         )
       }
@@ -251,12 +254,14 @@ export class WorkflowRunSession {
         }
       }
       if (run.status !== "waiting" || completedNode.status !== "succeeded") {
-        throw new WorkflowWorkerError(
+        throw new SixbError(
+          "workflow.failed",
           `[SixbWorkflowWorker] Workflow run '${job.id}' and agent node '${completedNode.id}' must be waiting/succeeded to resume.`
         )
       }
       if (execution.status !== "succeeded" || !completedNode.output) {
-        throw new WorkflowWorkerError(
+        throw new SixbError(
+          "workflow.failed",
           `[SixbWorkflowWorker] Agent execution '${completedNode.id}' must have a validated output to resume.`
         )
       }
@@ -319,7 +324,8 @@ export class WorkflowRunSession {
     const workflowInterventions = runtime.storage.workflowInterventions
 
     if (!workflowInterventions) {
-      throw new WorkflowWorkerError(
+      throw new SixbError(
+        "workflow.failed",
         `[SixbWorkflowWorker] Workflow '${job.workflowId}' resume requires storage.workflowInterventions.`
       )
     }
@@ -372,19 +378,22 @@ export class WorkflowRunSession {
     }
 
     if (run.status !== "waiting") {
-      throw new WorkflowWorkerError(
+      throw new SixbError(
+        "workflow.failed",
         `[SixbWorkflowWorker] Workflow run '${job.id}' must be waiting to resume.`
       )
     }
 
     if (waitingNode.status !== "waiting") {
-      throw new WorkflowWorkerError(
+      throw new SixbError(
+        "workflow.failed",
         `[SixbWorkflowWorker] Workflow node run '${waitingNode.id}' must be waiting to resume.`
       )
     }
 
     if (intervention.status !== "submitted" || !intervention.response) {
-      throw new WorkflowWorkerError(
+      throw new SixbError(
+        "workflow.failed",
         `[SixbWorkflowWorker] Workflow intervention '${intervention.id}' must be submitted to resume.`
       )
     }
@@ -612,7 +621,10 @@ function requireWorkflow(
   job: { readonly workflowId: string }
 ): WorkflowDefinition {
   if (!workflow) {
-    throw new WorkflowWorkerError(`[SixbWorkflowWorker] Unknown workflow '${job.workflowId}'.`)
+    throw new SixbError(
+      "workflow.failed",
+      `[SixbWorkflowWorker] Unknown workflow '${job.workflowId}'.`
+    )
   }
 
   return workflow
@@ -629,7 +641,8 @@ async function requireInterventionRecord(input: {
   })
 
   if (!intervention) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow intervention '${input.id}' not found.`
     )
   }
@@ -648,7 +661,10 @@ async function requireWorkflowRun(input: {
   })
 
   if (!run) {
-    throw new WorkflowWorkerError(`[SixbWorkflowWorker] Workflow run '${input.id}' not found.`)
+    throw new SixbError(
+      "workflow.failed",
+      `[SixbWorkflowWorker] Workflow run '${input.id}' not found.`
+    )
   }
 
   return run
@@ -665,7 +681,10 @@ async function requireWorkflowNodeRun(input: {
   })
 
   if (!node) {
-    throw new WorkflowWorkerError(`[SixbWorkflowWorker] Workflow node run '${input.id}' not found.`)
+    throw new SixbError(
+      "workflow.failed",
+      `[SixbWorkflowWorker] Workflow node run '${input.id}' not found.`
+    )
   }
 
   return node
@@ -679,7 +698,8 @@ function assertResumeMatchesRun(input: {
   readonly waitingNode: WorkflowNodeRunRecord
 }): void {
   if (input.run.workflowId !== input.workflow.id || input.job.workflowId !== input.workflow.id) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow resume job for '${input.job.workflowId}' does not match run '${input.run.workflowId}'.`
     )
   }
@@ -688,7 +708,8 @@ function assertResumeMatchesRun(input: {
     input.intervention.workflowId !== input.workflow.id ||
     input.intervention.workflowRunId !== input.job.id
   ) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow intervention '${input.intervention.id}' does not match run '${input.job.id}'.`
     )
   }
@@ -698,7 +719,8 @@ function assertResumeMatchesRun(input: {
     input.waitingNode.workflowRunId !== input.job.id ||
     input.waitingNode.id !== input.intervention.nodeRunId
   ) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow node run '${input.waitingNode.id}' does not match intervention '${input.intervention.id}'.`
     )
   }
@@ -716,7 +738,8 @@ function requireInterventionNode(
     node.id !== intervention.nodeId ||
     node.key !== intervention.nodeKey
   ) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow '${workflow.id}' does not contain intervention node '${intervention.nodeId}' at index ${intervention.nodeIndex}.`
     )
   }
@@ -735,7 +758,8 @@ function requireAgentNode(
     node.id !== nodeRun.nodeId ||
     node.key !== nodeRun.nodeKey
   ) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow '${workflow.id}' does not contain agent node '${nodeRun.nodeId}' at index ${nodeRun.nodeIndex}.`
     )
   }
@@ -765,7 +789,8 @@ function reconstructWorkflowState(input: {
     const node = input.workflow.nodes[nodeIndex]
     const nodeRun = nodeRunsByIndex.get(nodeIndex)
     if (!node || !nodeRun) {
-      throw new WorkflowWorkerError(
+      throw new SixbError(
+        "workflow.failed",
         `[SixbWorkflowWorker] Workflow run '${input.run.id}' is missing node run at index ${nodeIndex}.`
       )
     }
@@ -790,7 +815,8 @@ function applyCompletedNodeToState(input: {
   readonly valueTypesById: ReadonlyMap<string, ValueType>
 }): void {
   if (input.nodeRun.status !== "succeeded") {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow node run '${input.nodeRun.id}' must be succeeded to reconstruct workflow state.`
     )
   }
@@ -873,7 +899,8 @@ function analyzeRunningWorkflowHistory(input: {
       continue
     }
 
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Running workflow '${input.workflow.id}' has an unrecoverable node '${nodeRun.id}' in status '${nodeRun.status}'.`
     )
   }
@@ -897,7 +924,8 @@ function requireWorkflowHistoryEntry(input: {
 } {
   const { workflow, node, nodeRun, expectedIndex } = input
   if (!node || !nodeRun) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow '${workflow.id}' has an incomplete node history at index ${expectedIndex}.`
     )
   }
@@ -911,7 +939,8 @@ function requireWorkflowHistoryEntry(input: {
   ].find(({ actual, expected }) => actual !== expected)
 
   if (mismatch) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow '${workflow.id}' node history has ${mismatch.field} '${mismatch.actual}' at index ${expectedIndex}; expected '${mismatch.expected}'.`
     )
   }
@@ -924,7 +953,8 @@ function createWorkflowBookkeepingError(input: {
   readonly runId: string
   readonly cause: unknown
 }): Error {
-  return new WorkflowWorkerError(
+  return new SixbError(
+    "workflow.failed",
     `[SixbWorkflowWorker] Workflow '${input.workflowId}' executed side effects, but failed to finalize workflow run '${input.runId}'. The workflow state may need repair.`,
     { cause: input.cause }
   )

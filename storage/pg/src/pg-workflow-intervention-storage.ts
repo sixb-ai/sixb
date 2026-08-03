@@ -1,3 +1,4 @@
+import { SixbError } from "@sixb/core/errors"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowInterventionInput,
@@ -10,7 +11,6 @@ import type {
   WorkflowInterventionRecord,
   WorkflowInterventionStorage,
 } from "@sixb/core/storage"
-import { WorkflowInterventionError } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
@@ -60,7 +60,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
       return rowToWorkflowInterventionRecord(row)
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new WorkflowInterventionError(
+        throw new SixbError(
           "storage.conflict",
           `[SixbPg] Workflow intervention '${input.id}' already exists for project '${input.projectId}'.`
         )
@@ -247,15 +247,15 @@ async function requirePendingIntervention(
   `
 
   if (!row) {
-    throw new WorkflowInterventionError(
+    throw new SixbError(
       "workflow.intervention_not_found",
       `[SixbPg] Workflow intervention '${id}' not found for project '${projectId}'.`
     )
   }
 
   if (row.status !== "pending") {
-    throw new WorkflowInterventionError(
-      "runtime.invalid_input",
+    throw new SixbError(
+      "storage.conflict",
       `[SixbPg] Workflow intervention '${id}' for project '${projectId}' is not pending.`
     )
   }
@@ -312,7 +312,7 @@ function rowToWorkflowInterventionRecord(
 
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
-    throw new WorkflowInterventionError(
+    throw new SixbError(
       "runtime.invalid_input",
       `[SixbPg] Workflow intervention ${fieldName} must be a non-negative integer.`
     )

@@ -1,4 +1,5 @@
 import { SYSTEM_PRINCIPAL } from "../../auth"
+import { SixbError } from "../../errors"
 import {
   cloneRecord,
   compareStartedAt,
@@ -9,7 +10,6 @@ import {
   storageKey,
   toStatusSet,
 } from "../run-listing"
-import { WorkflowRunError } from "./errors"
 import type {
   CancelWorkflowAgentNodeRunInput,
   ConfirmWorkflowAgentNodeRunExecutionOwnershipInput,
@@ -45,7 +45,7 @@ import type {
 
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
-    throw new WorkflowRunError(
+    throw new SixbError(
       "runtime.invalid_input",
       `[Sixb] Workflow run ${fieldName} must be a non-negative integer.`
     )
@@ -90,7 +90,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
   async queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord> {
     const key = storageKey(input.projectId, input.id)
     if (this.runs.has(key)) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
       )
@@ -119,14 +119,14 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     const existing = this.runs.get(key)
     if (existing) {
       if (existing.status !== "queued") {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_conflict",
           `[Sixb] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
       if (existing.workflowId !== input.workflowId) {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "runtime.invalid_input",
           `[Sixb] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflowId}'.`
         )
@@ -309,7 +309,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
   private requireExistingWorkflowRun(projectId: string, id: string): WorkflowRunRecord {
     const record = this.runs.get(storageKey(projectId, id))
     if (!record) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_not_found",
         `[Sixb] Workflow run '${id}' not found for project '${projectId}'.`
       )
@@ -321,7 +321,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
   private requireRunningWorkflowRun(projectId: string, id: string): WorkflowRunRecord {
     const record = this.requireExistingWorkflowRun(projectId, id)
     if (record.status !== "running") {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Workflow run '${id}' for project '${projectId}' must be running.`
       )
@@ -333,7 +333,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
   private requireWaitingWorkflowRun(projectId: string, id: string): WorkflowRunRecord {
     const record = this.requireExistingWorkflowRun(projectId, id)
     if (record.status !== "waiting") {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Workflow run '${id}' for project '${projectId}' must be waiting.`
       )
@@ -345,7 +345,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
   private requireActiveWorkflowRun(projectId: string, id: string): WorkflowRunRecord {
     const record = this.requireExistingWorkflowRun(projectId, id)
     if (record.status !== "running" && record.status !== "waiting") {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Workflow run '${id}' for project '${projectId}' is already terminal.`
       )
@@ -368,8 +368,8 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       return record
     }
 
-    throw new WorkflowRunError(
-      "runtime.invalid_input",
+    throw new SixbError(
+      "workflow.run_conflict",
       `[Sixb] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${record.status}'.`
     )
   }
@@ -380,7 +380,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
 
   private assertRecordExecutionOwnership(record: WorkflowRunRecord, token?: string): void {
     if (record.execution?.token !== token) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Execution token is no longer current on workflow run '${record.id}'.`
       )
@@ -423,7 +423,7 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
       input.executionToken
     )
     if (workflowRun.workflowId !== input.workflowId) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "runtime.invalid_input",
         `[Sixb] Workflow node run '${input.id}' workflow '${input.workflowId}' does not match workflow run '${input.workflowRunId}' workflow '${workflowRun.workflowId}'.`
       )
@@ -431,7 +431,7 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
     const key = storageKey(input.projectId, input.id)
     if (this.nodes.has(key)) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Workflow node run '${input.id}' already exists for project '${input.projectId}'.`
       )
@@ -552,14 +552,14 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
   private requireRunningNodeRun(projectId: string, id: string): WorkflowNodeRunRecord {
     const record = this.nodes.get(storageKey(projectId, id))
     if (!record) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.node_run_not_found",
         `[Sixb] Workflow node run '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (record.status !== "running") {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Workflow node run '${id}' for project '${projectId}' must be running.`
       )
@@ -571,14 +571,14 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
   private requireActiveNodeRun(projectId: string, id: string): WorkflowNodeRunRecord {
     const record = this.nodes.get(storageKey(projectId, id))
     if (!record) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.node_run_not_found",
         `[Sixb] Workflow node run '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (record.status !== "running" && record.status !== "waiting") {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Workflow node run '${id}' for project '${projectId}' is already terminal.`
       )
@@ -590,13 +590,13 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
   requireAgentNodeRun(projectId: string, id: string): WorkflowNodeRunRecord {
     const node = this.nodes.get(storageKey(projectId, id))
     if (!node) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.node_run_not_found",
         `[Sixb] Workflow node run '${id}' not found for project '${projectId}'.`
       )
     }
     if (node.nodeType !== "agent") {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "runtime.invalid_input",
         `[Sixb] Workflow node run '${id}' is not an agent node.`
       )
@@ -626,14 +626,14 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
   async create(input: CreateWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
     const node = this.nodes.requireAgentNodeRun(input.projectId, input.nodeRunId)
     if (node.status !== "running") {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Agent workflow node run '${input.nodeRunId}' must be running when queued.`
       )
     }
     const key = storageKey(input.projectId, input.nodeRunId)
     if (this.runs.has(key)) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Agent execution already exists for workflow node run '${input.nodeRunId}'.`
       )
@@ -709,7 +709,7 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
   async cancel(input: CancelWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
     const run = this.requireExisting(input.projectId, input.nodeRunId)
     if (run.status !== "queued" && run.status !== "running") {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Agent workflow node run '${input.nodeRunId}' cannot be cancelled from status '${run.status}'.`
       )
@@ -754,12 +754,12 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
   ): WorkflowAgentNodeRunRecord {
     const run = this.runs.get(storageKey(projectId, nodeRunId))
     if (!run)
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.node_run_not_found",
         `[Sixb] Agent workflow node run '${nodeRunId}' not found.`
       )
     if (run.status !== status) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Agent workflow node run '${nodeRunId}' must be ${status} (status '${run.status}').`
       )
@@ -770,7 +770,7 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
   private requireExisting(projectId: string, nodeRunId: string): WorkflowAgentNodeRunRecord {
     const run = this.runs.get(storageKey(projectId, nodeRunId))
     if (!run) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.node_run_not_found",
         `[Sixb] Agent workflow node run '${nodeRunId}' not found for project '${projectId}'.`
       )
@@ -785,7 +785,7 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
   ): WorkflowAgentNodeRunRecord {
     const run = this.requireStatus(projectId, nodeRunId, "running")
     if (run.execution?.token !== token) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[Sixb] Execution token is no longer current on agent workflow node run '${nodeRunId}'.`
       )

@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+import { SixbError } from "@sixb/core/errors"
 import type {
   FinishWebhookRunInput,
   ListWebhookRunsInput,
@@ -7,7 +8,7 @@ import type {
   WebhookRunRecord,
   WebhookRunStorage,
 } from "@sixb/core/storage"
-import { parseSixbFailure, serializeSixbFailure, WebhookRunError } from "@sixb/core/storage"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   appendRunListFilters,
@@ -73,7 +74,7 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        throw new WebhookRunError(
+        throw new SixbError(
           "storage.conflict",
           `[SixbSqlite] Webhook run '${input.id}' already exists for project '${input.projectId}'.`
         )
@@ -84,7 +85,7 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
 
     const record = await this.getById({ projectId: input.projectId, id: input.id })
     if (!record) {
-      throw new WebhookRunError(
+      throw new SixbError(
         "runtime.invalid_input",
         `[SixbSqlite] Failed to load webhook run '${input.id}' for project '${input.projectId}'.`
       )
@@ -100,14 +101,14 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
         .get(input.projectId, input.id) as WebhookRunDatabaseRow | null
 
       if (!existing) {
-        throw new WebhookRunError(
+        throw new SixbError(
           "webhook.run_not_found",
           `[SixbSqlite] Webhook run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
-        throw new WebhookRunError(
+        throw new SixbError(
           "storage.conflict",
           `[SixbSqlite] Webhook run '${input.id}' for project '${input.projectId}' is already terminal.`
         )

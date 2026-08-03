@@ -6,7 +6,7 @@ import type {
   SixbRunKind,
   StoredLogLine,
 } from "@sixb/core"
-import { BrokerCursorExpiredError } from "@sixb/core/broker"
+import { isSixbError } from "@sixb/core/errors"
 
 const MAX_CLIENT_RECORDS = 1_000
 const MAX_CLIENT_BYTES = 1_048_576
@@ -203,7 +203,7 @@ export class LogSubscriptionHub {
       state.replayedPendingCursors.clear()
       state.pendingBytes = 0
 
-      if (error instanceof BrokerCursorExpiredError) {
+      if (isSixbError(error, "broker.cursor_expired")) {
         try {
           const latest = await this.sixb.logs.tail({ limit: 1 })
           this.send(state, {

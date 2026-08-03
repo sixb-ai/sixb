@@ -1,16 +1,15 @@
 import { randomUUID } from "node:crypto"
 import { dirname } from "node:path"
-import {
-  type CommandResult,
-  type CreateSandboxOptions,
-  type RunCommandOptions,
-  type Sandbox,
-  SandboxError,
-  type SandboxFileRecord,
-  type SandboxNetworkPolicy,
-  SandboxNotRunningError,
-  type SandboxStatus,
+import type {
+  CommandResult,
+  CreateSandboxOptions,
+  RunCommandOptions,
+  Sandbox,
+  SandboxFileRecord,
+  SandboxNetworkPolicy,
+  SandboxStatus,
 } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import { exec } from "@sixb/core/sandboxes"
 import {
   buildCreateArgv,
@@ -101,7 +100,8 @@ export class SmolvmSandbox implements Sandbox {
         env: hostEnv(),
       })
       if (created.exitCode !== 0) {
-        throw new SandboxError(
+        throw new SixbError(
+          "sandbox.failed",
           `[Sandbox] smolvm create failed for ${id}: ${created.stderr.trim() || `exit ${created.exitCode}`}`
         )
       }
@@ -112,7 +112,8 @@ export class SmolvmSandbox implements Sandbox {
         env: hostEnv(),
       })
       if (started.exitCode !== 0) {
-        throw new SandboxError(
+        throw new SixbError(
+          "sandbox.failed",
           `[Sandbox] smolvm start failed for ${id}: ${started.stderr.trim() || `exit ${started.exitCode}`}`
         )
       }
@@ -132,7 +133,8 @@ export class SmolvmSandbox implements Sandbox {
         env: hostEnv(),
       })
       if (workdirReady.exitCode !== 0) {
-        throw new SandboxError(
+        throw new SixbError(
+          "sandbox.failed",
           `[Sandbox] smolvm working directory setup failed for ${id}: ${workdirReady.stderr.trim() || `exit ${workdirReady.exitCode}`}`
         )
       }
@@ -158,7 +160,8 @@ export class SmolvmSandbox implements Sandbox {
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
     if (this.currentStatus !== "running") {
-      throw new SandboxNotRunningError(
+      throw new SixbError(
+        "sandbox.not_running",
         `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot run commands`
       )
     }
@@ -191,7 +194,8 @@ export class SmolvmSandbox implements Sandbox {
 
   async writeFiles(files: readonly SandboxFileRecord[]): Promise<void> {
     if (this.currentStatus !== "running") {
-      throw new SandboxNotRunningError(
+      throw new SixbError(
+        "sandbox.not_running",
         `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot write files`
       )
     }
@@ -213,7 +217,8 @@ export class SmolvmSandbox implements Sandbox {
       env: hostEnv(),
     })
     if (result.exitCode !== 0) {
-      throw new SandboxError(
+      throw new SixbError(
+        "sandbox.failed",
         `[Sandbox] smolvm writeFiles failed for ${this.id}: ${result.stderr.trim() || `exit ${result.exitCode}`}`
       )
     }

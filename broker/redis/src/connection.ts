@@ -1,5 +1,5 @@
 import { RedisClient, type RedisOptions } from "bun"
-import { RedisBrokerError } from "./errors"
+import { redisBrokerError } from "./errors"
 
 export interface RedisBrokerConnectionOptions extends RedisOptions {
   readonly url?: string
@@ -122,13 +122,13 @@ export class RedisConnectionManager {
       return client
     } catch (error) {
       this.closeClient(client)
-      throw new RedisBrokerError(errorMessage, { cause: error })
+      throw redisBrokerError(errorMessage, { cause: error })
     }
   }
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new RedisBrokerError("broker connection has been closed")
+      throw redisBrokerError("broker connection has been closed")
     }
   }
 }

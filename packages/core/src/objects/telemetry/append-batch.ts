@@ -2,9 +2,9 @@
  * Leaf operation: batch telemetry append for multiple objects of a single type.
  */
 import { assertCanAppendTelemetry } from "../../authorization"
+import { SixbError } from "../../errors"
 import type { TelemetryPointWrite } from "../../materialization/model"
 import { telemetryPointKey } from "../../materialization/refs"
-import { OntologyValidationError } from "../../ontology/errors"
 import { assertTelemetryProperty } from "../../ontology/validation"
 import type { ResolvedObjectContext } from "../context"
 import { writeTelemetryBatch } from "./write-batch"
@@ -49,7 +49,10 @@ export async function appendTelemetryBatch(
     for (const [propertyId, rawValue] of Object.entries(item.properties)) {
       const propertyToken = objectType.p[propertyId]
       if (!propertyToken) {
-        throw new OntologyValidationError(`Unknown property '${objectType.id}.${propertyId}'`)
+        throw new SixbError(
+          "ontology.invalid_value",
+          `Unknown property '${objectType.id}.${propertyId}'`
+        )
       }
 
       assertTelemetryProperty(propertyToken.property)

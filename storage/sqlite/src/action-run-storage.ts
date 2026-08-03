@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type { ActionSubject, JsonValue } from "@sixb/core"
+import { materializationConflict } from "@sixb/core/internal/materialization"
 import type {
   ActionRunEffectsRecord,
   ActionRunParams,
@@ -18,7 +19,6 @@ import type {
   StartActionRunInput,
 } from "@sixb/core/storage"
 import {
-  ActionRunError,
   actionRunPhaseRecordsEqual,
   canRequeueActionRunAfterEnqueueFailure,
   finishActionRunPhase,
@@ -61,23 +61,27 @@ export class SqliteActionRunStorage implements ActionRunStorage {
       readonly status: string
     } | null
     if (!row) {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[SixbSqlite] Action run '${input.runId}' not found for project '${input.projectId}'.`
       )
     }
     if (row.action_id !== input.actionId) {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[SixbSqlite] Action run '${input.runId}' does not belong to action '${input.actionId}'.`
       )
     }
     if (row.status !== "running") {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[SixbSqlite] Action run '${input.runId}' cannot materialize from status '${row.status}'.`
       )
     }
     const record = await this.getById({ projectId: input.projectId, id: input.runId })
     if (!record) {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[SixbSqlite] Action run '${input.runId}' disappeared while locking materialization.`
       )
     }
@@ -144,7 +148,8 @@ export class SqliteActionRunStorage implements ActionRunStorage {
 
     const record = await this.getById({ projectId: input.projectId, id: input.id })
     if (!record) {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[SixbSqlite] Failed to load action run '${input.id}' for project '${input.projectId}'.`
       )
     }
@@ -165,7 +170,8 @@ export class SqliteActionRunStorage implements ActionRunStorage {
         !existing ||
         !canRequeueActionRunAfterEnqueueFailure(rowToActionRunRecord(existing), input)
       ) {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[SixbSqlite] Action run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
@@ -208,13 +214,15 @@ export class SqliteActionRunStorage implements ActionRunStorage {
         .get(input.projectId, input.id) as DatabaseRow | null
 
       if (!existing) {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[SixbSqlite] Action run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "queued") {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[SixbSqlite] Action run '${input.id}' cannot start from status '${existing.status}'.`
         )
       }
@@ -280,7 +288,8 @@ export class SqliteActionRunStorage implements ActionRunStorage {
           return rowToActionRunRecord(existing)
         }
 
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[SixbSqlite] Action run '${input.id}' already has a different writeback record.`
         )
       }
@@ -330,7 +339,8 @@ export class SqliteActionRunStorage implements ActionRunStorage {
           return rowToActionRunRecord(existing)
         }
 
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[SixbSqlite] Action run '${input.id}' already has a different effects record.`
         )
       }
@@ -371,13 +381,15 @@ export class SqliteActionRunStorage implements ActionRunStorage {
         .get(input.projectId, input.id) as DatabaseRow | null
 
       if (!existing) {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[SixbSqlite] Action run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (isTerminalActionRun({ status: existing.status })) {
-        throw new ActionRunError(
+        throw materializationConflict(
+          "run-correlation",
           `[SixbSqlite] Action run '${input.id}' cannot finish from terminal status '${existing.status}'.`
         )
       }
@@ -541,13 +553,15 @@ export class SqliteActionRunStorage implements ActionRunStorage {
       .get(projectId, id) as DatabaseRow | null
 
     if (!existing) {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[SixbSqlite] Action run '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (existing.status !== "running") {
-      throw new ActionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[SixbSqlite] Action run '${id}' cannot ${operation} from status '${existing.status}'.`
       )
     }
@@ -670,7 +684,10 @@ function rowToActionSubject(row: DatabaseRow): ActionSubject {
   }
 
   if (!row.object_type_id || !row.primary_id) {
-    throw new ActionRunError(`[SixbSqlite] Action run '${row.id}' has an invalid object subject.`)
+    throw materializationConflict(
+      "run-correlation",
+      `[SixbSqlite] Action run '${row.id}' has an invalid object subject.`
+    )
   }
 
   return {

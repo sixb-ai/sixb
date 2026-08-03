@@ -6,7 +6,7 @@ import type {
   ListAuthInvitationsInput,
   ListAuthInvitationsResult,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthInvitationRow } from "./rows"
 import { rowToInvitationRecord } from "./rows"
@@ -76,7 +76,7 @@ export class SqliteAuthInvitationStore implements AuthInvitationStore {
       }
 
       if (getInvitationById(this.db, { projectId, id })) {
-        throw new AuthStorageError(
+        throw authStorageError(
           "duplicate_invitation",
           `[Sixb] Invitation '${id}' already exists but is not active for project '${projectId}'.`
         )

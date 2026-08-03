@@ -8,7 +8,7 @@ import type {
   UpdateAuthUserStatusInput,
   UserRecord,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import type { SqliteAuthUserRow } from "./rows"
 import { rowToUserRecord } from "./rows"
 import {
@@ -33,14 +33,14 @@ export class SqliteAuthUserStore implements AuthUserStore {
     const email = normalizeEmail(input.email)
 
     if (getUserRowById(this.db, { projectId, id })) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "duplicate_user",
         `[Sixb] User '${id}' already exists for project '${projectId}'.`
       )
     }
 
     if (getUserRowByEmail(this.db, { projectId, email })) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "duplicate_user",
         `[Sixb] User email '${email}' already exists for project '${projectId}'.`
       )
@@ -118,7 +118,7 @@ export class SqliteAuthUserStore implements AuthUserStore {
     })
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_user",
         `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
       )
@@ -159,7 +159,7 @@ export class SqliteAuthUserStore implements AuthUserStore {
     })
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_user",
         `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
       )

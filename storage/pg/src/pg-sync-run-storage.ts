@@ -1,4 +1,5 @@
 import type { JsonValue } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
@@ -9,7 +10,7 @@ import type {
   SyncRunRecord,
   SyncRunStorage,
 } from "@sixb/core/storage"
-import { parseSixbFailure, SyncRunError, serializeSixbFailure } from "@sixb/core/storage"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
@@ -49,7 +50,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
       return rowToSyncRunRecord(row)
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new SyncRunError(
+        throw new SixbError(
           "storage.conflict",
           `[SixbPg] Sync run '${input.id}' already exists for project '${input.projectId}'.`
         )
@@ -67,7 +68,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
       `
 
       if (!existing) {
-        throw new SyncRunError(
+        throw new SixbError(
           "sync.run_not_found",
           `[SixbPg] Sync run '${input.id}' not found for project '${input.projectId}'.`
         )
@@ -75,13 +76,13 @@ export class PgSyncRunStorage implements SyncRunStorage {
 
       if (input.status === "succeeded") {
         if (input.output && input.output.datasetId !== existing.dataset_id) {
-          throw new SyncRunError(
+          throw new SixbError(
             "runtime.invalid_input",
             `[SixbPg] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
           )
         }
         if (!input.output && (existing.mode !== "append" || input.rowsRead !== 0)) {
-          throw new SyncRunError(
+          throw new SixbError(
             "runtime.invalid_input",
             `[SixbPg] Sync run '${input.id}' may omit its output only for an empty append.`
           )

@@ -1,5 +1,5 @@
 import { type OntologySource, resolveAuthorizationContext, type Sixb } from "@sixb/core"
-import { SixbValidationError } from "@sixb/core/errors"
+import { isSixbError, SixbError } from "@sixb/core/errors"
 import {
   AGENT_API_GATEWAY_PREFIX,
   AGENT_API_ROUTES,
@@ -80,7 +80,7 @@ async function handleAgentApiGatewayRequest(input: {
   try {
     body = await readRequestBody(input.request)
   } catch (error) {
-    if (error instanceof PayloadTooLargeError) {
+    if (isSixbError(error, "runtime.payload_too_large")) {
       return jsonError(413, error.message)
     }
     throw error
@@ -235,7 +235,10 @@ async function readRequestBody(request: Request): Promise<ArrayBuffer | undefine
     if (done) break
     total += value.byteLength
     if (total > MAX_AGENT_API_BODY_BYTES) {
-      throw new PayloadTooLargeError("Agent API gateway request body exceeds 1MB.")
+      throw new SixbError(
+        "runtime.payload_too_large",
+        "[SixbServer] Agent API gateway request body exceeds 1MB."
+      )
     }
     chunks.push(value)
   }
@@ -256,10 +259,4 @@ function concatChunks(chunks: readonly Uint8Array[], total: number): ArrayBuffer
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status })
-}
-
-class PayloadTooLargeError extends SixbValidationError {
-  constructor(message: string) {
-    super("runtime.payload_too_large", message)
-  }
 }

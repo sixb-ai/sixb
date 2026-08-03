@@ -9,7 +9,7 @@ import {
   linkRefKey,
   linkRefSortKey,
   linkScopeSortKey,
-  MaterializationConflictError,
+  materializationConflict,
   objectRefKey,
   objectRefSortKey,
   telemetryPointKey,
@@ -97,7 +97,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         if (
           reader.linkScope(expected.source, expected.linkId).fingerprint !== expected.fingerprint
         ) {
-          throw new MaterializationConflictError(
+          throw materializationConflict(
             "effective-state",
             `Expected link scope changed for ${expected.source.objectTypeId}:${expected.source.primaryId}.${expected.linkId}.`
           )
@@ -106,7 +106,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       for (const expected of input.expected.points) {
         const point = reader.exactPoint(expected.series, expected.at)
         if ((point?.lastCommitId ?? null) !== expected.lastCommitId) {
-          throw new MaterializationConflictError(
+          throw materializationConflict(
             "timeseries-point",
             `Telemetry point ${telemetryPointKey(expected.series, expected.at)} changed.`
           )
@@ -181,13 +181,13 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     const reader = new SqliteMaterializationStateReader(this.db, session.header.commit.projectId)
     if (input.entityKind === "object") {
       if (replacement.projectionKind !== "object") {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "source-materialization",
           "Link projection replacement cannot stream object state."
         )
       }
       if (replacement.objectStreamStarted) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           "Replacement object state may only be streamed once per session."
         )
@@ -222,13 +222,13 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     }
 
     if (replacement.projectionKind === "object" && !replacement.objectStreamCompleted) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         "Object projection replacement must fully stream object state before link state."
       )
     }
     if (replacement.linkStreamStarted) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         "Replacement link state may only be streamed once per session."
       )
@@ -327,7 +327,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         session.replacement.sourceId !== input.source.projectionId ||
         session.replacement.candidateMaterializationId !== input.candidateMaterializationId
       ) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "source-materialization",
           "Materialization session already owns another replacement union."
         )
@@ -341,7 +341,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       input.candidateMaterializationId
     )
     if (!candidate || candidate.status !== "ready" || candidate.execution_token === null) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "source-materialization",
         `Candidate source materialization '${input.candidateMaterializationId}' is missing or is not ready.`
       )
@@ -359,7 +359,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         (previous.protocol !== candidate.protocol ||
           previous.projection_kind !== candidate.projection_kind))
     ) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "source-materialization",
         "Source replacement kind or protocol does not match its active materialization."
       )
@@ -411,12 +411,12 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       ) as { readonly duplicate: "id" | "idempotency" | "origin" } | null
     if (!duplicate) return
     if (duplicate.duplicate === "origin") {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "run-correlation",
         "Ontology commit origin already has an authoritative commit."
       )
     }
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "idempotency",
       duplicate.duplicate === "id"
         ? `Ontology commit '${header.commit.id}' already exists.`
@@ -433,7 +433,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       (active?.materialization_id ?? null) !== expected.activeMaterializationId ||
       (active?.last_commit_id ?? null) !== expected.lastCommitId
     ) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "projection-fence",
         `Source '${expected.source.projectionId}' changed.`
       )
@@ -447,7 +447,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     const row = reader.effectiveObjectRevision(expected.ref)
     if (!expected.exists) {
       if (row) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           `Expected object ${objectRefKey(expected.ref)} to be absent.`
         )
@@ -455,7 +455,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       return
     }
     if (!row || row.version !== expected.version || row.lastCommitId !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         `Expected object ${objectRefKey(expected.ref)} changed.`
       )
@@ -469,7 +469,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     const lastCommitId = reader.effectiveLinkLastCommit(expected.ref)
     if (!expected.exists) {
       if (lastCommitId !== undefined) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           `Expected link ${linkRefKey(expected.ref)} to be absent.`
         )
@@ -477,7 +477,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       return
     }
     if (lastCommitId === undefined || lastCommitId !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         `Expected link ${linkRefKey(expected.ref)} changed.`
       )
@@ -671,7 +671,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       activation.materializationId
     )
     if (!candidate || candidate.status !== "ready" || candidate.execution_token === null) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "source-materialization",
         "Source activation candidate is missing or is not ready."
       )
@@ -797,10 +797,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         )
     } catch (error) {
       if (isSqliteConstraintError(error)) {
-        throw new MaterializationConflictError(
-          "idempotency",
-          "Ontology commit identity already exists."
-        )
+        throw materializationConflict("idempotency", "Ontology commit identity already exists.")
       }
       throw error
     }

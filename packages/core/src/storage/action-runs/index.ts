@@ -1,4 +1,3 @@
-export { ActionRunError } from "./errors"
 export type { ActionRunPhaseRecord } from "./idempotency"
 export {
   actionRunParamsEqual,

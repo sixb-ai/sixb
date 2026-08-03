@@ -1,5 +1,5 @@
 import type { RestClient } from "@sixb/connector-rest"
-import { connectorCodeForStatus, SixbProviderError } from "@sixb/core/errors"
+import { connectorCodeForStatus, SixbError } from "@sixb/core/errors"
 import type { GitHubPage, GitHubRepositoryTarget } from "./types/common"
 
 export interface GitHubHttpContext {
@@ -8,7 +8,7 @@ export interface GitHubHttpContext {
 }
 
 /** Raised when the GitHub REST API returns a non-2xx response. */
-export class GitHubApiError extends SixbProviderError {
+export class GitHubApiError extends SixbError {
   override readonly name = "GitHubApiError"
 
   constructor(

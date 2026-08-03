@@ -108,7 +108,6 @@ export type {
   WaitForActionRunInput,
 } from "./actions"
 export {
-  ActionDefinitionError,
   defineAction,
   isActionDefinition,
   isGlobalActionDefinition,
@@ -119,16 +118,6 @@ export {
   requestActionAndWait,
   waitForActionRun,
 } from "./actions"
-/**
- * `ctx.edits()` rejects an invalid batch with this, so it crosses a public boundary and users need
- * it to write `catch (error) { if (error instanceof EditBatchError) … }`.
- */
-export { EditBatchError } from "./edits"
-export {
-  ActionRunFailedError,
-  ActionRunTimeoutError,
-  ActionValidationError,
-} from "./objects/action"
 
 // ── Datasets ────────────────────────────────────────────────
 
@@ -142,13 +131,7 @@ export type {
   DatasetDefinition,
   DatasetSchema,
 } from "./datasets"
-export {
-  col,
-  DatasetValidationError,
-  defineDataset,
-  getDatasetRowValidationError,
-  isDatasetDefinition,
-} from "./datasets"
+export { col, defineDataset, getDatasetRowValidationError, isDatasetDefinition } from "./datasets"
 
 // ── Broker ─────────────────────────────────────────────────
 
@@ -304,19 +287,15 @@ export type {
   WorkflowRunQueuedEvent,
   WorkflowRunStartedEvent,
 } from "./events"
-export {
-  events,
-  isDomainEventType,
-} from "./events"
+export { events, isDomainEventType } from "./events"
 
 // ── Ontology materialization ────────────────────────────────
 
 export type { MaterializationConflictKind } from "./materialization/errors"
 export {
-  isMaterializationConflictError,
-  MaterializationCancellationError,
-  MaterializationConflictError,
-  MaterializationValidationError,
+  isMaterializationCancellation,
+  materializationCancelled,
+  materializationConflictKind,
 } from "./materialization/errors"
 
 // ── Logging ─────────────────────────────────────────────────
@@ -375,11 +354,7 @@ export type {
   RulePredicate,
   RuleSubject,
 } from "./rules"
-export {
-  defineRule,
-  isRuleDefinition,
-  RuleValidationError,
-} from "./rules"
+export { defineRule, isRuleDefinition } from "./rules"
 
 // ── Auth ───────────────────────────────────────────────────
 
@@ -408,7 +383,6 @@ export {
 
 export type { AuthorizationContext, GrantIndex, GrantKind } from "./authorization"
 export {
-  AuthorizationError,
   canAccessApplication,
   emptyGrantIndex,
   isAllowed,
@@ -453,7 +427,6 @@ export {
   defineMembershipPolicy,
   defineRole,
   every,
-  SecurityValidationError,
 } from "./security"
 
 // ── Storage ────────────────────────────────────────────────
@@ -534,12 +507,6 @@ export type {
   SandboxNetworkTarget,
   SandboxStatus,
 } from "./sandboxes"
-export {
-  SandboxError,
-  SandboxIsolationUnavailableError,
-  SandboxNotRunningError,
-  SandboxTimeoutError,
-} from "./sandboxes"
 
 // ── Object Queries ──────────────────────────────────────────
 // Query IR types + user-catchable errors. The planner/executor engine lives at
@@ -577,9 +544,10 @@ export type {
   ValidatedObjectQuery,
 } from "./objects/query"
 export {
-  ObjectQueryExecutionError,
   ObjectQueryPlanningError,
   ObjectQueryValidationError,
+  objectQueryExecutionFailed,
+  objectQueryIssues,
 } from "./objects/query"
 
 // ── Connectors ─────────────────────────────────────────────
@@ -614,8 +582,6 @@ export type {
 export {
   defineWebhook,
   resolveWebhookVerification,
-  UnverifiedWebhookError,
-  WebhookValidationError,
   warnUnverifiedWebhook,
   webhookConnector,
 } from "./webhooks"
@@ -663,11 +629,7 @@ export type {
   ScheduleReference,
   ScheduleTriggerDefinition,
 } from "./schedules"
-export {
-  defineSchedule,
-  isScheduleDefinition,
-  ScheduleValidationError,
-} from "./schedules"
+export { defineSchedule, isScheduleDefinition } from "./schedules"
 
 // ── Pipelines ───────────────────────────────────────────────
 
@@ -696,7 +658,6 @@ export {
   definePipelineStep,
   isPipelineDefinition,
   isPipelineStepDefinition,
-  PipelineError,
   requestPipelineRun,
 } from "./pipelines"
 
@@ -762,12 +723,11 @@ export {
   isStepDefinition,
   isWorkflowDefinition,
   requestWorkflowRun,
-  WorkflowDefinitionError,
-  WorkflowValidationError,
 } from "./workflows"
 
 // ── Errors ──────────────────────────────────────────────────
 
+export type { SixbErrorKind } from "./errors"
 /**
  * The failure vocabulary. App code catches with `isSixbError(error, code)` and branches on the
  * code; the five classes are there for the coarser `instanceof` a caller sometimes wants instead.
@@ -782,22 +742,13 @@ export {
   SIXB_PROVIDER_ERROR_CODES,
   SIXB_TIMEOUT_ERROR_CODES,
   SIXB_VALIDATION_ERROR_CODES,
-  SixbAuthorizationError,
-  type SixbAuthorizationErrorCode,
-  SixbConflictError,
-  type SixbConflictErrorCode,
   SixbError,
   type SixbErrorCode,
   type SixbErrorNamespace,
   type SixbErrorOptions,
   type SixbFailure,
   type SixbFailureDetails,
-  SixbProviderError,
-  type SixbProviderErrorCode,
-  SixbTimeoutError,
-  type SixbTimeoutErrorCode,
-  SixbValidationError,
-  type SixbValidationErrorCode,
+  sixbErrorKind,
   sixbErrorNamespace,
   type ToSixbFailureOptions,
   toSixbFailure,
@@ -860,19 +811,7 @@ export type {
   TelemetryPropertyToken,
   TwinObject,
 } from "./runtime"
-export {
-  ConnectorError,
-  ConnectorNotFoundError,
-  createSixb,
-  ObjectError,
-  ObjectNotFoundError,
-  OntologyNotFoundError,
-  OntologyValidationError,
-  ProjectionValidationError,
-  RuntimeError,
-  Sixb,
-  SyncValidationError,
-} from "./runtime"
+export { createSixb, Sixb } from "./runtime"
 
 // ── Agents ──────────────────────────────────────────────────
 
@@ -916,10 +855,9 @@ export type {
 } from "./agents"
 export {
   AGENT_REASONING_LEVELS,
-  AgentDefinitionError,
-  AgentRequestError,
   agentContext,
   agentContextIdentity,
+  agentRequestError,
   defineAgent,
   isAgentDefinition,
   MAX_AGENT_APP_STATE_ENTRY_BYTES,
@@ -929,8 +867,6 @@ export {
 } from "./agents"
 
 // ── Scheduling ──────────────────────────────────────────────
-
-export { CronValidationError } from "./schedules"
 
 // ── Projections ─────────────────────────────────────────────
 

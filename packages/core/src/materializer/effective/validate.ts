@@ -1,5 +1,5 @@
+import { isSixbError, SixbError } from "../../errors"
 import type { JsonValue } from "../../json"
-import { MaterializationValidationError } from "../../materialization/errors"
 import type {
   OntologyLinkRef,
   OntologyObjectRef,
@@ -174,7 +174,10 @@ function materializationValidation<T>(run: () => T): T {
   try {
     return run()
   } catch (error) {
-    if (error instanceof MaterializationValidationError) throw error
-    throw new MaterializationValidationError(error instanceof Error ? error.message : String(error))
+    if (isSixbError(error, "ontology.invalid_value")) throw error
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] ${error instanceof Error ? error.message : String(error)}`
+    )
   }
 }

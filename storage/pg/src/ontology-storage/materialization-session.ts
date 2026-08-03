@@ -1,4 +1,4 @@
-import { MaterializationConflictError } from "@sixb/core/internal/materialization"
+import { materializationConflict } from "@sixb/core/internal/materialization"
 import {
   correlateMaterializationChunk,
   duplicateMaterializationWork as duplicateWork,
@@ -69,7 +69,7 @@ export class PgMaterializationSessions {
 
   async create(header: MaterializationPlanHeader): Promise<PgMaterializationSessionState> {
     if (!this.context?.active) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         "Materialization sessions require an active storage transaction."
       )
@@ -90,10 +90,7 @@ export class PgMaterializationSessions {
       !this.context?.active ||
       value.transactionId !== this.context.id
     ) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Materialization session is inactive."
-      )
+      throw materializationConflict("effective-state", "Materialization session is inactive.")
     }
     return value
   }
@@ -166,7 +163,7 @@ export class PgMaterializationSessions {
     const session = this.require(input.session)
     const stream = session.workStreams[input.order]
     if (stream.started) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         `Materialization ${input.order} work may only be streamed once per session.`
       )

@@ -5,13 +5,13 @@ import {
   InMemoryStorage,
   link,
   type ObjectQuery,
-  ObjectQueryExecutionError,
   ObjectQueryPlanningError,
-  ObjectQueryValidationError,
   OntologyRegistry,
+  objectQueryIssues,
   prop,
   stringEnum,
 } from "../src"
+import { SixbError } from "../src/errors"
 import {
   collectObjectQueryValidationIssues,
   countObjects,
@@ -1131,7 +1131,7 @@ describe("object query planner and executor", () => {
         },
         { ontology, storage }
       )
-    ).rejects.toBeInstanceOf(ObjectQueryValidationError)
+    ).rejects.toHaveProperty("code", "storage.query_invalid")
 
     try {
       await facetObjects(
@@ -1143,10 +1143,9 @@ describe("object query planner and executor", () => {
         { ontology, storage }
       )
     } catch (error) {
-      expect(error).toBeInstanceOf(ObjectQueryValidationError)
-      if (error instanceof ObjectQueryValidationError) {
-        expect(error.issues.map((issue) => issue.code)).toContain("property_not_facetable")
-      }
+      expect(objectQueryIssues(error)?.map((issue) => issue.code)).toContain(
+        "property_not_facetable"
+      )
     }
   })
 
@@ -1377,7 +1376,7 @@ describe("object query planner and executor", () => {
         },
         { ontology, storage: disableQueryObjects(storage), maxFallbackRows: 10 }
       )
-    ).rejects.toBeInstanceOf(ObjectQueryPlanningError)
+    ).rejects.toHaveProperty("code", "storage.query_unsupported")
 
     try {
       await executeObjectQuery(
@@ -1392,10 +1391,9 @@ describe("object query planner and executor", () => {
         { ontology, storage: disableQueryObjects(storage), maxFallbackRows: 10 }
       )
     } catch (error) {
-      expect(error).toBeInstanceOf(ObjectQueryPlanningError)
-      if (error instanceof ObjectQueryPlanningError) {
-        expect(error.issues.map((issue) => issue.code)).toContain("fallback_requires_bound")
-      }
+      expect(objectQueryIssues(error)?.map((issue) => issue.code)).toContain(
+        "fallback_requires_bound"
+      )
     }
   })
 
@@ -1415,7 +1413,7 @@ describe("object query planner and executor", () => {
         },
         { ontology, storage: disableQueryObjects(storage), maxFallbackRows: 2 }
       )
-    ).rejects.toBeInstanceOf(ObjectQueryExecutionError)
+    ).rejects.toHaveProperty("code", "storage.query_unsupported")
 
     try {
       await executeObjectQuery(
@@ -1430,10 +1428,15 @@ describe("object query planner and executor", () => {
         { ontology, storage: disableQueryObjects(storage), maxFallbackRows: 2 }
       )
     } catch (error) {
-      expect(error).toBeInstanceOf(ObjectQueryExecutionError)
-      if (error instanceof ObjectQueryExecutionError) {
-        expect(error.reason).toBe("fallback_row_limit_exceeded")
-      }
+      // A single-fault execution failure has no `issues` field: the reader rebuilds its one issue
+      // from `details`, which is what the route serializes.
+      expect(objectQueryIssues(error)).toEqual([
+        {
+          path: "$.start",
+          code: "fallback_row_limit_exceeded",
+          message: expect.stringContaining("exceeded maxFallbackRows=2"),
+        },
+      ])
     }
   })
 
@@ -1630,7 +1633,36 @@ describe("object query planner and executor", () => {
           { projectId: "p1", query },
           { ontology, storage: disableQueryObjects(storage), maxFallbackRows: 10 }
         )
-      ).rejects.toBeInstanceOf(ObjectQueryPlanningError)
+      ).rejects.toHaveProperty("code", "storage.query_unsupported")
     }
+  })
+})
+
+describe("objectQueryIssues", () => {
+  test("reads a carrier that crossed a bundle boundary", () => {
+    // The whole reason this reader is structural rather than `instanceof`: a custom app, the client
+    // and the runtime are bundled separately, so the failure a route catches can be an instance of a
+    // *second copy* of ObjectQueryPlanningError. To reproduce the old behavior, swap the body for
+    // `error instanceof ObjectQueryPlanningError` and watch this fail while the next test passes.
+    const foreign = Object.assign(new Error("[Sixb] Object query planning failed: nope"), {
+      code: "storage.query_unsupported",
+      issues: [{ path: "$", code: "fallback_requires_bound", message: "nope" }],
+    })
+
+    expect(foreign instanceof ObjectQueryPlanningError).toBe(false)
+    expect(objectQueryIssues(foreign)).toEqual([
+      { path: "$", code: "fallback_requires_bound", message: "nope" },
+    ])
+  })
+
+  test("ignores a failure that is not a query failure, and a malformed issue list", () => {
+    expect(objectQueryIssues(new SixbError("storage.conflict", "lost the race"))).toBeUndefined()
+    expect(objectQueryIssues(new Error("boom"))).toBeUndefined()
+    // A carrier whose list is not issue-shaped falls through to `details`, which has no reason here.
+    const malformed = Object.assign(new Error("bad"), {
+      code: "storage.query_invalid",
+      issues: ["not an issue"],
+    })
+    expect(objectQueryIssues(malformed)).toBeUndefined()
   })
 })

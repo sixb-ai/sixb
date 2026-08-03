@@ -10,7 +10,7 @@ export {
   sha256Canonical,
 } from "../../materialization/identity"
 
-import { MaterializationValidationError } from "../../materialization/errors"
+import { SixbError } from "../../errors"
 import { createCommitId, createRequestHash, sha256Canonical } from "../../materialization/identity"
 import type {
   EffectiveLinkSnapshot,
@@ -99,7 +99,10 @@ export function timestampCommitIdentity(
 ): TimedCommitIdentity {
   const committedAt = new Date(now)
   if (Number.isNaN(committedAt.getTime())) {
-    throw new MaterializationValidationError("Materialization commit time must be a valid date.")
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Materialization commit time must be a valid date."
+    )
   }
   return Object.freeze({
     ...identity,

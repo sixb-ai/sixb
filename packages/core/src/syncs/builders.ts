@@ -1,8 +1,8 @@
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
+import { SixbError } from "../errors"
 import type { ScheduleDefinition, ScheduleReference } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
-import { SyncValidationError } from "./errors"
 import type {
   BatchSyncConfig,
   BatchSyncDefinitionConfig,
@@ -14,7 +14,7 @@ import type {
 
 function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
-    throw new SyncValidationError(`Sync ${field} must not be empty.`)
+    throw new SixbError("runtime.invalid_definition", `Sync ${field} must not be empty.`)
   }
 }
 
@@ -26,7 +26,8 @@ function normalizeBatchSyncConfig(options: BatchSyncConfig | undefined): BatchSy
   const mode = options?.mode ?? "snapshot"
 
   if (mode !== "snapshot" && mode !== "append") {
-    throw new SyncValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Invalid sync mode '${String(mode)}'. Expected 'snapshot' or 'append'.`
     )
   }
@@ -56,7 +57,10 @@ export function defineSync<TId extends string>(
     const builder: SyncBuilder<TId, TCheckpoint> = {
       when(schedule: ScheduleDefinition): SyncBuilder<TId, TCheckpoint> {
         if (!isScheduleDefinition(schedule)) {
-          throw new SyncValidationError("Sync .when(...) only accepts schedules.")
+          throw new SixbError(
+            "runtime.invalid_definition",
+            "Sync .when(...) only accepts schedules."
+          )
         }
         triggers.push({ type: "schedule", scheduleId: schedule.id })
         return builder

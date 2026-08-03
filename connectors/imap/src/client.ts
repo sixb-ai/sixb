@@ -1,4 +1,5 @@
 import { Readable } from "node:stream"
+import { isSixbError } from "@sixb/core/errors"
 import {
   type DownloadObject,
   type FetchMessageObject,
@@ -15,13 +16,7 @@ import {
   type MessageStructureObject,
   type SearchObject,
 } from "imapflow"
-import {
-  ImapAbortedError,
-  ImapConnectorError,
-  ImapDownloadTooLargeError,
-  ImapPartUnavailableError,
-  imapOperationError,
-} from "./errors"
+import { imapConnectorError, imapOperationError } from "./errors"
 import type {
   ImapAddress,
   ImapBodyPart,
@@ -124,7 +119,7 @@ class ImapGateway implements ImapClient {
   ): Promise<T> {
     const normalizedPath = path.trim()
     if (!normalizedPath) {
-      throw new ImapConnectorError("Mailbox path must not be empty.")
+      throw imapConnectorError("Mailbox path must not be empty.")
     }
 
     return this.runOperation(options.signal, async (transport) => {
@@ -134,16 +129,16 @@ class ImapGateway implements ImapClient {
       try {
         lock = await transport.getMailboxLock(normalizedPath, { readOnly: true })
         if (!transport.mailbox) {
-          throw new ImapConnectorError(`Mailbox ${normalizedPath} did not open.`)
+          throw imapConnectorError(`Mailbox ${normalizedPath} did not open.`)
         }
         if (!transport.mailbox.readOnly) {
-          throw new ImapConnectorError(`Mailbox ${normalizedPath} was not opened read-only.`)
+          throw imapConnectorError(`Mailbox ${normalizedPath} was not opened read-only.`)
         }
 
         session = new ImapMailboxSessionImpl(transport, this.connection.auth.pass)
         return await task(session)
       } catch (error) {
-        if (error instanceof ImapConnectorError || session) {
+        if (isSixbError(error) || session) {
           throw error
         }
         throw imapOperationError("Mailbox open", error, [this.connection.auth.pass])
@@ -201,7 +196,7 @@ class ImapGateway implements ImapClient {
       this.assertAvailable(operationSignal)
     } catch (error) {
       if (this.isAborted(operationSignal)) {
-        failure = new ImapAbortedError()
+        failure = imapConnectorError("Operation aborted.", { code: "runtime.cancelled" })
       } else if (phase === "connect") {
         failure = imapOperationError("Connection", error, [this.connection.auth.pass])
       } else {
@@ -236,7 +231,7 @@ class ImapGateway implements ImapClient {
 
   private assertAvailable(operationSignal?: AbortSignal): void {
     if (this.isAborted(operationSignal)) {
-      throw new ImapAbortedError()
+      throw imapConnectorError("Operation aborted.", { code: "runtime.cancelled" })
     }
   }
 
@@ -332,7 +327,10 @@ class ImapMailboxSessionImpl implements ImapMailboxSession {
     // longer selected or the requested body part is absent from the server response.
     // Surface that as a typed, actionable error before it poisons `activeStreams`.
     if (!downloaded.content || !downloaded.meta) {
-      throw new ImapPartUnavailableError(input.uid, input.part)
+      throw imapConnectorError(
+        `Message ${input.uid} part ${input.part} is unavailable: the server returned no content.`,
+        { code: "connector.request_failed", details: { uid: input.uid, part: input.part } }
+      )
     }
 
     const content = limitReadable(downloaded.content, input)
@@ -379,14 +377,14 @@ class ImapMailboxSessionImpl implements ImapMailboxSession {
 
   private assertActive(): void {
     if (!this.active) {
-      throw new ImapConnectorError("Mailbox session is no longer active.")
+      throw imapConnectorError("Mailbox session is no longer active.")
     }
   }
 
   private currentMailbox(): MailboxObject {
     this.assertActive()
     if (!this.transport.mailbox) {
-      throw new ImapConnectorError("No mailbox is open.")
+      throw imapConnectorError("No mailbox is open.")
     }
     return this.transport.mailbox
   }
@@ -571,16 +569,16 @@ function parseReferences(headers: ImapHeaders): readonly string[] {
 
 function validateListInput(input: ImapListMessagesInput): readonly string[] {
   if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > MAX_PAGE_SIZE) {
-    throw new ImapConnectorError(`Message page limit must be between 1 and ${MAX_PAGE_SIZE}.`)
+    throw imapConnectorError(`Message page limit must be between 1 and ${MAX_PAGE_SIZE}.`)
   }
   if (
     input.afterUid !== undefined &&
     (!Number.isInteger(input.afterUid) || input.afterUid < 0 || input.afterUid >= MAX_UID)
   ) {
-    throw new ImapConnectorError(`afterUid must be an integer between 0 and ${MAX_UID - 1}.`)
+    throw imapConnectorError(`afterUid must be an integer between 0 and ${MAX_UID - 1}.`)
   }
   if (input.since && Number.isNaN(input.since.getTime())) {
-    throw new ImapConnectorError("since must be a valid Date.")
+    throw imapConnectorError("since must be a valid Date.")
   }
   return normalizeRequestedHeaders(input.headers)
 }
@@ -590,7 +588,7 @@ function normalizeRequestedHeaders(headers: readonly string[] | undefined): read
     return []
   }
   if (headers.length > MAX_REQUESTED_HEADERS) {
-    throw new ImapConnectorError(
+    throw imapConnectorError(
       `No more than ${MAX_REQUESTED_HEADERS} message headers may be requested.`
     )
   }
@@ -599,11 +597,11 @@ function normalizeRequestedHeaders(headers: readonly string[] | undefined): read
   const seen = new Set<string>()
   for (const header of headers) {
     if (typeof header !== "string") {
-      throw new ImapConnectorError("Message header names must be strings.")
+      throw imapConnectorError("Message header names must be strings.")
     }
     const name = header.trim().toLowerCase()
     if (!name || name.length > MAX_HEADER_NAME_LENGTH || !HEADER_NAME_PATTERN.test(name)) {
-      throw new ImapConnectorError("Message header names must be valid RFC 5322 field names.")
+      throw imapConnectorError("Message header names must be valid RFC 5322 field names.")
     }
     if (!seen.has(name)) {
       normalized.push(name)
@@ -615,17 +613,17 @@ function normalizeRequestedHeaders(headers: readonly string[] | undefined): read
 
 function validateDownloadInput(input: ImapDownloadInput): void {
   if (!Number.isInteger(input.uid) || input.uid < 1 || input.uid > MAX_UID) {
-    throw new ImapConnectorError(`Message UID must be an integer between 1 and ${MAX_UID}.`)
+    throw imapConnectorError(`Message UID must be an integer between 1 and ${MAX_UID}.`)
   }
   if (!input.part.trim()) {
-    throw new ImapConnectorError("Message part must not be empty.")
+    throw imapConnectorError("Message part must not be empty.")
   }
   if (
     !Number.isSafeInteger(input.maxBytes) ||
     input.maxBytes < 1 ||
     input.maxBytes >= Number.MAX_SAFE_INTEGER
   ) {
-    throw new ImapConnectorError("maxBytes must be a positive safe integer.")
+    throw imapConnectorError("maxBytes must be a positive safe integer.")
   }
 }
 
@@ -638,7 +636,13 @@ function limitReadable(source: Readable, input: ImapDownloadInput): Readable {
           const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
           received += chunk.byteLength
           if (received > input.maxBytes) {
-            throw new ImapDownloadTooLargeError(input.uid, input.part, input.maxBytes)
+            throw imapConnectorError(
+              `Message ${input.uid} part ${input.part} exceeds the ${input.maxBytes}-byte limit.`,
+              {
+                code: "connector.request_failed",
+                details: { uid: input.uid, part: input.part, maxBytes: input.maxBytes },
+              }
+            )
           }
           yield chunk
         }

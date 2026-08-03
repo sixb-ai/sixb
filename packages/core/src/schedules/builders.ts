@@ -1,3 +1,4 @@
+import { SixbError } from "../errors"
 import type { EventSelectorSpec } from "../events/selectors"
 import { eventSelectorSpec } from "../events/selectors"
 import {
@@ -11,7 +12,6 @@ import {
   type RuntimePropertyPredicateBuilder,
 } from "../predicates"
 import { createCronMatcher } from "./cron"
-import { ScheduleValidationError } from "./errors"
 import type {
   CronScheduleDefinition,
   EventScheduleCondition,
@@ -44,7 +44,7 @@ type RuntimeEventScheduleTargetPredicateSubject = {
 
 function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
-    throw new ScheduleValidationError(`Schedule ${field} must not be empty.`)
+    throw new SixbError("runtime.invalid_definition", `Schedule ${field} must not be empty.`)
   }
 }
 
@@ -52,7 +52,7 @@ function validateTimezone(timezone: string): void {
   try {
     Intl.DateTimeFormat(undefined, { timeZone: timezone })
   } catch {
-    throw new ScheduleValidationError(`Invalid timezone '${timezone}'.`)
+    throw new SixbError("runtime.invalid_definition", `Invalid timezone '${timezone}'.`)
   }
 }
 
@@ -73,7 +73,7 @@ function createEventSchedulePropertyPredicateBuilder(
 ): RuntimeEventSchedulePropertyPredicateBuilder {
   return createPropertyPredicateBuilder(propertyId, {
     subject: "Schedule",
-    createError: (message) => new ScheduleValidationError(message),
+    createError: (message) => new SixbError("runtime.invalid_definition", message),
     wrap: (predicate) => createCondition(scope, predicate),
   })
 }
@@ -118,7 +118,7 @@ function createTargetPredicateSubject(): RuntimeEventScheduleTargetPredicateSubj
       "event.link",
       createFieldPredicate(field, value, {
         subject: "Schedule",
-        createError: (message) => new ScheduleValidationError(message),
+        createError: (message) => new SixbError("runtime.invalid_definition", message),
       })
     )
 
@@ -153,7 +153,8 @@ function createPredicateContext(selector: EventSelectorSpec): RuntimeEventSchedu
 
 function assertEventSource(source: EventSelectorSpec): void {
   if (!source.types || source.types.length === 0) {
-    throw new ScheduleValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       "Schedule event source must select an event operation, e.g. .created(), .updated(), or .succeeded()."
     )
   }
@@ -182,7 +183,8 @@ function assertEventSource(source: EventSelectorSpec): void {
       assertNonEmpty(source.pipelineId ?? "", "event source pipelineId")
       return
     default:
-      throw new ScheduleValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         "Schedule event source must select object, link, rule, action, dataset, sync, or pipeline events."
       )
   }
@@ -232,13 +234,14 @@ export function defineSchedule(id: string): ScheduleBuilder<string> {
         value(callback: (event: RuntimeEventSchedulePredicateContext) => EventScheduleCondition) {
           const condition = callback(createPredicateContext(source))
           if (!condition || condition.kind !== "becomesTrue") {
-            throw new ScheduleValidationError(
+            throw new SixbError(
+              "runtime.invalid_definition",
               "Schedule condition must be built from the event DSL."
             )
           }
           assertPredicateShape(condition.predicate, {
             subject: "Schedule",
-            createError: (message) => new ScheduleValidationError(message),
+            createError: (message) => new SixbError("runtime.invalid_definition", message),
           })
 
           return {

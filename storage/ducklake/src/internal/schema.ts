@@ -1,5 +1,5 @@
 import type { DatasetColumnDefinition, DatasetColumnType, DatasetSchema, FileRef } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
 import { DUCKDB_COLUMN_TYPES, findDatasetColumnTypeForDuckDbSql } from "./duckdb-column-types"
 import { normalizeDuckDbDecimalValue } from "./duckdb-decimal"
 import { quoteIdentifier } from "./sql"
@@ -29,7 +29,8 @@ export function duckDbTypeToDatasetColumnType(typeSql: string): DatasetColumnTyp
     return type
   }
 
-  throw new LakeStorageError(
+  throw new SixbError(
+    "storage.lake_failed",
     `[SixbDuckLake] DuckDB column type '${typeSql}' cannot be mapped to a Sixb dataset column type.`
   )
 }
@@ -96,7 +97,10 @@ export function normalizeReadValue(value: unknown, column: DatasetColumnDefiniti
 
 function normalizeFileRef(value: unknown): FileRef {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new LakeStorageError("[SixbDuckLake] DuckDB fileRef value must be a struct.")
+    throw new SixbError(
+      "storage.lake_failed",
+      "[SixbDuckLake] DuckDB fileRef value must be a struct."
+    )
   }
 
   const record = value as Record<string, unknown>
@@ -113,7 +117,10 @@ function normalizeFileRef(value: unknown): FileRef {
 function getStringField(record: Readonly<Record<string, unknown>>, key: string): string {
   const value = record[key]
   if (typeof value !== "string") {
-    throw new LakeStorageError(`[SixbDuckLake] DuckDB fileRef field '${key}' must be a string.`)
+    throw new SixbError(
+      "storage.lake_failed",
+      `[SixbDuckLake] DuckDB fileRef field '${key}' must be a string.`
+    )
   }
 
   return value
@@ -129,7 +136,10 @@ function getOptionalStringField(
   }
 
   if (typeof value !== "string") {
-    throw new LakeStorageError(`[SixbDuckLake] DuckDB fileRef field '${key}' must be a string.`)
+    throw new SixbError(
+      "storage.lake_failed",
+      `[SixbDuckLake] DuckDB fileRef field '${key}' must be a string.`
+    )
   }
 
   return value
@@ -145,5 +155,8 @@ function getIntegerField(record: Readonly<Record<string, unknown>>, key: string)
     return Number(value)
   }
 
-  throw new LakeStorageError(`[SixbDuckLake] DuckDB fileRef field '${key}' must be an integer.`)
+  throw new SixbError(
+    "storage.lake_failed",
+    `[SixbDuckLake] DuckDB fileRef field '${key}' must be an integer.`
+  )
 }

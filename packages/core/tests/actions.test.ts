@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
-  ActionDefinitionError,
   defineAction,
   defineObjectType,
-  OntologyValidationError,
   optional,
   param,
   prop,
@@ -13,7 +11,6 @@ import {
   stringEnum,
 } from "../src"
 import { flushSixbErrors } from "../src/error-reporting/internal"
-import { ActionRunError } from "../src/storage"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -133,7 +130,7 @@ describe("defineAction", () => {
   test("validates empty action ids", () => {
     expect(() => {
       defineAction("")
-    }).toThrow(ActionDefinitionError)
+    }).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() => {
       defineAction("")
     }).toThrow("Action id must not be empty")
@@ -148,7 +145,7 @@ describe("defineAction", () => {
 
     expect(() => {
       definition.effects(() => {})
-    }).toThrow(ActionDefinitionError)
+    }).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() => {
       definition.effects(() => {})
     }).toThrow('Action "effectsWithoutEdits" cannot declare .effects(...) without .edits(...).')
@@ -200,7 +197,7 @@ describe("ActionRegistry", () => {
         actions: [actionDefinition(reboot), actionDefinition(duplicate)],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(ActionDefinitionError)
+    }).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() => {
       new Sixb({
         ontology: [Room],
@@ -244,7 +241,7 @@ describe("ActionRegistry", () => {
         actions: [actionDefinition(unknownAction)],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(ActionDefinitionError)
+    }).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
   })
 
   test("rejects action definitions without writeback or edits", () => {
@@ -262,7 +259,7 @@ describe("ActionRegistry", () => {
         actions: [invalidAction],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(ActionDefinitionError)
+    }).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() => {
       new Sixb({
         ontology: [Room],
@@ -291,7 +288,7 @@ describe("ActionRegistry", () => {
         actions: [invalidAction],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(ActionDefinitionError)
+    }).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() => {
       new Sixb({
         ontology: [Room],
@@ -320,7 +317,7 @@ describe("requestAction", () => {
         id: "room:1",
         actionId: "nonexistent",
       })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
     await expect(
       sixb.objects(Room).requestAction({
         id: "room:1",
@@ -367,7 +364,7 @@ describe("requestAction", () => {
         actionId: "setTemperature",
         params: {},
       })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
     await expect(
       sixb.objects(Room).requestAction({
         id: "room:1",
@@ -809,7 +806,7 @@ describe("requestAction", () => {
         params: { target: 73 },
         runId: "act_fixed",
       })
-    ).rejects.toBeInstanceOf(ActionRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 
   test("retries enqueue failures for the same run id and payload", async () => {
@@ -1000,7 +997,7 @@ describe("requestAction", () => {
         actionId: "createRoom",
         params: { id: "room:1", name: 42 },
       })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
 
     const events = await sixb.events.read({
       types: ["action.requested"],

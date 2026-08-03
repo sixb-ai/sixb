@@ -1,5 +1,5 @@
 import type { AuthSessionAudience } from "../../../auth/audience"
-import { AuthStorageError } from "../errors"
+import { authStorageError } from "../../../storage/auth/errors"
 import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "../types"
 import type { AuthStorageState } from "./shared"
 import {
@@ -123,7 +123,7 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
     const existing = this.state.sessions.get(key)
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_session",
         `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
       )
@@ -161,7 +161,7 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
     const existing = this.state.sessions.get(key)
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_session",
         `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
       )

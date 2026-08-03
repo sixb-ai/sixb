@@ -1,4 +1,4 @@
-import { WorkerUnhealthyError } from "./errors"
+import { SixbError } from "../errors"
 
 // The budget rides out ~80s of continuous failure (0.1s -> 30s backoffs) before the worker is
 // declared unhealthy, so a transient infra outage does not kill an otherwise healthy process.
@@ -63,7 +63,11 @@ export abstract class Worker {
         restartCount = 0
       }
       if (restartCount >= MAX_RESTARTS) {
-        throw new WorkerUnhealthyError(this.constructor.name, restartCount, { cause: failure })
+        throw new SixbError(
+          "runtime.unexpected",
+          `[SixbWorker] ${this.constructor.name} is unhealthy after ${restartCount} restart attempt(s).`,
+          { cause: failure, details: { workerName: this.constructor.name, restartCount } }
+        )
       }
 
       const delayMs = Math.min(this.restartBackoffMs * 2 ** restartCount, MAX_RESTART_BACKOFF_MS)

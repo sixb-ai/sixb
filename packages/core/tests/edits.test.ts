@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { defineObjectType, link, MaterializationConflictError, prop, Sixb } from "../src"
+import { defineObjectType, link, prop, Sixb } from "../src"
 import type { ActionReadObjectSetSource } from "../src/actions"
 import {
   ActionReadRecorder,
@@ -13,7 +13,7 @@ import { lowerEditBatch } from "../src/edits"
 import { createLinkScopeFingerprint } from "../src/materializer"
 import { getOntologyMutationRuntime } from "../src/runtime/internal"
 import type { ObjectRow, Storage } from "../src/storage"
-import { StorageTransactionError } from "../src/storage"
+import { storageTransactionError } from "../src/storage/errors"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Customer = defineObjectType({
@@ -314,8 +314,9 @@ describe("Action edit commits", () => {
     const divergent = await recordEdits({ runId: "act_replay" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "void" })
     })
-    await expect(commit(sixb, { runId: "act_replay", batch: divergent })).rejects.toBeInstanceOf(
-      MaterializationConflictError
+    await expect(commit(sixb, { runId: "act_replay", batch: divergent })).rejects.toHaveProperty(
+      "code",
+      "storage.conflict"
     )
   })
 
@@ -395,7 +396,7 @@ describe("Action edit commits", () => {
           linkScopes: [],
         },
       })
-    ).rejects.toBeInstanceOf(MaterializationConflictError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 
   test("fails the commit when an observed link scope changed", async () => {
@@ -425,7 +426,7 @@ describe("Action edit commits", () => {
           ],
         },
       })
-    ).rejects.toBeInstanceOf(MaterializationConflictError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 
   test("accepts a commit whose observed empty scope still matches", async () => {
@@ -471,7 +472,7 @@ describe("Action commit retries", () => {
             const result = await run(tx)
             if (!armed) return result
             armed = false
-            throw new StorageTransactionError("forced serialization failure", {
+            throw storageTransactionError("forced serialization failure", {
               reason: "serialization_failure",
             })
           }, options as never)
@@ -646,6 +647,6 @@ describe("Action read dependency capture", () => {
     })
     await expect(
       commit(sixb, { runId: "act_capture", batch, dependencies: reads.dependencies() })
-    ).rejects.toBeInstanceOf(MaterializationConflictError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
   })
 })

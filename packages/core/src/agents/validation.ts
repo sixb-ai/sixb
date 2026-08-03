@@ -1,6 +1,6 @@
+import { SixbError } from "../errors"
 import { getInvalidJsonValueReason } from "../json"
 import type { GroupDefinition, SecurityRegistry } from "../security"
-import { AgentDefinitionError } from "./errors"
 import {
   AGENT_REASONING_LEVELS,
   type AgentDefinition,
@@ -11,7 +11,7 @@ import {
 
 export function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
-    throw new AgentDefinitionError(`[Sixb] Agent ${field} must not be empty.`)
+    throw new SixbError("runtime.invalid_definition", `[Sixb] Agent ${field} must not be empty.`)
   }
 }
 
@@ -34,7 +34,8 @@ export function assertValidLoopConfig(loop: AgentLoopConfig | undefined): void {
     return
   }
   if (!Number.isInteger(maxSteps) || maxSteps <= 0) {
-    throw new AgentDefinitionError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       "[Sixb] Agent loop.stopWhen.maxSteps must be a positive finite integer."
     )
   }
@@ -45,7 +46,8 @@ export function assertValidReasoningLevel(reasoning: AgentReasoningLevel | undef
     return
   }
   if (!isAgentReasoningLevel(reasoning)) {
-    throw new AgentDefinitionError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `[Sixb] Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}.`
     )
   }
@@ -60,20 +62,23 @@ export function assertValidProviderOptions(
 
   const reason = getInvalidJsonValueReason(providerOptions, "providerOptions")
   if (!isRecord(providerOptions) || reason) {
-    throw new AgentDefinitionError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `[Sixb] Agent providerOptions must be a provider-keyed JSON object${reason ? `; ${reason}` : "."}`
     )
   }
 
   for (const [provider, options] of Object.entries(providerOptions)) {
     if (!provider.trim()) {
-      throw new AgentDefinitionError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         "[Sixb] Agent providerOptions provider names must not be empty."
       )
     }
     const optionsReason = getInvalidJsonValueReason(options, `providerOptions.${provider}`)
     if (!isRecord(options) || optionsReason) {
-      throw new AgentDefinitionError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `[Sixb] Agent providerOptions.${provider} must be a JSON object${optionsReason ? `; ${optionsReason}` : "."}`
       )
     }
@@ -86,7 +91,8 @@ export function groupIdsFromDefinitions(
 ): readonly string[] {
   const groupIds = (groups ?? []).map((group) => {
     if (!isRecord(group) || group.kind !== "group") {
-      throw new AgentDefinitionError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `[Sixb] Agent '${agentId}' groups must contain only group definitions.`
       )
     }
@@ -107,7 +113,8 @@ export function validateAgentGroupReferences(
     assertNoDuplicateGroupIds(agent.id, agent.groupIds)
     for (const groupId of agent.groupIds) {
       if (!security.getGroupById(groupId)) {
-        throw new AgentDefinitionError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `[Sixb] Agent '${agent.id}' groups references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
         )
       }
@@ -120,7 +127,8 @@ function assertNoDuplicateGroupIds(agentId: string, groupIds: readonly string[])
   for (const groupId of groupIds) {
     assertNonEmpty(groupId, `Agent '${agentId}' group id`)
     if (seen.has(groupId)) {
-      throw new AgentDefinitionError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `[Sixb] Agent '${agentId}' groups contains duplicate group id '${groupId}'.`
       )
     }

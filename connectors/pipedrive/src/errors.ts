@@ -1,5 +1,5 @@
-import { connectorCodeForStatus, SixbProviderError } from "@sixb/core/errors"
-export class PipedriveApiError extends SixbProviderError {
+import { connectorCodeForStatus, SixbError } from "@sixb/core/errors"
+export class PipedriveApiError extends SixbError {
   override readonly name = "PipedriveApiError"
 
   constructor(

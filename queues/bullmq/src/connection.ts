@@ -1,4 +1,4 @@
-import { QueueError } from "@sixb/core/queues"
+import { SixbError } from "@sixb/core/errors"
 import IORedis, { type Redis, type RedisOptions } from "ioredis"
 
 export type BullMqConnectionInput = string | RedisOptions | Redis
@@ -36,7 +36,8 @@ export function resolveConnections(input: BullMqConnectionInput): BullMqConnecti
   if (isRedisClient(input)) {
     const options = input.options as RedisOptions | undefined
     if (options && options.maxRetriesPerRequest !== null) {
-      throw new QueueError(
+      throw new SixbError(
+        "runtime.invalid_input",
         "[Sixb] BullMqQueues requires a borrowed IORedis connection with `maxRetriesPerRequest: null`"
       )
     }

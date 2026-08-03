@@ -1,4 +1,4 @@
-import { MaterializationValidationError } from "../../materialization/errors"
+import { SixbError } from "../../errors"
 import type { ProjectionSourceEntry } from "../../materialization/model"
 import { linkOwnershipKey } from "../../materialization/refs"
 import type { OntologyRegistry } from "../../ontology"
@@ -74,8 +74,9 @@ function validateProjectionRoot(
   entry: ProjectionSourceEntry
 ): void {
   if (entry.root.kind === policy.expectedRootKind) return
-  throw new MaterializationValidationError(
-    `Projection '${resolved.projectionId}' requires ${policy.expectedRootDescription} root.`
+  throw new SixbError(
+    "ontology.invalid_value",
+    `[Sixb] Projection '${resolved.projectionId}' requires ${policy.expectedRootDescription} root.`
   )
 }
 
@@ -101,8 +102,9 @@ function validateObjectAssertion(
     resolved.definition._tag !== "ObjectProjectionDefinition" ||
     assertion.ref.objectTypeId !== resolved.definition.objectTypeId
   ) {
-    throw new MaterializationValidationError(
-      "Projection asserted an object outside its owned type."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Projection asserted an object outside its owned type."
     )
   }
 
@@ -114,8 +116,9 @@ function validateObjectAssertion(
   const owned = policy.ownedProperties.get(assertion.ref.objectTypeId) ?? new Set<string>()
   for (const propertyId of Object.keys(properties)) {
     if (owned.has(propertyId)) continue
-    throw new MaterializationValidationError(
-      `Projection '${resolved.projectionId}' asserted unowned property '${assertion.ref.objectTypeId}.${propertyId}'.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Projection '${resolved.projectionId}' asserted unowned property '${assertion.ref.objectTypeId}.${propertyId}'.`
     )
   }
   return { ...assertion, properties }
@@ -129,20 +132,25 @@ function validateLinkAssertion(
 ): LinkAssertion {
   const ownershipKey = linkOwnershipKey(assertion.ref.source.objectTypeId, assertion.ref.linkId)
   if (!policy.ownedLinks.has(ownershipKey)) {
-    throw new MaterializationValidationError("Projection asserted a link outside its owned scope.")
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Projection asserted a link outside its owned scope."
+    )
   }
 
   const expectedTargetTypeId = projectionLinkTargetType(resolved, assertion)
   if (expectedTargetTypeId !== assertion.ref.target.objectTypeId) {
-    throw new MaterializationValidationError(
-      `Projection '${resolved.projectionId}' asserted link target type '${assertion.ref.target.objectTypeId}' outside its mapping.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Projection '${resolved.projectionId}' asserted link target type '${assertion.ref.target.objectTypeId}' outside its mapping.`
     )
   }
 
   validateLinkAuthorityProperties(ontology, assertion.ref, assertion.properties)
   if (assertion.properties !== undefined) {
-    throw new MaterializationValidationError(
-      `Projection '${resolved.projectionId}' does not map link assertion properties.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Projection '${resolved.projectionId}' does not map link assertion properties.`
     )
   }
   return { ...assertion }

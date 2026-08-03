@@ -6,7 +6,7 @@ import type {
   AgentMessageRole,
   FileRef,
 } from "../src"
-import { AgentMessageAdapterError, fromAiSdk, toModelMessages, toUiMessage } from "../src/agents"
+import { fromAiSdk, toModelMessages, toUiMessage } from "../src/agents"
 
 function sixbMessage(role: AgentMessageRole, parts: AgentMessagePart[]): AgentMessage {
   return { role, parts }
@@ -147,7 +147,9 @@ describe("fromAiSdk", () => {
       role: "assistant",
       parts: [{ type: "source", url: "https://x" }],
     } as unknown as AgentInboundUiMessage
-    expect(() => fromAiSdk(message)).toThrow(AgentMessageAdapterError)
+    expect(() => fromAiSdk(message)).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_input" })
+    )
   })
 
   test("throws on transient/streaming states that must never be persisted", () => {
@@ -155,24 +157,32 @@ describe("fromAiSdk", () => {
       role: "assistant",
       parts: [{ type: "text", text: "partial", state: "streaming" }],
     } as unknown as AgentInboundUiMessage
-    expect(() => fromAiSdk(streamingText)).toThrow(AgentMessageAdapterError)
+    expect(() => fromAiSdk(streamingText)).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_input" })
+    )
 
     const transientTool = {
       role: "assistant",
       parts: [{ type: "tool-bash", toolCallId: "c", state: "input-available", input: {} }],
     } as unknown as AgentInboundUiMessage
-    expect(() => fromAiSdk(transientTool)).toThrow(AgentMessageAdapterError)
+    expect(() => fromAiSdk(transientTool)).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_input" })
+    )
 
     const approval = {
       role: "assistant",
       parts: [{ type: "tool-bash", toolCallId: "c", state: "approval-requested", input: {} }],
     } as unknown as AgentInboundUiMessage
-    expect(() => fromAiSdk(approval)).toThrow(AgentMessageAdapterError)
+    expect(() => fromAiSdk(approval)).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_input" })
+    )
   })
 
   test("throws on an unsupported role", () => {
     const message = { role: "tool", parts: [] } as unknown as AgentInboundUiMessage
-    expect(() => fromAiSdk(message)).toThrow(AgentMessageAdapterError)
+    expect(() => fromAiSdk(message)).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_input" })
+    )
   })
 
   test("throws on out-of-contract (non-JSON) payloads", () => {
@@ -188,7 +198,9 @@ describe("fromAiSdk", () => {
         },
       ],
     } as unknown as AgentInboundUiMessage
-    expect(() => fromAiSdk(message)).toThrow(AgentMessageAdapterError)
+    expect(() => fromAiSdk(message)).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_input" })
+    )
   })
 })
 

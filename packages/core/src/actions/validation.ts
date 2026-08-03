@@ -1,11 +1,10 @@
+import { SixbError } from "../errors"
 import type { JsonValue } from "../json"
 import { type SchemaOrRef, type ValueType, validateSchemaOrRefValue } from "../ontology"
-import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { Schema } from "../ontology/types"
 import { coerceSchemaValueToTyped, normalizeSchemaValue } from "../ontology/validation"
 import type { ActionRunParams } from "../storage/action-runs"
-import { ActionDefinitionError } from "./errors"
 import type {
   ActionDefinition,
   ActionParamsConfig,
@@ -26,7 +25,7 @@ interface ActionValidationRuntime {
 
 export function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
-    throw new ActionDefinitionError(`Action ${field} must not be empty.`)
+    throw new SixbError("runtime.invalid_definition", `Action ${field} must not be empty.`)
   }
 }
 
@@ -59,7 +58,10 @@ export function normalizeActionParams(
 
   for (const paramId of Object.keys(params)) {
     if (!knownParamIds.has(paramId)) {
-      throw new OntologyValidationError(`Unknown param '${paramId}' for action '${pathPrefix}'`)
+      throw new SixbError(
+        "ontology.invalid_value",
+        `Unknown param '${paramId}' for action '${pathPrefix}'`
+      )
     }
   }
 
@@ -68,7 +70,8 @@ export function normalizeActionParams(
 
     if (value === undefined) {
       if (paramDef.required) {
-        throw new OntologyValidationError(
+        throw new SixbError(
+          "ontology.invalid_value",
           `Missing required param '${paramId}' for action '${pathPrefix}'`
         )
       }
@@ -77,7 +80,8 @@ export function normalizeActionParams(
 
     if (value === null) {
       if (!paramDef.nullable) {
-        throw new OntologyValidationError(
+        throw new SixbError(
+          "ontology.invalid_value",
           `[Sixb] Action param ${pathPrefix}.${paramId} cannot be null`
         )
       }
@@ -133,7 +137,10 @@ export function coerceActionParamsToTyped(
 
 export function validateActionSubject(action: ActionDefinition, subject: ActionSubject): void {
   if (isGlobalActionDefinition(action) && subject.kind !== "none") {
-    throw new OntologyValidationError(`Action '${action.id}' does not accept an object subject.`)
+    throw new SixbError(
+      "ontology.invalid_value",
+      `Action '${action.id}' does not accept an object subject.`
+    )
   }
 }
 
@@ -145,12 +152,16 @@ export function resolveObjectActionSubject(params: {
   const { runtime, action, subject } = params
 
   if (subject.kind !== "object") {
-    throw new OntologyValidationError(`Action '${action.id}' requires an object subject.`)
+    throw new SixbError(
+      "ontology.invalid_value",
+      `Action '${action.id}' requires an object subject.`
+    )
   }
 
   const objectType = runtime.ontology.resolveObjectType(subject.objectTypeId)
   if (!actionAppliesToObjectType(runtime, action, objectType)) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `Action '${action.id}' is not valid for object type '${objectType.id}'.`
     )
   }

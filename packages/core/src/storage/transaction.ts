@@ -1,4 +1,4 @@
-import { StorageTransactionError } from "./errors"
+import { storageTransactionError } from "../storage/errors"
 
 type ObjectLike = Record<PropertyKey, unknown>
 
@@ -42,7 +42,7 @@ export function createTransactionStorageProxy<T extends object>(
 
 export function assertTransactionActive(isActive: () => boolean): void {
   if (!isActive()) {
-    throw new StorageTransactionError(
+    throw storageTransactionError(
       "[Sixb] Transaction storage cannot be used after transaction completion.",
       { reason: "transaction_inactive" }
     )
@@ -50,7 +50,7 @@ export function assertTransactionActive(isActive: () => boolean): void {
 }
 
 export function throwNestedStorageTransaction(): never {
-  throw new StorageTransactionError("[Sixb] Nested storage transactions are not supported yet.", {
+  throw storageTransactionError("[Sixb] Nested storage transactions are not supported yet.", {
     reason: "nested_transaction",
   })
 }

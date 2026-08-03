@@ -1,4 +1,4 @@
-import { MaterializationValidationError } from "../../materialization/errors"
+import { SixbError } from "../../errors"
 import { utf8JsonByteLength } from "../../materialization/refs"
 import type {
   MaterializationSession,
@@ -65,7 +65,10 @@ export async function drainStagedWork(
   })) {
     for (const record of page.records) {
       if (record.kind !== "plan") {
-        throw new MaterializationValidationError("Provider returned non-plan apply work.")
+        throw new SixbError(
+          "ontology.invalid_value",
+          "[Sixb] Provider returned non-plan apply work."
+        )
       }
       if (phase !== null && record.applyPhase !== phase) await flush()
       phase = record.applyPhase
@@ -92,8 +95,9 @@ export async function validateStagedCardinality(
     throwIfAborted(signal)
     for (const record of page.records) {
       if (record.kind !== "cardinality") {
-        throw new MaterializationValidationError(
-          "Provider returned non-cardinality cardinality work."
+        throw new SixbError(
+          "ontology.invalid_value",
+          "[Sixb] Provider returned non-cardinality cardinality work."
         )
       }
       if (record.scopeSortKey !== currentScope) {
@@ -102,8 +106,9 @@ export async function validateStagedCardinality(
       }
       if (!record.occupied) continue
       if (occupant && occupant !== record.linkSortKey) {
-        throw new MaterializationValidationError(
-          `Link scope '${record.ref.source.objectTypeId}.${record.ref.linkId}' has cardinality one.`
+        throw new SixbError(
+          "ontology.invalid_value",
+          `[Sixb] Link scope '${record.ref.source.objectTypeId}.${record.ref.linkId}' has cardinality one.`
         )
       }
       occupant = record.linkSortKey
@@ -127,7 +132,10 @@ export async function drainStagedEvents(
     const items: MaterializationPlanItem[] = []
     for (const record of page.records) {
       if (record.kind !== "event") {
-        throw new MaterializationValidationError("Provider returned non-event event work.")
+        throw new SixbError(
+          "ontology.invalid_value",
+          "[Sixb] Provider returned non-event event work."
+        )
       }
       const event = sequenceMaterializationEvent(
         context.projectId,

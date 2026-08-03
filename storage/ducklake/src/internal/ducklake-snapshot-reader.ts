@@ -1,4 +1,5 @@
 import type { DatasetDefinition } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type {
   DatasetCatalogState,
   DatasetLatestVersionSummary,
@@ -6,7 +7,6 @@ import type {
   DatasetVersionMode,
   DatasetVersionRef,
 } from "@sixb/core/lake-storage"
-import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { getBigIntLike, getBoolean, getDate, getOptionalString, getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
@@ -404,7 +404,8 @@ export class DuckLakeSnapshotReader {
     metadata: SixbCommitMetadata | undefined
   ): void {
     if (metadata !== undefined && metadata.datasetId !== datasetId) {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbDuckLake] DuckLake snapshot '${snapshotId}' changed dataset '${datasetId}' but Sixb commit metadata references dataset '${metadata.datasetId}'.`
       )
     }
@@ -817,7 +818,10 @@ export class DuckLakeSnapshotReader {
 
 function assertDuckLakeSnapshotId(snapshotId: string): void {
   if (!/^\d+$/.test(snapshotId)) {
-    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`)
+    throw new SixbError(
+      "storage.lake_failed",
+      `[SixbDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`
+    )
   }
 }
 

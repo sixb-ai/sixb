@@ -1,4 +1,4 @@
-import { MaterializationValidationError } from "@sixb/core/internal/materialization"
+import { SixbError } from "@sixb/core/errors"
 import {
   assertSourceBeginInput as assertBeginInput,
   assertSourceExecutionIdentity as assertExecutionIdentity,
@@ -191,7 +191,10 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
         )
       }
       if (input.readyAt < toIsoString(manifest.created_at)) {
-        throw new MaterializationValidationError("Source readyAt cannot precede source createdAt.")
+        throw new SixbError(
+          "ontology.invalid_value",
+          "[Sixb] Source readyAt cannot precede source createdAt."
+        )
       }
       await this.assertReadyState(sql, manifest, input.rootCount, input.assertionCount)
       const rows = await sql<PgOntologySourceRow[]>`
@@ -389,8 +392,9 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       abandonedAt < toIsoString(manifest.created_at) ||
       (manifest.ready_at !== null && abandonedAt < toIsoString(manifest.ready_at))
     ) {
-      throw new MaterializationValidationError(
-        "Source abandonedAt cannot precede source creation or readiness."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Source abandonedAt cannot precede source creation or readiness."
       )
     }
     const rows = await sql<PgOntologySourceRow[]>`
@@ -445,8 +449,9 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       ordinals !== rootCount ||
       (rootCount > 0 && (minimum !== 0 || maximum !== rootCount - 1))
     ) {
-      throw new MaterializationValidationError(
-        "Source ready counts do not match the staged roots and assertions."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Source ready counts do not match the staged roots and assertions."
       )
     }
 
@@ -486,10 +491,11 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
             LIMIT 1
           `
     if (invalid) {
-      throw new MaterializationValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         manifest.projection_kind === "link"
-          ? "Link projection roots must contain exactly their matching link assertion."
-          : "Object projection roots must contain exactly their matching object assertion plus links sourced from that root."
+          ? "[Sixb] Link projection roots must contain exactly their matching link assertion."
+          : "[Sixb] Object projection roots must contain exactly their matching object assertion plus links sourced from that root."
       )
     }
   }

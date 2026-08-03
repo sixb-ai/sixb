@@ -7,7 +7,7 @@ import type {
   UpdateAuthUserStatusInput,
   UserRecord,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import type { PgStoreClient } from "../transactions"
 import type { PgAuthUserRow } from "./rows"
 import { rowToUserRecord } from "./rows"
@@ -32,14 +32,14 @@ export class PgAuthUserStore implements AuthUserStore {
     const email = normalizeEmail(input.email)
 
     if (await getUserRowById(this.sql, { projectId, id })) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "duplicate_user",
         `[Sixb] User '${id}' already exists for project '${projectId}'.`
       )
     }
 
     if (await getUserRowByEmail(this.sql, { projectId, email })) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "duplicate_user",
         `[Sixb] User email '${email}' already exists for project '${projectId}'.`
       )
@@ -105,7 +105,7 @@ export class PgAuthUserStore implements AuthUserStore {
     })
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_user",
         `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
       )
@@ -132,7 +132,7 @@ export class PgAuthUserStore implements AuthUserStore {
     })
 
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_user",
         `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
       )

@@ -1,5 +1,4 @@
 import { stableJsonStringify } from "../../json"
-import { MaterializationObjectNotFoundError } from "../../materialization/errors"
 import type {
   OntologyMaterializationOrigin,
   OntologyObjectRef,
@@ -12,6 +11,7 @@ import {
   telemetryPointKey,
   telemetryPointSortKey,
 } from "../../materialization/refs"
+import { objectNotFound } from "../../storage/errors"
 import type {
   MaterializationObjectState,
   MaterializationPlanWorkItem,
@@ -79,9 +79,10 @@ export async function planTelemetryAppend(
   for (const group of telemetryObjectGroups(input.points)) {
     const storedObject = objects.get(objectRefKey(group.objectRef))
     if (!storedObject?.effective) {
-      throw new MaterializationObjectNotFoundError(
+      throw objectNotFound(
         group.objectRef.objectTypeId,
-        group.objectRef.primaryId
+        group.objectRef.primaryId,
+        "Cannot append telemetry to missing object"
       )
     }
     await planTelemetryObject(

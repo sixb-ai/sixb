@@ -21,7 +21,6 @@ import { EventsRuntime } from "@sixb/core/internal/events"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import type { ActionRunRecord, ObjectRow } from "@sixb/core/storage"
 import { ActionWorker } from "../src"
-import { ActionWorkerError } from "../src/errors"
 import { waitFor } from "./helpers"
 
 /** What `onError` is handed: the portable record, and the live thrown value on the context. */
@@ -103,7 +102,7 @@ describe("ActionWorker", () => {
     await worker.stop()
   })
 
-  test("throws ActionWorkerError when action-run storage is missing", () => {
+  test("throws action.failed when action-run storage is missing", () => {
     const noop = defineAction("noop")
       .on(Device)
       .params({})
@@ -127,10 +126,10 @@ describe("ActionWorker", () => {
             return actionId === "noop" ? noop : null
           },
         })
-    ).toThrow(ActionWorkerError)
+    ).toThrow(expect.objectContaining({ code: "action.failed" }))
   })
 
-  test("throws ActionWorkerError when blob storage is missing", () => {
+  test("throws action.failed when blob storage is missing", () => {
     const noop = defineAction("noop")
       .on(Device)
       .params({})

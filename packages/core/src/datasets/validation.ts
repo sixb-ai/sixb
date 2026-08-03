@@ -1,7 +1,7 @@
 import { isFileRef } from "../blob-storage"
+import { SixbError } from "../errors"
 import { isJsonValue } from "../json"
 import { isDecimalString } from "../ontology/decimal"
-import { DatasetValidationError } from "./errors"
 import type {
   DatasetColumnDefinition,
   DatasetColumnType,
@@ -130,7 +130,8 @@ function assertDatasetSchema(
 
 export function assertDatasetDefinition(
   definition: unknown,
-  createError: (message: string) => Error = (message) => new DatasetValidationError(message)
+  createError: (message: string) => Error = (message) =>
+    new SixbError("runtime.invalid_definition", message)
 ): asserts definition is DatasetDefinition {
   if (!isRecord(definition)) {
     throw createError("Dataset definition must be an object.")

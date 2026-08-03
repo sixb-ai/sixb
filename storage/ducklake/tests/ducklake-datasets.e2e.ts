@@ -3,7 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { col, type DatasetDefinition, defineDataset } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorage } from "../src"
 import {
   createDuckDbRuntime,
@@ -100,7 +99,7 @@ describe("DuckLakeStorage dataset metadata", () => {
       })
     )
 
-    await expect(rejected).rejects.toBeInstanceOf(LakeStorageError)
+    await expect(rejected).rejects.toHaveProperty("code", "storage.lake_failed")
     await expect(rejected).rejects.toThrow("changing column 'orderId' type")
   })
 

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
   col,
-  DatasetValidationError,
   defineConnector,
   defineDataset,
   defineObjectType,
@@ -10,7 +9,6 @@ import {
   defineSync,
   getDatasetRowValidationError,
   prop,
-  RuntimeError,
   Sixb,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -116,7 +114,7 @@ describe("defineDataset", () => {
       defineDataset("raw.erp.missing-column").derive(rawOrdersDataset, {
         pick: ["missing"],
       } as never)
-    ).toThrow(DatasetValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       defineDataset("raw.erp.missing-column").derive(rawOrdersDataset, {
         pick: ["missing"],
@@ -183,7 +181,7 @@ describe("Sixb dataset registration", () => {
           syncs: [sync],
           ...createTestRuntimeDeps(),
         })
-    ).toThrow(RuntimeError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(
       () =>
         new Sixb<readonly []>({
@@ -209,7 +207,7 @@ describe("Sixb dataset registration", () => {
           pipelines: [pipeline],
           ...createTestRuntimeDeps(),
         })
-    ).toThrow(RuntimeError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(
       () =>
         new Sixb<readonly []>({

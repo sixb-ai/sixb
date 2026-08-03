@@ -1,8 +1,9 @@
+import { isSixbError, SixbError } from "../../errors"
 import { assertPinnedDatasetWatermark } from "../../materialization/dataset-watermark"
 import {
-  MaterializationCancellationError,
-  MaterializationConflictError,
-  MaterializationValidationError,
+  isMaterializationCancellation,
+  materializationConflict,
+  materializationConflictKind,
 } from "../../materialization/errors"
 import type {
   OntologyMaterializationOrigin,
@@ -138,8 +139,9 @@ function validateProjectionDataset(
   datasetVersion: PinnedDatasetVersion
 ): void {
   if (datasetVersion.datasetId === resolved.datasetId) return
-  throw new MaterializationValidationError(
-    `Projection '${resolved.projectionId}' requires dataset '${resolved.datasetId}'.`
+  throw new SixbError(
+    "ontology.invalid_value",
+    `[Sixb] Projection '${resolved.projectionId}' requires dataset '${resolved.datasetId}'.`
   )
 }
 
@@ -191,7 +193,7 @@ function projectionReplayResult(
     commit.origin.projectionRunId !== command.execution.projectionRunId ||
     commit.result.kind !== "projection"
   ) {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "run-correlation",
       `Projection commit '${commit.id}' belongs to a different logical run.`
     )
@@ -433,9 +435,9 @@ async function abandonFailedCandidate(
 }
 
 function shouldAbandonCandidate(error: unknown): boolean {
-  if (error instanceof MaterializationValidationError) return true
-  if (error instanceof MaterializationCancellationError) return true
-  return error instanceof MaterializationConflictError && error.kind === "run-correlation"
+  if (isSixbError(error, "ontology.invalid_value")) return true
+  if (isMaterializationCancellation(error)) return true
+  return materializationConflictKind(error) === "run-correlation"
 }
 
 function validateProjectionWatermark(

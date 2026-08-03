@@ -10,6 +10,7 @@ import {
   SIXB_TIMEOUT_ERROR_CODES,
   SIXB_VALIDATION_ERROR_CODES,
   type SixbErrorCode,
+  type SixbErrorKind,
 } from "../../packages/core/src/errors"
 
 /**
@@ -79,38 +80,38 @@ describe("docs/runtime/error-codes.md", () => {
   })
 })
 
-describe("the error classes", () => {
-  const buckets = {
-    SixbValidationError: SIXB_VALIDATION_ERROR_CODES,
-    SixbAuthorizationError: SIXB_AUTHORIZATION_ERROR_CODES,
-    SixbConflictError: SIXB_CONFLICT_ERROR_CODES,
-    SixbTimeoutError: SIXB_TIMEOUT_ERROR_CODES,
-    SixbProviderError: SIXB_PROVIDER_ERROR_CODES,
-  } as const satisfies Record<string, readonly SixbErrorCode[]>
+describe("the error kinds", () => {
+  const kinds = {
+    validation: SIXB_VALIDATION_ERROR_CODES,
+    authorization: SIXB_AUTHORIZATION_ERROR_CODES,
+    conflict: SIXB_CONFLICT_ERROR_CODES,
+    timeout: SIXB_TIMEOUT_ERROR_CODES,
+    provider: SIXB_PROVIDER_ERROR_CODES,
+  } as const satisfies Record<SixbErrorKind, readonly SixbErrorCode[]>
 
-  const classTable = parseClassRows(sectionBetween(doc, "\n## Catching\n", "\n## Retryable\n"))
+  const kindTable = parseKindRows(sectionBetween(doc, "\n## Catching\n", "\n## Retryable\n"))
 
   test("claim no code twice", () => {
     const owner = new Map<string, string>()
     const overlaps: string[] = []
-    for (const [className, codes] of Object.entries(buckets)) {
+    for (const [kind, codes] of Object.entries(kinds)) {
       for (const code of codes) {
         const previous = owner.get(code)
-        if (previous) overlaps.push(`${code}: ${previous} and ${className}`)
-        else owner.set(code, className)
+        if (previous) overlaps.push(`${code}: ${previous} and ${kind}`)
+        else owner.set(code, kind)
       }
     }
     expect(overlaps).toEqual([])
   })
 
   test("list codes the same way the docs do", () => {
-    for (const [className, codes] of Object.entries(buckets)) {
-      expect({ [className]: classTable.get(className) }).toEqual({ [className]: [...codes] })
+    for (const [kind, codes] of Object.entries(kinds)) {
+      expect({ [kind]: kindTable.get(kind) }).toEqual({ [kind]: [...codes] })
     }
   })
 
   test("are all documented", () => {
-    expect([...classTable.keys()].sort()).toEqual(Object.keys(buckets).sort())
+    expect([...kindTable.keys()].sort()).toEqual(Object.keys(kinds).sort())
   })
 })
 
@@ -141,17 +142,15 @@ function parseCodeRows(section: string): readonly DocumentedCode[] {
   return rows
 }
 
-/** `| \`SixbConflictError\` | means ... | \`code\`, \`code\` |` */
-function parseClassRows(section: string): ReadonlyMap<string, readonly string[]> {
+/** `| \`conflict\` | means ... | \`code\`, \`code\` |` — a kind row is one whose codes are all known. */
+function parseKindRows(section: string): ReadonlyMap<string, readonly string[]> {
   const rows = new Map<string, readonly string[]>()
   for (const cells of tableRows(section)) {
     if (cells.length !== 3) continue
-    const className = unwrapCode(cells[0])
-    if (!className?.startsWith("Sixb")) continue
-    rows.set(
-      className,
-      [...cells[2].matchAll(/`([^`]+)`/g)].map((match) => match[1])
-    )
+    const kind = unwrapCode(cells[0])
+    const codes = [...cells[2].matchAll(/`([^`]+)`/g)].map((match) => match[1])
+    if (!kind || codes.length === 0 || !codes.every(isKnownCode)) continue
+    rows.set(kind, codes)
   }
   return rows
 }

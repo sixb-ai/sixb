@@ -1,6 +1,6 @@
+import { SixbError } from "../../errors"
 import type { JsonValue } from "../../json"
 import { stableJsonStringify } from "../../json"
-import { MaterializationValidationError } from "../../materialization/errors"
 import type {
   LinkOverride,
   ObjectOverride,
@@ -64,7 +64,7 @@ export function applyObjectEdit(input: ObjectEditInput): AuthorityTransition<Obj
       next = applyObjectRestore(input)
       break
     default:
-      throw new MaterializationValidationError("Expected an object edit operation.")
+      throw new SixbError("ontology.invalid_value", "[Sixb] Expected an object edit operation.")
   }
 
   return transition(current, next)
@@ -75,8 +75,9 @@ function applyObjectCreate(
   operation: ObjectWriteOperation
 ): ObjectOverride {
   if (input.sourceProperties || input.authority) {
-    throw new MaterializationValidationError(
-      `Object create requires complete authority absence for ${operation.ref.objectTypeId}:${operation.ref.primaryId}.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Object create requires complete authority absence for ${operation.ref.objectTypeId}:${operation.ref.primaryId}.`
     )
   }
   return { kind: "create", properties: input.normalizedProperties ?? operation.properties }
@@ -120,8 +121,9 @@ function applyObjectPatch(
 ): ObjectOverride | null {
   const current = input.authority
   if (!input.effectiveExists && current?.kind !== "patch") {
-    throw new MaterializationValidationError(
-      `Object patch requires an effective object for ${operation.ref.objectTypeId}:${operation.ref.primaryId}.`
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] Object patch requires an effective object for ${operation.ref.objectTypeId}:${operation.ref.primaryId}.`
     )
   }
 
@@ -204,7 +206,7 @@ export function applyLinkEdit(input: LinkEditInput): AuthorityTransition<LinkOve
       next = null
       break
     default:
-      throw new MaterializationValidationError("Expected a link edit operation.")
+      throw new SixbError("ontology.invalid_value", "[Sixb] Expected a link edit operation.")
   }
 
   return transition(current, next)

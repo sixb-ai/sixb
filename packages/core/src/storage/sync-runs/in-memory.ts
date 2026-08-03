@@ -1,4 +1,5 @@
 import type { SixbFailure } from "../../errors"
+import { SixbError } from "../../errors"
 import { cloneJsonValue, type JsonValue } from "../../json"
 import {
   compareStartedAt,
@@ -8,7 +9,6 @@ import {
   paginate,
   toStatusSet,
 } from "../run-listing"
-import { SyncRunError } from "./errors"
 import type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
@@ -53,7 +53,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
   async start(input: StartSyncRunInput): Promise<SyncRunRecord> {
     const key = syncRunKey(input.projectId, input.id)
     if (this.rows.has(key)) {
-      throw new SyncRunError(
+      throw new SixbError(
         "storage.conflict",
         `[Sixb] Sync run '${input.id}' already exists for project '${input.projectId}'.`
       )
@@ -80,7 +80,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     const existing = this.rows.get(key)
 
     if (!existing) {
-      throw new SyncRunError(
+      throw new SixbError(
         "sync.run_not_found",
         `[Sixb] Sync run '${input.id}' not found for project '${input.projectId}'.`
       )
@@ -88,13 +88,13 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
 
     if (input.status === "succeeded") {
       if (input.output && input.output.datasetId !== existing.datasetId) {
-        throw new SyncRunError(
+        throw new SixbError(
           "runtime.invalid_input",
           `[Sixb] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.datasetId}'.`
         )
       }
       if (!input.output && (existing.mode !== "append" || input.rowsRead !== 0)) {
-        throw new SyncRunError(
+        throw new SixbError(
           "runtime.invalid_input",
           `[Sixb] Sync run '${input.id}' may omit its output only for an empty append.`
         )

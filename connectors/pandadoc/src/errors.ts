@@ -1,6 +1,6 @@
-import { connectorCodeForStatus, SixbProviderError } from "@sixb/core/errors"
+import { connectorCodeForStatus, SixbError } from "@sixb/core/errors"
 /** Raised when the PandaDoc API returns a non-2xx response. */
-export class PandaDocApiError extends SixbProviderError {
+export class PandaDocApiError extends SixbError {
   override readonly name = "PandaDocApiError"
 
   constructor(

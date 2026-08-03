@@ -1,16 +1,8 @@
 import type { DatasetDefinition, PipelineDefinition } from "@sixb/core"
-import { SixbError, type SixbErrorOptions } from "@sixb/core/errors"
+import { SixbError } from "@sixb/core/errors"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { type PipelineRunStatus, type SixbFailure, toSixbFailure } from "@sixb/core/storage"
 import type { PipelineJob } from "./types"
-
-export class PipelineWorkerError extends SixbError {
-  override readonly name = "PipelineWorkerError"
-
-  constructor(message: string, options?: SixbErrorOptions) {
-    super("pipeline.failed", message, options)
-  }
-}
 
 /**
  * Files an unlabeled pipeline failure under the pipeline's own code rather than the catch-all, and
@@ -43,7 +35,8 @@ export function requireFinishedAt(runId: string, finishedAt: Date | undefined): 
     return finishedAt
   }
 
-  throw new PipelineWorkerError(
+  throw new SixbError(
+    "pipeline.failed",
     `[SixbPipelineWorker] Pipeline run '${runId}' finished without a finishedAt timestamp.`
   )
 }
@@ -56,7 +49,8 @@ export function createStepBookkeepingError(options: {
   readonly cause: unknown
 }): Error {
   // The dataset version is already durable; retrying the whole pipeline could duplicate appends.
-  return new PipelineWorkerError(
+  return new SixbError(
+    "pipeline.failed",
     `[SixbPipelineWorker] Pipeline '${options.pipelineId}' step '${options.stepId}' committed dataset version '${options.version.versionId}', but failed to finalize step run '${options.runId}'. The dataset commit may already have succeeded and the step run record may need repair.`,
     { cause: options.cause }
   )
@@ -68,7 +62,8 @@ export function createPipelineBookkeepingError(options: {
   readonly version: DatasetVersion
   readonly cause: unknown
 }): Error {
-  return new PipelineWorkerError(
+  return new SixbError(
+    "pipeline.failed",
     `[SixbPipelineWorker] Pipeline '${options.pipelineId}' committed final dataset version '${options.version.versionId}', but failed to finalize pipeline run '${options.runId}'. The dataset commit may already have succeeded and the pipeline run record may need repair.`,
     { cause: options.cause }
   )
@@ -79,7 +74,10 @@ export function requirePipeline(
   job: PipelineJob
 ): PipelineDefinition {
   if (!pipeline) {
-    throw new PipelineWorkerError(`[SixbPipelineWorker] Unknown pipeline '${job.pipelineId}'.`)
+    throw new SixbError(
+      "pipeline.failed",
+      `[SixbPipelineWorker] Unknown pipeline '${job.pipelineId}'.`
+    )
   }
 
   return pipeline
@@ -99,7 +97,8 @@ export function requireRegisteredDataset(options: {
 
   const namedRole = options.role === "input" ? `input '${options.name ?? "unknown"}'` : "output"
 
-  throw new PipelineWorkerError(
+  throw new SixbError(
+    "pipeline.failed",
     `[SixbPipelineWorker] Pipeline '${options.pipelineId}' step '${options.stepId}' ${namedRole} references unknown dataset '${options.datasetId}'.`
   )
 }

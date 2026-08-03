@@ -7,7 +7,6 @@ import {
   defineValueType,
   link,
   OntologyRegistry,
-  ProjectionValidationError,
   prop,
   type ValueType,
   valueTypeRef,
@@ -487,7 +486,7 @@ describe("projection registry", () => {
           ontology: new OntologyRegistry({ sources: [RequiredTelemetry] }),
           datasetsById: new Map(),
         })
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(
       () =>
         new ProjectionRegistry({

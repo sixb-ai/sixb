@@ -12,7 +12,7 @@ import {
   prop,
   Sixb,
 } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
 
 const Room = defineObjectType({
   id: "Room",
@@ -38,7 +38,8 @@ class FixtureLakeStorage extends InMemoryLakeStorage {
   ): Promise<void> {
     if (process.env.SIXB_CLI_TEST_LAKE_DRIFT === "1") {
       const datasetId = definitions[0]?.id ?? "unknown"
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbLake] Lake dataset definition check failed for 1 dataset(s).\n- ${datasetId}: dataset '${datasetId}' has drifted from the lake catalog`
       )
     }

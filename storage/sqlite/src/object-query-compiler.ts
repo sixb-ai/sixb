@@ -1,10 +1,10 @@
 import {
   type ObjectExpansion,
   type ObjectQuery,
-  ObjectQueryExecutionError,
   type ObjectQueryPredicate,
   type ObjectQuerySetOperation,
   type ObjectQuerySortField,
+  objectQueryExecutionFailed,
 } from "@sixb/core"
 
 export type SqliteValue = string | number | bigint | boolean | null
@@ -573,7 +573,7 @@ function compileExpansionOrder(
     // Relevance is a no-op in the fallback comparator; mirror that by skipping it.
     if (field.kind !== "property") continue
     if (field.scalarKind === "decimal") {
-      throw new ObjectQueryExecutionError(
+      throw objectQueryExecutionFailed(
         "storage.query_unsupported",
         "exact_decimal_not_supported",
         "SQLite object storage cannot push down exact decimal expansion sorting",
@@ -749,7 +749,7 @@ function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
       predicate.op === "gt" ||
       predicate.op === "gte")
   ) {
-    throw new ObjectQueryExecutionError(
+    throw objectQueryExecutionFailed(
       "storage.query_unsupported",
       "exact_decimal_not_supported",
       "SQLite object storage cannot push down exact decimal predicates",
@@ -951,7 +951,7 @@ function sortOrderFields(fields: readonly ObjectQuerySortField[]): readonly Comp
       throw new Error("[Sixb] SQLite object storage does not support relevance sorting")
     }
     if (field.scalarKind === "decimal") {
-      throw new ObjectQueryExecutionError(
+      throw objectQueryExecutionFailed(
         "storage.query_unsupported",
         "exact_decimal_not_supported",
         "SQLite object storage cannot push down exact decimal sorting",
@@ -1102,7 +1102,7 @@ function decodePageToken(
 }
 
 function throwInvalidPageToken(message: string): never {
-  throw new ObjectQueryExecutionError(
+  throw objectQueryExecutionFailed(
     "storage.query_invalid",
     "invalid_page_token",
     message,

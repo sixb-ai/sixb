@@ -1,4 +1,5 @@
 import type { SixbFailure } from "../../errors"
+import { SixbError } from "../../errors"
 import {
   cloneRecord,
   compareStartedAt,
@@ -9,7 +10,6 @@ import {
   storageKey,
   toStatusSet,
 } from "../run-listing"
-import { PipelineRunError } from "./errors"
 import type {
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
@@ -32,7 +32,7 @@ function normalizeError(error: SixbFailure | undefined): SixbFailure | undefined
 
 function assertNonNegativeInteger(value: number | undefined, fieldName: string): void {
   if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
-    throw new PipelineRunError(
+    throw new SixbError(
       "runtime.invalid_input",
       `[Sixb] Pipeline run ${fieldName} must be a non-negative integer.`
     )
@@ -65,7 +65,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
   async start(input: StartPipelineRunInput): Promise<PipelineRunRecord> {
     const key = storageKey(input.projectId, input.id)
     if (this.runs.has(key)) {
-      throw new PipelineRunError(
+      throw new SixbError(
         "storage.conflict",
         `[Sixb] Pipeline run '${input.id}' already exists for project '${input.projectId}'.`
       )
@@ -111,7 +111,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
   async startStep(input: StartPipelineStepRunInput): Promise<PipelineStepRunRecord> {
     const pipelineRun = this.requireRunningPipelineRun(input.projectId, input.pipelineRunId)
     if (pipelineRun.pipelineId !== input.pipelineId) {
-      throw new PipelineRunError(
+      throw new SixbError(
         "runtime.invalid_input",
         `[Sixb] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipelineId}'.`
       )
@@ -119,7 +119,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
 
     const key = storageKey(input.projectId, input.id)
     if (this.steps.has(key)) {
-      throw new PipelineRunError(
+      throw new SixbError(
         "storage.conflict",
         `[Sixb] Pipeline step run '${input.id}' already exists for project '${input.projectId}'.`
       )
@@ -148,7 +148,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     const existing = this.requireRunningStepRun(input.projectId, input.id)
 
     if (input.status === "succeeded" && input.output.datasetId !== existing.datasetId) {
-      throw new PipelineRunError(
+      throw new SixbError(
         "runtime.invalid_input",
         `[Sixb] Pipeline step run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.datasetId}'.`
       )
@@ -271,7 +271,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
   private requireExistingPipelineRun(projectId: string, id: string): PipelineRunRecord {
     const record = this.runs.get(storageKey(projectId, id))
     if (!record) {
-      throw new PipelineRunError(
+      throw new SixbError(
         "pipeline.run_not_found",
         `[Sixb] Pipeline run '${id}' not found for project '${projectId}'.`
       )
@@ -283,7 +283,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
   private requireRunningPipelineRun(projectId: string, id: string): PipelineRunRecord {
     const record = this.requireExistingPipelineRun(projectId, id)
     if (record.status !== "running") {
-      throw new PipelineRunError(
+      throw new SixbError(
         "storage.conflict",
         `[Sixb] Pipeline run '${id}' for project '${projectId}' is already terminal.`
       )
@@ -295,14 +295,14 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
   private requireRunningStepRun(projectId: string, id: string): PipelineStepRunRecord {
     const record = this.steps.get(storageKey(projectId, id))
     if (!record) {
-      throw new PipelineRunError(
+      throw new SixbError(
         "pipeline.run_not_found",
         `[Sixb] Pipeline step run '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (record.status !== "running") {
-      throw new PipelineRunError(
+      throw new SixbError(
         "storage.conflict",
         `[Sixb] Pipeline step run '${id}' for project '${projectId}' is already terminal.`
       )

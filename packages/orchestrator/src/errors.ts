@@ -1,9 +1,6 @@
 import { SixbError, type SixbErrorOptions } from "@sixb/core/errors"
 
-export class OrchestratorError extends SixbError {
-  override readonly name = "OrchestratorError"
-
-  constructor(message: string, options?: SixbErrorOptions) {
-    super("runtime.unexpected", `[SixbOrchestrator] ${message}`, options)
-  }
+/** An orchestrator invariant broke. Always `runtime.unexpected`. */
+export function orchestratorError(message: string, options?: SixbErrorOptions): SixbError {
+  return new SixbError("runtime.unexpected", `[SixbOrchestrator] ${message}`, options)
 }

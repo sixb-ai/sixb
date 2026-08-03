@@ -1,4 +1,4 @@
-import { OntologyValidationError } from "./errors"
+import { SixbError } from "../errors"
 import { isObjectRefSchema, type SchemaOrRef } from "./refs"
 import type { Schema, ValueType } from "./types"
 
@@ -109,13 +109,15 @@ function schemaJsonSchema(
 
   const valueTypeId = schema.valueTypeId
   if (resolving.has(valueTypeId)) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `Structured output contains a recursive value type '${valueTypeId}'.`
     )
   }
   const resolved = schema._resolved ?? valueTypesById.get(valueTypeId)?.schema
   if (!resolved) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `Structured output references unknown value type '${valueTypeId}'.`
     )
   }

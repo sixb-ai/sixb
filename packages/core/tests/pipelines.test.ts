@@ -10,9 +10,7 @@ import {
   isPipelineDefinition,
   isPipelineStepDefinition,
   type PipelineDefinition,
-  PipelineError,
   prop,
-  RuntimeError,
   Sixb,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -54,12 +52,16 @@ function makeRunStep(id = "normalize-orders") {
 
 describe("definePipelineStep", () => {
   test("rejects empty ids", () => {
-    expect(() => definePipelineStep("")).toThrow(PipelineError)
+    expect(() => definePipelineStep("")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => definePipelineStep("")).toThrow("Pipeline step id must not be empty")
   })
 
   test("rejects empty inputs", () => {
-    expect(() => definePipelineStep("step").inputs({})).toThrow(PipelineError)
+    expect(() => definePipelineStep("step").inputs({})).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => definePipelineStep("step").inputs({})).toThrow(
       "Pipeline step input dataset must contain at least one entry"
     )
@@ -67,7 +69,7 @@ describe("definePipelineStep", () => {
 
   test("rejects empty input names", () => {
     expect(() => definePipelineStep("step").inputs({ "  ": rawOrdersDataset } as never)).toThrow(
-      PipelineError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
     expect(() => definePipelineStep("step").inputs({ "  ": rawOrdersDataset } as never)).toThrow(
       "Pipeline step input name must not be empty"
@@ -79,7 +81,7 @@ describe("definePipelineStep", () => {
       definePipelineStep("step").inputs({
         rawOrders: { kind: "dataset", id: "   ", schema: { columns: [] } },
       } as never)
-    ).toThrow(PipelineError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       definePipelineStep("step").inputs({
         rawOrders: { kind: "dataset", id: "   ", schema: { columns: [] } },
@@ -92,7 +94,7 @@ describe("definePipelineStep", () => {
       definePipelineStep("step")
         .inputs({ rawOrders: rawOrdersDataset })
         .output({ kind: "dataset", id: "   ", schema: { columns: [] } } as never)
-    ).toThrow(PipelineError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       definePipelineStep("step")
         .inputs({ rawOrders: rawOrdersDataset })
@@ -144,7 +146,9 @@ describe("definePipelineStep", () => {
 
 describe("definePipeline", () => {
   test("rejects empty ids", () => {
-    expect(() => definePipeline("")).toThrow(PipelineError)
+    expect(() => definePipeline("")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => definePipeline("")).toThrow("Pipeline id must not be empty")
   })
 
@@ -256,7 +260,7 @@ describe("Sixb pipeline registration", () => {
           pipelines,
           ...runtimeDeps,
         })
-    ).toThrow(RuntimeError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(
       () =>
         new Sixb<readonly []>({
@@ -284,7 +288,7 @@ describe("Sixb pipeline registration", () => {
           pipelines: [pipeline],
           ...createTestRuntimeDeps(),
         })
-    ).toThrow(RuntimeError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(
       () =>
         new Sixb<readonly []>({
@@ -312,7 +316,7 @@ describe("Sixb pipeline registration", () => {
           pipelines: [pipeline],
           ...createTestRuntimeDeps(),
         })
-    ).toThrow(RuntimeError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(
       () =>
         new Sixb<readonly []>({
@@ -342,7 +346,7 @@ describe("Sixb pipeline registration", () => {
           pipelines: [pipeline],
           ...createTestRuntimeDeps(),
         })
-    ).toThrow(RuntimeError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(
       () =>
         new Sixb<readonly []>({
@@ -367,7 +371,7 @@ describe("Sixb pipeline registration", () => {
           pipelines: [pipeline],
           ...createTestRuntimeDeps(),
         })
-    ).toThrow(RuntimeError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(
       () =>
         new Sixb<readonly []>({

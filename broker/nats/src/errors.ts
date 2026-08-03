@@ -1,11 +1,11 @@
-import { BrokerError } from "@sixb/core/broker"
+import { SixbError, type SixbErrorCode, type SixbErrorOptions } from "@sixb/core/errors"
 
-/** Error class for NATS-backed broker failures. */
-export class NatsBrokerError extends BrokerError {
-  override readonly name = "NatsBrokerError"
+export interface NatsBrokerErrorOptions extends SixbErrorOptions {
+  /** Narrows the failure past the module default; most callers leave this alone. */
+  readonly code?: Extract<SixbErrorCode, `broker.${string}`>
+}
 
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options)
-    this.message = `[NatsBroker] ${message}`
-  }
+/** A NATS JetStream broker failure, prefixed and defaulted to `broker.unavailable`. */
+export function natsBrokerError(message: string, options: NatsBrokerErrorOptions = {}): SixbError {
+  return new SixbError(options.code ?? "broker.unavailable", `[NatsBroker] ${message}`, options)
 }

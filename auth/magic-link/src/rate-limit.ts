@@ -1,4 +1,4 @@
-import { SixbError } from "@sixb/core/errors"
+import { magicLinkError } from "./errors"
 export interface MagicLinkRateLimitOptions {
   readonly perMinute: number
   readonly perHour: number
@@ -71,26 +71,18 @@ export function resolveRateLimitOptions(
   const perHour = options?.perHour ?? 20
 
   if (!Number.isInteger(perMinute) || perMinute <= 0) {
-    throw new MagicLinkConfigError("Magic-link auth rateLimit.perMinute must be positive.")
+    throw magicLinkError("Magic-link auth rateLimit.perMinute must be positive.")
   }
 
   if (!Number.isInteger(perHour) || perHour <= 0) {
-    throw new MagicLinkConfigError("Magic-link auth rateLimit.perHour must be positive.")
+    throw magicLinkError("Magic-link auth rateLimit.perHour must be positive.")
   }
 
   if (perHour < perMinute) {
-    throw new MagicLinkConfigError(
+    throw magicLinkError(
       "Magic-link auth rateLimit.perHour must be greater than or equal to perMinute."
     )
   }
 
   return { perMinute, perHour }
-}
-
-class MagicLinkConfigError extends SixbError {
-  override readonly name = "MagicLinkConfigError"
-
-  constructor(message: string) {
-    super("runtime.invalid_definition", `[Sixb] ${message}`)
-  }
 }

@@ -19,7 +19,6 @@ import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import type { EventsRuntime } from "@sixb/core/internal/events"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { ActionRunParams, ObjectRow } from "@sixb/core/storage"
-import { ActionWorkerError } from "../src/errors"
 import { runActionJob } from "../src/run-action-job"
 import type { ActionWorkerContext } from "../src/types"
 
@@ -115,7 +114,7 @@ async function queueActionRun(
 }
 
 describe("runActionJob", () => {
-  test("throws ActionWorkerError when the stored run is missing", async () => {
+  test("throws action.failed when the stored run is missing", async () => {
     const count = defineAction("count")
       .params({})
       .writeback(() => {})
@@ -129,7 +128,7 @@ describe("runActionJob", () => {
           actionId: "count",
         },
       })
-    ).rejects.toBeInstanceOf(ActionWorkerError)
+    ).rejects.toHaveProperty("code", "action.failed")
   })
 
   test("passes nullable params to action handlers unchanged", async () => {

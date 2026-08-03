@@ -1,6 +1,5 @@
-export { WorkerAbortError, WorkerUnhealthyError } from "./errors"
+export { workerAbortError } from "./errors"
 export type { QueueDelivery, QueueDeliveryState, QueueSettlementResult } from "./queue-delivery"
-export { QueueDeliveryLeaseLostError } from "./queue-delivery"
 export type { QueueWorkerConfig, QueueWorkerFailureDecision } from "./queue-worker"
 export { isAbortError, QueueWorker } from "./queue-worker"
 export { Worker } from "./worker"

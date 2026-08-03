@@ -11,11 +11,11 @@ import type {
   OidcStartSignInInput,
   OidcStartSignInResult,
 } from "@sixb/core/auth/strategy"
+import { SixbError } from "@sixb/core/errors"
 import type { AuthStorage } from "@sixb/core/storage"
 import { resolveOidcProfile } from "./claims"
 import { defaultOidcClientAdapter, type OidcClientAdapter } from "./client"
 import { createOidcInvitationEmail, type SendOidcInvitationInput } from "./email"
-import { OidcAuthError } from "./errors"
 import { createOpaqueSecret, formatOidcState, parseOidcState, sha256 } from "./state"
 
 const DEFAULT_OIDC_ATTEMPT_TTL_MS = 10 * 60 * 1000
@@ -129,9 +129,9 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
     const callbackUrl = new URL(input.requestUrl)
     const parsedState = parseOidcState(callbackUrl.searchParams.get("state"))
     if (!parsedState) {
-      throw new OidcAuthError(
+      throw new SixbError(
         "runtime.invalid_definition",
-        "OIDC callback state is invalid or missing."
+        "[Sixb] OIDC callback state is invalid or missing."
       )
     }
 
@@ -140,17 +140,17 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
       id: parsedState.attemptId,
     })
     if (!attempt) {
-      throw new OidcAuthError(
+      throw new SixbError(
         "runtime.invalid_definition",
-        "OIDC sign-in attempt is invalid or expired."
+        "[Sixb] OIDC sign-in attempt is invalid or expired."
       )
     }
 
     const stateHash = sha256(parsedState.state)
     if (attempt.stateHash !== stateHash || attempt.expiresAt <= now || attempt.consumedAt) {
-      throw new OidcAuthError(
+      throw new SixbError(
         "runtime.invalid_definition",
-        "OIDC sign-in attempt is invalid or expired."
+        "[Sixb] OIDC sign-in attempt is invalid or expired."
       )
     }
 
@@ -170,15 +170,18 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
       )
       const idTokenClaims = tokens.claims()
       if (!idTokenClaims) {
-        throw new OidcAuthError(
+        throw new SixbError(
           "auth.invalid_credentials",
-          "OIDC token response is missing id token claims."
+          "[Sixb] OIDC token response is missing id token claims."
         )
       }
 
       const idTokenSubject = claimString(idTokenClaims, "sub")
       if (!idTokenSubject) {
-        throw new OidcAuthError("auth.invalid_credentials", "OIDC id token is missing a subject.")
+        throw new SixbError(
+          "auth.invalid_credentials",
+          "[Sixb] OIDC id token is missing a subject."
+        )
       }
 
       const userInfo = tokens.access_token
@@ -190,12 +193,12 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
         : undefined
       const profile = resolveOidcProfile({ idTokenClaims, userInfo })
       if (!profile.nonce || sha256(profile.nonce) !== attempt.nonceHash) {
-        throw new OidcAuthError("runtime.invalid_definition", "OIDC id token nonce is invalid.")
+        throw new SixbError("runtime.invalid_definition", "[Sixb] OIDC id token nonce is invalid.")
       }
 
       const email = normalizeEmail(profile.email)
       if (!this.isAllowedEmail(email)) {
-        throw new OidcAuthError("auth.invalid_credentials", "OIDC email domain is not allowed.")
+        throw new SixbError("auth.invalid_credentials", "[Sixb] OIDC email domain is not allowed.")
       }
 
       // Every verified email in the configured bootstrap allowlist may
@@ -349,9 +352,9 @@ function normalizeAllowedDomains(domains: readonly string[] | undefined): readon
 
   for (const domain of normalized) {
     if (domain.includes("@") || domain.includes("/") || domain.includes(":")) {
-      throw new OidcAuthError(
+      throw new SixbError(
         "runtime.invalid_definition",
-        `OIDC allowed domain '${domain}' is invalid.`
+        `[Sixb] OIDC allowed domain '${domain}' is invalid.`
       )
     }
   }
@@ -372,7 +375,7 @@ function normalizeScope(value: string | undefined): string {
   const scope = value?.trim() || DEFAULT_SCOPE
   const parts = scope.split(/\s+/).filter(Boolean)
   if (!parts.includes("openid")) {
-    throw new OidcAuthError("runtime.invalid_definition", "OIDC scope must include 'openid'.")
+    throw new SixbError("runtime.invalid_definition", "[Sixb] OIDC scope must include 'openid'.")
   }
 
   return parts.join(" ")
@@ -381,7 +384,7 @@ function normalizeScope(value: string | undefined): string {
 function normalizeHttpUrl(value: string | URL, label: string): URL {
   const url = value instanceof URL ? new URL(value) : new URL(value)
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new OidcAuthError("runtime.invalid_definition", `${label} must use http or https.`)
+    throw new SixbError("runtime.invalid_definition", `[Sixb] ${label} must use http or https.`)
   }
 
   return url
@@ -390,7 +393,7 @@ function normalizeHttpUrl(value: string | URL, label: string): URL {
 function normalizeEmail(value: string): string {
   const email = value.trim().toLowerCase()
   if (!email || !email.includes("@")) {
-    throw new OidcAuthError("runtime.invalid_definition", `OIDC email '${value}' is invalid.`)
+    throw new SixbError("runtime.invalid_definition", `[Sixb] OIDC email '${value}' is invalid.`)
   }
 
   return email
@@ -418,7 +421,7 @@ function claimString(claims: Readonly<Record<string, unknown>>, key: string): st
 function assertNonEmpty(value: string | undefined, label: string): string {
   const normalized = value?.trim()
   if (!normalized) {
-    throw new OidcAuthError("runtime.invalid_definition", `${label} is required.`)
+    throw new SixbError("runtime.invalid_definition", `[Sixb] ${label} is required.`)
   }
 
   return normalized

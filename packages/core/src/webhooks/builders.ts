@@ -1,4 +1,4 @@
-import { WebhookValidationError } from "./errors"
+import { SixbError } from "../errors"
 import type {
   WebhookBodyParser,
   WebhookBodySchema,
@@ -53,7 +53,10 @@ export class WebhookBodyBuilder<TClient = unknown> {
   json<TBody>(schema: WebhookBodySchema<TBody>): WebhookBuilder<TBody, TClient>
   json<TBody>(schema?: WebhookBodySchema<TBody>): WebhookBuilder<TBody | unknown, TClient> {
     if (schema !== undefined && typeof schema.parse !== "function") {
-      throw new WebhookValidationError("[Sixb] Webhook JSON schema must provide parse(value).")
+      throw new SixbError(
+        "runtime.invalid_definition",
+        "[Sixb] Webhook JSON schema must provide parse(value)."
+      )
     }
 
     return new WebhookBuilder({
@@ -108,7 +111,7 @@ export class WebhookBuilder<TBody, TClient = unknown> {
 
   verify(verify: WebhookVerifyHandler): WebhookBuilder<TBody, TClient> {
     if (typeof verify !== "function") {
-      throw new WebhookValidationError("[Sixb] Webhook verify must be a function.")
+      throw new SixbError("runtime.invalid_definition", "[Sixb] Webhook verify must be a function.")
     }
 
     return new WebhookBuilder({
@@ -119,7 +122,10 @@ export class WebhookBuilder<TBody, TClient = unknown> {
 
   idempotencyKey(resolver: WebhookIdempotencyKeyResolver<TBody>): WebhookBuilder<TBody, TClient> {
     if (typeof resolver !== "function") {
-      throw new WebhookValidationError("[Sixb] Webhook idempotencyKey must be a function.")
+      throw new SixbError(
+        "runtime.invalid_definition",
+        "[Sixb] Webhook idempotencyKey must be a function."
+      )
     }
 
     return new WebhookBuilder({
@@ -132,7 +138,7 @@ export class WebhookBuilder<TBody, TClient = unknown> {
     handle: WebhookHandler<TBody, TNextClient>
   ): WebhookDefinition<TBody, TNextClient> {
     if (typeof handle !== "function") {
-      throw new WebhookValidationError("[Sixb] Webhook handle must be a function.")
+      throw new SixbError("runtime.invalid_definition", "[Sixb] Webhook handle must be a function.")
     }
 
     return {
@@ -149,6 +155,6 @@ export class WebhookBuilder<TBody, TClient = unknown> {
 
 function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
-    throw new WebhookValidationError(`[Sixb] ${field} must not be empty.`)
+    throw new SixbError("runtime.invalid_definition", `[Sixb] ${field} must not be empty.`)
   }
 }

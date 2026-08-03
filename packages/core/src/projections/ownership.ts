@@ -1,6 +1,6 @@
+import { SixbError } from "../errors"
 import { compareStrings } from "../json"
 import type { OntologyRegistry } from "../ontology"
-import { ProjectionValidationError } from "./errors"
 import type { ProjectionDefinition, ProjectionOwnership } from "./types"
 
 export function computeProjectionOwnership(
@@ -112,7 +112,8 @@ function registerOwner(
 ): void {
   const existing = owners.get(key)
   if (existing !== undefined) {
-    throw new ProjectionValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `[Sixb] Projection '${projectionId}' overlaps ${description} owned by projection '${existing}'.`
     )
   }

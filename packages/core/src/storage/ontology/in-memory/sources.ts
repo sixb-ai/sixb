@@ -1,5 +1,5 @@
+import { SixbError } from "../../../errors"
 import { stableJsonStringify } from "../../../json"
-import { MaterializationValidationError } from "../../../materialization/errors"
 import type { ProjectionExecution } from "../../../materialization/model"
 import { projectionEntityKey } from "../../../materialization/refs"
 import {
@@ -214,8 +214,9 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
       assertNonblank(input.projectId, "Terminal source cleanup project id")
       assertCanonicalTimestamp(input.terminalBefore, "Terminal source cleanup cutoff")
       if (!Number.isSafeInteger(input.limit) || input.limit <= 0) {
-        throw new MaterializationValidationError(
-          "Terminal source cleanup limit must be a positive safe integer."
+        throw new SixbError(
+          "ontology.invalid_value",
+          "[Sixb] Terminal source cleanup limit must be a positive safe integer."
         )
       }
 
@@ -421,16 +422,18 @@ function stageRowsAtomically(
     const existingOrdinal =
       materialization.rootOrdinals.get(rootKey) ?? newRootOrdinals.get(rootKey)
     if (existingOrdinal !== undefined && existingOrdinal !== row.stagingOrdinal) {
-      throw new MaterializationValidationError(
-        `Source materialization repeats root ${rootKey} at a different stream ordinal.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Source materialization repeats root ${rootKey} at a different stream ordinal.`
       )
     }
     const existingRoot =
       materialization.ordinalRoots.get(row.stagingOrdinal) ??
       newOrdinalRoots.get(row.stagingOrdinal)
     if (existingRoot !== undefined && existingRoot !== rootKey) {
-      throw new MaterializationValidationError(
-        `Source materialization repeats stream ordinal ${row.stagingOrdinal} for another root.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Source materialization repeats stream ordinal ${row.stagingOrdinal} for another root.`
       )
     }
 
@@ -441,8 +444,9 @@ function stageRowsAtomically(
         unchanged += 1
         continue
       }
-      throw new MaterializationValidationError(
-        `Source materialization repeats asserted entity ${entityKey}.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Source materialization repeats asserted entity ${entityKey}.`
       )
     }
 
@@ -472,14 +476,16 @@ function assertReadyCounts(
     materialization.ordinalRoots.size !== rootCount ||
     materialization.rowsByEntity.size !== assertionCount
   ) {
-    throw new MaterializationValidationError(
-      "Source ready counts do not match the staged roots and assertions."
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Source ready counts do not match the staged roots and assertions."
     )
   }
   for (let ordinal = 0; ordinal < rootCount; ordinal += 1) {
     if (!materialization.ordinalRoots.has(ordinal)) {
-      throw new MaterializationValidationError(
-        `Source staging ordinals must be contiguous from zero; missing ${ordinal}.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Source staging ordinals must be contiguous from zero; missing ${ordinal}.`
       )
     }
   }
@@ -499,7 +505,10 @@ function assertReadyTopology(materialization: InMemorySourceMaterialization): vo
     const rows = rowsByRoot.get(rootKey) ?? []
     const first = rows[0]
     if (!first) {
-      throw new MaterializationValidationError(`Source root ${rootKey} has no staged assertions.`)
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Source root ${rootKey} has no staged assertions.`
+      )
     }
     const root = first.root
 
@@ -510,16 +519,18 @@ function assertReadyTopology(materialization: InMemorySourceMaterialization): vo
         first.assertion.kind !== "link" ||
         projectionEntityKey(first.assertion) !== rootKey
       ) {
-        throw new MaterializationValidationError(
-          `Link projection root ${rootKey} must contain exactly its matching link assertion.`
+        throw new SixbError(
+          "ontology.invalid_value",
+          `[Sixb] Link projection root ${rootKey} must contain exactly its matching link assertion.`
         )
       }
       continue
     }
 
     if (root.kind !== "object") {
-      throw new MaterializationValidationError(
-        `Object projection root ${rootKey} must be an object.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Object projection root ${rootKey} must be an object.`
       )
     }
     const matchingObjects = rows.filter(
@@ -530,8 +541,9 @@ function assertReadyTopology(materialization: InMemorySourceMaterialization): vo
       return projectionEntityKey({ kind: "object", ref: row.assertion.ref.source }) !== rootKey
     })
     if (matchingObjects.length !== 1 || hasForeignAssertion) {
-      throw new MaterializationValidationError(
-        `Object projection root ${rootKey} must contain exactly its matching object assertion plus links sourced from that root.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Object projection root ${rootKey} must contain exactly its matching object assertion plus links sourced from that root.`
       )
     }
   }
@@ -539,7 +551,10 @@ function assertReadyTopology(materialization: InMemorySourceMaterialization): vo
 
 function assertCount(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new MaterializationValidationError(`${label} must be a nonnegative safe integer.`)
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] ${label} must be a nonnegative safe integer.`
+    )
   }
 }
 
@@ -550,7 +565,10 @@ function assertNotBefore(
   minimumLabel: string
 ): void {
   if (value < minimum) {
-    throw new MaterializationValidationError(`${label} cannot precede source ${minimumLabel}.`)
+    throw new SixbError(
+      "ontology.invalid_value",
+      `[Sixb] ${label} cannot precede source ${minimumLabel}.`
+    )
   }
 }
 

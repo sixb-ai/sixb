@@ -12,6 +12,7 @@ import type {
   WebhookResponse,
 } from "@sixb/core"
 import type { SixbErrorCode } from "@sixb/core/errors"
+import { isSixbError } from "@sixb/core/errors"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type {
   FinishWebhookRunStatus,
@@ -21,7 +22,7 @@ import type {
 import { type SixbFailure, toSixbFailure } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { type ErrorResponseBody, errorResponse } from "../utils/http"
-import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
+import { readRequestBodyWithLimit } from "../utils/request-body"
 
 const DEFAULT_WEBHOOK_BODY_LIMIT_BYTES = 1024 * 1024
 
@@ -154,7 +155,7 @@ async function dispatchWebhookRun(
   try {
     rawBody = await readRawBody(request, options.bodyLimitBytes ?? DEFAULT_WEBHOOK_BODY_LIMIT_BYTES)
   } catch (error) {
-    const responseStatus = error instanceof RequestBodyTooLargeError ? 413 : 400
+    const responseStatus = isSixbError(error, "runtime.payload_too_large") ? 413 : 400
     const failure = toSixbFailure(error, { fallbackCode: "runtime.invalid_input" })
     set.status = responseStatus
     await finishWebhookRun({

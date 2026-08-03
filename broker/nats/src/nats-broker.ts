@@ -3,15 +3,15 @@ import type { JetStreamClient, OrderedConsumerOptions, StreamInfo } from "@nats-
 import { DeliverPolicy, jetstream } from "@nats-io/jetstream"
 import type { ConnectionOptions } from "@nats-io/nats-core"
 import { type Broker, cloneJsonValue } from "@sixb/core"
-import {
-  BrokerCursorExpiredError,
-  type BrokerPage,
-  type BrokerRecord,
-  type BrokerRecordInput,
-  type BrokerStreamDefinition,
+import type {
+  BrokerPage,
+  BrokerRecord,
+  BrokerRecordInput,
+  BrokerStreamDefinition,
 } from "@sixb/core/broker"
+import { isSixbError } from "@sixb/core/errors"
 import { NatsConnectionManager } from "./connection"
-import { NatsBrokerError } from "./errors"
+import { natsBrokerError } from "./errors"
 import { validateProjectId } from "./project-id"
 import { assertEncodableRecord, decodeRecord, encodeRecord } from "./serialization"
 import { StreamManager } from "./stream"
@@ -140,7 +140,7 @@ export class NatsBroker implements Broker {
         )
         records.push(...published)
       } catch (error) {
-        throw new NatsBrokerError(`Failed to publish records to stream "${params.streamId}"`, {
+        throw natsBrokerError(`Failed to publish records to stream "${params.streamId}"`, {
           cause: error,
         })
       }
@@ -501,11 +501,12 @@ export class NatsBroker implements Broker {
     const firstAvailableSequence = firstAvailableSequenceFor(streamInfo)
 
     if (requestedNextSequence < firstAvailableSequence) {
-      throw new BrokerCursorExpiredError(
+      throw natsBrokerError(
         `afterCursor '${afterCursor}' is outside the retained range for stream ` +
           `'${streamId}'. The next requested cursor sequence is ` +
           `'${requestedNextSequence}', but the earliest available cursor sequence is ` +
-          `'${firstAvailableSequence}'.`
+          `'${firstAvailableSequence}'.`,
+        { code: "broker.cursor_expired" }
       )
     }
   }
@@ -520,10 +521,11 @@ export class NatsBroker implements Broker {
     }
     const firstAvailableSequence = firstAvailableSequenceFor(streamInfo)
     if (BigInt(beforeCursor) < firstAvailableSequence) {
-      throw new BrokerCursorExpiredError(
+      throw natsBrokerError(
         `beforeCursor '${beforeCursor}' is outside the retained range for stream ` +
           `'${streamId}'. The earliest available cursor sequence is ` +
-          `'${firstAvailableSequence}'.`
+          `'${firstAvailableSequence}'.`,
+        { code: "broker.cursor_expired" }
       )
     }
   }
@@ -537,7 +539,7 @@ export class NatsBroker implements Broker {
   private async requireStreamName(projectId: string, streamId: string): Promise<string> {
     const streamName = await this.streamManager.getExistingStream(projectId, streamId)
     if (!streamName) {
-      throw new NatsBrokerError(
+      throw natsBrokerError(
         `stream '${streamId}' has not been ensured for project '${projectId}'. Call ensureStream() before append or subscribe.`
       )
     }
@@ -553,7 +555,7 @@ export class NatsBroker implements Broker {
     const stream = await js.streams.get(params.streamName)
     const msg = await stream.getMessage({ seq: params.streamSequence })
     if (!msg) {
-      throw new NatsBrokerError(
+      throw natsBrokerError(
         `JetStream deduplicated publish at sequence ${params.streamSequence}, but the retained record was not found.`
       )
     }
@@ -622,7 +624,7 @@ export class NatsBroker implements Broker {
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new NatsBrokerError("broker has been closed")
+      throw natsBrokerError("broker has been closed")
     }
   }
 }
@@ -634,19 +636,19 @@ function assertCursor(cursor: string | undefined): void {
 
   try {
     if (BigInt(cursor) < 0n) {
-      throw new NatsBrokerError("cursor must be non-negative")
+      throw natsBrokerError("cursor must be non-negative")
     }
   } catch (error) {
-    if (error instanceof NatsBrokerError) {
+    if (isSixbError(error)) {
       throw error
     }
-    throw new NatsBrokerError("cursor must be a NATS JetStream sequence cursor", { cause: error })
+    throw natsBrokerError("cursor must be a NATS JetStream sequence cursor", { cause: error })
   }
 }
 
 function assertStreamId(streamId: string): void {
   if (streamId.trim().length === 0) {
-    throw new NatsBrokerError("streamId must be a non-empty string")
+    throw natsBrokerError("streamId must be a non-empty string")
   }
 }
 

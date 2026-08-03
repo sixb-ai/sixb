@@ -7,6 +7,7 @@ import type {
   ProjectionDefinition,
   TelemetryProjectionDefinition,
 } from "@sixb/core"
+import type { SixbError } from "@sixb/core/errors"
 import {
   createProjectionRunId,
   getProjectionRegistry,
@@ -14,7 +15,7 @@ import {
   projectionTargetOf,
 } from "@sixb/core/internal/projections"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import { ProjectionWorkerPermanentError } from "./errors"
+import { isPermanentProjectionWorkerError, projectionWorkerPermanentError } from "./errors"
 import {
   assertDatasetVersionMatchesDefinition,
   assertProjectionCompatibleWithDataset,
@@ -111,7 +112,7 @@ function correlateValidatedProjection(
   }
 }
 
-function invalidProjectionKind(job: ProjectionJob): ProjectionWorkerPermanentError {
+function invalidProjectionKind(job: ProjectionJob): SixbError {
   return permanent(
     `Projection '${job.projectionId}' does not match queued kind '${job.projectionKind}'.`
   )
@@ -127,7 +128,7 @@ function validatePinnedSchema(input: {
     assertDatasetVersionMatchesDefinition(input)
     assertProjectionCompatibleWithDataset({ ...input, ontology: input.runtime.ontology })
   } catch (error) {
-    if (error instanceof ProjectionWorkerPermanentError) throw error
+    if (isPermanentProjectionWorkerError(error)) throw error
     throw permanent(
       `Projection '${input.projection.id}' is incompatible with its pinned dataset version: ${errorMessage(error)}`,
       error
@@ -206,8 +207,8 @@ async function requirePinnedVersion(
   return version
 }
 
-function permanent(message: string, cause?: unknown): ProjectionWorkerPermanentError {
-  return new ProjectionWorkerPermanentError(`[SixbProjectionWorker] ${message}`, { cause })
+function permanent(message: string, cause?: unknown): SixbError {
+  return projectionWorkerPermanentError(`[SixbProjectionWorker] ${message}`, { cause })
 }
 
 function errorMessage(error: unknown): string {

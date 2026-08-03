@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type { Principal, WorkflowRunSource } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowAgentNodeRunInput,
@@ -33,7 +34,7 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { parseSixbFailure, serializeSixbFailure, WorkflowRunError } from "@sixb/core/storage"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
@@ -112,7 +113,7 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_conflict",
           `[SixbSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
         )
@@ -134,14 +135,14 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
 
       if (existing) {
         if (existing.status !== "queued") {
-          throw new WorkflowRunError(
+          throw new SixbError(
             "workflow.run_conflict",
             `[SixbSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
 
         if (existing.workflow_id !== input.workflowId) {
-          throw new WorkflowRunError(
+          throw new SixbError(
             "runtime.invalid_input",
             `[SixbSqlite] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflow_id}'.`
           )
@@ -213,7 +214,7 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
           )
       } catch (error) {
         if (isUniqueConstraintError(error)) {
-          throw new WorkflowRunError(
+          throw new SixbError(
             "workflow.run_conflict",
             `[SixbSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
           )
@@ -275,15 +276,15 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
         .get(input.projectId, input.id) as WorkflowRunDatabaseRow | null
 
       if (!existing) {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_not_found",
           `[SixbSqlite] Workflow run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (!canFinishWorkflowRun(existing.status, input.status)) {
-        throw new WorkflowRunError(
-          "runtime.invalid_input",
+        throw new SixbError(
+          "workflow.run_conflict",
           `[SixbSqlite] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${existing.status}'.`
         )
       }
@@ -324,14 +325,14 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
         .get(input.projectId, input.id) as WorkflowRunDatabaseRow | null
 
       if (!existing) {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_not_found",
           `[SixbSqlite] Workflow run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_conflict",
           `[SixbSqlite] Workflow run '${input.id}' for project '${input.projectId}' must be running.`
         )
@@ -363,14 +364,14 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
         .get(input.projectId, input.id) as WorkflowRunDatabaseRow | null
 
       if (!existing) {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_not_found",
           `[SixbSqlite] Workflow run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "waiting") {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_conflict",
           `[SixbSqlite] Workflow run '${input.id}' for project '${input.projectId}' must be waiting.`
         )
@@ -476,7 +477,7 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
       .get(projectId, id) as WorkflowRunDatabaseRow | null
 
     if (!record) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "runtime.invalid_input",
         `[SixbSqlite] Failed to load workflow run '${id}' for project '${projectId}'.`
       )
@@ -494,12 +495,9 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
       .query("SELECT * FROM workflow_runs WHERE project_id = ? AND id = ?")
       .get(projectId, id) as WorkflowRunDatabaseRow | null
     if (!row)
-      throw new WorkflowRunError(
-        "workflow.run_not_found",
-        `[SixbSqlite] Workflow run '${id}' not found.`
-      )
+      throw new SixbError("workflow.run_not_found", `[SixbSqlite] Workflow run '${id}' not found.`)
     if (row.status !== status) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[SixbSqlite] Workflow run '${id}' must be ${status} (status '${row.status}').`
       )
@@ -530,7 +528,7 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_conflict",
           `[SixbSqlite] Agent execution already exists for workflow node run '${input.nodeRunId}'.`
         )
@@ -640,7 +638,7 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
     return this.db.transaction(() => {
       const row = this.require(input.projectId, input.nodeRunId)
       if (row.status !== "queued" && row.status !== "running") {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_conflict",
           `[SixbSqlite] Agent workflow node run '${input.nodeRunId}' cannot be cancelled from status '${row.status}'.`
         )
@@ -698,7 +696,7 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
       .query("SELECT * FROM workflow_agent_node_runs WHERE project_id = ? AND node_run_id = ?")
       .get(projectId, nodeRunId) as WorkflowAgentNodeRunDatabaseRow | null
     if (!row) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.node_run_not_found",
         `[SixbSqlite] Agent workflow node run '${nodeRunId}' not found for project '${projectId}'.`
       )
@@ -715,13 +713,13 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
       .query("SELECT * FROM workflow_agent_node_runs WHERE project_id = ? AND node_run_id = ?")
       .get(projectId, nodeRunId) as WorkflowAgentNodeRunDatabaseRow | null
     if (!row) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.node_run_not_found",
         `[SixbSqlite] Agent workflow node run '${nodeRunId}' not found for project '${projectId}'.`
       )
     }
     if (row.status !== status) {
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_conflict",
         `[SixbSqlite] Agent workflow node run '${nodeRunId}' must be ${status} (status '${row.status}').`
       )
@@ -742,14 +740,14 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
         .get(input.projectId, input.workflowRunId) as WorkflowRunDatabaseRow | null
 
       if (!workflowRun) {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_not_found",
           `[SixbSqlite] Workflow run '${input.workflowRunId}' not found for project '${input.projectId}'.`
         )
       }
 
       if (workflowRun.status !== "running") {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_conflict",
           `[SixbSqlite] Workflow run '${input.workflowRunId}' for project '${input.projectId}' must be running.`
         )
@@ -757,7 +755,7 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
       assertSqliteWorkflowRunOwnership(workflowRun, input.executionToken)
 
       if (workflowRun.workflow_id !== input.workflowId) {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "runtime.invalid_input",
           `[SixbSqlite] Workflow node run '${input.id}' workflow '${input.workflowId}' does not match workflow run '${input.workflowRunId}' workflow '${workflowRun.workflow_id}'.`
         )
@@ -799,7 +797,7 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
           )
       } catch (error) {
         if (isUniqueConstraintError(error)) {
-          throw new WorkflowRunError(
+          throw new SixbError(
             "workflow.run_conflict",
             `[SixbSqlite] Workflow node run '${input.id}' already exists for project '${input.projectId}'.`
           )
@@ -813,7 +811,7 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
         .get(input.projectId, input.id) as WorkflowNodeRunDatabaseRow | null
 
       if (!row) {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "runtime.invalid_input",
           `[SixbSqlite] Failed to load workflow node run '${input.id}' for project '${input.projectId}'.`
         )
@@ -830,7 +828,7 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
         .get(input.projectId, input.id) as WorkflowNodeRunDatabaseRow | null
 
       if (!existing) {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.node_run_not_found",
           `[SixbSqlite] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
         )
@@ -838,7 +836,7 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
       this.assertNodeParentOwnership(existing, input.executionToken)
 
       if (existing.status !== "running" && existing.status !== "waiting") {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_conflict",
           `[SixbSqlite] Workflow node run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
@@ -880,7 +878,7 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
         .get(input.projectId, input.id) as WorkflowNodeRunDatabaseRow | null
 
       if (!existing) {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.node_run_not_found",
           `[SixbSqlite] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
         )
@@ -888,7 +886,7 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
       this.assertNodeParentOwnership(existing, input.executionToken)
 
       if (existing.status !== "running") {
-        throw new WorkflowRunError(
+        throw new SixbError(
           "workflow.run_conflict",
           `[SixbSqlite] Workflow node run '${input.id}' for project '${input.projectId}' must be running.`
         )
@@ -985,7 +983,7 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
       .query("SELECT * FROM workflow_runs WHERE project_id = ? AND id = ?")
       .get(node.project_id, node.workflow_run_id) as WorkflowRunDatabaseRow | null
     if (!run)
-      throw new WorkflowRunError(
+      throw new SixbError(
         "workflow.run_not_found",
         "[SixbSqlite] Parent workflow run was not found."
       )
@@ -1050,7 +1048,7 @@ function rowToWorkflowNodeRunRecord(row: WorkflowNodeRunDatabaseRow): WorkflowNo
 
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
-    throw new WorkflowRunError(
+    throw new SixbError(
       "runtime.invalid_input",
       `[SixbSqlite] Workflow run ${fieldName} must be a non-negative integer.`
     )
@@ -1130,7 +1128,7 @@ function assertSqliteWorkflowAgentNodeOwnership(
   token: string
 ): void {
   if (row.execution_token !== token) {
-    throw new WorkflowRunError(
+    throw new SixbError(
       "workflow.run_conflict",
       `[SixbSqlite] Execution token is no longer current on agent workflow node run '${row.node_run_id}'.`
     )
@@ -1177,7 +1175,7 @@ function rowToWorkflowAgentNodeRunRecord(
 
 function assertSqliteWorkflowRunOwnership(row: WorkflowRunDatabaseRow, token?: string): void {
   if (row.execution_token !== (token ?? null)) {
-    throw new WorkflowRunError(
+    throw new SixbError(
       "workflow.run_conflict",
       `[SixbSqlite] Execution token is no longer current on workflow run '${row.id}'.`
     )

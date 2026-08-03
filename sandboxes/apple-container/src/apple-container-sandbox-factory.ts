@@ -4,7 +4,7 @@ import type {
   SandboxFactory,
   SandboxNetworkPolicy,
 } from "@sixb/core"
-import { SandboxIsolationUnavailableError } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import { AppleContainerSandbox } from "./apple-container-sandbox"
 import {
   type AppleContainerCliConfig,
@@ -108,7 +108,7 @@ export class AppleContainerSandboxFactory implements SandboxFactory {
       this.probe = probeAppleContainer(cli.bin)
     }
     if (!this.probe.ok) {
-      throw new SandboxIsolationUnavailableError(`[Sandbox] ${this.probe.message}`)
+      throw new SixbError("sandbox.isolation_unavailable", `[Sandbox] ${this.probe.message}`)
     }
   }
 }

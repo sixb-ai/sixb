@@ -18,13 +18,11 @@ import {
   isWorkflowDefinition,
   param,
   prop,
-  RuntimeError,
   ref,
   Sixb,
   stringEnum,
   valueTypeRef,
   type WorkflowDefinition,
-  WorkflowDefinitionError,
 } from "../src"
 import { schemaRecordToJsonSchema } from "../src/ontology/internal"
 import { validateWorkflowDefinition } from "../src/workflows"
@@ -148,7 +146,9 @@ describe("defineWorkflowStep", () => {
   })
 
   test("rejects empty step ids", () => {
-    expect(() => runtimeDefineWorkflowStep("")).toThrow(WorkflowDefinitionError)
+    expect(() => runtimeDefineWorkflowStep("")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => runtimeDefineWorkflowStep("")).toThrow("Step id must not be empty")
   })
 })
@@ -317,14 +317,18 @@ describe("defineIntervention", () => {
   test("rejects empty intervention ids", () => {
     const runtimeDefineIntervention = defineIntervention as unknown as (id: string) => unknown
 
-    expect(() => runtimeDefineIntervention("")).toThrow(WorkflowDefinitionError)
+    expect(() => runtimeDefineIntervention("")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => runtimeDefineIntervention("")).toThrow("Intervention id must not be empty")
   })
 })
 
 describe("defineWorkflow", () => {
   test("rejects empty workflow ids", () => {
-    expect(() => runtimeDefineWorkflow("")).toThrow(WorkflowDefinitionError)
+    expect(() => runtimeDefineWorkflow("")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => runtimeDefineWorkflow("")).toThrow("Workflow id must not be empty")
   })
 
@@ -479,7 +483,7 @@ describe("defineWorkflow", () => {
         .then(findBestInvoice, () => ({
           transaction: { objectTypeId: "Transaction", primaryId: "transaction:1" },
         }))
-    }).toThrow(WorkflowDefinitionError)
+    }).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() => {
       runtimeDefineWorkflow("duplicate-node-id")
         .input({
@@ -529,7 +533,7 @@ describe("defineWorkflow", () => {
           invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
           confidence: 0.98,
         }))
-    }).toThrow(WorkflowDefinitionError)
+    }).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() => {
       runtimeDefineWorkflow("duplicate-node-key")
         .input({
@@ -550,10 +554,18 @@ describe("defineWorkflow", () => {
     })
     const then = draft.then
 
-    expect(() => then(attachInvoice, "alias")).toThrow(WorkflowDefinitionError)
-    expect(() => then(findBestInvoice, "alias")).toThrow(WorkflowDefinitionError)
-    expect(() => then(findBestInvoice, () => ({}), "alias")).toThrow(WorkflowDefinitionError)
-    expect(() => then(approveInvoiceMatch, "alias")).toThrow(WorkflowDefinitionError)
+    expect(() => then(attachInvoice, "alias")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
+    expect(() => then(findBestInvoice, "alias")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
+    expect(() => then(findBestInvoice, () => ({}), "alias")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
+    expect(() => then(approveInvoiceMatch, "alias")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
   })
 
   test("rejects invalid runtime .when(...) overloads", () => {
@@ -562,9 +574,15 @@ describe("defineWorkflow", () => {
     })
     const when = draft.when
 
-    expect(() => when(highValueTransaction, "mapper")).toThrow(WorkflowDefinitionError)
-    expect(() => when(highValueTransaction, () => ({}), "extra")).toThrow(WorkflowDefinitionError)
-    expect(() => when({ kind: "schedule" })).toThrow(WorkflowDefinitionError)
+    expect(() => when(highValueTransaction, "mapper")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
+    expect(() => when(highValueTransaction, () => ({}), "extra")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
+    expect(() => when({ kind: "schedule" })).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
   })
 })
 
@@ -581,7 +599,9 @@ describe("validateWorkflowDefinition", () => {
     }
 
     expect(isWorkflowDefinition(workflow)).toBe(true)
-    expect(() => validateWorkflowDefinition(workflow)).toThrow(WorkflowDefinitionError)
+    expect(() => validateWorkflowDefinition(workflow)).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => validateWorkflowDefinition(workflow)).toThrow(
       'Workflow "empty" must contain at least one node'
     )
@@ -679,7 +699,7 @@ describe("Sixb workflow registration", () => {
         workflows,
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(RuntimeError)
+    }).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() => {
       new Sixb({
         ontology: [Transaction, Invoice],
@@ -704,7 +724,7 @@ describe("Sixb workflow registration", () => {
         workflows: [workflow],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(WorkflowDefinitionError)
+    }).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() => {
       new Sixb({
         ontology: [Transaction],
@@ -729,7 +749,7 @@ describe("Sixb workflow registration", () => {
         workflows: [workflow as unknown as WorkflowDefinition],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(WorkflowDefinitionError)
+    }).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() => {
       new Sixb({
         ontology: [Transaction, Invoice],
@@ -827,7 +847,7 @@ describe("Sixb workflow registration", () => {
         workflows: [workflow],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(WorkflowDefinitionError)
+    }).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() => {
       new Sixb({
         ontology: [Transaction, Invoice],

@@ -1,4 +1,4 @@
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
 import type { DuckLakeStorageOptions } from "../types"
 import { localCatalogCoordinationKey } from "./catalog-key"
 import {
@@ -49,7 +49,7 @@ export class DuckLakeConnectionManager {
 
   assertOpen(): void {
     if (this.closed) {
-      throw new LakeStorageError("[SixbDuckLake] DuckLakeStorage is closed.")
+      throw new SixbError("storage.lake_failed", "[SixbDuckLake] DuckLakeStorage is closed.")
     }
   }
 

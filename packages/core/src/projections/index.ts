@@ -11,7 +11,6 @@ export {
   projectionKindOf,
 } from "./builders"
 // ── Errors ──────────────────────────────────────────────────
-export { ProjectionValidationError } from "./errors"
 // ── Types ────────────────────────────────────────────────────
 export type {
   ForeignKeyDescriptor,

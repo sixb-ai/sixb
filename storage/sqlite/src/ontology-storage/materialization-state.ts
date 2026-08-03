@@ -10,7 +10,7 @@ import type {
 import {
   linkRefKey,
   linkScopeSortKey,
-  MaterializationConflictError,
+  materializationConflict,
   objectRefKey,
   projectionEntityKey,
   telemetryPointSortKey,
@@ -392,7 +392,7 @@ export class SqliteMaterializationStateReader {
     for (const row of rows) {
       const accumulator = accumulators.get(row.scope_sort_key)
       if (!accumulator) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           `Unexpected link scope '${row.scope_sort_key}' returned by storage.`
         )
@@ -407,10 +407,7 @@ export class SqliteMaterializationStateReader {
   linkScope(source: OntologyObjectRef, linkId: string): MaterializationLinkScopeState {
     const [scope] = this.linkScopes([{ source, linkId }])
     if (!scope) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Link scope lookup returned no row."
-      )
+      throw materializationConflict("effective-state", "Link scope lookup returned no row.")
     }
     return scope
   }
@@ -765,7 +762,7 @@ function activeSourceMap(
     const source = storedSource(row)
     const key = projectionEntityKey(source.assertion)
     if (result.has(key)) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "source-materialization",
         `Multiple active sources assert ${key}.`
       )
@@ -825,7 +822,7 @@ function storedSource(row: SqliteOntologySourceAssertionRow): StoredSourceAssert
 
 function effectiveObjectSnapshot(row: EffectiveObjectRow): EffectiveObjectSnapshot {
   if (!row.last_commit_id) {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "effective-state",
       `Effective object ${row.object_type_id}:${row.primary_id} lacks materializer provenance.`
     )
@@ -842,7 +839,7 @@ function effectiveObjectSnapshot(row: EffectiveObjectRow): EffectiveObjectSnapsh
 
 function effectiveLinkSnapshot(row: EffectiveLinkRow): EffectiveLinkSnapshot {
   if (!row.last_commit_id) {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "effective-state",
       `Effective link ${linkRefKey(linkRefFromColumns(row))} lacks materializer provenance.`
     )
@@ -862,7 +859,7 @@ function effectiveLinkSnapshot(row: EffectiveLinkRow): EffectiveLinkSnapshot {
 
 function storedPoint(row: TelemetryRow): StoredTelemetryPoint {
   if (!row.last_commit_id) {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "timeseries-point",
       `Telemetry point ${telemetryPointSortKey(
         {

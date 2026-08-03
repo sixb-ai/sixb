@@ -16,9 +16,7 @@ import {
   integerEnum,
   type LakeStorage,
   link,
-  MaterializationCancellationError,
-  MaterializationConflictError,
-  MaterializationValidationError,
+  materializationCancelled,
   type ProjectionDefinition,
   prop,
   Sixb,
@@ -26,6 +24,7 @@ import {
   valueTypeRef,
 } from "@sixb/core"
 import type { EventsRuntime } from "@sixb/core/internal/events"
+import { materializationConflict } from "@sixb/core/internal/materialization"
 import {
   createProjectionRunId,
   getProjectionRegistry,
@@ -410,22 +409,20 @@ describe("runProjectionJob", () => {
   test("classifies only terminal materialization conflicts as permanent", () => {
     expect(
       isPermanentProjectionFailure(
-        new MaterializationConflictError("projection-fence", "A newer version is active.")
+        materializationConflict("projection-fence", "A newer version is active.")
       )
     ).toBe(true)
     expect(
-      isPermanentProjectionFailure(
-        new MaterializationConflictError("run-correlation", "Identity mismatch.")
-      )
+      isPermanentProjectionFailure(materializationConflict("run-correlation", "Identity mismatch."))
     ).toBe(true)
     expect(
       isPermanentProjectionFailure(
-        new MaterializationConflictError("execution-lost", "Delivery was reclaimed.")
+        materializationConflict("execution-lost", "Delivery was reclaimed.")
       )
     ).toBe(false)
     expect(
       isPermanentProjectionFailure(
-        new MaterializationConflictError("effective-state", "Concurrent state changed.")
+        materializationConflict("effective-state", "Concurrent state changed.")
       )
     ).toBe(false)
   })
@@ -2116,7 +2113,7 @@ describe("runProjectionJob", () => {
           versionId: version.versionId,
         },
       })
-    ).rejects.toBeInstanceOf(MaterializationValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
 
     const run = await deps.storage.projectionRuns.getById({
       projectId: sixb.id,
@@ -2481,7 +2478,7 @@ describe("runProjectionJob", () => {
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: null },
     ])
-    const cancellation = new MaterializationCancellationError("Cancelled by test.")
+    const cancellation = materializationCancelled("Cancelled by test.")
     const abortController = new AbortController()
     abortController.abort(cancellation)
     let failuresReported = 0
@@ -2651,7 +2648,7 @@ describe("runProjectionJob", () => {
         room_id: "r1",
         observed_at: "2026-06-02T12:00:00.000Z",
         target: 22,
-        target_unit: "bananas", // not a Temperature unit -> OntologyValidationError at append time
+        target_unit: "bananas", // not a Temperature unit -> ontology.invalid_value at append time
       },
     ])
 
@@ -2666,7 +2663,7 @@ describe("runProjectionJob", () => {
           versionId: version.versionId,
         },
       })
-    ).rejects.toBeInstanceOf(MaterializationValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
 
     const run = await deps.storage.projectionRuns.getById({
       projectId: sixb.id,

@@ -1,4 +1,4 @@
-import { RedisBrokerError } from "./errors"
+import { redisBrokerError } from "./errors"
 
 export interface ParsedStreamId {
   readonly milliseconds: bigint
@@ -39,7 +39,7 @@ export function compareStreamIds(left: string, right: string): number {
 function parseStreamId(cursor: string): ParsedStreamId {
   const match = STREAM_ID_PATTERN.exec(cursor)
   if (!match) {
-    throw new RedisBrokerError("cursor must be a Redis stream id cursor")
+    throw redisBrokerError("cursor must be a Redis stream id cursor")
   }
 
   return {

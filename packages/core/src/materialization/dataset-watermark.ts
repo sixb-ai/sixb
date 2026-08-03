@@ -1,4 +1,4 @@
-import { MaterializationConflictError } from "./errors"
+import { materializationConflict } from "../materialization/errors"
 import type { PinnedDatasetVersion } from "./model"
 
 export type PinnedDatasetWatermarkConflict =
@@ -32,7 +32,7 @@ export function assertPinnedDatasetWatermark(
   if (!conflict) return
 
   const message = pinnedDatasetWatermarkConflictMessage(conflict, subject)
-  throw new MaterializationConflictError("projection-fence", message)
+  throw materializationConflict("projection-fence", message)
 }
 
 function pinnedDatasetWatermarkConflictMessage(

@@ -1965,6 +1965,24 @@ describe("SixbServer HTTP contract", () => {
     })
   })
 
+  test("answers 404 when telemetry targets an object that does not exist", async () => {
+    // The Materializer reports the missing target as `storage.object_not_found`, and the code is
+    // what the status comes from. It used to inherit `ontology.invalid_value` from a validation
+    // subclass and answer 400, which read as "your payload is wrong" for a payload that was fine.
+    // To reproduce the old behavior, file the failure under `ontology.invalid_value` in
+    // `materializer/telemetry/plan.ts` and watch this expect 400.
+    await withHttpContractServer(async ({ baseUrl }) => {
+      const response = await fetch(`${baseUrl}/api/objects/device/never-created/telemetry/rpm`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ value: 900, at: "2026-02-18T10:05:00.000Z" }),
+      })
+
+      expect(response.status).toBe(404)
+      expect(await response.json()).toMatchObject({ code: "storage.object_not_found" })
+    })
+  })
+
   test("supports documented write endpoints", async () => {
     await withHttpContractServer(async ({ baseUrl, events, sixb }) => {
       const upsertObjectResponse = await fetch(`${baseUrl}/api/objects/device/fan-2`, {
@@ -2302,7 +2320,7 @@ describe("SixbServer HTTP contract", () => {
     await withHttpContractServer(async ({ baseUrl }) => {
       // The status used to be picked by searching the message for "Unknown" or "not found", so
       // every ontology validation error whose text began "Unknown property" answered 404. To see
-      // this fail, drop the OntologyValidationError branch from `handleRouteError`.
+      // this fail, drop the `ontology.invalid_value` branch from `handleRouteError`.
       const unknownProperty = await fetch(`${baseUrl}/api/objects/device/fan-2`, {
         method: "PUT",
         headers: { "content-type": "application/json" },

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { SandboxNotRunningError } from "@sixb/core"
 import { SmolvmSandbox } from "../src/smolvm-sandbox"
 
 /**
@@ -118,7 +117,10 @@ describe("SmolvmSandbox lifecycle", () => {
     const sandbox = await SmolvmSandbox.create({ cli: { bin, image: "x" }, id: "run-1" })
     await sandbox.stop()
     expect(sandbox.status).toBe("stopped")
-    expect(sandbox.runCommand("bash", ["-lc", "echo"])).rejects.toThrow(SandboxNotRunningError)
+    expect(sandbox.runCommand("bash", ["-lc", "echo"])).rejects.toHaveProperty(
+      "code",
+      "sandbox.not_running"
+    )
     await sandbox.destroy()
   })
 

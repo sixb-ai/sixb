@@ -1,5 +1,4 @@
 export { defineConnector } from "./builders"
-export { ConnectorError, ConnectorNotFoundError } from "./errors"
 export type {
   ConnectorAdapter,
   ConnectorClient,

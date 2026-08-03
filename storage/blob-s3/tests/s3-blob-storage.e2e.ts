@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createHash, randomUUID } from "node:crypto"
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
-import { BlobStorageError, computeBlobDigest } from "@sixb/core/blob-storage/server"
+import { computeBlobDigest } from "@sixb/core/blob-storage/server"
 import { runBlobStorageContractSuite } from "@sixb/core/testing"
 import { S3BlobStorage } from "../src"
 
@@ -134,7 +134,7 @@ describe("S3BlobStorage", () => {
       sizeBytes: fileRef.sizeBytes,
     })
     await expect(storage.stat(missingBlobId)).resolves.toBeNull()
-    await expect(storage.open(missingBlobId)).rejects.toBeInstanceOf(BlobStorageError)
+    await expect(storage.open(missingBlobId)).rejects.toHaveProperty("code", "storage.blob_failed")
     await expect(storage.open(missingBlobId)).rejects.toThrow(`Unknown blob '${missingBlobId}'`)
   })
 
@@ -219,7 +219,7 @@ describe("S3BlobStorage", () => {
         expectedSizeBytes: body.byteLength,
         expectedDigest: digest,
       })
-    ).rejects.toBeInstanceOf(BlobStorageError)
+    ).rejects.toHaveProperty("code", "storage.blob_failed")
     await expect(
       storage.completeUpload({
         uploadId,

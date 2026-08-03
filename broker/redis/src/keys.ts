@@ -1,4 +1,4 @@
-import { RedisBrokerError } from "./errors"
+import { redisBrokerError } from "./errors"
 
 export interface RedisStreamKeys {
   readonly streamKey: string
@@ -10,22 +10,22 @@ const DEFAULT_DEDUPE_TOKEN = "_"
 
 export function assertPrefix(prefix: string): void {
   if (prefix.trim().length === 0) {
-    throw new RedisBrokerError("prefix must be a non-empty string")
+    throw redisBrokerError("prefix must be a non-empty string")
   }
   if (/[{}]/.test(prefix)) {
-    throw new RedisBrokerError("prefix must not contain Redis hash-tag braces")
+    throw redisBrokerError("prefix must not contain Redis hash-tag braces")
   }
 }
 
 export function validateProjectId(projectId: string): void {
   if (typeof projectId !== "string" || projectId.trim().length === 0) {
-    throw new RedisBrokerError("projectId must be a non-empty string")
+    throw redisBrokerError("projectId must be a non-empty string")
   }
 }
 
 export function assertStreamId(streamId: string): void {
   if (streamId.trim().length === 0) {
-    throw new RedisBrokerError("streamId must be a non-empty string")
+    throw redisBrokerError("streamId must be a non-empty string")
   }
 }
 

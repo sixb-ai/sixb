@@ -5,11 +5,10 @@ import {
   parseSixbFailure,
   SIXB_ERROR_CODES,
   SIXB_ERROR_RETRYABLE,
-  SixbConflictError,
   SixbError,
   type SixbFailure,
-  SixbProviderError,
   serializeSixbFailure,
+  sixbErrorKind,
   sixbErrorNamespace,
   toSixbFailure,
 } from "../src/errors"
@@ -60,11 +59,19 @@ describe("SixbError", () => {
     expect("cause" in new SixbError("storage.unavailable", "no route")).toBe(false)
   })
 
-  test("subclasses narrow the code and stay catchable as SixbError", () => {
-    const error = new SixbConflictError("storage.conflict", "concurrent write")
-    expect(error).toBeInstanceOf(SixbError)
-    expect(error.name).toBe("SixbConflictError")
-    expect(error.code).toBe("storage.conflict")
+  test("groups a code into its coarse kind, and leaves an ungrouped code alone", () => {
+    expect(sixbErrorKind(new SixbError("storage.conflict", "concurrent write"))).toBe("conflict")
+    expect(sixbErrorKind(new SixbError("runtime.invalid_input", "bad"))).toBe("validation")
+    expect(sixbErrorKind(new SixbError("provider.unavailable", "down"))).toBe("provider")
+    // `runtime.unexpected` belongs to no kind: the grouping never claims a code it cannot place.
+    expect(sixbErrorKind(new SixbError("runtime.unexpected", "boom"))).toBeUndefined()
+    expect(sixbErrorKind(new Error("boom"))).toBeUndefined()
+  })
+
+  test("reads the kind off a failure that crossed a bundle boundary", () => {
+    // The class hierarchy this replaces could not: `instanceof` misses a second copy of the runtime.
+    const foreign = Object.assign(new Error("lost the race"), { code: "storage.conflict" })
+    expect(sixbErrorKind(foreign)).toBe("conflict")
   })
 })
 
@@ -95,7 +102,7 @@ describe("isSixbError", () => {
 describe("toSixbFailure", () => {
   test("records the code, the message, and the details of a Sixb error", () => {
     const failure = toSixbFailure(
-      new SixbProviderError("provider.unavailable", "connection refused", {
+      new SixbError("provider.unavailable", "connection refused", {
         details: { provider: "@sixb/queue-bullmq" },
       })
     )

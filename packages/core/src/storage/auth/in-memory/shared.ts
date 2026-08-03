@@ -1,5 +1,5 @@
 import { type AuthSessionAudience, resolveAuthSessionAudience } from "../../../auth/audience"
-import { AuthStorageError } from "../errors"
+import { authStorageError } from "../../../storage/auth/errors"
 import type {
   AccessTokenRecord,
   CompleteAuthSessionInput,
@@ -114,7 +114,7 @@ export function dateOrNow(value: Date | undefined): Date {
 export function assertNonEmpty(value: string, label: string): string {
   const normalized = value.trim()
   if (!normalized) {
-    throw new AuthStorageError("invalid_input", `[Sixb] ${label} must be a non-empty string.`)
+    throw authStorageError("invalid_input", `[Sixb] ${label} must be a non-empty string.`)
   }
   return normalized
 }
@@ -270,7 +270,7 @@ export function assertSessionIdAvailable(
   sessionId: string
 ): void {
   if (state.sessions.has(sessionKey(projectId, sessionId))) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "duplicate_session",
       `[Sixb] Session '${sessionId}' already exists for project '${projectId}'.`
     )
@@ -329,7 +329,7 @@ export function createServiceAccountRecord(
   const key = serviceAccountKey(projectId, id)
 
   if (state.serviceAccounts.has(key)) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "duplicate_service_account",
       `[Sixb] Service account '${id}' already exists for project '${projectId}'.`
     )
@@ -360,7 +360,7 @@ export function upsertServiceAccountGroupMembershipRecord(
   const serviceAccountId = assertNonEmpty(input.serviceAccountId, "Service account id")
   const groupId = assertNonEmpty(input.groupId, "Group id")
   if (!state.serviceAccounts.has(serviceAccountKey(projectId, serviceAccountId))) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_service_account",
       `[Sixb] Service account '${serviceAccountId}' not found for project '${projectId}'.`
     )
@@ -399,7 +399,7 @@ export function createAccessTokenRecord(
 
   const key = accessTokenKey(projectId, id)
   if (state.accessTokens.has(key)) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "duplicate_access_token",
       `[Sixb] Access token '${id}' already exists for project '${projectId}'.`
     )
@@ -432,7 +432,7 @@ export function upsertGroupMembershipRecord(
   const userId = assertNonEmpty(input.userId, "User id")
   const groupId = assertNonEmpty(input.groupId, "Group id")
   if (!state.users.has(userKey(projectId, userId))) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_user",
       `[Sixb] User '${userId}' not found for project '${projectId}'.`
     )
@@ -486,7 +486,7 @@ function assertAccessTokenSubject(
     return
   }
 
-  throw new AuthStorageError(
+  throw authStorageError(
     "invalid_input",
     `[Sixb] Access token kind '${kind}' cannot target subject type '${subjectType}'.`
   )
@@ -500,14 +500,14 @@ function assertAccessTokenSubjectExists(
 ): void {
   if (subjectType === "user") {
     if (state.users.has(userKey(projectId, subjectId))) return
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_user",
       `[Sixb] User '${subjectId}' not found for project '${projectId}'.`
     )
   }
 
   if (state.serviceAccounts.has(serviceAccountKey(projectId, subjectId))) return
-  throw new AuthStorageError(
+  throw authStorageError(
     "missing_service_account",
     `[Sixb] Service account '${subjectId}' not found for project '${projectId}'.`
   )
@@ -529,21 +529,21 @@ export function consumeMagicLinkRecord(
   const existing = state.magicLinks.get(key)
 
   if (!existing) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_magic_link",
       `[Sixb] Magic link '${id}' not found for project '${projectId}'.`
     )
   }
 
   if (existing.tokenHash !== tokenHash || existing.consumedAt || existing.revokedAt) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "invalid_magic_link",
       `[Sixb] Magic link '${id}' is not valid for project '${projectId}'.`
     )
   }
 
   if (existing.expiresAt <= params.consumedAt) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "expired_magic_link",
       `[Sixb] Magic link '${id}' is expired for project '${projectId}'.`
     )
@@ -573,21 +573,21 @@ export function consumeOidcAttemptRecord(
   const existing = state.oidcAuthorizationAttempts.get(key)
 
   if (!existing) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "missing_oidc_attempt",
       `[Sixb] OIDC authorization attempt '${id}' not found for project '${projectId}'.`
     )
   }
 
   if (existing.stateHash !== stateHash || existing.consumedAt) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "invalid_oidc_attempt",
       `[Sixb] OIDC authorization attempt '${id}' is not valid for project '${projectId}'.`
     )
   }
 
   if (existing.expiresAt <= params.consumedAt) {
-    throw new AuthStorageError(
+    throw authStorageError(
       "expired_oidc_attempt",
       `[Sixb] OIDC authorization attempt '${id}' is expired for project '${projectId}'.`
     )

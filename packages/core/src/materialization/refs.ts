@@ -1,5 +1,5 @@
+import { SixbError } from "../errors"
 import { compareStrings } from "../json"
-import { MaterializationValidationError } from "./errors"
 import type {
   OntologyLinkRef,
   OntologyObjectRef,
@@ -11,7 +11,7 @@ const textEncoder = new TextEncoder()
 
 function assertIdentifier(value: string, label: string): void {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new MaterializationValidationError(`${label} must be a nonblank string.`)
+    throw new SixbError("ontology.invalid_value", `[Sixb] ${label} must be a nonblank string.`)
   }
 }
 

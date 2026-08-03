@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
+import { materializationConflict } from "../../materialization/errors"
 import type { AssertSourceMaterializationExecutionInput } from "../ontology/sources"
 import { latestStartedAtByOwnerId } from "../run-listing"
-import { ProjectionRunError } from "./errors"
 import {
   advanceProjectionTelemetry,
   assertGenericProgressDoesNotAdvanceTelemetry,
@@ -124,7 +124,8 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
       record.identity.projectionId !== input.source.projectionId ||
       record.identity.protocol !== "replacement"
     ) {
-      throw new ProjectionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[Sixb] Projection run '${record.id}' does not own replacement source '${input.source.projectionId}'.`
       )
     }
@@ -279,7 +280,8 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     const usedTokens = this.executionTokensByRun.get(key) ?? new Set<string>()
     if (currentToken) usedTokens.add(currentToken)
     if (usedTokens.has(executionToken)) {
-      throw new ProjectionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[Sixb] Projection run '${runId}' execution token was already used.`
       )
     }

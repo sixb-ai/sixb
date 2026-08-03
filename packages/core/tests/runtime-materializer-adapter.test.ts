@@ -1,15 +1,5 @@
 import { describe, expect, mock, test } from "bun:test"
-import {
-  defineObjectType,
-  InMemoryBroker,
-  type InMemoryStorage,
-  link,
-  MaterializationValidationError,
-  ObjectNotFoundError,
-  OntologyValidationError,
-  prop,
-  Sixb,
-} from "../src"
+import { defineObjectType, InMemoryBroker, type InMemoryStorage, link, prop, Sixb } from "../src"
 import { type EventsRuntime, OntologyOutboxDispatcher } from "../src/events"
 import { getOntologyMutationRuntime } from "../src/runtime/internal"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
@@ -180,7 +170,7 @@ describe("runtime object writes", () => {
 
     await expect(
       sixb.upsertLink("room", "r1", "sensors", { targetTypeId: "sensor", targetId: "missing" })
-    ).rejects.toBeInstanceOf(ObjectNotFoundError)
+    ).rejects.toHaveProperty("code", "storage.object_not_found")
   })
 
   test("replaces the whole link property set on upsert", async () => {
@@ -228,7 +218,7 @@ describe("runtime object writes", () => {
         targetId: "s1",
         properties: {},
       })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
+    ).rejects.toHaveProperty("code", "ontology.invalid_value")
     expect((await listSensorLinks(sixb, "certifiedSensors"))[0]?.properties).toEqual({
       role: "primary",
     })
@@ -237,22 +227,25 @@ describe("runtime object writes", () => {
   test("surfaces effective validation from the materializer", async () => {
     const { sixb } = createRuntime()
 
-    await expect(sixb.upsertObject("room", { id: "r1" })).rejects.toBeInstanceOf(
-      MaterializationValidationError
+    await expect(sixb.upsertObject("room", { id: "r1" })).rejects.toHaveProperty(
+      "code",
+      "ontology.invalid_value"
     )
   })
 
   test("single and batch writes report the same validation failure catchably", async () => {
-    // The batch path rewraps materializer item errors as OntologyValidationError. A caller that
-    // branches on `instanceof OntologyValidationError` must catch the single-write error too, or
-    // the same invalid input is skippable through one API and fatal through the other.
+    // The batch path rewraps materializer item errors, and it must not rewrap them under a
+    // different code: a caller branching on `ontology.invalid_value` has to catch the single-write
+    // failure too, or the same invalid input is skippable through one API and fatal through the
+    // other. This used to be enforced by a subclass relationship; the shared code is what enforces
+    // it now.
     const { sixb } = createRuntime()
 
     const single = await sixb.upsertObject("room", { id: "r1" }).catch((error: unknown) => error)
     const [batch] = await sixb.upsertObjectBatch("room", [{ properties: { id: "r1" } }])
 
-    expect(single).toBeInstanceOf(OntologyValidationError)
-    expect(batch?.ok === false && batch.error).toBeInstanceOf(OntologyValidationError)
+    expect(single).toHaveProperty("code", "ontology.invalid_value")
+    expect(batch?.ok === false && batch.error).toHaveProperty("code", "ontology.invalid_value")
     expect((single as Error).message).toBe(
       batch?.ok === false ? batch.error.message : "<no batch error>"
     )
@@ -273,7 +266,10 @@ describe("runtime object batches", () => {
 
     expect(results.map((result) => result.ok)).toEqual([true, false, false, true])
     expect(results[0].ok && results[0].value.primaryId).toBe("r1")
-    expect(results[1].ok === false && results[1].error).toBeInstanceOf(OntologyValidationError)
+    expect(results[1].ok === false && results[1].error).toHaveProperty(
+      "code",
+      "ontology.invalid_value"
+    )
     expect(results[2].ok === false && results[2].error.message).toContain(
       "Missing required property 'name'"
     )

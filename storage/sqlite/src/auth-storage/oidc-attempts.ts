@@ -5,7 +5,7 @@ import type {
   CreateOidcAuthorizationAttemptInput,
   OidcAuthorizationAttemptRecord,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import { runImmediateTransaction } from "../transactions"
 import {
   assertNonEmpty,
@@ -32,7 +32,7 @@ export class SqliteAuthOidcAuthorizationAttemptStore implements AuthOidcAuthoriz
       const codeVerifier = assertNonEmpty(input.codeVerifier, "OIDC code verifier")
 
       if (getOidcAttemptRowById(this.db, { projectId, id })) {
-        throw new AuthStorageError(
+        throw authStorageError(
           "duplicate_oidc_attempt",
           `[Sixb] OIDC authorization attempt '${id}' already exists for project '${projectId}'.`
         )

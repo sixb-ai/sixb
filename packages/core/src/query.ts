@@ -8,9 +8,9 @@
 
 export type { ObjectQueryPlanningIssue } from "./objects/query/errors"
 export {
-  ObjectQueryExecutionError,
   ObjectQueryPlanningError,
   ObjectQueryValidationError,
+  objectQueryExecutionFailed,
 } from "./objects/query/errors"
 export type {
   ObjectExpansion,

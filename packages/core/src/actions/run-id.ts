@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto"
-import { OntologyValidationError } from "../ontology/errors"
+import { SixbError } from "../errors"
 
 export function createActionRunId(runId: string | undefined): string {
   if (runId !== undefined) {
     if (!runId.trim()) {
-      throw new OntologyValidationError("[Sixb] Action run id must not be empty")
+      throw new SixbError("ontology.invalid_value", "[Sixb] Action run id must not be empty")
     }
     return runId
   }

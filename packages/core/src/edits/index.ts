@@ -1,4 +1,3 @@
-export { EditBatchError } from "./errors"
 export { lowerEditBatch } from "./normalize"
 export type {
   EditablePropertyId,

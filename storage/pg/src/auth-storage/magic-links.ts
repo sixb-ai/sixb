@@ -4,7 +4,7 @@ import type {
   CreateAuthMagicLinkInput,
   MagicLinkRecord,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import {
   authLockKey,
   lockAdvisoryKeys,
@@ -38,7 +38,7 @@ export class PgAuthMagicLinkStore implements AuthMagicLinkStore {
       await lockAdvisoryKeys(tx, [authLockKey("magic-links", projectId, email)])
 
       if (await getMagicLinkRowById(tx, { projectId, id })) {
-        throw new AuthStorageError(
+        throw authStorageError(
           "duplicate_magic_link",
           `[Sixb] Magic link '${id}' already exists for project '${projectId}'.`
         )

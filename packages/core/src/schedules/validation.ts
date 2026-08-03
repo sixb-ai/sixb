@@ -1,8 +1,8 @@
+import { SixbError } from "../errors"
 import type { EventSelectorSpec } from "../events/selectors"
 import type { ObjectLink, ObjectType, OntologyRegistry } from "../ontology"
 import { assertPredicateShape, type Predicate } from "../predicates"
 import { createCronMatcher } from "./cron"
-import { ScheduleValidationError } from "./errors"
 import type { EventScheduleCondition, EventScheduleDefinition, ScheduleDefinition } from "./types"
 
 const objectEventTypes = new Set(["object.created", "object.updated", "object.deleted"])
@@ -39,7 +39,8 @@ function assertNonEmptyString(
 
 export function assertScheduleDefinition(
   value: unknown,
-  createError: (message: string) => Error = (message) => new ScheduleValidationError(message)
+  createError: (message: string) => Error = (message) =>
+    new SixbError("runtime.invalid_definition", message)
 ): asserts value is ScheduleDefinition {
   if (!isRecord(value)) throw createError("Schedule definition must be an object.")
   if (value.kind !== "schedule") {
@@ -95,7 +96,7 @@ export function validateSchedulesAtStartup(
   for (const schedule of schedules) {
     assertScheduleDefinition(schedule)
     if (seenIds.has(schedule.id)) {
-      throw new ScheduleValidationError(`Duplicate schedule id: ${schedule.id}`)
+      throw new SixbError("runtime.invalid_definition", `Duplicate schedule id: ${schedule.id}`)
     }
     seenIds.add(schedule.id)
 
@@ -113,7 +114,7 @@ function validateTimezone(timezone: string): void {
   try {
     Intl.DateTimeFormat(undefined, { timeZone: timezone })
   } catch {
-    throw new ScheduleValidationError(`Invalid timezone '${timezone}'.`)
+    throw new SixbError("runtime.invalid_definition", `Invalid timezone '${timezone}'.`)
   }
 }
 
@@ -195,7 +196,8 @@ function validateEventSchedule(
       const objectTypeId = source.objectTypeId
       const objectType = objectTypeId ? ontology.getObjectTypeById(objectTypeId) : undefined
       if (!objectType) {
-        throw new ScheduleValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `Schedule "${schedule.id}": unknown object type "${objectTypeId}".`
         )
       }
@@ -259,7 +261,8 @@ function validateObjectSource(schedule: EventScheduleDefinition, objectType: Obj
   const condition = schedule.trigger.condition
   if (!condition) return
   if (condition.scope !== "event.object") {
-    throw new ScheduleValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Schedule "${schedule.id}": object event sources can only use event.object conditions.`
     )
   }
@@ -271,7 +274,8 @@ function validateLinkSource(schedule: EventScheduleDefinition, objectType: Objec
   const source = schedule.trigger.source
   const link = objectType.links.find((candidate) => candidate.id === source.linkId)
   if (!link) {
-    throw new ScheduleValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Schedule "${schedule.id}": unknown link "${source.linkId}" on object type "${objectType.id}".`
     )
   }
@@ -282,7 +286,8 @@ function validateLinkSource(schedule: EventScheduleDefinition, objectType: Objec
   const condition = schedule.trigger.condition
   if (!condition) return
   if (condition.scope !== "event.link") {
-    throw new ScheduleValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Schedule "${schedule.id}": link event sources can only use event.link conditions.`
     )
   }
@@ -298,12 +303,14 @@ function validateRegisteredSource(
 ): void {
   validateEventTypes(schedule, supportedTypes, sourceKind)
   if (!registeredIds?.has(sourceId ?? "")) {
-    throw new ScheduleValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Schedule "${schedule.id}": unknown ${sourceKind} "${sourceId}".`
     )
   }
   if (schedule.trigger.condition) {
-    throw new ScheduleValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Schedule "${schedule.id}": ${sourceKind} event sources do not support .where() conditions.`
     )
   }
@@ -316,7 +323,8 @@ function validateEventTypes(
 ): void {
   for (const type of schedule.trigger.source.types ?? []) {
     if (!supportedTypes.has(type)) {
-      throw new ScheduleValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Schedule "${schedule.id}": unsupported ${sourceKind} event type "${type}".`
       )
     }
@@ -329,7 +337,8 @@ function validateSelectorProperty(
 ): void {
   const propertyId = schedule.trigger.source.propertyId
   if (propertyId !== undefined && !propertyIds.has(propertyId)) {
-    throw new ScheduleValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Schedule "${schedule.id}": unknown selector property "${propertyId}".`
     )
   }
@@ -343,7 +352,8 @@ function validateConditionPredicate(
 ): void {
   if (predicate.kind === "all" || predicate.kind === "any") {
     if (predicate.predicates.length === 0) {
-      throw new ScheduleValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Schedule "${schedule.id}": ${predicate.kind} predicate must contain at least one predicate.`
       )
     }
@@ -359,19 +369,22 @@ function validateConditionPredicate(
   }
 
   if (predicate.kind === "link") {
-    throw new ScheduleValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Schedule "${schedule.id}": link predicates are not supported in event conditions.`
     )
   }
 
   if (predicate.kind === "field") {
     if (!link || !linkIdentityFields.has(predicate.field)) {
-      throw new ScheduleValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Schedule "${schedule.id}": unsupported event field predicate "${predicate.field}".`
       )
     }
     if (typeof predicate.value !== "string" || !predicate.value.trim()) {
-      throw new ScheduleValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Schedule "${schedule.id}": event field "${predicate.field}" must compare against a non-empty string.`
       )
     }
@@ -380,7 +393,8 @@ function validateConditionPredicate(
         ? link.targetObjectTypeId
         : [link.targetObjectTypeId]
       if (!targetIds.includes("*") && !targetIds.includes(predicate.value)) {
-        throw new ScheduleValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `Schedule "${schedule.id}": object type "${predicate.value}" is not a target of link "${link.id}".`
         )
       }
@@ -391,7 +405,8 @@ function validateConditionPredicate(
   if (!propertyIds.has(predicate.propertyId)) {
     const source = schedule.trigger.source
     const subject = link ? `link "${link.id}"` : `object type "${source.objectTypeId}"`
-    throw new ScheduleValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Schedule "${schedule.id}": unknown property "${predicate.propertyId}" on ${subject}.`
     )
   }

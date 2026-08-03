@@ -8,11 +8,13 @@ import {
   type Sixb,
 } from "@sixb/core"
 import { computeBlobDigest, supportsDirectUpload } from "@sixb/core/blob-storage/server"
+import type { SixbError } from "@sixb/core/errors"
+import { isSixbError } from "@sixb/core/errors"
 import {
   createFileUploadId,
   createUploadExpiresAt,
   type FileUploadSession,
-  FileUploadSessionError,
+  fileUploadSessionError,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
@@ -29,7 +31,7 @@ import {
   SignedFileUploadPartSchema,
 } from "../schemas/files"
 import { type ErrorResponseBody, errorResponse, handleRouteError } from "../utils/http"
-import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
+import { readRequestBodyWithLimit } from "../utils/request-body"
 // The simple-upload ceiling lives in @sixb/core so the client staged-switch
 // threshold and this server limit stay a single source of truth. The body limit
 // adds headroom for multipart/form-data encoding overhead on the `POST /api/files`
@@ -425,7 +427,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
 
           if (session.status === "completed") {
-            throw new FileUploadSessionError(
+            throw fileUploadSessionError(
               "already_completed",
               "File upload session is already completed."
             )
@@ -530,18 +532,18 @@ function mapUploadContentError(context: {
 
 // The cap runs in the `parse` phase, so Elysia surfaces it wrapped in a
 // ParseError; the original error is carried on `cause`.
-function asRequestBodyTooLarge(error: unknown): RequestBodyTooLargeError | undefined {
-  if (error instanceof RequestBodyTooLargeError) {
+function asRequestBodyTooLarge(error: unknown): SixbError | undefined {
+  if (isSixbError(error, "runtime.payload_too_large")) {
     return error
   }
   const cause = (error as { cause?: unknown } | null | undefined)?.cause
-  return cause instanceof RequestBodyTooLargeError ? cause : undefined
+  return isSixbError(cause, "runtime.payload_too_large") ? cause : undefined
 }
 
 // A non-pending session is terminal; surface which terminal state so the route
 // boundary maps it to 409. Store lookups already raise `not_found`/`expired`.
-function terminalSessionError(status: "completed" | "aborted"): FileUploadSessionError {
-  return new FileUploadSessionError(
+function terminalSessionError(status: "completed" | "aborted"): SixbError {
+  return fileUploadSessionError(
     status === "completed" ? "already_completed" : "already_aborted",
     `File upload session is already ${status}.`
   )

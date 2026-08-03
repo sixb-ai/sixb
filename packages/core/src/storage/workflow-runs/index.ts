@@ -1,4 +1,3 @@
-export { WorkflowRunError } from "./errors"
 export {
   InMemoryWorkflowAgentNodeRunStorage,
   InMemoryWorkflowNodeRunStorage,

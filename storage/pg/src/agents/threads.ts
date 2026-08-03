@@ -1,7 +1,7 @@
 import {
-  AgentStorageError,
   type AgentThreadRecord,
   type AgentThreadStore,
+  agentStorageError,
   type CreateAgentThreadInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
@@ -47,7 +47,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
       return rowToThreadRecord(row)
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new AgentStorageError(
+        throw agentStorageError(
           "duplicate_id",
           `[SixbPg] Agent thread '${input.id}' already exists for project '${input.projectId}'.`
         )

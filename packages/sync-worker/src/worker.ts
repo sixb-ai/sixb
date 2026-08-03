@@ -10,13 +10,14 @@ import type {
   Storage,
   SyncDefinition,
 } from "@sixb/core"
+import { isSixbError } from "@sixb/core/errors"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "@sixb/core/queues"
 import type { SyncRunRecord } from "@sixb/core/storage"
-import { runSyncJob, SyncRunAlreadyStartedError } from "./run-sync-job"
+import { runSyncJob } from "./run-sync-job"
 import type { SyncJob, SyncRunResult, SyncWorkerContext } from "./types"
 
 const SOURCE = "SixbSyncWorker"
@@ -90,7 +91,7 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
         },
       })
     } catch (error) {
-      if (error instanceof SyncRunAlreadyStartedError) return
+      if (isSixbError(error, "sync.already_running")) return
       throw error
     }
 

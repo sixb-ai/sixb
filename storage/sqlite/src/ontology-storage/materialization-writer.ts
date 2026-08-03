@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite"
 import {
   linkRefKey,
-  MaterializationConflictError,
+  materializationConflict,
   objectRefKey,
   telemetryPointKey,
 } from "@sixb/core/internal/materialization"
@@ -324,7 +324,7 @@ export class SqliteMaterializationWriter {
             )
         } catch (error) {
           if (isSqliteConstraintError(error)) {
-            throw new MaterializationConflictError(
+            throw materializationConflict(
               "timeseries-point",
               `Telemetry point ${telemetryPointKey(point.series, point.at)} changed.`
             )

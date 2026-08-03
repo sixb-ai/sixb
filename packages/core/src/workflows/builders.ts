@@ -2,10 +2,10 @@ import type { ActionDefinition } from "../actions"
 import { isActionDefinition } from "../actions"
 import type { AgentDefinition } from "../agents"
 import { isAgentDefinition } from "../agents"
+import { SixbError } from "../errors"
 import type { SchemaOrRef } from "../ontology"
 import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
-import { WorkflowDefinitionError } from "./errors"
 import type {
   AgentStepBuilder,
   AgentStepDefinition,
@@ -121,7 +121,10 @@ export function defineAgentStep<const TId extends string, const TAgent extends A
 ): AgentStepBuilder<TId, TAgent> {
   assertNonEmpty(id, "Agent step", "id")
   if (!isAgentDefinition(agent)) {
-    throw new WorkflowDefinitionError(`Agent step "${id}" references an invalid agent.`)
+    throw new SixbError(
+      "runtime.invalid_definition",
+      `Agent step "${id}" references an invalid agent.`
+    )
   }
 
   return {
@@ -131,7 +134,10 @@ export function defineAgentStep<const TId extends string, const TAgent extends A
           return {
             prompt(prompt: unknown): unknown {
               if (typeof prompt !== "function") {
-                throw new WorkflowDefinitionError(`Agent step "${id}" prompt must be a function.`)
+                throw new SixbError(
+                  "runtime.invalid_definition",
+                  `Agent step "${id}" prompt must be a function.`
+                )
               }
               return { kind: "agentStep", id, agent, input, output, prompt }
             },
@@ -188,12 +194,15 @@ function createWorkflowDraftBuilder(
     ...extraArgs: unknown[]
   ): WorkflowChainDefinition => {
     if (extraArgs.length > 0) {
-      throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
+      throw new SixbError("runtime.invalid_definition", `Invalid workflow "${id}" .then(...) call.`)
     }
 
     if (isStepDefinition(nodeDefinition)) {
       if (mapper !== undefined && !isRuntimeWorkflowMapper(mapper)) {
-        throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
+        throw new SixbError(
+          "runtime.invalid_definition",
+          `Invalid workflow "${id}" .then(...) call.`
+        )
       }
 
       nodes.push(createStepNode(id, nodes, nodeDefinition, mapper))
@@ -203,7 +212,10 @@ function createWorkflowDraftBuilder(
 
     if (isAgentStepDefinition(nodeDefinition)) {
       if (mapper !== undefined && !isRuntimeWorkflowMapper(mapper)) {
-        throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
+        throw new SixbError(
+          "runtime.invalid_definition",
+          `Invalid workflow "${id}" .then(...) call.`
+        )
       }
 
       nodes.push(createAgentNode(id, nodes, nodeDefinition, mapper))
@@ -213,7 +225,10 @@ function createWorkflowDraftBuilder(
 
     if (isInterventionDefinition(nodeDefinition)) {
       if (mapper !== undefined && !isRuntimeWorkflowMapper(mapper)) {
-        throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
+        throw new SixbError(
+          "runtime.invalid_definition",
+          `Invalid workflow "${id}" .then(...) call.`
+        )
       }
 
       nodes.push(createInterventionNode(id, nodes, nodeDefinition, mapper))
@@ -223,7 +238,10 @@ function createWorkflowDraftBuilder(
 
     if (isActionDefinition(nodeDefinition)) {
       if (mapper !== undefined && !isRuntimeWorkflowMapper(mapper)) {
-        throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
+        throw new SixbError(
+          "runtime.invalid_definition",
+          `Invalid workflow "${id}" .then(...) call.`
+        )
       }
 
       nodes.push(createActionNode(id, nodes, nodeDefinition, mapper))
@@ -231,7 +249,7 @@ function createWorkflowDraftBuilder(
       return definition
     }
 
-    throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
+    throw new SixbError("runtime.invalid_definition", `Invalid workflow "${id}" .then(...) call.`)
   }
 
   let draft: RuntimeWorkflowDraftBuilder
@@ -247,15 +265,21 @@ function createWorkflowDraftBuilder(
     ...extraArgs: unknown[]
   ): RuntimeWorkflowDraftBuilder {
     if (extraArgs.length > 0) {
-      throw new WorkflowDefinitionError(`Invalid workflow "${id}" .when(...) call.`)
+      throw new SixbError("runtime.invalid_definition", `Invalid workflow "${id}" .when(...) call.`)
     }
 
     if (isScheduleDefinition(schedule)) {
       if (mapper !== undefined && schedule.trigger.type !== "event") {
-        throw new WorkflowDefinitionError(`Workflow "${id}" cron schedules do not accept a mapper.`)
+        throw new SixbError(
+          "runtime.invalid_definition",
+          `Workflow "${id}" cron schedules do not accept a mapper.`
+        )
       }
       if (mapper !== undefined && !isRuntimeWorkflowScheduleMapper(mapper)) {
-        throw new WorkflowDefinitionError(`Invalid workflow "${id}" .when(...) schedule mapper.`)
+        throw new SixbError(
+          "runtime.invalid_definition",
+          `Invalid workflow "${id}" .when(...) schedule mapper.`
+        )
       }
 
       triggers.push({
@@ -266,7 +290,10 @@ function createWorkflowDraftBuilder(
       return draft
     }
 
-    throw new WorkflowDefinitionError(`Workflow "${id}" .when(...) only accepts schedules.`)
+    throw new SixbError(
+      "runtime.invalid_definition",
+      `Workflow "${id}" .when(...) only accepts schedules.`
+    )
   }
 
   draft = {
@@ -413,7 +440,8 @@ function createInterventionNode(
 
 function assertNodeKey(workflowId: string, nodeId: string, key: string): void {
   if (key.length === 0) {
-    throw new WorkflowDefinitionError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Workflow "${workflowId}" node id "${nodeId}" must contain at least one letter or number.`
     )
   }
@@ -427,14 +455,16 @@ function assertUniqueNode(
 ): void {
   const duplicateId = nodes.find((node) => node.id === nodeId)
   if (duplicateId) {
-    throw new WorkflowDefinitionError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Duplicate workflow node id "${nodeId}" in workflow "${workflowId}".`
     )
   }
 
   const duplicateKey = nodes.find((node) => node.key === key)
   if (duplicateKey) {
-    throw new WorkflowDefinitionError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Duplicate workflow node key "${key}" in workflow "${workflowId}". Node ids "${duplicateKey.id}" and "${nodeId}" derive the same key.`
     )
   }

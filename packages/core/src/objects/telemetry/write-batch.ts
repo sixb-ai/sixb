@@ -8,10 +8,8 @@
 import { randomUUID } from "node:crypto"
 import type { AuthorizationContext } from "../../authorization"
 import { assertCanAppendTelemetry } from "../../authorization"
-import { MaterializationObjectNotFoundError } from "../../materialization/errors"
 import type { TelemetryCommitResult, TelemetryPointWrite } from "../../materialization/model"
 import { getOntologyMutationRuntime } from "../../runtime/ontology-mutations"
-import { ObjectNotFoundError } from "../../storage/errors"
 import type { RuntimeMaterializerContext } from "../materializer-adapter"
 
 export type TelemetryWriteContext = RuntimeMaterializerContext & {
@@ -30,23 +28,13 @@ export async function writeTelemetryBatch(
   }
   if (points.length === 0) return null
 
-  let commit: TelemetryCommitResult
-  try {
-    commit = await getOntologyMutationRuntime(ctx).appendTelemetry({
-      source: { kind: "runtime", requestId: randomUUID() },
-      // A `Principal` is an `EventActor` — same literals, no translation.
-      ...(ctx.authorization === undefined ? {} : { actor: ctx.authorization.principal }),
-      points,
-    })
-  } catch (error) {
-    if (error instanceof MaterializationObjectNotFoundError) {
-      throw new ObjectNotFoundError(
-        error.objectTypeId,
-        error.primaryId,
-        "Object not found for telemetry append"
-      )
-    }
-    throw error
-  }
-  return commit
+  // A missing telemetry target propagates as-is: the Materializer already reports it as
+  // `storage.object_not_found` with the object in `details`, which is the 404 this call owes its
+  // caller. Rewrapping it here only restated the same failure in different words.
+  return await getOntologyMutationRuntime(ctx).appendTelemetry({
+    source: { kind: "runtime", requestId: randomUUID() },
+    // A `Principal` is an `EventActor` — same literals, no translation.
+    ...(ctx.authorization === undefined ? {} : { actor: ctx.authorization.principal }),
+    points,
+  })
 }

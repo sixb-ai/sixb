@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks"
+import { storageTransactionError } from "../../storage/errors"
 import { InMemoryActionRunStorage } from "../action-runs"
 import { type AgentStorage, InMemoryAgentStorage } from "../agents"
 import { type AuthStorage, InMemoryAuthStorage } from "../auth"
-import { StorageTransactionError } from "../errors"
 import { type FileUploadSessionStore, InMemoryFileUploadSessions } from "../file-upload-sessions"
 import type { ObjectStorage } from "../objects"
 import { InMemoryObjectStorage } from "../objects/in-memory"
@@ -161,7 +161,7 @@ export class InMemoryStorage implements Storage {
         try {
           this.restore(snapshot)
         } catch (restoreError) {
-          throw new StorageTransactionError(
+          throw storageTransactionError(
             `[Sixb] In-memory storage failed to roll back after a transaction error; state may be inconsistent. Original transaction error: ${
               error instanceof Error ? error.message : String(error)
             }`,
@@ -185,7 +185,7 @@ export class InMemoryStorage implements Storage {
 
   private assertRootOperationAvailable(): void {
     if (!this.getActiveTransactionToken()) return
-    throw new StorageTransactionError(
+    throw storageTransactionError(
       "[Sixb] Root storage cannot be used inside a transaction callback; use the provided tx storage."
     )
   }

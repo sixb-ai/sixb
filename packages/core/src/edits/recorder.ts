@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto"
 import type { ObjectLink, ValueType } from "../ontology"
-import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import { assertRequiredProperties } from "../ontology/validation"
-import { EditBatchError } from "./errors"
 import {
   assertPrimaryPropertyNotUpdated,
   getPrimaryProperty,
@@ -24,6 +22,8 @@ import type {
 
 export type { RecordEditsHandler, RecordEditsOptions } from "./types"
 
+import { SixbError } from "../errors"
+
 const EMPTY_VALUE_TYPES = new Map<string, ValueType>()
 
 type RuntimeEditRecorder = {
@@ -42,7 +42,7 @@ export async function recordEdits(
 
 function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
   if (!options.runId.trim()) {
-    throw new EditBatchError("[Sixb] recordEdits requires a non-empty runId.")
+    throw new SixbError("storage.edit_rejected", "[Sixb] recordEdits requires a non-empty runId.")
   }
 
   const operations: EditOperation[] = []
@@ -67,7 +67,8 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
           })
 
         if (typeof primaryValue !== "string" || !primaryValue.trim()) {
-          throw new EditBatchError(
+          throw new SixbError(
+            "storage.edit_rejected",
             `[Sixb] EditBatch create '${objectType.id}' primary property '${primaryProperty.id}' must be a non-empty string.`
           )
         }
@@ -126,7 +127,8 @@ function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
           // An empty patch resolves to a null override and commits as `unchanged`, so a handler
           // that built its update conditionally would report a successful run that wrote nothing.
           if (Object.keys(normalizedProperties).length === 0) {
-            throw new EditBatchError(
+            throw new SixbError(
+              "storage.edit_rejected",
               `[Sixb] EditBatch update '${objectType.id}:${ref.primaryId}' must set at least one property.`
             )
           }
@@ -253,7 +255,8 @@ function assertLinkTokenSource(
   link: { readonly objectTypeId: string; readonly id: string }
 ): void {
   if (source.objectTypeId !== link.objectTypeId) {
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Link token ${link.objectTypeId}.${link.id} cannot be used with ${source.objectTypeId}`
     )
   }
@@ -292,14 +295,17 @@ function withoutPrimaryProperty(
 
 function assertRecord(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new EditBatchError(`[Sixb] EditBatch ${label} must be an object.`)
+    throw new SixbError("storage.edit_rejected", `[Sixb] EditBatch ${label} must be an object.`)
   }
   return value as Record<string, unknown>
 }
 
 function assertNonEmptyString(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim()) {
-    throw new EditBatchError(`[Sixb] EditBatch ${label} must be a non-empty string.`)
+    throw new SixbError(
+      "storage.edit_rejected",
+      `[Sixb] EditBatch ${label} must be a non-empty string.`
+    )
   }
   return value
 }

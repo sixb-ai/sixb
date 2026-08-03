@@ -5,8 +5,8 @@ import type { SixbErrorCode, SixbFailure } from "../errors"
 import {
   type AgentRunExecution,
   type AgentStorage,
-  AgentStorageError,
   type AgentStorageErrorReason,
+  agentStorageErrorReason,
   type CreateAgentRunInput,
   type CreateAgentThreadInput,
   type StartAgentRunInput,
@@ -39,8 +39,13 @@ async function expectAgentError(
   promise: Promise<unknown>,
   reason: AgentStorageErrorReason
 ): Promise<void> {
-  await expect(promise).rejects.toBeInstanceOf(AgentStorageError)
-  await expect(promise).rejects.toMatchObject({ reason })
+  const thrown = await promise.then(
+    () => undefined,
+    (error: unknown) => error
+  )
+  // Reads through the module's own reader, so a store that rejects with something that is not a
+  // Sixb failure at all fails here rather than matching on a stray `reason` property.
+  expect(agentStorageErrorReason(thrown)).toBe(reason)
 }
 
 function threadInput(overrides: Partial<CreateAgentThreadInput> = {}): CreateAgentThreadInput {
@@ -334,8 +339,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         expect(fulfilled).toHaveLength(1)
         expect(rejected).toHaveLength(1)
         const loser: unknown = rejected[0].reason
-        expect(loser).toBeInstanceOf(AgentStorageError)
-        expect((loser as AgentStorageError).reason).toBe("active_run_exists")
+        expect(agentStorageErrorReason(loser)).toBe("active_run_exists")
       })
     })
 

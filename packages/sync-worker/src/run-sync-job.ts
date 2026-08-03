@@ -7,22 +7,12 @@ import {
   isFileRef,
   type JsonValue,
 } from "@sixb/core"
-import { SixbConflictError } from "@sixb/core/errors"
+import { SixbError } from "@sixb/core/errors"
 import { resolveLogsRuntime } from "@sixb/core/internal/logging"
 import type { DatasetVersion, LakeWriteSession } from "@sixb/core/lake-storage"
 import { type SixbFailure, type SyncRunRecord, toSixbFailure } from "@sixb/core/storage"
 import { assertDatasetRow, normalizeReadResult, throwIfAborted } from "./normalize"
 import type { RunSyncJobInput, SyncRunResult } from "./types"
-
-export class SyncRunAlreadyStartedError extends SixbConflictError {
-  override readonly name = "SyncRunAlreadyStartedError"
-
-  constructor(readonly run: SyncRunRecord) {
-    super("sync.already_running", `[SixbSyncWorker] Sync run '${run.id}' has already started.`, {
-      details: { runId: run.id, syncId: run.syncId },
-    })
-  }
-}
 
 /** An aborted run is not a failed sync, so the code follows the status it is written with. */
 function toSyncRunFailure(error: unknown, status: "failed" | "cancelled"): SixbFailure {
@@ -147,7 +137,11 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
   } catch (error) {
     const existing = await syncRunsStorage.getById({ projectId: runtime.id, id: job.id })
     if (existing?.syncId === sync.id && existing.datasetId === dataset.id) {
-      throw new SyncRunAlreadyStartedError(existing)
+      throw new SixbError(
+        "sync.already_running",
+        `[SixbSyncWorker] Sync run '${existing.id}' has already started.`,
+        { details: { runId: existing.id, syncId: existing.syncId } }
+      )
     }
     throw error
   }

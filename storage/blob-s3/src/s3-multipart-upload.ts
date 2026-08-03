@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import type { BlobDigest } from "@sixb/core"
-import { assertExpectedBlobSize, BlobStorageError } from "@sixb/core/blob-storage/server"
+import { assertExpectedBlobSize } from "@sixb/core/blob-storage/server"
+import { SixbError } from "@sixb/core/errors"
 
 export interface S3UploadPart {
   readonly partNumber: number
@@ -119,7 +120,10 @@ export async function uploadBlobStreamToS3(
       signal: input.signal,
     })
     if (uploadId.length === 0) {
-      throw new BlobStorageError("[BlobS3] S3 did not return a multipart upload id.")
+      throw new SixbError(
+        "storage.blob_failed",
+        "[BlobS3] S3 did not return a multipart upload id."
+      )
     }
   }
 
@@ -127,7 +131,7 @@ export async function uploadBlobStreamToS3(
     await waitForUploadCapacity()
     input.signal?.throwIfAborted()
     if (uploadId === undefined) {
-      throw new BlobStorageError("[BlobS3] Multipart upload was not initialized.")
+      throw new SixbError("storage.blob_failed", "[BlobS3] Multipart upload was not initialized.")
     }
     const currentUploadId = uploadId
 
@@ -204,7 +208,10 @@ export async function uploadBlobStreamToS3(
 
         await ensureCurrentBuffer()
         if (!currentBuffer) {
-          throw new BlobStorageError("[BlobS3] Could not allocate an S3 upload part buffer.")
+          throw new SixbError(
+            "storage.blob_failed",
+            "[BlobS3] Could not allocate an S3 upload part buffer."
+          )
         }
 
         const copied = Math.min(currentBuffer.byteLength - currentLength, value.byteLength - offset)

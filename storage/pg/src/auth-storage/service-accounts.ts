@@ -6,7 +6,7 @@ import type {
   ServiceAccountRecord,
   UpdateAuthServiceAccountInput,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import type { PgStoreClient } from "../transactions"
 import type { PgAuthServiceAccountRow } from "./rows"
 import { rowToServiceAccountRecord } from "./rows"
@@ -87,7 +87,7 @@ export class PgAuthServiceAccountStore implements AuthServiceAccountStore {
   async update(input: UpdateAuthServiceAccountInput): Promise<ServiceAccountRecord> {
     const existing = await this.getById(input)
     if (!existing) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_service_account",
         `[Sixb] Service account '${input.id}' not found for project '${input.projectId}'.`
       )

@@ -54,12 +54,7 @@ export {
   dispatchQueuedAgentRuns,
   workflowAgentNodeQueueJobId,
 } from "./dispatch"
-export {
-  AgentDefinitionError,
-  AgentMessageAdapterError,
-  AgentRequestError,
-  type AgentRequestErrorReason,
-} from "./errors"
+export { type AgentRequestErrorReason, agentRequestError } from "./errors"
 export {
   createAgentMessageId,
   createAgentRunExecutionToken,

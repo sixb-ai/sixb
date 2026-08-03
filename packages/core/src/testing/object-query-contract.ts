@@ -8,7 +8,7 @@ import {
   facetObjects,
   normalizeObjectQuery,
   type ObjectQuery,
-  ObjectQueryPlanningError,
+  objectQueryIssues,
   validateObjectQuery,
 } from "../objects/query"
 import { defineObjectType, link, OntologyRegistry, prop, stringEnum } from "../ontology"
@@ -1194,12 +1194,10 @@ async function expectPlanningIssue(promise: Promise<unknown>, code: string): Pro
   try {
     await promise
   } catch (error) {
-    expect(error).toBeInstanceOf(ObjectQueryPlanningError)
-    if (error instanceof ObjectQueryPlanningError) {
-      expect(error.issues.map((issue) => issue.code)).toContain(code)
-    }
+    expect(error).toHaveProperty("code", "storage.query_unsupported")
+    expect(objectQueryIssues(error)?.map((issue) => issue.code)).toContain(code)
     return
   }
 
-  throw new Error(`Expected ObjectQueryPlanningError with code '${code}'`)
+  throw new Error(`Expected a planning rejection carrying issue code '${code}'`)
 }

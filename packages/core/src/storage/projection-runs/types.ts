@@ -96,7 +96,7 @@ export type TelemetryProjectionRunRecord = ProjectionRunRecordBase & {
   readonly target: ObjectProjectionTarget
   readonly telemetryCheckpoint: ProjectionTelemetryCheckpoint
   /**
-   * Only telemetry carries this: `MaterializationObjectNotFoundError` is raised by telemetry
+   * Only telemetry carries this: a missing telemetry target is reported by telemetry
    * validation alone, and only a batched protocol has a checkpoint to anchor the wait to.
    */
   readonly missingTarget?: ProjectionMissingTarget

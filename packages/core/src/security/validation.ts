@@ -1,5 +1,5 @@
 import { GRANT_KINDS, type GrantUniverseKey, grantKindOf } from "../authorization/grant-kinds"
-import { SecurityValidationError } from "./errors"
+import { SixbError } from "../errors"
 import { isMembershipOperation } from "./membership-policies"
 import type {
   GrantCapability,
@@ -49,7 +49,8 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 export function assertNonEmptyString(
   value: unknown,
   field: string,
-  createError: CreateSecurityError = (message) => new SecurityValidationError(message)
+  createError: CreateSecurityError = (message) =>
+    new SixbError("runtime.invalid_definition", message)
 ): asserts value is string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw createError(`[Sixb] ${field} must not be empty.`)
@@ -59,7 +60,8 @@ export function assertNonEmptyString(
 export function assertOptionalString(
   value: unknown,
   field: string,
-  createError: CreateSecurityError = (message) => new SecurityValidationError(message)
+  createError: CreateSecurityError = (message) =>
+    new SixbError("runtime.invalid_definition", message)
 ): asserts value is string | undefined {
   if (value === undefined) {
     return
@@ -106,7 +108,10 @@ function assertNoDuplicateIds(ids: readonly string[], field: string): void {
   const seen = new Set<string>()
   for (const id of ids) {
     if (seen.has(id)) {
-      throw new SecurityValidationError(`[Sixb] ${field} contains duplicate group id '${id}'.`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `[Sixb] ${field} contains duplicate group id '${id}'.`
+      )
     }
     seen.add(id)
   }
@@ -119,7 +124,8 @@ function assertNoDuplicateOperations(
   const seen = new Set<string>()
   for (const operation of operations) {
     if (seen.has(operation)) {
-      throw new SecurityValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `[Sixb] ${field} contains duplicate operation '${operation}'.`
       )
     }
@@ -129,7 +135,8 @@ function assertNoDuplicateOperations(
 
 export function assertGroupDefinition(
   value: unknown,
-  createError: CreateSecurityError = (message) => new SecurityValidationError(message)
+  createError: CreateSecurityError = (message) =>
+    new SixbError("runtime.invalid_definition", message)
 ): asserts value is GroupDefinition {
   if (!isRecord(value)) {
     throw createError("[Sixb] Group definition must be an object.")
@@ -155,7 +162,8 @@ export function isGroupDefinition(value: unknown): value is GroupDefinition {
 
 export function assertMembershipPolicyDefinition(
   value: unknown,
-  createError: CreateSecurityError = (message) => new SecurityValidationError(message)
+  createError: CreateSecurityError = (message) =>
+    new SixbError("runtime.invalid_definition", message)
 ): asserts value is MembershipPolicyDefinition {
   if (!isRecord(value)) {
     throw createError("[Sixb] Membership policy definition must be an object.")
@@ -187,7 +195,8 @@ export function isMembershipPolicyDefinition(value: unknown): value is Membershi
 export function assertGrantDefinition(
   value: unknown,
   field: string,
-  createError: CreateSecurityError = (message) => new SecurityValidationError(message)
+  createError: CreateSecurityError = (message) =>
+    new SixbError("runtime.invalid_definition", message)
 ): asserts value is GrantDefinition {
   if (!isRecord(value) || value.kind !== "grant") {
     throw createError(`[Sixb] ${field} must contain only grant definitions from 'can'.`)
@@ -247,7 +256,8 @@ function assertSelection(
 
 export function assertRoleDefinition(
   value: unknown,
-  createError: CreateSecurityError = (message) => new SecurityValidationError(message)
+  createError: CreateSecurityError = (message) =>
+    new SixbError("runtime.invalid_definition", message)
 ): asserts value is RoleDefinition {
   if (!isRecord(value)) {
     throw createError("[Sixb] Role definition must be an object.")
@@ -311,7 +321,7 @@ export function validateSecurityDefinitionsAtStartup(input: {
     assertGroupDefinition(group)
 
     if (groupsById.has(group.id)) {
-      throw new SecurityValidationError(`[Sixb] Duplicate group id: ${group.id}`)
+      throw new SixbError("runtime.invalid_definition", `[Sixb] Duplicate group id: ${group.id}`)
     }
 
     groupsById.set(group.id, group)
@@ -321,24 +331,29 @@ export function validateSecurityDefinitionsAtStartup(input: {
     assertRoleDefinition(role)
 
     if (rolesById.has(role.id)) {
-      throw new SecurityValidationError(`[Sixb] Duplicate role id: ${role.id}`)
+      throw new SixbError("runtime.invalid_definition", `[Sixb] Duplicate role id: ${role.id}`)
     }
 
     if (role.grantedToGroupIds.length === 0) {
-      throw new SecurityValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `[Sixb] Role '${role.id}' must be granted to at least one group.`
       )
     }
 
     if (role.grants.length === 0) {
-      throw new SecurityValidationError(`[Sixb] Role '${role.id}' must declare at least one grant.`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `[Sixb] Role '${role.id}' must declare at least one grant.`
+      )
     }
 
     assertNoDuplicateIds(role.grantedToGroupIds, `Role '${role.id}' grantedTo`)
 
     for (const groupId of role.grantedToGroupIds) {
       if (!groupsById.has(groupId)) {
-        throw new SecurityValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `[Sixb] Role '${role.id}' grantedTo references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
         )
       }
@@ -355,17 +370,22 @@ export function validateSecurityDefinitionsAtStartup(input: {
     assertMembershipPolicyDefinition(policy)
 
     if (membershipPoliciesById.has(policy.id)) {
-      throw new SecurityValidationError(`[Sixb] Duplicate membership policy id: ${policy.id}`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `[Sixb] Duplicate membership policy id: ${policy.id}`
+      )
     }
 
     if (policy.grantedToGroupIds.length === 0) {
-      throw new SecurityValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `[Sixb] Membership policy '${policy.id}' must grant membership authority to at least one group.`
       )
     }
 
     if (policy.can.length === 0) {
-      throw new SecurityValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `[Sixb] Membership policy '${policy.id}' must declare at least one operation.`
       )
     }
@@ -376,7 +396,8 @@ export function validateSecurityDefinitionsAtStartup(input: {
 
     for (const groupId of policy.grantedToGroupIds) {
       if (!groupsById.has(groupId)) {
-        throw new SecurityValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `[Sixb] Membership policy '${policy.id}' grantedTo references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
         )
       }
@@ -384,7 +405,8 @@ export function validateSecurityDefinitionsAtStartup(input: {
 
     for (const groupId of policy.scopeGroupIds) {
       if (!groupsById.has(groupId)) {
-        throw new SecurityValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `[Sixb] Membership policy '${policy.id}' scope references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
         )
       }
@@ -422,7 +444,8 @@ function assertGrantReferences(
 
   for (const id of ids) {
     if (!universe.has(id)) {
-      throw new SecurityValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `[Sixb] Role '${roleId}' grants ${grant.capability} on unknown ${spec.subject} '${id}'. ${spec.fix}`
       )
     }

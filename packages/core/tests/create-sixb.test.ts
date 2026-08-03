@@ -20,7 +20,6 @@ import {
   events,
   fromForeignKey,
   link,
-  ProjectionValidationError,
   prop,
   ref,
 } from "../src"
@@ -1343,7 +1342,7 @@ export const setTemperature = defineAction("setTemperature")
         projections: [firstProjection, secondProjection],
         ...createTestRuntimeDeps(),
       })
-    ).rejects.toBeInstanceOf(ProjectionValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_definition")
     await expect(
       createSixb({
         projectRoot,
@@ -1375,7 +1374,7 @@ export const setTemperature = defineAction("setTemperature")
         projections: [roomProjection],
         ...createTestRuntimeDeps(),
       })
-    ).rejects.toBeInstanceOf(ProjectionValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_definition")
     await expect(
       createSixb({
         projectRoot,
@@ -1412,7 +1411,7 @@ export const setTemperature = defineAction("setTemperature")
         projections: [roomProjection],
         ...createTestRuntimeDeps(),
       })
-    ).rejects.toBeInstanceOf(ProjectionValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_definition")
     await expect(
       createSixb({
         projectRoot,
@@ -1453,7 +1452,7 @@ export const setTemperature = defineAction("setTemperature")
         projections: [telemetryProjection],
         ...createTestRuntimeDeps(),
       })
-    ).rejects.toBeInstanceOf(ProjectionValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_definition")
     await expect(
       createSixb({
         projectRoot,
@@ -1501,7 +1500,7 @@ export const setTemperature = defineAction("setTemperature")
         projections: [telemetryProjection],
         ...createTestRuntimeDeps(),
       })
-    ).rejects.toBeInstanceOf(ProjectionValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_definition")
     await expect(
       createSixb({
         projectRoot,
@@ -1550,7 +1549,7 @@ export const setTemperature = defineAction("setTemperature")
         projections: [telemetryProjection],
         ...createTestRuntimeDeps(),
       })
-    ).rejects.toBeInstanceOf(ProjectionValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_definition")
     await expect(
       createSixb({
         projectRoot,
@@ -1616,7 +1615,7 @@ export const Room = defineObjectType({
         projections: [roomProjection],
         ...createTestRuntimeDeps(),
       })
-    ).rejects.toBeInstanceOf(ProjectionValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_definition")
     await expect(
       createSixb({
         projectRoot,
@@ -1668,7 +1667,7 @@ export const Room = defineObjectType({
         projections: [roomProjection],
         ...createTestRuntimeDeps(),
       })
-    ).rejects.toBeInstanceOf(ProjectionValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_definition")
     await expect(
       createSixb({
         projectRoot,

@@ -8,7 +8,6 @@ import {
   link,
   normalizeDecimalValue,
   OntologyRegistry,
-  OntologyValidationError,
   prop,
 } from "../src"
 import {
@@ -60,7 +59,7 @@ describe("exact decimal values", () => {
 
     for (const value of [1.23, "1e3", Number.NaN]) {
       expect(() => validateSchemaValue("decimal", value, "amount", valueTypes)).toThrow(
-        OntologyValidationError
+        expect.objectContaining({ code: "ontology.invalid_value" })
       )
     }
   })

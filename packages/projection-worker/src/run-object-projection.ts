@@ -1,9 +1,5 @@
-import {
-  type DatasetDefinition,
-  isJsonValue,
-  MaterializationValidationError,
-  type ObjectProjectionDefinition,
-} from "@sixb/core"
+import { type DatasetDefinition, isJsonValue, type ObjectProjectionDefinition } from "@sixb/core"
+import { isSixbError, SixbError } from "@sixb/core/errors"
 import type { ProjectionSourceEntry } from "@sixb/core/internal/materialization"
 import {
   buildObjectProjectionPlan,
@@ -55,8 +51,8 @@ export function mapObjectProjectionEntries(input: {
         try {
           entry = toSourceEntry(projection, plan.primaryPropertyId, projected.row)
         } catch (error) {
-          if (error instanceof MaterializationValidationError) {
-            await failCurrentRow(progress, error.message)
+          if (isSixbError(error, "ontology.invalid_value")) {
+            await failCurrentRow(progress, error)
           }
           throw error
         }
@@ -137,12 +133,18 @@ function createProgress(
   })
 }
 
-async function failCurrentRow(progress: ReplacementProgress, message: string): Promise<never> {
+/** Records the row as failed, flushes the run's progress, then reports what went wrong. */
+async function failCurrentRow(
+  progress: ReplacementProgress,
+  failure: string | SixbError
+): Promise<never> {
   await progress.recordRow(false)
   await progress.flush()
-  throw new MaterializationValidationError(message)
+  throw typeof failure === "string"
+    ? new SixbError("ontology.invalid_value", `[Sixb] ${failure}`)
+    : failure
 }
 
-function validationError(projectionId: string, message: string): MaterializationValidationError {
-  return new MaterializationValidationError(`Projection '${projectionId}' ${message}.`)
+function validationError(projectionId: string, message: string): SixbError {
+  return new SixbError("ontology.invalid_value", `[Sixb] Projection '${projectionId}' ${message}.`)
 }

@@ -1,4 +1,4 @@
-import { SixbConflictError } from "@sixb/core/errors"
+import { SixbError } from "@sixb/core/errors"
 import { resolveLogsRuntime } from "@sixb/core/internal/logging"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { PipelineRunRecord } from "@sixb/core/storage"
@@ -12,18 +12,6 @@ import {
 } from "./errors"
 import { runStep } from "./run-step"
 import type { PipelineRunResult, PipelineStepRunResult, RunPipelineJobInput } from "./types"
-
-export class PipelineRunAlreadyStartedError extends SixbConflictError {
-  override readonly name = "PipelineRunAlreadyStartedError"
-
-  constructor(readonly run: PipelineRunRecord) {
-    super(
-      "pipeline.already_running",
-      `[SixbPipelineWorker] Pipeline run '${run.id}' has already started.`,
-      { details: { runId: run.id, pipelineId: run.pipelineId } }
-    )
-  }
-}
 
 export async function runPipelineJob(input: RunPipelineJobInput): Promise<PipelineRunResult> {
   const { runtime, job } = input
@@ -53,7 +41,11 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
         id: job.id,
       })
       if (existing?.pipelineId === pipeline.id) {
-        throw new PipelineRunAlreadyStartedError(existing)
+        throw new SixbError(
+          "pipeline.already_running",
+          `[SixbPipelineWorker] Pipeline run '${existing.id}' has already started.`,
+          { details: { runId: existing.id, pipelineId: existing.pipelineId } }
+        )
       }
       throw error
     }

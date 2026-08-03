@@ -6,8 +6,8 @@
  * repeat is rejected, and each item's Materializer outcomes map back to the position they came from.
  */
 
+import { SixbError } from "../errors"
 import type { OntologyEditOperation, OntologyOperationOutcome } from "../materialization/model"
-import { OntologyValidationError } from "../ontology/errors"
 import type { BatchItemResult } from "../runtime/types"
 import {
   commitRuntimeBatch,
@@ -74,7 +74,8 @@ export async function runRuntimeItemBatch<TItem, TValue>(
       if (claimed.fingerprint !== plan.fingerprint) {
         results[index] = {
           ok: false,
-          error: new OntologyValidationError(
+          error: new SixbError(
+            "ontology.invalid_value",
             `[Sixb] Conflicting duplicate ${plan.label} at batch positions ${claimed.index} and ${index}`
           ),
         }

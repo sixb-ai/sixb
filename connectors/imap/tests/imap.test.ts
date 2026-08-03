@@ -12,13 +12,7 @@ import type {
   MailboxObject,
   SearchObject,
 } from "imapflow"
-import {
-  ImapAbortedError,
-  ImapConnectorError,
-  ImapDownloadTooLargeError,
-  ImapPartUnavailableError,
-  imap,
-} from "../src"
+import { imap } from "../src"
 import { createImapClient, type ImapTransport } from "../src/client"
 import type { ImapConnection, ImapMailboxSession } from "../src/types"
 
@@ -50,7 +44,7 @@ describe("imap connector", () => {
 
     await expect(
       adapter.connect({ projectId: "demo", connectorId: "mail", signal: controller.signal })
-    ).rejects.toBeInstanceOf(ImapAbortedError)
+    ).rejects.toHaveProperty("code", "runtime.cancelled")
   })
 
   test("uses secure, non-idling ImapFlow options and normalizes mailbox status", async () => {
@@ -364,7 +358,7 @@ describe("imap connector", () => {
         const part = await mailbox.downloadPart({ uid: 7, part: "2", maxBytes: 3 })
         await readAll(part.content)
       })
-    ).rejects.toBeInstanceOf(ImapDownloadTooLargeError)
+    ).rejects.toHaveProperty("code", "connector.request_failed")
   })
 
   test("destroys an unconsumed part when its mailbox callback ends", async () => {
@@ -394,7 +388,7 @@ describe("imap connector", () => {
       fixture.client.withMailbox("INBOX", (mailbox) =>
         mailbox.downloadPart({ uid: 7, part: "2", maxBytes: 5 })
       )
-    ).rejects.toBeInstanceOf(ImapPartUnavailableError)
+    ).rejects.toHaveProperty("code", "connector.request_failed")
 
     // Teardown must surface the typed error, not a masking `source.destroy` TypeError
     // from an entry poisoned with an undefined stream.
@@ -418,7 +412,7 @@ describe("imap connector", () => {
       fixture.client.withMailbox("INBOX", (mailbox) =>
         mailbox.downloadPart({ uid: 7, part: "1", maxBytes: 5 })
       )
-    ).rejects.toBeInstanceOf(ImapPartUnavailableError)
+    ).rejects.toHaveProperty("code", "connector.request_failed")
   })
 
   test("makes a mailbox session unusable after its callback", async () => {
@@ -450,9 +444,9 @@ describe("imap connector", () => {
     await fixture.client.close()
     await fixture.client.close()
 
-    await expect(operation).rejects.toBeInstanceOf(ImapAbortedError)
+    await expect(operation).rejects.toHaveProperty("code", "runtime.cancelled")
     expect(fixture.transports[0]?.events.filter((event) => event === "close")).toHaveLength(1)
-    await expect(fixture.client.listMailboxes()).rejects.toBeInstanceOf(ImapAbortedError)
+    await expect(fixture.client.listMailboxes()).rejects.toHaveProperty("code", "runtime.cancelled")
   })
 
   test("an operation signal aborts only its session and leaves the gateway reusable", async () => {
@@ -480,7 +474,7 @@ describe("imap connector", () => {
     await searchStarted
     controller.abort()
 
-    await expect(operation).rejects.toBeInstanceOf(ImapAbortedError)
+    await expect(operation).rejects.toHaveProperty("code", "runtime.cancelled")
     expect(await fixture.client.listMailboxes()).toHaveLength(1)
   })
 
@@ -489,7 +483,7 @@ describe("imap connector", () => {
 
     fixture.lifecycle.abort()
 
-    await expect(fixture.client.listMailboxes()).rejects.toBeInstanceOf(ImapAbortedError)
+    await expect(fixture.client.listMailboxes()).rejects.toHaveProperty("code", "runtime.cancelled")
     expect(fixture.transports).toHaveLength(0)
   })
 
@@ -506,7 +500,7 @@ describe("imap connector", () => {
       failure = error
     }
 
-    expect(failure).toBeInstanceOf(ImapConnectorError)
+    expect(failure).toHaveProperty("code", "connector.unavailable")
     expect(String(failure)).not.toContain("secret-password")
     expect(String(failure)).toContain("[redacted]")
   })

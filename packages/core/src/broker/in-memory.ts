@@ -1,5 +1,6 @@
+import { isSixbError } from "../errors"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
-import { BrokerCursorExpiredError, BrokerError } from "./errors"
+import { brokerError } from "./errors"
 import type {
   Broker,
   BrokerPage,
@@ -224,7 +225,7 @@ export class InMemoryBroker implements Broker {
   private getEnsuredStream(projectId: string, streamId: string): StoredStream {
     const storedStream = this.streams.get(streamKey(projectId, streamId))
     if (!storedStream) {
-      throw new BrokerError(
+      throw brokerError(
         `stream '${streamId}' has not been ensured for project '${projectId}'. Call ensureStream() before append or subscribe.`
       )
     }
@@ -304,10 +305,11 @@ export class InMemoryBroker implements Broker {
       firstRecord === undefined ? storedStream.nextSequence : BigInt(firstRecord.cursor)
 
     if (requestedNextSequence < firstAvailableSequence) {
-      throw new BrokerCursorExpiredError(
+      throw brokerError(
         `afterCursor '${afterCursor}' is outside the retained range for stream '${storedStream.definition.id}'. ` +
           `The next requested cursor sequence is '${requestedNextSequence}', but the earliest ` +
-          `available cursor sequence is '${firstAvailableSequence}'.`
+          `available cursor sequence is '${firstAvailableSequence}'.`,
+        { code: "broker.cursor_expired" }
       )
     }
   }
@@ -321,9 +323,10 @@ export class InMemoryBroker implements Broker {
     }
     const firstAvailableSequence = BigInt(storedStream.records[0]!.cursor)
     if (BigInt(beforeCursor) < firstAvailableSequence) {
-      throw new BrokerCursorExpiredError(
+      throw brokerError(
         `beforeCursor '${beforeCursor}' is outside the retained range for stream '${storedStream.definition.id}'. ` +
-          `The earliest available cursor sequence is '${firstAvailableSequence}'.`
+          `The earliest available cursor sequence is '${firstAvailableSequence}'.`,
+        { code: "broker.cursor_expired" }
       )
     }
   }
@@ -468,26 +471,26 @@ function utf8Bytes(value: string): number {
 
 function assertProjectId(projectId: string): void {
   if (projectId.trim().length === 0) {
-    throw new BrokerError("projectId must be a non-empty string")
+    throw brokerError("projectId must be a non-empty string")
   }
 }
 
 function assertStream(stream: BrokerStreamDefinition): void {
   if (stream.id.trim().length === 0) {
-    throw new BrokerError("stream.id must be a non-empty string")
+    throw brokerError("stream.id must be a non-empty string")
   }
 }
 
 function assertStreamId(streamId: string): void {
   if (streamId.trim().length === 0) {
-    throw new BrokerError("streamId must be a non-empty string")
+    throw brokerError("streamId must be a non-empty string")
   }
 }
 
 function assertBrokerPayload(payload: unknown): void {
   const reason = getInvalidJsonValueReason(payload, "record.payload")
   if (reason) {
-    throw new BrokerError(`record.payload must be a JSON value; ${reason}`)
+    throw brokerError(`record.payload must be a JSON value; ${reason}`)
   }
 }
 
@@ -498,13 +501,13 @@ function assertCursor(cursor: string | undefined): void {
 
   try {
     if (BigInt(cursor) < 0n) {
-      throw new BrokerError("cursor must be non-negative")
+      throw brokerError("cursor must be non-negative")
     }
   } catch (error) {
-    if (error instanceof BrokerError) {
+    if (isSixbError(error)) {
       throw error
     }
-    throw new BrokerError("cursor must be a numeric in-memory broker cursor", {
+    throw brokerError("cursor must be a numeric in-memory broker cursor", {
       cause: error,
     })
   }

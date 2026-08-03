@@ -5,14 +5,12 @@ import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { LanguageModelV4 } from "@ai-sdk/provider"
 import {
-  AgentDefinitionError,
   createSixb,
   defineAgent,
   defineGroup,
   defineObjectType,
   isAgentDefinition,
   prop,
-  RuntimeError,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -109,13 +107,13 @@ describe("defineAgent", () => {
 
   test("rejects empty id, name, and instructions", () => {
     expect(() => defineAgent("", { name: "A", model, instructions: "x" })).toThrow(
-      AgentDefinitionError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
     expect(() => defineAgent("a", { name: "  ", model, instructions: "x" })).toThrow(
-      AgentDefinitionError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
     expect(() => defineAgent("a", { name: "A", model, instructions: " " })).toThrow(
-      AgentDefinitionError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
   })
 
@@ -126,7 +124,7 @@ describe("defineAgent", () => {
         instructions: "x",
         model: undefined as unknown as LanguageModelV4,
       })
-    ).toThrow(AgentDefinitionError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
   })
 
   test("rejects invalid maxSteps loop settings", () => {
@@ -138,7 +136,7 @@ describe("defineAgent", () => {
           instructions: "x",
           loop: { stopWhen: { maxSteps } },
         })
-      ).toThrow(AgentDefinitionError)
+      ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     }
   })
 
@@ -150,7 +148,7 @@ describe("defineAgent", () => {
         instructions: "x",
         reasoning: "maximum" as never,
       })
-    ).toThrow(AgentDefinitionError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
   })
 
   test("rejects invalid provider options", () => {
@@ -161,7 +159,7 @@ describe("defineAgent", () => {
         instructions: "x",
         providerOptions: [] as never,
       })
-    ).toThrow(AgentDefinitionError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       defineAgent("bad", {
         name: "Bad",
@@ -169,7 +167,7 @@ describe("defineAgent", () => {
         instructions: "x",
         providerOptions: { openai: "fast" } as never,
       })
-    ).toThrow(AgentDefinitionError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       defineAgent("bad", {
         name: "Bad",
@@ -177,7 +175,7 @@ describe("defineAgent", () => {
         instructions: "x",
         providerOptions: { openai: { fn: () => undefined } } as never,
       })
-    ).toThrow(AgentDefinitionError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
   })
 
   test("rejects invalid group definitions", () => {
@@ -188,7 +186,7 @@ describe("defineAgent", () => {
         instructions: "x",
         groups: [{ kind: "not-a-group", id: "x" } as never],
       })
-    ).toThrow(AgentDefinitionError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
 
     expect(() =>
       defineAgent("bad", {
@@ -197,7 +195,7 @@ describe("defineAgent", () => {
         instructions: "x",
         groups: [agentRuntime, agentRuntime],
       })
-    ).toThrow(AgentDefinitionError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
   })
 })
 
@@ -285,7 +283,7 @@ describe("agent discovery + registry", () => {
 
     await expect(
       createSixb({ projectRoot, ontologies: [Room], agents: [dup], ...createTestRuntimeDeps() })
-    ).rejects.toThrow(RuntimeError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_definition")
   })
 
   test("rejects agents that reference unregistered execution groups", async () => {
@@ -304,7 +302,7 @@ describe("agent discovery + registry", () => {
         agents: [agent],
         ...createTestRuntimeDeps(),
       })
-    ).rejects.toThrow(AgentDefinitionError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_definition")
   })
 
   test("accepts agents whose execution groups are registered", async () => {

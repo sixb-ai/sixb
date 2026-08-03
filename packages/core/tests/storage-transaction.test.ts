@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, InMemoryStorage, OntologyRegistry, prop, type Storage } from "../src"
-import { type ActionRunStorage, StorageTransactionError } from "../src/storage"
+import type { ActionRunStorage } from "../src/storage"
 import { createMaterializerTestFixture } from "../src/testing"
 
 const Room = defineObjectType({
@@ -358,7 +358,7 @@ describe("InMemoryStorage.transaction", () => {
     const storage = new InMemoryStorage()
 
     await expect(storage.transaction((tx) => tx.transaction(() => undefined))).rejects.toThrow(
-      StorageTransactionError
+      expect.objectContaining({ code: "storage.transaction_failed" })
     )
   })
 
@@ -375,7 +375,9 @@ describe("InMemoryStorage.transaction", () => {
       throw new Error("Expected transaction storage to be captured.")
     }
 
-    expect(() => transactionStorage.objects.queryCapabilities()).toThrow(StorageTransactionError)
+    expect(() => transactionStorage.objects.queryCapabilities()).toThrow(
+      expect.objectContaining({ code: "storage.transaction_failed" })
+    )
   })
 })
 

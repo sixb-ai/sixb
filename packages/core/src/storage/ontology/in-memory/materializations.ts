@@ -1,8 +1,6 @@
+import { SixbError } from "../../../errors"
 import { stableJsonStringify } from "../../../json"
-import {
-  MaterializationConflictError,
-  MaterializationValidationError,
-} from "../../../materialization/errors"
+import { materializationConflict } from "../../../materialization/errors"
 import type {
   ExpectedLinkRevision,
   ExpectedObjectRevision,
@@ -189,8 +187,9 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     const transactionToken = this.getTransactionToken()
     const lifecycle = this.getMaterializationLifecycle()
     if (!transactionToken || !lifecycle) {
-      throw new MaterializationValidationError(
-        "Materialization sessions require an active storage transaction."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Materialization sessions require an active storage transaction."
       )
     }
     assertMaterializationHeader(input)
@@ -209,7 +208,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         this.computeLinkScopeState(input.commit.projectId, expected.source, expected.linkId)
       expectedScopeStates.set(key, current)
       if (current.fingerprint !== expected.fingerprint) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           `Expected link scope changed for ${expected.source.objectTypeId}:${expected.source.primaryId}.${expected.linkId}.`
         )
@@ -359,13 +358,13 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     const replacement = this.requireReplacement(session, input)
     if (input.entityKind === "object") {
       if (replacement.candidate.projectionKind !== "object") {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "source-materialization",
           "Link projection replacement cannot stream object state."
         )
       }
       if (replacement.objectStreamStarted)
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           "Replacement object state may only be streamed once per session."
         )
@@ -400,13 +399,13 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     }
 
     if (replacement.candidate.projectionKind === "object" && !replacement.objectStreamCompleted) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         "Object projection replacement must fully stream object state before link state."
       )
     }
     if (replacement.linkStreamStarted)
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         "Replacement link state may only be streamed once per session."
       )
@@ -450,7 +449,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
   async stageWork(input: StageMaterializationWorkInput): Promise<void> {
     const session = this.requireSession(input.session)
     if (session.workSealed) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         "Materialization work cannot be staged after draining begins."
       )
@@ -466,7 +465,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         batchUniqueKeys.has(uniqueKey) ||
         session.workUniqueKeys.has(uniqueKey)
       ) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           `Duplicate materialization work key '${record.recordKey}'.`
         )
@@ -475,7 +474,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         record.kind === "incident-object" &&
         (!session.replacement || session.replacement.linkStreamStarted)
       ) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           "Incident replacement work must be staged before link state is streamed."
         )
@@ -511,7 +510,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     assertPageRows(input.pageRows)
     const stream = session.workStreams[input.order]
     if (stream.started) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         `Materialization ${input.order} work may only be streamed once per session.`
       )
@@ -667,8 +666,9 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       write("outbox.insert", () => {
         const envelope = item.envelope
         if (envelope.projectId !== projectId || envelope.commitId !== session.header.commit.id) {
-          throw new MaterializationValidationError(
-            "Outbox event does not correlate with its materialization commit."
+          throw new SixbError(
+            "ontology.invalid_value",
+            "[Sixb] Outbox event does not correlate with its materialization commit."
           )
         }
         assertTimestamp(item.availableAt, "Outbox availableAt")
@@ -676,16 +676,13 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         assertTimestamp(envelope.occurredAt, "Outbox event occurredAt")
         const key = outboxKey(projectId, envelope.id)
         if (this.state.outbox.has(key)) {
-          throw new MaterializationConflictError(
+          throw materializationConflict(
             "effective-state",
             `Duplicate outbox event '${envelope.id}'.`
           )
         }
         if (session.outboxEnvelopes.has(envelope.commitOrdinal))
-          throw new MaterializationConflictError(
-            "effective-state",
-            "Duplicate outbox commit ordinal."
-          )
+          throw materializationConflict("effective-state", "Duplicate outbox commit ordinal.")
         this.state.outbox.set(key, {
           envelope: structuredClone(envelope),
           availableAt: item.availableAt,
@@ -723,7 +720,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       )
       const candidate = this.state.sourceMaterializations.get(candidateKey)
       if (!candidate || candidate.status !== "ready")
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "source-materialization",
           "Source activation candidate is missing or is not ready."
         )
@@ -782,10 +779,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       !this.getTransactionToken() ||
       this.getTransactionToken() !== value.transactionToken
     ) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Materialization session is inactive."
-      )
+      throw materializationConflict("effective-state", "Materialization session is inactive.")
     }
     return value
   }
@@ -799,7 +793,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         session.replacement.sourceId !== input.source.projectionId ||
         session.replacement.candidateMaterializationId !== input.candidateMaterializationId
       ) {
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "source-materialization",
           "Materialization session already owns another replacement union."
         )
@@ -812,7 +806,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       sourceMaterializationKey(projectId, sourceId, input.candidateMaterializationId)
     )
     if (!candidate || candidate.status !== "ready") {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "source-materialization",
         `Candidate source materialization '${input.candidateMaterializationId}' is missing or is not ready.`
       )
@@ -824,7 +818,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         (previous.protocol !== candidate.protocol ||
           previous.projectionKind !== candidate.projectionKind))
     ) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "source-materialization",
         "Source replacement kind or protocol does not match its active materialization."
       )
@@ -904,7 +898,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
 
   private assertCommitAbsent(header: MaterializationPlanHeader): void {
     if (this.state.commitsById.has(commitKey(header.commit.projectId, header.commit.id))) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "idempotency",
         `Ontology commit '${header.commit.id}' already exists.`
       )
@@ -914,17 +908,14 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         idempotencyKey(header.commit.projectId, header.commit.idempotencyKey)
       )
     ) {
-      throw new MaterializationConflictError(
-        "idempotency",
-        "Ontology idempotency key already exists."
-      )
+      throw materializationConflict("idempotency", "Ontology idempotency key already exists.")
     }
     const origin = ontologyCommitOriginSelector(header.commit.origin)
     if (
       origin &&
       this.state.commitIdByOrigin.has(commitOriginKey(header.commit.projectId, origin))
     ) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "run-correlation",
         "Ontology commit origin already has an authoritative commit."
       )
@@ -941,7 +932,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       (current?.materializationId ?? null) !== expected.activeMaterializationId ||
       (current?.lastCommitId ?? null) !== expected.lastCommitId
     ) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "projection-fence",
         `Source '${expected.source.projectionId}' changed.`
       )
@@ -960,14 +951,14 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     )
     if (!expected.exists) {
       if (row)
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           `Expected object ${objectRefKey(expected.ref)} to be absent.`
         )
       return
     }
     if (!row || row.version !== expected.version || row.lastCommitId !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         `Expected object ${objectRefKey(expected.ref)} changed.`
       )
@@ -988,14 +979,14 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     })
     if (!expected.exists) {
       if (row)
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "effective-state",
           `Expected link ${linkRefKey(expected.ref)} to be absent.`
         )
       return
     }
     if (!row || row.lastCommitId !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "effective-state",
         `Expected link ${linkRefKey(expected.ref)} changed.`
       )
@@ -1009,7 +1000,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       expected.at
     )
     if ((point?.lastCommitId ?? null) !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
+      throw materializationConflict(
         "timeseries-point",
         `Telemetry point ${telemetryPointKey(expected.series, expected.at)} changed.`
       )
@@ -1129,7 +1120,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       const row = active.rowsByEntity.get(entityKey)
       if (!row) continue
       if (found)
-        throw new MaterializationConflictError(
+        throw materializationConflict(
           "source-materialization",
           `Multiple active sources assert ${entityKey}.`
         )

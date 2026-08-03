@@ -4,7 +4,7 @@ import type {
   ServiceAccountGroupMembershipRecord,
   UpsertAuthServiceAccountGroupMembershipInput,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import type { PgStoreClient } from "../transactions"
 import type { PgAuthServiceAccountGroupMembershipRow, PgAuthServiceAccountRow } from "./rows"
 import { rowToServiceAccountGroupMembershipRecord } from "./rows"
@@ -28,7 +28,7 @@ export class PgAuthServiceAccountGroupMembershipStore
         AND id = ${serviceAccountId}
     `
     if (!serviceAccount) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_service_account",
         `[Sixb] Service account '${serviceAccountId}' not found for project '${projectId}'.`
       )
@@ -71,7 +71,7 @@ export class PgAuthServiceAccountGroupMembershipStore
         AND id = ${serviceAccountId}
     `
     if (!serviceAccount) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_service_account",
         `[Sixb] Service account '${serviceAccountId}' not found for project '${projectId}'.`
       )

@@ -2,7 +2,7 @@ import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { ActionRunFailure, ActionRunRecord } from "@sixb/core/storage"
 import { isTerminalActionRun } from "@sixb/core/storage"
-import { ActionWorkerError } from "../errors"
+import { actionWorkerError } from "../errors"
 import type { ActionRunResult, RunActionJobInput } from "../types"
 
 export function requireFinishedAt(runId: string, finishedAt: Date | undefined): Date {
@@ -10,7 +10,7 @@ export function requireFinishedAt(runId: string, finishedAt: Date | undefined): 
     return finishedAt
   }
 
-  throw new ActionWorkerError(`Action run '${runId}' finished without a finishedAt timestamp.`)
+  throw actionWorkerError(`Action run '${runId}' finished without a finishedAt timestamp.`)
 }
 
 /**
@@ -52,7 +52,7 @@ async function resolveRunningRunUnderFence(input: RunActionJobInput, run: Action
   return input.runtime.storage.transaction(
     async (storage) => {
       if (!storage.actionRuns) {
-        throw new ActionWorkerError(
+        throw actionWorkerError(
           "Action workers require transactional Action materialization fencing."
         )
       }
@@ -112,9 +112,7 @@ function redeliveryFailure(runId: string, run: ActionRunRecord): ActionRunFailur
 }
 
 function reportRedeliveryFailure(input: RunActionJobInput, run: ActionRunRecord): void {
-  const error = new ActionWorkerError(
-    run.error?.message ?? `Action run '${run.id}' lost its lease.`
-  )
+  const error = actionWorkerError(run.error?.message ?? `Action run '${run.id}' lost its lease.`)
   reportRunFailure(input.runtime.sixb, error, {
     projectId: input.runtime.id,
     occurredAt: run.finishedAt,

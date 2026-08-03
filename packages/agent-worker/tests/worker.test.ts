@@ -10,7 +10,6 @@ import type {
 } from "@ai-sdk/provider"
 import {
   type AgentReasoningLevel,
-  AgentRequestError,
   type BlobStorage,
   type Broker,
   type CommandResult,
@@ -45,8 +44,8 @@ import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import type { EventsRuntime } from "@sixb/core/internal/events"
 import {
   type AgentStorage,
-  AgentStorageError,
   type AppendAgentMessageInput,
+  agentStorageError,
 } from "@sixb/core/storage"
 import { jsonSchema, type ToolSet, tool } from "ai"
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
@@ -54,7 +53,6 @@ import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
-import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { reconcileAgentExecutionIdentity } from "../src/identity"
 import { runAgentTurn } from "../src/run-agent-turn"
@@ -2796,10 +2794,9 @@ describe("AgentWorker", () => {
       text: "second",
       threadId: first.run.threadId,
     })
-    await expect(promise).rejects.toBeInstanceOf(AgentRequestError)
     await expect(promise).rejects.toMatchObject({
-      reason: "active_run_exists",
       code: "agent.run_conflict",
+      details: { reason: "active_run_exists" },
     })
   })
 
@@ -2893,7 +2890,7 @@ describe("AgentWorker", () => {
       run: staleRun,
       signal: new AbortController().signal,
     })
-    await expect(promise).rejects.toBeInstanceOf(AgentExecutionLostError)
+    await expect(promise).rejects.toHaveProperty("code", "agent.execution_lost")
 
     // No assistant message was written; the run is still owned by the reclaiming worker.
     const messages = await listMessages(storage, threadId)
@@ -3236,7 +3233,7 @@ describe("AgentWorker", () => {
         run,
         signal: new AbortController().signal,
       })
-    ).rejects.toBeInstanceOf(AgentFinalizationError)
+    ).rejects.toHaveProperty("code", "storage.unavailable")
 
     const afterFailure = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
     expect(afterFailure?.status).toBe("running")
@@ -3397,7 +3394,7 @@ describe("AgentWorker", () => {
       expect(failed.error?.message).toContain("not registered")
       await reporter.flush()
       expect(reports).toHaveLength(1)
-      expect(reports[0]?.context.cause).toBeInstanceOf(AgentWorkerError)
+      expect(reports[0]?.context.cause).toHaveProperty("code", "agent.failed")
       expect(reports[0]?.context).toMatchObject({
         projectId: PROJECT_ID,
         attempt: 1,
@@ -3498,17 +3495,19 @@ describe("finishRunOrThrow", () => {
 
   test("raises AgentFinalizationError when an infra error persists across retries", async () => {
     const storage = finishingStorage(() => Promise.reject(new Error("db down")))
-    await expect(finishRunOrThrow(storage, succeededInput)).rejects.toBeInstanceOf(
-      AgentFinalizationError
+    await expect(finishRunOrThrow(storage, succeededInput)).rejects.toHaveProperty(
+      "code",
+      "storage.unavailable"
     )
   })
 
   test("raises AgentExecutionLostError when the run is no longer ours", async () => {
     const storage = finishingStorage(() =>
-      Promise.reject(new AgentStorageError("execution_lost", "gone"))
+      Promise.reject(agentStorageError("execution_lost", "gone"))
     )
-    await expect(finishRunOrThrow(storage, succeededInput)).rejects.toBeInstanceOf(
-      AgentExecutionLostError
+    await expect(finishRunOrThrow(storage, succeededInput)).rejects.toHaveProperty(
+      "code",
+      "agent.execution_lost"
     )
   })
 })

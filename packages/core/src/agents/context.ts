@@ -1,7 +1,7 @@
+import { agentRequestError } from "../agents/errors"
 import type { JsonValue } from "../json"
 import { cloneJsonValue, getInvalidJsonValueReason, stableJsonStringify } from "../json"
 import type { ObjectRef } from "../ontology/refs"
-import { AgentRequestError } from "./errors"
 
 export type AgentContextInput =
   | { readonly kind: "object"; readonly ref: ObjectRef }
@@ -181,5 +181,5 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function invalidContext(message: string): never {
-  throw new AgentRequestError("invalid_context", `[Sixb] Invalid agent context: ${message}.`)
+  throw agentRequestError("invalid_context", `[Sixb] Invalid agent context: ${message}.`)
 }

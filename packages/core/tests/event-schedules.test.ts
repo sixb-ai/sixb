@@ -10,7 +10,6 @@ import {
   OntologyRegistry,
   param,
   prop,
-  ScheduleValidationError,
 } from "../src"
 import { EventsRuntime } from "../src/events"
 import type { OntologyMaterializationEvent } from "../src/materialization/events"
@@ -242,7 +241,9 @@ describe("event schedules", () => {
   })
 
   test("rejects empty ids and non-terminal event selectors", () => {
-    expect(() => defineSchedule("")).toThrow(ScheduleValidationError)
+    expect(() => defineSchedule("")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => defineSchedule("bad-source").on(events.object(Invoice))).toThrow(
       "Schedule event source must select an event operation"
     )

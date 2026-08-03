@@ -8,7 +8,7 @@ import {
   agentRunStreamIdempotencyKey,
 } from "@sixb/core/agents/streams"
 import type { AgentRunRecord } from "@sixb/core/storage"
-import { AgentWorkerError } from "./errors"
+import { agentWorkerError } from "./errors"
 
 /** Receives live and lifecycle records for one agent run stream. */
 export interface StreamSink {
@@ -194,13 +194,13 @@ function toBrokerJson(value: unknown, label: string): JsonValue {
   try {
     const serialized = JSON.stringify(value)
     if (serialized === undefined) {
-      throw new AgentWorkerError(`${label} serialized to undefined.`)
+      throw agentWorkerError(`${label} serialized to undefined.`)
     }
     // The stringify/parse round-trip already yields a pure JSON value (functions/symbols/undefined
     // are dropped or throw above, NaN/Infinity become null), so no further validation is needed —
     // the broker append boundary re-checks the payload anyway.
     return JSON.parse(serialized) as JsonValue
   } catch (error) {
-    throw new AgentWorkerError(`${label} could not be JSON encoded.`, { cause: error })
+    throw agentWorkerError(`${label} could not be JSON encoded.`, { cause: error })
   }
 }

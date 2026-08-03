@@ -1,5 +1,4 @@
 import { stableJsonStringify } from "../../json"
-import { MaterializationValidationError } from "../../materialization/errors"
 import { createEventId, materializationEventKindOrdinal } from "../../materialization/identity"
 import type { OntologyLinkRef, OntologyObjectRef } from "../../materialization/model"
 import {
@@ -25,9 +24,14 @@ import { assertTimestamp, invalidCorrelation } from "./provider-validation"
 
 export { invalidCorrelation } from "./provider-validation"
 
+import { SixbError } from "../../errors"
+
 export function assertPageRows(value: number): void {
   if (!Number.isSafeInteger(value) || value <= 0)
-    throw new MaterializationValidationError("Materialization page size must be positive.")
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Materialization page size must be positive."
+    )
 }
 
 export function materializationChunkRows(chunk: MaterializationPlanChunk): number {
@@ -78,11 +82,17 @@ export function assertWorkRecord(
   header: MaterializationPlanHeader
 ): void {
   if (record.recordKey.trim().length === 0) {
-    throw new MaterializationValidationError("Materialization work key must be nonblank.")
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Materialization work key must be nonblank."
+    )
   }
   if (record.kind === "plan") {
     if (!/^[0-9a-f]+$/.test(record.sortKey) || !planPhaseMatches(record)) {
-      throw new MaterializationValidationError("Materialization plan work has an invalid order.")
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Materialization plan work has an invalid order."
+      )
     }
     assertPlanItemCorrelation(record.item, header.commit)
     return
@@ -100,7 +110,7 @@ export function assertWorkRecord(
       stableJsonStringify(record.draft.actor ?? null) !==
         stableJsonStringify(header.commit.actor ?? null)
     ) {
-      throw new MaterializationValidationError("Materialization event work is invalid.")
+      throw new SixbError("ontology.invalid_value", "[Sixb] Materialization event work is invalid.")
     }
     return
   }
@@ -109,14 +119,18 @@ export function assertWorkRecord(
       record.scopeSortKey !== linkScopeSortKey(record.ref.source, record.ref.linkId) ||
       record.linkSortKey !== linkRefSortKey(record.ref)
     ) {
-      throw new MaterializationValidationError(
-        "Materialization cardinality work has an invalid identity or order."
+      throw new SixbError(
+        "ontology.invalid_value",
+        "[Sixb] Materialization cardinality work has an invalid identity or order."
       )
     }
     return
   }
   if (record.kind === "classification" && record.identityKey.trim().length === 0) {
-    throw new MaterializationValidationError("Materialization classification identity is invalid.")
+    throw new SixbError(
+      "ontology.invalid_value",
+      "[Sixb] Materialization classification identity is invalid."
+    )
   }
 }
 

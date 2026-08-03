@@ -10,7 +10,6 @@ import {
   isProjectionDefinition,
   isTelemetryProjectionDefinition,
   link,
-  ProjectionValidationError,
   prop,
 } from "../src"
 import { categorizeProjections } from "../src/projections"
@@ -96,14 +95,16 @@ describe("defineProjection", () => {
   })
 
   test("rejects empty id", () => {
-    expect(() => defineProjection("  ", Room)).toThrow(ProjectionValidationError)
+    expect(() => defineProjection("  ", Room)).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => defineProjection("  ", Room)).toThrow("Projection id must not be empty")
   })
 
   test("rejects empty dataset id", () => {
     const invalidDataset = { kind: "dataset", id: "  ", schema: { columns: [] } } as never
     expect(() => defineProjection("p", Room).fromDataset(invalidDataset)).toThrow(
-      ProjectionValidationError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
     expect(() => defineProjection("p", Room).fromDataset(invalidDataset)).toThrow(
       "Projection dataset id must not be empty"
@@ -115,7 +116,7 @@ describe("defineProjection", () => {
       defineProjection("p", Room)
         .fromDataset(genericDataset)
         .properties({ id: "col", unknownProp: "col" } as never)
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       defineProjection("p", Room)
         .fromDataset(genericDataset)
@@ -126,7 +127,7 @@ describe("defineProjection", () => {
   test("rejects missing primary in mapping", () => {
     expect(() =>
       defineProjection("p", Room).fromDataset(genericDataset).properties({ name: "col" })
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       defineProjection("p", Room).fromDataset(genericDataset).properties({ name: "col" })
     ).toThrow("id")
@@ -207,7 +208,7 @@ describe("defineProjection", () => {
           targetObjectTypeId: "x",
         },
       } as Record<string, { linkId: string; sourcePropertyId: string; targetObjectTypeId: string }>)
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       base.withLinks({
         unknownLink: {
@@ -232,7 +233,7 @@ describe("defineProjection", () => {
           targetObjectTypeId: "building",
         },
       })
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       base.withLinks({
         inBuilding: {
@@ -255,7 +256,7 @@ describe("defineProjection", () => {
           targetObjectTypeId: "building",
         },
       })
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       base.withLinks({
         inBuilding: {
@@ -279,7 +280,7 @@ describe("defineProjection", () => {
           targetObjectTypeId: "building",
         },
       })
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       base.withLinks({
         inBuilding: {
@@ -348,7 +349,7 @@ describe("fromForeignKey", () => {
         sourceProperty: TypeWithPolymorphicLink.p.ref as never,
         target: Building,
       })
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       fromForeignKey({
         link: TypeWithPolymorphicLink.l.targets as never,
@@ -365,7 +366,7 @@ describe("fromForeignKey", () => {
         sourceProperty: TypeWithWildcardLink.p.ref as never,
         target: Building,
       })
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       fromForeignKey({
         link: TypeWithWildcardLink.l.anything as never,
@@ -396,7 +397,9 @@ describe("defineProjection — link target", () => {
   })
 
   test("rejects empty id", () => {
-    expect(() => defineProjection("  ", Room.l.hasSensors)).toThrow(ProjectionValidationError)
+    expect(() => defineProjection("  ", Room.l.hasSensors)).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => defineProjection("  ", Room.l.hasSensors)).toThrow(
       "Projection id must not be empty"
     )
@@ -405,7 +408,7 @@ describe("defineProjection — link target", () => {
   test("rejects empty dataset id", () => {
     const invalidDataset = { kind: "dataset", id: "  ", schema: { columns: [] } } as never
     expect(() => defineProjection("lp", Room.l.hasSensors).fromDataset(invalidDataset)).toThrow(
-      ProjectionValidationError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
     expect(() => defineProjection("lp", Room.l.hasSensors).fromDataset(invalidDataset)).toThrow(
       "Projection dataset id must not be empty"
@@ -417,7 +420,7 @@ describe("defineProjection — link target", () => {
       defineProjection("lp", Room.l.hasSensors)
         .fromDataset(genericDataset)
         .sourceField("  " as never)
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       defineProjection("lp", Room.l.hasSensors)
         .fromDataset(genericDataset)
@@ -431,7 +434,7 @@ describe("defineProjection — link target", () => {
         .fromDataset(genericDataset)
         .sourceField("a")
         .targetField("  " as never)
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       defineProjection("lp", Room.l.hasSensors)
         .fromDataset(genericDataset)
@@ -442,7 +445,7 @@ describe("defineProjection — link target", () => {
 
   test("rejects polymorphic link token", () => {
     expect(() => defineProjection("lp", TypeWithPolymorphicLink.l.targets as never)).toThrow(
-      ProjectionValidationError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
     expect(() => defineProjection("lp", TypeWithPolymorphicLink.l.targets as never)).toThrow(
       "polymorphic"
@@ -451,7 +454,7 @@ describe("defineProjection — link target", () => {
 
   test("rejects wildcard link token", () => {
     expect(() => defineProjection("lp", TypeWithWildcardLink.l.anything as never)).toThrow(
-      ProjectionValidationError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
     expect(() => defineProjection("lp", TypeWithWildcardLink.l.anything as never)).toThrow(
       "wildcard"
@@ -497,7 +500,7 @@ describe("defineProjection — telemetry target", () => {
 
   test("rejects static property token", () => {
     expect(() => defineProjection("room-names", Room.p.name as never)).toThrow(
-      ProjectionValidationError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
     expect(() => defineProjection("room-names", Room.p.name as never)).toThrow(
       "must be telemetry-enabled"
@@ -505,7 +508,9 @@ describe("defineProjection — telemetry target", () => {
   })
 
   test("rejects empty id", () => {
-    expect(() => defineProjection("  ", Room.p.temperature)).toThrow(ProjectionValidationError)
+    expect(() => defineProjection("  ", Room.p.temperature)).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => defineProjection("  ", Room.p.temperature)).toThrow(
       "Projection id must not be empty"
     )
@@ -514,7 +519,7 @@ describe("defineProjection — telemetry target", () => {
   test("rejects empty dataset id", () => {
     const invalidDataset = { kind: "dataset", id: "  ", schema: { columns: [] } } as never
     expect(() => defineProjection("tp", Room.p.temperature).fromDataset(invalidDataset)).toThrow(
-      ProjectionValidationError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
     expect(() => defineProjection("tp", Room.p.temperature).fromDataset(invalidDataset)).toThrow(
       "Projection dataset id must not be empty"
@@ -526,7 +531,7 @@ describe("defineProjection — telemetry target", () => {
       defineProjection("tp", Room.p.temperature)
         .fromDataset(roomReadingsDataset)
         .points({ objectId: "room_id", value: "temperature" } as never)
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       defineProjection("tp", Room.p.temperature)
         .fromDataset(roomReadingsDataset)
@@ -544,7 +549,7 @@ describe("defineProjection — telemetry target", () => {
           value: "temperature",
           extra: "room_id",
         } as never)
-    ).toThrow(ProjectionValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_definition" }))
     expect(() =>
       defineProjection("tp", Room.p.temperature)
         .fromDataset(roomReadingsDataset)

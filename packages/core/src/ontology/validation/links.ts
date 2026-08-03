@@ -1,6 +1,6 @@
+import { SixbError } from "../../errors"
 import type { JsonValue } from "../../json"
 import type { ObjectLink, ValueType } from ".."
-import { OntologyValidationError } from "../errors"
 import type { ObjectTypeWithPropertyTokens } from "../tokens"
 import { normalizeObjectProperties } from "./normalize"
 import { validatePropertyValue } from "./properties"
@@ -25,7 +25,8 @@ export function assertLinkTargetType(
     const expected = Array.isArray(linkDefinition.targetObjectTypeId)
       ? linkDefinition.targetObjectTypeId.join(" | ")
       : linkDefinition.targetObjectTypeId
-    throw new OntologyValidationError(
+    throw new SixbError(
+      "ontology.invalid_value",
       `[Sixb] Link ${objectTypeId}.${linkId} must target '${expected}', got '${targetTypeId}'`
     )
   }
@@ -48,7 +49,8 @@ export function assertTargetTypeCompatible(
     if (actualTarget === type || getSubTypes(type).includes(actualTarget)) return
   }
   const expected = types.join(" | ")
-  throw new OntologyValidationError(
+  throw new SixbError(
+    "ontology.invalid_value",
     `[Sixb] ${context}: target type '${actualTarget}' is not compatible with declared target '${expected}'`
   )
 }
@@ -80,7 +82,8 @@ export function validateLinkProperties(
 
   if (linkProperties.length === 0) {
     if (Object.keys(provided).length > 0) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Link ${objectType.id}.${link.id} does not define link properties`
       )
     }
@@ -90,7 +93,8 @@ export function validateLinkProperties(
   const knownPropertyIds = new Set(linkProperties.map((property) => property.id))
   for (const propertyId of Object.keys(provided)) {
     if (!knownPropertyIds.has(propertyId)) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Unknown link property '${propertyId}' for link '${objectType.id}.${link.id}'`
       )
     }
@@ -118,7 +122,8 @@ export function validateLinkProperties(
 
   for (const property of linkProperties) {
     if (property.required && merged[property.id] === undefined) {
-      throw new OntologyValidationError(
+      throw new SixbError(
+        "ontology.invalid_value",
         `[Sixb] Missing required link property '${property.id}' for link '${objectType.id}.${link.id}'`
       )
     }

@@ -1,6 +1,6 @@
 import { stableJsonStringify } from "../../../json"
 import { assertPinnedDatasetWatermark } from "../../../materialization/dataset-watermark"
-import { MaterializationConflictError } from "../../../materialization/errors"
+import { materializationConflict } from "../../../materialization/errors"
 import { createEventId } from "../../../materialization/identity"
 import type {
   EffectiveChangeCounts,
@@ -264,7 +264,7 @@ function assertSourceActivationCorrelation(
     )
   )
   if (!candidate || candidate.status !== "ready") {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "source-materialization",
       "Source activation candidate is missing or is not ready."
     )

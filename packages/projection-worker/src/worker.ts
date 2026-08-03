@@ -1,5 +1,5 @@
-import { MaterializationCancellationError } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { isMaterializationCancellation } from "@sixb/core/internal/materialization"
 import { shareProjectionRegistry } from "@sixb/core/internal/projections"
 import { shareOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
@@ -74,7 +74,7 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
     claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
     error: unknown
   ): Promise<QueueWorkerFailureDecision> {
-    if (error instanceof MaterializationCancellationError) {
+    if (isMaterializationCancellation(error)) {
       return { kind: "fail" }
     }
     return this.failureDecision(claimed, error)

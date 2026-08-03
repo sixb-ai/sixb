@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { InMemorySyncRunStorage, SyncRunError } from "../src/storage"
+import { InMemorySyncRunStorage } from "../src/storage"
 
 describe("InMemorySyncRunStorage", () => {
   test("starts and finishes a successful run with a checkpoint", async () => {
@@ -114,7 +114,7 @@ describe("InMemorySyncRunStorage", () => {
         datasetId: "raw.erp.orders",
         mode: "snapshot",
       })
-    ).rejects.toBeInstanceOf(SyncRunError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
 
     await expect(
       storage.finish({
@@ -126,7 +126,7 @@ describe("InMemorySyncRunStorage", () => {
           message: "boom",
         },
       })
-    ).rejects.toBeInstanceOf(SyncRunError)
+    ).rejects.toHaveProperty("code", "sync.run_not_found")
   })
 
   test("stores failed runs and lists with filters, ordering, and paging", async () => {
@@ -284,6 +284,6 @@ describe("InMemorySyncRunStorage", () => {
           versionId: "ver_1",
         },
       })
-    ).rejects.toBeInstanceOf(SyncRunError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
   })
 })

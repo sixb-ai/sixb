@@ -5,8 +5,8 @@ import type {
   AppendAgentMessageInput,
   FinishAgentRunInput,
 } from "@sixb/core/storage"
-import { AgentStorageError } from "@sixb/core/storage"
-import { AgentExecutionLostError, AgentFinalizationError } from "./errors"
+import { agentStorageErrorReason } from "@sixb/core/storage"
+import { agentExecutionLost, agentFinalizationFailure } from "./errors"
 
 /** Short in-place retries that absorb a transient storage blip without re-running the model. */
 const FINALIZE_BACKOFF_MS = [50, 200, 600] as const
@@ -17,21 +17,17 @@ const FINALIZE_BACKOFF_MS = [50, 200, 600] as const
  * state — nothing more to record either way.
  */
 export function isTerminalOrExecutionGone(error: unknown): boolean {
-  return (
-    error instanceof AgentStorageError &&
-    (error.reason === "execution_lost" ||
-      error.reason === "invalid_state" ||
-      error.reason === "run_not_found")
-  )
+  const reason = agentStorageErrorReason(error)
+  return reason === "execution_lost" || reason === "invalid_state" || reason === "run_not_found"
 }
 
 /**
  * Finalize a run, absorbing transient infra blips with a few short in-place retries.
  *
  * - returns the finalized record on success;
- * - throws {@link AgentExecutionLostError} if the run is no longer ours (token stale / already terminal),
+ * - throws {@link agentExecutionLost} if the run is no longer ours (token stale / already terminal),
  *   so the caller acknowledges the (now duplicate) delivery;
- * - throws {@link AgentFinalizationError} if a non-terminal (infra) error persists across retries,
+ * - throws {@link agentFinalizationFailure} if a non-terminal (infra) error persists across retries,
  *   so the caller leaves the job for redelivery instead of acking a still-locked thread.
  */
 export async function finishRunOrThrow(
@@ -76,11 +72,11 @@ async function waitBeforeFinalizeRetry(
   error: unknown
 ): Promise<void> {
   if (isTerminalOrExecutionGone(error)) {
-    throw new AgentExecutionLostError(runId)
+    throw agentExecutionLost(runId)
   }
   const delay = FINALIZE_BACKOFF_MS[attempt]
   if (delay === undefined) {
-    throw new AgentFinalizationError(runId, { cause: error })
+    throw agentFinalizationFailure(runId, { cause: error })
   }
   await sleep(delay)
 }

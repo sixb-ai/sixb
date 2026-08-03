@@ -1,5 +1,5 @@
+import { SixbError } from "../errors"
 import type { SixbRuntimeContext } from "../runtime/types"
-import { WorkflowValidationError } from "./errors"
 import {
   type RequestWorkflowRunInput,
   requestWorkflowRun,
@@ -60,7 +60,7 @@ export class WorkflowsRuntime {
   ): Promise<WorkflowRunRequestResult> {
     const workflow = this.getById(input.workflowId)
     if (!workflow) {
-      throw new WorkflowValidationError(`[Sixb] Unknown workflow '${input.workflowId}'`)
+      throw new SixbError("runtime.invalid_input", `[Sixb] Unknown workflow '${input.workflowId}'`)
     }
 
     return requestWorkflowRun(runtime, workflow, input)

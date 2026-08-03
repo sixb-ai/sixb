@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto"
+import { authRuntimeError } from "../auth/errors"
 import {
   type AuthorizationContext,
   canAccessApplication,
   resolveAuthorizationContext,
 } from "../authorization"
+import type { SixbError } from "../errors"
 import {
   canPerformMembershipOperation,
   type GroupReference,
@@ -14,16 +16,16 @@ import {
   type SecurityRegistry,
 } from "../security"
 import type { Storage } from "../storage"
-import {
-  type AccessTokenRecord,
-  type AuthStorage,
-  AuthStorageError,
-  type InvitationRecord,
-  type ServiceAccountGroupMembershipRecord,
-  type ServiceAccountRecord,
-  type SessionRecord,
-  type UserRecord,
+import type {
+  AccessTokenRecord,
+  AuthStorage,
+  InvitationRecord,
+  ServiceAccountGroupMembershipRecord,
+  ServiceAccountRecord,
+  SessionRecord,
+  UserRecord,
 } from "../storage/auth"
+import { authStorageError } from "../storage/auth/errors"
 import { paginate } from "../storage/pagination"
 import {
   createAccessTokenCredential,
@@ -37,7 +39,6 @@ import {
   type ResolvedAuthCookieOptions,
   resolveAuthCookieOptionsForAudience,
 } from "./cookies"
-import { AuthRuntimeError } from "./errors"
 import { SessionCache } from "./session-cache"
 import { hashSessionSecret, parseSessionCookieValue } from "./sessions"
 import type {
@@ -140,7 +141,7 @@ export class AuthRuntime {
       this.config.session.cacheTtlMs > 0 ? new SessionCache(this.config.session.cacheTtlMs) : null
 
     if (this.isEnabled() && !this.storage.auth) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "auth_storage_missing",
         "[Sixb] Auth is enabled but storage.auth is not configured."
       )
@@ -178,7 +179,7 @@ export class AuthRuntime {
 
     if (!strategy) {
       if (params.production) {
-        throw new AuthRuntimeError(
+        throw authRuntimeError(
           "production_auth_required",
           "[SixbServer] Auth is required in production. Configure auth or use an explicit disabled auth strategy."
         )
@@ -187,7 +188,7 @@ export class AuthRuntime {
     }
 
     if (params.production && strategy.developmentOnly) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "production_auth_required",
         `[SixbServer] Auth strategy '${strategy.id}' is development-only and cannot be used in production.`
       )
@@ -198,7 +199,7 @@ export class AuthRuntime {
       (strategy.kind === "disabled" || strategy.disabled === true) &&
       strategy.allowDisabledInProduction !== true
     ) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "production_auth_required",
         "[SixbServer] Disabled auth in production requires allowDisabledInProduction: true."
       )
@@ -516,7 +517,7 @@ export class AuthRuntime {
   ): Promise<Principal> {
     const session = await this.getSession(request, options)
     if (!session.authenticated) {
-      throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
+      throw authRuntimeError("authentication_required", "[Sixb] Authentication is required.")
     }
 
     return session.principal
@@ -528,7 +529,7 @@ export class AuthRuntime {
   ): Promise<AuthenticatedAuthSession> {
     const session = await this.getSession(request, { ...options, credentialSource: "session" })
     if (!session.authenticated) {
-      throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
+      throw authRuntimeError("authentication_required", "[Sixb] Authentication is required.")
     }
 
     return session
@@ -540,11 +541,11 @@ export class AuthRuntime {
   ): Promise<AuthenticatedUserRequestSession> {
     const session = await this.getSession(request, { ...options, credentialSource: "any" })
     if (!session.authenticated) {
-      throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
+      throw authRuntimeError("authentication_required", "[Sixb] Authentication is required.")
     }
 
     if (!isAuthenticatedUserRequestSession(session)) {
-      throw new AuthRuntimeError("authorization_denied", "[Sixb] User authentication is required.")
+      throw authRuntimeError("authorization_denied", "[Sixb] User authentication is required.")
     }
 
     return session
@@ -575,7 +576,7 @@ export class AuthRuntime {
   ): Promise<AuthorizationContext> {
     const session = await this.getSession(request, options)
     if (!session.authenticated) {
-      throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
+      throw authRuntimeError("authentication_required", "[Sixb] Authentication is required.")
     }
 
     return this.contextFromSession(session)
@@ -799,7 +800,7 @@ export class AuthRuntime {
       await this.requireManageableServiceAccount(storage, session.groupIds, input.serviceAccountId)
 
     if (serviceAccount.status === "suspended") {
-      throw new AuthStorageError(
+      throw authStorageError(
         "suspended_service_account",
         `[Sixb] Service account '${input.serviceAccountId}' is suspended for project '${this.projectId}'.`
       )
@@ -892,7 +893,7 @@ export class AuthRuntime {
       : []
 
     if (!serviceAccount || !callerCanManageServiceAccount(callerGroupIds, groupIds)) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_service_account",
         `[Sixb] Service account '${serviceAccountId}' not found for project '${this.projectId}'.`
       )
@@ -1035,7 +1036,7 @@ export class AuthRuntime {
     // Every requested group must fall within the caller's assign scope.
     const missing = missingMembershipGroupIds(scope, "assignGroups", requestedGroupIds)
     if (missing.length > 0) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "authorization_denied",
         `[Sixb] The current user is not allowed to assign group(s): ${missing.join(", ")}.`
       )
@@ -1049,7 +1050,7 @@ export class AuthRuntime {
     // Self-protection: a caller may add in-scope groups to themselves but may not
     // remove any of their own current groups, so they cannot lock themselves out.
     if (user.id === session.user.id && removals.length > 0) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "authorization_denied",
         "[Sixb] The current user cannot remove their own groups."
       )
@@ -1096,7 +1097,7 @@ export class AuthRuntime {
     const { user, groupIds } = await this.requireManageableMember(storage, scope, "suspend", userId)
 
     if (user.id === session.user.id) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "authorization_denied",
         "[Sixb] The current user cannot suspend themselves."
       )
@@ -1174,7 +1175,7 @@ export class AuthRuntime {
       : []
 
     if (!user || !canPerformMembershipOperation(scope, operation, groupIds)) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_user",
         `[Sixb] User '${userId}' not found for project '${this.projectId}'.`
       )
@@ -1187,7 +1188,7 @@ export class AuthRuntime {
     const groupIds = [...new Set(input.map((groupId) => assertNonEmpty(groupId, "Group id")))]
     for (const groupId of groupIds) {
       if (!this.security.getGroupById(groupId)) {
-        throw new AuthRuntimeError(
+        throw authRuntimeError(
           "invalid_auth_input",
           `[Sixb] Unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
         )
@@ -1209,7 +1210,7 @@ export class AuthRuntime {
 
     const strategy = this.getStrategy()
     if (!isInvitationDeliveryAuthStrategy(strategy)) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "invalid_auth_config",
         "[Sixb] The active auth strategy does not support invitations."
       )
@@ -1302,7 +1303,7 @@ export class AuthRuntime {
     })
 
     if (!invitation) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "missing_invitation",
         `[Sixb] Invitation '${invitationId}' not found for project '${this.projectId}'.`
       )
@@ -1311,7 +1312,7 @@ export class AuthRuntime {
     this.assertCanManageInvitationGroups(session.groupIds, invitation.groupIds)
 
     if (invitation.status !== "pending") {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "invalid_auth_input",
         `[Sixb] Invitation '${invitationId}' is already ${invitation.status} and cannot be revoked.`
       )
@@ -1328,7 +1329,7 @@ export class AuthRuntime {
 
   private requireAuthStorage() {
     if (!this.storage.auth) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "auth_storage_missing",
         "[Sixb] Auth is enabled but storage.auth is not configured."
       )
@@ -1339,7 +1340,7 @@ export class AuthRuntime {
 
   private resolveInviteGroupIds(input: InviteUserInput): readonly string[] {
     if (input.groups && input.groupIds) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "invalid_auth_input",
         "[Sixb] Invitation input cannot provide both groups and groupIds."
       )
@@ -1351,7 +1352,7 @@ export class AuthRuntime {
 
     for (const groupId of groupIds) {
       if (!this.security.getGroupById(groupId)) {
-        throw new AuthRuntimeError(
+        throw authRuntimeError(
           "invalid_auth_input",
           `[Sixb] Unknown invitation group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
         )
@@ -1397,7 +1398,7 @@ export class AuthRuntime {
 
     if (canAccessApplication(authorization, roles, audience)) return
 
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "authorization_denied",
       `[Sixb] Invitation groups do not grant access to application '${audience}'.`
     )
@@ -1443,13 +1444,13 @@ export class AuthRuntime {
     status: Exclude<InviteDeliveryStatus, "sent" | "not_supported">
   ) {
     if (status === "rate_limited") {
-      return new AuthRuntimeError(
+      return authRuntimeError(
         "rate_limited",
         "[Sixb] Invitation delivery is rate limited. Try again later."
       )
     }
 
-    return new AuthRuntimeError(
+    return authRuntimeError(
       "invalid_auth_input",
       "[Sixb] Invitation delivery was skipped by the active auth strategy."
     )
@@ -1466,14 +1467,14 @@ export class AuthRuntime {
     }
 
     if (groupIds.length === 0) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "authorization_denied",
         "[Sixb] The current user is not allowed to create or manage invitations without groups."
       )
     }
 
     const missing = missingMembershipGroupIds(scope, "invite", groupIds)
-    throw new AuthRuntimeError(
+    throw authRuntimeError(
       "authorization_denied",
       `[Sixb] The current user is not allowed to create or manage invitations for group(s): ${missing.join(", ")}.`
     )
@@ -1523,8 +1524,8 @@ function callerCanManageServiceAccount(
   return serviceAccountGroupIds.every((groupId) => callerGroups.has(groupId))
 }
 
-function missingAccessTokenError(tokenId: string, projectId: string): AuthStorageError {
-  return new AuthStorageError(
+function missingAccessTokenError(tokenId: string, projectId: string): SixbError {
+  return authStorageError(
     "missing_access_token",
     `[Sixb] Access token '${tokenId}' not found for project '${projectId}'.`
   )
@@ -1548,7 +1549,7 @@ function constrainRequestedGroupIds(
   const allowed = new Set(allowedGroupIds)
   for (const groupId of groupIds) {
     if (!allowed.has(groupId)) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "authorization_denied",
         `[Sixb] Group '${groupId}' cannot be assigned to this ${options.subject}.`
       )
@@ -1569,7 +1570,7 @@ function normalizeRequestedGroupIds(
   for (const raw of input) {
     const groupId = raw.trim()
     if (!groupId) {
-      throw new AuthRuntimeError(
+      throw authRuntimeError(
         "invalid_auth_input",
         "[Sixb] Group ids cannot be empty when creating auth credentials."
       )
@@ -1585,26 +1586,26 @@ function normalizeRequestedGroupIds(
 function createInvitationRecipientError(
   status: Exclude<InvitationRecipientStatus, "allowed">,
   email: string
-): AuthRuntimeError {
+): SixbError {
   if (status === "rate_limited") {
-    return new AuthRuntimeError(
+    return authRuntimeError(
       "rate_limited",
       "[Sixb] Invitation delivery is rate limited. Try again later."
     )
   }
 
   if (status === "invalid_email") {
-    return new AuthRuntimeError("invalid_auth_input", "[Sixb] Invitation email is invalid.")
+    return authRuntimeError("invalid_auth_input", "[Sixb] Invitation email is invalid.")
   }
 
   if (status === "disallowed_domain") {
-    return new AuthRuntimeError(
+    return authRuntimeError(
       "invalid_auth_input",
       `[Sixb] Invitation email '${email}' is not allowed by the active auth strategy.`
     )
   }
 
-  return new AuthRuntimeError(
+  return authRuntimeError(
     "invalid_auth_input",
     `[Sixb] Invitation email '${email}' belongs to a suspended user.`
   )

@@ -1,4 +1,4 @@
-import { type SixbErrorOptions, SixbValidationError } from "../errors"
+import { SixbError } from "../errors"
 /**
  * How a webhook is allowed to treat the credential its provider sends.
  *
@@ -36,15 +36,6 @@ export interface WebhookVerificationSubject {
   readonly allowOption: string
 }
 
-/** A webhook route left unverified without the project saying so out loud. */
-export class UnverifiedWebhookError extends SixbValidationError {
-  override readonly name = "UnverifiedWebhookError"
-
-  constructor(message: string, options?: SixbErrorOptions) {
-    super("runtime.invalid_definition", message, options)
-  }
-}
-
 /**
  * Narrows a credential that may be absent into a {@link WebhookVerification}, or refuses.
  *
@@ -60,7 +51,8 @@ export function resolveWebhookVerification<TCredential>(
   if (options.credential) return { credential: options.credential }
 
   if (!options.allowUnverified) {
-    throw new UnverifiedWebhookError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `[${subject.connector}] This webhook has no credential, so ${subject.verifies} cannot be ` +
         `checked and the route would accept unverified requests from anyone who can reach it. ` +
         `Set ${subject.credentialOption}, or pass ${subject.allowOption} to accept that.`

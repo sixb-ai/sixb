@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "../src"
-import { EVENTS_STREAM, EventsError, EventsRuntime, type StoredDomainEvent } from "../src/events"
+import { EVENTS_STREAM, EventsRuntime, type StoredDomainEvent } from "../src/events"
 
 function actionRequested(runId: string) {
   return {
@@ -222,7 +222,7 @@ describe("EventsRuntime broker backing", () => {
       records: [{ name: "object.created", payload: { type: "unknown.event" } }],
     })
 
-    await expect(runtime.read()).rejects.toBeInstanceOf(EventsError)
+    await expect(runtime.read()).rejects.toHaveProperty("code", "runtime.invariant_violated")
   })
 
   test("rejects directly authored ontology facts", async () => {

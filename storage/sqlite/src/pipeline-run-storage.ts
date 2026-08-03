@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+import { SixbError } from "@sixb/core/errors"
 import type { DatasetVersionRef } from "@sixb/core/lake-storage"
 import type {
   FinishPipelineRunInput,
@@ -15,7 +16,7 @@ import type {
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "@sixb/core/storage"
-import { PipelineRunError, parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
@@ -70,7 +71,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
         .run(input.projectId, input.id, input.pipelineId, "running", startedAt.toISOString())
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        throw new PipelineRunError(
+        throw new SixbError(
           "storage.conflict",
           `[SixbSqlite] Pipeline run '${input.id}' already exists for project '${input.projectId}'.`
         )
@@ -81,7 +82,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
 
     const record = await this.getById({ projectId: input.projectId, id: input.id })
     if (!record) {
-      throw new PipelineRunError(
+      throw new SixbError(
         "runtime.invalid_input",
         `[SixbSqlite] Failed to load pipeline run '${input.id}' for project '${input.projectId}'.`
       )
@@ -97,14 +98,14 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
         .get(input.projectId, input.id) as PipelineRunDatabaseRow | null
 
       if (!existing) {
-        throw new PipelineRunError(
+        throw new SixbError(
           "pipeline.run_not_found",
           `[SixbSqlite] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
-        throw new PipelineRunError(
+        throw new SixbError(
           "storage.conflict",
           `[SixbSqlite] Pipeline run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
@@ -148,21 +149,21 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
         .get(input.projectId, input.pipelineRunId) as PipelineRunDatabaseRow | null
 
       if (!pipelineRun) {
-        throw new PipelineRunError(
+        throw new SixbError(
           "pipeline.run_not_found",
           `[SixbSqlite] Pipeline run '${input.pipelineRunId}' not found for project '${input.projectId}'.`
         )
       }
 
       if (pipelineRun.status !== "running") {
-        throw new PipelineRunError(
+        throw new SixbError(
           "storage.conflict",
           `[SixbSqlite] Pipeline run '${input.pipelineRunId}' for project '${input.projectId}' is already terminal.`
         )
       }
 
       if (pipelineRun.pipeline_id !== input.pipelineId) {
-        throw new PipelineRunError(
+        throw new SixbError(
           "runtime.invalid_input",
           `[SixbSqlite] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipeline_id}'.`
         )
@@ -202,7 +203,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
           )
       } catch (error) {
         if (isUniqueConstraintError(error)) {
-          throw new PipelineRunError(
+          throw new SixbError(
             "storage.conflict",
             `[SixbSqlite] Pipeline step run '${input.id}' already exists for project '${input.projectId}'.`
           )
@@ -216,7 +217,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
         .get(input.projectId, input.id) as PipelineStepRunDatabaseRow | null
 
       if (!row) {
-        throw new PipelineRunError(
+        throw new SixbError(
           "runtime.invalid_input",
           `[SixbSqlite] Failed to load pipeline step run '${input.id}' for project '${input.projectId}'.`
         )
@@ -235,21 +236,21 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
         .get(input.projectId, input.id) as PipelineStepRunDatabaseRow | null
 
       if (!existing) {
-        throw new PipelineRunError(
+        throw new SixbError(
           "pipeline.run_not_found",
           `[SixbSqlite] Pipeline step run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
-        throw new PipelineRunError(
+        throw new SixbError(
           "storage.conflict",
           `[SixbSqlite] Pipeline step run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }
 
       if (input.status === "succeeded" && input.output.datasetId !== existing.dataset_id) {
-        throw new PipelineRunError(
+        throw new SixbError(
           "runtime.invalid_input",
           `[SixbSqlite] Pipeline step run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
         )
@@ -461,7 +462,7 @@ function rowToPipelineStepRunRecord(row: PipelineStepRunDatabaseRow): PipelineSt
 
 function assertOptionalNonNegativeInteger(value: number | undefined, fieldName: string): void {
   if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
-    throw new PipelineRunError(
+    throw new SixbError(
       "runtime.invalid_input",
       `[SixbSqlite] Pipeline run ${fieldName} must be a non-negative integer.`
     )

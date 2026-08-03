@@ -2,7 +2,7 @@ import { reportBackgroundTaskFailure } from "../error-reporting/capability"
 import type { SixbBackgroundTask } from "../error-reporting/types"
 import { SixbError } from "../errors"
 import type { ClaimedQueueJob, Queue, QueueJob, QueueJobError } from "../queues"
-import { WorkerAbortError } from "./errors"
+import { workerAbortError } from "./errors"
 import {
   createQueueDelivery,
   type QueueDelivery,
@@ -275,7 +275,7 @@ export function isAbortError(error: unknown): boolean {
 
 async function sleep(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
-    throw new WorkerAbortError("Worker runtime aborted.")
+    throw workerAbortError("Worker runtime aborted.")
   }
 
   await new Promise<void>((resolve, reject) => {
@@ -287,7 +287,7 @@ async function sleep(ms: number, signal: AbortSignal): Promise<void> {
     const onAbort = () => {
       clearTimeout(timer)
       signal.removeEventListener("abort", onAbort)
-      reject(new WorkerAbortError("Worker runtime aborted."))
+      reject(workerAbortError("Worker runtime aborted."))
     }
 
     signal.addEventListener("abort", onAbort, { once: true })

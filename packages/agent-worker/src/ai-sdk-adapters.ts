@@ -2,7 +2,7 @@ import type { AgentInboundUiMessagePart, AgentMessagePart } from "@sixb/core"
 import { fromAiSdk } from "@sixb/core/internal/agents"
 import type { AgentRunUsage } from "@sixb/core/storage"
 import type { LanguageModelUsage } from "ai"
-import { AgentWorkerError } from "./errors"
+import { agentWorkerError } from "./errors"
 
 /** Minimal structural boundary implemented by AI SDK StepResult content. */
 export interface AiSdkTraceStep {
@@ -82,7 +82,7 @@ function agentTracePartsFromAiSdkContent(
       // Results are folded into their tool-call part, which is Sixb's durable representation.
       return []
     default:
-      throw new AgentWorkerError(
+      throw agentWorkerError(
         `AI SDK trace content '${part.type}' is not supported by the durable agent trace contract.`
       )
   }
@@ -113,7 +113,7 @@ function toolCallTracePart(
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== "string") {
-    throw new AgentWorkerError(`AI SDK trace ${field} must be a string.`)
+    throw agentWorkerError(`AI SDK trace ${field} must be a string.`)
   }
   return value
 }
@@ -121,7 +121,7 @@ function requireString(value: unknown, field: string): string {
 function requireNonEmptyString(value: unknown, field: string): string {
   const string = requireString(value, field)
   if (!string) {
-    throw new AgentWorkerError(`AI SDK trace ${field} must not be empty.`)
+    throw agentWorkerError(`AI SDK trace ${field} must not be empty.`)
   }
   return string
 }

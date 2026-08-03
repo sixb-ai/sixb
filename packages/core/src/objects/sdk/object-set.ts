@@ -8,8 +8,8 @@ import type { ActionDefinition } from "../../actions"
 import type { AuthorizationContext } from "../../authorization"
 import { assertAuthorized } from "../../authorization"
 import { shareSixbErrorReporter } from "../../error-reporting/capability"
+import { SixbError } from "../../errors"
 import type { ValueType } from "../../ontology"
-import { OntologyValidationError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { shareOntologyMutationRuntime } from "../../runtime/ontology-mutations"
 import type {
@@ -44,7 +44,10 @@ export function createObjectSet<
   const { objectType } = params
   const primaryProp = objectType.properties.find((p) => p.primary)
   if (!primaryProp) {
-    throw new OntologyValidationError(`Object type '${objectType.id}' has no primary property`)
+    throw new SixbError(
+      "ontology.invalid_value",
+      `Object type '${objectType.id}' has no primary property`
+    )
   }
   const primaryPropertyId = primaryProp.id
 
@@ -146,7 +149,8 @@ export function createObjectSet<
     }) => {
       const actionId = input.action?.id ?? input.actionId
       if (!actionId) {
-        throw new OntologyValidationError(
+        throw new SixbError(
+          "ontology.invalid_value",
           "[Sixb] requestAction requires either 'action' or 'actionId'"
         )
       }
@@ -168,7 +172,8 @@ export function createObjectSet<
     }) => {
       const actionId = input.action?.id ?? input.actionId
       if (!actionId) {
-        throw new OntologyValidationError(
+        throw new SixbError(
+          "ontology.invalid_value",
           "[Sixb] requestActionAndWait requires either 'action' or 'actionId'"
         )
       }

@@ -22,8 +22,8 @@ import {
   type AgentRunDiagnostic,
   type AgentRunRecord,
   type AgentStorage,
-  AgentStorageError,
   type AgentThreadRecord,
+  agentStorageErrorReason,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
@@ -229,10 +229,10 @@ function handleAgentRouteError(
 ): ErrorResponseBody {
   // A generic message rather than the provider's raw one, which leaks the id, project, and storage
   // prefix.
-  if (error instanceof AgentStorageError && error.reason === "duplicate_id") {
+  if (agentStorageErrorReason(error) === "duplicate_id") {
     return errorResponse(set, "agent.thread_conflict", "Agent thread already exists")
   }
-  if (error instanceof AgentStorageError && error.reason === "active_run_exists") {
+  if (agentStorageErrorReason(error) === "active_run_exists") {
     return errorResponse(
       set,
       "agent.run_conflict",
@@ -693,7 +693,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
               })
               cancelledWhileQueued = true
             } catch (error) {
-              if (!(error instanceof AgentStorageError) || error.reason !== "invalid_state") {
+              if (agentStorageErrorReason(error) !== "invalid_state") {
                 throw error
               }
 

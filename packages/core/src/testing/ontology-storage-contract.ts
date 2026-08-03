@@ -113,7 +113,8 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         ).toEqual(stored)
 
         await expect(commitEmptyEdit(storage, "commit-one")).rejects.toMatchObject({
-          kind: "idempotency",
+          code: "storage.conflict",
+          details: { kind: "idempotency" },
         })
         const divergent = structuredClone(contractEditHeader("different-id"))
         ;(divergent.commit as { idempotencyKey: string }).idempotencyKey = "runtime:commit-one"
@@ -122,7 +123,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           storage.transaction(async (tx) => {
             await tx.ontology.materializations.begin(divergent)
           })
-        ).rejects.toMatchObject({ kind: "idempotency" })
+        ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "idempotency" } })
 
         const list = await storage.ontology.commits.list({
           projectId: "contract-project",
@@ -304,7 +305,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             execution,
             rows: [],
           })
-        ).rejects.toMatchObject({ kind: "execution-lost" })
+        ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "execution-lost" } })
         await expect(
           storage.ontology.sources.markReady({
             projectId: "contract-project",
@@ -315,7 +316,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             assertionCount: 1,
             readyAt: "2026-01-01T00:03:00.000Z",
           })
-        ).rejects.toMatchObject({ kind: "execution-lost" })
+        ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "execution-lost" } })
         await expect(
           storage.ontology.sources.abandon({
             kind: "candidate",
@@ -325,7 +326,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             execution,
             abandonedAt: "2026-01-01T00:03:00.000Z",
           })
-        ).rejects.toMatchObject({ kind: "execution-lost" })
+        ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "execution-lost" } })
         const abandoned = await storage.ontology.sources.abandon({
           kind: "reclaim",
           projectId: "contract-project",
@@ -393,7 +394,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             "duplicate-projection-origin",
             "2026-01-03T01:00:00.000Z"
           )
-        ).rejects.toMatchObject({ kind: "run-correlation" })
+        ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "run-correlation" } })
 
         const left = await createReadyEmptyCandidate(storage, "run-left", "candidate-left", "02")
         const right = await createReadyEmptyCandidate(storage, "run-right", "candidate-right", "03")
@@ -412,7 +413,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             "commit-source-right",
             "2026-01-05T00:00:00.000Z"
           )
-        ).rejects.toMatchObject({ kind: "projection-fence" })
+        ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "projection-fence" } })
         const currentActive = await storage.ontology.sources.getActive({
           projectId: "contract-project",
           source: first.source,
@@ -646,7 +647,10 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             conflict = error
           }
         })
-        expect(conflict).toMatchObject({ kind: "outbox-lease" })
+        expect(conflict).toMatchObject({
+          code: "storage.conflict",
+          details: { kind: "outbox-lease" },
+        })
 
         await storage.ontology.outbox.markPublished({
           projectId: "contract-project",

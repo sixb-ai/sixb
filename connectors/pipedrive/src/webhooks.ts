@@ -1,11 +1,7 @@
 import { timingSafeEqual } from "node:crypto"
 import type { WebhookDefinition, WebhookVerification, WebhookVerificationSubject } from "@sixb/core"
-import {
-  defineWebhook,
-  resolveWebhookVerification,
-  UnverifiedWebhookError,
-  warnUnverifiedWebhook,
-} from "@sixb/core"
+import { defineWebhook, resolveWebhookVerification, warnUnverifiedWebhook } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type {
   PipedriveClient,
   PipedriveEventHandler,
@@ -98,7 +94,8 @@ function assertUsableBasicAuth(
 ): void {
   if (isFilled(auth.username) && isFilled(auth.password)) return
 
-  throw new UnverifiedWebhookError(
+  throw new SixbError(
+    "runtime.invalid_definition",
     `[${subject.connector}] ${subject.credentialOption} needs a non-empty username and password. ` +
       `An unset or empty value would leave this route accepting a credential anyone can guess, ` +
       `so pass ${subject.allowOption} if that is what you want.`

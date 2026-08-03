@@ -2,8 +2,8 @@ import { AGENT_MESSAGE_CONTENT_VERSION } from "@sixb/core/internal/agents"
 import {
   type AgentMessageRecord,
   type AgentMessageStore,
-  AgentStorageError,
   type AppendAgentMessageInput,
+  agentStorageError,
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
 } from "@sixb/core/storage"
@@ -27,7 +27,7 @@ export class PgAgentMessageStore implements AgentMessageStore {
         `
 
         if (!thread) {
-          throw new AgentStorageError(
+          throw agentStorageError(
             "thread_not_found",
             `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
           )
@@ -39,7 +39,7 @@ export class PgAgentMessageStore implements AgentMessageStore {
           `
 
           if (!run) {
-            throw new AgentStorageError(
+            throw agentStorageError(
               "run_not_found",
               `[SixbPg] Agent run '${input.runId}' not found for project '${input.projectId}'.`
             )
@@ -94,7 +94,7 @@ export class PgAgentMessageStore implements AgentMessageStore {
       })
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new AgentStorageError(
+        throw agentStorageError(
           "duplicate_id",
           `[SixbPg] Agent message '${input.id}' already exists for project '${input.projectId}'.`
         )

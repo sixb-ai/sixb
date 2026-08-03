@@ -46,11 +46,11 @@ export class SixbError extends Error {
 }
 
 /**
- * The five coarse buckets, kept because a caller often wants the class of failure without
- * enumerating its codes: `catch (error) { if (error instanceof SixbConflictError) return retry() }`.
+ * The five coarse kinds, for the caller who wants the class of failure without enumerating its
+ * codes: `if (sixbErrorKind(error) === "conflict") return retryAfterReread()`.
  *
- * Each one owns a closed set of codes, so the bucket means something precise rather than reading as
- * a mood. A code may belong to no bucket; it may not belong to two.
+ * Each kind owns a closed set of codes, so it means something precise rather than reading as a mood.
+ * A code may belong to no kind; it may not belong to two.
  */
 
 /** The input is wrong and nothing was written. Maps to 4xx, never worth retrying unchanged. */
@@ -64,17 +64,6 @@ export const SIXB_VALIDATION_ERROR_CODES = [
   "storage.query_invalid",
 ] as const satisfies readonly SixbErrorCode[]
 
-export type SixbValidationErrorCode = (typeof SIXB_VALIDATION_ERROR_CODES)[number]
-
-export class SixbValidationError extends SixbError {
-  override readonly name: string = "SixbValidationError"
-
-  // biome-ignore lint/complexity/noUselessConstructor: it narrows `code` to this class's set.
-  constructor(code: SixbValidationErrorCode, message: string, options?: SixbErrorOptions) {
-    super(code, message, options)
-  }
-}
-
 /** The caller is not allowed to do this, or is not who they claim to be. */
 export const SIXB_AUTHORIZATION_ERROR_CODES = [
   "auth.authentication_required",
@@ -83,17 +72,6 @@ export const SIXB_AUTHORIZATION_ERROR_CODES = [
   "auth.permission_denied",
   "auth.session_expired",
 ] as const satisfies readonly SixbErrorCode[]
-
-export type SixbAuthorizationErrorCode = (typeof SIXB_AUTHORIZATION_ERROR_CODES)[number]
-
-export class SixbAuthorizationError extends SixbError {
-  override readonly name: string = "SixbAuthorizationError"
-
-  // biome-ignore lint/complexity/noUselessConstructor: it narrows `code` to this class's set.
-  constructor(code: SixbAuthorizationErrorCode, message: string, options?: SixbErrorOptions) {
-    super(code, message, options)
-  }
-}
 
 /** The state moved underneath the caller. Re-read, then retry or reconcile. */
 export const SIXB_CONFLICT_ERROR_CODES = [
@@ -104,34 +82,12 @@ export const SIXB_CONFLICT_ERROR_CODES = [
   "sync.already_running",
 ] as const satisfies readonly SixbErrorCode[]
 
-export type SixbConflictErrorCode = (typeof SIXB_CONFLICT_ERROR_CODES)[number]
-
-export class SixbConflictError extends SixbError {
-  override readonly name: string = "SixbConflictError"
-
-  // biome-ignore lint/complexity/noUselessConstructor: it narrows `code` to this class's set.
-  constructor(code: SixbConflictErrorCode, message: string, options?: SixbErrorOptions) {
-    super(code, message, options)
-  }
-}
-
 /** A bound was exceeded and the work was abandoned mid-flight. */
 export const SIXB_TIMEOUT_ERROR_CODES = [
   "action.timed_out",
   "agent.timed_out",
   "sandbox.timed_out",
 ] as const satisfies readonly SixbErrorCode[]
-
-export type SixbTimeoutErrorCode = (typeof SIXB_TIMEOUT_ERROR_CODES)[number]
-
-export class SixbTimeoutError extends SixbError {
-  override readonly name: string = "SixbTimeoutError"
-
-  // biome-ignore lint/complexity/noUselessConstructor: it narrows `code` to this class's set.
-  constructor(code: SixbTimeoutErrorCode, message: string, options?: SixbErrorOptions) {
-    super(code, message, options)
-  }
-}
 
 /** Something Sixb does not own failed: a database, a queue, a broker, a third-party API. */
 export const SIXB_PROVIDER_ERROR_CODES = [
@@ -147,17 +103,6 @@ export const SIXB_PROVIDER_ERROR_CODES = [
   "storage.lake_failed",
   "storage.unavailable",
 ] as const satisfies readonly SixbErrorCode[]
-
-export type SixbProviderErrorCode = (typeof SIXB_PROVIDER_ERROR_CODES)[number]
-
-export class SixbProviderError extends SixbError {
-  override readonly name: string = "SixbProviderError"
-
-  // biome-ignore lint/complexity/noUselessConstructor: it narrows `code` to this class's set.
-  constructor(code: SixbProviderErrorCode, message: string, options?: SixbErrorOptions) {
-    super(code, message, options)
-  }
-}
 
 /**
  * Identifies a Sixb error across bundle boundaries, optionally narrowing to one code.
@@ -180,4 +125,51 @@ export function isSixbError(value: unknown, code?: SixbErrorCode): value is Sixb
   if (typeof candidate.message !== "string") return false
   if (!isSixbErrorCode(candidate.code)) return false
   return code === undefined || candidate.code === code
+}
+
+/**
+ * Reads the finer `reason` a failure carries in `details`, narrowed to one module's own union.
+ *
+ * Several modules keep a discriminant that is finer than the code: twenty-five auth-storage reasons
+ * collapse onto five codes, and inside the repo it is the reason that decides what to do next.
+ * `details` is a flat scalar bag by design, so a reader has to narrow — and passing the union's
+ * runtime list is what keeps the comparison honest. A misspelled reason stops compiling, which is
+ * the guarantee the old `instanceof X && error.reason === "…"` pair gave for free.
+ */
+export function sixbFailureReason<T extends string>(
+  error: unknown,
+  reasons: readonly T[]
+): T | undefined {
+  if (!isSixbError(error)) return undefined
+  const reason = error.details?.reason
+  return reasons.find((candidate) => candidate === reason)
+}
+
+/** The coarse class of a failure, for a caller who does not want to enumerate codes. */
+export type SixbErrorKind = "validation" | "authorization" | "conflict" | "timeout" | "provider"
+
+const KIND_BY_CODE: Partial<Record<SixbErrorCode, SixbErrorKind>> = {
+  ...codeKinds(SIXB_VALIDATION_ERROR_CODES, "validation"),
+  ...codeKinds(SIXB_AUTHORIZATION_ERROR_CODES, "authorization"),
+  ...codeKinds(SIXB_CONFLICT_ERROR_CODES, "conflict"),
+  ...codeKinds(SIXB_TIMEOUT_ERROR_CODES, "timeout"),
+  ...codeKinds(SIXB_PROVIDER_ERROR_CODES, "provider"),
+}
+
+function codeKinds(
+  codes: readonly SixbErrorCode[],
+  kind: SixbErrorKind
+): Partial<Record<SixbErrorCode, SixbErrorKind>> {
+  return Object.fromEntries(codes.map((code) => [code, kind]))
+}
+
+/**
+ * Groups a failure into one of the five coarse kinds, or `undefined` for a code that belongs to none.
+ *
+ * This is the answer to "is this a conflict?" without listing the five conflict codes, and it works
+ * where the class hierarchy it replaces could not: the kind is derived from `code`, so it survives a
+ * failure that crossed a bundle boundary between two copies of the runtime.
+ */
+export function sixbErrorKind(error: unknown): SixbErrorKind | undefined {
+  return isSixbError(error) ? KIND_BY_CODE[error.code] : undefined
 }

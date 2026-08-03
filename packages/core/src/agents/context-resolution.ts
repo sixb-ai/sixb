@@ -1,3 +1,4 @@
+import { agentRequestError } from "../agents/errors"
 import { assertAuthorized } from "../authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
@@ -5,7 +6,6 @@ import {
   type AgentContextPart,
   normalizeAgentContextEntries,
 } from "./context"
-import { AgentRequestError } from "./errors"
 
 /** Resolve the exact context parts that will be persisted with the triggering user message. */
 export async function resolveAgentContextParts(
@@ -39,5 +39,5 @@ export async function resolveAgentContextParts(
 }
 
 function invalidContext(message: string): never {
-  throw new AgentRequestError("invalid_context", `[Sixb] Invalid agent context: ${message}.`)
+  throw agentRequestError("invalid_context", `[Sixb] Invalid agent context: ${message}.`)
 }

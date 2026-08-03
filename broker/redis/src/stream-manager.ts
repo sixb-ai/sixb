@@ -1,6 +1,6 @@
 import type { BrokerStreamDefinition } from "@sixb/core/broker"
 import type { RedisBrokerClient, RedisConnectionManager } from "./connection"
-import { RedisBrokerError } from "./errors"
+import { redisBrokerError } from "./errors"
 import { assertStreamId, type RedisStreamKeys, streamKeysFor, validateProjectId } from "./keys"
 import { assertStream, normalizeRetention } from "./retention"
 import { ENSURE_STREAM_SCRIPT } from "./scripts"
@@ -56,7 +56,7 @@ export class StreamManager {
           retention.maxBytes === undefined ? "" : String(retention.maxBytes),
         ])
       } catch (error) {
-        throw new RedisBrokerError(`Failed to ensure stream "${stream.id}"`, { cause: error })
+        throw redisBrokerError(`Failed to ensure stream "${stream.id}"`, { cause: error })
       }
     })
 
@@ -79,7 +79,7 @@ export class StreamManager {
       try {
         return await client.exists(keys.metaKey)
       } catch (error) {
-        throw new RedisBrokerError(`Failed to inspect stream "${streamId}"`, { cause: error })
+        throw redisBrokerError(`Failed to inspect stream "${streamId}"`, { cause: error })
       }
     })
 
@@ -95,7 +95,7 @@ export class StreamManager {
   async requireStream(projectId: string, streamId: string): Promise<EnsuredStream> {
     const ensured = await this.getExistingStream(projectId, streamId)
     if (ensured === null) {
-      throw new RedisBrokerError(
+      throw redisBrokerError(
         `stream '${streamId}' has not been ensured for project '${projectId}'. Call ensureStream() before append or subscribe.`
       )
     }
@@ -111,7 +111,7 @@ export class StreamManager {
     try {
       reply = await client.hmget(ensured.keys.metaKey, [...fields])
     } catch (error) {
-      throw new RedisBrokerError(`Failed to read stream "${ensured.streamId}" metadata`, {
+      throw redisBrokerError(`Failed to read stream "${ensured.streamId}" metadata`, {
         cause: error,
       })
     }

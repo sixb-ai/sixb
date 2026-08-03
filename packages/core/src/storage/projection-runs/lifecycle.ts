@@ -1,10 +1,10 @@
-import type { SixbFailure } from "../../errors"
+import type { SixbError, SixbFailure } from "../../errors"
+import { materializationConflict } from "../../materialization/errors"
 import type {
   ProjectionMaterializationIdentity,
   ProjectionRunTerminalDecision,
 } from "../../materialization/model"
 import type { ProjectionKind, ProjectionTarget } from "../../projections/types"
-import { ProjectionRunError } from "./errors"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
   FinishProjectionRunInput,
@@ -72,13 +72,17 @@ export interface ProjectionRunFinishPlan {
 
 export function assertProjectionRunNonEmpty(value: string, fieldName: string): void {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new ProjectionRunError(`[Sixb] Projection run ${fieldName} must not be empty.`)
+    throw materializationConflict(
+      "run-correlation",
+      `[Sixb] Projection run ${fieldName} must not be empty.`
+    )
   }
 }
 
 export function assertProjectionRunCounter(value: number, fieldName: string): void {
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Projection run ${fieldName} must be a non-negative safe integer.`
     )
   }
@@ -86,14 +90,20 @@ export function assertProjectionRunCounter(value: number, fieldName: string): vo
 
 export function assertProjectionRunListWindow(value: number | undefined, fieldName: string): void {
   if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
-    throw new ProjectionRunError(`[Sixb] Projection run list ${fieldName} must be >= 0.`)
+    throw materializationConflict(
+      "run-correlation",
+      `[Sixb] Projection run list ${fieldName} must be >= 0.`
+    )
   }
 }
 
 export function addProjectionRunCounter(left: number, right: number, fieldName: string): number {
   const result = left + right
   if (!Number.isSafeInteger(result)) {
-    throw new ProjectionRunError(`[Sixb] Projection run ${fieldName} exceeds safe integer range.`)
+    throw materializationConflict(
+      "run-correlation",
+      `[Sixb] Projection run ${fieldName} exceeds safe integer range.`
+    )
   }
   return result
 }
@@ -101,12 +111,14 @@ export function addProjectionRunCounter(left: number, right: number, fieldName: 
 export function assertProjectionRunIdentity(identity: ProjectionMaterializationIdentity): void {
   assertProjectionRunNonEmpty(identity.projectionId, "projectionId")
   if (!isProjectionKind(identity.projectionKind)) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       "[Sixb] Projection run projectionKind must be 'object', 'link', or 'telemetry'."
     )
   }
   if (identity.protocol !== "replacement" && identity.protocol !== "telemetry") {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       "[Sixb] Projection run protocol must be 'replacement' or 'telemetry'."
     )
   }
@@ -117,7 +129,8 @@ export function assertProjectionRunIdentity(identity: ProjectionMaterializationI
   assertProjectionRunNonEmpty(identity.projectionRevision, "projectionRevision")
   assertProjectionRunNonEmpty(identity.ownershipHash, "ownershipHash")
   if ((identity.protocol === "telemetry") !== (identity.projectionKind === "telemetry")) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Projection run protocol '${identity.protocol}' is incompatible with kind '${identity.projectionKind}'.`
     )
   }
@@ -128,7 +141,8 @@ export function assertProjectionRunIdentityMatches(
   identity: ProjectionMaterializationIdentity
 ): void {
   if (projectionRunIdentitiesEqual(record.identity, identity)) return
-  throw new ProjectionRunError(
+  throw materializationConflict(
+    "run-correlation",
     `[Sixb] Projection run '${record.id}' materialization identity does not match.`
   )
 }
@@ -138,7 +152,8 @@ export function assertProjectionRunTargetMatches(
   target: ProjectionTarget
 ): void {
   if (projectionTargetsEqual(record.target, target)) return
-  throw new ProjectionRunError(
+  throw materializationConflict(
+    "run-correlation",
     `[Sixb] Projection run '${record.id}' target object types do not match.`
   )
 }
@@ -153,7 +168,8 @@ export function assertProjectionRunStartInput(input: StartOrReclaimProjectionRun
     const telemetry = input as ProjectionRunStart<"telemetry">
     assertPositiveCounter(telemetry.fixedBatchSize, "fixedBatchSize")
   } else if (input.fixedBatchSize !== undefined) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       "[Sixb] Replacement projection runs cannot declare a telemetry fixedBatchSize."
     )
   }
@@ -167,7 +183,8 @@ export function planProjectionRunReclaim(
   assertProjectionRunIdentityMatches(record, input.identity)
   assertProjectionRunTargetMatches(record, input.target)
   if (record.telemetryCheckpoint?.fixedBatchSize !== input.fixedBatchSize) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Projection run '${input.id}' fixed batch size does not match.`
     )
   }
@@ -219,7 +236,8 @@ export function assertProjectionRunRunning(
   record: Pick<ProjectionRunRecord, "id" | "projectId" | "status">
 ): void {
   if (record.status === "running") return
-  throw new ProjectionRunError(
+  throw materializationConflict(
+    "run-correlation",
     `[Sixb] Projection run '${record.id}' for project '${record.projectId}' is already terminal.`
   )
 }
@@ -256,7 +274,10 @@ export function mergeProjectionRunProgress(
     if (value === undefined) continue
     assertProjectionRunCounter(value, key)
     if (value < current[key]) {
-      throw new ProjectionRunError(`[Sixb] Projection run ${key} must not decrease.`)
+      throw materializationConflict(
+        "run-correlation",
+        `[Sixb] Projection run ${key} must not decrease.`
+      )
     }
     progress[key] = value
   }
@@ -271,7 +292,8 @@ export function assertGenericProgressDoesNotAdvanceTelemetry(
   if (record.identity.protocol !== "telemetry") return
   for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
     if (patch[key] !== undefined && patch[key] !== record.progress[key]) {
-      throw new ProjectionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[Sixb] Telemetry projection run '${record.id}' progress can only advance with its checkpoint.`
       )
     }
@@ -288,27 +310,32 @@ export function advanceProjectionTelemetry(
   assertPositiveCounter(input.batchRowCount, "batchRowCount")
   assertProjectionRunCounter(input.batchRowsSkipped, "batchRowsSkipped")
   if (input.batchRowsSkipped > input.batchRowCount) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Telemetry projection run '${record.id}' skipped rows exceed its batch row count.`
     )
   }
   if (input.batchOrdinal !== checkpoint.nextBatchOrdinal) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Telemetry projection run '${record.id}' expected batch ordinal ${checkpoint.nextBatchOrdinal}, got ${input.batchOrdinal}.`
     )
   }
   if (input.batchRowCount > checkpoint.fixedBatchSize) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Telemetry projection run '${record.id}' batch exceeds its fixed size.`
     )
   }
   if (!input.inputExhausted && input.batchRowCount !== checkpoint.fixedBatchSize) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Telemetry projection run '${record.id}' cannot advance past a partial non-final batch.`
     )
   }
   if (checkpoint.inputExhausted) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Telemetry projection run '${record.id}' has already exhausted its input.`
     )
   }
@@ -389,7 +416,10 @@ export function restoreProjectionRun(row: PersistedProjectionRunRecord): StoredP
   assertProjectionRunNonEmpty(row.projectId, "projectId")
   assertProjectionRunCounter(row.attempt, "attempt")
   if (row.attempt < 1) {
-    throw new ProjectionRunError(`[Sixb] Projection run '${row.id}' attempt must be positive.`)
+    throw materializationConflict(
+      "run-correlation",
+      `[Sixb] Projection run '${row.id}' attempt must be positive.`
+    )
   }
   assertProjectionRunProgress(row.progress)
   assertValidDate(row.startedAt, "startedAt")
@@ -435,7 +465,8 @@ export function restoreProjectionRun(row: PersistedProjectionRunRecord): StoredP
   if (identity.projectionKind === "telemetry") {
     const telemetryCheckpoint = restoreCheckpoint(row)
     if (row.progress.sourceRowsRead !== telemetryCheckpoint.nextRowOffset) {
-      throw new ProjectionRunError(
+      throw materializationConflict(
+        "run-correlation",
         `[Sixb] Telemetry projection run '${row.id}' progress does not match its checkpoint.`
       )
     }
@@ -475,23 +506,25 @@ export function requireProjectionRunExecutionToken(record: StoredProjectionRunRe
   throw incompleteProjectionRun(record.id)
 }
 
-export function staleProjectionRunExecution(id: string): ProjectionRunError {
-  return new ProjectionRunError(
-    `[Sixb] Projection run '${id}' execution token is stale.`,
-    "execution-lost"
+export function staleProjectionRunExecution(id: string): SixbError {
+  return materializationConflict(
+    "execution-lost",
+    `[Sixb] Projection run '${id}' execution token is stale.`
   )
 }
 
-export function projectionRunNotFound(projectId: string, id: string): ProjectionRunError {
-  return new ProjectionRunError(
+export function projectionRunNotFound(projectId: string, id: string): SixbError {
+  return materializationConflict(
+    "run-correlation",
     `[Sixb] Projection run '${id}' not found for project '${projectId}'.`
   )
 }
 
 export function immutableDatasetVersionConflict(
   identity: ProjectionMaterializationIdentity
-): ProjectionRunError {
-  return new ProjectionRunError(
+): SixbError {
+  return materializationConflict(
+    "run-correlation",
     `[Sixb] Dataset version '${identity.datasetVersion.versionId}' reused an immutable dataset version id with different metadata.`
   )
 }
@@ -500,7 +533,8 @@ export function immutableDatasetVersionConflict(
 
 function assertPositiveCounter(value: number, fieldName: string): void {
   if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Projection run ${fieldName} must be a positive safe integer.`
     )
   }
@@ -509,7 +543,8 @@ function assertPositiveCounter(value: number, fieldName: string): void {
 function assertCanonicalTimestamp(value: string, fieldName: string): void {
   const milliseconds = Date.parse(value)
   if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Projection run ${fieldName} must be a canonical UTC timestamp.`
     )
   }
@@ -517,13 +552,19 @@ function assertCanonicalTimestamp(value: string, fieldName: string): void {
 
 function assertValidDate(value: Date, fieldName: string): void {
   if (!Number.isFinite(value.getTime())) {
-    throw new ProjectionRunError(`[Sixb] Projection run persisted ${fieldName} is invalid.`)
+    throw materializationConflict(
+      "run-correlation",
+      `[Sixb] Projection run persisted ${fieldName} is invalid.`
+    )
   }
 }
 
 function assertProjectionRunDate(value: Date, fieldName: string): void {
   if (!Number.isFinite(value.getTime())) {
-    throw new ProjectionRunError(`[Sixb] Projection run ${fieldName} is invalid.`)
+    throw materializationConflict(
+      "run-correlation",
+      `[Sixb] Projection run ${fieldName} is invalid.`
+    )
   }
 }
 
@@ -534,7 +575,8 @@ function isProjectionKind(value: unknown): value is ProjectionKind {
 function assertProjectionTarget(kind: ProjectionKind, target: ProjectionTarget): void {
   if (kind === "link") {
     if (!("sourceObjectTypeId" in target)) {
-      throw new ProjectionRunError(
+      throw materializationConflict(
+        "run-correlation",
         "[Sixb] Link projection runs must declare source and target object types."
       )
     }
@@ -543,7 +585,8 @@ function assertProjectionTarget(kind: ProjectionKind, target: ProjectionTarget):
     return
   }
   if (!("objectTypeId" in target)) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       "[Sixb] Object and telemetry projection runs must declare one object type."
     )
   }
@@ -584,7 +627,8 @@ function assertProjectionRunProgress(progress: ProjectionRunProgress): void {
     assertProjectionRunCounter(progress[key], key)
   }
   if (progress.sourceRowsSkipped > progress.sourceRowsRead) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       "[Sixb] Projection run sourceRowsSkipped must not exceed sourceRowsRead."
     )
   }
@@ -595,27 +639,34 @@ function assertFinishDecision(
   input: ProjectionRunTerminalDecision
 ): void {
   if (input.status !== "succeeded" && input.status !== "failed" && input.status !== "cancelled") {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Projection run '${record.id}' finish status must be terminal.`
     )
   }
   if (input.protocol !== "replacement" && input.protocol !== "telemetry") {
-    throw new ProjectionRunError(`[Sixb] Projection run '${record.id}' finish protocol is invalid.`)
+    throw materializationConflict(
+      "run-correlation",
+      `[Sixb] Projection run '${record.id}' finish protocol is invalid.`
+    )
   }
   if (input.protocol !== record.identity.protocol) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Projection run '${record.id}' finish protocol does not match its identity.`
     )
   }
   const inputExhausted = "inputExhausted" in input ? input.inputExhausted : undefined
   if (input.status === "succeeded" && input.protocol === "telemetry") {
     if (inputExhausted === true) return
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Telemetry projection run '${record.id}' cannot succeed before input exhaustion.`
     )
   }
   if (inputExhausted !== undefined) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Projection run '${record.id}' contains telemetry-only completion metadata.`
     )
   }
@@ -655,7 +706,8 @@ function restoreCheckpoint(row: PersistedProjectionRunRecord): ProjectionTelemet
     row.nextRowOffset === undefined ||
     row.inputExhausted === undefined
   ) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Telemetry projection run '${row.id}' has incomplete checkpoint state.`
     )
   }
@@ -691,7 +743,8 @@ function restoreMissingTarget(
     row.missingTargetBatchOrdinal === undefined ||
     row.missingTargetFirstSeenAt === undefined
   ) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Telemetry projection run '${row.id}' has a partially persisted missing target.`
     )
   }
@@ -704,12 +757,14 @@ function restoreMissingTarget(
   assertValidDate(missingTarget.firstSeenAt, "missingTarget.firstSeenAt")
   assertProjectionRunCounter(missingTarget.batchOrdinal, "missingTarget.batchOrdinal")
   if (missingTarget.batchOrdinal !== checkpoint.nextBatchOrdinal) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Telemetry projection run '${row.id}' is waiting on a batch it has already passed.`
     )
   }
   if (missingTarget.objectTypeId !== row.objectTypeId) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Telemetry projection run '${row.id}' is waiting on an object type it does not write.`
     )
   }
@@ -725,19 +780,24 @@ function assertNoCheckpoint(row: PersistedProjectionRunRecord): void {
   ) {
     return
   }
-  throw new ProjectionRunError(
+  throw materializationConflict(
+    "run-correlation",
     `[Sixb] Replacement projection run '${row.id}' contains a telemetry checkpoint.`
   )
 }
 
-function incompleteProjectionRun(id: string): ProjectionRunError {
-  return new ProjectionRunError(
+function incompleteProjectionRun(id: string): SixbError {
+  return materializationConflict(
+    "run-correlation",
     `[Sixb] Projection run '${id}' has incomplete materialization state.`
   )
 }
 
-function invalidProjectionRunTarget(id: string): ProjectionRunError {
-  return new ProjectionRunError(`[Sixb] Projection run '${id}' has an invalid target.`)
+function invalidProjectionRunTarget(id: string): SixbError {
+  return materializationConflict(
+    "run-correlation",
+    `[Sixb] Projection run '${id}' has an invalid target.`
+  )
 }
 
 /**
@@ -756,15 +816,20 @@ export function assertProjectionMissingTarget(
   assertProjectionRunNonEmpty(missingTarget.objectId, "missingTarget.objectId")
   assertProjectionRunCounter(missingTarget.batchOrdinal, "missingTarget.batchOrdinal")
   if (Number.isNaN(missingTarget.firstSeenAt.getTime())) {
-    throw new ProjectionRunError("[Sixb] Projection run missingTarget.firstSeenAt is invalid.")
+    throw materializationConflict(
+      "run-correlation",
+      "[Sixb] Projection run missingTarget.firstSeenAt is invalid."
+    )
   }
   if (missingTarget.objectTypeId !== record.target.objectTypeId) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Telemetry projection run '${record.id}' cannot wait on '${missingTarget.objectTypeId}'; it writes '${record.target.objectTypeId}'.`
     )
   }
   if (missingTarget.batchOrdinal !== record.telemetryCheckpoint.nextBatchOrdinal) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[Sixb] Telemetry projection run '${record.id}' cannot wait on batch ${missingTarget.batchOrdinal}; it is at ${record.telemetryCheckpoint.nextBatchOrdinal}.`
     )
   }
@@ -775,7 +840,8 @@ export function requireTelemetryProjectionRun<TRecord extends ProjectionRunRecor
   record: TRecord
 ): TRecord & TelemetryProjectionRunRecord {
   if (isTelemetryProjectionRun(record)) return record as TRecord & TelemetryProjectionRunRecord
-  throw new ProjectionRunError(
+  throw materializationConflict(
+    "run-correlation",
     `[Sixb] Projection run '${record.id}' does not have a telemetry checkpoint.`
   )
 }

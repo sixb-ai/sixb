@@ -4,16 +4,7 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { OntologySource, RuleDefinition } from "../src"
-import {
-  createSixb,
-  defineObjectType,
-  defineRule,
-  InMemoryBroker,
-  link,
-  prop,
-  RuleValidationError,
-  Sixb,
-} from "../src"
+import { createSixb, defineObjectType, defineRule, InMemoryBroker, link, prop, Sixb } from "../src"
 import { EventsRuntime } from "../src/events"
 import { deriveRuleEventDependencies } from "../src/rules"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -165,7 +156,9 @@ describe("rules", () => {
   })
 
   test("invalid empty rule ids throw a rule validation error", () => {
-    expect(() => defineRule("")).toThrow(RuleValidationError)
+    expect(() => defineRule("")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => defineRule("")).toThrow("Rule id must not be empty.")
   })
 
@@ -225,7 +218,9 @@ export const transactionRequiresDocument = defineRule("transaction.requires-docu
       .on(Transaction)
       .where((tx) => tx.l.document.isMissing())
 
-    expect(() => createRuntimeWithRules([rule1, rule2])).toThrow(RuleValidationError)
+    expect(() => createRuntimeWithRules([rule1, rule2])).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
   })
 
   test("runtime registration rejects predicates for unknown properties", () => {

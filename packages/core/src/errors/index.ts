@@ -8,6 +8,7 @@ export {
   type SixbErrorNamespace,
   sixbErrorNamespace,
 } from "./codes"
+export type { SixbErrorKind } from "./error"
 export {
   isSixbError,
   SIXB_AUTHORIZATION_ERROR_CODES,
@@ -15,18 +16,10 @@ export {
   SIXB_PROVIDER_ERROR_CODES,
   SIXB_TIMEOUT_ERROR_CODES,
   SIXB_VALIDATION_ERROR_CODES,
-  SixbAuthorizationError,
-  type SixbAuthorizationErrorCode,
-  SixbConflictError,
-  type SixbConflictErrorCode,
   SixbError,
   type SixbErrorOptions,
-  SixbProviderError,
-  type SixbProviderErrorCode,
-  SixbTimeoutError,
-  type SixbTimeoutErrorCode,
-  SixbValidationError,
-  type SixbValidationErrorCode,
+  sixbErrorKind,
+  sixbFailureReason,
 } from "./error"
 export {
   parseSixbFailure,

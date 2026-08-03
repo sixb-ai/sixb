@@ -1,5 +1,6 @@
 import { isIP } from "node:net"
-import { SandboxError, type SandboxNetworkPolicy } from "@sixb/core"
+import type { SandboxNetworkPolicy } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type { NetworkPolicy } from "@vercel/sandbox"
 
 /**
@@ -26,7 +27,8 @@ export function toVercelNetworkPolicy(policy: SandboxNetworkPolicy | undefined):
   for (const target of policy.allow) {
     const origin = parseNetworkTarget(target.origin)
     if (isLoopbackHost(origin.host)) {
-      throw new SandboxError(
+      throw new SixbError(
+        "sandbox.failed",
         `[Sandbox] Vercel Sandbox runs remotely and cannot reach restricted target '${target.name}' at ${target.origin}. Use a public HTTPS gateway origin instead of localhost/loopback.`
       )
     }
@@ -38,7 +40,8 @@ export function toVercelNetworkPolicy(policy: SandboxNetworkPolicy | undefined):
     }
 
     if (origin.protocol === "http:") {
-      throw new SandboxError(
+      throw new SixbError(
+        "sandbox.failed",
         `[Sandbox] Vercel Sandbox cannot enforce a hostname allow-list for plain HTTP target '${target.name}' (${target.origin}); Vercel's domain firewall is TLS/SNI-based. Use HTTPS, or point the target at an IP/CIDR-reachable origin.`
       )
     }

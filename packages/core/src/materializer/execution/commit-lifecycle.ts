@@ -1,4 +1,4 @@
-import { MaterializationConflictError } from "../../materialization/errors"
+import { materializationConflict } from "../../materialization/errors"
 import type {
   EditCommitResult,
   ProjectionCommitResult,
@@ -20,7 +20,7 @@ export async function replayCommitRecord(
   })
   if (!existing) return null
   if (existing.requestHash !== identity.requestHash) {
-    throw new MaterializationConflictError(
+    throw materializationConflict(
       "idempotency",
       `Idempotency key '${identity.idempotencyKey}' was reused with different intent.`
     )

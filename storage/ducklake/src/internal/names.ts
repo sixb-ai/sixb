@@ -1,4 +1,4 @@
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
 
 /**
  * Prefix used for all Sixb dataset tables inside the DuckLake schema.
@@ -25,7 +25,7 @@ function isHexPair(value: string): boolean {
  */
 function encodeDatasetId(datasetId: string): string {
   if (datasetId.trim().length === 0) {
-    throw new LakeStorageError("[SixbDuckLake] Dataset id must not be empty.")
+    throw new SixbError("storage.lake_failed", "[SixbDuckLake] Dataset id must not be empty.")
   }
 
   let encoded = ""

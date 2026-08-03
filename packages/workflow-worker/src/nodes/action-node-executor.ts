@@ -1,9 +1,9 @@
 import type { ActionSubject } from "@sixb/core"
-import { ActionRunFailedError, isObjectActionDefinition } from "@sixb/core"
+import { isObjectActionDefinition } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type { WorkflowActionNodeDefinition } from "@sixb/core/internal/workflows"
 import { snapshotWorkflowActionInput } from "@sixb/core/internal/workflows"
 import type { ActionRunFailure } from "@sixb/core/storage"
-import { WorkflowWorkerError } from "../errors"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { isRecord } from "../normalize"
 import { callWorkflowMapper } from "./mapper"
@@ -64,12 +64,15 @@ export const actionNodeExecutor: WorkflowNodeExecutor<WorkflowActionNodeDefiniti
       onRequested: () => context.markSideEffectBoundaryPassed(),
     })
     if (run.status !== "succeeded") {
-      throw new ActionRunFailedError({
-        runId: run.id,
-        actionId: run.actionId,
-        subject: run.subject,
-        error: run.error ?? actionRunStatusFailure(run.status, run.phase),
-        finishedAt: (run.finishedAt ?? new Date()).toISOString(),
+      const failure = run.error ?? actionRunStatusFailure(run.status, run.phase)
+      throw new SixbError("action.failed", failure.message, {
+        details: {
+          runId: run.id,
+          actionId: run.actionId,
+          ...(run.subject.kind === "object"
+            ? { objectTypeId: run.subject.objectTypeId, primaryId: run.subject.primaryId }
+            : {}),
+        },
       })
     }
 
@@ -98,7 +101,8 @@ function normalizeActionMapperResult(input: {
   readonly mode: "direct" | "mapped"
 }): ActionMapperResult {
   if (!isRecord(input.value)) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' input must be an object.`
     )
   }
@@ -121,7 +125,8 @@ function normalizeMappedActionInput(input: {
   const { subject, params } = input.value
 
   if (!isRecord(params)) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must return params as an object.`
     )
   }
@@ -138,7 +143,8 @@ function normalizeMappedActionInput(input: {
   }
 
   if (Object.hasOwn(input.value, "subject")) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must not return subject for a global action.`
     )
   }
@@ -156,7 +162,8 @@ function normalizeDirectActionInput(input: {
 }): ActionMapperResult {
   if (isObjectActionDefinition(input.action)) {
     if (!Object.hasOwn(input.value, "subject")) {
-      throw new WorkflowWorkerError(
+      throw new SixbError(
+        "workflow.failed",
         `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' direct input must include subject for an object action.`
       )
     }
@@ -172,7 +179,8 @@ function normalizeDirectActionInput(input: {
   }
 
   if (Object.hasOwn(input.value, "subject")) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' direct input must not include subject for a global action.`
     )
   }
@@ -205,7 +213,8 @@ function normalizeObjectActionSubject(input: {
   }
 
   if (!isObjectRef(input.value)) {
-    throw new WorkflowWorkerError(
+    throw new SixbError(
+      "workflow.failed",
       `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must return a valid subject object ref.`
     )
   }

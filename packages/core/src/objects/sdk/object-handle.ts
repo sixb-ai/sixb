@@ -5,8 +5,8 @@
  */
 import type { ActionDefinition } from "../../actions"
 import { assertAuthorized, assertPrivileged } from "../../authorization"
+import { SixbError } from "../../errors"
 import type { ObjectLink, ObjectRef, ValueType } from "../../ontology"
-import { OntologyValidationError } from "../../ontology/errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { assertLinkTokenBelongsToObjectType } from "../../ontology/validation"
 import type { ObjectByIdHandle, TwinObject } from "../../runtime/types"
@@ -96,7 +96,8 @@ export function createObjectByIdHandle<
     }) => {
       const actionId = input.action?.id ?? input.actionId
       if (!actionId) {
-        throw new OntologyValidationError(
+        throw new SixbError(
+          "ontology.invalid_value",
           "[Sixb] requestAction requires either 'action' or 'actionId'"
         )
       }
@@ -117,7 +118,8 @@ export function createObjectByIdHandle<
     }) => {
       const actionId = input.action?.id ?? input.actionId
       if (!actionId) {
-        throw new OntologyValidationError(
+        throw new SixbError(
+          "ontology.invalid_value",
           "[Sixb] requestActionAndWait requires either 'action' or 'actionId'"
         )
       }

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { SandboxNotRunningError } from "@sixb/core"
 import type {
   VercelCommandClient,
   VercelCommandFinishedClient,
@@ -159,8 +158,9 @@ describe("VercelSandbox", () => {
     await sandbox.stop()
     expect(sandbox.status).toBe("stopped")
     expect(client.stopCalls).toBe(1)
-    await expect(sandbox.runCommand("echo", ["nope"])).rejects.toBeInstanceOf(
-      SandboxNotRunningError
+    await expect(sandbox.runCommand("echo", ["nope"])).rejects.toHaveProperty(
+      "code",
+      "sandbox.not_running"
     )
 
     await sandbox.destroy()

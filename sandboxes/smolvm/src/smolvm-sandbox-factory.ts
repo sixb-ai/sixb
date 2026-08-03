@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs"
-import {
-  type CreateSandboxOptions,
-  type Sandbox,
-  type SandboxFactory,
-  SandboxIsolationUnavailableError,
-  type SandboxNetworkPolicy,
+import type {
+  CreateSandboxOptions,
+  Sandbox,
+  SandboxFactory,
+  SandboxNetworkPolicy,
 } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import { defaultAgentImageCandidates, defaultAgentImagePath } from "./agent-image"
 import { isLocalImageArchive, type SmolvmCliConfig } from "./cli"
 import { DOCKER_HUB_REGISTRY_HOSTS } from "./network"
@@ -89,14 +89,15 @@ export class SmolvmSandboxFactory implements SandboxFactory {
       this.probe = probeSmolvm(cli.bin)
     }
     if (!this.probe.ok) {
-      throw new SandboxIsolationUnavailableError(`[Sandbox] ${this.probe.message}`)
+      throw new SixbError("sandbox.isolation_unavailable", `[Sandbox] ${this.probe.message}`)
     }
   }
 
   private ensureImage(cli: SmolvmCliConfig): void {
     const image = cli.image
     if (image !== undefined && isLocalImageArchive(image) && !existsSync(image)) {
-      throw new SandboxIsolationUnavailableError(
+      throw new SixbError(
+        "sandbox.isolation_unavailable",
         `[Sandbox] agent image not found at ${image}. Build it once with \`bun run agent:image\` (requires Docker or Podman), or set \`image\` to a prebuilt .tar or a registry reference.`
       )
     }

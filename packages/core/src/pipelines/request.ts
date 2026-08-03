@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { assertAuthorized } from "../authorization"
+import { SixbError } from "../errors"
 import type { SixbRuntimeContext } from "../runtime/types"
-import { PipelineError } from "./errors"
 import type { PipelineDefinition } from "./types"
 
 export interface PipelineRunRequestOptions {
@@ -41,12 +41,18 @@ export async function requestPipelineRun(
 ): Promise<PipelineRunRequestResult> {
   assertAuthorized(runtime, { kind: "pipeline.run", pipelineId: pipeline.id })
   if (!runtime.storage.pipelineRuns) {
-    throw new PipelineError("[Sixb] Pipeline run storage is not configured.")
+    throw new SixbError(
+      "runtime.invalid_definition",
+      "[Sixb] Pipeline run storage is not configured."
+    )
   }
 
   const queue = runtime.queues.pipelines
   if (!queue) {
-    throw new PipelineError("[Sixb] Pipeline run queue is not configured.")
+    throw new SixbError(
+      "runtime.invalid_definition",
+      "[Sixb] Pipeline run queue is not configured."
+    )
   }
 
   const runId = createPipelineRunId(options.runId)
@@ -62,7 +68,7 @@ export async function requestPipelineRun(
 function createPipelineRunId(runId: string | undefined): string {
   if (runId !== undefined) {
     if (!runId.trim()) {
-      throw new PipelineError("[Sixb] Pipeline run id must not be empty")
+      throw new SixbError("runtime.invalid_definition", "[Sixb] Pipeline run id must not be empty")
     }
     return runId
   }

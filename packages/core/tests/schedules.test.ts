@@ -1,37 +1,40 @@
 import { describe, expect, test } from "bun:test"
-import {
-  CronValidationError,
-  defineSchedule,
-  isScheduleDefinition,
-  ScheduleValidationError,
-} from "../src/schedules"
+import { defineSchedule, isScheduleDefinition } from "../src/schedules"
 
 describe("defineSchedule", () => {
   test("rejects empty ids", () => {
-    expect(() => defineSchedule("")).toThrow(ScheduleValidationError)
+    expect(() => defineSchedule("")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => defineSchedule("")).toThrow("Schedule id must not be empty")
   })
 
   test("rejects whitespace-only ids", () => {
-    expect(() => defineSchedule("   ")).toThrow(ScheduleValidationError)
+    expect(() => defineSchedule("   ")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => defineSchedule("   ")).toThrow("Schedule id must not be empty")
   })
 
   test("rejects empty cron expressions", () => {
-    expect(() => defineSchedule("s1").cron("")).toThrow(ScheduleValidationError)
+    expect(() => defineSchedule("s1").cron("")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => defineSchedule("s1").cron("")).toThrow(
       "Schedule cron expression must not be empty"
     )
   })
 
   test("rejects invalid cron expressions", () => {
-    expect(() => defineSchedule("s1").cron("not-a-cron")).toThrow(CronValidationError)
+    expect(() => defineSchedule("s1").cron("not-a-cron")).toThrow(
+      expect.objectContaining({ code: "runtime.invalid_definition" })
+    )
     expect(() => defineSchedule("s1").cron("not-a-cron")).toThrow("Invalid cron expression")
   })
 
   test("rejects invalid timezones", () => {
     expect(() => defineSchedule("s1").cron("0 * * * *", { timezone: "Invalid/TZ" })).toThrow(
-      ScheduleValidationError
+      expect.objectContaining({ code: "runtime.invalid_definition" })
     )
     expect(() => defineSchedule("s1").cron("0 * * * *", { timezone: "Invalid/TZ" })).toThrow(
       "Invalid timezone 'Invalid/TZ'"

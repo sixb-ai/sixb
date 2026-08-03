@@ -1,4 +1,4 @@
-import { SecurityValidationError } from "./errors"
+import { SixbError } from "../errors"
 import type {
   GrantDefinition,
   GroupDefinition,
@@ -35,14 +35,17 @@ const MEMBERSHIP_OPERATIONS = new Set<MembershipOperation>(["invite", "assignGro
 
 function assertNonEmptyArray<T>(value: readonly T[], field: string): void {
   if (value.length === 0) {
-    throw new SecurityValidationError(`[Sixb] ${field} must not be empty.`)
+    throw new SixbError("runtime.invalid_definition", `[Sixb] ${field} must not be empty.`)
   }
 }
 
 function groupIdsFrom(groups: readonly GroupDefinition[], field: string): readonly string[] {
   return groups.map((group) => {
     if (!isRecord(group) || group.kind !== "group") {
-      throw new SecurityValidationError(`[Sixb] ${field} must contain only group definitions.`)
+      throw new SixbError(
+        "runtime.invalid_definition",
+        `[Sixb] ${field} must contain only group definitions.`
+      )
     }
 
     assertNonEmptyString(group.id, `${field} group id`)
@@ -56,7 +59,8 @@ function membershipOperationsFrom(
 ): readonly MembershipOperation[] {
   return operations.map((operation) => {
     if (!MEMBERSHIP_OPERATIONS.has(operation)) {
-      throw new SecurityValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `[Sixb] ${field} must contain only membership operations: invite, assignGroups, suspend.`
       )
     }
@@ -97,7 +101,10 @@ export function defineRole<const TId extends string>(
   }
 
   if (options.grants.length === 0) {
-    throw new SecurityValidationError(`[Sixb] Role '${id}' grants must not be empty.`)
+    throw new SixbError(
+      "runtime.invalid_definition",
+      `[Sixb] Role '${id}' grants must not be empty.`
+    )
   }
 
   return {

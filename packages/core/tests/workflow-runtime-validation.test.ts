@@ -8,7 +8,6 @@ import {
   prop,
   ref,
   stringEnum,
-  WorkflowValidationError,
 } from "../src"
 import {
   snapshotWorkflowActionInput,
@@ -104,7 +103,7 @@ describe("workflow runtime validation", () => {
         value: {},
         valueTypesById,
       })
-    ).toThrow(WorkflowValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_input" }))
     expect(() =>
       validateWorkflowInput({
         workflow,
@@ -122,7 +121,7 @@ describe("workflow runtime validation", () => {
         },
         valueTypesById,
       })
-    ).toThrow(WorkflowValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_input" }))
     expect(() =>
       validateWorkflowInput({
         workflow,
@@ -142,7 +141,7 @@ describe("workflow runtime validation", () => {
         },
         valueTypesById,
       })
-    ).toThrow(WorkflowValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_input" }))
     expect(() =>
       validateWorkflowInput({
         workflow,
@@ -204,7 +203,7 @@ describe("workflow runtime validation", () => {
         },
         valueTypesById,
       })
-    ).toThrow(WorkflowValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_input" }))
     expect(() =>
       validateWorkflowStepOutput({
         workflowId: workflow.id,
@@ -293,7 +292,7 @@ describe("workflow runtime validation", () => {
         },
         valueTypesById,
       })
-    ).toThrow(WorkflowValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_input" }))
 
     expect(() =>
       validateWorkflowInterventionDefaultResponse({
@@ -419,7 +418,7 @@ describe("workflow runtime validation", () => {
           callback: () => undefined,
         },
       })
-    ).toThrow(WorkflowValidationError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_input" }))
 
     expect(() =>
       snapshotWorkflowActionInput({

@@ -1,4 +1,4 @@
-import { MaterializationValidationError } from "../../materialization/errors"
+import { SixbError } from "../../errors"
 
 export interface MaterializationBatching {
   readonly sourceStageRows: number
@@ -23,8 +23,9 @@ export function resolveMaterializationBatching(
   const resolved = { ...DEFAULT_MATERIALIZATION_BATCHING, ...overrides }
   for (const [name, value] of Object.entries(resolved)) {
     if (!Number.isSafeInteger(value) || value <= 0) {
-      throw new MaterializationValidationError(
-        `Materialization batching '${name}' must be a positive safe integer.`
+      throw new SixbError(
+        "ontology.invalid_value",
+        `[Sixb] Materialization batching '${name}' must be a positive safe integer.`
       )
     }
   }

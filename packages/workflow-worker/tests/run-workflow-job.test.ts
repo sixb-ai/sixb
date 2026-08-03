@@ -22,10 +22,9 @@ import {
   Sixb,
   SYSTEM_PRINCIPAL,
   type WorkflowDefinition,
-  WorkflowValidationError,
 } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import type { ActionRunStorage, WorkflowRunStorage } from "@sixb/core/storage"
-import { WorkflowWorkerError } from "../src/errors"
 import { EventsRuntimeWorkflowRunObserver } from "../src/events"
 import { runWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"
 import type { WorkflowRunObserver, WorkflowWorkerContext } from "../src/types"
@@ -1037,7 +1036,7 @@ describe("runWorkflowJob", () => {
           },
         },
       })
-    ).rejects.toBeInstanceOf(WorkflowValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     const run = await sixb.storage.workflowRuns!.getById({
       projectId: sixb.id,
@@ -1073,7 +1072,7 @@ describe("runWorkflowJob", () => {
           input: {},
         },
       })
-    ).rejects.toBeInstanceOf(WorkflowValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     const runs = await sixb.storage.workflowRuns!.list({
       projectId: sixb.id,
@@ -1114,7 +1113,7 @@ describe("runWorkflowJob", () => {
           },
         },
       })
-    ).rejects.toBeInstanceOf(WorkflowValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     const run = await sixb.storage.workflowRuns!.getById({
       projectId: sixb.id,
@@ -1145,7 +1144,7 @@ describe("runWorkflowJob", () => {
           },
         },
       })
-    ).rejects.toBeInstanceOf(WorkflowValidationError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
 
     const run = await sixb.storage.workflowRuns!.getById({
       projectId: sixb.id,
@@ -1707,7 +1706,7 @@ describe("runWorkflowJob", () => {
       })
       .then(findBestInvoice)
       .then(reviewInvoiceMatch, () => {
-        throw new WorkflowWorkerError("mapper exploded")
+        throw new SixbError("workflow.failed", "mapper exploded")
       })
     const sixb = createSixb({ workflows: [workflow] })
 

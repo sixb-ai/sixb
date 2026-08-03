@@ -1,12 +1,5 @@
 import { describe, expect, mock, test } from "bun:test"
-import {
-  defineObjectType,
-  link,
-  ObjectNotFoundError,
-  OntologyValidationError,
-  prop,
-  Sixb,
-} from "../src"
+import { defineObjectType, link, prop, Sixb } from "../src"
 import type { EventsRuntime } from "../src/events"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
@@ -212,7 +205,7 @@ describe("upsertLinkBatch", () => {
     expect(links).toHaveLength(2)
   })
 
-  test("ObjectNotFoundError per-item for missing source/target", async () => {
+  test("object-not-found per-item for missing source/target", async () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
@@ -239,13 +232,13 @@ describe("upsertLinkBatch", () => {
 
     expect(results[0].ok).toBe(false)
     if (!results[0].ok) {
-      expect(results[0].error).toBeInstanceOf(ObjectNotFoundError)
+      expect(results[0].error).toHaveProperty("code", "storage.object_not_found")
       expect(results[0].error.message).toContain("Source object not found")
     }
 
     expect(results[1].ok).toBe(false)
     if (!results[1].ok) {
-      expect(results[1].error).toBeInstanceOf(ObjectNotFoundError)
+      expect(results[1].error).toHaveProperty("code", "storage.object_not_found")
       expect(results[1].error.message).toContain("Target object not found")
     }
   })
@@ -276,7 +269,7 @@ describe("upsertLinkBatch", () => {
     expect(results).toHaveLength(1)
     expect(results[0].ok).toBe(false)
     if (!results[0].ok) {
-      expect(results[0].error).toBeInstanceOf(OntologyValidationError)
+      expect(results[0].error).toHaveProperty("code", "ontology.invalid_value")
     }
   })
 

@@ -1,6 +1,6 @@
 import type { ConnectionOptions, NatsConnection } from "@nats-io/nats-core"
 import { connect } from "@nats-io/transport-node"
-import { NatsBrokerError } from "./errors"
+import { natsBrokerError } from "./errors"
 
 /**
  * Lazily manages a single NATS connection.
@@ -46,7 +46,7 @@ export class NatsConnectionManager {
       } catch (error) {
         // Clear so the next caller can retry from scratch.
         this.connectPromise = undefined
-        throw new NatsBrokerError("Failed to connect to NATS", { cause: error })
+        throw natsBrokerError("Failed to connect to NATS", { cause: error })
       }
     })()
 

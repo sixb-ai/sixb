@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { FileRef } from "../src"
 import { fileNameFor, InMemoryBlobStorage, isFileRef } from "../src"
-import { BlobStorageError } from "../src/blob-storage"
 
 const encoder = new TextEncoder()
 
@@ -85,7 +84,7 @@ describe("InMemoryBlobStorage", () => {
     const store = new InMemoryBlobStorage()
 
     await expect(store.stat("blob_missing")).resolves.toBeNull()
-    await expect(store.open("blob_missing")).rejects.toBeInstanceOf(BlobStorageError)
+    await expect(store.open("blob_missing")).rejects.toHaveProperty("code", "storage.blob_failed")
     await expect(store.open("blob_missing")).rejects.toThrow("Unknown blob 'blob_missing'")
   })
 })

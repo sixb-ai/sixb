@@ -17,6 +17,7 @@ import {
   getDatasetRowValidationError,
   type LakeStorage,
 } from "@sixb/core"
+import { SixbError } from "@sixb/core/errors"
 import {
   type BeginDatasetWriteInput,
   type CommitDatasetWriteInput,
@@ -24,7 +25,6 @@ import {
   type DatasetVersion,
   type DatasetWriteCommitResult,
   type DatasetWriteMode,
-  LakeStorageError,
   type LakeWriteSession,
   mergeStrictDatasetDefinition,
   type ReadDatasetRowsInput,
@@ -66,7 +66,7 @@ class LocalLakeWriteSession implements LakeWriteSession {
     for await (const row of rows) {
       const validationError = getDatasetRowValidationError(row, this.input.dataset)
       if (validationError) {
-        throw new LakeStorageError(`[LakeLocal] ${validationError}`)
+        throw new SixbError("storage.lake_failed", `[LakeLocal] ${validationError}`)
       }
       lines.push(`${JSON.stringify(row)}\n`)
       this.rowKeys.push(rowContentKey(row, this.input.dataset.schema))
@@ -102,7 +102,7 @@ class LocalLakeWriteSession implements LakeWriteSession {
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new LakeStorageError("[LakeLocal] Write session is already closed")
+      throw new SixbError("storage.lake_failed", "[LakeLocal] Write session is already closed")
     }
   }
 
@@ -164,7 +164,8 @@ export class LocalLakeStorage implements LakeStorage {
 
     if (failures.length > 0) {
       const details = failures.join("\n")
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[SixbLake] Lake dataset definition check failed for ${failures.length} dataset(s).\n${details}`
       )
     }
@@ -239,7 +240,10 @@ export class LocalLakeStorage implements LakeStorage {
   async beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession> {
     const definition = await this.getDataset(input.dataset.id)
     if (!definition) {
-      throw new LakeStorageError(`[LakeLocal] Unknown dataset '${input.dataset.id}'`)
+      throw new SixbError(
+        "storage.lake_failed",
+        `[LakeLocal] Unknown dataset '${input.dataset.id}'`
+      )
     }
 
     await this.ensureBaseDirs()
@@ -280,7 +284,7 @@ export class LocalLakeStorage implements LakeStorage {
   async *readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {
     const definition = await this.getDataset(input.datasetId)
     if (!definition) {
-      throw new LakeStorageError(`[LakeLocal] Unknown dataset '${input.datasetId}'`)
+      throw new SixbError("storage.lake_failed", `[LakeLocal] Unknown dataset '${input.datasetId}'`)
     }
 
     const version =
@@ -289,7 +293,8 @@ export class LocalLakeStorage implements LakeStorage {
         : await this.getVersion(input.datasetId, input.versionId)
 
     if (!version) {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[LakeLocal] No committed version found for dataset '${input.datasetId}'`
       )
     }
@@ -326,7 +331,10 @@ export class LocalLakeStorage implements LakeStorage {
   async commitWrite(options: CommitWriteInput): Promise<DatasetWriteCommitResult> {
     const definition = await this.getDataset(options.write.dataset.id)
     if (!definition) {
-      throw new LakeStorageError(`[LakeLocal] Unknown dataset '${options.write.dataset.id}'`)
+      throw new SixbError(
+        "storage.lake_failed",
+        `[LakeLocal] Unknown dataset '${options.write.dataset.id}'`
+      )
     }
 
     await this.ensureDatasetDirs(options.write.dataset.id)
@@ -335,7 +343,8 @@ export class LocalLakeStorage implements LakeStorage {
     if (options.commit?.expectedLatestVersionId !== undefined) {
       const actual = latestVersion?.versionId
       if (actual !== options.commit.expectedLatestVersionId) {
-        throw new LakeStorageError(
+        throw new SixbError(
+          "storage.lake_failed",
           `[LakeLocal] Optimistic commit failed for dataset '${options.write.dataset.id}': expected latest version '${options.commit.expectedLatestVersionId}', found '${actual ?? "none"}'`
         )
       }
@@ -474,7 +483,8 @@ export class LocalLakeStorage implements LakeStorage {
   }): Promise<void> {
     const parentRowsPath = this.rowsPath(options.datasetId, options.parentVersionId)
     if (!(await pathExists(parentRowsPath))) {
-      throw new LakeStorageError(
+      throw new SixbError(
+        "storage.lake_failed",
         `[LakeLocal] Missing parent rows for dataset '${options.datasetId}' version '${options.parentVersionId}'`
       )
     }

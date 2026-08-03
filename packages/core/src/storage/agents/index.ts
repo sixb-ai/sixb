@@ -1,5 +1,5 @@
 export type { AgentStorageErrorReason } from "./errors"
-export { AgentStorageError } from "./errors"
+export { agentStorageError, agentStorageErrorReason } from "./errors"
 export type { InMemoryAgentStorageSnapshot } from "./in-memory"
 export { InMemoryAgentStorage } from "./in-memory"
 export type {

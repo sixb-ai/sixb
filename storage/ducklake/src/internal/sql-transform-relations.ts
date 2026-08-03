@@ -1,9 +1,6 @@
 import { randomUUID } from "node:crypto"
-import {
-  LakeStorageError,
-  type SqlTransformBody,
-  type SqlTransformRelation,
-} from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
+import type { SqlTransformBody, SqlTransformRelation } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { encodeDatasetTableName } from "./names"
 import { qualifiedTableName } from "./sql"
@@ -41,7 +38,10 @@ export function renderDuckLakeSqlTransformSql(input: RenderDuckLakeSqlTransformS
   const sql = input.sql(context.relations)
 
   if (typeof sql !== "string") {
-    throw new LakeStorageError("[SixbDuckLake] SQL transform body must return a SQL string.")
+    throw new SixbError(
+      "storage.lake_failed",
+      "[SixbDuckLake] SQL transform body must return a SQL string."
+    )
   }
 
   return context.render(sql)
@@ -93,7 +93,8 @@ function renderDuckLakeSourceRelation(
 }
 
 function throwUnresolvedPlaceholder(): never {
-  throw new LakeStorageError(
+  throw new SixbError(
+    "storage.lake_failed",
     "[SixbDuckLake] SQL transform contains an unresolved relation placeholder."
   )
 }

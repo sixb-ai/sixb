@@ -21,7 +21,7 @@ import {
 import {
   createTransactionStorageProxy,
   type ObjectStorage,
-  StorageTransactionError,
+  storageTransactionError,
   throwNestedStorageTransaction,
 } from "@sixb/core/storage"
 import { PgAgentStorage } from "./agents"
@@ -253,7 +253,7 @@ export class PostgresStorage implements MigrationCapableStorage {
       )
     } catch (error) {
       if (isRetryableTransactionConflict(error)) {
-        throw new StorageTransactionError(
+        throw storageTransactionError(
           "[SixbPg] Storage transaction failed due to a serialization conflict or deadlock and may be retried.",
           { cause: error, reason: "serialization_failure" }
         )
@@ -264,7 +264,7 @@ export class PostgresStorage implements MigrationCapableStorage {
 
   private assertRootOperationAvailable(): void {
     if (!this.transactionScope.getStore()) return
-    throw new StorageTransactionError(
+    throw storageTransactionError(
       "[SixbPg] Root storage cannot be used inside a transaction callback; use the provided tx storage."
     )
   }

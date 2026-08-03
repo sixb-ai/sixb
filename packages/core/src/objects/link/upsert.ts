@@ -26,7 +26,7 @@ export async function upsertLink(
   assertCanWriteLink(ctx, { sourceTypeId: objectType.id, targetTypeId })
   const endpoints = { objectType, sourceId, targetTypeId, targetId }
 
-  // Endpoint reads keep the public `ObjectNotFoundError` contract; the Materializer independently
+  // Endpoint reads keep the public `storage.object_not_found` contract; the Materializer independently
   // refuses a link whose endpoints are not effective when it commits. This runs before property
   // normalization so the same input reports the same error class here and through the batch APIs,
   // which check endpoints first inside `plan`.

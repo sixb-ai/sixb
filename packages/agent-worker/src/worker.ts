@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import type { AgentDefinition, Principal } from "@sixb/core"
-import { SixbError } from "@sixb/core/errors"
+import { isSixbError, SixbError } from "@sixb/core/errors"
 import {
   createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
@@ -9,14 +9,14 @@ import {
 } from "@sixb/core/internal/agents"
 import { reportBackgroundTaskFailure, reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
-import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
+import { isAbortError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
-import { AgentStorageError, toSixbFailure } from "@sixb/core/storage"
+import { agentStorageErrorReason, toSixbFailure } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
-import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } from "./errors"
-import { finishRunOrThrow } from "./finalize"
+import { agentWorkerError, isAgentFinalizationFailure } from "./errors"
+import { finishRunOrThrow, isTerminalOrExecutionGone } from "./finalize"
 import { reconcileAgentExecutionIdentities, reconcileAgentExecutionIdentity } from "./identity"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
 import {
@@ -166,7 +166,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     const { agentId, threadId, runId, triggerMessageId } = job.payload
     const agent = this.sixb.agents.getById(agentId)
     if (!agent) {
-      const error = new AgentWorkerError(`Unknown agent '${agentId}'.`)
+      const error = agentWorkerError(`Unknown agent '${agentId}'.`)
       const run = await context.storage.agents.runs.getById({ projectId: context.id, id: runId })
       if (
         run?.status === "queued" &&
@@ -204,7 +204,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     const run = reservation.run
     const executionToken = run.execution?.token
     if (!executionToken) {
-      throw new AgentWorkerError(`Agent run '${run.id}' has no execution token.`)
+      throw agentWorkerError(`Agent run '${run.id}' has no execution token.`)
     }
 
     let environment: AgentExecutionEnvironment | null = null
@@ -223,7 +223,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
           executionToken,
           renewed.leaseExpiresAt
         ).catch((error) => {
-          if (!isExecutionGone(error)) {
+          if (!isTerminalOrExecutionGone(error)) {
             console.error(
               `[SixbAgentWorker] Could not project queue ownership for agent run '${run.id}'.`,
               error
@@ -252,19 +252,19 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       // Queue ownership or the durable execution token was lost. Touch nothing; the current
       // delivery will reconcile the run.
       if (
-        error instanceof AgentExecutionLostError ||
-        error instanceof QueueDeliveryLeaseLostError ||
-        signal.reason instanceof QueueDeliveryLeaseLostError
+        isSixbError(error, "agent.execution_lost") ||
+        isSixbError(error, "queue.lease_lost") ||
+        isSixbError(signal.reason, "queue.lease_lost")
       ) {
         return
       }
       // The turn succeeded but its finalize could not be recorded (storage down). Don't ack: let the
       // job redeliver so a later delivery finalizes the run — onExecutionError turns this into retry.
-      if (error instanceof AgentFinalizationError) {
+      if (isAgentFinalizationFailure(error)) {
         throw error
       }
       // Otherwise record the run's terminal fate. `recordFate` retries transient blips; if it cannot
-      // record the fate at all it raises `AgentFinalizationError`, which propagates here so the job
+      // record the fate at all it raises a finalization failure, which propagates here so the job
       // is redelivered rather than acked with the thread left silently locked. A user cancel is
       // detected off its own signal so it records `cancelled` however the aborted stream surfaced.
       const aborted = signal.aborted || cancel.signal.aborted || isAbortError(error)
@@ -299,13 +299,13 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
   ): Promise<QueueWorkerFailureDecision> {
     // We could not finalize the run (storage unavailable). Redeliver so a later delivery records the
     // fate — but cap the redeliveries so a persistent failure dead-letters instead of churning.
-    if (error instanceof AgentFinalizationError) {
+    if (isAgentFinalizationFailure(error)) {
       if (claimed.job.attempt < MAX_AGENT_DELIVERY_ATTEMPTS) {
         return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
       }
       return { kind: "fail" }
     }
-    if (error instanceof AgentWorkerError) {
+    if (isSixbError(error, "agent.failed")) {
       return { kind: "fail" }
     }
 
@@ -351,7 +351,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     }
     // Shutdown reached us before we could record the run's fate: redeliver so another process
     // finalizes it. Otherwise the run is already terminal, so fail (no redelivery needed).
-    if (error instanceof AgentFinalizationError) {
+    if (isAgentFinalizationFailure(error)) {
       return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
     }
     return { kind: "fail" }
@@ -455,7 +455,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
 
   private requireContext(): AgentWorkerContext {
     if (!this.context) {
-      throw new AgentWorkerError("Agent worker has no agent storage configured.")
+      throw agentWorkerError("Agent worker has no agent storage configured.")
     }
     return this.context
   }
@@ -472,14 +472,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       id: input.runId,
     })
     if (!run) {
-      throw new AgentWorkerError(`Queued agent run '${input.runId}' was not found.`)
+      throw agentWorkerError(`Queued agent run '${input.runId}' was not found.`)
     }
     if (
       run.threadId !== input.threadId ||
       run.agentId !== input.agent.id ||
       run.triggerMessageId !== input.triggerMessageId
     ) {
-      throw new AgentWorkerError(`Agent run '${input.runId}' does not match its queued request.`)
+      throw agentWorkerError(`Agent run '${input.runId}' does not match its queued request.`)
     }
     if (run.status === "queued") {
       return {
@@ -504,7 +504,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       })
       return { kind: "run", run: reclaimed }
     } catch (error) {
-      if (error instanceof AgentStorageError && error.reason === "invalid_state") {
+      if (agentStorageErrorReason(error) === "invalid_state") {
         return { kind: "skip" }
       }
       throw error
@@ -578,7 +578,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       })
     } catch (finalizeError) {
       // Execution already lost / run already terminal — nothing more to record.
-      if (finalizeError instanceof AgentExecutionLostError) {
+      if (isSixbError(finalizeError, "agent.execution_lost")) {
         return undefined
       }
       // Storage stayed unavailable across retries: propagate so the job is redelivered, not acked.
@@ -590,13 +590,13 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
 function buildAgentContext(sixb: AgentWorkerSixb, options: AgentWorkerOptions): AgentWorkerContext {
   const storage = sixb.storage
   if (!storage.agents) {
-    throw new AgentWorkerError("Agent workers require storage.agents support.")
+    throw agentWorkerError("Agent workers require storage.agents support.")
   }
   if (!storage.auth) {
-    throw new AgentWorkerError("Agent workers require storage.auth support.")
+    throw agentWorkerError("Agent workers require storage.auth support.")
   }
   if (!sixb.sandboxes) {
-    throw new AgentWorkerError(
+    throw agentWorkerError(
       "Agent workers require createSixb({ sandboxes }) for the built-in bash tool."
     )
   }
@@ -633,15 +633,6 @@ function freshExecution(queueLeaseExpiresAt: string): AgentRunExecution {
   }
 }
 
-function isExecutionGone(error: unknown): boolean {
-  return (
-    error instanceof AgentStorageError &&
-    (error.reason === "execution_lost" ||
-      error.reason === "invalid_state" ||
-      error.reason === "run_not_found")
-  )
-}
-
 function backoff(ms: number): string {
   return new Date(Date.now() + ms).toISOString()
 }
@@ -649,7 +640,7 @@ function backoff(ms: number): string {
 function normalizeRequiredString(value: string | undefined): string {
   const trimmed = value?.trim()
   if (!trimmed) {
-    throw new AgentWorkerError("Agent workers require options.apiBaseUrl.")
+    throw agentWorkerError("Agent workers require options.apiBaseUrl.")
   }
   return trimmed
 }
@@ -672,7 +663,7 @@ function normalizeConcurrency(value: number | undefined): number {
     return DEFAULT_AGENT_CONCURRENCY
   }
   if (!Number.isFinite(value) || value < 1) {
-    throw new AgentWorkerError("Agent worker concurrency must be at least 1.")
+    throw agentWorkerError("Agent worker concurrency must be at least 1.")
   }
   return Math.floor(value)
 }

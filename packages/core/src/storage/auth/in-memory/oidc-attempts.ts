@@ -1,5 +1,5 @@
 import { resolveAuthSessionAudience } from "../../../auth/audience"
-import { AuthStorageError } from "../errors"
+import { authStorageError } from "../../../storage/auth/errors"
 import type {
   AuthOidcAuthorizationAttemptStore,
   CreateOidcAuthorizationAttemptInput,
@@ -33,7 +33,7 @@ export class InMemoryAuthOidcAuthorizationAttemptStore
     const key = oidcAttemptKey(projectId, id)
 
     if (this.state.oidcAuthorizationAttempts.has(key)) {
-      throw new AuthStorageError(
+      throw authStorageError(
         "duplicate_oidc_attempt",
         `[Sixb] OIDC authorization attempt '${id}' already exists for project '${projectId}'.`
       )

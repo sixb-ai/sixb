@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  AgentRequestError,
   agentContext,
   agentContextIdentity,
   buildAgentSystemPrompt,
@@ -87,7 +86,7 @@ describe("agent context normalization", () => {
           origin: "explicit",
         },
       ])
-    ).toThrow(AgentRequestError)
+    ).toThrow(expect.objectContaining({ code: "runtime.invalid_input" }))
   })
 
   test("enforces entry count, JSON values, and UTF-8 byte budgets", () => {

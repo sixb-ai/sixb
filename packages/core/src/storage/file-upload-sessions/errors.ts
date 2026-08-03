@@ -5,11 +5,14 @@ import { SixbError, type SixbErrorCode, type SixbErrorOptions } from "../../erro
  * reason to an HTTP status (or any other transport) is the responsibility of the
  * boundary that surfaces it, not of core.
  */
-export type FileUploadSessionErrorReason =
-  | "not_found"
-  | "expired"
-  | "already_completed"
-  | "already_aborted"
+const FILE_UPLOAD_SESSION_ERROR_REASONS = [
+  "not_found",
+  "expired",
+  "already_completed",
+  "already_aborted",
+] as const
+
+export type FileUploadSessionErrorReason = (typeof FILE_UPLOAD_SESSION_ERROR_REASONS)[number]
 
 /**
  * One code per reason, because a boundary that can only read one of them cannot tell an unknown
@@ -26,17 +29,13 @@ const CODE_BY_REASON: Record<FileUploadSessionErrorReason, SixbErrorCode> = {
 /**
  * Error for file upload session invariants and invalid state transitions.
  */
-export class FileUploadSessionError extends SixbError {
-  override readonly name = "FileUploadSessionError"
-
-  constructor(
-    readonly reason: FileUploadSessionErrorReason,
-    message: string,
-    options: SixbErrorOptions = {}
-  ) {
-    super(CODE_BY_REASON[reason], message, {
-      ...options,
-      details: { reason, ...options.details },
-    })
-  }
+export function fileUploadSessionError(
+  reason: FileUploadSessionErrorReason,
+  message: string,
+  options: SixbErrorOptions = {}
+): SixbError {
+  return new SixbError(CODE_BY_REASON[reason], message, {
+    ...options,
+    details: { reason, ...options.details },
+  })
 }

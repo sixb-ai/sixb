@@ -6,9 +6,9 @@
  */
 
 import type { DatasetDefinition } from "../datasets"
+import { SixbError } from "../errors"
 import type { OntologyRegistry } from "../ontology"
 import type { ObjectType, Property } from "../ontology/types"
-import { ProjectionValidationError } from "./errors"
 import {
   computeProjectionOwnership,
   type ProjectionOwnershipRecord,
@@ -41,7 +41,8 @@ export function validatePropertyMapping(
   for (const key of mappingKeys) {
     if (!propertyIds.has(key)) {
       const available = [...propertyIds].sort().join(", ")
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Property '${key}' does not exist on object type '${objectType.id}'. ` +
           `Available properties: ${available}`
       )
@@ -51,7 +52,8 @@ export function validatePropertyMapping(
   // Rule 2: exactly one primary property
   const primaryProperties = objectType.properties.filter((p) => p.primary === true)
   if (primaryProperties.length !== 1) {
-    throw new ProjectionValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Object type '${objectType.id}' must have exactly one primary property, ` +
         `found ${primaryProperties.length}.`
     )
@@ -60,7 +62,8 @@ export function validatePropertyMapping(
   // Rule 3: primary property is in the mapping
   const primaryId = primaryProperties[0].id
   if (!(primaryId in mapping)) {
-    throw new ProjectionValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Primary property '${primaryId}' of object type '${objectType.id}' ` +
         `must be included in the property mapping.`
     )
@@ -91,7 +94,8 @@ export function validateAndLowerLinkMapping(
     // Rule 1: valid link id
     if (!linkIds.has(key)) {
       const available = [...linkIds].sort().join(", ")
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Link '${key}' does not exist on object type '${objectType.id}'. ` +
           `Available links: ${available}`
       )
@@ -99,7 +103,8 @@ export function validateAndLowerLinkMapping(
 
     // Rule 2: key matches descriptor.linkId
     if (key !== descriptor.linkId) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Link mapping key '${key}' does not match descriptor linkId '${descriptor.linkId}'.`
       )
     }
@@ -107,13 +112,15 @@ export function validateAndLowerLinkMapping(
     // Rule 3: single concrete target
     const link = linksById.get(key)!
     if (Array.isArray(link.targetObjectTypeId)) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Link '${key}' on object type '${objectType.id}' has a polymorphic target. ` +
           `FK projection of polymorphic links is not yet supported.`
       )
     }
     if (link.targetObjectTypeId === "*") {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Link '${key}' on object type '${objectType.id}' has a wildcard target. ` +
           `FK projection of wildcard links is not supported.`
       )
@@ -122,12 +129,14 @@ export function validateAndLowerLinkMapping(
     const sourcePropertyId = descriptor.sourcePropertyId
     const sourceField = descriptor.sourceField
     if (sourcePropertyId && sourceField) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `FK link '${key}' must use either sourceProperty or sourceField, not both.`
       )
     }
     if (!sourcePropertyId && !sourceField) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `FK link '${key}' must declare sourceProperty or sourceField.`
       )
     }
@@ -139,7 +148,8 @@ export function validateAndLowerLinkMapping(
     // Rule 4: source property exists on the type
     if (!propertyIds.has(sourcePropertyId)) {
       const available = [...propertyIds].sort().join(", ")
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Source property '${sourcePropertyId}' does not exist on ` +
           `object type '${objectType.id}'. Available properties: ${available}`
       )
@@ -147,7 +157,8 @@ export function validateAndLowerLinkMapping(
 
     // Rule 5: source property is in the property mapping
     if (!(sourcePropertyId in propertyMapping)) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `Source property '${sourcePropertyId}' for link '${key}' ` +
           `must be included in the property mapping.`
       )
@@ -181,13 +192,15 @@ export function validateLinkProjectionTarget(linkToken: {
   readonly targetObjectTypeId: string | readonly string[]
 }): void {
   if (Array.isArray(linkToken.targetObjectTypeId)) {
-    throw new ProjectionValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Link '${linkToken.id}' has a polymorphic target. ` +
         `Link projection of polymorphic links is not yet supported.`
     )
   }
   if (linkToken.targetObjectTypeId === "*") {
-    throw new ProjectionValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `Link '${linkToken.id}' has a wildcard target. ` +
         `Link projection of wildcard links is not supported.`
     )
@@ -212,12 +225,14 @@ export function validateTelemetryProjectionFieldMapping(
 ): Property {
   const property = objectType.properties.find((candidate) => candidate.id === projection.propertyId)
   if (!property) {
-    throw new ProjectionValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `${prefix}: unknown property "${projection.propertyId}" on type "${projection.objectTypeId}"`
     )
   }
   if (property.mode !== "telemetry") {
-    throw new ProjectionValidationError(
+    throw new SixbError(
+      "runtime.invalid_definition",
       `${prefix}: property "${projection.propertyId}" on type "${projection.objectTypeId}" must be telemetry-enabled`
     )
   }
@@ -230,7 +245,8 @@ export function validateTelemetryProjectionFieldMapping(
   ] as const
   for (const [fieldRole, columnName] of mappedFields) {
     if (!datasetColumnNames.has(columnName)) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: ${fieldRole} field "${columnName}" references unknown dataset column ` +
           `on dataset "${projection.datasetId}"`
       )
@@ -301,7 +317,8 @@ export function validateProjectionsAtStartup(
     const prefix = `Projection "${projection.id}"`
     const dataset = datasetsById.get(projection.datasetId)
     if (!dataset) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: unknown dataset "${projection.datasetId}". ` +
           `Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
       )
@@ -309,7 +326,8 @@ export function validateProjectionsAtStartup(
 
     const objectType = objectTypesById.get(projection.objectTypeId)
     if (!objectType) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: unknown object type "${projection.objectTypeId}"`
       )
     }
@@ -318,19 +336,22 @@ export function validateProjectionsAtStartup(
     const propertyIds = new Set(objectType.properties.map((p) => p.id))
     for (const [propId, columnName] of Object.entries(projection.properties)) {
       if (!propertyIds.has(propId)) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `${prefix}: unknown property "${propId}" on type "${projection.objectTypeId}"`
         )
       }
       if (!datasetColumnNames.has(columnName)) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `${prefix}: property "${propId}" references unknown dataset column "${columnName}" ` +
             `on dataset "${projection.datasetId}"`
         )
       }
       const property = objectType.properties.find((candidate) => candidate.id === propId)
       if (property?.mode === "telemetry") {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `[Sixb] ${prefix}: source mappings cannot own telemetry property "${projection.objectTypeId}.${propId}"`
         )
       }
@@ -338,7 +359,8 @@ export function validateProjectionsAtStartup(
 
     const primaryId = primaryByTypeId.get(projection.objectTypeId)!
     if (!(primaryId in projection.properties)) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: primary property "${primaryId}" must be in property mapping`
       )
     }
@@ -346,55 +368,65 @@ export function validateProjectionsAtStartup(
     const linkIds = new Set(objectType.links.map((l) => l.id))
     for (const [linkId, fk] of Object.entries(projection.links)) {
       if (!linkIds.has(linkId)) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `${prefix}: FK link "${linkId}" references unknown link on type "${projection.objectTypeId}"`
         )
       }
       if (fk.linkId !== linkId) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `${prefix}: FK link mapping key "${linkId}" does not match descriptor linkId "${fk.linkId}"`
         )
       }
       const sourcePropertyId = fk.sourcePropertyId
       const sourceField = fk.sourceField
       if (sourcePropertyId && sourceField) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `${prefix}: FK link "${linkId}" must use either sourcePropertyId or sourceField, not both`
         )
       }
       if (!sourcePropertyId && !sourceField) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `${prefix}: FK link "${linkId}" must declare sourcePropertyId or sourceField`
         )
       }
       if (sourcePropertyId && !propertyIds.has(sourcePropertyId)) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `${prefix}: FK link "${linkId}" source property "${sourcePropertyId}" does not exist on type "${projection.objectTypeId}"`
         )
       }
       if (sourcePropertyId && !(sourcePropertyId in projection.properties)) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `${prefix}: FK link "${linkId}" source property "${sourcePropertyId}" must be in property mapping`
         )
       }
       if (sourceField && !datasetColumnNames.has(sourceField)) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `${prefix}: FK link "${linkId}" source field "${sourceField}" references unknown dataset column on dataset "${projection.datasetId}"`
         )
       }
       if (!objectTypesById.has(fk.targetObjectTypeId)) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `${prefix}: FK link "${linkId}" target type "${fk.targetObjectTypeId}" is unknown`
         )
       }
       if (!primaryByTypeId.has(fk.targetObjectTypeId)) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `${prefix}: FK link "${linkId}" target type "${fk.targetObjectTypeId}" has no primary property`
         )
       }
       const link = objectType.links.find((candidate) => candidate.id === linkId)!
       if (!ontology.isValidLinkTarget(link.targetObjectTypeId, fk.targetObjectTypeId)) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `${prefix}: FK link "${linkId}" target type "${fk.targetObjectTypeId}" is not compatible with its declared target`
         )
       }
@@ -411,54 +443,63 @@ export function validateProjectionsAtStartup(
     const prefix = `Projection "${projection.id}"`
     const dataset = datasetsById.get(projection.datasetId)
     if (!dataset) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: unknown dataset "${projection.datasetId}". ` +
           `Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
       )
     }
 
     if (!objectTypesById.has(projection.sourceObjectTypeId)) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: unknown source type "${projection.sourceObjectTypeId}"`
       )
     }
     if (!objectTypesById.has(projection.targetObjectTypeId)) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: unknown target type "${projection.targetObjectTypeId}"`
       )
     }
     const sourceType = objectTypesById.get(projection.sourceObjectTypeId)!
     const link = sourceType.links.find((candidate) => candidate.id === projection.linkId)
     if (!link) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: link "${projection.linkId}" does not exist on source type "${projection.sourceObjectTypeId}"`
       )
     }
     if (!ontology.isValidLinkTarget(link.targetObjectTypeId, projection.targetObjectTypeId)) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: target type "${projection.targetObjectTypeId}" is not compatible with link "${projection.linkId}"`
       )
     }
     const datasetColumnNames = new Set(dataset.schema.columns.map((column) => column.name))
     if (!datasetColumnNames.has(projection.sourceField)) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: source field "${projection.sourceField}" references unknown dataset column ` +
           `on dataset "${projection.datasetId}"`
       )
     }
     if (!datasetColumnNames.has(projection.targetField)) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: target field "${projection.targetField}" references unknown dataset column ` +
           `on dataset "${projection.datasetId}"`
       )
     }
     if (!primaryByTypeId.has(projection.sourceObjectTypeId)) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: source type "${projection.sourceObjectTypeId}" has no primary property`
       )
     }
     if (!primaryByTypeId.has(projection.targetObjectTypeId)) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: target type "${projection.targetObjectTypeId}" has no primary property`
       )
     }
@@ -474,7 +515,8 @@ export function validateProjectionsAtStartup(
     const prefix = `Projection "${projection.id}"`
     const dataset = datasetsById.get(projection.datasetId)
     if (!dataset) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: unknown dataset "${projection.datasetId}". ` +
           `Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
       )
@@ -482,7 +524,8 @@ export function validateProjectionsAtStartup(
 
     const objectType = objectTypesById.get(projection.objectTypeId)
     if (!objectType) {
-      throw new ProjectionValidationError(
+      throw new SixbError(
+        "runtime.invalid_definition",
         `${prefix}: unknown object type "${projection.objectTypeId}"`
       )
     }
@@ -513,7 +556,8 @@ function validateMaterializationOntologyConstraints(ontology: OntologyRegistry):
   for (const objectType of ontology.getObjectTypesById().values()) {
     for (const property of objectType.properties) {
       if (property.mode === "telemetry" && property.required === true) {
-        throw new ProjectionValidationError(
+        throw new SixbError(
+          "runtime.invalid_definition",
           `[Sixb] Telemetry property '${objectType.id}.${property.id}' cannot be required.`
         )
       }
@@ -521,7 +565,8 @@ function validateMaterializationOntologyConstraints(ontology: OntologyRegistry):
     for (const link of objectType.links) {
       for (const property of link.properties ?? []) {
         if (property.mode === "telemetry") {
-          throw new ProjectionValidationError(
+          throw new SixbError(
+            "runtime.invalid_definition",
             `[Sixb] Link property '${objectType.id}.${link.id}.${property.id}' cannot use telemetry mode.`
           )
         }

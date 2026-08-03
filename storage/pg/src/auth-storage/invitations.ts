@@ -5,7 +5,7 @@ import type {
   ListAuthInvitationsInput,
   ListAuthInvitationsResult,
 } from "@sixb/core/storage"
-import { AuthStorageError } from "@sixb/core/storage"
+import { authStorageError } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 import {
   authLockKey,
@@ -82,7 +82,7 @@ export class PgAuthInvitationStore implements AuthInvitationStore {
       }
 
       if (await getInvitationById(tx, { projectId, id })) {
-        throw new AuthStorageError(
+        throw authStorageError(
           "duplicate_invitation",
           `[Sixb] Invitation '${id}' already exists but is not active for project '${projectId}'.`
         )

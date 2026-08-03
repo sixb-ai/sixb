@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { ConnectorNotFoundError, defineConnector, defineObjectType, prop, Sixb } from "../src"
+import { defineConnector, defineObjectType, prop, Sixb } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -110,7 +110,7 @@ describe("connectors", () => {
       ...createTestRuntimeDeps(),
     })
 
-    await expect(sixb.connector(unknown)).rejects.toBeInstanceOf(ConnectorNotFoundError)
+    await expect(sixb.connector(unknown)).rejects.toHaveProperty("code", "connector.not_found")
     await expect(sixb.connector(unknown)).rejects.toThrow("Unknown connector 'unknown'")
   })
 

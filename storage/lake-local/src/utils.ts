@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { readFile, rename, stat, writeFile } from "node:fs/promises"
 import type { DatasetRow, DatasetSchema } from "@sixb/core"
-import { type DatasetVersion, LakeStorageError } from "@sixb/core/lake-storage"
+import { SixbError } from "@sixb/core/errors"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { StoredDatasetVersionManifest, StoredManifestInput } from "./types"
 
 export function encodeSegment(value: string): string {
@@ -11,13 +12,13 @@ export function encodeSegment(value: string): string {
 
 export function assertDatasetId(datasetId: string): void {
   if (datasetId.trim().length === 0) {
-    throw new LakeStorageError("[LakeLocal] Dataset id must not be empty")
+    throw new SixbError("storage.lake_failed", "[LakeLocal] Dataset id must not be empty")
   }
 }
 
 export function assertRow(row: DatasetRow): void {
   if (!row || typeof row !== "object" || Array.isArray(row)) {
-    throw new LakeStorageError("[LakeLocal] Dataset rows must be plain objects")
+    throw new SixbError("storage.lake_failed", "[LakeLocal] Dataset rows must be plain objects")
   }
 }
 

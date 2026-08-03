@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+import { SixbError } from "@sixb/core/errors"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowInterventionInput,
@@ -11,7 +12,6 @@ import type {
   WorkflowInterventionRecord,
   WorkflowInterventionStorage,
 } from "@sixb/core/storage"
-import { WorkflowInterventionError } from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "./migrations"
 import { isUniqueConstraintError } from "./storage-errors"
 import {
@@ -83,7 +83,7 @@ export class SqliteWorkflowInterventionStorage implements WorkflowInterventionSt
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        throw new WorkflowInterventionError(
+        throw new SixbError(
           "storage.conflict",
           `[SixbSqlite] Workflow intervention '${input.id}' already exists for project '${input.projectId}'.`
         )
@@ -293,15 +293,15 @@ export class SqliteWorkflowInterventionStorage implements WorkflowInterventionSt
       .get(projectId, id) as WorkflowInterventionDatabaseRow | null
 
     if (!row) {
-      throw new WorkflowInterventionError(
+      throw new SixbError(
         "workflow.intervention_not_found",
         `[SixbSqlite] Workflow intervention '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (row.status !== "pending") {
-      throw new WorkflowInterventionError(
-        "runtime.invalid_input",
+      throw new SixbError(
+        "storage.conflict",
         `[SixbSqlite] Workflow intervention '${id}' for project '${projectId}' is not pending.`
       )
     }
@@ -315,7 +315,7 @@ export class SqliteWorkflowInterventionStorage implements WorkflowInterventionSt
       .get(projectId, id) as WorkflowInterventionDatabaseRow | null
 
     if (!row) {
-      throw new WorkflowInterventionError(
+      throw new SixbError(
         "runtime.invalid_input",
         `[SixbSqlite] Failed to load workflow intervention '${id}' for project '${projectId}'.`
       )
@@ -372,7 +372,7 @@ function rowToWorkflowInterventionRecord(
 
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
-    throw new WorkflowInterventionError(
+    throw new SixbError(
       "runtime.invalid_input",
       `[SixbSqlite] Workflow intervention ${fieldName} must be a non-negative integer.`
     )

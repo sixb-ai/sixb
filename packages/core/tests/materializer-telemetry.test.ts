@@ -56,7 +56,7 @@ describe("ontology materializer telemetry", () => {
         },
         points: [{ series, value: 20, at: "2026-01-01T01:00:00Z" }],
       })
-    ).rejects.toMatchObject({ kind: "run-correlation" })
+    ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "run-correlation" } })
     await expect(
       materializer.projections.finishRun({
         protocol: "telemetry",
@@ -65,7 +65,7 @@ describe("ontology materializer telemetry", () => {
         execution,
         status: "failed",
       })
-    ).rejects.toMatchObject({ kind: "run-correlation" })
+    ).rejects.toMatchObject({ code: "storage.conflict", details: { kind: "run-correlation" } })
   })
 
   test("persists telemetry EOF atomically with terminal success", async () => {
@@ -728,7 +728,7 @@ describe("ontology materializer telemetry", () => {
         source: { kind: "runtime", requestId: "missing-object" },
         points: [{ series, value: 20, at: "2026-01-01T01:00:00Z" }],
       })
-    ).rejects.toThrow("Cannot append telemetry to missing object 'Device:one'")
+    ).rejects.toThrow("Cannot append telemetry to missing object: Device:one")
 
     expect(
       await storage.timeseries.getHistory({

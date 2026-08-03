@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import { randomUUID } from "node:crypto"
+import { materializationConflict } from "@sixb/core/internal/materialization"
 import {
   advanceProjectionTelemetry,
   assertGenericProgressDoesNotAdvanceTelemetry,
@@ -41,7 +42,7 @@ import type {
   TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
 } from "@sixb/core/storage"
-import { ProjectionRunError, parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
@@ -176,7 +177,8 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
             )
         } catch (error) {
           if (isUniqueConstraintError(error)) {
-            throw new ProjectionRunError(
+            throw materializationConflict(
+              "run-correlation",
               `[SixbSqlite] Projection run '${input.id}' already exists for project '${input.projectId}'.`
             )
           }
@@ -547,7 +549,8 @@ function optionalDatabaseSafeInteger(value: number | null, fieldName: string): n
 
 function databaseSafeInteger(value: number, fieldName: string): number {
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new ProjectionRunError(
+    throw materializationConflict(
+      "run-correlation",
       `[SixbSqlite] Projection run persisted ${fieldName} is not a non-negative safe integer.`
     )
   }

@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { CreateWorkflowInterventionInput } from "@sixb/core/storage"
-import { WorkflowInterventionError } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { PgWorkflowInterventionStorage } from "../src/pg-workflow-intervention-storage"
 import { createTestStorage } from "./helpers"
@@ -136,10 +135,10 @@ describe("PgWorkflowInterventionStorage", () => {
         id: "submit-me",
         projectId: "my-app",
       })
-    ).rejects.toBeInstanceOf(WorkflowInterventionError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
     await expect(
       storage.workflowInterventions.create(createInterventionInput({ id: "submit-me" }))
-    ).rejects.toBeInstanceOf(WorkflowInterventionError)
+    ).rejects.toHaveProperty("code", "storage.conflict")
     await expect(
       storage.workflowInterventions.create(
         createInterventionInput({
@@ -147,7 +146,7 @@ describe("PgWorkflowInterventionStorage", () => {
           nodeIndex: -1,
         })
       )
-    ).rejects.toBeInstanceOf(WorkflowInterventionError)
+    ).rejects.toHaveProperty("code", "runtime.invalid_input")
   })
 
   test("PostgresStorage includes workflow intervention storage", () => {
