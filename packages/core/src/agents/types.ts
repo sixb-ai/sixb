@@ -1,4 +1,9 @@
 import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider"
+import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../connectors"
+import type { JsonValue } from "../json"
+import type { Logger } from "../logging"
+import type { InferSchema } from "../ontology/inference"
+import type { Schema } from "../ontology/types"
 import type { GroupDefinition } from "../security"
 
 export type {
@@ -31,6 +36,90 @@ export interface AgentLoopConfig {
   }
 }
 
+type Simplify<T> = { [K in keyof T]: T[K] } & {}
+type JsonifyAgentToolInput<T> = unknown extends T
+  ? JsonValue
+  : T extends Date
+    ? string
+    : T extends JsonValue
+      ? T
+      : T extends readonly (infer TItem)[]
+        ? JsonifyAgentToolInput<TItem>[]
+        : T extends object
+          ? { [K in keyof T]: JsonifyAgentToolInput<T[K]> }
+          : never
+
+/** A model-facing object shape expressed with Sixb's schema DSL. */
+export type AgentToolInputSchema = Readonly<Record<string, Schema>>
+
+/** Infer the handler input represented by an agent tool schema. */
+export type InferAgentToolInputSchema<TInput extends AgentToolInputSchema> =
+  string extends keyof TInput
+    ? Record<string, unknown>
+    : Simplify<{
+        -readonly [K in keyof TInput]: JsonifyAgentToolInput<InferSchema<TInput[K]>>
+      }>
+
+/** Identifies the agent execution that invoked a tool. */
+export interface AgentToolRunInfo {
+  readonly id: string
+  readonly agentId: string
+  readonly threadId?: string
+}
+
+/** The narrow, run-scoped surface passed to an agent tool handler. */
+export interface AgentToolRunContext<
+  TInput extends Record<string, unknown> = Record<string, unknown>,
+> {
+  readonly input: TInput
+  readonly signal: AbortSignal
+  readonly run: AgentToolRunInfo
+  connector<TAdapter extends ConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>
+  ): Promise<ConnectorClient<TAdapter>>
+  readonly logger: Logger
+}
+
+/** Agent tool handlers may return only values safe to persist in agent messages. */
+export type AgentToolHandlerResult = JsonValue | Promise<JsonValue>
+
+export type AgentToolHandler<TInput extends Record<string, unknown>> = {
+  bivarianceHack(context: AgentToolRunContext<TInput>): AgentToolHandlerResult
+}["bivarianceHack"]
+
+/** A reusable, inert model tool definition selected explicitly by an agent. */
+export interface AgentToolDefinition<
+  TName extends string = string,
+  TInput extends AgentToolInputSchema = AgentToolInputSchema,
+> {
+  readonly kind: "agentTool"
+  readonly name: TName
+  readonly description: string
+  readonly input: TInput
+  readonly handler: AgentToolHandler<InferAgentToolInputSchema<TInput>>
+}
+
+/** Infer the input received by a tool definition's handler. */
+export type InferAgentToolInput<TTool extends AgentToolDefinition> = InferAgentToolInputSchema<
+  TTool["input"]
+>
+
+export interface AgentToolRunBuilder<TName extends string, TInput extends AgentToolInputSchema> {
+  run(
+    handler: AgentToolHandler<InferAgentToolInputSchema<TInput>>
+  ): AgentToolDefinition<TName, TInput>
+}
+
+export interface AgentToolInputBuilder<TName extends string> {
+  input<const TInput extends AgentToolInputSchema>(
+    input: TInput
+  ): AgentToolRunBuilder<TName, TInput>
+}
+
+export interface AgentToolDescriptionBuilder<TName extends string> {
+  description(description: string): AgentToolInputBuilder<TName>
+}
+
 /**
  * Declarative config accepted by {@link defineAgent}.
  *
@@ -45,6 +134,8 @@ export interface DefineAgentConfig {
   readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
   readonly instructions: string
   readonly groups?: readonly GroupDefinition[]
+  /** Reusable tools this agent is explicitly allowed to call. */
+  readonly tools?: readonly AgentToolDefinition[]
   readonly loop?: AgentLoopConfig
 }
 
@@ -66,5 +157,7 @@ export interface AgentDefinition<TId extends string = string> {
   readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
   readonly instructions: string
   readonly groupIds: readonly string[]
+  /** Selected tool definitions, normalized to an empty array when omitted. */
+  readonly tools: readonly AgentToolDefinition[]
   readonly loop?: AgentLoopConfig
 }
