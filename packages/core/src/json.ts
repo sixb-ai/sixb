@@ -74,7 +74,7 @@ export function getInvalidJsonValueReason(
     return undefined
   }
 
-  if (isPlainObject(value)) {
+  if (isPlainRecord(value)) {
     if (seen.has(value)) {
       return `${label} contains a circular reference`
     }
@@ -101,7 +101,7 @@ export function getInvalidJsonValueReason(
   return `${label} is ${describeNonJsonValue(value)}`
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false
   }

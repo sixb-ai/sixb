@@ -25,7 +25,7 @@ export {
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
 } from "./api-gateway"
-export { defineAgent } from "./builders"
+export { defineAgent, defineAgentTool } from "./builders"
 export type {
   AgentContextEntryInput,
   AgentContextInput,
@@ -116,7 +116,23 @@ export type {
   AgentDefinition,
   AgentLoopConfig,
   AgentReasoningLevel,
+  AgentToolDefinition,
+  AgentToolDescriptionBuilder,
+  AgentToolHandler,
+  AgentToolHandlerResult,
+  AgentToolInputBuilder,
+  AgentToolInputSchema,
+  AgentToolRunBuilder,
+  AgentToolRunContext,
+  AgentToolRunInfo,
   DefineAgentConfig,
+  InferAgentToolInput,
+  InferAgentToolInputSchema,
 } from "./types"
 export { AGENT_REASONING_LEVELS } from "./types"
-export { isAgentDefinition, validateAgentGroupReferences } from "./validation"
+export {
+  AGENT_RESERVED_TOOL_NAMES,
+  isAgentDefinition,
+  isAgentToolDefinition,
+  validateAgentGroupReferences,
+} from "./validation"

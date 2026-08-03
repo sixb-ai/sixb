@@ -1,5 +1,5 @@
 import { type FileRef, isFileRef } from "../blob-storage"
-import { getInvalidJsonValueReason, type JsonValue } from "../json"
+import { getInvalidJsonValueReason, isPlainRecord, type JsonValue } from "../json"
 import {
   type AgentContextEntryInput,
   type AgentContextInput,
@@ -233,14 +233,6 @@ function omitUndefinedObjectProperties(value: unknown, seen = new Set<object>())
   } finally {
     seen.delete(value)
   }
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false
-  }
-  const prototype = Object.getPrototypeOf(value)
-  return prototype === Object.prototype || prototype === null
 }
 
 function isToolType(type: string): boolean {

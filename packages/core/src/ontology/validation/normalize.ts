@@ -2,7 +2,7 @@ import { assertJsonValue, cloneJsonValue, type JsonValue } from "../../json"
 import type { ObjectFieldSchema, Property, Schema, ValueType } from ".."
 import { normalizeDecimalValue } from "../decimal"
 import { OntologyValidationError } from "../errors"
-import { resolveValueTypeSchema } from "./schema"
+import { isRecord, resolveValueTypeSchema } from "./schema"
 
 /**
  * Normalize a property bag to JSON-safe values using each property's schema —
@@ -149,10 +149,6 @@ function normalizeDateLike(value: unknown, path: string): Date {
   return date
 }
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
 /**
  * Inverse of `normalizeSchemaValue` for the handler-facing surface: re-hydrate
  * `date`/`timestamp` values from their stored ISO string back into a `Date`, so
@@ -196,7 +192,7 @@ export function coerceSchemaValueToTyped(
   }
 
   if (schema.type === "map") {
-    if (!isPlainRecord(value)) return value
+    if (!isRecord(value)) return value
     return Object.fromEntries(
       Object.entries(value).map(([key, entry]) => [
         key,
@@ -205,7 +201,7 @@ export function coerceSchemaValueToTyped(
     )
   }
 
-  if (!isPlainRecord(value)) return value
+  if (!isRecord(value)) return value
   const output: Record<string, unknown> = { ...value }
   for (const [fieldId, field] of Object.entries(schema.properties)) {
     if (value[fieldId] === undefined) continue

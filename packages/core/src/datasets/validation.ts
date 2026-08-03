@@ -1,5 +1,5 @@
 import { isFileRef } from "../blob-storage"
-import { isJsonValue } from "../json"
+import { isJsonValue, isPlainRecord } from "../json"
 import { isDecimalString } from "../ontology/decimal"
 import { DatasetValidationError } from "./errors"
 import type {
@@ -23,15 +23,6 @@ const datasetColumnTypes = new Set<DatasetColumnType>([
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (!isRecord(value)) {
-    return false
-  }
-
-  const prototype = Object.getPrototypeOf(value)
-  return prototype === Object.prototype || prototype === null
 }
 
 function isValidDateValue(value: unknown): boolean {
@@ -176,7 +167,7 @@ export function getDatasetRowValidationError(
   dataset: DatasetDefinition,
   options?: { readonly columns?: Iterable<string> }
 ): string | null {
-  if (!isPlainObject(row)) {
+  if (!isPlainRecord(row)) {
     return `Dataset '${dataset.id}' rows must be plain objects.`
   }
 

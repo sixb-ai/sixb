@@ -1,5 +1,5 @@
 import type { ActionSubject } from "../actions"
-import type { JsonValue } from "../json"
+import { isPlainRecord, type JsonValue } from "../json"
 import { isObjectRefSchema, type Schema, type SchemaOrRef, type ValueType } from "../ontology"
 import { WorkflowValidationError } from "./errors"
 import type {
@@ -371,13 +371,4 @@ function cannotSerialize(path: string): WorkflowValidationError {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (!isRecord(value)) {
-    return false
-  }
-
-  const prototype = Object.getPrototypeOf(value)
-  return prototype === Object.prototype || prototype === null
 }

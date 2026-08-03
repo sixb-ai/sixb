@@ -8,6 +8,7 @@ import {
   AgentDefinitionError,
   createSixb,
   defineAgent,
+  defineAgentTool,
   defineGroup,
   defineObjectType,
   isAgentDefinition,
@@ -65,6 +66,105 @@ export const ${id} = defineAgent("${id}", {
 `
 }
 
+function agentWithToolModule(id: string): string {
+  return `import { defineAgent, defineAgentTool } from "${coreModuleUrl}"
+
+export const searchKnowledge = defineAgentTool("search_knowledge")
+  .description("Search project knowledge.")
+  .input({ query: "string" })
+  .run(({ input }) => ({ query: input.query, results: [] }))
+
+export const ${id} = defineAgent("${id}", {
+  name: "Agent with tools",
+  model: { specificationVersion: "v4", provider: "test", modelId: "test" },
+  instructions: "Use selected tools when needed.",
+  tools: [searchKnowledge],
+})
+`
+}
+
+function validateToolInput(input: unknown): void {
+  const builder = defineAgentTool("search").description("Search.") as unknown as {
+    input(input: unknown): void
+  }
+  builder.input(input)
+}
+
+describe("defineAgentTool", () => {
+  test("builds an inert tool definition and validates handler results", async () => {
+    const searchKnowledge = defineAgentTool("search_knowledge")
+      .description("Search project knowledge.")
+      .input({ query: "string", limit: "integer" })
+      .run(({ input }) => ({ results: [input.query], limit: input.limit }))
+
+    expect(searchKnowledge.kind).toBe("agentTool")
+    expect(searchKnowledge.name).toBe("search_knowledge")
+    expect(searchKnowledge.description).toBe("Search project knowledge.")
+    expect(searchKnowledge.input).toEqual({ query: "string", limit: "integer" })
+    await expect(
+      searchKnowledge.handler({ input: { query: "sixb", limit: 3 } } as never)
+    ).resolves.toEqual({ results: ["sixb"], limit: 3 })
+
+    const invalidResult = defineAgentTool("invalid_result")
+      .description("Return an invalid result.")
+      .input({})
+      .run((() => ({ value: undefined })) as never)
+
+    await expect(invalidResult.handler({ input: {} } as never)).rejects.toThrow(
+      "Agent tool 'invalid_result' result must be a JSON value"
+    )
+  })
+
+  test("rejects invalid and reserved names", () => {
+    const validateName = (name: string): void => {
+      defineAgentTool(name)
+    }
+    for (const name of ["", "1search", "search knowledge", "a".repeat(65)]) {
+      expect(() => validateName(name)).toThrow(AgentDefinitionError)
+    }
+    expect(() => validateName("bash")).toThrow("reserved by the framework")
+  })
+
+  test("rejects empty descriptions, invalid schemas, and missing handlers", () => {
+    const validateHandler = (handler: unknown): void => {
+      const builder = defineAgentTool("search").description("Search.").input({}) as unknown as {
+        run(handler: unknown): void
+      }
+      builder.run(handler)
+    }
+
+    expect(() => defineAgentTool("search").description(" ")).toThrow(AgentDefinitionError)
+    expect(() => validateToolInput({ query: "unknown" })).toThrow(
+      "input.query must be a valid Sixb schema"
+    )
+    expect(() =>
+      validateToolInput({ mode: { type: "enum", valueType: "string", values: [] } })
+    ).toThrow("input.mode must be a valid Sixb schema")
+    expect(() => validateHandler(undefined)).toThrow("handler must be a function")
+  })
+
+  test("rejects malformed nested input schemas", () => {
+    const recursive: Record<string, unknown> = { type: "array" }
+    recursive.items = recursive
+
+    const invalidInputs: readonly [input: unknown, path: string][] = [
+      [{ items: { type: "array" } }, "input.items.items"],
+      [{ lookup: { type: "map", keySchema: "integer", valueSchema: "string" } }, "input.lookup"],
+      [
+        { filters: { type: "object", properties: { active: { required: true } } } },
+        "input.filters.properties.active",
+      ],
+      [{ reference: { type: "valueTypeRef", valueTypeId: " " } }, "input.reference"],
+      [{ mode: { type: "enum", valueType: "string", values: ["quick", "quick"] } }, "input.mode"],
+      [{ recursive }, "input.recursive.items"],
+    ]
+
+    for (const [input, path] of invalidInputs) {
+      expect(() => validateToolInput(input)).toThrow(`${path} must be a valid Sixb schema`)
+    }
+  })
+})
+
 describe("defineAgent", () => {
   test("builds an inert agent definition", () => {
     const agent = defineAgent("sales", {
@@ -78,6 +178,7 @@ describe("defineAgent", () => {
     expect(agent.name).toBe("Sales Assistant")
     expect(agent.instructions).toBe("Assist.")
     expect(agent.groupIds).toEqual([])
+    expect(agent.tools).toEqual([])
     expect(agent.reasoning).toBeUndefined()
     expect(agent.providerOptions).toBeUndefined()
     expect(agent.description).toBeUndefined()
@@ -85,6 +186,10 @@ describe("defineAgent", () => {
   })
 
   test("keeps description, model options, groups, and loop when provided", () => {
+    const searchKnowledge = defineAgentTool("search_knowledge")
+      .description("Search project knowledge.")
+      .input({ query: "string" })
+      .run(({ input }) => ({ query: input.query }))
     const agent = defineAgent("sales", {
       name: "Sales Assistant",
       description: "Quotes and contacts.",
@@ -97,6 +202,7 @@ describe("defineAgent", () => {
       },
       instructions: "Assist.",
       groups: [agentRuntime],
+      tools: [searchKnowledge],
       loop: { stopWhen: { maxSteps: 16 } },
     })
 
@@ -104,6 +210,8 @@ describe("defineAgent", () => {
     expect(agent.reasoning).toBe("medium")
     expect(agent.providerOptions).toEqual({ openai: { reasoningSummary: "detailed" } })
     expect(agent.groupIds).toEqual(["agent-runtime"])
+    expect(agent.tools).toEqual([searchKnowledge])
+    expect(agent.tools[0]).toBe(searchKnowledge)
     expect(agent.loop).toEqual({ stopWhen: { maxSteps: 16 } })
   })
 
@@ -199,6 +307,34 @@ describe("defineAgent", () => {
       })
     ).toThrow(AgentDefinitionError)
   })
+
+  test("rejects invalid and duplicate tool definitions", () => {
+    const first = defineAgentTool("search")
+      .description("Search one source.")
+      .input({ query: "string" })
+      .run(() => ({ results: [] }))
+    const second = defineAgentTool("search")
+      .description("Search another source.")
+      .input({ query: "string" })
+      .run(() => ({ results: [] }))
+
+    expect(() =>
+      defineAgent("bad", {
+        name: "Bad",
+        model,
+        instructions: "x",
+        tools: [first, second],
+      })
+    ).toThrow("duplicate tool name 'search'")
+    expect(() =>
+      defineAgent("bad", {
+        name: "Bad",
+        model,
+        instructions: "x",
+        tools: [{ kind: "not-a-tool" } as never],
+      })
+    ).toThrow("only agent tool definitions")
+  })
 })
 
 describe("isAgentDefinition", () => {
@@ -242,6 +378,18 @@ describe("agent discovery + registry", () => {
     ).toEqual(["sales", "support"])
     expect(sixb.agents.getById("sales")?.name).toBe("Sales Assistant")
     expect(sixb.agents.getById("unknown")).toBeNull()
+  })
+
+  test("discovers agents with selected tools without discovering tools themselves", async () => {
+    const projectRoot = await createTempProjectRoot()
+    await writeProjectFile(projectRoot, "agents/research.ts", agentWithToolModule("research"))
+
+    const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
+
+    expect(sixb.agents.list().map((agent) => agent.id)).toEqual(["research"])
+    expect(sixb.agents.getById("research")?.tools.map((tool) => tool.name)).toEqual([
+      "search_knowledge",
+    ])
   })
 
   test("ignores non-agent exports co-located in agents/", async () => {
