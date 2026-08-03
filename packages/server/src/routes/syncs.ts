@@ -230,6 +230,8 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+          503: ErrorResponseSchema,
         },
         detail: {
           summary: "Request a sync run",

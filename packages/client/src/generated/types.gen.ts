@@ -2532,6 +2532,20 @@ export type RequestSyncRunErrors = {
     error: string
     code: SixbErrorCode
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    code: SixbErrorCode
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
+    error: string
+    code: SixbErrorCode
+  }
 }
 
 export type RequestSyncRunError = RequestSyncRunErrors[keyof RequestSyncRunErrors]
@@ -2962,6 +2976,20 @@ export type RequestPipelineRunErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+    code: SixbErrorCode
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    code: SixbErrorCode
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
     error: string
     code: SixbErrorCode
   }
@@ -4137,6 +4165,13 @@ export type RequestWorkflowRunErrors = {
     error: string
     code: SixbErrorCode
   }
+  /**
+   * Response for status 503
+   */
+  503: {
+    error: string
+    code: SixbErrorCode
+  }
 }
 
 export type RequestWorkflowRunError = RequestWorkflowRunErrors[keyof RequestWorkflowRunErrors]
@@ -5232,6 +5267,20 @@ export type RequestActionErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+    code: SixbErrorCode
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    code: SixbErrorCode
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
     error: string
     code: SixbErrorCode
   }

@@ -318,6 +318,8 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+          503: ErrorResponseSchema,
         },
         detail: {
           summary: "Request a pipeline run",

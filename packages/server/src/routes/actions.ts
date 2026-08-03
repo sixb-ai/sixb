@@ -113,6 +113,10 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          // Declared because this route's whole job is to reach two providers: 501 when the
+          // deployment has no run storage or action queue, 503 when the queue itself refuses.
+          501: ErrorResponseSchema,
+          503: ErrorResponseSchema,
         },
         detail: {
           summary: "Request an action",

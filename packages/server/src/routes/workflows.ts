@@ -1345,6 +1345,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
           501: ErrorResponseSchema,
+          503: ErrorResponseSchema,
         },
         detail: {
           summary: "Request a workflow run",
