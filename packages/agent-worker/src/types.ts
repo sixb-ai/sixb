@@ -1,13 +1,19 @@
 import type {
+  AgentToolRunContext,
   BlobStorage,
   Broker,
+  ConnectorAdapter,
+  ConnectorClient,
+  ConnectorDefinition,
   DomainEventLog,
   Queues,
   SandboxFactory,
   SixbRuntimeContext,
   Storage,
+  ValueType,
 } from "@sixb/core"
 import type { AgentsRuntime } from "@sixb/core/internal/agents"
+import type { LogsRuntime } from "@sixb/core/internal/logging"
 import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
 import type { AgentStorage, AuthStorage } from "@sixb/core/storage"
 import type { ToolSet } from "ai"
@@ -39,6 +45,10 @@ export interface AgentWorkerSixb {
   readonly blobStorage: BlobStorage
   readonly sandboxes?: SandboxFactory
   readonly projectRoot?: string
+  readonly logs?: LogsRuntime
+  connector<TAdapter extends ConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>
+  ): Promise<ConnectorClient<TAdapter>>
 }
 
 /**
@@ -51,7 +61,9 @@ export interface AgentWorkerContext {
   readonly storage: AgentWorkerStorage
   readonly blobStorage: BlobStorage
   readonly sandboxes: SandboxFactory
-  readonly baseTools: ToolSet
+  readonly connector: AgentToolRunContext["connector"]
+  readonly logs?: LogsRuntime
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
   readonly apiBaseUrl: string
   readonly streamSink: StreamSink
   readonly agentSkills: Promise<readonly AgentSkill[]>
@@ -89,8 +101,6 @@ export interface AgentWorkerOptions {
    * The sandbox receives a run-scoped gateway URL under this origin.
    */
   readonly apiBaseUrl: string
-  /** Tools exposed to the model in addition to the built-in `bash` tool. */
-  readonly tools?: ToolSet
   /** Project Agent Skills directory. Defaults to `<projectRoot>/skills`; `false` disables project skills. */
   readonly skillsDir?: string | false
   /** Maximum number of agent run jobs this worker claims and executes at once. Defaults to 4. */

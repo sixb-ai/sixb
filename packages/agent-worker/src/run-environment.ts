@@ -1,7 +1,9 @@
 import type { AgentDefinition, Sandbox } from "@sixb/core"
+import { resolveLogsRuntime } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { AgentRunRecord, WorkflowAgentNodeRunRecord } from "@sixb/core/storage"
 import { renderAgentSkillCatalog } from "./agent-skills"
+import { aiSdkToolsFromAgentDefinitions } from "./ai-sdk-adapters"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
 import {
   modelSupportsInlineImages,
@@ -130,7 +132,30 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
 function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvironment {
   const { context, agent, runId, threadId, apiBaseUrl, attachmentContext, skills } = input
 
-  const ready = provisionSandbox({
+  const logSession = resolveLogsRuntime(context.id, context.logs).startExecution({
+    kind: "agent",
+    id: runId,
+  })
+  const logger = logSession.logger.child({
+    agentId: agent.id,
+    ...(threadId ? { threadId } : {}),
+  })
+  const tools = aiSdkToolsFromAgentDefinitions({
+    definitions: agent.tools,
+    valueTypesById: context.valueTypesById,
+    run: { id: runId, agentId: agent.id, ...(threadId ? { threadId } : {}) },
+    connector: context.connector,
+    logger,
+  })
+
+  let sandboxWasUsed = false
+  let ready: Promise<BashSandboxHandle>
+  tools.bash = createBashTool(() => {
+    sandboxWasUsed = true
+    return ready
+  })
+
+  ready = provisionSandbox({
     context,
     agent,
     run: { id: runId, ...(threadId ? { threadId } : {}) },
@@ -139,7 +164,6 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     attachmentContext,
     skills,
   })
-  let sandboxWasUsed = false
   // Creation failure is surfaced where it is awaited (turn / bash tool / dispose); attach a no-op
   // catch so a rejection observed by none of them is not reported as unhandled.
   ready.catch(() => {})
@@ -157,13 +181,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       blobStorage: context.blobStorage,
       apiBaseUrl,
       attachmentContext,
-      tools: {
-        ...context.baseTools,
-        bash: createBashTool(() => {
-          sandboxWasUsed = true
-          return ready
-        }),
-      },
+      tools,
       systemAddendum: renderAgentSkillCatalog(skills),
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
@@ -171,7 +189,12 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       defaultMaxSteps: context.defaultMaxSteps,
       turnTimeoutMs: context.turnTimeoutMs,
     },
-    dispose: () => disposeEnvironment(ready, () => settled, input.onDetachedTeardown),
+    async dispose() {
+      await Promise.all([
+        disposeEnvironment(ready, () => settled, input.onDetachedTeardown),
+        logSession.flush(),
+      ])
+    },
   }
 }
 

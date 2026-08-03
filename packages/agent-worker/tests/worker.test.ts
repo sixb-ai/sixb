@@ -11,12 +11,16 @@ import type {
 import {
   type AgentReasoningLevel,
   AgentRequestError,
+  type AgentToolDefinition,
   type BlobStorage,
   type Broker,
   type CommandResult,
+  type ConnectorDefinition,
   type CreateSandboxOptions,
   defineAgent,
   defineAgentStep,
+  defineAgentTool,
+  defineConnector,
   defineGroup,
   defineWorkflow,
   InMemoryBlobStorage,
@@ -59,7 +63,7 @@ import { reconcileAgentExecutionIdentity } from "../src/identity"
 import { runAgentTurn } from "../src/run-agent-turn"
 import { createConversationAgentEnvironment } from "../src/run-environment"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
-import type { AgentWorkerContext, AgentWorkerStorage } from "../src/types"
+import type { AgentWorkerContext, AgentWorkerSixb, AgentWorkerStorage } from "../src/types"
 import { waitFor, writeProjectSkill } from "./helpers"
 
 const PROJECT_ID = "agent-worker-tests"
@@ -84,11 +88,11 @@ function finish(unified: "stop" | "tool-calls"): LanguageModelV4StreamPart {
  * A model that, on its first call, calls the `echo` tool, then on its second call answers with
  * reasoning + text. A stateful `doStream` (not the array form) guarantees per-call ordering.
  */
-function toolThenAnswerModel(): MockLanguageModelV4 {
+function toolThenAnswerModel(captureReplay?: (prompt: string) => void): MockLanguageModelV4 {
   let call = 0
   return new MockLanguageModelV4({
     modelId: "mock-model",
-    doStream: async () => {
+    doStream: async (options) => {
       call += 1
       if (call === 1) {
         return stream([
@@ -102,6 +106,9 @@ function toolThenAnswerModel(): MockLanguageModelV4 {
           finish("tool-calls"),
         ])
       }
+      if (call === 3) {
+        captureReplay?.(JSON.stringify(options.prompt))
+      }
       return stream([
         { type: "stream-start", warnings: [] },
         { type: "reasoning-start", id: "r" },
@@ -110,6 +117,54 @@ function toolThenAnswerModel(): MockLanguageModelV4 {
         { type: "text-start", id: "t" },
         { type: "text-delta", id: "t", delta: "Echoed hi" },
         { type: "text-end", id: "t" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
+function answerModel(captureTools?: (names: readonly string[]) => void): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doStream: async (options) => {
+      captureTools?.((options.tools ?? []).map((tool) => tool.name))
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "answer" },
+        { type: "text-delta", id: "answer", delta: "Done" },
+        { type: "text-end", id: "answer" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
+function failingToolThenAnswerModel(captureReplay: (prompt: string) => void): MockLanguageModelV4 {
+  let call = 0
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doStream: async (options) => {
+      call += 1
+      if (call === 1) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "invalid-result-call",
+            toolName: "invalid_result",
+            input: JSON.stringify({}),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      if (call === 3) {
+        captureReplay(JSON.stringify(options.prompt))
+      }
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: `answer-${call}` },
+        { type: "text-delta", id: `answer-${call}`, delta: "Recovered" },
+        { type: "text-end", id: `answer-${call}` },
         finish("stop"),
       ])
     },
@@ -154,13 +209,30 @@ function toolOnlyModel(): MockLanguageModelV4 {
   })
 }
 
-function structuredAnswerModel(
+function structuredToolThenAnswerModel(
   captureSystem?: (system: string | undefined) => void
 ): MockLanguageModelV4 {
+  let call = 0
   return new MockLanguageModelV4({
     modelId: "mock-model",
     doGenerate: async (options) => {
       captureSystem?.(options.prompt.find((message) => message.role === "system")?.content)
+      call += 1
+      if (call === 1) {
+        return {
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "workflow-lookup",
+              toolName: "lookup_project",
+              input: JSON.stringify({ query: "alpha" }),
+            },
+          ],
+          finishReason: { unified: "tool-calls", raw: "tool-calls" },
+          usage: USAGE,
+          warnings: [],
+        }
+      }
       return {
         content: [
           {
@@ -393,6 +465,11 @@ const echoTool: ToolSet = {
   }),
 }
 
+const echoAgentTool = defineAgentTool("echo")
+  .description("Echo a value back.")
+  .input({ value: "string" })
+  .run(({ input }) => ({ echoed: input.value }))
+
 // Sixb's generics overflow TS2589 when instantiated with an empty ontology in a test; we only need a
 // structural `AgentWorkerSixb`, so we construct through a narrowed constructor cast (as the
 // action-worker tests do).
@@ -406,6 +483,9 @@ interface TestSixb {
   readonly agents: AgentsRuntime
   readonly blobStorage: BlobStorage
   readonly sandboxes?: SandboxFactory
+  readonly logs: NonNullable<AgentWorkerSixb["logs"]>
+  readonly ontology: NonNullable<AgentWorkerSixb["ontology"]>
+  readonly connector: AgentWorkerSixb["connector"]
 }
 
 const SixbCtor = Sixb as unknown as new (options: Record<string, unknown>) => TestSixb
@@ -641,6 +721,8 @@ function buildSixb(
     readonly reasoning?: AgentReasoningLevel
     readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
     readonly projectRoot?: string
+    readonly agentTools?: readonly AgentToolDefinition[]
+    readonly connectors?: readonly ConnectorDefinition[]
   } = {}
 ): TestSixb {
   const agent = defineAgent("assistant", {
@@ -650,12 +732,14 @@ function buildSixb(
     ...(options.providerOptions === undefined ? {} : { providerOptions: options.providerOptions }),
     instructions: "You are a helpful test assistant.",
     groups: [AGENT_RUNTIME_GROUP],
+    ...(options.agentTools === undefined ? {} : { tools: options.agentTools }),
     loop: { stopWhen: { maxSteps: 4 } },
   })
   return new SixbCtor({
     id: PROJECT_ID,
     ontology: [],
     agents: [agent],
+    ...(options.connectors === undefined ? {} : { connectors: options.connectors }),
     groups: [AGENT_RUNTIME_GROUP],
     broker,
     storage: new InMemoryStorage(),
@@ -665,6 +749,14 @@ function buildSixb(
     sandboxes,
     ...(options.projectRoot === undefined ? {} : { projectRoot: options.projectRoot }),
   })
+}
+
+function buildSixbWithEchoTool(
+  model: LanguageModelV4,
+  broker: Broker = new InMemoryBroker(),
+  sandboxes: SandboxFactory = new RecordingSandboxFactory()
+): TestSixb {
+  return buildSixb(model, broker, sandboxes, { agentTools: [echoAgentTool] })
 }
 
 class FailingRunStreamBroker extends InMemoryBroker {
@@ -706,7 +798,7 @@ function workerStorageOf(storage: Storage): AgentWorkerStorage {
 
 function buildAgentWorkerContext(
   sixb: TestSixb,
-  input: { readonly apiBaseUrl?: string; readonly baseTools?: ToolSet } = {}
+  input: { readonly apiBaseUrl?: string } = {}
 ): AgentWorkerContext {
   if (!sixb.sandboxes) {
     throw new Error("expected sandbox factory")
@@ -716,7 +808,9 @@ function buildAgentWorkerContext(
     storage: workerStorageOf(sixb.storage),
     blobStorage: sixb.blobStorage,
     sandboxes: sixb.sandboxes,
-    baseTools: input.baseTools ?? {},
+    connector: (definition) => sixb.connector(definition),
+    logs: sixb.logs,
+    valueTypesById: sixb.ontology.getValueTypesById(),
     // Mirror the production boundary (worker.ts buildAgentContext): normalize the server base once.
     apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL),
     streamSink: NOOP_STREAM_SINK,
@@ -936,14 +1030,23 @@ describe("AgentWorker", () => {
 
   test("executes a headless workflow agent node and publishes its resume", async () => {
     let capturedSystem: string | undefined
-    const model = structuredAnswerModel((system) => {
+    const model = structuredToolThenAnswerModel((system) => {
       capturedSystem = system
     })
+    let lookupCalls = 0
+    const lookupProject = defineAgentTool("lookup_project")
+      .description("Look up a project.")
+      .input({ query: "string" })
+      .run(({ input, run }) => {
+        lookupCalls += 1
+        return { project: "Project Alpha", query: input.query, runId: run.id }
+      })
     const agent = defineAgent("workflow-resolver", {
       name: "Workflow resolver",
       model,
       instructions: "Resolve the best project.",
       groups: [AGENT_RUNTIME_GROUP],
+      tools: [lookupProject],
     })
     const agentStep = defineAgentStep("resolve-project", agent)
       .input({ query: "string" })
@@ -1026,6 +1129,19 @@ describe("AgentWorker", () => {
       })
       expect(execution.execution).toBeUndefined()
       expect(execution.trace).toBeArray()
+      expect(lookupCalls).toBe(1)
+      expect(execution.trace).toContainEqual(
+        expect.objectContaining({
+          type: "tool-call",
+          toolName: lookupProject.name,
+          state: "output-available",
+          output: {
+            project: "Project Alpha",
+            query: "alpha",
+            runId: nodeRunId,
+          },
+        })
+      )
       expect(capturedSystem).toContain("headless Sixb workflow agent")
       expect(capturedSystem).toContain("Do not ask a user follow-up question")
       expect(await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })).toMatchObject({
@@ -1581,7 +1697,7 @@ describe("AgentWorker", () => {
   })
 
   test("dispatches a durable queued run after the request-time enqueue fails", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
+    const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     const queue = sixb.queues.agents
     const originalEnqueue = queue.enqueue.bind(queue)
@@ -1602,7 +1718,7 @@ describe("AgentWorker", () => {
     }
     expect(request.jobId).toBeUndefined()
 
-    const worker = new AgentWorker(sixb, workerOptions({ tools: echoTool }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const run = await waitFor(
@@ -1619,17 +1735,222 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("runs only the current agent's selected tools with connector, metadata, and logs", async () => {
+    let connectorCalls = 0
+    const knowledge = defineConnector("knowledge", {
+      type: "knowledge",
+      connect() {
+        connectorCalls += 1
+        return { echo: (value: string) => `connected:${value}` }
+      },
+    })
+    let handlerContext:
+      | { readonly runId: string; readonly agentId: string; readonly threadId?: string }
+      | undefined
+    let handlerSignal: AbortSignal | undefined
+    let selectedCalls = 0
+    let successfulReplay = ""
+    const selectedEcho = defineAgentTool("echo")
+      .description("Echo through the registered knowledge connector.")
+      .input({ value: "string" })
+      .run(async ({ input, run, signal, connector, logger }) => {
+        selectedCalls += 1
+        handlerContext = { runId: run.id, agentId: run.agentId, threadId: run.threadId }
+        handlerSignal = signal
+        const client = await connector(knowledge)
+        logger.info("selected tool called", { value: input.value })
+        return { echoed: client.echo(input.value) }
+      })
+    const research = defineAgent("research", {
+      name: "Research",
+      model: toolThenAnswerModel((prompt) => {
+        successfulReplay = prompt
+      }),
+      instructions: "Research with selected tools.",
+      groups: [AGENT_RUNTIME_GROUP],
+      tools: [selectedEcho],
+    })
+    let unselectedToolNames: readonly string[] = []
+    const plain = defineAgent("plain", {
+      name: "Plain",
+      model: answerModel((names) => {
+        unselectedToolNames = names
+      }),
+      instructions: "Answer without the research tool.",
+      groups: [AGENT_RUNTIME_GROUP],
+    })
+    const sixb = new SixbCtor({
+      id: PROJECT_ID,
+      ontology: [],
+      agents: [research, plain],
+      connectors: [knowledge],
+      groups: [AGENT_RUNTIME_GROUP],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      sandboxes: new RecordingSandboxFactory(),
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const selectedRequest = await sixb.agents.request({ agentId: research.id, text: "echo hi" })
+      const selectedRun = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: selectedRequest.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "selected tool run terminal" }
+      )
+      const plainRequest = await sixb.agents.request({ agentId: plain.id, text: "answer" })
+      await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: plainRequest.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "unselected agent run terminal" }
+      )
+
+      expect(selectedRun.status).toBe("succeeded")
+      expect(selectedCalls).toBe(1)
+      expect(connectorCalls).toBe(1)
+      expect(handlerSignal).toBeInstanceOf(AbortSignal)
+      expect(handlerContext).toEqual({
+        runId: selectedRequest.run.id,
+        agentId: research.id,
+        threadId: selectedRequest.run.threadId,
+      })
+      expect(unselectedToolNames).toContain("bash")
+      expect(unselectedToolNames).not.toContain(selectedEcho.name)
+
+      const messages = await listMessages(storage, selectedRequest.run.threadId)
+      expect(
+        messages
+          .find((message) => message.role === "assistant")
+          ?.parts.find((part) => part.type === "tool-call" && part.toolName === selectedEcho.name)
+      ).toMatchObject({
+        state: "output-available",
+        input: { value: "hi" },
+        output: { echoed: "connected:hi" },
+      })
+
+      const followUp = await sixb.agents.request({
+        agentId: research.id,
+        threadId: selectedRequest.run.threadId,
+        text: "continue",
+      })
+      await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: followUp.run.id })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "successful selected tool replay terminal" }
+      )
+      expect(successfulReplay).toContain(selectedEcho.name)
+      expect(successfulReplay).toContain("connected:hi")
+
+      const logs = await waitFor(
+        async () => {
+          const page = await sixb.logs.read({
+            run: { kind: "agent", id: selectedRequest.run.id },
+          })
+          return page.lines.length > 0 ? page.lines : null
+        },
+        { label: "selected tool logs flushed" }
+      )
+      expect(logs).toHaveLength(1)
+      expect(logs[0]).toMatchObject({
+        level: "info",
+        message: "selected tool called",
+        fields: {
+          agentId: research.id,
+          threadId: selectedRequest.run.threadId,
+          value: "hi",
+        },
+        context: { run: { kind: "agent", id: selectedRequest.run.id } },
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("persists and replays selected tool failures with clear non-JSON diagnostics", async () => {
+    let replayedPrompt = ""
+    const invalidResult = {
+      kind: "agentTool",
+      name: "invalid_result",
+      description: "Return an invalid result.",
+      input: {},
+      handler: async () => ({ invalid: undefined }),
+    } as unknown as AgentToolDefinition
+    const sixb = buildSixb(
+      failingToolThenAnswerModel((prompt) => {
+        replayedPrompt = prompt
+      }),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { agentTools: [invalidResult] }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const first = await sixb.agents.request({ agentId: "assistant", text: "run the tool" })
+      const firstRun = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: first.run.id })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "invalid selected tool run terminal" }
+      )
+      expect(firstRun.status).toBe("succeeded")
+
+      const firstAssistant = (await listMessages(storage, first.run.threadId)).find(
+        (message) => message.role === "assistant"
+      )
+      expect(
+        firstAssistant?.parts.find(
+          (part) => part.type === "tool-call" && part.toolName === invalidResult.name
+        )
+      ).toMatchObject({
+        state: "output-error",
+        errorText:
+          "[SixbAgentWorker] Agent tool 'invalid_result' returned a non-JSON result; result.invalid is undefined.",
+      })
+
+      const second = await sixb.agents.request({
+        agentId: "assistant",
+        threadId: first.run.threadId,
+        text: "continue",
+      })
+      await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: second.run.id })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "tool failure replay run terminal" }
+      )
+      expect(replayedPrompt).toContain("invalid_result")
+      expect(replayedPrompt).toContain("returned a non-JSON result")
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("runs a full multi-step turn: starts, persists the assistant message, finalizes with usage", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
+    const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     const auth = authStorageOf(sixb)
 
-    const worker = new AgentWorker(
-      sixb,
-      workerOptions({
-        tools: echoTool,
-      })
-    )
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const {
@@ -1856,15 +2177,10 @@ describe("AgentWorker", () => {
   })
 
   test("adds visible guidance when the step limit is reached before an answer", async () => {
-    const sixb = buildSixb(toolOnlyModel())
+    const sixb = buildSixbWithEchoTool(toolOnlyModel())
     const storage = agentStorageOf(sixb)
 
-    const worker = new AgentWorker(
-      sixb,
-      workerOptions({
-        tools: echoTool,
-      })
-    )
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const {
@@ -2403,10 +2719,7 @@ describe("AgentWorker", () => {
 
     const firstRequest = await sixb.agents.request({ agentId: "assistant", text: "first" })
 
-    const worker = new AgentWorker(
-      sixb,
-      workerOptions({ concurrency: 2, idlePollMs: 10, tools: echoTool })
-    )
+    const worker = new AgentWorker(sixb, workerOptions({ concurrency: 2, idlePollMs: 10 }))
     await worker.start()
     try {
       await waitFor(() => (controlled.startedCount() >= 1 ? true : null), {
@@ -2502,7 +2815,7 @@ describe("AgentWorker", () => {
 
     const request = await sixb.agents.request({ agentId: "assistant", text: "go" })
 
-    const worker = new AgentWorker(sixb, workerOptions({ idlePollMs: 10, tools: echoTool }))
+    const worker = new AgentWorker(sixb, workerOptions({ idlePollMs: 10 }))
     await worker.start()
     try {
       await waitFor(() => (controlled.startedCount() >= 1 ? true : null), {
@@ -2543,6 +2856,55 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("propagates run cancellation to an active selected tool handler", async () => {
+    const started = Promise.withResolvers<void>()
+    let handlerWasCancelled = false
+    const blockingEcho = defineAgentTool("echo")
+      .description("Wait for cancellation.")
+      .input({ value: "string" })
+      .run(async ({ signal }) => {
+        started.resolve()
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) {
+            resolve()
+            return
+          }
+          signal.addEventListener("abort", () => resolve(), { once: true })
+        })
+        handlerWasCancelled = signal.aborted
+        return { cancelled: signal.aborted }
+      })
+    const sixb = buildSixb(
+      toolThenAnswerModel(),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { agentTools: [blockingEcho] }
+    )
+    const storage = agentStorageOf(sixb)
+    const request = await sixb.agents.request({ agentId: "assistant", text: "wait" })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      await started.promise
+      await publishAgentRunCancel(sixb.broker, {
+        projectId: PROJECT_ID,
+        runId: request.run.id,
+      })
+
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "selected tool run terminal after cancel" }
+      )
+      expect(run.status).toBe("cancelled")
+      expect(handlerWasCancelled).toBe(true)
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("persists the partial assistant message when a mid-response run is cancelled", async () => {
     const partial = "Let me start by checking the pipeline logs"
     const controlled = partialTextThenBlockingModel(partial)
@@ -2551,7 +2913,7 @@ describe("AgentWorker", () => {
 
     const request = await sixb.agents.request({ agentId: "assistant", text: "go" })
 
-    const worker = new AgentWorker(sixb, workerOptions({ idlePollMs: 10, tools: echoTool }))
+    const worker = new AgentWorker(sixb, workerOptions({ idlePollMs: 10 }))
     await worker.start()
     try {
       await controlled.waitForStarted()
@@ -2598,7 +2960,7 @@ describe("AgentWorker", () => {
   })
 
   test("publishes UI chunks before appending the finalized assistant message", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
+    const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     let chunksBeforeAssistantAppend = 0
     let finalizedBeforeAssistantAppend = false
@@ -2624,9 +2986,12 @@ describe("AgentWorker", () => {
       agents: sixb.agents,
       blobStorage: sixb.blobStorage,
       sandboxes: sixb.sandboxes,
+      logs: sixb.logs,
+      ontology: sixb.ontology,
+      connector: sixb.connector.bind(sixb),
     }
 
-    const worker = new AgentWorker(workerSixb, workerOptions({ tools: echoTool }))
+    const worker = new AgentWorker(workerSixb, workerOptions())
     await worker.start()
     try {
       const {
@@ -2649,7 +3014,7 @@ describe("AgentWorker", () => {
   })
 
   test("does not report broker run stream publication failures", async () => {
-    const sixb = buildSixb(toolThenAnswerModel(), new FailingRunStreamBroker())
+    const sixb = buildSixbWithEchoTool(toolThenAnswerModel(), new FailingRunStreamBroker())
     const storage = agentStorageOf(sixb)
     let reportCount = 0
     const reporter = attachSixbErrorReporter(sixb, () => {
@@ -2658,7 +3023,7 @@ describe("AgentWorker", () => {
     const originalConsoleError = console.error
     console.error = () => {}
 
-    const worker = new AgentWorker(sixb, workerOptions({ tools: echoTool }))
+    const worker = new AgentWorker(sixb, workerOptions())
     try {
       await worker.start()
       const {
@@ -2687,7 +3052,7 @@ describe("AgentWorker", () => {
   })
 
   test("continues the turn when a custom stream sink fails", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
+    const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     const originalConsoleError = console.error
     console.error = () => {}
@@ -2695,7 +3060,6 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(
       sixb,
       workerOptions({
-        tools: echoTool,
         streamSink: {
           async publishStarted() {
             throw new Error("sink down")
@@ -2795,7 +3159,7 @@ describe("AgentWorker", () => {
   })
 
   test("reclaims a crashed run on redelivery and completes it (attempt++)", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
+    const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
 
     // Trigger normally, then simulate a worker that crashed after starting the durable run. The
@@ -2813,7 +3177,7 @@ describe("AgentWorker", () => {
       execution: freshTestExecution(),
     })
 
-    const worker = new AgentWorker(sixb, workerOptions({ tools: echoTool }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const reclaimed = await waitFor(
@@ -3153,7 +3517,7 @@ describe("AgentWorker", () => {
   })
 
   test("absorbs a transient finalize blip in place: one run, one message, no lock", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
+    const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     // The worker sees a storage whose `finish` fails twice before succeeding; the trigger keeps using
     // the real storage (both delegate to the same underlying state).
@@ -3166,9 +3530,12 @@ describe("AgentWorker", () => {
       agents: sixb.agents,
       blobStorage: sixb.blobStorage,
       sandboxes: sixb.sandboxes,
+      logs: sixb.logs,
+      ontology: sixb.ontology,
+      connector: sixb.connector.bind(sixb),
     }
 
-    const worker = new AgentWorker(workerSixb, workerOptions({ tools: echoTool }))
+    const worker = new AgentWorker(workerSixb, workerOptions())
     await worker.start()
     try {
       const {
@@ -3453,7 +3820,7 @@ describe("AgentWorker", () => {
       ],
     })
 
-    const worker = new AgentWorker(sixb, workerOptions({ tools: echoTool }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       // Let the worker reject the orphan job. The active run must be untouched: not reclaimed, no
