@@ -113,6 +113,12 @@ The four-field record is what you get when the failure is part of something the 
 rather than the reason it could not: the `error` of a failed sync run, pipeline step, workflow node,
 or action run is the record itself, `details` and `cause` included.
 
+The WebSocket streams carry the pair too. `@sixb/client`'s event, log, and agent-run sockets hand
+`onError` a `SixbFailure` and keep the last one on the socket state, so a browser branches on `code`
+the way a server-side `catch` does. A failure below the protocol — the socket never opened, the
+handshake timed out — has no server code and is filed under `runtime.unexpected`; `connected` and
+`reconnecting` are what separate that from a server that answered with a complaint.
+
 ## The codes
 
 ### `action.*`

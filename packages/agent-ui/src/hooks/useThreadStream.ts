@@ -54,7 +54,9 @@ export function useThreadStream(options: UseThreadStreamOptions): UseThreadStrea
     enabled: Boolean(runId && threadId) && !runFinished,
     onEvent: (event) => dispatch({ type: "event", event }),
     onRunSnapshot: setRun,
-    onError: (message) => dispatch({ type: "stream-error", message }),
+    // `streamError` is display text, and its other source is an AI SDK error chunk that has no
+    // code, so the failure is flattened to its message here rather than widened across both.
+    onError: (failure) => dispatch({ type: "stream-error", message: failure.message }),
   })
 
   // Reload durable messages once the assistant message is persisted.

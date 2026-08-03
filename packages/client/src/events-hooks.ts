@@ -12,7 +12,7 @@ import { startTransition, useCallback, useEffect, useRef, useState } from "react
 import type { SixbEvent, SixbEventOfType } from "./events"
 import type { SubscribableEvents } from "./events-builder"
 import { useEventsRegistry } from "./events-provider"
-import type { EventSocketState } from "./events-transport"
+import type { EventSocketState, SixbFailure } from "./events-transport"
 import { type TelemetryUpdate, telemetryUpdateFromEvent } from "./telemetry-events"
 
 const DISCONNECTED: EventSocketState = { connected: false, reconnecting: false, error: null }
@@ -24,7 +24,7 @@ export interface UseEventsOptions {
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
   readonly handshakeTimeoutMs?: number
-  readonly onError?: (error: string) => void
+  readonly onError?: (failure: SixbFailure) => void
 }
 
 /**
@@ -66,7 +66,7 @@ export function useEvents<TEvent extends SixbEvent>(
     }
 
     const handler = (event: SixbEvent) => onEventRef.current(event as TEvent)
-    const onError = (message: string) => onErrorRef.current?.(message)
+    const onError = (failure: SixbFailure) => onErrorRef.current?.(failure)
 
     // With a provider, delegate to the shared socket; otherwise open a
     // per-builder socket. The transport options apply only to the standalone

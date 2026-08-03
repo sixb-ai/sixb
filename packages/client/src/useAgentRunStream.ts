@@ -4,7 +4,7 @@ import {
   type AgentRunStreamEvent,
   createAgentRunSocket,
 } from "./agent-streams"
-import type { ReconnectingSocketState } from "./ws-socket"
+import type { ReconnectingSocketState, SixbFailure } from "./ws-socket"
 
 export interface UseAgentRunStreamOptions {
   readonly runId?: string | null
@@ -14,7 +14,7 @@ export interface UseAgentRunStreamOptions {
   readonly reconnectDelayMs?: number
   readonly onEvent?: (event: AgentRunStreamEvent, cursor: string) => void
   readonly onRunSnapshot?: (run: AgentRunSnapshot) => void
-  readonly onError?: (message: string) => void
+  readonly onError?: (failure: SixbFailure) => void
 }
 
 export type UseAgentRunStreamResult = ReconnectingSocketState
@@ -51,7 +51,7 @@ export function useAgentRunStream(options: UseAgentRunStreamOptions): UseAgentRu
       reconnectDelayMs,
       onEvent: (event, cursor) => onEventRef.current?.(event, cursor),
       onRunSnapshot: (run) => onSnapshotRef.current?.(run),
-      onError: (message) => onErrorRef.current?.(message),
+      onError: (failure) => onErrorRef.current?.(failure),
       onStateChange: setState,
     })
 

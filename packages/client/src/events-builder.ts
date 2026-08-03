@@ -37,7 +37,7 @@ import {
 } from "@sixb/core/events/selectors"
 import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from "@sixb/core/ontology"
 import type { SixbEvent, SixbEventOfTopic, SixbEventOfType, SixbEventTopic } from "./events-model"
-import { createEventSocket, type EventSocketState } from "./events-transport"
+import { createEventSocket, type EventSocketState, type SixbFailure } from "./events-transport"
 import type { Client } from "./generated/client"
 
 /**
@@ -166,7 +166,7 @@ export interface EventSubscribeOptions {
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
   readonly handshakeTimeoutMs?: number
-  readonly onError?: (error: string) => void
+  readonly onError?: (failure: SixbFailure) => void
   readonly onStateChange?: (state: EventSocketState) => void
 }
 

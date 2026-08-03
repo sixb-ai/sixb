@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { SixbEvent } from "../src/events"
-import { createEventSocket } from "../src/events-transport"
+import { createEventSocket, type SixbFailure } from "../src/events-transport"
 
 function telemetryEvent(cursor: string): SixbEvent {
   return {
@@ -159,13 +159,13 @@ describe("createEventSocket", () => {
   })
 
   test("closes and reconnects when the protocol handshake times out", async () => {
-    const errors: string[] = []
+    const failures: SixbFailure[] = []
     const socket = createEventSocket({
       reconnect: true,
       reconnectDelayMs: 1,
       handshakeTimeoutMs: 5,
       onEvent: () => {},
-      onError: (message) => errors.push(message),
+      onError: (failure) => failures.push(failure),
     })
     activeSocket = socket
 
@@ -175,7 +175,9 @@ describe("createEventSocket", () => {
     await waitFor(() => ws1.closed)
     await waitFor(() => FakeWebSocket.instances.length === 2)
 
-    expect(errors).toEqual(["Event websocket handshake timed out."])
+    expect(failures).toEqual([
+      { code: "runtime.unexpected", message: "Event websocket handshake timed out." },
+    ])
 
     socket.close()
   })

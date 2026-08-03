@@ -86,7 +86,7 @@ Common options:
 | `reconnect` | Enable or disable reconnects. |
 | `reconnectDelayMs` | Delay before reconnecting. |
 | `handshakeTimeoutMs` | Maximum time to establish and acknowledge the event subscription. |
-| `onError` | Receive socket or subscription errors. |
+| `onError` | Receive socket or subscription failures as a `SixbFailure` — branch on `code`, render `message`. |
 
 ## Latest Telemetry
 

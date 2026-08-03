@@ -11,7 +11,12 @@
 import { createContext, createElement, type ReactNode, useContext, useEffect, useMemo } from "react"
 import type { SixbEvent } from "./events"
 import { buildEventPredicate, type EventsFilterSpec } from "./events-builder"
-import { createEventSocket, type EventSocket, type EventSocketState } from "./events-transport"
+import {
+  createEventSocket,
+  type EventSocket,
+  type EventSocketState,
+  type SixbFailure,
+} from "./events-transport"
 
 const DISCONNECTED: EventSocketState = { connected: false, reconnecting: false, error: null }
 
@@ -23,7 +28,7 @@ const DISCONNECTED: EventSocketState = { connected: false, reconnecting: false, 
 const DEFAULT_CLOSE_DELAY_MS = 3000
 
 export interface EventsRegistrationOptions {
-  readonly onError?: (error: string) => void
+  readonly onError?: (failure: SixbFailure) => void
   readonly onStateChange?: (state: EventSocketState) => void
 }
 
@@ -97,8 +102,8 @@ export function createEventsRegistry(
           if (subscriber.matches(event)) subscriber.handler(event)
         }
       },
-      onError: (message) => {
-        for (const subscriber of subscribers) subscriber.options?.onError?.(message)
+      onError: (failure) => {
+        for (const subscriber of subscribers) subscriber.options?.onError?.(failure)
       },
       onStateChange: (next) => {
         state = next

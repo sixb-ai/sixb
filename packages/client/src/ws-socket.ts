@@ -7,21 +7,36 @@
  * protocol while sharing one reconnection loop. React is an optional peer of `@sixb/client`;
  * nothing here may import it.
  */
+import { type SixbFailure, toSixbFailure } from "@sixb/core/errors"
 import { client } from "./generated/client.gen"
+
+export type { SixbFailure } from "@sixb/core/errors"
 
 const DEFAULT_SIXB_API_BASE_URL = "http://localhost:3002"
 const DEFAULT_RECONNECT_DELAY_MS = 1000
 const DEFAULT_READY_TIMEOUT_MS = 10_000
 
+/**
+ * The socket never opened, or dropped. There is no server code to carry — the failure happened
+ * below the protocol — so it is filed under the same code the parsers use for a frame whose code
+ * they cannot read. The socket state says which: `connected` and `reconnecting` are what separate a
+ * dead transport from a server that answered with a complaint.
+ */
+const CONNECTION_FAILURE_CODE = "runtime.unexpected" as const
+
 export interface ReconnectingSocketState {
   readonly connected: boolean
   readonly reconnecting: boolean
-  readonly error: string | null
+  /**
+   * The last failure, as the same record the API and the run rows carry. Branch on `error.code`;
+   * `error.message` is prose.
+   */
+  readonly error: SixbFailure | null
 }
 
 /** Handed to `onMessage` so a stream-level error frame updates socket state + notifies the caller. */
 export interface ReconnectingSocketErrorSink {
-  reportError(message: string): void
+  reportError(failure: SixbFailure): void
 }
 
 export interface ReconnectingSocketOptions {
@@ -49,7 +64,7 @@ export interface ReconnectingSocketOptions {
   readonly onMessage: (data: unknown, sink: ReconnectingSocketErrorSink) => void
   /** Message surfaced when the socket itself errors (connection failure). */
   readonly connectionErrorMessage: string
-  readonly onError?: (message: string) => void
+  readonly onError?: (failure: SixbFailure) => void
   readonly onStateChange?: (state: ReconnectingSocketState) => void
 }
 
@@ -80,10 +95,14 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
   }
 
   const sink: ReconnectingSocketErrorSink = {
-    reportError(message: string) {
-      options.onError?.(message)
-      setState({ ...state, error: message })
+    reportError(failure: SixbFailure) {
+      options.onError?.(failure)
+      setState({ ...state, error: failure })
     },
+  }
+
+  const reportConnectionFailure = (message: string) => {
+    sink.reportError({ code: CONNECTION_FAILURE_CODE, message })
   }
 
   const scheduleReconnect = () => {
@@ -104,7 +123,10 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
       if (options.protocols) protocols = await options.protocols()
     } catch (error) {
       if (stopped || generation !== connectionGeneration) return
-      sink.reportError(error instanceof Error ? error.message : String(error))
+      // Connection setup runs the caller's own code — fetching a one-shot ticket, most often — so
+      // this is the one connection-level path that can carry a real code, and `toSixbFailure` keeps
+      // it: an expired session reaches `onError` as `auth.session_expired`, not as prose.
+      sink.reportError(toSixbFailure(error))
       const retry = reconnect && (options.shouldReconnectAfterSetupError?.(error) ?? true)
       setState({ connected: false, reconnecting: retry, error: state.error })
       if (retry) scheduleReconnect()
@@ -140,7 +162,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
           () => {
             if (stopped || socket !== ws) return
             try {
-              sink.reportError(
+              reportConnectionFailure(
                 options.readyTimeoutMessage ?? "Websocket protocol handshake timed out."
               )
             } finally {
@@ -161,7 +183,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
 
     ws.onerror = () => {
       if (stopped) return
-      sink.reportError(options.connectionErrorMessage)
+      reportConnectionFailure(options.connectionErrorMessage)
     }
 
     ws.onclose = () => {

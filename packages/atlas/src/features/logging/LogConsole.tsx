@@ -1,5 +1,5 @@
 import { useSixbLogs } from "@sixb/client/hooks"
-import type { LogLevel, LogsBuilder, SixbLogLine } from "@sixb/client/logs"
+import type { LogLevel, LogsBuilder, SixbFailure, SixbLogLine } from "@sixb/client/logs"
 import {
   Badge,
   Button,
@@ -559,15 +559,22 @@ function RunRef({ run }: { run: SixbLogLine["context"]["run"] }) {
   )
 }
 
-function ConnectionIndicator({ connected, error }: { connected: boolean; error: string | null }) {
+function ConnectionIndicator({
+  connected,
+  error,
+}: {
+  connected: boolean
+  error: SixbFailure | null
+}) {
   const state = error ? "error" : connected ? "live" : "connecting"
   const label = state === "error" ? "Disconnected" : state === "live" ? "Live" : "Connecting"
+  const detail = error?.message
   return (
     <Badge
       variant="ghost"
       className="h-7 gap-1.5 px-2 text-[11px] font-normal text-muted-foreground"
-      title={error ?? undefined}
-      aria-label={error ? `${label}: ${error}` : label}
+      title={detail}
+      aria-label={detail ? `${label}: ${detail}` : label}
     >
       <span
         className={cn(
@@ -600,7 +607,7 @@ function LogEmptyState({
   hadSourceLines,
   viewWasCleared,
 }: {
-  error: string | null
+  error: SixbFailure | null
   emptyLabel: string
   searchQuery: string
   hadSourceLines: boolean
@@ -618,7 +625,7 @@ function LogEmptyState({
     ? `No entries match “${searchQuery.trim()}”.`
     : viewWasCleared && hadSourceLines
       ? "New entries will appear here as they arrive."
-      : (error ?? emptyLabel)
+      : (error?.message ?? emptyLabel)
 
   return (
     <Empty className="flex-1 rounded-none">

@@ -10,7 +10,10 @@ import {
   createReconnectingSocket,
   createSixbWebSocketUrl,
   type ReconnectingSocketState,
+  type SixbFailure,
 } from "./ws-socket"
+
+export type { SixbFailure } from "./ws-socket"
 
 export type LogSocketState = ReconnectingSocketState
 
@@ -24,7 +27,7 @@ export interface LogSocketOptions {
   /** API origin override. Authentication uses the browser session cookie. */
   readonly baseUrl?: string
   readonly onLog: (line: StoredLogLine) => void
-  readonly onError?: (error: string) => void
+  readonly onError?: (failure: SixbFailure) => void
   readonly onReset?: (cursor?: string) => void
   readonly onStateChange?: (state: LogSocketState) => void
 }
@@ -79,7 +82,7 @@ export function createLogSocket(options: LogSocketOptions): LogSocket {
         latestCursor = message.cursor
         options.onReset?.(message.cursor)
       } else if (message.type === "error") {
-        sink.reportError(message.message)
+        sink.reportError({ code: message.code, message: message.message })
       }
     },
   })

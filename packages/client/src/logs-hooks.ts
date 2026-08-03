@@ -10,6 +10,7 @@
  * behind the `./hooks` subpath and never the root barrel.
  */
 import type { StoredLogLine } from "@sixb/core"
+import { type SixbFailure, toSixbFailure } from "@sixb/core/errors"
 import { useEffect, useRef, useState } from "react"
 import type { LogsBuilder } from "./logs-builder"
 import type { LogSocketState } from "./logs-transport"
@@ -24,13 +25,13 @@ export interface UseSixbLogsOptions {
   readonly max?: number
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
-  readonly onError?: (error: string) => void
+  readonly onError?: (failure: SixbFailure) => void
 }
 
 export interface UseSixbLogsResult {
   readonly lines: StoredLogLine[]
   readonly connected: boolean
-  readonly error: string | null
+  readonly error: SixbFailure | null
 }
 
 export function useSixbLogs(builder: LogsBuilder, options?: UseSixbLogsOptions): UseSixbLogsResult {
@@ -62,7 +63,7 @@ export function useSixbLogs(builder: LogsBuilder, options?: UseSixbLogsOptions):
     let cancelled = false
     let unsubscribe: (() => void) | undefined
     const builderNow = builderRef.current
-    const onError = (message: string) => onErrorRef.current?.(message)
+    const onError = (failure: SixbFailure) => onErrorRef.current?.(failure)
 
     const cap = (next: StoredLogLine[]) =>
       next.length > max ? next.slice(next.length - max) : next
@@ -94,7 +95,7 @@ export function useSixbLogs(builder: LogsBuilder, options?: UseSixbLogsOptions):
         unsubscribe = subscribe(seed.at(-1)?.cursor ?? initial.cursor)
       } catch (error) {
         if (cancelled) return
-        onError(error instanceof Error ? error.message : String(error))
+        onError(toSixbFailure(error))
         // Still open a live tail even when history failed to load.
         unsubscribe = subscribe()
       }

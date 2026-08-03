@@ -10,10 +10,11 @@ import {
   createSixbWebSocketUrl,
   type ReconnectingSocket,
   type ReconnectingSocketState,
+  type SixbFailure,
 } from "./ws-socket"
 
 export type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
-export type { ReconnectingSocket, ReconnectingSocketState } from "./ws-socket"
+export type { ReconnectingSocket, ReconnectingSocketState, SixbFailure } from "./ws-socket"
 
 export type AgentRunSnapshot = GetAgentRunResponses[200]
 
@@ -81,7 +82,7 @@ export interface AgentRunSocketOptions {
   readonly baseUrl?: string
   readonly onEvent: (event: AgentRunStreamEvent, cursor: string) => void
   readonly onRunSnapshot?: (run: AgentRunSnapshot) => void
-  readonly onError?: (message: string) => void
+  readonly onError?: (failure: SixbFailure) => void
   readonly onStateChange?: (state: ReconnectingSocketState) => void
 }
 
@@ -122,7 +123,7 @@ export function createAgentRunSocket(options: AgentRunSocketOptions): Reconnecti
       }
 
       if (message.type === "error") {
-        sink.reportError(message.message)
+        sink.reportError({ code: message.code, message: message.message })
       }
     },
   })

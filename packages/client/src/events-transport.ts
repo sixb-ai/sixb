@@ -19,7 +19,10 @@ import {
   createReconnectingSocket,
   createSixbWebSocketUrl,
   type ReconnectingSocketState,
+  type SixbFailure,
 } from "./ws-socket"
+
+export type { SixbFailure } from "./ws-socket"
 
 /** Event-level state: `connected` becomes true only after the subscription is acknowledged. */
 export type EventSocketState = ReconnectingSocketState
@@ -44,7 +47,7 @@ export interface EventSocketOptions {
   /** Override the API base url. Defaults to the global client config. */
   readonly baseUrl?: string
   readonly onEvent: (event: SixbEvent) => void
-  readonly onError?: (error: string) => void
+  readonly onError?: (failure: SixbFailure) => void
   readonly onStateChange?: (state: EventSocketState) => void
 }
 
@@ -138,7 +141,7 @@ export function createEventSocket(options: EventSocketOptions): EventSocket {
       }
 
       if (message.type === "error") {
-        sink.reportError(message.message)
+        sink.reportError({ code: message.code, message: message.message })
       }
     },
   })

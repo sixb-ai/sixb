@@ -3,6 +3,7 @@ import { defineObjectType, prop } from "@sixb/core/ontology"
 import type { SixbEvent } from "../src/events"
 import { events } from "../src/events-builder"
 import { createEventsRegistry } from "../src/events-provider"
+import type { SixbFailure } from "../src/events-transport"
 
 const Device = defineObjectType({
   id: "device",
@@ -141,14 +142,14 @@ describe("createEventsRegistry", () => {
 
   test("broadcasts socket errors to every subscriber", () => {
     const registry = createEventsRegistry()
-    const errors1: string[] = []
-    const errors2: string[] = []
+    const failures1: SixbFailure[] = []
+    const failures2: SixbFailure[] = []
 
     registry.register(events.object(Device).telemetry().ir, () => {}, {
-      onError: (message) => errors1.push(message),
+      onError: (failure) => failures1.push(failure),
     })
     registry.register(events.object(Sensor).telemetry().ir, () => {}, {
-      onError: (message) => errors2.push(message),
+      onError: (failure) => failures2.push(failure),
     })
 
     const ws = FakeWebSocket.instances[0]
@@ -156,8 +157,14 @@ describe("createEventsRegistry", () => {
     ws.onopen?.()
     ws.onerror?.()
 
-    expect(errors1).toEqual(["Event websocket connection failed."])
-    expect(errors2).toEqual(["Event websocket connection failed."])
+    // A dead socket carries no server code, so it is filed under the same one an unreadable frame
+    // gets. `connected`/`reconnecting` are what tell the two apart.
+    const connectionFailure: SixbFailure = {
+      code: "runtime.unexpected",
+      message: "Event websocket connection failed.",
+    }
+    expect(failures1).toEqual([connectionFailure])
+    expect(failures2).toEqual([connectionFailure])
   })
 
   test("fans each event only to subscribers whose filter matches", () => {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { AGENT_RUN_STREAM_SCHEMA_VERSION } from "@sixb/core/agents/streams"
-import { createAgentRunSocket } from "../src/agent-streams"
+import { createAgentRunSocket, type SixbFailure } from "../src/agent-streams"
 
 function runSnapshotFrame(): string {
   return JSON.stringify({
@@ -117,20 +117,43 @@ describe("createAgentRunSocket", () => {
     socket.close()
   })
 
-  test("surfaces server error frames through onError", async () => {
-    const errors: string[] = []
+  // The server has put a code on its error frames and the parser reads it; these two lock the rest
+  // of the trip. Before that, `onError` took a `string` and this test asserted a message alone — so
+  // it passed while the code was dropped one line after being parsed.
+  test("surfaces the server's failure code through onError", async () => {
+    const failures: SixbFailure[] = []
     const socket = createAgentRunSocket({
       runId: "run-1",
       reconnect: false,
       onEvent: () => {},
-      onError: (message) => errors.push(message),
+      onError: (failure) => failures.push(failure),
+    })
+
+    const ws1 = FakeWebSocket.instances[0]
+    if (!ws1) throw new Error("expected a websocket")
+    ws1.onopen?.()
+    ws1.onmessage?.({
+      data: JSON.stringify({ type: "error", code: "agent.run_not_found", message: "run gone" }),
+    })
+    expect(failures).toEqual([{ code: "agent.run_not_found", message: "run gone" }])
+
+    socket.close()
+  })
+
+  test("files a frame with no code under runtime.unexpected", async () => {
+    const failures: SixbFailure[] = []
+    const socket = createAgentRunSocket({
+      runId: "run-1",
+      reconnect: false,
+      onEvent: () => {},
+      onError: (failure) => failures.push(failure),
     })
 
     const ws1 = FakeWebSocket.instances[0]
     if (!ws1) throw new Error("expected a websocket")
     ws1.onopen?.()
     ws1.onmessage?.({ data: JSON.stringify({ type: "error", message: "run gone" }) })
-    expect(errors).toEqual(["run gone"])
+    expect(failures).toEqual([{ code: "runtime.unexpected", message: "run gone" }])
 
     socket.close()
   })

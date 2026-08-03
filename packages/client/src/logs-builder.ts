@@ -7,7 +7,7 @@ import {
 } from "@sixb/core/logging"
 import { listLogs } from "./generated"
 import type { Client } from "./generated/client"
-import { createLogSocket, type LogSocketState } from "./logs-transport"
+import { createLogSocket, type LogSocketState, type SixbFailure } from "./logs-transport"
 
 export interface LogsFilterIR {
   readonly kinds?: readonly SixbRunKind[]
@@ -19,7 +19,7 @@ export interface LogSubscribeOptions {
   readonly afterCursor?: string
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
-  readonly onError?: (error: string) => void
+  readonly onError?: (failure: SixbFailure) => void
   readonly onReset?: (cursor?: string) => void
   readonly onStateChange?: (state: LogSocketState) => void
 }
