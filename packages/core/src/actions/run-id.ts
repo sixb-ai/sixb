@@ -4,7 +4,7 @@ import { SixbError } from "../errors"
 export function createActionRunId(runId: string | undefined): string {
   if (runId !== undefined) {
     if (!runId.trim()) {
-      throw new SixbError("ontology.invalid_value", "[Sixb] Action run id must not be empty")
+      throw new SixbError("runtime.invalid_input", "[Sixb] Action run id must not be empty")
     }
     return runId
   }

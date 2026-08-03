@@ -82,7 +82,7 @@ export async function requestSyncRun(
 function createSyncRunId(runId: string | undefined): string {
   if (runId !== undefined) {
     if (!runId.trim()) {
-      throw new SixbError("runtime.invalid_definition", "[Sixb] Sync run id must not be empty")
+      throw new SixbError("runtime.invalid_input", "[Sixb] Sync run id must not be empty")
     }
     return runId
   }

@@ -62,7 +62,7 @@ export async function requestPipelineRun(
 function createPipelineRunId(runId: string | undefined): string {
   if (runId !== undefined) {
     if (!runId.trim()) {
-      throw new SixbError("runtime.invalid_definition", "[Sixb] Pipeline run id must not be empty")
+      throw new SixbError("runtime.invalid_input", "[Sixb] Pipeline run id must not be empty")
     }
     return runId
   }
