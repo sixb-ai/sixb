@@ -1,6 +1,6 @@
 {
   "name": "@sixb/blob-local",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Local filesystem blob storage for Sixb fileRef payloads",
   "keywords": [
     "sixb",

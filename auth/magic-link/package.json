@@ -1,6 +1,6 @@
 {
   "name": "@sixb/auth-magic-link",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Magic-link email authentication strategy for Sixb",
   "keywords": [
     "sixb",

@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-companycam",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "CompanyCam connector for Sixb built on @sixb/connector-rest",
   "keywords": [
     "sixb",

@@ -78,8 +78,8 @@ describe("sixb init", () => {
 
     expect(packageJson.name).toBe("starter")
     expect(packageJson.scripts.typecheck).toBe("sixb typegen && tsc --noEmit")
-    expect(packageJson.dependencies["@sixb/client"]).toBe("^0.0.1")
-    expect(packageJson.dependencies["@sixb/ducklake"]).toBe("^0.0.1")
+    expect(packageJson.dependencies["@sixb/client"]).toBe("^0.1.0")
+    expect(packageJson.dependencies["@sixb/ducklake"]).toBe("^0.1.0")
     expect(packageJson.dependencies["@sixb/lake-local"]).toBeUndefined()
     expect(packageJson.dependencies["@sixb/pg"]).toBeUndefined()
     expect(packageJson.dependencies["@sixb/blob-s3"]).toBeUndefined()
