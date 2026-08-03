@@ -17,7 +17,7 @@ import {
   toClaimed,
 } from "./adapter"
 import type { BullMqConnections } from "./connection"
-import { wrapLeaseError } from "./errors"
+import { wrapDriverError, wrapLeaseError } from "./errors"
 import { assertNonEmpty, assertPositiveNumber, parseTimestamp } from "./validation"
 
 export interface BullMqLaneShared {
@@ -75,19 +75,23 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     // data type is a discriminated union of literal `name`s. Our generic `TQueueJob["type"]`
     // doesn't satisfy that inference, so we widen the array at the call site.
     type AddBulkArg = Parameters<typeof queue.addBulk>[0]
-    await queue.addBulk(
-      envelopes.map((envelope) => ({
-        name: envelope.data.type,
-        data: envelope.data,
-        opts: {
-          jobId: toBullMqJobId(envelope.data.id),
-          delay: envelope.delayMs,
-          attempts: 1,
-          removeOnComplete: this.shared.removeOnComplete,
-          removeOnFail: this.shared.removeOnFail,
-        },
-      })) as unknown as AddBulkArg
-    )
+    try {
+      await queue.addBulk(
+        envelopes.map((envelope) => ({
+          name: envelope.data.type,
+          data: envelope.data,
+          opts: {
+            jobId: toBullMqJobId(envelope.data.id),
+            delay: envelope.delayMs,
+            attempts: 1,
+            removeOnComplete: this.shared.removeOnComplete,
+            removeOnFail: this.shared.removeOnFail,
+          },
+        })) as unknown as AddBulkArg
+      )
+    } catch (error) {
+      throw wrapDriverError(error, "enqueue")
+    }
 
     return envelopes.map((envelope) => envelope.job)
   }
@@ -112,9 +116,12 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
 
     for (let i = 0; i < limit; i++) {
       const token = randomUUID()
-      const bullJob = (await worker.getNextJob(token)) as
-        | BullJob<QueueJobData<TQueueJob>>
-        | undefined
+      let bullJob: BullJob<QueueJobData<TQueueJob>> | undefined
+      try {
+        bullJob = (await worker.getNextJob(token)) as BullJob<QueueJobData<TQueueJob>> | undefined
+      } catch (error) {
+        throw wrapDriverError(error, "claim")
+      }
       if (!bullJob) break
 
       const claimedAtMs = Date.now()
@@ -198,10 +205,7 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     assertNonEmpty(params.leaseId, "leaseId")
     assertPositiveNumber(params.leaseMs, "leaseMs")
 
-    const queue = this.getQueue(params.projectId)
-    const bullJob = (await queue.getJob(toBullMqJobId(params.jobId))) as
-      | BullJob<QueueJobData<TQueueJob>>
-      | undefined
+    const bullJob = await this.loadJob(params.projectId, params.jobId)
     if (!bullJob) return null
 
     const extended = await extendLockOrZero(bullJob, params.leaseId, params.leaseMs)
@@ -233,14 +237,26 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     await Promise.all(closers)
   }
 
+  /** Fetches a job by id, or `undefined` when the queue has no such job. */
+  private async loadJob(
+    projectId: string,
+    jobId: string
+  ): Promise<BullJob<QueueJobData<TQueueJob>> | undefined> {
+    const queue = this.getQueue(projectId)
+    try {
+      return (await queue.getJob(toBullMqJobId(jobId))) as
+        | BullJob<QueueJobData<TQueueJob>>
+        | undefined
+    } catch (error) {
+      throw wrapDriverError(error, "getJob")
+    }
+  }
+
   private async loadKnownJob(
     projectId: string,
     jobId: string
   ): Promise<BullJob<QueueJobData<TQueueJob>>> {
-    const queue = this.getQueue(projectId)
-    const bullJob = (await queue.getJob(toBullMqJobId(jobId))) as
-      | BullJob<QueueJobData<TQueueJob>>
-      | undefined
+    const bullJob = await this.loadJob(projectId, jobId)
     if (!bullJob) {
       throw new SixbError("runtime.invalid_input", `[Sixb] Unknown queue job '${jobId}'`)
     }
