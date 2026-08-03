@@ -171,6 +171,7 @@ describe("workflow runtime events", () => {
     const eventsRuntime = new EventsRuntime({
       projectId: "project-a",
       broker: new InMemoryBroker(),
+      host: null,
     })
 
     await eventsRuntime.append({

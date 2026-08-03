@@ -29,7 +29,7 @@ function scheduleTriggered(scheduleId: string) {
 describe("EventsRuntime broker backing", () => {
   test("appends domain events through a broker stream", async () => {
     const broker = new RecordingBroker()
-    const runtime = new EventsRuntime({ projectId: "project-a", broker })
+    const runtime = new EventsRuntime({ projectId: "project-a", broker, host: null })
 
     const [event] = await runtime.append({
       actor: { type: "system", id: "tests" },
@@ -93,7 +93,11 @@ describe("EventsRuntime broker backing", () => {
   })
 
   test("reads with cursor and filter semantics", async () => {
-    const runtime = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
+    const runtime = new EventsRuntime({
+      projectId: "project-a",
+      broker: new InMemoryBroker(),
+      host: null,
+    })
     await runtime.append({
       events: [actionRequested("run-1"), scheduleTriggered("daily"), actionRequested("run-2")],
     })
@@ -123,6 +127,7 @@ describe("EventsRuntime broker backing", () => {
       projectId: "project-a",
       broker: new InMemoryBroker(),
       stream: { id: "__events", retention: { maxRecords: 2 } },
+      host: null,
     })
     await runtime.append({
       events: [
@@ -138,8 +143,8 @@ describe("EventsRuntime broker backing", () => {
 
   test("isolates projects", async () => {
     const broker = new InMemoryBroker()
-    const projectA = new EventsRuntime({ projectId: "project-a", broker })
-    const projectB = new EventsRuntime({ projectId: "project-b", broker })
+    const projectA = new EventsRuntime({ projectId: "project-a", broker, host: null })
+    const projectB = new EventsRuntime({ projectId: "project-b", broker, host: null })
 
     await projectA.append({ events: [actionRequested("a")] })
     await projectB.append({ events: [actionRequested("b")] })
@@ -149,7 +154,11 @@ describe("EventsRuntime broker backing", () => {
   })
 
   test("subscribes to live events with type filters", async () => {
-    const runtime = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
+    const runtime = new EventsRuntime({
+      projectId: "project-a",
+      broker: new InMemoryBroker(),
+      host: null,
+    })
     const received: string[] = []
 
     await runtime.subscribe({ types: ["schedule.triggered"] }, (batch) => {
@@ -164,7 +173,11 @@ describe("EventsRuntime broker backing", () => {
   })
 
   test("preserves fire-and-forget subscriber error behavior", async () => {
-    const runtime = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
+    const runtime = new EventsRuntime({
+      projectId: "project-a",
+      broker: new InMemoryBroker(),
+      host: null,
+    })
     const received: string[] = []
 
     await runtime.subscribe({}, () => {
@@ -180,7 +193,7 @@ describe("EventsRuntime broker backing", () => {
 
   test("skips retained event types that are no longer part of the domain contract", async () => {
     const broker = new InMemoryBroker()
-    const runtime = new EventsRuntime({ projectId: "project-a", broker })
+    const runtime = new EventsRuntime({ projectId: "project-a", broker, host: null })
 
     await broker.ensureStream({ projectId: "project-a", stream: EVENTS_STREAM })
     await broker.append({
@@ -202,7 +215,7 @@ describe("EventsRuntime broker backing", () => {
 
   test("returns empty append batches", async () => {
     const broker = new InMemoryBroker()
-    const runtime = new EventsRuntime({ projectId: "project-a", broker })
+    const runtime = new EventsRuntime({ projectId: "project-a", broker, host: null })
 
     expect(await runtime.append({ events: [] })).toEqual([])
     await broker.ensureStream({ projectId: "project-a", stream: EVENTS_STREAM })
@@ -213,7 +226,7 @@ describe("EventsRuntime broker backing", () => {
 
   test("rejects malformed broker records", async () => {
     const broker = new InMemoryBroker()
-    const runtime = new EventsRuntime({ projectId: "project-a", broker })
+    const runtime = new EventsRuntime({ projectId: "project-a", broker, host: null })
 
     await broker.ensureStream({ projectId: "project-a", stream: EVENTS_STREAM })
     await broker.append({
@@ -226,7 +239,11 @@ describe("EventsRuntime broker backing", () => {
   })
 
   test("rejects directly authored ontology facts", async () => {
-    const runtime = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
+    const runtime = new EventsRuntime({
+      projectId: "project-a",
+      broker: new InMemoryBroker(),
+      host: null,
+    })
 
     await expect(
       runtime.append({
@@ -248,7 +265,11 @@ describe("EventsRuntime broker backing", () => {
   })
 
   test("rejects authorable events that cannot be stored as broker JSON", async () => {
-    const runtime = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
+    const runtime = new EventsRuntime({
+      projectId: "project-a",
+      broker: new InMemoryBroker(),
+      host: null,
+    })
 
     await expect(
       runtime.append({

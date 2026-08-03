@@ -1,4 +1,10 @@
-import { isSixbError, SixbError, type SixbErrorOptions, sixbFailureReason } from "../errors"
+import {
+  isSixbError,
+  SixbError,
+  type SixbErrorOptions,
+  sixbFailureReason,
+  toSixbFailure,
+} from "../errors"
 
 /** The object a lookup or a write could not find. */
 export interface MissingObjectRef {
@@ -27,7 +33,7 @@ export function objectNotFound(
 /** The object reference this failure names, or `undefined` when it is not a missing-object failure. */
 export function missingObjectRef(error: unknown): MissingObjectRef | undefined {
   if (!isSixbError(error, "storage.object_not_found")) return undefined
-  const { objectTypeId, primaryId } = error.details ?? {}
+  const { objectTypeId, primaryId } = toSixbFailure(error).details ?? {}
   if (typeof objectTypeId !== "string" || typeof primaryId !== "string") return undefined
   return { objectTypeId, primaryId }
 }

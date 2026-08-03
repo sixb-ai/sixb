@@ -4,7 +4,7 @@ import type { StoredScheduleTriggeredEvent } from "../src/events"
 import { EventsRuntime } from "../src/events"
 
 function createEvents(projectId: string) {
-  return new EventsRuntime({ projectId, broker: new InMemoryBroker() })
+  return new EventsRuntime({ projectId, broker: new InMemoryBroker(), host: null })
 }
 
 describe("schedule.triggered event", () => {

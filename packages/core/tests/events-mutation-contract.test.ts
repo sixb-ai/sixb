@@ -6,7 +6,11 @@ import type { OntologyMaterializationEvent } from "../src/materialization/events
 
 describe("materialized object/link event envelopes", () => {
   test("stores object.updated with property changes", async () => {
-    const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
+    const events = new EventsRuntime({
+      projectId: "project-a",
+      broker: new InMemoryBroker(),
+      host: null,
+    })
     const [event] = await events.publishEnvelopes([
       materializationFact(
         {
@@ -39,7 +43,11 @@ describe("materialized object/link event envelopes", () => {
   })
 
   test("stores object.deleted with cleared property changes", async () => {
-    const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
+    const events = new EventsRuntime({
+      projectId: "project-a",
+      broker: new InMemoryBroker(),
+      host: null,
+    })
     const [event] = await events.publishEnvelopes([
       materializationFact({
         type: "object.deleted",
@@ -63,7 +71,11 @@ describe("materialized object/link event envelopes", () => {
   })
 
   test("stores link.created with link property changes", async () => {
-    const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
+    const events = new EventsRuntime({
+      projectId: "project-a",
+      broker: new InMemoryBroker(),
+      host: null,
+    })
     const [event] = await events.publishEnvelopes([
       materializationFact({
         type: "link.created",

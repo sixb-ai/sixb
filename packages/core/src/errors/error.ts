@@ -116,11 +116,15 @@ export const SIXB_PROVIDER_ERROR_CODES = [
  * `boolean` that is `undefined` at runtime on the very path the guard was written for, and
  * `undefined === false` reads as *retryable*, which is the wrong way to fail. A caller that holds a
  * live `SixbError` still reads `.retryable` off it directly.
+ *
+ * No `details` either, and that is the same rule applied once more. The guard does not look at it,
+ * and it should not: `details` is a flat scalar bag, so validating it would mean rejecting a whole
+ * failure over one bad key — where {@link toSixbFailure} keeps the good keys and drops the rest.
+ * Read it through that function, which is the one that sanitizes.
  */
 export interface SixbErrorLike {
   readonly code: SixbErrorCode
   readonly message: string
-  readonly details?: SixbFailureDetails
 }
 
 /**
@@ -145,24 +149,6 @@ export function isSixbError(value: unknown, code?: SixbErrorCode): value is Sixb
   if (typeof candidate.message !== "string") return false
   if (!isSixbErrorCode(candidate.code)) return false
   return code === undefined || candidate.code === code
-}
-
-/**
- * Reads the finer `reason` a failure carries in `details`, narrowed to one module's own union.
- *
- * Several modules keep a discriminant that is finer than the code: twenty-five auth-storage reasons
- * collapse onto five codes, and inside the repo it is the reason that decides what to do next.
- * `details` is a flat scalar bag by design, so a reader has to narrow — and passing the union's
- * runtime list is what keeps the comparison honest. A misspelled reason stops compiling, which is
- * the guarantee the old `instanceof X && error.reason === "…"` pair gave for free.
- */
-export function sixbFailureReason<T extends string>(
-  error: unknown,
-  reasons: readonly T[]
-): T | undefined {
-  if (!isSixbError(error)) return undefined
-  const reason = error.details?.reason
-  return reasons.find((candidate) => candidate === reason)
 }
 
 /** The coarse class of a failure, for a caller who does not want to enumerate codes. */

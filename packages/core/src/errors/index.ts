@@ -20,13 +20,13 @@ export {
   type SixbErrorLike,
   type SixbErrorOptions,
   sixbErrorKind,
-  sixbFailureReason,
 } from "./error"
 export {
   parseSixbFailure,
   type SixbFailure,
   type SixbFailureDetails,
   serializeSixbFailure,
+  sixbFailureReason,
   type ToSixbFailureOptions,
   toSixbFailure,
 } from "./failure"

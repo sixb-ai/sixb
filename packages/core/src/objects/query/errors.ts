@@ -1,4 +1,4 @@
-import { isSixbError, SixbError, type SixbErrorOptions } from "../../errors"
+import { isSixbError, SixbError, type SixbErrorOptions, toSixbFailure } from "../../errors"
 import type { ObjectQueryValidationIssue } from "./validate"
 
 export interface ObjectQueryPlanningIssue {
@@ -90,9 +90,10 @@ export function objectQueryIssues(error: unknown): readonly ObjectQueryIssue[] |
     return carried
   }
 
-  const reason = error.details?.reason
+  const { details } = toSixbFailure(error)
+  const reason = details?.reason
   if (typeof reason !== "string") return undefined
-  const path = error.details?.path
+  const path = details?.path
   // The issue keeps the planner's own discriminant; the error's `code` is the framework-wide one.
   return [{ path: typeof path === "string" ? path : "$", code: reason, message: error.message }]
 }

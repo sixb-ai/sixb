@@ -190,8 +190,13 @@ export type SixbErrorContext =
  *
  * The first argument is the same {@link SixbFailure} the run row stores and the API returns — the
  * record itself, handed over, not a second reading of the thrown value — so a handler branches on
- * `failure.code` knowing it is the code an operator sees on the run, and reads a primitive's typed
- * extension (an action's `phase`) off the same object. The second is where the failure happened.
+ * `failure.code` knowing it is the code an operator sees on the run. The second is where the
+ * failure happened.
+ *
+ * A primitive that extends the record hands over the extension too: an action run's failure arrives
+ * carrying its `phase`. The parameter still says `SixbFailure`, the one shape every path shares, so
+ * reading `phase` means checking `context.run.kind === "action"` and narrowing. Typing this argument
+ * per context would make every handler generic to buy one field that only one context has.
  *
  * `context.cause` is the value that was actually thrown, alive and with its stack. It is deliberately
  * not part of the record: `failure.cause` is the string an operator reads, and this is the object a

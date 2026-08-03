@@ -12,7 +12,7 @@ type Report = { failure: SixbFailure; context: SixbErrorContext & { cause: unkno
 
 const PROJECT = "test"
 
-function createEvents(host?: object) {
+function createEvents(host: object | null = null) {
   return new EventsRuntime({ projectId: PROJECT, broker: new InMemoryBroker(), host })
 }
 

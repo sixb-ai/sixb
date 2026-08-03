@@ -259,7 +259,11 @@ export const transactionRequiresDocument = defineRule("transaction.requires-docu
   })
 
   test("rule transition events use the rules topic and stable partition key", async () => {
-    const events = new EventsRuntime({ projectId: "test", broker: new InMemoryBroker() })
+    const events = new EventsRuntime({
+      projectId: "test",
+      broker: new InMemoryBroker(),
+      host: null,
+    })
     const [stored] = await events.append({
       events: [
         {

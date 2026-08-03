@@ -87,7 +87,11 @@ describe("ActionWorker", () => {
     const storage = createStorageWithoutActionRuns()
     const worker = new ActionWorker({
       id: "idle-project",
-      events: new EventsRuntime({ projectId: "idle-project", broker: new InMemoryBroker() }),
+      events: new EventsRuntime({
+        projectId: "idle-project",
+        broker: new InMemoryBroker(),
+        host: null,
+      }),
       storage,
       queues: new InMemoryQueues(),
       listActions() {
@@ -116,6 +120,7 @@ describe("ActionWorker", () => {
           events: new EventsRuntime({
             projectId: "missing-action-runs",
             broker: new InMemoryBroker(),
+            host: null,
           }),
           storage,
           queues: new InMemoryQueues(),

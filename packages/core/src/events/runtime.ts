@@ -32,10 +32,14 @@ export interface EventsRuntimeOptions {
   readonly broker: Broker
   readonly stream?: BrokerStreamDefinition
   /**
-   * The `Sixb` instance — or anything sharing its error reporter — that owns this runtime. Only `emit`
-   * needs it, to escalate a lost batch. Absent means a lost batch is logged and nothing more.
+   * The `Sixb` instance — or anything sharing its error reporter — that owns this runtime. Only
+   * `emit` needs it, to escalate a lost batch.
+   *
+   * Required, and `null` is the way to say there is nothing to escalate to: a lost batch then
+   * reaches no one at all. It used to be optional, with a docstring claiming the batch was logged
+   * instead — it was not, and an omitted field is the easiest way to lose events without noticing.
    */
-  readonly host?: object
+  readonly host: object | null
 }
 
 export interface EventsAppendInput {
@@ -95,7 +99,7 @@ export class EventsRuntime implements DomainEventLog, StableEventPublisher {
   private readonly projectId: string
   private readonly broker: Broker
   private readonly stream: BrokerStreamDefinition
-  private readonly host: object | undefined
+  private readonly host: object | null
   private readonly ensureStreamPromises = new Map<string, Promise<void>>()
 
   constructor(options: EventsRuntimeOptions) {

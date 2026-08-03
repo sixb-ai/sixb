@@ -76,6 +76,25 @@ export function toSixbFailure(error: unknown, options: ToSixbFailureOptions = {}
 }
 
 /**
+ * Reads the finer `reason` a failure carries in `details`, narrowed to one module's own union.
+ *
+ * Several modules keep a discriminant that is finer than the code: twenty-five auth-storage reasons
+ * collapse onto five codes, and inside the repo it is the reason that decides what to do next.
+ * `details` is a flat scalar bag by design, so a reader has to narrow — and passing the union's
+ * runtime list is what keeps the comparison honest. A misspelled reason stops compiling, which is
+ * the guarantee the old `instanceof X && error.reason === "…"` pair gave for free.
+ */
+export function sixbFailureReason<T extends string>(
+  error: unknown,
+  reasons: readonly T[]
+): T | undefined {
+  // No guard in front: `toSixbFailure` only keeps `details` off a value that carries a known code,
+  // so anything else arrives here with nothing to read.
+  const reason = toSixbFailure(error).details?.reason
+  return reasons.find((candidate) => candidate === reason)
+}
+
+/**
  * Renders what the thrown value wrapped, outermost first.
  *
  * The thrown value's own message is already the failure's `message`, so the rendering starts one

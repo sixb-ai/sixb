@@ -1,4 +1,4 @@
-import { isSixbError, SixbError, type SixbErrorOptions } from "../errors"
+import { isSixbError, SixbError, type SixbErrorOptions, toSixbFailure } from "../errors"
 
 const MATERIALIZATION_CONFLICT_KINDS = [
   "idempotency",
@@ -40,7 +40,7 @@ export function materializationConflictKind(
   error: unknown
 ): MaterializationConflictKind | undefined {
   if (!isSixbError(error, "storage.conflict")) return undefined
-  const kind = error.details?.kind
+  const kind = toSixbFailure(error).details?.kind
   return MATERIALIZATION_CONFLICT_KINDS.find((candidate) => candidate === kind)
 }
 
@@ -70,5 +70,8 @@ export function materializationCancelled(
 
 /** Whether this failure is the explicit cancellation {@link materializationCancelled} builds. */
 export function isMaterializationCancellation(error: unknown): boolean {
-  return isSixbError(error, "runtime.cancelled") && error.details?.cancellation === "explicit"
+  return (
+    isSixbError(error, "runtime.cancelled") &&
+    toSixbFailure(error).details?.cancellation === "explicit"
+  )
 }

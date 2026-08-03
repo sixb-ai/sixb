@@ -398,7 +398,7 @@ class RecordingEventsRuntime extends EventsRuntime {
   }[] = []
 
   constructor() {
-    super({ projectId, broker: new InMemoryBroker() })
+    super({ projectId, broker: new InMemoryBroker(), host: null })
   }
 
   override subscribe(
@@ -644,7 +644,7 @@ async function ruleEventTypes(events: EventsRuntime): Promise<readonly string[]>
 }
 
 function createEventsRuntime(): EventsRuntime {
-  return new EventsRuntime({ projectId, broker: new InMemoryBroker() })
+  return new EventsRuntime({ projectId, broker: new InMemoryBroker(), host: null })
 }
 
 async function waitFor(fn: () => boolean | Promise<boolean>, timeoutMs = 2_000): Promise<void> {

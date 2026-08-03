@@ -490,7 +490,7 @@ function createRuntime(): {
 } {
   return {
     projectId: "project-a",
-    events: new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() }),
+    events: new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker(), host: null }),
     storage: new InMemoryStorage(),
   }
 }

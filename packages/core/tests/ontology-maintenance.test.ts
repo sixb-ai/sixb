@@ -9,7 +9,7 @@ describe("OntologyMaintenance", () => {
   test("does not start timers from construction and drains once when hosted", async () => {
     const storage = new InMemoryStorage()
     const broker = new InMemoryBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new EventsRuntime({ projectId: "project", broker, host: null })
     const dispatcher = new OntologyOutboxDispatcher({ projectId: "project", storage, events })
     const maintenance = new OntologyMaintenance({
       projectId: "project",
@@ -102,7 +102,11 @@ describe("OntologyMaintenance", () => {
 
   test("degrades only after repeated or overdue delivery failures", async () => {
     const storage = new InMemoryStorage()
-    const events = new EventsRuntime({ projectId: "project", broker: new UnavailableBroker() })
+    const events = new EventsRuntime({
+      projectId: "project",
+      broker: new UnavailableBroker(),
+      host: null,
+    })
     let nowMs = Date.parse("2026-01-02T03:04:05.000Z")
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
@@ -146,7 +150,7 @@ describe("OntologyMaintenance", () => {
   test("purges only old published rows during a bounded pass", async () => {
     const storage = new InMemoryStorage()
     const broker = new InMemoryBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new EventsRuntime({ projectId: "project", broker, host: null })
     const now = new Date("2026-06-02T00:00:00.000Z")
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
@@ -192,7 +196,7 @@ class DelayedDispatcher extends OntologyOutboxDispatcher {
     super({
       projectId: "project",
       storage,
-      events: new EventsRuntime({ projectId: "project", broker: new InMemoryBroker() }),
+      events: new EventsRuntime({ projectId: "project", broker: new InMemoryBroker(), host: null }),
     })
   }
 
@@ -223,7 +227,7 @@ class CountingDispatcher extends OntologyOutboxDispatcher {
     super({
       projectId: "project",
       storage,
-      events: new EventsRuntime({ projectId: "project", broker: new InMemoryBroker() }),
+      events: new EventsRuntime({ projectId: "project", broker: new InMemoryBroker(), host: null }),
     })
   }
 

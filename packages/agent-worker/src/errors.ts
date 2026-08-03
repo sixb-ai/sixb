@@ -1,4 +1,4 @@
-import { isSixbError, SixbError, type SixbErrorOptions } from "@sixb/core/errors"
+import { isSixbError, SixbError, type SixbErrorOptions, toSixbFailure } from "@sixb/core/errors"
 
 const FINALIZATION_REASON = "agent_finalization_failed"
 
@@ -48,7 +48,10 @@ export function agentFinalizationFailure(runId: string, options: SixbErrorOption
  * `details`, which is what actually distinguishes the two.
  */
 export function isAgentFinalizationFailure(error: unknown): boolean {
-  return isSixbError(error, "storage.unavailable") && error.details?.reason === FINALIZATION_REASON
+  return (
+    isSixbError(error, "storage.unavailable") &&
+    toSixbFailure(error).details?.reason === FINALIZATION_REASON
+  )
 }
 
 /**

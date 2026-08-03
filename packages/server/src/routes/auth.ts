@@ -2175,7 +2175,7 @@ function logAuthCallbackError(kind: string, error: unknown): void {
   }
 
   const detail = isSixbError(error)
-    ? `${error.code}(${error.details?.reason ?? "-"}): ${error.message}`
+    ? `${error.code}(${toSixbFailure(error).details?.reason ?? "-"}): ${error.message}`
     : error instanceof Error
       ? `${error.name}: ${error.message}`
       : String(error)

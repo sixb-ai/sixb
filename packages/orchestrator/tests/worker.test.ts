@@ -74,7 +74,7 @@ const rawInvoices = defineDataset("raw.invoices", { schema: [col("id", "string")
 const cleanInvoices = defineDataset("clean.invoices", { schema: [col("id", "string")] })
 
 function createEvents(projectId = PROJECT_ID, broker = new InMemoryBroker()): EventsRuntime {
-  return new EventsRuntime({ projectId, broker })
+  return new EventsRuntime({ projectId, broker, host: null })
 }
 
 function makeScheduleTriggeredEvent(
