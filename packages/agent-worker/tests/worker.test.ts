@@ -9,7 +9,7 @@ import type {
   LanguageModelV4Usage,
 } from "@ai-sdk/provider"
 import { exa } from "@sixb/connector-exa"
-import { exaWebSearch } from "@sixb/connector-exa/agent-tools"
+import { exaWebFetch, exaWebSearch } from "@sixb/connector-exa/agent-tools"
 import {
   type AgentReasoningLevel,
   AgentRequestError,
@@ -148,6 +148,36 @@ function webSearchThenAnswerModel(): MockLanguageModelV4 {
         { type: "text-start", id: "answer" },
         { type: "text-delta", id: "answer", delta: "Search complete" },
         { type: "text-end", id: "answer" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
+function webFetchThenAnswerModel(captureReplay: (prompt: string) => void): MockLanguageModelV4 {
+  let call = 0
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doStream: async (options) => {
+      call += 1
+      if (call === 1) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "web-fetch-call",
+            toolName: "web_fetch",
+            input: JSON.stringify({ url: "https://sixb.ai/docs" }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      if (call === 3) captureReplay(JSON.stringify(options.prompt))
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: `answer-${call}` },
+        { type: "text-delta", id: `answer-${call}`, delta: "Fetch complete" },
+        { type: "text-end", id: `answer-${call}` },
         finish("stop"),
       ])
     },
@@ -1996,6 +2026,115 @@ describe("AgentWorker", () => {
           costDollars: { total: 0.008 },
         },
       })
+    } finally {
+      await worker.stop()
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test("runs and replays a bounded Exa web_fetch through a registered connector", async () => {
+    const originalFetch = globalThis.fetch
+    let requestHeaders: Headers | undefined
+    let requestBody: unknown
+    let replayedPrompt = ""
+    globalThis.fetch = (async (_input, init) => {
+      requestHeaders = new Headers(init?.headers)
+      requestBody = JSON.parse(String(init?.body))
+      return Response.json({
+        results: [
+          {
+            id: "https://sixb.ai/docs",
+            title: "Sixb docs",
+            url: "https://sixb.ai/docs",
+            text: "connector-backed fetch content",
+          },
+        ],
+        statuses: [
+          {
+            id: "https://sixb.ai/docs",
+            status: "success",
+            source: "cached",
+          },
+        ],
+        requestId: "exa-contents-request-1",
+        costDollars: { total: 0.001 },
+      })
+    }) as typeof fetch
+    const exaConnector = defineConnector("exa", exa({ apiKey: "exa-test-key" }))
+    const webFetch = exaWebFetch(exaConnector, {
+      maxCharacters: 12,
+      timeoutMs: 1_000,
+      allowedDomains: ["sixb.ai"],
+    })
+    const sixb = buildSixb(
+      webFetchThenAnswerModel((prompt) => {
+        replayedPrompt = prompt
+      }),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { agentTools: [webFetch], connectors: [exaConnector] }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    try {
+      await worker.start()
+      const request = await sixb.agents.request({
+        agentId: "assistant",
+        text: "fetch the Sixb docs",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "Exa web_fetch run terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      expect(requestHeaders?.get("x-api-key")).toBe("exa-test-key")
+      expect(requestBody).toEqual({
+        urls: ["https://sixb.ai/docs"],
+        text: { maxCharacters: 12 },
+        subpages: 0,
+      })
+      const messages = await listMessages(storage, request.run.threadId)
+      expect(
+        messages
+          .find((message) => message.role === "assistant")
+          ?.parts.find((part) => part.type === "tool-call" && part.toolName === "web_fetch")
+      ).toMatchObject({
+        state: "output-available",
+        input: { url: "https://sixb.ai/docs" },
+        output: {
+          title: "Sixb docs",
+          url: "https://sixb.ai/docs",
+          content: "connector-ba",
+          status: { status: "success", source: "cached" },
+          requestId: "exa-contents-request-1",
+          costDollars: { total: 0.001 },
+        },
+      })
+
+      const followUp = await sixb.agents.request({
+        agentId: "assistant",
+        threadId: request.run.threadId,
+        text: "continue",
+      })
+      await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: followUp.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "Exa web_fetch replay terminal" }
+      )
+      expect(replayedPrompt).toContain("web_fetch")
+      expect(replayedPrompt).toContain("connector-ba")
     } finally {
       await worker.stop()
       globalThis.fetch = originalFetch

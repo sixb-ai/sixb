@@ -66,6 +66,44 @@ export interface ExaSearchResponse {
   readonly searchTime?: number
 }
 
+/** The supported wire fields for one Exa `/contents` request. */
+export interface ExaContentsRequest {
+  readonly urls: readonly string[]
+  readonly text?: true | ExaTextContentsOptions
+  readonly subpages?: number
+}
+
+/** One document returned by Exa's `/contents` endpoint. */
+export interface ExaContentsResult {
+  readonly id: string
+  readonly title: string | null
+  readonly url: string
+  readonly publishedDate?: string | null
+  readonly author?: string | null
+  readonly text?: string
+}
+
+export interface ExaContentsStatusError {
+  readonly tag: string
+  readonly httpStatusCode?: number | null
+}
+
+/** Per-document retrieval status returned by Exa's `/contents` endpoint. */
+export interface ExaContentsStatus {
+  readonly id: string
+  readonly status: string
+  readonly source?: string
+  readonly error?: ExaContentsStatusError
+}
+
+/** The non-streaming Exa `/contents` response used by this connector. */
+export interface ExaContentsResponse {
+  readonly results: readonly ExaContentsResult[]
+  readonly requestId?: string
+  readonly statuses?: readonly ExaContentsStatus[]
+  readonly costDollars?: ExaCostDollars
+}
+
 /** Structured fields Exa may return for a failed API request. */
 export interface ExaErrorResponse {
   readonly requestId?: string
@@ -75,6 +113,10 @@ export interface ExaErrorResponse {
 
 export interface ExaClient {
   search(request: ExaSearchRequest, options?: ExaRequestOptions): Promise<ExaSearchResponse>
+  getContents(
+    request: ExaContentsRequest,
+    options?: ExaRequestOptions
+  ): Promise<ExaContentsResponse>
 }
 
 export type ExaConnector = ConnectorAdapter<"exa", ExaClient>

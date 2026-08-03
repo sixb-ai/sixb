@@ -2,19 +2,30 @@ import type { AgentToolDefinition, ConnectorDefinition } from "@sixb/core"
 import { AgentToolPublicError, defineAgentTool, type JsonValue } from "@sixb/core"
 import { type ExaSearchDomainPolicy, resolveExaSearchDomainPolicy } from "./search-domain-policy"
 import { waitForSignal } from "./signals"
-import type { ExaConnector, ExaSearchRequest, ExaSearchResponse } from "./types"
+import type {
+  ExaConnector,
+  ExaContentsRequest,
+  ExaContentsResponse,
+  ExaContentsStatus,
+  ExaSearchRequest,
+  ExaSearchResponse,
+} from "./types"
 
 const DEFAULT_MAX_RESULTS = 5
 const DEFAULT_MAX_CHARACTERS_PER_RESULT = 2_000
 const DEFAULT_MAX_TOTAL_CHARACTERS = 10_000
+const DEFAULT_MAX_FETCH_CHARACTERS = 10_000
 const DEFAULT_TIMEOUT_MS = 20_000
 const MAX_RESULTS = 100
+const MAX_DOMAINS = 1_200
 const MAX_QUERY_CHARACTERS = 2_000
 const MAX_TITLE_CHARACTERS = 500
 const MAX_URL_CHARACTERS = 4_096
 const MAX_AUTHOR_CHARACTERS = 300
 const MAX_PUBLISHED_DATE_CHARACTERS = 100
 const MAX_REQUEST_ID_CHARACTERS = 200
+const MAX_INPUT_URL_CHARACTERS = 2_048
+const MAX_STATUS_CHARACTERS = 100
 
 export interface ExaWebSearchOptions {
   /** Maximum provider results requested and returned. Defaults to 5; Exa allows at most 100. */
@@ -49,6 +60,35 @@ export interface ExaWebSearchOutput {
 
 export type ExaWebSearchTool = AgentToolDefinition<"web_search", { readonly query: "string" }>
 
+export interface ExaWebFetchOptions {
+  /** Maximum page-text characters requested and returned. Defaults to 10,000. */
+  readonly maxCharacters?: number
+  /** Overall connector resolution and provider-request timeout. Defaults to 20 seconds. */
+  readonly timeoutMs?: number
+  /** Hostnames the requested and returned page may use. Subdomains are included. */
+  readonly allowedDomains?: readonly string[]
+  /** Hostnames the requested and returned page may not use. Denials take precedence. */
+  readonly deniedDomains?: readonly string[]
+}
+
+export type ExaWebFetchStatus = {
+  readonly status: string
+  readonly source?: string
+}
+
+export interface ExaWebFetchOutput {
+  readonly title: string
+  readonly url: string
+  readonly content: string
+  readonly status?: ExaWebFetchStatus
+  readonly requestId?: string
+  readonly costDollars?: {
+    readonly total: number
+  }
+}
+
+export type ExaWebFetchTool = AgentToolDefinition<"web_fetch", { readonly url: "string" }>
+
 interface ResolvedExaWebSearchOptions {
   readonly maxResults: number
   readonly maxCharactersPerResult: number
@@ -57,12 +97,19 @@ interface ResolvedExaWebSearchOptions {
   readonly domainPolicy: ExaSearchDomainPolicy
 }
 
+interface ResolvedExaWebFetchOptions {
+  readonly maxCharacters: number
+  readonly timeoutMs: number
+  readonly allowedDomains?: readonly string[]
+  readonly deniedDomains?: readonly string[]
+}
+
 /** Create a provider-neutral, bounded `web_search` tool backed by an Exa connector. */
 export function exaWebSearch(
   connectorDefinition: ConnectorDefinition<string, ExaConnector>,
   options: ExaWebSearchOptions = {}
 ): ExaWebSearchTool {
-  const limits = resolveOptions(options)
+  const limits = resolveSearchOptions(options)
 
   return defineAgentTool("web_search")
     .description("Search the web and return bounded source text with URLs and metadata.")
@@ -120,6 +167,51 @@ export function exaWebSearch(
     })
 }
 
+/** Create a provider-neutral, single-page `web_fetch` tool backed by an Exa connector. */
+export function exaWebFetch(
+  connectorDefinition: ConnectorDefinition<string, ExaConnector>,
+  options: ExaWebFetchOptions = {}
+): ExaWebFetchTool {
+  const limits = resolveFetchOptions(options)
+
+  return defineAgentTool("web_fetch")
+    .description("Fetch one web page and return bounded source content with its URL and metadata.")
+    .input({ url: "string" })
+    .run(async ({ input, connector, signal: runSignal }) => {
+      const requestedUrl = normalizeFetchUrl(input.url)
+      assertDomainPolicy(requestedUrl, limits)
+
+      const timeoutSignal = AbortSignal.timeout(limits.timeoutMs)
+      const signal = AbortSignal.any([runSignal, timeoutSignal])
+      const request: ExaContentsRequest = {
+        urls: [requestedUrl.toString()],
+        text: { maxCharacters: limits.maxCharacters },
+        subpages: 0,
+      }
+
+      try {
+        signal.throwIfAborted()
+        const response = await waitForSignal(
+          (async () => {
+            const client = await connector(connectorDefinition)
+            return client.getContents(request, { signal })
+          })(),
+          signal
+        )
+        signal.throwIfAborted()
+        return normalizeFetchOutput(response, requestedUrl, limits)
+      } catch (error) {
+        if (runSignal.aborted) throw runSignal.reason ?? error
+        if (timeoutSignal.aborted) {
+          throw new Error(`[SixbExa] web_fetch timed out after ${limits.timeoutMs}ms.`, {
+            cause: error,
+          })
+        }
+        throw error
+      }
+    })
+}
+
 function normalizeOutput(
   response: ExaSearchResponse,
   limits: ResolvedExaWebSearchOptions
@@ -161,7 +253,7 @@ function normalizeOutput(
   return output
 }
 
-function resolveOptions(options: ExaWebSearchOptions): ResolvedExaWebSearchOptions {
+function resolveSearchOptions(options: ExaWebSearchOptions): ResolvedExaWebSearchOptions {
   if (!options || typeof options !== "object" || Array.isArray(options)) {
     throw new Error("[SixbExa] web_search options must be an object.")
   }
@@ -186,6 +278,89 @@ function resolveOptions(options: ExaWebSearchOptions): ResolvedExaWebSearchOptio
     timeoutMs,
     domainPolicy,
   }
+}
+
+function normalizeFetchOutput(
+  response: ExaContentsResponse,
+  requestedUrl: URL,
+  limits: ResolvedExaWebFetchOptions
+): JsonValue {
+  const status =
+    response.statuses?.find((item) => item.id === requestedUrl.toString()) ?? response.statuses?.[0]
+  if (status?.error || status?.status.toLowerCase() === "error") {
+    throw contentsStatusError(status)
+  }
+
+  const result = response.results[0]
+  if (!result || !result.text?.trim()) {
+    throw new Error("[SixbExa] web_fetch returned no content for the requested URL.")
+  }
+
+  const resultUrl = normalizeReturnedUrl(result.url)
+  assertDomainPolicy(resultUrl, limits, true)
+  const title = truncate(result.title?.trim() || resultUrl.toString(), MAX_TITLE_CHARACTERS)
+  const content = result.text.slice(0, limits.maxCharacters)
+  const normalizedStatus = normalizeFetchStatus(status)
+  const requestId = normalizeOptionalString(response.requestId, MAX_REQUEST_ID_CHARACTERS)
+
+  const output = {
+    title,
+    url: resultUrl.toString(),
+    content,
+    ...(normalizedStatus ? { status: normalizedStatus } : {}),
+    ...(requestId ? { requestId } : {}),
+    ...(response.costDollars ? { costDollars: { total: response.costDollars.total } } : {}),
+  } satisfies ExaWebFetchOutput
+  return output
+}
+
+function resolveFetchOptions(options: ExaWebFetchOptions): ResolvedExaWebFetchOptions {
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    throw new Error("[SixbExa] web_fetch options must be an object.")
+  }
+
+  const maxCharacters = options.maxCharacters ?? DEFAULT_MAX_FETCH_CHARACTERS
+  assertPositiveSafeInteger(maxCharacters, "maxCharacters")
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  assertPositiveSafeInteger(timeoutMs, "timeoutMs")
+
+  return {
+    maxCharacters,
+    timeoutMs,
+    ...(options.allowedDomains !== undefined
+      ? { allowedDomains: normalizeHostnames(options.allowedDomains, "allowedDomains") }
+      : {}),
+    ...(options.deniedDomains !== undefined
+      ? { deniedDomains: normalizeHostnames(options.deniedDomains, "deniedDomains") }
+      : {}),
+  }
+}
+
+function normalizeHostnames(hostnames: readonly string[], field: string): readonly string[] {
+  if (!Array.isArray(hostnames) || hostnames.length < 1 || hostnames.length > MAX_DOMAINS) {
+    throw new Error(`[SixbExa] ${field} must contain from 1 to ${MAX_DOMAINS} domains.`)
+  }
+
+  return hostnames.map((value) => {
+    if (typeof value !== "string") throw invalidHostnameError(field)
+    const hostname = canonicalHostname(value.trim())
+    if (!hostname || hostname.length > 253 || /[/:?#@]/.test(hostname) || hostname.includes("*")) {
+      throw invalidHostnameError(field)
+    }
+    try {
+      const parsed = new URL(`https://${hostname}`)
+      if (canonicalHostname(parsed.hostname) !== hostname || parsed.pathname !== "/") {
+        throw invalidHostnameError(field)
+      }
+      return canonicalHostname(parsed.hostname)
+    } catch {
+      throw invalidHostnameError(field)
+    }
+  })
+}
+
+function invalidHostnameError(field: string): Error {
+  return new Error(`[SixbExa] ${field} entries must be hostnames without ports or paths.`)
 }
 
 function assertIntegerInRange(value: number, field: string, min: number, max: number): void {
@@ -217,6 +392,96 @@ function normalizeResultUrl(
     return { value: url, parsed }
   } catch {
     return undefined
+  }
+}
+
+function normalizeFetchUrl(value: string): URL {
+  const url = value.trim()
+  if (!url) throw new Error("[SixbExa] web_fetch URL must not be empty.")
+  if (url.length > MAX_INPUT_URL_CHARACTERS) {
+    throw new Error(
+      `[SixbExa] web_fetch URL must contain at most ${MAX_INPUT_URL_CHARACTERS} characters.`
+    )
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new Error("[SixbExa] web_fetch URL must be an absolute HTTP(S) URL.")
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("[SixbExa] web_fetch URL must be an absolute HTTP(S) URL.")
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("[SixbExa] web_fetch URL must not contain credentials.")
+  }
+  if (parsed.toString().length > MAX_INPUT_URL_CHARACTERS) {
+    throw new Error(
+      `[SixbExa] web_fetch URL must contain at most ${MAX_INPUT_URL_CHARACTERS} characters.`
+    )
+  }
+  return parsed
+}
+
+function normalizeReturnedUrl(value: string): URL {
+  if (value.trim().length > MAX_URL_CHARACTERS) {
+    throw new Error("[SixbExa] web_fetch returned an invalid URL.")
+  }
+  let url: URL
+  try {
+    url = new URL(value.trim())
+  } catch {
+    throw new Error("[SixbExa] web_fetch returned an invalid URL.")
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
+    throw new Error("[SixbExa] web_fetch returned an invalid URL.")
+  }
+  return url
+}
+
+function assertDomainPolicy(url: URL, limits: ResolvedExaWebFetchOptions, returned = false): void {
+  const hostname = canonicalHostname(url.hostname)
+  if (limits.deniedDomains?.some((domain) => domainMatches(hostname, domain))) {
+    const subject = returned ? "returned domain" : "domain"
+    throw new Error(`[SixbExa] web_fetch denied ${subject} "${hostname}".`)
+  }
+  if (
+    limits.allowedDomains &&
+    !limits.allowedDomains.some((domain) => domainMatches(hostname, domain))
+  ) {
+    const subject = returned ? "returned domain" : "domain"
+    throw new Error(`[SixbExa] web_fetch ${subject} "${hostname}" is not allowed.`)
+  }
+}
+
+function domainMatches(hostname: string, domain: string): boolean {
+  return hostname === domain || hostname.endsWith(`.${domain}`)
+}
+
+function canonicalHostname(value: string): string {
+  return value.toLowerCase().replace(/\.$/, "")
+}
+
+function contentsStatusError(status: ExaContentsStatus): Error {
+  const tag = normalizeOptionalString(status.error?.tag, MAX_STATUS_CHARACTERS)
+  const statusName = normalizeOptionalString(status.status, MAX_STATUS_CHARACTERS)
+  const label = tag ?? statusName ?? "an unknown error"
+  const httpStatusCode = status.error?.httpStatusCode
+  const http =
+    httpStatusCode === undefined || httpStatusCode === null ? "" : ` (HTTP ${httpStatusCode})`
+  return new Error(`[SixbExa] web_fetch provider reported ${label}${http}.`)
+}
+
+function normalizeFetchStatus(
+  status: ExaContentsStatus | undefined
+): ExaWebFetchStatus | undefined {
+  if (!status) return undefined
+  const statusName = normalizeOptionalString(status.status, MAX_STATUS_CHARACTERS)
+  if (!statusName) return undefined
+  const source = normalizeOptionalString(status.source, MAX_STATUS_CHARACTERS)
+  return {
+    status: statusName,
+    ...(source ? { source } : {}),
   }
 }
 
