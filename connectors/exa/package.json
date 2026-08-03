@@ -1,14 +1,15 @@
 {
   "name": "@sixb/connector-exa",
   "version": "0.1.0",
-  "description": "Exa web search connector and bounded agent tools for Sixb",
+  "description": "Exa web search and content retrieval connector with bounded agent tools for Sixb",
   "keywords": [
     "sixb",
     "bun",
     "connector",
     "integration",
     "exa",
-    "search"
+    "search",
+    "fetch"
   ],
   "homepage": "https://sixb.ai",
   "bugs": {

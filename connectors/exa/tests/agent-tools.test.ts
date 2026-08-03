@@ -5,8 +5,20 @@ import {
   defineConnector,
   noopLogger,
 } from "@sixb/core"
-import type { ExaClient, ExaConnector, ExaSearchRequest, ExaSearchResponse } from "../src"
-import { type ExaWebSearchOptions, exaWebSearch } from "../src/agent-tools"
+import type {
+  ExaClient,
+  ExaConnector,
+  ExaContentsRequest,
+  ExaContentsResponse,
+  ExaSearchRequest,
+  ExaSearchResponse,
+} from "../src"
+import {
+  type ExaWebFetchOptions,
+  type ExaWebSearchOptions,
+  exaWebFetch,
+  exaWebSearch,
+} from "../src/agent-tools"
 
 describe("Exa web_search agent tool", () => {
   test("keeps model input narrow and applies bounded defaults", async () => {
@@ -207,7 +219,10 @@ describe("Exa web_search agent tool", () => {
   })
 
   test("rejects invalid limits and domain policies when the tool is defined", () => {
-    const definition = defineConnector("exa", fakeConnector({ search: async () => response([]) }))
+    const definition = defineConnector(
+      "exa",
+      fakeConnector(fakeClient({ search: async () => response([]) }))
+    )
 
     expect(() => exaWebSearch(definition, [] as unknown as ExaWebSearchOptions)).toThrow(
       "web_search options must be an object"
@@ -322,13 +337,234 @@ describe("Exa web_search agent tool", () => {
   })
 })
 
+describe("Exa web_fetch agent tool", () => {
+  test("keeps model input narrow and fetches exactly one page with bounded defaults", async () => {
+    let receivedRequest: ExaContentsRequest | undefined
+    let receivedSignal: AbortSignal | undefined
+    const { tool, execute } = fetchHarness({
+      async getContents(request, options) {
+        receivedRequest = request
+        receivedSignal = options?.signal
+        return contentsResponse("https://sixb.ai/docs", "  Connector-backed tools  ")
+      },
+    })
+
+    const output = await execute("  https://sixb.ai/docs  ")
+
+    expect(tool.name).toBe("web_fetch")
+    expect(tool.input).toEqual({ url: "string" })
+    expect(receivedRequest).toEqual({
+      urls: ["https://sixb.ai/docs"],
+      text: { maxCharacters: 10_000 },
+      subpages: 0,
+    })
+    expect(receivedSignal).toBeInstanceOf(AbortSignal)
+    expect(output).toEqual({
+      title: "Title for https://sixb.ai/docs",
+      url: "https://sixb.ai/docs",
+      content: "  Connector-backed tools  ",
+      status: { status: "success", source: "cached" },
+      requestId: "contents-request",
+      costDollars: { total: 0.001 },
+    })
+  })
+
+  test("accepts only bounded HTTP(S) URLs before resolving the connector", async () => {
+    let resolutions = 0
+    const { execute } = fetchHarness(
+      {
+        getContents: async () => contentsResponse("https://sixb.ai", "content"),
+      },
+      {},
+      new AbortController().signal,
+      async () => {
+        resolutions += 1
+        return fakeClient({})
+      }
+    )
+
+    for (const url of [
+      "",
+      "relative/path",
+      "ftp://sixb.ai/docs",
+      "https://user:secret@sixb.ai/docs",
+      `https://sixb.ai/${"u".repeat(2_049)}`,
+    ]) {
+      await expect(execute(url)).rejects.toThrow("[SixbExa]")
+    }
+    expect(resolutions).toBe(0)
+  })
+
+  test("enforces snapshotted allow and deny policies on requested and returned URLs", async () => {
+    const allowedDomains = [" sixb.ai "]
+    const deniedDomains = ["private.sixb.ai"]
+    let fetches = 0
+    const { execute } = fetchHarness(
+      {
+        async getContents() {
+          fetches += 1
+          return contentsResponse("https://docs.sixb.ai/page", "content")
+        },
+      },
+      { allowedDomains, deniedDomains }
+    )
+    allowedDomains[0] = "changed.example"
+    deniedDomains[0] = "changed.example"
+
+    await expect(execute("https://docs.sixb.ai/page")).resolves.toMatchObject({
+      url: "https://docs.sixb.ai/page",
+    })
+    await expect(execute("https://private.sixb.ai/page")).rejects.toThrow(
+      'web_fetch denied domain "private.sixb.ai"'
+    )
+    await expect(execute("https://private.sixb.ai./page")).rejects.toThrow(
+      'web_fetch denied domain "private.sixb.ai"'
+    )
+    await expect(execute("https://example.com/page")).rejects.toThrow(
+      'web_fetch domain "example.com" is not allowed'
+    )
+    expect(fetches).toBe(1)
+
+    const escaped = fetchHarness(
+      {
+        getContents: async () => contentsResponse("https://outside.example/page", "content"),
+      },
+      { allowedDomains: ["sixb.ai"] }
+    )
+    await expect(escaped.execute("https://sixb.ai/redirect")).rejects.toThrow(
+      'returned domain "outside.example" is not allowed'
+    )
+  })
+
+  test("truncates content and bounds provider-controlled metadata", async () => {
+    const { execute } = fetchHarness(
+      {
+        getContents: async () => ({
+          results: [
+            {
+              id: "https://sixb.ai/docs",
+              title: ` Title ${"t".repeat(600)} `,
+              url: "https://sixb.ai/docs",
+              text: "abcdefgh",
+            },
+          ],
+          statuses: [
+            {
+              id: "https://sixb.ai/docs",
+              status: `success-${"s".repeat(200)}`,
+              source: `cached-${"c".repeat(200)}`,
+            },
+          ],
+          requestId: ` request-${"r".repeat(300)} `,
+          costDollars: { total: 0.001, contents: { text: 0.001 } },
+        }),
+      },
+      { maxCharacters: 5 }
+    )
+
+    const output = (await execute("https://sixb.ai/docs")) as {
+      title: string
+      content: string
+      status: { status: string; source: string }
+      requestId: string
+      costDollars: { total: number }
+    }
+
+    expect(output.content).toBe("abcde")
+    expect(output.title).toHaveLength(500)
+    expect(output.status.status).toHaveLength(100)
+    expect(output.status.source).toHaveLength(100)
+    expect(output.requestId).toHaveLength(200)
+    expect(output.costDollars).toEqual({ total: 0.001 })
+  })
+
+  test("surfaces per-URL provider failures and empty content", async () => {
+    const failed = fetchHarness({
+      getContents: async () => ({
+        results: [],
+        statuses: [
+          {
+            id: "https://missing.example",
+            status: "error",
+            error: { tag: "CRAWL_NOT_FOUND", httpStatusCode: 404 },
+          },
+        ],
+      }),
+    })
+    await expect(failed.execute("https://missing.example")).rejects.toThrow(
+      "provider reported CRAWL_NOT_FOUND (HTTP 404)"
+    )
+
+    const empty = fetchHarness({
+      getContents: async () => contentsResponse("https://empty.example", "   "),
+    })
+    await expect(empty.execute("https://empty.example")).rejects.toThrow(
+      "web_fetch returned no content"
+    )
+  })
+
+  test("rejects invalid limits and domain policies when the tool is defined", () => {
+    const definition = defineConnector("exa", fakeConnector(fakeClient({})))
+
+    expect(() => exaWebFetch(definition, [] as unknown as ExaWebFetchOptions)).toThrow(
+      "web_fetch options must be an object"
+    )
+    for (const options of [{ maxCharacters: 0 }, { timeoutMs: Number.POSITIVE_INFINITY }]) {
+      expect(() => exaWebFetch(definition, options)).toThrow("[SixbExa]")
+    }
+    expect(() => exaWebFetch(definition, { allowedDomains: [] })).toThrow(
+      "allowedDomains must contain from 1 to 1200 domains"
+    )
+    for (const domain of ["https://sixb.ai/docs", "sixb.ai:443", "user@sixb.ai", " "]) {
+      expect(() => exaWebFetch(definition, { deniedDomains: [domain] })).toThrow(
+        "deniedDomains entries must be hostnames"
+      )
+    }
+  })
+
+  test("times out connector resolution and passes cancellation to contents requests", async () => {
+    const timedOut = fetchHarness(
+      {},
+      { timeoutMs: 10 },
+      new AbortController().signal,
+      () => new Promise(() => {})
+    )
+    await expect(timedOut.execute("https://sixb.ai")).rejects.toThrow(
+      "web_fetch timed out after 10ms"
+    )
+
+    const started = Promise.withResolvers<void>()
+    let receivedSignal: AbortSignal | undefined
+    const controller = new AbortController()
+    const cancellation = new Error("run cancelled")
+    const cancelled = fetchHarness(
+      {
+        getContents(_request, options) {
+          receivedSignal = options?.signal
+          started.resolve()
+          return new Promise(() => {})
+        },
+      },
+      { timeoutMs: 1_000 },
+      controller.signal
+    )
+    const execution = cancelled.execute("https://sixb.ai")
+    await started.promise
+
+    controller.abort(cancellation)
+
+    await expect(execution).rejects.toBe(cancellation)
+    expect(receivedSignal?.aborted).toBe(true)
+  })
+})
+
 function harness(
-  client: ExaClient,
+  client: Pick<ExaClient, "search">,
   options: Parameters<typeof exaWebSearch>[1] = {},
   signal: AbortSignal = new AbortController().signal,
-  resolveConnector: () => Promise<ExaClient> = async () => client
+  resolveConnector: () => Promise<ExaClient> = async () => fakeClient(client)
 ) {
-  const definition = defineConnector("exa", fakeConnector(client))
+  const definition = defineConnector("exa", fakeConnector(fakeClient(client)))
   const tool = exaWebSearch(definition, options)
   const connector = (async (requestedDefinition: unknown) => {
     expect(requestedDefinition).toBe(definition)
@@ -356,10 +592,55 @@ function fakeConnector(client: ExaClient): ExaConnector {
   }
 }
 
+function fetchHarness(
+  client: Partial<Pick<ExaClient, "getContents">>,
+  options: Parameters<typeof exaWebFetch>[1] = {},
+  signal: AbortSignal = new AbortController().signal,
+  resolveConnector: () => Promise<ExaClient> = async () => fakeClient(client)
+) {
+  const definition = defineConnector("exa", fakeConnector(fakeClient(client)))
+  const tool = exaWebFetch(definition, options)
+  const connector = (async (requestedDefinition: unknown) => {
+    expect(requestedDefinition).toBe(definition)
+    return resolveConnector()
+  }) as AgentToolRunContext["connector"]
+
+  return {
+    tool,
+    execute(url: string) {
+      return tool.handler({
+        input: { url },
+        signal,
+        run: { id: "run-1", agentId: "research", threadId: "thread-1" },
+        connector,
+        logger: noopLogger,
+      })
+    },
+  }
+}
+
+function fakeClient(client: Partial<ExaClient>): ExaClient {
+  return {
+    search: client.search ?? (async () => response([])),
+    getContents:
+      client.getContents ??
+      (async () => ({ results: [], statuses: [] }) satisfies ExaContentsResponse),
+  }
+}
+
 function result(url: string, text: string) {
   return { id: url, title: `Title for ${url}`, url, text }
 }
 
 function response(results: ExaSearchResponse["results"]): ExaSearchResponse {
   return { results }
+}
+
+function contentsResponse(url: string, text: string): ExaContentsResponse {
+  return {
+    results: [{ id: url, title: `Title for ${url}`, url, text }],
+    statuses: [{ id: url, status: "success", source: "cached" }],
+    requestId: "contents-request",
+    costDollars: { total: 0.001, contents: { text: 0.001 } },
+  }
 }
