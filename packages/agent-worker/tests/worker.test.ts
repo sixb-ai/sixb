@@ -8,6 +8,8 @@ import type {
   LanguageModelV4StreamPart,
   LanguageModelV4Usage,
 } from "@ai-sdk/provider"
+import { exa } from "@sixb/connector-exa"
+import { exaWebSearch } from "@sixb/connector-exa/agent-tools"
 import {
   type AgentReasoningLevel,
   AgentRequestError,
@@ -117,6 +119,35 @@ function toolThenAnswerModel(captureReplay?: (prompt: string) => void): MockLang
         { type: "text-start", id: "t" },
         { type: "text-delta", id: "t", delta: "Echoed hi" },
         { type: "text-end", id: "t" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
+function webSearchThenAnswerModel(): MockLanguageModelV4 {
+  let call = 0
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doStream: async () => {
+      call += 1
+      if (call === 1) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "web-search-call",
+            toolName: "web_search",
+            input: JSON.stringify({ query: "sixb connector tools" }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "answer" },
+        { type: "text-delta", id: "answer", delta: "Search complete" },
+        { type: "text-end", id: "answer" },
         finish("stop"),
       ])
     },
@@ -1879,6 +1910,95 @@ describe("AgentWorker", () => {
       })
     } finally {
       await worker.stop()
+    }
+  })
+
+  test("runs a bounded Exa web_search through a registered connector", async () => {
+    const originalFetch = globalThis.fetch
+    let requestHeaders: Headers | undefined
+    let requestBody: unknown
+    globalThis.fetch = (async (_input, init) => {
+      requestHeaders = new Headers(init?.headers)
+      requestBody = JSON.parse(String(init?.body))
+      return Response.json({
+        results: [
+          {
+            id: "https://sixb.ai/docs",
+            title: "Sixb docs",
+            url: "https://sixb.ai/docs",
+            author: "Sixb",
+            publishedDate: "2026-08-03",
+            text: "connector-backed search content",
+          },
+        ],
+        requestId: "exa-request-1",
+        costDollars: { total: 0.008 },
+      })
+    }) as typeof fetch
+    const exaConnector = defineConnector("exa", exa({ apiKey: "exa-test-key" }))
+    const webSearch = exaWebSearch(exaConnector, {
+      maxResults: 1,
+      maxCharactersPerResult: 12,
+      maxTotalCharacters: 12,
+      timeoutMs: 1_000,
+    })
+    const sixb = buildSixb(
+      webSearchThenAnswerModel(),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { agentTools: [webSearch], connectors: [exaConnector] }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    try {
+      await worker.start()
+      const request = await sixb.agents.request({
+        agentId: "assistant",
+        text: "search for connector tools",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "Exa web_search run terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      expect(requestHeaders?.get("x-api-key")).toBe("exa-test-key")
+      expect(requestBody).toEqual({
+        query: "sixb connector tools",
+        numResults: 1,
+        contents: { text: { maxCharacters: 12 } },
+      })
+      const messages = await listMessages(storage, request.run.threadId)
+      expect(
+        messages
+          .find((message) => message.role === "assistant")
+          ?.parts.find((part) => part.type === "tool-call" && part.toolName === "web_search")
+      ).toMatchObject({
+        state: "output-available",
+        input: { query: "sixb connector tools" },
+        output: {
+          results: [
+            {
+              title: "Sixb docs",
+              url: "https://sixb.ai/docs",
+              author: "Sixb",
+              publishedDate: "2026-08-03",
+              text: "connector-ba",
+            },
+          ],
+          requestId: "exa-request-1",
+          costDollars: { total: 0.008 },
+        },
+      })
+    } finally {
+      await worker.stop()
+      globalThis.fetch = originalFetch
     }
   })
 
