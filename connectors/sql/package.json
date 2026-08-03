@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-sql",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "SQL connector for Sixb built on Bun.SQL",
   "keywords": [
     "sixb",

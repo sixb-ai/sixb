@@ -1,6 +1,6 @@
 {
   "name": "@sixb/logger-pino",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Pino output provider for Sixb handler logs",
   "keywords": [
     "sixb",

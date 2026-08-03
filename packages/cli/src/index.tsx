@@ -47,7 +47,7 @@ function compareVersions(left: string, right: string): number {
 }
 
 async function readPackageVersion(): Promise<string> {
-  const fallbackVersion = "0.0.1"
+  const fallbackVersion = "0.1.0"
 
   try {
     const packageJson = (await Bun.file(join(import.meta.dir, "..", "package.json")).json()) as {

@@ -1,6 +1,6 @@
 {
   "name": "@sixb/lake-local",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Local filesystem lake storage provider for Sixb datasets",
   "keywords": [
     "sixb",

@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-pandadoc",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "PandaDoc connector for Sixb built on @sixb/connector-rest",
   "keywords": [
     "sixb",

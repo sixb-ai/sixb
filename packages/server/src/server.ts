@@ -245,7 +245,7 @@ export function createSixbApi(server: SixbServer) {
       documentation: {
         info: {
           title: "Sixb API",
-          version: "0.0.1",
+          version: "0.1.0",
           description: "Ontology-first digital twins runtime API",
         },
         components: {

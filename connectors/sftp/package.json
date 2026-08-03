@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-sftp",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "SFTP connector for Sixb built on ssh2",
   "keywords": [
     "sixb",
