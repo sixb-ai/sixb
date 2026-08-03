@@ -31,6 +31,16 @@ body {
   color: var(--foreground);
 }
 
+/* Wide Markdown tables must scroll inside the article on narrow screens instead of widening the
+ * whole page. Code blocks already provide their own horizontal scroller. */
+@media (max-width: 640px) {
+  .prose table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
 /* Markdown / prose rendering style now lives in `@sixb/ui/globals.css` (imported above) so the
  * docs site and runtime markdown (e.g. agent responses) share one source of truth. The docs keep
  * `--docs-accent` above for the Shiki code-block copy affordance. */

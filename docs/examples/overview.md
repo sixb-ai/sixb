@@ -27,7 +27,7 @@ bun run dev
 
 ## northline — the operations reference
 
-[Northline Mechanical](../../examples/northline/README.md) is a fictional commercial HVAC and
+[Northline Mechanical](https://github.com/sixb-ai/sixb/blob/main/examples/northline/README.md) is a fictional commercial HVAC and
 building-services operator. Northline Operations connects customer and contract records,
 field-service work, and building-controls data around a central `ServiceCase`.
 
@@ -94,7 +94,7 @@ bun run demo:alarm
 bun run demo:approve-quote
 ```
 
-Read the [example README](../../examples/northline/README.md) for the complete walkthrough and
+Read the [example README](https://github.com/sixb-ai/sixb/blob/main/examples/northline/README.md) for the complete walkthrough and
 recommended code-reading order.
 
 ## auth — authentication and access control
