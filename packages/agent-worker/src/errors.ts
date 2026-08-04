@@ -1,3 +1,5 @@
+import { AgentToolPublicError } from "@sixb/core"
+
 /** Infra-level failure in the agent worker (unknown agent, missing storage, malformed job). */
 export class AgentWorkerError extends Error {
   readonly name = "AgentWorkerError"
@@ -49,9 +51,21 @@ export class AgentTurnTimeoutError extends Error {
   }
 }
 
+/** Keep an untrusted tool failure as the cause while exposing only a generic message to AI SDK. */
+export class AgentToolExecutionError extends Error {
+  readonly name = "AgentToolExecutionError"
+
+  constructor(
+    readonly toolName: string,
+    options: ErrorOptions
+  ) {
+    super("An error occurred.", options)
+  }
+}
+
 /** A selected agent tool returned a value that cannot cross the durable JSON message boundary. */
-export class AgentToolOutputError extends Error {
-  readonly name = "AgentToolOutputError"
+export class AgentToolOutputError extends AgentToolPublicError {
+  override readonly name = "AgentToolOutputError"
   constructor(
     readonly toolName: string,
     reason: string,

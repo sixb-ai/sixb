@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { type AgentToolRunContext, defineConnector, noopLogger } from "@sixb/core"
+import {
+  AgentToolPublicError,
+  type AgentToolRunContext,
+  defineConnector,
+  noopLogger,
+} from "@sixb/core"
 import type { ExaClient, ExaConnector, ExaSearchRequest, ExaSearchResponse } from "../src"
 import { type ExaWebSearchOptions, exaWebSearch } from "../src/agent-tools"
 
@@ -68,8 +73,8 @@ describe("Exa web_search agent tool", () => {
   })
 
   test("maps domain policy to Exa and snapshots developer configuration", async () => {
-    const allowedDomains = [" docs.sixb.ai "]
-    const deniedDomains = ["archive.example"]
+    const allowedDomains = [" Docs.Sixb.AI./guide/ ", "*.EXAMPLE.com/news/"]
+    const deniedDomains = [" Archive.Example. "]
     let receivedRequest: ExaSearchRequest | undefined
     const { execute } = harness(
       {
@@ -86,9 +91,47 @@ describe("Exa web_search agent tool", () => {
     await execute("domain filters")
 
     expect(receivedRequest).toMatchObject({
-      includeDomains: ["docs.sixb.ai"],
+      includeDomains: ["docs.sixb.ai/guide", "*.example.com/news"],
       excludeDomains: ["archive.example"],
     })
+  })
+
+  test("reapplies path, wildcard, allow, and deny rules to provider results", async () => {
+    const options = {
+      allowedDomains: ["example.com/docs", "*.trusted.example"],
+      deniedDomains: ["example.com/docs/private", "*.blocked.trusted.example"],
+    }
+
+    for (const url of [
+      "https://example.com/docs",
+      "https://example.com/docs/reference",
+      "https://api.trusted.example/reference",
+    ]) {
+      await expect(
+        harness({ search: async () => response([result(url, "allowed")]) }, options).execute(
+          "allowed"
+        )
+      ).resolves.toMatchObject({ results: [{ url }] })
+    }
+
+    for (const url of [
+      "https://outside.example/docs",
+      "https://example.com/docs-private",
+      "https://example.com/docs/private/credentials",
+      "https://trusted.example/reference",
+      "https://deep.blocked.trusted.example/reference",
+    ]) {
+      const error = await harness(
+        { search: async () => response([result(url, "denied")]) },
+        options
+      )
+        .execute("denied")
+        .catch((caught) => caught)
+
+      expect(error).toBeInstanceOf(AgentToolPublicError)
+      if (!(error instanceof AgentToolPublicError)) throw error
+      expect(error.message).toContain("domain policy")
+    }
   })
 
   test("normalizes metadata and includes request and cost information when available", async () => {
@@ -184,12 +227,25 @@ describe("Exa web_search agent tool", () => {
       "allowedDomains must contain from 1 to 1200 domains"
     )
     expect(() => exaWebSearch(definition, { deniedDomains: [" "] })).toThrow(
-      "deniedDomains entries must be non-empty strings"
+      "deniedDomains entries must be Exa domain filters"
     )
     for (const allowedDomains of [null, "", false]) {
       expect(() =>
         exaWebSearch(definition, { allowedDomains } as unknown as ExaWebSearchOptions)
       ).toThrow("allowedDomains must contain from 1 to 1200 domains")
+    }
+    for (const domain of [
+      "https://example.com",
+      "user@example.com",
+      "example.com:443",
+      "example.com?query=true",
+      "example.com#fragment",
+      "*.*.example.com",
+      "bad_label.example",
+    ]) {
+      expect(() => exaWebSearch(definition, { allowedDomains: [domain] })).toThrow(
+        "allowedDomains entries must be Exa domain filters"
+      )
     }
   })
 
@@ -281,8 +337,8 @@ function harness(
 
   return {
     tool,
-    execute(query: string) {
-      return tool.handler({
+    async execute(query: string) {
+      return await tool.handler({
         input: { query },
         signal,
         run: { id: "run-1", agentId: "research", threadId: "thread-1" },

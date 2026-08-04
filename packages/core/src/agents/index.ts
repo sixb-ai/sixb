@@ -59,6 +59,7 @@ export {
   AgentMessageAdapterError,
   AgentRequestError,
   type AgentRequestErrorCode,
+  AgentToolPublicError,
   AgentToolResultValidationError,
 } from "./errors"
 export {

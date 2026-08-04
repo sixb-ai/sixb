@@ -16,6 +16,15 @@ export class AgentMessageAdapterError extends Error {
   readonly name = "AgentMessageAdapterError"
 }
 
+/**
+ * An agent-tool failure whose message is intentionally safe to expose to the model and persist in
+ * the durable trace. Tool authors must keep the message free of credentials and internal details;
+ * unknown errors remain masked by the worker.
+ */
+export class AgentToolPublicError extends Error {
+  readonly name: string = "AgentToolPublicError"
+}
+
 /** Raised when an agent tool result cannot cross the durable JSON message boundary. */
 export class AgentToolResultValidationError extends Error {
   readonly name = "AgentToolResultValidationError"

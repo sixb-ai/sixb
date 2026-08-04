@@ -8,6 +8,7 @@ import type {
   Logger,
   ValueType,
 } from "@sixb/core"
+import { AgentToolPublicError } from "@sixb/core"
 import {
   AgentToolResultValidationError,
   fromAiSdk,
@@ -16,7 +17,7 @@ import {
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import type { AgentRunUsage } from "@sixb/core/storage"
 import { jsonSchema, type LanguageModelUsage, type Tool, type ToolSet, tool } from "ai"
-import { AgentToolOutputError, AgentWorkerError } from "./errors"
+import { AgentToolExecutionError, AgentToolOutputError, AgentWorkerError } from "./errors"
 
 const NEVER_ABORTED_SIGNAL = new AbortController().signal
 
@@ -65,7 +66,8 @@ function aiSdkToolFromAgentDefinition(
         if (error instanceof AgentToolResultValidationError) {
           throw new AgentToolOutputError(definition.name, error.reason, { cause: error })
         }
-        throw error
+        if (error instanceof AgentToolPublicError) throw error
+        throw new AgentToolExecutionError(definition.name, { cause: error })
       }
       return result
     },
@@ -158,7 +160,7 @@ function indexToolOutcomes(
       toolCallId,
       part.type === "tool-result"
         ? { state: "output-available", output: part.output }
-        : { state: "output-error", errorText: errorText(part.error) }
+        : { state: "output-error", errorText: agentToolErrorText(part.error) }
     )
   }
   return outcomes
@@ -203,7 +205,7 @@ function toolCallTracePart(
     outcomes.get(toolCallId) ??
     (part.error === undefined
       ? { state: "output-error" as const, errorText: "Tool call did not produce a result." }
-      : { state: "output-error" as const, errorText: errorText(part.error) })
+      : { state: "output-error" as const, errorText: agentToolErrorText(part.error) })
 
   return {
     type: part.dynamic === true ? "dynamic-tool" : `tool-${toolName}`,
@@ -231,15 +233,9 @@ function requireNonEmptyString(value: unknown, field: string): string {
   return string
 }
 
-function errorText(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === "string") return error
-  try {
-    const serialized = JSON.stringify(error)
-    return serialized === undefined ? String(error) : serialized
-  } catch {
-    return String(error)
-  }
+/** Expose only failures that the tool author explicitly marked as safe for the model and storage. */
+export function agentToolErrorText(error: unknown): string {
+  return error instanceof AgentToolPublicError ? error.message : "An error occurred."
 }
 
 /** Map AI SDK accounting onto Sixb's provider-independent durable usage vocabulary. */

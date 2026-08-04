@@ -14,9 +14,9 @@ import {
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { AgentRunRecord, AgentStorage } from "@sixb/core/storage"
 import { type ModelMessage, stepCountIs, streamText, toUIMessageStream } from "ai"
-import { agentRunUsageFromAiSdk } from "./ai-sdk-adapters"
+import { agentRunUsageFromAiSdk, agentToolErrorText } from "./ai-sdk-adapters"
 import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
-import { AgentToolOutputError, AgentTurnTimeoutError, AgentWorkerError } from "./errors"
+import { AgentTurnTimeoutError, AgentWorkerError } from "./errors"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import {
   type AgentOutputAttachmentResult,
@@ -128,8 +128,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const uiStream = toUIMessageStream({
     stream: result.stream,
     tools,
-    onError: (error) =>
-      error instanceof AgentToolOutputError ? error.message : "An error occurred.",
+    onError: agentToolErrorText,
     onEnd: (event) => {
       responseMessage = event.responseMessage
       streamAborted = streamAborted || event.isAborted

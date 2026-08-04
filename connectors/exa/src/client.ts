@@ -84,7 +84,9 @@ async function resolveApiKey(apiKey: ExaApiKeyResolver): Promise<string> {
   if (typeof value !== "string" || !value.trim()) {
     throw new ExaApiError("[SixbExa] Resolved apiKey must not be empty.")
   }
-  return value
+  // Headers normalize surrounding HTTP whitespace. Use that exact wire value for both the request
+  // and provider-error redaction so a padded configuration can never bypass secret scrubbing.
+  return value.trim()
 }
 
 function assertSearchRequest(request: ExaSearchRequest): void {

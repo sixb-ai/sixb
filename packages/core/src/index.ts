@@ -889,6 +889,7 @@ export {
   AGENT_REASONING_LEVELS,
   AgentDefinitionError,
   AgentRequestError,
+  AgentToolPublicError,
   agentContext,
   agentContextIdentity,
   defineAgent,
