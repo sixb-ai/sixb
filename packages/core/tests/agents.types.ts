@@ -1,5 +1,6 @@
 import {
   type AgentToolDefinition,
+  type AgentToolRunContext,
   defineAgent,
   defineAgentTool,
   defineConnector,
@@ -65,11 +66,11 @@ type _searchKnowledgeInput = Expect<
   Equal<
     SearchKnowledgeInput,
     {
-      query: string
-      limit: number
-      requestedAt: string
-      mode: "quick" | "deep"
-      filters: { active: boolean; note?: string }
+      readonly query: string
+      readonly limit: number
+      readonly requestedAt: string
+      readonly mode: "quick" | "deep"
+      readonly filters: { readonly active: boolean; readonly note?: string }
     }
   >
 >
@@ -95,5 +96,28 @@ defineAgentTool("invalid_output")
   .input({})
   // @ts-expect-error tool results must be JSON-compatible
   .run(() => ({ createdAt: new Date() }))
+
+defineAgentTool("strict_handler_input")
+  .description("Require exactly the declared input.")
+  .input({ query: "string" })
+  // @ts-expect-error handlers cannot require fields absent from the declared schema
+  .run((context: AgentToolRunContext<{ readonly query: string; readonly secret: string }>) => ({
+    query: context.input.query,
+  }))
+
+defineAgentTool("readonly_handler_input")
+  .description("Keep model-provided input immutable.")
+  .input({ query: "string" })
+  .run(({ input }) => {
+    // @ts-expect-error tool inputs are immutable snapshots
+    input.query = "changed"
+    return null
+  })
+
+const readonlyResults: readonly string[] = ["sixb"]
+defineAgentTool("readonly_output")
+  .description("Accept readonly JSON-compatible output.")
+  .input({})
+  .run(() => ({ results: readonlyResults }))
 
 void definition

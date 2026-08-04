@@ -7,6 +7,7 @@ import {
   type AgentLoopConfig,
   type AgentReasoningLevel,
   type AgentToolDefinition,
+  type AgentToolInputSchema,
   type DefineAgentConfig,
 } from "./types"
 
@@ -41,8 +42,7 @@ export function isAgentDefinition(value: unknown): value is AgentDefinition {
     (value.reasoning === undefined || isAgentReasoningLevel(value.reasoning)) &&
     (value.providerOptions === undefined || isProviderOptions(value.providerOptions)) &&
     Array.isArray(value.groupIds) &&
-    Array.isArray(value.tools) &&
-    value.tools.every(isAgentToolDefinition)
+    isAgentToolDefinitionArray(value.tools)
   )
 }
 
@@ -89,38 +89,35 @@ export function assertValidAgentToolInput(name: string, input: unknown): void {
   }
 }
 
-export function toolsFromDefinitions(
-  agentId: string,
-  tools: readonly AgentToolDefinition[] | undefined
-): readonly AgentToolDefinition[] {
-  if (tools === undefined) {
-    return []
-  }
-  if (!Array.isArray(tools)) {
+export function validateAndSnapshotAgentToolInput<TInput extends AgentToolInputSchema>(
+  toolName: string,
+  input: TInput
+): TInput {
+  assertValidAgentToolInput(toolName, input)
+  try {
+    return deepFreeze(structuredClone(input))
+  } catch {
     throw new AgentDefinitionError(
-      `[Sixb] Agent '${agentId}' tools must be an array of agent tool definitions.`
+      `[Sixb] Agent tool '${toolName}' input must be safely snapshot-compatible.`
     )
   }
+}
 
-  const seen = new Set<string>()
-  return tools.map((tool) => {
-    if (!isAgentToolDefinition(tool)) {
-      throw new AgentDefinitionError(
-        `[Sixb] Agent '${agentId}' tools must contain only agent tool definitions.`
-      )
+/** Revalidate and lock tool definitions supplied directly to the runtime. */
+export function validateAgentToolsAtStartup(agents: readonly AgentDefinition[]): void {
+  for (const agent of agents) {
+    if (!isAgentDefinition(agent)) {
+      throw new AgentDefinitionError("[Sixb] Agents must contain only valid agent definitions.")
     }
 
-    assertValidAgentToolName(tool.name)
-    assertValidAgentToolDescription(tool.name, tool.description)
-    assertValidAgentToolInput(tool.name, tool.input)
-    if (seen.has(tool.name)) {
-      throw new AgentDefinitionError(
-        `[Sixb] Agent '${agentId}' tools contains duplicate tool name '${tool.name}'.`
-      )
+    assertValidAgentToolDefinitions(agent.id, agent.tools)
+    for (const tool of agent.tools) {
+      deepFreeze(tool.input)
+      Object.freeze(tool)
     }
-    seen.add(tool.name)
-    return tool
-  })
+    Object.freeze(agent.tools)
+    Object.freeze(agent)
+  }
 }
 
 export function assertValidLoopConfig(loop: AgentLoopConfig | undefined): void {
@@ -191,7 +188,7 @@ export function groupIdsFromDefinitions(
   })
 
   assertNoDuplicateGroupIds(agentId, groupIds)
-  return groupIds
+  return Object.freeze(groupIds)
 }
 
 export function validateAgentGroupReferences(
@@ -261,13 +258,7 @@ function assertValidAgentToolSchema(
   switch (schema.type) {
     case "enum": {
       const values = schema.values
-      const validValues =
-        Array.isArray(values) &&
-        values.length > 0 &&
-        (schema.valueType === "string"
-          ? values.every((value) => typeof value === "string")
-          : schema.valueType === "integer" &&
-            values.every((value) => typeof value === "number" && Number.isInteger(value)))
+      const validValues = isValidAgentToolEnumValues(values, schema.valueType)
       if (!validValues || new Set(values).size !== values.length) {
         throw invalidAgentToolSchema(toolName, path)
       }
@@ -325,6 +316,79 @@ function invalidAgentToolSchema(toolName: string, path: string): AgentDefinition
   return new AgentDefinitionError(
     `[Sixb] Agent tool '${toolName}' ${path} must be a valid Sixb schema.`
   )
+}
+
+function isAgentToolDefinitionArray(value: unknown): value is readonly AgentToolDefinition[] {
+  if (!Array.isArray(value)) {
+    return false
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index) || !isAgentToolDefinition(value[index])) {
+      return false
+    }
+  }
+  return true
+}
+
+export function assertValidAgentToolDefinitions(
+  agentId: string,
+  tools: readonly AgentToolDefinition[]
+): void {
+  const seen = new Set<string>()
+  for (let index = 0; index < tools.length; index += 1) {
+    const tool = tools[index]
+    if (!Object.hasOwn(tools, index) || !isAgentToolDefinition(tool)) {
+      throw new AgentDefinitionError(
+        `[Sixb] Agent '${agentId}' tools must contain only agent tool definitions.`
+      )
+    }
+
+    assertValidAgentToolName(tool.name)
+    assertValidAgentToolDescription(tool.name, tool.description)
+    assertValidAgentToolInput(tool.name, tool.input)
+    if (seen.has(tool.name)) {
+      throw new AgentDefinitionError(
+        `[Sixb] Agent '${agentId}' tools contains duplicate tool name '${tool.name}'.`
+      )
+    }
+    seen.add(tool.name)
+  }
+}
+
+function isValidAgentToolEnumValues(values: unknown, valueType: unknown): values is unknown[] {
+  if (!Array.isArray(values) || values.length === 0) {
+    return false
+  }
+
+  for (let index = 0; index < values.length; index += 1) {
+    if (!Object.hasOwn(values, index)) {
+      return false
+    }
+    const value = values[index]
+    if (
+      valueType === "string"
+        ? typeof value !== "string"
+        : valueType !== "integer" || typeof value !== "number" || !Number.isInteger(value)
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function deepFreeze<T>(value: T, seen: Set<object> = new Set()): T {
+  if (value === null || typeof value !== "object" || seen.has(value)) {
+    return value
+  }
+
+  seen.add(value)
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (descriptor && "value" in descriptor) {
+      deepFreeze(descriptor.value, seen)
+    }
+  }
+  return Object.freeze(value)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
