@@ -165,6 +165,7 @@ async function startWorker(
 ): Promise<OrchestratorWorker> {
   const worker = new OrchestratorWorker({
     projectId,
+    host: null,
     events: eventRuntime,
     queues,
     routes,
@@ -527,6 +528,7 @@ describe("OrchestratorWorker", () => {
     }
     const input = {
       projectId: PROJECT_ID,
+      host: null,
       queue: queues.projections,
       descriptors: [descriptor],
       lakeStorage,
@@ -569,6 +571,7 @@ describe("OrchestratorWorker", () => {
 
     await reconcileProjectionDispatch({
       projectId: PROJECT_ID,
+      host: null,
       queue: queues.projections,
       descriptors: [invoiceProjectionDescriptor()],
       lakeStorage: {
@@ -621,6 +624,7 @@ describe("OrchestratorWorker", () => {
 
     await reconcileProjectionDispatch({
       projectId: PROJECT_ID,
+      host: null,
       queue: queues.projections,
       descriptors: [descriptor],
       lakeStorage,
@@ -633,6 +637,7 @@ describe("OrchestratorWorker", () => {
 
     await reconcileProjectionDispatch({
       projectId: PROJECT_ID,
+      host: null,
       queue: queues.projections,
       descriptors: [invoiceProjectionDescriptor({ projectionRevision: "projection-2" })],
       lakeStorage,
@@ -729,6 +734,7 @@ describe("OrchestratorWorker", () => {
       () =>
         new OrchestratorWorker({
           projectId: "",
+          host: null,
           events: createEvents(),
           queues: new InMemoryQueues(),
           routes: new Map(),

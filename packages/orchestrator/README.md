@@ -38,6 +38,9 @@ const { routes } = compileRoutesWithDiagnostics({
 
 const worker = new OrchestratorWorker({
   projectId: sixb.id,
+  // Where a dispatch or reconciliation failure is escalated. Pass `null` only when nothing should
+  // hear about them.
+  host: sixb,
   events: sixb.events,
   queues: sixb.queues,
   routes,

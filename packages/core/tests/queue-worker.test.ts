@@ -28,6 +28,7 @@ describe("QueueWorker", () => {
 
     const worker = new TestWorker({
       projectId: PROJECT_ID,
+      host: null,
       queue: queues.syncRuns,
       workerId: "w",
       idlePollMs: 10,
@@ -66,6 +67,7 @@ describe("QueueWorker", () => {
 
     const worker = new TestWorker({
       projectId: PROJECT_ID,
+      host: null,
       queue: queues.syncRuns,
       workerId: "w",
       idlePollMs: 1,
@@ -93,6 +95,7 @@ describe("QueueWorker", () => {
 
     const worker = new FailingWorker({
       projectId: PROJECT_ID,
+      host: null,
       queue: queues.syncRuns,
       workerId: "w",
       idlePollMs: 10,
@@ -137,6 +140,7 @@ describe("QueueWorker", () => {
 
     const worker = new RetryingWorker({
       projectId: PROJECT_ID,
+      host: null,
       queue: queues.syncRuns,
       workerId: "w",
       idlePollMs: 10,
@@ -171,6 +175,7 @@ describe("QueueWorker", () => {
 
     const worker = new AbortFailingWorker({
       projectId: PROJECT_ID,
+      host: null,
       queue: queues.syncRuns,
       workerId: "w",
       idlePollMs: 10,
@@ -216,6 +221,7 @@ describe("QueueWorker", () => {
 
     const worker = new SlowWorker({
       projectId: PROJECT_ID,
+      host: null,
       queue: queues.syncRuns,
       workerId: "w",
       leaseMs: 90,
@@ -319,6 +325,7 @@ describe("QueueWorker", () => {
 
     const worker = new BatchWorker({
       projectId: PROJECT_ID,
+      host: null,
       queue: queues.syncRuns,
       workerId: "w",
       claimLimit: 3,

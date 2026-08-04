@@ -13,8 +13,8 @@ interface ProjectionDispatchReconcilerInput extends ProjectionDispatchPorts {
   readonly projectId: string
   readonly queue: Queue<ProjectionRunRequestedQueueJob>
   readonly descriptors: readonly ProjectionDispatchDescriptor[]
-  /** The runtime this pass escalates through. Absent when the reconciler is driven from a test. */
-  readonly host?: unknown
+  /** The runtime this pass escalates through. `null` when nothing should be escalated to. */
+  readonly host: object | null
 }
 
 export async function runProjectionDispatchReconciler(

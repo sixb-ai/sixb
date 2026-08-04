@@ -20,10 +20,11 @@ export interface QueueWorkerConfig<TJob extends QueueJob> {
   /**
    * The runtime this worker escalates through, which is the `Sixb` the subclass was given.
    *
-   * Optional because a worker can be driven directly. Without it the lease and settlement failures
-   * below have nowhere to go, which is why every worker in this repo passes it.
+   * Required, and `null` is the way to say there is nothing to escalate to: the lease and settlement
+   * failures below then reach no one. It was optional, which made losing them a matter of forgetting
+   * a field — and the one documented way to build this by hand did exactly that.
    */
-  readonly host?: unknown
+  readonly host: object | null
 }
 
 export interface QueueWorkerFailureDecision {

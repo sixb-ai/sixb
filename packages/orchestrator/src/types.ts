@@ -113,8 +113,9 @@ export interface OrchestratorRuntimeOptions {
   /**
    * The runtime the orchestrator escalates through, which is the `Sixb` it routes for.
    *
-   * Optional because the orchestrator is also driven directly in tests, where a dispatch failure
-   * has nowhere to go.
+   * Required, with `null` for "nothing to escalate to". Left optional, a dispatch or reconciliation
+   * failure disappeared for anyone who omitted it — including anyone following this package's own
+   * README, which did.
    */
-  readonly host?: unknown
+  readonly host: object | null
 }
