@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { SixbError } from "@sixb/core/errors"
 import IORedis from "ioredis"
 import { BullMqQueues } from "../src"
+import { extendLockOrThrow, wrapLeaseError } from "../src/errors"
 
 /**
  * These cases need a Redis that is *not* there, so they run in the fast suite rather than in
@@ -118,5 +119,68 @@ describe("BullMqQueues driver failures", () => {
 
     // A closed provider is the caller's mistake, not the queue's. Normalizing must not overwrite it.
     expect((error as SixbError).code).toBe("runtime.invalid_input")
+  })
+})
+
+/**
+ * Settlement and lease renewal are tested at the mapping rather than end to end, on purpose.
+ *
+ * `complete()` and `renewLease()` look the job up first, so an absent Redis trips that lookup and
+ * never reaches `moveTo*`/`extendLock`; reaching them needs the connection to die *between* the two
+ * calls, which no test can schedule through the public API. An earlier attempt at an e2e case for
+ * this passed with the mapping removed — it was asserting the lookup's code, not the one under test.
+ *
+ * The two error shapes below are the real ones, captured against bullmq 5.77.1 and a live Redis: a
+ * wrong token answers a plain `Error` carrying `code: -6`, and the same call over a destroyed
+ * connection answers `Error("Connection is closed.")` with no `code` at all.
+ */
+describe("wrapLeaseError", () => {
+  const scriptError = () =>
+    Object.assign(new Error("Lock mismatch for job j1. Cmd …"), { code: -6 })
+
+  test("a script answer is the lease, so it keeps the contract's code", () => {
+    const wrapped = wrapLeaseError(scriptError(), "j1", "complete")
+
+    expect(wrapped.code).toBe("runtime.invalid_input")
+  })
+
+  test("a driver rejection is the queue, not the caller's input", () => {
+    const wrapped = wrapLeaseError(new Error("Connection is closed."), "j1", "complete")
+
+    // Remove the `isBullMqScriptError` branch in `src/errors.ts` and this becomes
+    // `runtime.invalid_input` — a Redis outage answered as HTTP 400.
+    expect(wrapped.code).toBe("queue.unavailable")
+    expect(wrapped.details).toEqual({ provider: "@sixb/queues-bullmq", operation: "complete" })
+    expect(wrapped.cause).toBeInstanceOf(Error)
+  })
+})
+
+describe("extendLockOrThrow", () => {
+  test("a returned zero is a lost lock", async () => {
+    expect(await extendLockOrThrow(async () => 0, "renewLease")).toBe(false)
+  })
+
+  test("a positive result is an extended lock", async () => {
+    expect(await extendLockOrThrow(async () => 1, "renewLease")).toBe(true)
+  })
+
+  test("a script answer is a lost lock too", async () => {
+    const throwing = async () => {
+      throw Object.assign(new Error("Missing lock for job j1. extendLock"), { code: -2 })
+    }
+
+    expect(await extendLockOrThrow(throwing, "renewLease")).toBe(false)
+  })
+
+  test("a driver rejection is raised instead of read as a lost lock", async () => {
+    const throwing = async () => {
+      throw new Error("Connection is closed.")
+    }
+
+    // Returning `false` here is what made an outage indistinguishable from a lease loss: the job was
+    // abandoned and redelivered while nothing reported `queue.unavailable`.
+    const error = await extendLockOrThrow(throwing, "renewLease").catch((thrown: unknown) => thrown)
+    expect(error).toBeInstanceOf(SixbError)
+    expect((error as SixbError).code).toBe("queue.unavailable")
   })
 })

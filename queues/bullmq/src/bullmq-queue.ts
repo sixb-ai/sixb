@@ -17,7 +17,7 @@ import {
   toClaimed,
 } from "./adapter"
 import type { BullMqConnections } from "./connection"
-import { wrapDriverError, wrapLeaseError } from "./errors"
+import { extendLockOrThrow, wrapDriverError, wrapLeaseError } from "./errors"
 import { assertNonEmpty, assertPositiveNumber, parseTimestamp } from "./validation"
 
 export interface BullMqLaneShared {
@@ -125,7 +125,7 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
       if (!bullJob) break
 
       const claimedAtMs = Date.now()
-      const extended = await extendLockOrZero(bullJob, token, leaseMs)
+      const extended = await extendLockOrThrow(() => bullJob.extendLock(token, leaseMs), "claim")
       if (!extended) {
         // The lock was lost between fetch and extend (rare — only under racing stall checks).
         // Skip this job and let the next claim attempt pick it up again after its lock expires.
@@ -147,7 +147,7 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     try {
       await bullJob.moveToCompleted(undefined, params.leaseId, false)
     } catch (error) {
-      throw wrapLeaseError(error, params.jobId)
+      throw wrapLeaseError(error, params.jobId, "complete")
     }
   }
 
@@ -169,7 +169,7 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     try {
       await bullJob.moveToDelayed(Math.max(availableAtMs, Date.now()), params.leaseId)
     } catch (error) {
-      throw wrapLeaseError(error, params.jobId)
+      throw wrapLeaseError(error, params.jobId, "retry")
     }
   }
 
@@ -190,7 +190,7 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     try {
       await bullJob.moveToFailed(wrapped, params.leaseId, false)
     } catch (error) {
-      throw wrapLeaseError(error, params.jobId)
+      throw wrapLeaseError(error, params.jobId, "fail")
     }
   }
 
@@ -208,7 +208,10 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     const bullJob = await this.loadJob(params.projectId, params.jobId)
     if (!bullJob) return null
 
-    const extended = await extendLockOrZero(bullJob, params.leaseId, params.leaseMs)
+    const extended = await extendLockOrThrow(
+      () => bullJob.extendLock(params.leaseId, params.leaseMs),
+      "renewLease"
+    )
     if (!extended) return null
 
     const claimedAtMs = Date.now()
@@ -317,24 +320,4 @@ function noop(): void {}
 
 function stopStalledCheckTimer(worker: BullWorker): void {
   ;(worker as unknown as { stalledCheckStopper?: (() => void) | undefined }).stalledCheckStopper?.()
-}
-
-/**
- * BullMQ's `extendLock` does not throw on token mismatch — the underlying Lua script returns
- * `0` when the lock's current value is not the caller's token (or the key no longer exists).
- * Calling code needs that signal to return `null` from `renewLease` and to skip the claim in
- * the rare racing-stall-check window. This helper folds the error path and the silent-zero
- * path into a single boolean: `true` iff the lock was actually extended.
- */
-async function extendLockOrZero(
-  bullJob: BullJob,
-  token: string,
-  leaseMs: number
-): Promise<boolean> {
-  try {
-    const result = await bullJob.extendLock(token, leaseMs)
-    return Number(result) > 0
-  } catch {
-    return false
-  }
 }
