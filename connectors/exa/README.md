@@ -13,7 +13,7 @@ bun add @sixb/connector-exa
 
 ```ts
 import { exa } from "@sixb/connector-exa"
-import { defineAgent, defineConnector } from "@sixb/core"
+import { defineConnector } from "@sixb/core"
 
 export const exaConnector = defineConnector(
   "exa",
@@ -29,6 +29,9 @@ caller `AbortSignal`.
 
 ```ts
 import { exaWebFetch, exaWebSearch } from "@sixb/connector-exa/agent-tools"
+import { defineAgent } from "@sixb/core"
+import { gateway } from "ai"
+import { exaConnector } from "../connectors/exa"
 
 const webSearch = exaWebSearch(exaConnector, {
   maxResults: 8,
@@ -44,13 +47,11 @@ const webFetch = exaWebFetch(exaConnector, {
   allowedDomains: ["docs.example.com"],
   deniedDomains: ["private.docs.example.com"],
 })
-```
 
-Attach either definition to an agent's `tools` array to grant that capability explicitly:
-
-```ts
 export default defineAgent("researcher", {
-  model,
+  name: "Researcher",
+  model: gateway("openai/gpt-5.5"),
+  instructions: "Research questions on the web and cite the sources you use.",
   tools: [webSearch, webFetch],
 })
 ```
@@ -60,5 +61,7 @@ Credentials, domain policy, timeouts, and output limits stay on the host.
 
 `web_fetch` accepts one HTTP(S) URL, requests one page with `subpages: 0`, and defensively truncates
 the returned content. Domain policy is checked against both the requested URL and Exa's returned
-canonical URL; denied domains take precedence and configured domains include their subdomains.
-Per-URL crawl failures reported by Exa are surfaced as tool errors.
+canonical URL. Filters support exact domains (`docs.example.com`), wildcard subdomains
+(`*.example.com`), and path prefixes (`docs.example.com/guides`). Wildcards do not match the apex
+domain, and denied filters take precedence. Per-URL crawl failures reported by Exa are surfaced as
+tool errors.

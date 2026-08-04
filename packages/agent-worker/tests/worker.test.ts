@@ -154,7 +154,9 @@ function webSearchThenAnswerModel(): MockLanguageModelV4 {
   })
 }
 
-function webFetchThenAnswerModel(captureReplay: (prompt: string) => void): MockLanguageModelV4 {
+function webFetchThenAnswerModel(
+  config: { readonly captureReplay?: (prompt: string) => void; readonly url?: string } = {}
+): MockLanguageModelV4 {
   let call = 0
   return new MockLanguageModelV4({
     modelId: "mock-model",
@@ -167,12 +169,12 @@ function webFetchThenAnswerModel(captureReplay: (prompt: string) => void): MockL
             type: "tool-call",
             toolCallId: "web-fetch-call",
             toolName: "web_fetch",
-            input: JSON.stringify({ url: "https://sixb.ai/docs" }),
+            input: JSON.stringify({ url: config.url ?? "https://sixb.ai/docs" }),
           },
           finish("tool-calls"),
         ])
       }
-      if (call === 3) captureReplay(JSON.stringify(options.prompt))
+      if (call === 3) config.captureReplay?.(JSON.stringify(options.prompt))
       return stream([
         { type: "stream-start", warnings: [] },
         { type: "text-start", id: `answer-${call}` },
@@ -1947,40 +1949,41 @@ describe("AgentWorker", () => {
     const originalFetch = globalThis.fetch
     let requestHeaders: Headers | undefined
     let requestBody: unknown
-    globalThis.fetch = (async (_input, init) => {
-      requestHeaders = new Headers(init?.headers)
-      requestBody = JSON.parse(String(init?.body))
-      return Response.json({
-        results: [
-          {
-            id: "https://sixb.ai/docs",
-            title: "Sixb docs",
-            url: "https://sixb.ai/docs",
-            author: "Sixb",
-            publishedDate: "2026-08-03",
-            text: "connector-backed search content",
-          },
-        ],
-        requestId: "exa-request-1",
-        costDollars: { total: 0.008 },
-      })
-    }) as typeof fetch
-    const exaConnector = defineConnector("exa", exa({ apiKey: "exa-test-key" }))
-    const webSearch = exaWebSearch(exaConnector, {
-      maxResults: 1,
-      maxCharactersPerResult: 12,
-      maxTotalCharacters: 12,
-      timeoutMs: 1_000,
-    })
-    const sixb = buildSixb(
-      webSearchThenAnswerModel(),
-      new InMemoryBroker(),
-      new RecordingSandboxFactory(),
-      { agentTools: [webSearch], connectors: [exaConnector] }
-    )
-    const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    let worker: AgentWorker | undefined
     try {
+      globalThis.fetch = (async (_input, init) => {
+        requestHeaders = new Headers(init?.headers)
+        requestBody = JSON.parse(String(init?.body))
+        return Response.json({
+          results: [
+            {
+              id: "https://sixb.ai/docs",
+              title: "Sixb docs",
+              url: "https://sixb.ai/docs",
+              author: "Sixb",
+              publishedDate: "2026-08-03",
+              text: "connector-backed search content",
+            },
+          ],
+          requestId: "exa-request-1",
+          costDollars: { total: 0.008 },
+        })
+      }) as typeof fetch
+      const exaConnector = defineConnector("exa", exa({ apiKey: "exa-test-key" }))
+      const webSearch = exaWebSearch(exaConnector, {
+        maxResults: 1,
+        maxCharactersPerResult: 12,
+        maxTotalCharacters: 12,
+        timeoutMs: 1_000,
+      })
+      const sixb = buildSixb(
+        webSearchThenAnswerModel(),
+        new InMemoryBroker(),
+        new RecordingSandboxFactory(),
+        { agentTools: [webSearch], connectors: [exaConnector] }
+      )
+      const storage = agentStorageOf(sixb)
+      worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
       await worker.start()
       const request = await sixb.agents.request({
         agentId: "assistant",
@@ -2027,7 +2030,7 @@ describe("AgentWorker", () => {
         },
       })
     } finally {
-      await worker.stop()
+      await worker?.stop()
       globalThis.fetch = originalFetch
     }
   })
@@ -2037,46 +2040,49 @@ describe("AgentWorker", () => {
     let requestHeaders: Headers | undefined
     let requestBody: unknown
     let replayedPrompt = ""
-    globalThis.fetch = (async (_input, init) => {
-      requestHeaders = new Headers(init?.headers)
-      requestBody = JSON.parse(String(init?.body))
-      return Response.json({
-        results: [
-          {
-            id: "https://sixb.ai/docs",
-            title: "Sixb docs",
-            url: "https://sixb.ai/docs",
-            text: "connector-backed fetch content",
-          },
-        ],
-        statuses: [
-          {
-            id: "https://sixb.ai/docs",
-            status: "success",
-            source: "cached",
-          },
-        ],
-        requestId: "exa-contents-request-1",
-        costDollars: { total: 0.001 },
-      })
-    }) as typeof fetch
-    const exaConnector = defineConnector("exa", exa({ apiKey: "exa-test-key" }))
-    const webFetch = exaWebFetch(exaConnector, {
-      maxCharacters: 12,
-      timeoutMs: 1_000,
-      allowedDomains: ["sixb.ai"],
-    })
-    const sixb = buildSixb(
-      webFetchThenAnswerModel((prompt) => {
-        replayedPrompt = prompt
-      }),
-      new InMemoryBroker(),
-      new RecordingSandboxFactory(),
-      { agentTools: [webFetch], connectors: [exaConnector] }
-    )
-    const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    let worker: AgentWorker | undefined
     try {
+      globalThis.fetch = (async (_input, init) => {
+        requestHeaders = new Headers(init?.headers)
+        requestBody = JSON.parse(String(init?.body))
+        return Response.json({
+          results: [
+            {
+              id: "https://sixb.ai/docs",
+              title: "Sixb docs",
+              url: "https://sixb.ai/docs",
+              text: "connector-backed fetch content",
+            },
+          ],
+          statuses: [
+            {
+              id: "https://sixb.ai/docs",
+              status: "success",
+              source: "cached",
+            },
+          ],
+          requestId: "exa-contents-request-1",
+          costDollars: { total: 0.001 },
+        })
+      }) as typeof fetch
+      const exaConnector = defineConnector("exa", exa({ apiKey: "exa-test-key" }))
+      const webFetch = exaWebFetch(exaConnector, {
+        maxCharacters: 12,
+        timeoutMs: 1_000,
+        allowedDomains: ["sixb.ai"],
+      })
+      const sixb = buildSixb(
+        webFetchThenAnswerModel({
+          captureReplay(prompt) {
+            replayedPrompt = prompt
+          },
+        }),
+        new InMemoryBroker(),
+        new RecordingSandboxFactory(),
+        { agentTools: [webFetch], connectors: [exaConnector] }
+      )
+      const storage = agentStorageOf(sixb)
+      worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
       await worker.start()
       const request = await sixb.agents.request({
         agentId: "assistant",
@@ -2136,8 +2142,53 @@ describe("AgentWorker", () => {
       expect(replayedPrompt).toContain("web_fetch")
       expect(replayedPrompt).toContain("connector-ba")
     } finally {
-      await worker.stop()
+      await worker?.stop()
       globalThis.fetch = originalFetch
+    }
+  })
+
+  test("preserves actionable Exa web_fetch errors through the worker", async () => {
+    const exaConnector = defineConnector("exa", exa({ apiKey: "exa-test-key" }))
+    const webFetch = exaWebFetch(exaConnector, { allowedDomains: ["sixb.ai"] })
+    const sixb = buildSixb(
+      webFetchThenAnswerModel({ url: "https://outside.example/docs" }),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { agentTools: [webFetch], connectors: [exaConnector] }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const request = await sixb.agents.request({
+        agentId: "assistant",
+        text: "fetch a URL outside the policy",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "Exa web_fetch policy failure terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      const messages = await listMessages(storage, request.run.threadId)
+      expect(
+        messages
+          .find((message) => message.role === "assistant")
+          ?.parts.find((part) => part.type === "tool-call" && part.toolName === "web_fetch")
+      ).toMatchObject({
+        state: "output-error",
+        errorText:
+          '[SixbExa] web_fetch requested URL is outside the allowed domain policy: "outside.example".',
+      })
+    } finally {
+      await worker.stop()
     }
   })
 

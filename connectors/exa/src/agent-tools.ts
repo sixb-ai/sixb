@@ -1,6 +1,6 @@
 import type { AgentToolDefinition, ConnectorDefinition } from "@sixb/core"
 import { AgentToolPublicError, defineAgentTool, type JsonValue } from "@sixb/core"
-import { type ExaSearchDomainPolicy, resolveExaSearchDomainPolicy } from "./search-domain-policy"
+import { type ExaDomainPolicy, resolveExaDomainPolicy } from "./domain-policy"
 import { waitForSignal } from "./signals"
 import type {
   ExaConnector,
@@ -17,7 +17,6 @@ const DEFAULT_MAX_TOTAL_CHARACTERS = 10_000
 const DEFAULT_MAX_FETCH_CHARACTERS = 10_000
 const DEFAULT_TIMEOUT_MS = 20_000
 const MAX_RESULTS = 100
-const MAX_DOMAINS = 1_200
 const MAX_QUERY_CHARACTERS = 2_000
 const MAX_TITLE_CHARACTERS = 500
 const MAX_URL_CHARACTERS = 4_096
@@ -65,9 +64,9 @@ export interface ExaWebFetchOptions {
   readonly maxCharacters?: number
   /** Overall connector resolution and provider-request timeout. Defaults to 20 seconds. */
   readonly timeoutMs?: number
-  /** Hostnames the requested and returned page may use. Subdomains are included. */
+  /** Exa domain or path filters to allow. An explicitly empty allowlist is rejected. */
   readonly allowedDomains?: readonly string[]
-  /** Hostnames the requested and returned page may not use. Denials take precedence. */
+  /** Exa domain or path filters to deny. Denials take precedence. */
   readonly deniedDomains?: readonly string[]
 }
 
@@ -94,14 +93,18 @@ interface ResolvedExaWebSearchOptions {
   readonly maxCharactersPerResult: number
   readonly maxTotalCharacters: number
   readonly timeoutMs: number
-  readonly domainPolicy: ExaSearchDomainPolicy
+  readonly domainPolicy: ExaDomainPolicy
 }
 
 interface ResolvedExaWebFetchOptions {
   readonly maxCharacters: number
   readonly timeoutMs: number
-  readonly allowedDomains?: readonly string[]
-  readonly deniedDomains?: readonly string[]
+  readonly domainPolicy: ExaDomainPolicy
+}
+
+interface NormalizedHttpUrl {
+  readonly parsed: URL
+  readonly value: string
 }
 
 /** Create a provider-neutral, bounded `web_search` tool backed by an Exa connector. */
@@ -179,12 +182,15 @@ export function exaWebFetch(
     .input({ url: "string" })
     .run(async ({ input, connector, signal: runSignal }) => {
       const requestedUrl = normalizeFetchUrl(input.url)
-      assertDomainPolicy(requestedUrl, limits)
+      limits.domainPolicy.assertAllows(requestedUrl.parsed, {
+        toolName: "web_fetch",
+        source: "requested",
+      })
 
       const timeoutSignal = AbortSignal.timeout(limits.timeoutMs)
       const signal = AbortSignal.any([runSignal, timeoutSignal])
       const request: ExaContentsRequest = {
-        urls: [requestedUrl.toString()],
+        urls: [requestedUrl.value],
         text: { maxCharacters: limits.maxCharacters },
         subpages: 0,
       }
@@ -203,9 +209,10 @@ export function exaWebFetch(
       } catch (error) {
         if (runSignal.aborted) throw runSignal.reason ?? error
         if (timeoutSignal.aborted) {
-          throw new Error(`[SixbExa] web_fetch timed out after ${limits.timeoutMs}ms.`, {
-            cause: error,
-          })
+          throw new AgentToolPublicError(
+            `[SixbExa] web_fetch timed out after ${limits.timeoutMs}ms.`,
+            { cause: error }
+          )
         }
         throw error
       }
@@ -220,7 +227,10 @@ function normalizeOutput(
   const results = response.results.slice(0, limits.maxResults).flatMap((result) => {
     const resultUrl = normalizeResultUrl(result.url)
     if (!resultUrl) return []
-    limits.domainPolicy.assertAllows(resultUrl.parsed)
+    limits.domainPolicy.assertAllows(resultUrl.parsed, {
+      toolName: "web_search",
+      source: "returned",
+    })
     const url = resultUrl.value
 
     const availableCharacters = Math.min(limits.maxCharactersPerResult, remainingCharacters)
@@ -266,7 +276,7 @@ function resolveSearchOptions(options: ExaWebSearchOptions): ResolvedExaWebSearc
   assertPositiveSafeInteger(maxTotalCharacters, "maxTotalCharacters")
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   assertPositiveSafeInteger(timeoutMs, "timeoutMs")
-  const domainPolicy = resolveExaSearchDomainPolicy({
+  const domainPolicy = resolveExaDomainPolicy({
     allowedDomains: options.allowedDomains,
     deniedDomains: options.deniedDomains,
   })
@@ -282,30 +292,33 @@ function resolveSearchOptions(options: ExaWebSearchOptions): ResolvedExaWebSearc
 
 function normalizeFetchOutput(
   response: ExaContentsResponse,
-  requestedUrl: URL,
+  requestedUrl: NormalizedHttpUrl,
   limits: ResolvedExaWebFetchOptions
 ): JsonValue {
   const status =
-    response.statuses?.find((item) => item.id === requestedUrl.toString()) ?? response.statuses?.[0]
+    response.statuses?.find((item) => item.id === requestedUrl.value) ?? response.statuses?.[0]
   if (status?.error || status?.status.toLowerCase() === "error") {
     throw contentsStatusError(status)
   }
 
   const result = response.results[0]
   if (!result || !result.text?.trim()) {
-    throw new Error("[SixbExa] web_fetch returned no content for the requested URL.")
+    throw new AgentToolPublicError("[SixbExa] web_fetch returned no content for the requested URL.")
   }
 
   const resultUrl = normalizeReturnedUrl(result.url)
-  assertDomainPolicy(resultUrl, limits, true)
-  const title = truncate(result.title?.trim() || resultUrl.toString(), MAX_TITLE_CHARACTERS)
+  limits.domainPolicy.assertAllows(resultUrl.parsed, {
+    toolName: "web_fetch",
+    source: "returned",
+  })
+  const title = truncate(result.title?.trim() || resultUrl.value, MAX_TITLE_CHARACTERS)
   const content = result.text.slice(0, limits.maxCharacters)
   const normalizedStatus = normalizeFetchStatus(status)
   const requestId = normalizeOptionalString(response.requestId, MAX_REQUEST_ID_CHARACTERS)
 
   const output = {
     title,
-    url: resultUrl.toString(),
+    url: resultUrl.value,
     content,
     ...(normalizedStatus ? { status: normalizedStatus } : {}),
     ...(requestId ? { requestId } : {}),
@@ -323,44 +336,16 @@ function resolveFetchOptions(options: ExaWebFetchOptions): ResolvedExaWebFetchOp
   assertPositiveSafeInteger(maxCharacters, "maxCharacters")
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   assertPositiveSafeInteger(timeoutMs, "timeoutMs")
+  const domainPolicy = resolveExaDomainPolicy({
+    allowedDomains: options.allowedDomains,
+    deniedDomains: options.deniedDomains,
+  })
 
   return {
     maxCharacters,
     timeoutMs,
-    ...(options.allowedDomains !== undefined
-      ? { allowedDomains: normalizeHostnames(options.allowedDomains, "allowedDomains") }
-      : {}),
-    ...(options.deniedDomains !== undefined
-      ? { deniedDomains: normalizeHostnames(options.deniedDomains, "deniedDomains") }
-      : {}),
+    domainPolicy,
   }
-}
-
-function normalizeHostnames(hostnames: readonly string[], field: string): readonly string[] {
-  if (!Array.isArray(hostnames) || hostnames.length < 1 || hostnames.length > MAX_DOMAINS) {
-    throw new Error(`[SixbExa] ${field} must contain from 1 to ${MAX_DOMAINS} domains.`)
-  }
-
-  return hostnames.map((value) => {
-    if (typeof value !== "string") throw invalidHostnameError(field)
-    const hostname = canonicalHostname(value.trim())
-    if (!hostname || hostname.length > 253 || /[/:?#@]/.test(hostname) || hostname.includes("*")) {
-      throw invalidHostnameError(field)
-    }
-    try {
-      const parsed = new URL(`https://${hostname}`)
-      if (canonicalHostname(parsed.hostname) !== hostname || parsed.pathname !== "/") {
-        throw invalidHostnameError(field)
-      }
-      return canonicalHostname(parsed.hostname)
-    } catch {
-      throw invalidHostnameError(field)
-    }
-  })
-}
-
-function invalidHostnameError(field: string): Error {
-  return new Error(`[SixbExa] ${field} entries must be hostnames without ports or paths.`)
 }
 
 function assertIntegerInRange(value: number, field: string, min: number, max: number): void {
@@ -395,11 +380,11 @@ function normalizeResultUrl(
   }
 }
 
-function normalizeFetchUrl(value: string): URL {
+function normalizeFetchUrl(value: string): NormalizedHttpUrl {
   const url = value.trim()
-  if (!url) throw new Error("[SixbExa] web_fetch URL must not be empty.")
+  if (!url) throw new AgentToolPublicError("[SixbExa] web_fetch URL must not be empty.")
   if (url.length > MAX_INPUT_URL_CHARACTERS) {
-    throw new Error(
+    throw new AgentToolPublicError(
       `[SixbExa] web_fetch URL must contain at most ${MAX_INPUT_URL_CHARACTERS} characters.`
     )
   }
@@ -407,69 +392,73 @@ function normalizeFetchUrl(value: string): URL {
   try {
     parsed = new URL(url)
   } catch {
-    throw new Error("[SixbExa] web_fetch URL must be an absolute HTTP(S) URL.")
+    throw new AgentToolPublicError("[SixbExa] web_fetch URL must be an absolute HTTP(S) URL.")
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("[SixbExa] web_fetch URL must be an absolute HTTP(S) URL.")
+    throw new AgentToolPublicError("[SixbExa] web_fetch URL must be an absolute HTTP(S) URL.")
   }
   if (parsed.username || parsed.password) {
-    throw new Error("[SixbExa] web_fetch URL must not contain credentials.")
+    throw new AgentToolPublicError("[SixbExa] web_fetch URL must not contain credentials.")
   }
-  if (parsed.toString().length > MAX_INPUT_URL_CHARACTERS) {
-    throw new Error(
+  const normalized = parsed.toString()
+  if (normalized.length > MAX_INPUT_URL_CHARACTERS) {
+    throw new AgentToolPublicError(
       `[SixbExa] web_fetch URL must contain at most ${MAX_INPUT_URL_CHARACTERS} characters.`
     )
   }
-  return parsed
+  return { parsed, value: normalized }
 }
 
-function normalizeReturnedUrl(value: string): URL {
-  if (value.trim().length > MAX_URL_CHARACTERS) {
-    throw new Error("[SixbExa] web_fetch returned an invalid URL.")
+function normalizeReturnedUrl(value: string): NormalizedHttpUrl {
+  const raw = value.trim()
+  if (!raw || raw.length > MAX_URL_CHARACTERS) {
+    throw new AgentToolPublicError("[SixbExa] web_fetch returned an invalid URL.")
   }
-  let url: URL
+  let parsed: URL
   try {
-    url = new URL(value.trim())
+    parsed = new URL(raw)
   } catch {
-    throw new Error("[SixbExa] web_fetch returned an invalid URL.")
-  }
-  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
-    throw new Error("[SixbExa] web_fetch returned an invalid URL.")
-  }
-  return url
-}
-
-function assertDomainPolicy(url: URL, limits: ResolvedExaWebFetchOptions, returned = false): void {
-  const hostname = canonicalHostname(url.hostname)
-  if (limits.deniedDomains?.some((domain) => domainMatches(hostname, domain))) {
-    const subject = returned ? "returned domain" : "domain"
-    throw new Error(`[SixbExa] web_fetch denied ${subject} "${hostname}".`)
+    throw new AgentToolPublicError("[SixbExa] web_fetch returned an invalid URL.")
   }
   if (
-    limits.allowedDomains &&
-    !limits.allowedDomains.some((domain) => domainMatches(hostname, domain))
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+    parsed.username ||
+    parsed.password
   ) {
-    const subject = returned ? "returned domain" : "domain"
-    throw new Error(`[SixbExa] web_fetch ${subject} "${hostname}" is not allowed.`)
+    throw new AgentToolPublicError("[SixbExa] web_fetch returned an invalid URL.")
   }
+  const normalized = parsed.toString()
+  if (normalized.length > MAX_URL_CHARACTERS) {
+    throw new AgentToolPublicError("[SixbExa] web_fetch returned an invalid URL.")
+  }
+  return { parsed, value: normalized }
 }
 
-function domainMatches(hostname: string, domain: string): boolean {
-  return hostname === domain || hostname.endsWith(`.${domain}`)
-}
-
-function canonicalHostname(value: string): string {
-  return value.toLowerCase().replace(/\.$/, "")
-}
-
-function contentsStatusError(status: ExaContentsStatus): Error {
-  const tag = normalizeOptionalString(status.error?.tag, MAX_STATUS_CHARACTERS)
-  const statusName = normalizeOptionalString(status.status, MAX_STATUS_CHARACTERS)
-  const label = tag ?? statusName ?? "an unknown error"
+function contentsStatusError(status: ExaContentsStatus): AgentToolPublicError {
+  const tag = normalizeProviderStatusTag(status.error?.tag)
   const httpStatusCode = status.error?.httpStatusCode
   const http =
-    httpStatusCode === undefined || httpStatusCode === null ? "" : ` (HTTP ${httpStatusCode})`
-  return new Error(`[SixbExa] web_fetch provider reported ${label}${http}.`)
+    typeof httpStatusCode === "number" &&
+    Number.isSafeInteger(httpStatusCode) &&
+    httpStatusCode >= 100 &&
+    httpStatusCode <= 599
+      ? ` (HTTP ${httpStatusCode})`
+      : ""
+  return new AgentToolPublicError(
+    `[SixbExa] web_fetch provider reported ${tag ?? "an error"}${http}.`
+  )
+}
+
+function normalizeProviderStatusTag(value: string | undefined): string | undefined {
+  const normalized = value?.trim()
+  if (
+    !normalized ||
+    normalized.length > MAX_STATUS_CHARACTERS ||
+    !/^[A-Z][A-Z0-9_]*$/.test(normalized)
+  ) {
+    return undefined
+  }
+  return normalized
 }
 
 function normalizeFetchStatus(
