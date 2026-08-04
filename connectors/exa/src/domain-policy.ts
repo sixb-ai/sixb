@@ -3,43 +3,42 @@ import { AgentToolPublicError } from "@sixb/core"
 const MAX_DOMAINS = 1_200
 const MAX_FILTER_CHARACTERS = 4_096
 
-interface ExaSearchDomainRule {
-  /** Canonical value sent to Exa. */
+interface ExaDomainRule {
+  /** Canonical value sent to Exa search requests. */
   readonly value: string
   readonly hostname: string
   readonly wildcard: boolean
   readonly pathPrefix?: string
 }
 
-export interface ExaSearchDomainPolicy {
-  readonly includeDomains?: readonly string[]
-  readonly excludeDomains?: readonly string[]
-  assertAllows(url: URL): void
+interface ExaDomainPolicyCheck {
+  readonly toolName: "web_search" | "web_fetch"
+  readonly source: "requested" | "returned"
 }
 
-/** Compile Exa's hostname, path-prefix, and wildcard syntax once when the tool is defined. */
-export function resolveExaSearchDomainPolicy(input: {
+export interface ExaDomainPolicy {
+  readonly includeDomains?: readonly string[]
+  readonly excludeDomains?: readonly string[]
+  assertAllows(url: URL, check: ExaDomainPolicyCheck): void
+}
+
+/** Compile Exa's hostname, path-prefix, and wildcard syntax once per tool definition. */
+export function resolveExaDomainPolicy(input: {
   readonly allowedDomains?: readonly string[]
   readonly deniedDomains?: readonly string[]
-}): ExaSearchDomainPolicy {
+}): ExaDomainPolicy {
   const allowedRules = normalizeRules(input.allowedDomains, "allowedDomains")
   const deniedRules = normalizeRules(input.deniedDomains, "deniedDomains")
 
   return {
     ...(allowedRules ? { includeDomains: allowedRules.map((rule) => rule.value) } : {}),
     ...(deniedRules ? { excludeDomains: deniedRules.map((rule) => rule.value) } : {}),
-    assertAllows(url) {
-      const denied = deniedRules?.some((rule) => matchesRule(url, rule)) ?? false
-      if (denied) {
-        throw new AgentToolPublicError(
-          `[SixbExa] web_search returned a URL denied by domain policy: "${url.hostname}".`
-        )
+    assertAllows(url, check) {
+      if (deniedRules?.some((rule) => matchesRule(url, rule))) {
+        throw domainPolicyError(url, check, "denied")
       }
-      const allowed = allowedRules?.some((rule) => matchesRule(url, rule)) ?? true
-      if (!allowed) {
-        throw new AgentToolPublicError(
-          `[SixbExa] web_search returned a URL outside the allowed domain policy: "${url.hostname}".`
-        )
+      if (allowedRules && !allowedRules.some((rule) => matchesRule(url, rule))) {
+        throw domainPolicyError(url, check, "outside")
       }
     },
   }
@@ -48,13 +47,13 @@ export function resolveExaSearchDomainPolicy(input: {
 function normalizeRules(
   values: readonly string[] | undefined,
   field: string
-): readonly ExaSearchDomainRule[] | undefined {
+): readonly ExaDomainRule[] | undefined {
   if (values === undefined) return undefined
   if (!Array.isArray(values) || values.length < 1 || values.length > MAX_DOMAINS) {
     throw new Error(`[SixbExa] ${field} must contain from 1 to ${MAX_DOMAINS} domains.`)
   }
 
-  const rules = new Map<string, ExaSearchDomainRule>()
+  const rules = new Map<string, ExaDomainRule>()
   for (const value of values) {
     const rule = normalizeRule(value, field)
     rules.set(rule.value, rule)
@@ -62,10 +61,10 @@ function normalizeRules(
   return [...rules.values()]
 }
 
-function normalizeRule(value: string, field: string): ExaSearchDomainRule {
+function normalizeRule(value: string, field: string): ExaDomainRule {
   if (typeof value !== "string") throw invalidRule(field)
   const trimmed = value.trim()
-  if (!trimmed || trimmed.length > MAX_FILTER_CHARACTERS || trimmed.includes("\\")) {
+  if (!trimmed || trimmed.length > MAX_FILTER_CHARACTERS || /[\\?#]/.test(trimmed)) {
     throw invalidRule(field)
   }
 
@@ -80,7 +79,7 @@ function normalizeRule(value: string, field: string): ExaSearchDomainRule {
   } catch {
     throw invalidRule(field)
   }
-  if (parsed.username || parsed.password || parsed.port || parsed.search || parsed.hash) {
+  if (parsed.username || parsed.password || parsed.port) {
     throw invalidRule(field)
   }
 
@@ -98,7 +97,7 @@ function normalizeRule(value: string, field: string): ExaSearchDomainRule {
   }
 }
 
-function matchesRule(url: URL, rule: ExaSearchDomainRule): boolean {
+function matchesRule(url: URL, rule: ExaDomainRule): boolean {
   const hostname = canonicalHostname(url.hostname)
   const hostnameMatches = rule.wildcard
     ? hostname !== rule.hostname && hostname.endsWith(`.${rule.hostname}`)
@@ -123,6 +122,19 @@ function isValidHostname(hostname: string): boolean {
     if (label.length < 1 || label.length > 63) return false
     return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)
   })
+}
+
+function domainPolicyError(
+  url: URL,
+  check: ExaDomainPolicyCheck,
+  reason: "denied" | "outside"
+): AgentToolPublicError {
+  const subject = check.source === "requested" ? "requested URL" : "returned URL"
+  const policy =
+    reason === "denied" ? "denied by domain policy" : "outside the allowed domain policy"
+  return new AgentToolPublicError(
+    `[SixbExa] ${check.toolName} ${subject} is ${policy}: "${canonicalHostname(url.hostname)}".`
+  )
 }
 
 function invalidRule(field: string): Error {
