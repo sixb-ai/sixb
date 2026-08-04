@@ -694,10 +694,7 @@ function contentsResponse(url: string, text: string): ExaContentsResponse {
   }
 }
 
-async function expectPublicFailure(
-  value: unknown,
-  message: string
-): Promise<AgentToolPublicError> {
+async function expectPublicFailure(value: unknown, message: string): Promise<AgentToolPublicError> {
   const error = await Promise.resolve(value).catch((caught) => caught)
   expect(error).toBeInstanceOf(AgentToolPublicError)
   if (!(error instanceof AgentToolPublicError)) throw error
