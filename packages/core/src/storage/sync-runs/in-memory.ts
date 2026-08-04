@@ -90,9 +90,9 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
           `[Sixb] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.datasetId}'.`
         )
       }
-      if (!input.output && (existing.mode !== "append" || input.rowsRead !== 0)) {
+      if (!input.output && input.rowsRead !== 0) {
         throw new SyncRunError(
-          `[Sixb] Sync run '${input.id}' may omit its output only for an empty append.`
+          `[Sixb] Sync run '${input.id}' may omit its output only when no rows were read.`
         )
       }
     }

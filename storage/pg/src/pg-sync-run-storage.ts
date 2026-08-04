@@ -78,9 +78,9 @@ export class PgSyncRunStorage implements SyncRunStorage {
             `[SixbPg] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
           )
         }
-        if (!input.output && (existing.mode !== "append" || input.rowsRead !== 0)) {
+        if (!input.output && input.rowsRead !== 0) {
           throw new SyncRunError(
-            `[SixbPg] Sync run '${input.id}' may omit its output only for an empty append.`
+            `[SixbPg] Sync run '${input.id}' may omit its output only when no rows were read.`
           )
         }
       }

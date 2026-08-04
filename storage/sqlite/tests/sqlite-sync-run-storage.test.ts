@@ -87,6 +87,21 @@ describe("SqliteSyncRunStorage", () => {
     })
     expect(emptyFinished.output).toBeUndefined()
     expect(emptyFinished.checkpoint).toEqual({ cursor: "cursor-empty" })
+
+    await storage.start({
+      id: "run-empty-snapshot",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+    })
+    const emptySnapshotFinished = await storage.finish({
+      id: "run-empty-snapshot",
+      projectId: "my-app",
+      status: "succeeded",
+      rowsRead: 0,
+    })
+    expect(emptySnapshotFinished.output).toBeUndefined()
   })
 
   test("stores failures and supports filtered paging", async () => {

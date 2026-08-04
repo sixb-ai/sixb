@@ -63,7 +63,7 @@ export type SyncRunResult = SyncRunResultBase &
         readonly versionCreated: boolean
       }
     | {
-        /** A first empty append has no dataset version yet. */
+        /** A first empty sync has no dataset version yet. */
         readonly version?: undefined
         readonly versionCreated: false
       }
