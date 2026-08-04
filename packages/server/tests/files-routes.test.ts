@@ -349,6 +349,9 @@ describe("file routes", () => {
     expect(await completeResponse.json()).toEqual({
       error: "File upload session is already aborted.",
       code: "storage.upload_conflict",
+      // The response carries the record's `details`, so a caller can tell the four upload-session
+      // conflicts apart instead of seeing one code for all of them.
+      details: { reason: "already_aborted" },
     })
   })
 
@@ -436,6 +439,7 @@ describe("file routes", () => {
     expect(await abortResponse.json()).toEqual({
       error: "File upload session is already completed.",
       code: "storage.upload_conflict",
+      details: { reason: "already_completed" },
     })
   })
 
@@ -463,6 +467,7 @@ describe("file routes", () => {
     expect(await contentResponse.json()).toEqual({
       error: "File upload session is already aborted.",
       code: "storage.upload_conflict",
+      details: { reason: "already_aborted" },
     })
   })
 

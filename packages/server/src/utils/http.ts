@@ -1,4 +1,4 @@
-import { SixbError, type SixbErrorCode, toSixbFailure } from "@sixb/core/errors"
+import { SixbError, type SixbErrorCode, type SixbFailure, toSixbFailure } from "@sixb/core/errors"
 
 export function toIsoString(value: Date): string {
   return value.toISOString()
@@ -37,9 +37,22 @@ export function parseOptionalInt(value: string | undefined): number | undefined 
  * message alone fails its own declared schema and goes out as a 422, so a forgotten code is a
  * failing test rather than a silently code-less response.
  */
-export interface ErrorResponseBody {
+export interface ErrorResponseBody extends Omit<SixbFailure, "message"> {
+  /** The failure's message, under the key the API has always used. */
   readonly error: string
-  readonly code: SixbErrorCode
+}
+
+/**
+ * The recorded failure as an error response: every field of the record, with `message` moved to
+ * `error`.
+ *
+ * This is the whole difference between the two surfaces. It used to drop `details` and `cause`, so a
+ * caller who could read the provider or the field off a failed run row could not read either off the
+ * response that refused their request.
+ */
+export function toErrorResponseBody(failure: SixbFailure): ErrorResponseBody {
+  const { message, ...rest } = failure
+  return { ...rest, error: message }
 }
 
 /**
@@ -212,5 +225,6 @@ export function handleRouteError(
   fallbackCode: SixbErrorCode = "runtime.invalid_input"
 ): ErrorResponseBody {
   const failure = toSixbFailure(error, { fallbackCode })
-  return errorResponse(set, failure.code, failure.message)
+  set.status = STATUS_BY_CODE[failure.code]
+  return toErrorResponseBody(failure)
 }

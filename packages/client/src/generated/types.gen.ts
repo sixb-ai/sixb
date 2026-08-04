@@ -102,9 +102,25 @@ export type SixbErrorCode =
   | "workflow.run_conflict"
   | "workflow.run_not_found"
 
+/**
+ * A request that could not be served, as the recorded failure.
+ */
 export type ErrorResponse = {
+  /**
+   * The failure's message. Not a contract.
+   */
   error: string
   code: SixbErrorCode
+  /**
+   * Flat scalar context: the field, the provider, the object type.
+   */
+  details?: {
+    [key: string]: string | number | boolean
+  }
+  /**
+   * What the failure wrapped, outermost first.
+   */
+  cause?: string
 }
 
 export type ObjectQueryObject = {
@@ -366,10 +382,7 @@ export type SignOutErrors = {
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
 }
 
 export type SignOutError = SignOutErrors[keyof SignOutErrors]
@@ -396,10 +409,7 @@ export type ListAuthSessionsErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
 }
 
 export type ListAuthSessionsError = ListAuthSessionsErrors[keyof ListAuthSessionsErrors]
@@ -437,24 +447,15 @@ export type RevokeAuthSessionErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type RevokeAuthSessionError = RevokeAuthSessionErrors[keyof RevokeAuthSessionErrors]
@@ -481,17 +482,11 @@ export type SignOutAllErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
 }
 
 export type SignOutAllError = SignOutAllErrors[keyof SignOutAllErrors]
@@ -519,17 +514,11 @@ export type GetAuthAccessManagementOptionsErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type GetAuthAccessManagementOptionsError =
@@ -562,17 +551,11 @@ export type ListAuthAccessTokensErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type ListAuthAccessTokensError = ListAuthAccessTokensErrors[keyof ListAuthAccessTokensErrors]
@@ -619,31 +602,19 @@ export type CreateAuthPersonalAccessTokenErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type CreateAuthPersonalAccessTokenError =
@@ -690,31 +661,19 @@ export type RevokeAuthAccessTokenErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type RevokeAuthAccessTokenError =
@@ -758,24 +717,15 @@ export type ListAuthServiceAccountsErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type ListAuthServiceAccountsError =
@@ -817,31 +767,19 @@ export type CreateAuthServiceAccountErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type CreateAuthServiceAccountError =
@@ -880,31 +818,19 @@ export type DisableAuthServiceAccountErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type DisableAuthServiceAccountError =
@@ -943,31 +869,19 @@ export type ListAuthServiceAccountAccessTokensErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type ListAuthServiceAccountAccessTokensError =
@@ -1017,38 +931,23 @@ export type CreateAuthServiceAccountAccessTokenErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type CreateAuthServiceAccountAccessTokenError =
@@ -1096,31 +995,19 @@ export type RevokeAuthServiceAccountAccessTokenErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type RevokeAuthServiceAccountAccessTokenError =
@@ -1170,38 +1057,23 @@ export type ListAuthInvitationsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type ListAuthInvitationsError = ListAuthInvitationsErrors[keyof ListAuthInvitationsErrors]
@@ -1247,45 +1119,27 @@ export type CreateAuthInvitationErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 429
    */
-  429: {
-    error: string
-    code: SixbErrorCode
-  }
+  429: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type CreateAuthInvitationError = CreateAuthInvitationErrors[keyof CreateAuthInvitationErrors]
@@ -1326,17 +1180,11 @@ export type GetAuthInvitationOptionsErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type GetAuthInvitationOptionsError =
@@ -1387,38 +1235,23 @@ export type RevokeAuthInvitationErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type RevokeAuthInvitationError = RevokeAuthInvitationErrors[keyof RevokeAuthInvitationErrors]
@@ -1456,17 +1289,11 @@ export type GetAuthMembershipOptionsErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type GetAuthMembershipOptionsError =
@@ -1508,24 +1335,15 @@ export type ListAuthMembersErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type ListAuthMembersError = ListAuthMembersErrors[keyof ListAuthMembersErrors]
@@ -1574,38 +1392,23 @@ export type UpdateAuthMemberGroupsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type UpdateAuthMemberGroupsError =
@@ -1647,31 +1450,19 @@ export type SuspendAuthMemberErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type SuspendAuthMemberError = SuspendAuthMemberErrors[keyof SuspendAuthMemberErrors]
@@ -1711,31 +1502,19 @@ export type ReactivateAuthMemberErrors = {
   /**
    * Response for status 401
    */
-  401: {
-    error: string
-    code: SixbErrorCode
-  }
+  401: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 500
    */
-  500: {
-    error: string
-    code: SixbErrorCode
-  }
+  500: ErrorResponse
 }
 
 export type ReactivateAuthMemberError = ReactivateAuthMemberErrors[keyof ReactivateAuthMemberErrors]
@@ -1865,10 +1644,7 @@ export type GetConnectorErrors = {
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetConnectorError = GetConnectorErrors[keyof GetConnectorErrors]
@@ -1905,10 +1681,7 @@ export type ListDatasetsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
 }
 
 export type ListDatasetsError = ListDatasetsErrors[keyof ListDatasetsErrors]
@@ -1968,17 +1741,11 @@ export type GetDatasetErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetDatasetError = GetDatasetErrors[keyof GetDatasetErrors]
@@ -2040,17 +1807,11 @@ export type ListDatasetVersionsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type ListDatasetVersionsError = ListDatasetVersionsErrors[keyof ListDatasetVersionsErrors]
@@ -2115,17 +1876,11 @@ export type GetDatasetVersionErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetDatasetVersionError = GetDatasetVersionErrors[keyof GetDatasetVersionErrors]
@@ -2190,17 +1945,11 @@ export type ListDatasetRowsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type ListDatasetRowsError = ListDatasetRowsErrors[keyof ListDatasetRowsErrors]
@@ -2349,10 +2098,7 @@ export type GetSyncErrors = {
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetSyncError = GetSyncErrors[keyof GetSyncErrors]
@@ -2446,17 +2192,11 @@ export type ListSyncRunsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type ListSyncRunsError = ListSyncRunsErrors[keyof ListSyncRunsErrors]
@@ -2514,38 +2254,23 @@ export type RequestSyncRunErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
   /**
    * Response for status 503
    */
-  503: {
-    error: string
-    code: SixbErrorCode
-  }
+  503: ErrorResponse
 }
 
 export type RequestSyncRunError = RequestSyncRunErrors[keyof RequestSyncRunErrors]
@@ -2682,10 +2407,7 @@ export type GetPipelineErrors = {
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetPipelineError = GetPipelineErrors[keyof GetPipelineErrors]
@@ -2807,17 +2529,11 @@ export type ListPipelineRunsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type ListPipelineRunsError = ListPipelineRunsErrors[keyof ListPipelineRunsErrors]
@@ -2867,24 +2583,15 @@ export type GetPipelineRunErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type GetPipelineRunError = GetPipelineRunErrors[keyof GetPipelineRunErrors]
@@ -2961,38 +2668,23 @@ export type RequestPipelineRunErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
   /**
    * Response for status 503
    */
-  503: {
-    error: string
-    code: SixbErrorCode
-  }
+  503: ErrorResponse
 }
 
 export type RequestPipelineRunError = RequestPipelineRunErrors[keyof RequestPipelineRunErrors]
@@ -3120,10 +2812,7 @@ export type GetWorkflowErrors = {
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetWorkflowError = GetWorkflowErrors[keyof GetWorkflowErrors]
@@ -3240,17 +2929,11 @@ export type ListWorkflowInterventionsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type ListWorkflowInterventionsError =
@@ -3316,24 +2999,15 @@ export type GetWorkflowInterventionErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type GetWorkflowInterventionError =
@@ -3399,31 +3073,19 @@ export type SubmitWorkflowInterventionErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 409
    */
-  409: {
-    error: string
-    code: SixbErrorCode
-  }
+  409: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type SubmitWorkflowInterventionError =
@@ -3490,31 +3152,19 @@ export type CancelWorkflowInterventionErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 409
    */
-  409: {
-    error: string
-    code: SixbErrorCode
-  }
+  409: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type CancelWorkflowInterventionError =
@@ -3584,17 +3234,11 @@ export type ListWorkflowRunsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type ListWorkflowRunsError = ListWorkflowRunsErrors[keyof ListWorkflowRunsErrors]
@@ -3648,24 +3292,15 @@ export type GetWorkflowRunErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type GetWorkflowRunError = GetWorkflowRunErrors[keyof GetWorkflowRunErrors]
@@ -3757,24 +3392,15 @@ export type GetWorkflowAgentNodeExecutionErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type GetWorkflowAgentNodeExecutionError =
@@ -3833,31 +3459,19 @@ export type CancelWorkflowRunErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 409
    */
-  409: {
-    error: string
-    code: SixbErrorCode
-  }
+  409: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type CancelWorkflowRunError = CancelWorkflowRunErrors[keyof CancelWorkflowRunErrors]
@@ -4140,38 +3754,23 @@ export type RequestWorkflowRunErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
   /**
    * Response for status 503
    */
-  503: {
-    error: string
-    code: SixbErrorCode
-  }
+  503: ErrorResponse
 }
 
 export type RequestWorkflowRunError = RequestWorkflowRunErrors[keyof RequestWorkflowRunErrors]
@@ -4333,10 +3932,7 @@ export type GetRuleErrors = {
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetRuleError = GetRuleErrors[keyof GetRuleErrors]
@@ -4481,17 +4077,11 @@ export type ListRuleStatesErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type ListRuleStatesError = ListRuleStatesErrors[keyof ListRuleStatesErrors]
@@ -4625,10 +4215,7 @@ export type GetObjectTypeErrors = {
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetObjectTypeError = GetObjectTypeErrors[keyof GetObjectTypeErrors]
@@ -4734,17 +4321,11 @@ export type SearchObjectsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
 }
 
 export type SearchObjectsError = SearchObjectsErrors[keyof SearchObjectsErrors]
@@ -4789,17 +4370,11 @@ export type ListObjectsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
 }
 
 export type ListObjectsError = ListObjectsErrors[keyof ListObjectsErrors]
@@ -5057,10 +4632,7 @@ export type GetObjectErrors = {
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetObjectError = GetObjectErrors[keyof GetObjectErrors]
@@ -5100,24 +4672,15 @@ export type UpsertObjectErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type UpsertObjectError = UpsertObjectErrors[keyof UpsertObjectErrors]
@@ -5188,10 +4751,7 @@ export type GetActionErrors = {
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetActionError = GetActionErrors[keyof GetActionErrors]
@@ -5252,38 +4812,23 @@ export type RequestActionErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
   /**
    * Response for status 503
    */
-  503: {
-    error: string
-    code: SixbErrorCode
-  }
+  503: ErrorResponse
 }
 
 export type RequestActionError = RequestActionErrors[keyof RequestActionErrors]
@@ -5316,17 +4861,11 @@ export type UploadFileRawErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 413
    */
-  413: {
-    error: string
-    code: SixbErrorCode
-  }
+  413: ErrorResponse
 }
 
 export type UploadFileRawError = UploadFileRawErrors[keyof UploadFileRawErrors]
@@ -5364,10 +4903,7 @@ export type CreateFileUploadErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
 }
 
 export type CreateFileUploadError = CreateFileUploadErrors[keyof CreateFileUploadErrors]
@@ -5417,31 +4953,19 @@ export type UploadFileContentErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 409
    */
-  409: {
-    error: string
-    code: SixbErrorCode
-  }
+  409: ErrorResponse
   /**
    * Response for status 410
    */
-  410: {
-    error: string
-    code: SixbErrorCode
-  }
+  410: ErrorResponse
 }
 
 export type UploadFileContentError = UploadFileContentErrors[keyof UploadFileContentErrors]
@@ -5471,31 +4995,19 @@ export type SignFileUploadPartErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 409
    */
-  409: {
-    error: string
-    code: SixbErrorCode
-  }
+  409: ErrorResponse
   /**
    * Response for status 410
    */
-  410: {
-    error: string
-    code: SixbErrorCode
-  }
+  410: ErrorResponse
 }
 
 export type SignFileUploadPartError = SignFileUploadPartErrors[keyof SignFileUploadPartErrors]
@@ -5538,31 +5050,19 @@ export type CompleteFileUploadErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 409
    */
-  409: {
-    error: string
-    code: SixbErrorCode
-  }
+  409: ErrorResponse
   /**
    * Response for status 410
    */
-  410: {
-    error: string
-    code: SixbErrorCode
-  }
+  410: ErrorResponse
 }
 
 export type CompleteFileUploadError = CompleteFileUploadErrors[keyof CompleteFileUploadErrors]
@@ -5597,38 +5097,23 @@ export type AbortFileUploadErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 409
    */
-  409: {
-    error: string
-    code: SixbErrorCode
-  }
+  409: ErrorResponse
   /**
    * Response for status 410
    */
-  410: {
-    error: string
-    code: SixbErrorCode
-  }
+  410: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type AbortFileUploadError = AbortFileUploadErrors[keyof AbortFileUploadErrors]
@@ -5665,17 +5150,11 @@ export type ListActionRunsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type ListActionRunsError = ListActionRunsErrors[keyof ListActionRunsErrors]
@@ -5749,24 +5228,15 @@ export type GetActionRunErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type GetActionRunError = GetActionRunErrors[keyof GetActionRunErrors]
@@ -6003,10 +5473,7 @@ export type GetAgentErrors = {
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetAgentError = GetAgentErrors[keyof GetAgentErrors]
@@ -6049,17 +5516,11 @@ export type ListAgentThreadsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type ListAgentThreadsError = ListAgentThreadsErrors[keyof ListAgentThreadsErrors]
@@ -6107,31 +5568,19 @@ export type CreateAgentThreadErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 409
    */
-  409: {
-    error: string
-    code: SixbErrorCode
-  }
+  409: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type CreateAgentThreadError = CreateAgentThreadErrors[keyof CreateAgentThreadErrors]
@@ -6175,24 +5624,15 @@ export type GetAgentThreadErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type GetAgentThreadError = GetAgentThreadErrors[keyof GetAgentThreadErrors]
@@ -6239,24 +5679,15 @@ export type ListAgentThreadMessagesErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type ListAgentThreadMessagesError =
@@ -6535,38 +5966,23 @@ export type PostAgentThreadMessageErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 409
    */
-  409: {
-    error: string
-    code: SixbErrorCode
-  }
+  409: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type PostAgentThreadMessageError =
@@ -6751,31 +6167,19 @@ export type CancelAgentRunErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 409
    */
-  409: {
-    error: string
-    code: SixbErrorCode
-  }
+  409: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type CancelAgentRunError = CancelAgentRunErrors[keyof CancelAgentRunErrors]
@@ -6862,31 +6266,19 @@ export type RetryAgentRunErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 409
    */
-  409: {
-    error: string
-    code: SixbErrorCode
-  }
+  409: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type RetryAgentRunError = RetryAgentRunErrors[keyof RetryAgentRunErrors]
@@ -6977,24 +6369,15 @@ export type ListAgentThreadRunsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type ListAgentThreadRunsError = ListAgentThreadRunsErrors[keyof ListAgentThreadRunsErrors]
@@ -7083,24 +6466,15 @@ export type GetAgentRunErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type GetAgentRunError = GetAgentRunErrors[keyof GetAgentRunErrors]
@@ -7188,17 +6562,11 @@ export type ListObjectLinksErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type ListObjectLinksError = ListObjectLinksErrors[keyof ListObjectLinksErrors]
@@ -7242,24 +6610,15 @@ export type RemoveObjectLinkErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type RemoveObjectLinkError = RemoveObjectLinkErrors[keyof RemoveObjectLinkErrors]
@@ -7296,24 +6655,15 @@ export type UpsertObjectLinkErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type UpsertObjectLinkError = UpsertObjectLinkErrors[keyof UpsertObjectLinkErrors]
@@ -7348,24 +6698,15 @@ export type AppendTelemetryErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type AppendTelemetryError = AppendTelemetryErrors[keyof AppendTelemetryErrors]
@@ -7402,17 +6743,11 @@ export type GetBulkTelemetryHistoryErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
 }
 
 export type GetBulkTelemetryHistoryError =
@@ -7463,17 +6798,11 @@ export type GetTelemetryHistoryErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetTelemetryHistoryError = GetTelemetryHistoryErrors[keyof GetTelemetryHistoryErrors]
@@ -7511,17 +6840,11 @@ export type GetLatestTelemetryErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetLatestTelemetryError = GetLatestTelemetryErrors[keyof GetLatestTelemetryErrors]
@@ -7601,17 +6924,15 @@ export type ListEventsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
+  /**
+   * Response for status 503
+   */
+  503: ErrorResponse
 }
 
 export type ListEventsError = ListEventsErrors[keyof ListEventsErrors]
@@ -8551,17 +7872,15 @@ export type ListLogsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 403
    */
-  403: {
-    error: string
-    code: SixbErrorCode
-  }
+  403: ErrorResponse
+  /**
+   * Response for status 503
+   */
+  503: ErrorResponse
 }
 
 export type ListLogsError = ListLogsErrors[keyof ListLogsErrors]
@@ -8998,10 +8317,7 @@ export type GetProjectionErrors = {
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
 }
 
 export type GetProjectionError = GetProjectionErrors[keyof GetProjectionErrors]
@@ -9408,17 +8724,11 @@ export type ListProjectionRunsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type ListProjectionRunsError = ListProjectionRunsErrors[keyof ListProjectionRunsErrors]
@@ -9560,24 +8870,15 @@ export type GetProjectionRunErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-    code: SixbErrorCode
-  }
+  404: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type GetProjectionRunError = GetProjectionRunErrors[keyof GetProjectionRunErrors]
@@ -9721,17 +9022,11 @@ export type ListWebhookRunsErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-    code: SixbErrorCode
-  }
+  400: ErrorResponse
   /**
    * Response for status 501
    */
-  501: {
-    error: string
-    code: SixbErrorCode
-  }
+  501: ErrorResponse
 }
 
 export type ListWebhookRunsError = ListWebhookRunsErrors[keyof ListWebhookRunsErrors]

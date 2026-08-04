@@ -56,6 +56,7 @@ export function registerLogRoutes(app: Elysia, sixb: Sixb<readonly OntologySourc
         200: LogsResponseSchema,
         400: ErrorResponseSchema,
         403: ErrorResponseSchema,
+        503: ErrorResponseSchema,
       },
       detail: {
         summary: "Read run logs",

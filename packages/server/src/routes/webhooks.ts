@@ -21,7 +21,7 @@ import type {
 } from "@sixb/core/storage"
 import { type SixbFailure, toSixbFailure } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
-import { type ErrorResponseBody, errorResponse } from "../utils/http"
+import { errorResponse, toErrorResponseBody } from "../utils/http"
 import { readRequestBodyWithLimit } from "../utils/request-body"
 
 const DEFAULT_WEBHOOK_BODY_LIMIT_BYTES = 1024 * 1024
@@ -391,10 +391,6 @@ function webhookFailure(code: SixbErrorCode, message: string): SixbFailure {
  * that called it, so a method mismatch owes it a 405 with an `Allow` header and an oversized body a
  * 413, neither of which the code alone would produce.
  */
-function toErrorResponseBody(failure: SixbFailure): ErrorResponseBody {
-  return { error: failure.message, code: failure.code }
-}
-
 async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {
   const storage = input.sixb.storage.webhookRuns
   if (!storage) {

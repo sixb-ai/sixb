@@ -37,6 +37,8 @@ export function registerEventRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         200: EventsResponseSchema,
         400: ErrorResponseSchema,
         403: ErrorResponseSchema,
+        // Reading the log is a broker read, and both shipped brokers answer `broker.unavailable`.
+        503: ErrorResponseSchema,
       },
       detail: {
         summary: "Read domain events",

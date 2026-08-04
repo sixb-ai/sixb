@@ -5,6 +5,11 @@ Every failure Sixb raises on purpose carries a `SixbErrorCode` — a short, stab
 [`onError`](error-handling.md), and rendered by Atlas. It is the same string on all four surfaces,
 so a branch you write once keeps working wherever the failure turns up.
 
+"On purpose" is doing work in that sentence. A few public entry points still validate their own
+arguments with a bare `throw new Error(...)` — a connector factory handed an empty token, say — and
+those arrive without a code, which is why the paragraph below on the fallback exists. Treat a missing
+code as a bug worth reporting rather than as a shape to code against.
+
 Message text is not part of the contract. It is written for a human reading one failure and may be
 reworded in a patch release. Never parse it.
 
@@ -99,19 +104,32 @@ record already has.
 
 ## On the wire
 
-A request that fails answers with the code and the message, under the key the API has always used:
+A request that fails answers with the record, and only the message key differs: it is `error`, the
+key the API has always used.
 
 ```json
-{ "error": "No sync is registered under 'crm-nightly'", "code": "sync.not_found" }
+{
+  "error": "could not reach the queue",
+  "code": "queue.unavailable",
+  "details": { "provider": "@sixb/queues-bullmq", "operation": "enqueue" },
+  "cause": "Connection is closed."
+}
 ```
 
-`code` is always there. Branch on it and never on the status, which is coarser: two conditions
-answer 409 and only the code says which. The status is a function of the code — one condition
-cannot answer 404 on one route and 400 on another — so there is nothing to reconcile between them.
+`code` is always there. `details` and `cause` are there whenever the failure carried them, so a
+rejected write names the field and an unreachable provider names itself — the same context an
+operator reads off the run row.
 
-The four-field record is what you get when the failure is part of something the API *returns*
-rather than the reason it could not: the `error` of a failed sync run, pipeline step, workflow node,
-or action run is the record itself, `details` and `cause` included.
+Branch on the code and never on the status, which is coarser: two conditions answer 409 and only the
+code says which. The status is a function of the code — one condition cannot answer 404 on one route
+and 400 on another — so there is nothing to reconcile between them.
+
+A route declares the statuses its own work can produce, which is not the same as every status you
+can meet. Any route touching a provider can answer `503` when that provider is down, whether or not
+its OpenAPI entry says so.
+
+A failure the API *returns* rather than fails with — the `error` of a sync run, pipeline step,
+workflow node, or action run — is the record verbatim, `message` and all.
 
 The WebSocket streams carry the pair too. `@sixb/client`'s event, log, and agent-run sockets hand
 `onError` a `SixbFailure` and keep the last one on the socket state, so a browser branches on `code`

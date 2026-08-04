@@ -34,6 +34,7 @@ export interface SixbApiErrorInit {
   readonly method?: string
   readonly body?: unknown
   readonly code?: SixbErrorCode
+  readonly details?: Readonly<Record<string, string | number | boolean>>
 }
 
 /**
@@ -58,6 +59,14 @@ export class SixbApiError extends Error {
    * conditions answer 409 and only the code says which.
    */
   readonly code?: SixbErrorCode
+  /**
+   * The failure's context, lifted out of the body beside the code.
+   *
+   * The API returns the recorded failure, so a `400` on an object write names the field it rejected
+   * and a `503` names the provider that was unreachable. Reading it off `body` would mean casting;
+   * this is the same value, typed.
+   */
+  readonly details?: Readonly<Record<string, string | number | boolean>>
 
   constructor(message: string, init: SixbApiErrorInit) {
     super(message)
@@ -68,6 +77,7 @@ export class SixbApiError extends Error {
     this.method = init.method ?? ""
     this.body = init.body
     this.code = init.code
+    this.details = init.details
   }
 }
 
@@ -189,6 +199,7 @@ function sixbErrorInterceptor(
   const method = request?.method ?? ""
   const url = response.url || request?.url || ""
   const code = extractErrorCode(error)
+  const details = extractErrorDetails(error)
   return new SixbApiError(buildSixbApiErrorMessage(method, url, response, error), {
     status: response.status,
     statusText: response.statusText,
@@ -196,6 +207,7 @@ function sixbErrorInterceptor(
     method,
     body: error,
     ...(code ? { code } : {}),
+    ...(details ? { details } : {}),
   })
 }
 
@@ -209,6 +221,22 @@ function extractErrorCode(body: unknown): SixbErrorCode | undefined {
   }
   const code = (body as { code: unknown }).code
   return typeof code === "string" && code.includes(".") ? (code as SixbErrorCode) : undefined
+}
+
+/** Keeps the scalar entries and drops the rest, the way the runtime's own reader does. */
+function extractErrorDetails(
+  body: unknown
+): Readonly<Record<string, string | number | boolean>> | undefined {
+  if (!body || typeof body !== "object") return undefined
+  const raw = (body as { details?: unknown }).details
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+
+  const details: Record<string, string | number | boolean> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "string" || typeof value === "boolean") details[key] = value
+    else if (typeof value === "number" && Number.isFinite(value)) details[key] = value
+  }
+  return Object.keys(details).length > 0 ? details : undefined
 }
 
 function buildSixbApiErrorMessage(

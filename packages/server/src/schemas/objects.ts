@@ -333,15 +333,9 @@ const objectExpansionRef = { $ref: "#/components/schemas/ObjectExpansion" }
  * the recursive request contract directly for generated clients and docs.
  */
 export const ObjectQueryOpenApiSchemas = {
-  ErrorResponse: {
-    type: "object",
-    required: ["error", "code"],
-    additionalProperties: false,
-    properties: {
-      error: { type: "string" },
-      code: { $ref: "#/components/schemas/SixbErrorCode" },
-    },
-  },
+  // `ErrorResponse` used to be declared here too, a second copy of the shape `common.ts` owns. It
+  // was spread after the shared components and therefore won, which silently pinned every error
+  // response in the document to two fields. The routes below still reference it by name.
   ObjectQueryObject: {
     type: "object",
     required: ["primaryId", "objectTypeId", "properties", "createdAt", "updatedAt"],
