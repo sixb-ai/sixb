@@ -1,11 +1,15 @@
-import { assertJsonValue } from "../json"
 import { AgentDefinitionError } from "./errors"
+import { createAgentToolDefinition, toolsFromDefinitions } from "./tool-definition"
 import type {
   AgentDefinition,
+  AgentToolDefinition,
   AgentToolDescriptionBuilder,
   AgentToolHandler,
+  AgentToolInputBuilder,
   AgentToolInputSchema,
+  AgentToolRunBuilder,
   DefineAgentConfig,
+  InferAgentToolInputSchema,
 } from "./types"
 import {
   assertNonEmpty,
@@ -16,7 +20,6 @@ import {
   assertValidProviderOptions,
   assertValidReasoningLevel,
   groupIdsFromDefinitions,
-  toolsFromDefinitions,
 } from "./validation"
 
 /**
@@ -30,40 +33,27 @@ export function defineAgentTool<const TName extends string>(
 ): AgentToolDescriptionBuilder<TName> {
   assertValidAgentToolName(name)
 
-  const builder = {
-    description(description: string) {
+  return {
+    description(description: string): AgentToolInputBuilder<TName> {
       assertValidAgentToolDescription(name, description)
 
       return {
-        input(input: AgentToolInputSchema) {
+        input<const TInput extends AgentToolInputSchema>(
+          input: TInput
+        ): AgentToolRunBuilder<TName, TInput> {
           assertValidAgentToolInput(name, input)
 
           return {
-            run(handler: AgentToolHandler<Record<string, unknown>>) {
-              if (typeof handler !== "function") {
-                throw new AgentDefinitionError(
-                  `[Sixb] Agent tool '${name}' handler must be a function.`
-                )
-              }
-
-              return {
-                kind: "agentTool",
-                name,
-                description,
-                input,
-                handler: async (context: Parameters<typeof handler>[0]) => {
-                  const result = await handler(context)
-                  assertJsonValue(result, `Agent tool '${name}' result`)
-                  return result
-                },
-              }
+            run(
+              handler: AgentToolHandler<InferAgentToolInputSchema<TInput>>
+            ): AgentToolDefinition<TName, TInput> {
+              return createAgentToolDefinition({ name, description, input, handler })
             },
           }
         },
       }
     },
   }
-  return builder as unknown as AgentToolDescriptionBuilder<TName>
 }
 
 /**
@@ -90,7 +80,7 @@ export function defineAgent<const TId extends string>(
   const groupIds = groupIdsFromDefinitions(id, config.groups)
   const tools = toolsFromDefinitions(id, config.tools)
 
-  return {
+  return Object.freeze({
     kind: "agent",
     id,
     name: config.name,
@@ -102,5 +92,5 @@ export function defineAgent<const TId extends string>(
     tools,
     ...(config.description !== undefined ? { description: config.description } : {}),
     ...(config.loop !== undefined ? { loop: config.loop } : {}),
-  }
+  })
 }

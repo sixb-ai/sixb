@@ -135,4 +135,5 @@ export {
   isAgentDefinition,
   isAgentToolDefinition,
   validateAgentGroupReferences,
+  validateAgentToolsAtStartup,
 } from "./validation"

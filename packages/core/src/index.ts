@@ -154,7 +154,7 @@ export {
 
 export type { Broker, BrokerCursor } from "./broker"
 export { InMemoryBroker } from "./broker"
-export type { JsonValue } from "./json"
+export type { JsonValue, ReadonlyJsonValue } from "./json"
 export {
   assertJsonValue,
   cloneJsonValue,

@@ -3,6 +3,13 @@ export type JsonObject = { [key: string]: JsonValue }
 export type JsonArray = JsonValue[]
 export type JsonValue = JsonPrimitive | JsonObject | JsonArray
 
+/** JSON-compatible input that also accepts readonly containers from typed application code. */
+export type ReadonlyJsonObject = {
+  readonly [key: string]: ReadonlyJsonValue
+}
+export type ReadonlyJsonArray = readonly ReadonlyJsonValue[]
+export type ReadonlyJsonValue = JsonPrimitive | ReadonlyJsonObject | ReadonlyJsonArray
+
 export function isJsonValue(value: unknown): value is JsonValue {
   return getInvalidJsonValueReason(value) === undefined
 }
@@ -14,8 +21,8 @@ export function assertJsonValue(value: unknown, label = "value"): asserts value 
   }
 }
 
-export function cloneJsonValue(value: JsonValue): JsonValue {
-  assertJsonValue(value)
+export function cloneJsonValue(value: ReadonlyJsonValue, label = "value"): JsonValue {
+  assertJsonValue(value, label)
   return JSON.parse(JSON.stringify(value)) as JsonValue
 }
 

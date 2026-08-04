@@ -19,7 +19,7 @@ import {
 } from "../actions/request"
 import type { ActionDefinition } from "../actions/types"
 import type { AgentDefinition, RequestAgentRunInput, RequestAgentRunResult } from "../agents"
-import { AgentsRuntime, validateAgentGroupReferences } from "../agents"
+import { AgentsRuntime, validateAgentGroupReferences, validateAgentToolsAtStartup } from "../agents"
 import {
   AuthRuntime,
   AuthRuntimeError,
@@ -227,6 +227,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.actionRegistry = new ActionRegistry(options.actions ?? [], this.ontology)
     const registeredActionIds = new Set(this.actionRegistry.list().map((action) => action.id))
     const agents = options.agents ?? []
+    validateAgentToolsAtStartup(agents)
     this.security = createRuntimeSecurityRegistry({
       groups: options.groups ?? [],
       roles: options.roles ?? [],

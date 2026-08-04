@@ -5,7 +5,9 @@ import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { LanguageModelV4 } from "@ai-sdk/provider"
 import {
+  type AgentDefinition,
   AgentDefinitionError,
+  type AgentToolDefinition,
   createSixb,
   defineAgent,
   defineAgentTool,
@@ -91,19 +93,30 @@ function validateToolInput(input: unknown): void {
 }
 
 describe("defineAgentTool", () => {
-  test("builds an inert tool definition and validates handler results", async () => {
+  test("builds an immutable definition with snapshotted input and output", async () => {
+    const inputSchema = { query: "string", limit: "integer" } as const
+    const handlerResult = { results: ["sixb"], limit: 3 }
     const searchKnowledge = defineAgentTool("search_knowledge")
       .description("Search project knowledge.")
-      .input({ query: "string", limit: "integer" })
-      .run(({ input }) => ({ results: [input.query], limit: input.limit }))
+      .input(inputSchema)
+      .run(() => handlerResult)
+
+    ;(inputSchema as { query: string }).query = "boolean"
 
     expect(searchKnowledge.kind).toBe("agentTool")
     expect(searchKnowledge.name).toBe("search_knowledge")
     expect(searchKnowledge.description).toBe("Search project knowledge.")
     expect(searchKnowledge.input).toEqual({ query: "string", limit: "integer" })
-    await expect(
-      searchKnowledge.handler({ input: { query: "sixb", limit: 3 } } as never)
-    ).resolves.toEqual({ results: ["sixb"], limit: 3 })
+    expect(Object.isFrozen(searchKnowledge)).toBe(true)
+    expect(Object.isFrozen(searchKnowledge.input)).toBe(true)
+
+    const result = await searchKnowledge.handler({
+      input: { query: "sixb", limit: 3 },
+    } as never)
+    expect(result).toEqual({ results: ["sixb"], limit: 3 })
+    expect(result).not.toBe(handlerResult)
+    handlerResult.results.push("mutated")
+    expect(result).toEqual({ results: ["sixb"], limit: 3 })
 
     const invalidResult = defineAgentTool("invalid_result")
       .description("Return an invalid result.")
@@ -113,6 +126,23 @@ describe("defineAgentTool", () => {
     await expect(invalidResult.handler({ input: {} } as never)).rejects.toThrow(
       "Agent tool 'invalid_result' result must be a JSON value"
     )
+  })
+
+  test("deeply snapshots and freezes nested input schemas", () => {
+    const values = ["quick", "deep"]
+    const input = {
+      mode: { type: "enum" as const, valueType: "string" as const, values },
+    }
+    const tool = defineAgentTool("search_mode")
+      .description("Select a search mode.")
+      .input(input)
+      .run(() => null)
+
+    values.push("mutated")
+
+    expect(tool.input.mode.values).toEqual(["quick", "deep"])
+    expect(Object.isFrozen(tool.input.mode)).toBe(true)
+    expect(Object.isFrozen(tool.input.mode.values)).toBe(true)
   })
 
   test("rejects invalid and reserved names", () => {
@@ -141,11 +171,19 @@ describe("defineAgentTool", () => {
       validateToolInput({ mode: { type: "enum", valueType: "string", values: [] } })
     ).toThrow("input.mode must be a valid Sixb schema")
     expect(() => validateHandler(undefined)).toThrow("handler must be a function")
+
+    const mutableInput = { query: "string" }
+    const runBuilder = defineAgentTool("mutable_input")
+      .description("Catch mutations between builder stages.")
+      .input(mutableInput as { query: "string" })
+    mutableInput.query = "unknown"
+    expect(() => runBuilder.run(() => null)).toThrow("input.query must be a valid Sixb schema")
   })
 
   test("rejects malformed nested input schemas", () => {
     const recursive: Record<string, unknown> = { type: "array" }
     recursive.items = recursive
+    const sparseEnumValues = new Array<string>(1)
 
     const invalidInputs: readonly [input: unknown, path: string][] = [
       [{ items: { type: "array" } }, "input.items.items"],
@@ -156,6 +194,7 @@ describe("defineAgentTool", () => {
       ],
       [{ reference: { type: "valueTypeRef", valueTypeId: " " } }, "input.reference"],
       [{ mode: { type: "enum", valueType: "string", values: ["quick", "quick"] } }, "input.mode"],
+      [{ mode: { type: "enum", valueType: "string", values: sparseEnumValues } }, "input.mode"],
       [{ recursive }, "input.recursive.items"],
     ]
 
@@ -183,6 +222,9 @@ describe("defineAgent", () => {
     expect(agent.providerOptions).toBeUndefined()
     expect(agent.description).toBeUndefined()
     expect(agent.loop).toBeUndefined()
+    expect(Object.isFrozen(agent)).toBe(true)
+    expect(Object.isFrozen(agent.groupIds)).toBe(true)
+    expect(Object.isFrozen(agent.tools)).toBe(true)
   })
 
   test("keeps description, model options, groups, and loop when provided", () => {
@@ -213,6 +255,39 @@ describe("defineAgent", () => {
     expect(agent.tools).toEqual([searchKnowledge])
     expect(agent.tools[0]).toBe(searchKnowledge)
     expect(agent.loop).toEqual({ stopWhen: { maxSteps: 16 } })
+    expect(() => {
+      ;(searchKnowledge as unknown as { name: string }).name = "bash"
+    }).toThrow(TypeError)
+  })
+
+  test("normalizes manually constructed tools before selecting them", async () => {
+    const input = { query: "string" } as { query: string }
+    const handlerResult = { results: ["sixb"] }
+    const manualTool = {
+      kind: "agentTool" as const,
+      name: "manual_search",
+      description: "Search manually.",
+      input,
+      handler: () => handlerResult,
+    } as AgentToolDefinition
+
+    const agent = defineAgent("manual", {
+      name: "Manual",
+      model,
+      instructions: "Use the selected tool.",
+      tools: [manualTool],
+    })
+    input.query = "boolean"
+
+    const selectedTool = agent.tools[0]
+    expect(selectedTool).not.toBe(manualTool)
+    expect(selectedTool?.input).toEqual({ query: "string" })
+    expect(Object.isFrozen(selectedTool)).toBe(true)
+    expect(Object.isFrozen(selectedTool?.input)).toBe(true)
+
+    const result = await selectedTool?.handler({ input: { query: "sixb" } } as never)
+    expect(result).toEqual({ results: ["sixb"] })
+    expect(result).not.toBe(handlerResult)
   })
 
   test("rejects empty id, name, and instructions", () => {
@@ -334,6 +409,16 @@ describe("defineAgent", () => {
         tools: [{ kind: "not-a-tool" } as never],
       })
     ).toThrow("only agent tool definitions")
+
+    const sparseTools = new Array<AgentToolDefinition>(1)
+    expect(() =>
+      defineAgent("bad", {
+        name: "Bad",
+        model,
+        instructions: "x",
+        tools: sparseTools,
+      })
+    ).toThrow("only agent tool definitions")
   })
 })
 
@@ -347,6 +432,11 @@ describe("isAgentDefinition", () => {
     expect(isAgentDefinition({ kind: "connector", id: "x" })).toBe(false)
     // Right kind but missing required string fields.
     expect(isAgentDefinition({ kind: "agent", id: "x" })).toBe(false)
+  })
+
+  test("rejects definitions whose tools array is sparse", () => {
+    const agent = defineAgent("a", { name: "A", model, instructions: "x" })
+    expect(isAgentDefinition({ ...agent, tools: new Array<AgentToolDefinition>(1) })).toBe(false)
   })
 })
 
@@ -453,6 +543,70 @@ describe("agent discovery + registry", () => {
         ...createTestRuntimeDeps(),
       })
     ).rejects.toThrow(AgentDefinitionError)
+  })
+
+  test("revalidates directly constructed tool definitions at startup", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const manualTool = {
+      kind: "agentTool" as const,
+      name: "manual_search",
+      description: "Search manually.",
+      input: { query: "string" },
+      handler: () => null,
+    }
+    const manualAgent = {
+      kind: "agent" as const,
+      id: "manual",
+      name: "Manual",
+      model,
+      instructions: "Use the selected tool.",
+      groupIds: [],
+      tools: [manualTool],
+    } as AgentDefinition
+
+    manualTool.name = "bash"
+    expect(isAgentDefinition(manualAgent)).toBe(true)
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        agents: [manualAgent],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow("reserved by the framework")
+  })
+
+  test("locks directly constructed tool definitions at startup", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const input = { query: "string" }
+    const manualTool = {
+      kind: "agentTool" as const,
+      name: "manual_search",
+      description: "Search manually.",
+      input,
+      handler: () => null,
+    }
+    const manualAgent = {
+      kind: "agent" as const,
+      id: "manual",
+      name: "Manual",
+      model,
+      instructions: "Use the selected tool.",
+      groupIds: [],
+      tools: [manualTool],
+    } as AgentDefinition
+
+    await createSixb({
+      projectRoot,
+      ontologies: [Room],
+      agents: [manualAgent],
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(Object.isFrozen(manualAgent)).toBe(true)
+    expect(Object.isFrozen(manualAgent.tools)).toBe(true)
+    expect(Object.isFrozen(manualTool)).toBe(true)
+    expect(Object.isFrozen(input)).toBe(true)
   })
 
   test("accepts agents whose execution groups are registered", async () => {

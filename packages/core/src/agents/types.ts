@@ -1,6 +1,6 @@
 import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider"
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../connectors"
-import type { JsonValue } from "../json"
+import type { JsonPrimitive, JsonValue, ReadonlyJsonValue } from "../json"
 import type { Logger } from "../logging"
 import type { InferSchema } from "../ontology/inference"
 import type { Schema } from "../ontology/types"
@@ -38,15 +38,15 @@ export interface AgentLoopConfig {
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
 type JsonifyAgentToolInput<T> = unknown extends T
-  ? JsonValue
+  ? ReadonlyJsonValue
   : T extends Date
     ? string
-    : T extends JsonValue
-      ? T
-      : T extends readonly (infer TItem)[]
-        ? JsonifyAgentToolInput<TItem>[]
+    : T extends readonly (infer TItem)[]
+      ? readonly JsonifyAgentToolInput<TItem>[]
+      : T extends JsonPrimitive
+        ? T
         : T extends object
-          ? { [K in keyof T]: JsonifyAgentToolInput<T[K]> }
+          ? { readonly [K in keyof T]: JsonifyAgentToolInput<T[K]> }
           : never
 
 /** A model-facing object shape expressed with Sixb's schema DSL. */
@@ -55,9 +55,9 @@ export type AgentToolInputSchema = Readonly<Record<string, Schema>>
 /** Infer the handler input represented by an agent tool schema. */
 export type InferAgentToolInputSchema<TInput extends AgentToolInputSchema> =
   string extends keyof TInput
-    ? Record<string, unknown>
+    ? Readonly<Record<string, unknown>>
     : Simplify<{
-        -readonly [K in keyof TInput]: JsonifyAgentToolInput<InferSchema<TInput[K]>>
+        readonly [K in keyof TInput]: JsonifyAgentToolInput<InferSchema<TInput[K]>>
       }>
 
 /** Identifies the agent execution that invoked a tool. */
@@ -69,7 +69,7 @@ export interface AgentToolRunInfo {
 
 /** The narrow, run-scoped surface passed to an agent tool handler. */
 export interface AgentToolRunContext<
-  TInput extends Record<string, unknown> = Record<string, unknown>,
+  TInput extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>,
 > {
   readonly input: TInput
   readonly signal: AbortSignal
@@ -81,10 +81,18 @@ export interface AgentToolRunContext<
 }
 
 /** Agent tool handlers may return only values safe to persist in agent messages. */
-export type AgentToolHandlerResult = JsonValue | Promise<JsonValue>
+export type AgentToolHandlerResult = ReadonlyJsonValue | Promise<ReadonlyJsonValue>
 
-export type AgentToolHandler<TInput extends Record<string, unknown>> = {
-  bivarianceHack(context: AgentToolRunContext<TInput>): AgentToolHandlerResult
+export type AgentToolHandler<TInput extends Readonly<Record<string, unknown>>> = (
+  context: AgentToolRunContext<TInput>
+) => AgentToolHandlerResult
+
+/**
+ * Runtime definitions are stored heterogeneously. Keep variance erasure at this
+ * boundary only; authoring through `run()` remains strictly contravariant.
+ */
+type StoredAgentToolHandler<TInput extends Readonly<Record<string, unknown>>> = {
+  bivarianceHack(context: AgentToolRunContext<TInput>): JsonValue | Promise<JsonValue>
 }["bivarianceHack"]
 
 /** A reusable, inert model tool definition selected explicitly by an agent. */
@@ -96,7 +104,7 @@ export interface AgentToolDefinition<
   readonly name: TName
   readonly description: string
   readonly input: TInput
-  readonly handler: AgentToolHandler<InferAgentToolInputSchema<TInput>>
+  readonly handler: StoredAgentToolHandler<InferAgentToolInputSchema<TInput>>
 }
 
 /** Infer the input received by a tool definition's handler. */
