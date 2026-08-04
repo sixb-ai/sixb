@@ -1,5 +1,5 @@
-import { cloneJsonValue } from "../json"
-import { AgentDefinitionError } from "./errors"
+import { cloneJsonValue, getInvalidJsonValueReason } from "../json"
+import { AgentDefinitionError, AgentToolResultValidationError } from "./errors"
 import type {
   AgentToolDefinition,
   AgentToolHandler,
@@ -41,7 +41,15 @@ export function createAgentToolDefinition<
     input,
     handler: async (context) => {
       const result = await definition.handler(context)
-      return cloneJsonValue(result, `Agent tool '${definition.name}' result`)
+      try {
+        return cloneJsonValue(result, "result")
+      } catch (cause) {
+        throw new AgentToolResultValidationError(
+          definition.name,
+          getInvalidJsonValueReason(result, "result") ?? "result could not be cloned safely",
+          { cause }
+        )
+      }
     },
   }
 

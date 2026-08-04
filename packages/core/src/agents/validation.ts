@@ -1,4 +1,11 @@
-import { getInvalidJsonValueReason, isPlainRecord } from "../json"
+import { getInvalidJsonValueReason, isPlainRecord, type JsonValue } from "../json"
+import {
+  normalizeSchemaValue,
+  type ObjectSchema,
+  OntologyValidationError,
+  type ValueType,
+  validateSchemaValue,
+} from "../ontology"
 import type { GroupDefinition, SecurityRegistry } from "../security"
 import { AgentDefinitionError } from "./errors"
 import {
@@ -101,6 +108,38 @@ export function validateAndSnapshotAgentToolInput<TInput extends AgentToolInputS
       `[Sixb] Agent tool '${toolName}' input must be safely snapshot-compatible.`
     )
   }
+}
+
+/** Validate model input against a tool schema, normalize it to JSON, and lock the snapshot. */
+export function validateAndNormalizeAgentToolInput(
+  toolName: string,
+  shape: AgentToolInputSchema,
+  value: unknown,
+  valueTypesById: ReadonlyMap<string, ValueType>
+): Record<string, JsonValue> {
+  const label = `Agent tool '${toolName}' input`
+  if (!isPlainRecord(value)) {
+    throw new OntologyValidationError(`[Sixb] ${label} must be a JSON object.`)
+  }
+
+  const reason = getInvalidJsonValueReason(value, label)
+  if (reason) {
+    throw new OntologyValidationError(`[Sixb] ${label} must be JSON-compatible; ${reason}.`)
+  }
+
+  const schema: ObjectSchema = {
+    type: "object",
+    properties: Object.fromEntries(
+      Object.entries(shape).map(([field, fieldSchema]) => [
+        field,
+        { schema: fieldSchema, required: true },
+      ])
+    ),
+  }
+  validateSchemaValue(schema, value, label, valueTypesById)
+  return deepFreeze(
+    normalizeSchemaValue(schema, value, label, valueTypesById) as Record<string, JsonValue>
+  )
 }
 
 /** Revalidate and lock tool definitions supplied directly to the runtime. */

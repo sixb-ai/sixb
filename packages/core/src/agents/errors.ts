@@ -16,6 +16,19 @@ export class AgentMessageAdapterError extends Error {
   readonly name = "AgentMessageAdapterError"
 }
 
+/** Raised when an agent tool result cannot cross the durable JSON message boundary. */
+export class AgentToolResultValidationError extends Error {
+  readonly name = "AgentToolResultValidationError"
+
+  constructor(
+    readonly toolName: string,
+    readonly reason: string,
+    options?: ErrorOptions
+  ) {
+    super(`[Sixb] Agent tool '${toolName}' result must be a JSON value; ${reason}.`, options)
+  }
+}
+
 export type AgentRequestErrorCode =
   | "agent_not_found"
   | "thread_not_found"

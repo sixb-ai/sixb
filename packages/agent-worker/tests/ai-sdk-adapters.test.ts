@@ -117,6 +117,103 @@ describe("AI SDK agent adapters", () => {
     expect(receivedSignal).toBe(abort.signal)
   })
 
+  test("validates, normalizes, and freezes model input before execution", async () => {
+    let receivedInput: Readonly<Record<string, unknown>> | undefined
+    const definition = defineAgentTool("create_quote")
+      .description("Create a normalized quote.")
+      .input({
+        customer: "string",
+        quantity: "integer",
+        amount: "decimal",
+        details: {
+          type: "object",
+          properties: {
+            tags: {
+              required: true,
+              schema: { type: "array", items: "string" },
+            },
+          },
+        },
+      })
+      .run(({ input }) => {
+        receivedInput = input
+        return { amount: input.amount }
+      })
+    const adapted = executableTool(
+      aiSdkToolsFromAgentDefinitions({
+        definitions: [definition],
+        valueTypesById: new Map(),
+        run: { id: "run-input", agentId: "quotes" },
+        connector: (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"],
+        logger: noopLogger,
+      }),
+      definition.name
+    )
+
+    expect(await toolJsonSchema(adapted)).toMatchObject({
+      properties: {
+        amount: { type: "string", pattern: "^[+-]?\\d+(?:\\.\\d+)?$" },
+      },
+    })
+
+    const invalidInputs = [
+      { customer: "Acme", amount: "1.20", details: { tags: ["priority"] } },
+      {
+        customer: "Acme",
+        quantity: "2",
+        amount: "1.20",
+        details: { tags: ["priority"] },
+      },
+      {
+        customer: "Acme",
+        quantity: 2,
+        amount: 1.2,
+        details: { tags: ["priority"] },
+      },
+      {
+        customer: "Acme",
+        quantity: 2,
+        amount: "1.20",
+        details: { tags: ["priority"], unexpected: true },
+      },
+      {
+        customer: "Acme",
+        quantity: 2,
+        amount: "1.20",
+        details: { tags: ["priority"] },
+        unexpected: true,
+      },
+    ]
+    for (const input of invalidInputs) {
+      expect(await validateToolInput(adapted, input)).toMatchObject({ success: false })
+    }
+
+    const rawInput = {
+      customer: "Acme",
+      quantity: 2,
+      amount: "+001.2300",
+      details: { tags: ["priority"] },
+    }
+    const validation = await validateToolInput(adapted, rawInput)
+    if (!validation.success) throw validation.error
+    const normalizedInput = validation.value as typeof rawInput
+
+    expect(normalizedInput).toEqual({
+      customer: "Acme",
+      quantity: 2,
+      amount: "1.23",
+      details: { tags: ["priority"] },
+    })
+    expect(Object.isFrozen(normalizedInput)).toBe(true)
+    expect(Object.isFrozen(normalizedInput.details)).toBe(true)
+    expect(Object.isFrozen(normalizedInput.details.tags)).toBe(true)
+
+    rawInput.details.tags.push("mutated")
+    expect(normalizedInput.details.tags).toEqual(["priority"])
+    await expect(adapted.execute(normalizedInput, {})).resolves.toEqual({ amount: "1.23" })
+    expect(receivedInput).toBe(normalizedInput)
+  })
+
   test("rejects a non-JSON Sixb tool result at the AI SDK boundary", async () => {
     const definition = defineAgentTool("invalid_result")
       .description("Return an invalid result.")
@@ -133,6 +230,35 @@ describe("AI SDK agent adapters", () => {
     await expect(executableTool(tools, definition.name).execute({}, {})).rejects.toThrow(
       "[SixbAgentWorker] Agent tool 'invalid_result' returned a non-JSON result; result.value is undefined."
     )
+  })
+
+  test("does not classify project errors by matching their message", async () => {
+    const projectError = new Error(
+      "[Sixb] Agent tool 'project_failure' result must be a JSON value; lookalike"
+    )
+    const definition = defineAgentTool("project_failure")
+      .description("Throw a project error.")
+      .input({})
+      .run(() => {
+        throw projectError
+      })
+    const adapted = executableTool(
+      aiSdkToolsFromAgentDefinitions({
+        definitions: [definition],
+        valueTypesById: new Map(),
+        run: { id: "run-project-error", agentId: "broken" },
+        connector: (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"],
+        logger: noopLogger,
+      }),
+      definition.name
+    )
+
+    try {
+      await adapted.execute({}, {})
+      throw new Error("Expected the project error to propagate.")
+    } catch (error) {
+      expect(error).toBe(projectError)
+    }
   })
 
   test("keeps prototype-like valid tool names as own properties", () => {
@@ -277,8 +403,30 @@ function executableTool(
 }
 
 async function toolJsonSchema(toolDefinition: { readonly inputSchema: unknown }): Promise<unknown> {
-  const schema = toolDefinition.inputSchema as { readonly jsonSchema: unknown }
+  const schema = toolDefinition.inputSchema as ToolInputSchema
   return Promise.resolve(schema.jsonSchema)
+}
+
+type ToolInputValidationResult =
+  | { readonly success: true; readonly value: Record<string, unknown> }
+  | { readonly success: false; readonly error: Error }
+
+interface ToolInputSchema {
+  readonly jsonSchema: unknown
+  readonly validate?: (
+    value: unknown
+  ) => ToolInputValidationResult | PromiseLike<ToolInputValidationResult>
+}
+
+async function validateToolInput(
+  toolDefinition: { readonly inputSchema: unknown },
+  input: unknown
+): Promise<ToolInputValidationResult> {
+  const schema = toolDefinition.inputSchema as ToolInputSchema
+  if (!schema.validate) {
+    throw new Error("Expected the adapted tool input schema to validate values.")
+  }
+  return schema.validate(input)
 }
 
 function recordingLogger(
