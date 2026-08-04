@@ -194,6 +194,7 @@ describe("schemaRecordToJsonSchema", () => {
           project: ref(Invoice),
           evidence: valueTypeRef(MatchEvidence.id),
           scores: { type: "map", keySchema: "string", valueSchema: "double" },
+          amount: "decimal",
           attachment: "fileRef",
         },
         valueTypesById: new Map([[MatchEvidence.id, MatchEvidence]]),
@@ -220,6 +221,7 @@ describe("schemaRecordToJsonSchema", () => {
           additionalProperties: false,
         },
         scores: { type: "object", additionalProperties: { type: "number" } },
+        amount: { type: "string", pattern: "^[+-]?\\d+(?:\\.\\d+)?$" },
         attachment: {
           type: "object",
           properties: {
@@ -234,7 +236,7 @@ describe("schemaRecordToJsonSchema", () => {
           additionalProperties: false,
         },
       },
-      required: ["project", "evidence", "scores", "attachment"],
+      required: ["project", "evidence", "scores", "amount", "attachment"],
       additionalProperties: false,
     })
   })

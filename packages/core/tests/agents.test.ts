@@ -17,6 +17,7 @@ import {
   prop,
   RuntimeError,
 } from "../src"
+import { AgentToolResultValidationError } from "../src/agents/errors"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index.ts")).href
@@ -123,9 +124,12 @@ describe("defineAgentTool", () => {
       .input({})
       .run((() => ({ value: undefined })) as never)
 
-    await expect(invalidResult.handler({ input: {} } as never)).rejects.toThrow(
-      "Agent tool 'invalid_result' result must be a JSON value"
-    )
+    const invalidResultPromise = invalidResult.handler({ input: {} } as never)
+    await expect(invalidResultPromise).rejects.toBeInstanceOf(AgentToolResultValidationError)
+    await expect(invalidResultPromise).rejects.toMatchObject({
+      toolName: "invalid_result",
+      reason: "result.value is undefined",
+    })
   })
 
   test("deeply snapshots and freezes nested input schemas", () => {

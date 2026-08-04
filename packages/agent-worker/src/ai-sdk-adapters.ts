@@ -1,15 +1,18 @@
-import {
-  type AgentInboundUiMessagePart,
-  type AgentMessagePart,
-  type AgentToolDefinition,
-  type AgentToolRunContext,
-  type AgentToolRunInfo,
-  getInvalidJsonValueReason,
-  type JsonValue,
-  type Logger,
-  type ValueType,
+import type {
+  AgentInboundUiMessagePart,
+  AgentMessagePart,
+  AgentToolDefinition,
+  AgentToolRunContext,
+  AgentToolRunInfo,
+  JsonValue,
+  Logger,
+  ValueType,
 } from "@sixb/core"
-import { fromAiSdk } from "@sixb/core/internal/agents"
+import {
+  AgentToolResultValidationError,
+  fromAiSdk,
+  validateAndNormalizeAgentToolInput,
+} from "@sixb/core/internal/agents"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import type { AgentRunUsage } from "@sixb/core/storage"
 import { jsonSchema, type LanguageModelUsage, type Tool, type ToolSet, tool } from "ai"
@@ -45,16 +48,9 @@ function aiSdkToolFromAgentDefinition(
   definition: AgentToolDefinition,
   context: Omit<AiSdkToolsFromAgentDefinitionsInput, "definitions">
 ): Tool<Record<string, unknown>, JsonValue> {
-  const inputSchema = schemaRecordToJsonSchema({
-    shape: definition.input,
-    valueTypesById: context.valueTypesById,
-  })
-
   return tool({
     description: definition.description,
-    inputSchema: jsonSchema<Record<string, unknown>>(
-      inputSchema as Parameters<typeof jsonSchema>[0]
-    ),
+    inputSchema: aiSdkInputSchemaFromAgentDefinition(definition, context.valueTypesById),
     async execute(input, { abortSignal }) {
       let result: JsonValue
       try {
@@ -66,28 +62,46 @@ function aiSdkToolFromAgentDefinition(
           logger: context.logger,
         })
       } catch (error) {
-        const reason = coreResultValidationReason(error, definition.name)
-        if (reason) {
-          throw new AgentToolOutputError(definition.name, reason, { cause: error })
+        if (error instanceof AgentToolResultValidationError) {
+          throw new AgentToolOutputError(definition.name, error.reason, { cause: error })
         }
         throw error
-      }
-      const reason = getInvalidJsonValueReason(result, "result")
-      if (reason) {
-        throw new AgentToolOutputError(definition.name, reason)
       }
       return result
     },
   })
 }
 
-function coreResultValidationReason(error: unknown, toolName: string): string | null {
-  if (!(error instanceof Error)) return null
-  const prefix = `[Sixb] Agent tool '${toolName}' result must be a JSON value; `
-  if (!error.message.startsWith(prefix)) return null
-  const reason = error.message.slice(prefix.length)
-  const resultLabel = `Agent tool '${toolName}' `
-  return reason.startsWith(resultLabel) ? reason.slice(resultLabel.length) : reason
+function aiSdkInputSchemaFromAgentDefinition(
+  definition: AgentToolDefinition,
+  valueTypesById: ReadonlyMap<string, ValueType>
+) {
+  const inputSchema = schemaRecordToJsonSchema({ shape: definition.input, valueTypesById })
+  return jsonSchema<Record<string, unknown>>(inputSchema as Parameters<typeof jsonSchema>[0], {
+    validate(value) {
+      try {
+        return {
+          success: true,
+          value: validateAndNormalizeAgentToolInput(
+            definition.name,
+            definition.input,
+            value,
+            valueTypesById
+          ),
+        }
+      } catch (error) {
+        return {
+          success: false,
+          error:
+            error instanceof Error
+              ? error
+              : new AgentWorkerError(`Agent tool '${definition.name}' input validation failed.`, {
+                  cause: error,
+                }),
+        }
+      }
+    },
+  })
 }
 
 function emptyToolSet(): ToolSet {

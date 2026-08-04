@@ -53,8 +53,9 @@ function schemaJsonSchema(
       case "integer":
         return { type: "integer" }
       case "double":
-      case "decimal":
         return { type: "number" }
+      case "decimal":
+        return { type: "string", pattern: "^[+-]?\\d+(?:\\.\\d+)?$" }
       case "boolean":
         return { type: "boolean" }
       case "date":

@@ -59,6 +59,7 @@ export {
   AgentMessageAdapterError,
   AgentRequestError,
   type AgentRequestErrorCode,
+  AgentToolResultValidationError,
 } from "./errors"
 export {
   createAgentMessageId,
@@ -136,4 +137,5 @@ export {
   isAgentToolDefinition,
   validateAgentGroupReferences,
   validateAgentToolsAtStartup,
+  validateAndNormalizeAgentToolInput,
 } from "./validation"

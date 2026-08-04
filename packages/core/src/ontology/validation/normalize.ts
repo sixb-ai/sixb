@@ -84,20 +84,18 @@ export function normalizeSchemaValue(
 
   const fields = schema.properties
   const record = assertPlainRecord(value, path)
-  const output: Record<string, JsonValue> = {}
+  const entries: Array<[string, JsonValue]> = []
   for (const [fieldId, field] of Object.entries(fields)) {
     const fieldValue = record[fieldId]
     if (fieldValue === undefined) {
       continue
     }
-    output[fieldId] = normalizeObjectFieldValue(
-      field,
-      fieldValue,
-      `${path}.${fieldId}`,
-      valueTypesById
-    )
+    entries.push([
+      fieldId,
+      normalizeObjectFieldValue(field, fieldValue, `${path}.${fieldId}`, valueTypesById),
+    ])
   }
-  return output
+  return Object.fromEntries(entries)
 }
 
 function normalizeObjectFieldValue(
