@@ -193,6 +193,7 @@ to `defineConnector`, and most ship a matching webhook helper for the [Webhooks]
 
 | Package | Factory | Connects to | Webhook helper |
 | --- | --- | --- | --- |
+| `@sixb/connector-exa` | `exa(...)` | Exa web search and page contents | — |
 | `@sixb/connector-github` | `github(...)` | GitHub REST API | `githubEventsWebhook` |
 | `@sixb/connector-google` | `google(...)` | Google APIs (Drive, Calendar, Meet) | — |
 | `@sixb/connector-meta` | `meta(...)` | Meta Graph API (Facebook/Instagram) | — |
@@ -213,7 +214,8 @@ import { github } from "@sixb/connector-github"
 export const githubConnector = defineConnector("github", github({ token: process.env.GITHUB_TOKEN! }))
 ```
 
-Each factory's connected client and full options are documented in its package README.
+Each factory's connected client and full options are documented in its package README. Exa also
+exports bounded [`web_search` and `web_fetch` tools](../agents/tools-and-gateway.md#exa-web-tools).
 
 ## Webhooks
 

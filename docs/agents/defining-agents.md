@@ -36,6 +36,7 @@ export const invoiceAssistant = defineAgent("invoice-assistant", {
 | `reasoning` | reasoning level | No | `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
 | `providerOptions` | provider-keyed object | No | Per-provider passthrough, e.g. `{ openai: { ... } }`. |
 | `groups` | `GroupDefinition[]` | No | Gate who can use the agent and what it can reach. See [Authorization](./authorization.md). |
+| `tools` | `AgentToolDefinition[]` | No | Worker-side tools this agent is explicitly allowed to call. Defaults to none. |
 | `loop` | `{ stopWhen?: { maxSteps?: number } }` | No | Step cap per turn. Defaults to **25**. |
 
 ## The model
@@ -65,6 +66,22 @@ Project skills are installed into each run sandbox under `$SIXB_SKILLS_DIR`. The
 only each skill's `name` and `description` up front, and the agent reads the full `SKILL.md` when the
 skill is relevant.
 
+## Tools
+
+`tools` is an explicit per-agent capability grant:
+
+```ts
+export const researcher = defineAgent("researcher", {
+  name: "Researcher",
+  model: gateway("openai/gpt-5.5"),
+  instructions: "Research approved sources and cite them.",
+  tools: [webSearch, webFetch],
+})
+```
+
+Omitting it gives the agent no selected worker tools. Sixb still supplies sandboxed `bash`. See
+[Tools and gateway](./tools-and-gateway.md) for custom tools and Exa web access.
+
 ## Loop
 
 An agent runs a tool-calling loop: the model produces output, may call tools, sees the results, and
@@ -93,5 +110,6 @@ export const sixb = createSixb({
 ## Related
 
 - [Authorization](./authorization.md) — `groups` and what they gate.
+- [Tools and gateway](./tools-and-gateway.md) — selected worker tools and sandboxed `bash`.
 - [Running and streaming](./running-and-streaming.md) — drive a defined agent.
 - [Runtime](../runtime/overview.md) and [project structure](../fundamentals/project-structure.md).
