@@ -95,6 +95,27 @@ describe("InMemorySyncRunStorage", () => {
     expect(finished.output).toBeUndefined()
   })
 
+  test("stores a successful empty snapshot without an output version", async () => {
+    const storage = new InMemorySyncRunStorage()
+    await storage.start({
+      id: "syncrun_empty_snapshot",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+    })
+
+    const finished = await storage.finish({
+      id: "syncrun_empty_snapshot",
+      projectId: "my-app",
+      status: "succeeded",
+      rowsRead: 0,
+    })
+
+    expect(finished).toMatchObject({ status: "succeeded", rowsRead: 0 })
+    expect(finished.output).toBeUndefined()
+  })
+
   test("rejects duplicate starts and missing finishes", async () => {
     const storage = new InMemorySyncRunStorage()
 

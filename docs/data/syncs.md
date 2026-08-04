@@ -141,6 +141,10 @@ never received a row, that run does not create a dataset version, so dataset-upd
 not fire. This lets incremental readers advance an initial cursor without inventing placeholder
 rows.
 
+A first snapshot that returns no rows behaves the same way: it succeeds without creating a dataset
+version. Once a previous version exists, an empty snapshot still commits a new empty version so
+projections can withdraw source-owned objects that disappeared upstream.
+
 ## Read context
 
 The read handler signature is `(client, context)`.

@@ -555,6 +555,52 @@ describe("SyncWorker", () => {
     })
   })
 
+  test("finishes a first empty snapshot without emitting a dataset version", async () => {
+    const dataset = defineDataset("raw.erp.empty-orders", {
+      schema: [col("orderId", "string")],
+    })
+    const sync = defineSync("sync-empty-orders")
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(dataset)
+    const sixb = createSixbForSync(sync)
+    const worker = new SyncWorker(sixb)
+
+    await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
+      jobs: [
+        {
+          type: "sync.run.requested",
+          payload: { syncId: sync.id, runId: "run-first-empty-snapshot" },
+        },
+      ],
+    })
+
+    await worker.start()
+    const run = await waitFor(
+      () =>
+        sixb.storage.syncRuns!.getById({
+          projectId: sixb.id,
+          id: "run-first-empty-snapshot",
+        }),
+      (value) => value?.status === "succeeded"
+    )
+    await Bun.sleep(50)
+    await worker.stop()
+
+    expect(run?.output).toBeUndefined()
+    const events = await sixb.events.read({
+      types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
+    })
+    expect(events.map((event) => event.type)).toEqual(["sync.run.started", "sync.run.finished"])
+    expect(events[1]?.payload).toEqual({
+      syncId: sync.id,
+      runId: "run-first-empty-snapshot",
+      status: "succeeded",
+      datasetId: dataset.id,
+    })
+  })
+
   test("does not crash when retry fails on shutdown", async () => {
     const rawOrdersDataset = makeDataset("raw.erp.orders")
     const sync = defineSync("sync-orders")

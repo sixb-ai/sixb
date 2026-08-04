@@ -242,31 +242,33 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
 
     throwIfAborted(signal)
 
-    if (sync.config.mode === "append" && rowsRead === 0) {
-      await write.abort()
-      write = undefined
+    if (rowsRead === 0) {
       const version = await lakeStorage.getLatestVersion(dataset.id)
-      const finishedRun = await syncRunsStorage.finish({
-        projectId: runtime.id,
-        id: job.id,
-        status: "succeeded",
-        rowsRead,
-        ...(version
-          ? { output: { datasetId: version.datasetId, versionId: version.versionId } }
-          : {}),
-        checkpoint: nextCheckpoint,
-      })
+      if (sync.config.mode === "append" || !version) {
+        await write.abort()
+        write = undefined
+        const finishedRun = await syncRunsStorage.finish({
+          projectId: runtime.id,
+          id: job.id,
+          status: "succeeded",
+          rowsRead,
+          ...(version
+            ? { output: { datasetId: version.datasetId, versionId: version.versionId } }
+            : {}),
+          checkpoint: nextCheckpoint,
+        })
 
-      return {
-        id: job.id,
-        syncId: sync.id,
-        datasetId: dataset.id,
-        mode: sync.config.mode,
-        startedAt: startedRun.startedAt,
-        finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
-        rowsRead,
-        ...(version ? { version } : {}),
-        versionCreated: false,
+        return {
+          id: job.id,
+          syncId: sync.id,
+          datasetId: dataset.id,
+          mode: sync.config.mode,
+          startedAt: startedRun.startedAt,
+          finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
+          rowsRead,
+          ...(version ? { version } : {}),
+          versionCreated: false,
+        }
       }
     }
 

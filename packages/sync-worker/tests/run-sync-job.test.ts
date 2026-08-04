@@ -22,7 +22,7 @@ import {
   InMemoryLakeStorage,
   InMemoryStorage,
 } from "@sixb/core"
-import type { LakeWriteSession } from "@sixb/core/lake-storage"
+import type { BeginDatasetWriteInput, LakeWriteSession } from "@sixb/core/lake-storage"
 import type { SyncRunStorage } from "@sixb/core/storage"
 import { InMemorySyncRunStorage } from "@sixb/core/storage"
 import { LocalLakeStorage } from "@sixb/lake-local"
@@ -112,6 +112,33 @@ async function collectRows(rows: AsyncIterable<DatasetRow>): Promise<DatasetRow[
     result.push(row)
   }
   return result
+}
+
+class RejectingFirstEmptyCommitLakeStorage extends InMemoryLakeStorage {
+  override async beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession> {
+    const write = await super.beginWrite(input)
+    let rowsWritten = 0
+
+    return {
+      async writeRows(rows) {
+        await write.writeRows(
+          (async function* () {
+            for await (const row of rows) {
+              rowsWritten += 1
+              yield row
+            }
+          })()
+        )
+      },
+      commit: async (commitInput) => {
+        if (rowsWritten === 0 && !(await this.getLatestVersion(input.dataset.id))) {
+          throw new Error("A first empty commit cannot create a dataset version.")
+        }
+        return write.commit(commitInput)
+      },
+      abort: () => write.abort(),
+    }
+  }
 }
 
 describe("runSyncJob", () => {
@@ -361,6 +388,60 @@ describe("runSyncJob", () => {
       rowsRead: 0,
       checkpoint: { cursor: "cursor-1" },
     })
+  })
+
+  test("succeeds without committing a first empty snapshot", async () => {
+    const syncRunsStorage = new InMemorySyncRunStorage()
+    const lakeStorage = new RejectingFirstEmptyCommitLakeStorage()
+    const sync = defineSync("sync-empty-orders")
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(rawOrdersDataset)
+    const runtime = createRuntime({ sync, syncRunsStorage, lakeStorage })
+
+    const result = await runSyncJob({
+      runtime,
+      job: { id: "run_empty_snapshot", syncId: sync.id },
+    })
+
+    expect(result).toMatchObject({
+      mode: "snapshot",
+      rowsRead: 0,
+      versionCreated: false,
+    })
+    expect(result.version).toBeUndefined()
+    expect(await lakeStorage.getLatestVersion(rawOrdersDataset.id)).toBeNull()
+    expect(
+      await syncRunsStorage.getById({ projectId: "project-1", id: "run_empty_snapshot" })
+    ).toMatchObject({
+      status: "succeeded",
+      rowsRead: 0,
+      output: undefined,
+    })
+  })
+
+  test("commits an empty snapshot when it must clear a previous version", async () => {
+    const lakeStorage = new RejectingFirstEmptyCommitLakeStorage()
+    await lakeStorage.createDataset(rawOrdersDataset)
+    const seed = await lakeStorage.beginWrite({ dataset: rawOrdersDataset, mode: "snapshot" })
+    await seed.writeRows([{ orderId: "ord_1" }])
+    const previous = await seed.commit()
+
+    const sync = defineSync("sync-clear-orders")
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(rawOrdersDataset)
+    const runtime = createRuntime({ sync, lakeStorage })
+
+    const result = await runSyncJob({
+      runtime,
+      job: { id: "run_clear_snapshot", syncId: sync.id },
+    })
+
+    expect(result.versionCreated).toBe(true)
+    expect(result.version?.versionId).not.toBe(previous.versionId)
+    expect(result.version?.rowCount).toBe(0)
+    expect(await collectRows(lakeStorage.readRows({ datasetId: rawOrdersDataset.id }))).toEqual([])
   })
 
   test("does not advance checkpoints from failed runs", async () => {
