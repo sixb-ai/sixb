@@ -248,6 +248,27 @@ describe("Exa connector", () => {
     expect(error.requestId).toBe("request-[REDACTED]")
   })
 
+  test("uses the canonical wire API key for requests and error redaction", async () => {
+    const apiKey = "exa-padded-secret"
+    let receivedApiKey = ""
+    mockFetch((_input, init) => {
+      receivedApiKey = new Headers(init?.headers).get("x-api-key") ?? ""
+      return Promise.resolve(
+        json({ error: `Invalid credential ${receivedApiKey}` }, { status: 401 })
+      )
+    })
+    for (const resolver of [`  ${apiKey}  `, async () => `  ${apiKey}  `]) {
+      const client = await connect({ apiKey: resolver })
+
+      const error = await client.search({ query: "sixb" }).catch((caught) => caught)
+
+      expect(receivedApiKey).toBe(apiKey)
+      expect(error).toBeInstanceOf(ExaApiError)
+      expect(error.message).toContain("[REDACTED]")
+      expect(error.message).not.toContain(apiKey)
+    }
+  })
+
   test("validates credentials, base URLs, requests, and successful response bodies", async () => {
     expect(() => exa({ apiKey: "" })).toThrow("apiKey must not be empty")
     expect(() => exa({ apiKey: "key", baseUrl: "relative" })).toThrow(

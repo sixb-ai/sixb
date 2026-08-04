@@ -1,5 +1,6 @@
 import type { AgentToolDefinition, ConnectorDefinition } from "@sixb/core"
-import { defineAgentTool, type JsonValue } from "@sixb/core"
+import { AgentToolPublicError, defineAgentTool, type JsonValue } from "@sixb/core"
+import { type ExaSearchDomainPolicy, resolveExaSearchDomainPolicy } from "./search-domain-policy"
 import { waitForSignal } from "./signals"
 import type { ExaConnector, ExaSearchRequest, ExaSearchResponse } from "./types"
 
@@ -8,7 +9,6 @@ const DEFAULT_MAX_CHARACTERS_PER_RESULT = 2_000
 const DEFAULT_MAX_TOTAL_CHARACTERS = 10_000
 const DEFAULT_TIMEOUT_MS = 20_000
 const MAX_RESULTS = 100
-const MAX_DOMAINS = 1_200
 const MAX_QUERY_CHARACTERS = 2_000
 const MAX_TITLE_CHARACTERS = 500
 const MAX_URL_CHARACTERS = 4_096
@@ -54,8 +54,7 @@ interface ResolvedExaWebSearchOptions {
   readonly maxCharactersPerResult: number
   readonly maxTotalCharacters: number
   readonly timeoutMs: number
-  readonly allowedDomains?: readonly string[]
-  readonly deniedDomains?: readonly string[]
+  readonly domainPolicy: ExaSearchDomainPolicy
 }
 
 /** Create a provider-neutral, bounded `web_search` tool backed by an Exa connector. */
@@ -70,9 +69,11 @@ export function exaWebSearch(
     .input({ query: "string" })
     .run(async ({ input, connector, signal: runSignal }) => {
       const query = input.query.trim()
-      if (!query) throw new Error("[SixbExa] web_search query must not be empty.")
+      if (!query) {
+        throw new AgentToolPublicError("[SixbExa] web_search query must not be empty.")
+      }
       if (query.length > MAX_QUERY_CHARACTERS) {
-        throw new Error(
+        throw new AgentToolPublicError(
           `[SixbExa] web_search query must contain at most ${MAX_QUERY_CHARACTERS} characters.`
         )
       }
@@ -87,8 +88,12 @@ export function exaWebSearch(
             maxCharacters: Math.min(limits.maxCharactersPerResult, limits.maxTotalCharacters),
           },
         },
-        ...(limits.allowedDomains ? { includeDomains: limits.allowedDomains } : {}),
-        ...(limits.deniedDomains ? { excludeDomains: limits.deniedDomains } : {}),
+        ...(limits.domainPolicy.includeDomains
+          ? { includeDomains: limits.domainPolicy.includeDomains }
+          : {}),
+        ...(limits.domainPolicy.excludeDomains
+          ? { excludeDomains: limits.domainPolicy.excludeDomains }
+          : {}),
       }
 
       try {
@@ -105,9 +110,10 @@ export function exaWebSearch(
       } catch (error) {
         if (runSignal.aborted) throw runSignal.reason ?? error
         if (timeoutSignal.aborted) {
-          throw new Error(`[SixbExa] web_search timed out after ${limits.timeoutMs}ms.`, {
-            cause: error,
-          })
+          throw new AgentToolPublicError(
+            `[SixbExa] web_search timed out after ${limits.timeoutMs}ms.`,
+            { cause: error }
+          )
         }
         throw error
       }
@@ -120,8 +126,10 @@ function normalizeOutput(
 ): JsonValue {
   let remainingCharacters = limits.maxTotalCharacters
   const results = response.results.slice(0, limits.maxResults).flatMap((result) => {
-    const url = normalizeResultUrl(result.url)
-    if (!url) return []
+    const resultUrl = normalizeResultUrl(result.url)
+    if (!resultUrl) return []
+    limits.domainPolicy.assertAllows(resultUrl.parsed)
+    const url = resultUrl.value
 
     const availableCharacters = Math.min(limits.maxCharactersPerResult, remainingCharacters)
     const text = (result.text ?? "").slice(0, availableCharacters)
@@ -166,31 +174,18 @@ function resolveOptions(options: ExaWebSearchOptions): ResolvedExaWebSearchOptio
   assertPositiveSafeInteger(maxTotalCharacters, "maxTotalCharacters")
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   assertPositiveSafeInteger(timeoutMs, "timeoutMs")
+  const domainPolicy = resolveExaSearchDomainPolicy({
+    allowedDomains: options.allowedDomains,
+    deniedDomains: options.deniedDomains,
+  })
 
   return {
     maxResults,
     maxCharactersPerResult,
     maxTotalCharacters,
     timeoutMs,
-    ...(options.allowedDomains !== undefined
-      ? { allowedDomains: normalizeDomains(options.allowedDomains, "allowedDomains") }
-      : {}),
-    ...(options.deniedDomains !== undefined
-      ? { deniedDomains: normalizeDomains(options.deniedDomains, "deniedDomains") }
-      : {}),
+    domainPolicy,
   }
-}
-
-function normalizeDomains(domains: readonly string[], field: string): readonly string[] {
-  if (!Array.isArray(domains) || domains.length < 1 || domains.length > MAX_DOMAINS) {
-    throw new Error(`[SixbExa] ${field} must contain from 1 to ${MAX_DOMAINS} domains.`)
-  }
-  return domains.map((domain) => {
-    if (typeof domain !== "string" || !domain.trim()) {
-      throw new Error(`[SixbExa] ${field} entries must be non-empty strings.`)
-    }
-    return domain.trim()
-  })
 }
 
 function assertIntegerInRange(value: number, field: string, min: number, max: number): void {
@@ -205,12 +200,21 @@ function assertPositiveSafeInteger(value: number, field: string): void {
   }
 }
 
-function normalizeResultUrl(value: string): string | undefined {
+function normalizeResultUrl(
+  value: string
+): { readonly value: string; readonly parsed: URL } | undefined {
   const url = value.trim()
   if (!url || url.length > MAX_URL_CHARACTERS) return undefined
   try {
     const parsed = new URL(url)
-    return parsed.protocol === "http:" || parsed.protocol === "https:" ? url : undefined
+    if (
+      (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+      parsed.username ||
+      parsed.password
+    ) {
+      return undefined
+    }
+    return { value: url, parsed }
   } catch {
     return undefined
   }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  AgentToolPublicError,
   type AgentToolRunContext,
   defineAgentTool,
   defineConnector,
@@ -11,6 +12,7 @@ import {
 import type { LanguageModelUsage, ToolSet } from "ai"
 import {
   agentRunUsageFromAiSdk,
+  agentToolErrorText,
   agentTraceFromAiSdkSteps,
   aiSdkToolsFromAgentDefinitions,
 } from "../src/ai-sdk-adapters"
@@ -232,7 +234,7 @@ describe("AI SDK agent adapters", () => {
     )
   })
 
-  test("does not classify project errors by matching their message", async () => {
+  test("masks unmarked project errors without classifying them by message", async () => {
     const projectError = new Error(
       "[Sixb] Agent tool 'project_failure' result must be a JSON value; lookalike"
     )
@@ -253,12 +255,33 @@ describe("AI SDK agent adapters", () => {
       definition.name
     )
 
-    try {
-      await adapted.execute({}, {})
-      throw new Error("Expected the project error to propagate.")
-    } catch (error) {
-      expect(error).toBe(projectError)
-    }
+    const error = await adapted.execute({}, {}).catch((caught) => caught)
+
+    expect(error.message).toBe("An error occurred.")
+    expect(error.cause).toBe(projectError)
+    expect(error).not.toBe(projectError)
+  })
+
+  test("preserves tool errors explicitly marked as safe", async () => {
+    const publicError = new AgentToolPublicError("Safe project diagnostic")
+    const definition = defineAgentTool("public_failure")
+      .description("Throw a public project error.")
+      .input({})
+      .run(() => {
+        throw publicError
+      })
+    const adapted = executableTool(
+      aiSdkToolsFromAgentDefinitions({
+        definitions: [definition],
+        valueTypesById: new Map(),
+        run: { id: "run-public-error", agentId: "broken" },
+        connector: (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"],
+        logger: noopLogger,
+      }),
+      definition.name
+    )
+
+    await expect(adapted.execute({}, {})).rejects.toBe(publicError)
   })
 
   test("keeps prototype-like valid tool names as own properties", () => {
@@ -309,7 +332,7 @@ describe("AI SDK agent adapters", () => {
           {
             type: "tool-error",
             toolCallId: "call-2",
-            error: new Error("Not found"),
+            error: new AgentToolPublicError("Not found"),
           },
         ],
       },
@@ -337,6 +360,30 @@ describe("AI SDK agent adapters", () => {
         state: "output-error",
         errorText: "Not found",
       },
+    ])
+  })
+
+  test("exposes only tool errors explicitly marked as safe", () => {
+    const safe = new AgentToolPublicError("Safe diagnostic")
+    const internal = new Error("credential=secret")
+
+    expect(agentToolErrorText(safe)).toBe("Safe diagnostic")
+    expect(agentToolErrorText(internal)).toBe("An error occurred.")
+    expect(
+      agentTraceFromAiSdkSteps([
+        {
+          content: [
+            { type: "tool-call", toolCallId: "call-1", toolName: "safe", input: {} },
+            { type: "tool-error", toolCallId: "call-1", error: safe },
+            { type: "tool-call", toolCallId: "call-2", toolName: "internal", input: {} },
+            { type: "tool-error", toolCallId: "call-2", error: internal },
+          ],
+        },
+      ])
+    ).toMatchObject([
+      { type: "step-start" },
+      { toolName: "safe", state: "output-error", errorText: "Safe diagnostic" },
+      { toolName: "internal", state: "output-error", errorText: "An error occurred." },
     ])
   })
 
