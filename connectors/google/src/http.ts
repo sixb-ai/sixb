@@ -20,7 +20,7 @@ import {
  * name here, a base URL in `google.ts`, its typed resources, and one wiring
  * line in `client.ts` — the auth and HTTP core below never change.
  */
-export type GoogleSurface = "drive" | "calendar"
+export type GoogleSurface = "drive" | "calendar" | "gmail"
 
 export interface GoogleHttpClients {
   /** JSON API clients, keyed by surface. */
@@ -282,8 +282,12 @@ export function withQuery(path: string, query?: QueryParams): string {
 
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined) {
-      params.set(key, String(value))
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        params.append(key, String(item))
+      }
+    } else if (value !== undefined) {
+      params.append(key, String(value))
     }
   }
 

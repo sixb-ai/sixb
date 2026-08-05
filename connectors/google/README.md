@@ -8,7 +8,7 @@ One package spans Google's many APIs: auth and HTTP conventions live in a shared
 API is a **surface** of declarative typed resources. Adding a surface (e.g. `meet`, `calendar`)
 costs a base-URL entry, its resources, and one wiring line — the auth/HTTP core never changes.
 
-Surfaces implemented: **`drive`** (v3), **`calendar`** (v3).
+Surfaces implemented: **`drive`** (v3), **`calendar`** (v3), **`gmail`** (v1).
 
 ## Usage
 
@@ -131,6 +131,72 @@ List endpoints return `nextSyncToken` on their final page; call `list` (not `lis
 need it to poll incrementally with `syncToken`. `patch`/`insert`/`update` accept the raw Calendar
 resource shapes — the connector relays them without interpretation.
 
+### Gmail (v1)
+
+The complete Gmail REST v1 resource tree is available: profiles and mailbox watches, messages and
+attachments, drafts, history, labels, threads, account settings, forwarding addresses, filters,
+delegates, send-as aliases and S/MIME certificates, plus client-side encryption identities and key
+pairs. Every method keeps Google's `userId` explicit; pass `"me"` for the authenticated mailbox.
+
+```ts
+const profile = await client.gmail.users.getProfile("me")
+
+// Search returns lightweight message references; fetch each message for its content.
+for await (const ref of client.gmail.messages.listAll("me", {
+  q: "from:billing@example.com newer_than:30d",
+  labelIds: ["INBOX"],
+})) {
+  const message = await client.gmail.messages.get("me", ref.id!, { format: "full" })
+  // Message payload bodies and attachments are base64url encoded by Gmail.
+  console.log(message.payload?.headers)
+}
+
+// Send an RFC 2822 message. `raw` must be base64url encoded (without required padding).
+await client.gmail.messages.send("me", { raw: encodedRfc2822Message })
+
+// Incremental mailbox processing: persist the final page's `historyId` as the next checkpoint.
+let page = await client.gmail.history.list("me", { startHistoryId: checkpoint })
+for (;;) {
+  for (const change of page.history ?? []) { /* ... */ }
+  if (!page.nextPageToken) break
+  page = await client.gmail.history.list("me", {
+    startHistoryId: checkpoint,
+    pageToken: page.nextPageToken,
+  })
+}
+checkpoint = page.historyId ?? checkpoint
+
+// Pub/Sub mailbox notifications.
+const watch = await client.gmail.users.watch("me", {
+  topicName: "projects/my-project/topics/gmail",
+  labelIds: ["INBOX"],
+  labelFilterBehavior: "include",
+})
+await client.gmail.users.stop("me")
+
+// Settings mirror the REST resource hierarchy.
+await client.gmail.settings.updateVacation("me", {
+  enableAutoReply: true,
+  responseSubject: "Out of office",
+  responseBodyPlainText: "Back on Monday.",
+})
+await client.gmail.settings.filters.list("me")
+await client.gmail.settings.sendAs.smimeInfo.list("me", profile.emailAddress!)
+await client.gmail.settings.cse.keypairs.list("me")
+```
+
+Common least-privilege scopes are `gmail.readonly` for mailbox reads, `gmail.modify` for message
+and label changes, `gmail.compose` or `gmail.send` for authoring/sending, `gmail.labels` for labels,
+`gmail.settings.basic` for general and CSE settings, and `gmail.settings.sharing` for forwarding,
+delegation, and send-as administration. Several settings operations are restricted to Google
+Workspace accounts and may require domain-wide delegation. The broad `mail.google.com` scope can
+permanently delete mail and should only be used when narrower scopes cannot cover the workflow.
+
+`listAll` is provided for every paginated Gmail collection. Call the underlying `list` directly
+when the final response carries state you need to retain, notably `history.historyId`. Repeated
+query parameters such as `labelIds`, `metadataHeaders`, and `historyTypes` accept arrays and are
+encoded as repeated keys, matching the Gmail API contract.
+
 ## Auth
 
 Three explicit modes (a discriminated union):
@@ -165,7 +231,7 @@ gcloud auth application-default login \
   --scopes=https://www.googleapis.com/auth/drive.readonly
 ```
 
-Google APIs outside Google Cloud, including Drive and Calendar, require a custom OAuth client ID
+Google APIs outside Google Cloud, including Drive, Calendar, and Gmail, require a custom OAuth client ID
 when adding their scopes to local ADC. The resulting credential contains a refresh token; do not
 copy a short-lived access token into project configuration.
 
