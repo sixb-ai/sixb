@@ -27,6 +27,7 @@ import agentExecutionsSql from "./migrations/009-agent-executions.sql" with { ty
 import aiUsageAccountingFoundationSql from "./migrations/010-ai-usage-accounting-foundation.sql" with {
   type: "text",
 }
+import syncFailureRecordSql from "./migrations/011-sync-failure-record.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -290,6 +291,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("008-action-executions", actionExecutionsSql),
     pgSql("009-agent-executions", agentExecutionsSql),
     pgSql("010-ai-usage-accounting-foundation", aiUsageAccountingFoundationSql),
+    pgSql("011-sync-failure-record", syncFailureRecordSql),
   ],
 })
 

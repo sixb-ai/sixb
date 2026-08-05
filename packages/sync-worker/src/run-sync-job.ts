@@ -12,9 +12,10 @@ import {
   type MergeChange,
   type SyncDefinition,
 } from "@sixb/core"
+import { captureSixbFailure } from "@sixb/core/internal/errors"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type DatasetVersion, getDatasetMergeChangeValidationError } from "@sixb/core/lake-storage"
-import type { SyncRunFailure, SyncRunRecord } from "@sixb/core/storage"
+import { SYNC_RUN_FAILURE_CODES, type SyncRunRecord } from "@sixb/core/storage"
 import { assertDatasetRow, normalizeReadResult, throwIfAborted } from "./normalize"
 import type { RunSyncJobInput, SyncRunResult, SyncWorkerContext } from "./types"
 
@@ -23,19 +24,6 @@ export class SyncRunAlreadyStartedError extends Error {
 
   constructor(readonly run: SyncRunRecord) {
     super(`[SixbSyncWorker] Sync run '${run.id}' has already started.`)
-  }
-}
-
-function toSyncRunFailure(error: unknown): SyncRunFailure {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-    }
-  }
-
-  return {
-    message: String(error),
   }
 }
 
@@ -462,7 +450,11 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
           id: job.id,
           status,
           rowsRead,
-          error: toSyncRunFailure(error),
+          error: captureSixbFailure(error, {
+            allowedCodes: SYNC_RUN_FAILURE_CODES,
+            defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+            details: { syncId: sync.id, runId: job.id },
+          }),
         })
         if (status === "failed" && run.status === "failed") input.onRunFailed?.(error, run)
       } catch {

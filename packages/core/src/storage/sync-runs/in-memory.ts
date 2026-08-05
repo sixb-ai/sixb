@@ -1,3 +1,5 @@
+import { parseSixbFailure } from "../../errors/internal"
+import type { SixbFailure } from "../../errors/types"
 import { cloneJsonValue, type JsonValue } from "../../json"
 import {
   compareStartedAt,
@@ -15,10 +17,11 @@ import type {
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
-  SyncRunFailure,
+  SyncRunFailureCode,
   SyncRunRecord,
   SyncRunStorage,
 } from "./types"
+import { SYNC_RUN_FAILURE_CODES } from "./types"
 
 function syncRunKey(projectId: string, id: string): string {
   return `${projectId}:${id}`
@@ -32,8 +35,10 @@ function normalizeCheckpoint(checkpoint: JsonValue | undefined): JsonValue | und
   return checkpoint !== undefined ? cloneJsonValue(checkpoint) : undefined
 }
 
-function normalizeError(error: SyncRunFailure | undefined): SyncRunFailure | undefined {
-  return error ? structuredClone(error) : undefined
+function normalizeError(
+  error: SixbFailure<SyncRunFailureCode> | undefined
+): SixbFailure<SyncRunFailureCode> | undefined {
+  return error ? parseSixbFailure(error, SYNC_RUN_FAILURE_CODES) : undefined
 }
 
 export class InMemorySyncRunStorage implements SyncRunStorage {

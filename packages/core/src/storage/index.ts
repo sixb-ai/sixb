@@ -5,6 +5,7 @@
  * the interface cannot be implemented from outside the package.
  */
 export type { Principal } from "../auth"
+export type { SixbFailure } from "../errors/types"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
 export type { ReadonlyJsonObject } from "../json"
 export { stableJsonStringify } from "../json"
@@ -429,13 +430,13 @@ export type {
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
-  SyncRunFailure,
+  SyncRunFailureCode,
   SyncRunMode,
   SyncRunRecord,
   SyncRunStatus,
   SyncRunStorage,
 } from "./sync-runs"
-export { InMemorySyncRunStorage, SyncRunError } from "./sync-runs"
+export { InMemorySyncRunStorage, SYNC_RUN_FAILURE_CODES, SyncRunError } from "./sync-runs"
 export type {
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,

@@ -46,6 +46,7 @@ describe("Postgres storage migrations", () => {
             "008-action-executions",
             "009-agent-executions",
             "010-ai-usage-accounting-foundation",
+            "011-sync-failure-record",
           ],
         },
       ])
@@ -119,6 +120,13 @@ describe("Postgres storage migrations", () => {
           id: "010-ai-usage-accounting-foundation",
           status: "applied",
           version: 10,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "011-sync-failure-record",
+          status: "applied",
+          version: 11,
         },
       ])
     })
@@ -774,6 +782,13 @@ describe("Postgres storage migrations", () => {
           id: "010-ai-usage-accounting-foundation",
           status: "applied",
           version: 10,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "011-sync-failure-record",
+          status: "applied",
+          version: 11,
         },
       ])
     } finally {

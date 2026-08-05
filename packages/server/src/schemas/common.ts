@@ -1,4 +1,5 @@
 import type { SixbErrorCode } from "@sixb/core"
+import { SIXB_FAILURE_MAX_MESSAGE_BYTES } from "@sixb/core/internal/errors"
 import { z } from "zod"
 import { ignoreOverride, type JsonSchema7Type, type OverrideCallback } from "zod-to-json-schema"
 
@@ -35,6 +36,20 @@ export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 
 /** A JSON null with an explicit runtime and generated-client type. */
 export const JsonNullSchema = JsonValueSchema.refine((value): value is null => value === null)
+
+/** Creates a portable failure record constrained to one boundary's declared codes. */
+export function sixbFailureSchema<
+  const TCodes extends readonly [SixbErrorCode, ...SixbErrorCode[]],
+>(codes: TCodes) {
+  return z.object({
+    code: z.enum(codes),
+    message: z.string().max(SIXB_FAILURE_MAX_MESSAGE_BYTES),
+    retryable: z.boolean(),
+    at: z.string().datetime(),
+    details: JsonValueSchema.optional(),
+    truncated: z.literal(true).optional(),
+  })
+}
 
 const JsonValueOpenApiSchema = {
   description: "Any JSON-compatible value.",
