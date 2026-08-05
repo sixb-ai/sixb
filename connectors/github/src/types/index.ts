@@ -31,6 +31,25 @@ export type {
   RepositoryIssuesApi,
   UpdateIssueInput,
 } from "./issues"
+export type {
+  AuthenticatedUserOrganizationMembershipsApi,
+  GitHubOrganizationInvitation,
+  GitHubOrganizationInvitationRole,
+  GitHubOrganizationInvitationSource,
+  GitHubOrganizationMemberFilter,
+  GitHubOrganizationMemberRole,
+  GitHubOrganizationMembership,
+  GitHubOrganizationMembershipRole,
+  GitHubOrganizationMembershipState,
+  GitHubOrganizationSummary,
+  ListAuthenticatedUserOrganizationMembershipsOptions,
+  ListOrganizationInvitationsOptions,
+  ListOrganizationMembersOptions,
+  ListOutsideCollaboratorsOptions,
+  OrganizationInvitationsApi,
+  OrganizationMembersApi,
+  OrganizationOutsideCollaboratorsApi,
+} from "./members"
 export type { GitHubConnectorOptions } from "./options"
 export type {
   AuthenticatedUserRepositoriesApi,
@@ -47,6 +66,12 @@ export type {
   OrganizationRepositoriesApi,
   RepositoryApi,
 } from "./repos"
+export type {
+  GitHubUserPlan,
+  GitHubUserProfile,
+  GitHubUsersApi,
+  ListUsersOptions,
+} from "./users"
 export type {
   GitHubEventContext,
   GitHubEventHandler,

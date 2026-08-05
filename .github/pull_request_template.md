@@ -6,7 +6,7 @@ Examples:
 
 - `core: simplify createSixb auto-discovery`
 - `server: add tests for object action routes`
-- `docs: clarify proposal approval flow`
+- `docs: clarify idea review flow`
 
 ## Summary
 
