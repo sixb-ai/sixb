@@ -369,7 +369,7 @@ export type {
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
   ListPipelineStepRunsResult,
-  PipelineRunFailure,
+  PipelineRunFailureCode,
   PipelineRunRecord,
   PipelineRunStatus,
   PipelineRunStorage,
@@ -377,7 +377,11 @@ export type {
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./pipeline-runs"
-export { InMemoryPipelineRunStorage, PipelineRunError } from "./pipeline-runs"
+export {
+  InMemoryPipelineRunStorage,
+  PIPELINE_RUN_FAILURE_CODES,
+  PipelineRunError,
+} from "./pipeline-runs"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
   FinishProjectionRunInput,

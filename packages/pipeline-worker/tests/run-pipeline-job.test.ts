@@ -172,7 +172,12 @@ describe("runPipelineJob", () => {
       id: "run_missing_input",
     })
     expect(run?.status).toBe("failed")
-    expect(run?.error?.message).toContain("has no committed version")
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      details: { pipelineId: "customers", runId: "run_missing_input" },
+    })
+    expect(run?.error?.message).toBe("An unexpected internal error occurred.")
 
     const steps = await pipelineRunsStorage.listSteps({
       projectId: runtime.id,
@@ -381,7 +386,20 @@ describe("runPipelineJob", () => {
       order: "asc",
     })
     expect(stepRuns.steps.map((step) => step.status)).toEqual(["succeeded", "failed"])
-    expect(stepRuns.steps[1]?.error?.message).toBe("stats exploded")
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      details: { pipelineId: "customers", runId: "run_failure" },
+    })
+    expect(stepRuns.steps[1]?.error).toMatchObject({
+      code: "internal.unexpected",
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_failure",
+        stepId: "customer-stats",
+        stepRunId: "run_failure:step:2:customer-stats",
+      },
+    })
+    expect(stepRuns.steps[1]?.error?.message).toBe("An unexpected internal error occurred.")
 
     const committedRows = await collectRows(lakeStorage.readRows({ datasetId: "customers" }))
     expect(committedRows).toEqual([{ id: "cust_1", name: "Ada" }])
@@ -532,9 +550,10 @@ describe("runPipelineJob", () => {
       stepId: "customer-stats",
       status: "failed",
       error: {
-        name: "PipelineWorkerError",
+        code: "internal.unexpected",
+        retryable: false,
       },
     })
-    expect(stepRuns.steps[0]?.error?.message).toContain("requires SQL transform support")
+    expect(stepRuns.steps[0]?.error?.message).toBe("An unexpected internal error occurred.")
   })
 })

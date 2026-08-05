@@ -16,7 +16,7 @@ legacy exceptions use `internal.unexpected` until their call site receives a spe
 
 ## Failure records
 
-Persisted sync-run failures use the same portable record returned by their API:
+Persisted run failures use the same portable record returned by their API:
 
 ```ts
 interface SixbFailure<TCode extends SixbErrorCode = SixbErrorCode> {
@@ -29,8 +29,7 @@ interface SixbFailure<TCode extends SixbErrorCode = SixbErrorCode> {
 }
 ```
 
-Each primitive specializes `TCode` to the codes it can actually persist and expose. Sync runs
-currently declare `internal.unexpected | runtime.cancelled`.
+Each primitive specializes `TCode` to the codes it can actually persist and expose. Sync runs, pipeline runs, and pipeline step runs currently declare `internal.unexpected | runtime.cancelled`.
 
 Other run primitives keep their legacy error shape until their own vertical migration. This keeps
 each storage and wire change independently reviewable.

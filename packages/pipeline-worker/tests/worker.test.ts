@@ -479,7 +479,7 @@ describe("PipelineWorker", () => {
       stepIndex: 1,
       totalSteps: 2,
       status: "failed",
-      error: "nope",
+      error: "An unexpected internal error occurred.",
     })
 
     const datasetPayload = events[3]?.payload as {
@@ -598,6 +598,25 @@ describe("PipelineWorker", () => {
       pipelineId: "customers",
       runId: "run-aborts-late",
       status: "cancelled",
+    })
+    const cancelledRun = await sixb.storage.pipelineRuns!.getById({
+      projectId: sixb.id,
+      id: "run-aborts-late",
+    })
+    const [cancelledStep] = (
+      await sixb.storage.pipelineRuns!.listSteps({
+        projectId: sixb.id,
+        pipelineRunId: "run-aborts-late",
+        statuses: ["cancelled"],
+      })
+    ).steps
+    expect(cancelledRun?.error).toMatchObject({
+      code: "runtime.cancelled",
+      retryable: false,
+    })
+    expect(cancelledStep?.error).toMatchObject({
+      code: "runtime.cancelled",
+      retryable: false,
     })
     expect(reportCount).toBe(0)
   })
