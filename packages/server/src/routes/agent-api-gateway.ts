@@ -8,6 +8,7 @@ import {
 import { normalizeRoutePath, pathSegmentsFor } from "@sixb/core/internal/http"
 import type { Elysia } from "elysia"
 import { registerInternalRequestAuthState } from "../auth/scope"
+import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "./files"
 
 const MAX_AGENT_API_BODY_BYTES = 1_000_000
 const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
@@ -74,10 +75,22 @@ async function handleAgentApiGatewayRequest(input: {
   if (authState instanceof Response) {
     return authState
   }
+  if (
+    authState.agentExecution.kind === "workflow" &&
+    input.request.method === "POST" &&
+    matchesWorkflowRunStart(upstreamPath)
+  ) {
+    return jsonError(409, "Workflow agent nodes cannot start another workflow run.")
+  }
 
   let body: ArrayBuffer | undefined
   try {
-    body = await readRequestBody(input.request)
+    body = await readRequestBody(
+      input.request,
+      isSimpleFileUpload(input.request.method, upstreamPath)
+        ? DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES
+        : MAX_AGENT_API_BODY_BYTES
+    )
   } catch (error) {
     if (error instanceof PayloadTooLargeError) {
       return jsonError(413, error.message)
@@ -124,8 +137,14 @@ async function resolveAgentRunAuthState(
         nodeRunId: input.runId,
       })
   const run = conversationalRun ?? workflowRun
+  const agentExecution = conversationalRun
+    ? ({ kind: "conversation", runId: conversationalRun.id } as const)
+    : workflowRun
+      ? ({ kind: "workflow", nodeRunId: workflowRun.nodeRunId } as const)
+      : null
   if (
     !run ||
+    !agentExecution ||
     run.status !== "running" ||
     !run.execution ||
     run.execution.queueLeaseExpiresAt.getTime() <= Date.now() ||
@@ -143,6 +162,7 @@ async function resolveAgentRunAuthState(
     return {
       authz: null,
       scoped: null,
+      agentExecution,
       ...(conversationalRun ? { agentRun: conversationalRun } : {}),
     }
   }
@@ -179,6 +199,7 @@ async function resolveAgentRunAuthState(
   return {
     authz,
     scoped: sixb.as(authz),
+    agentExecution,
     ...(conversationalRun ? { agentRun: conversationalRun } : {}),
   }
 }
@@ -220,7 +241,10 @@ function copyHeader(source: Headers, target: Headers, name: string): void {
   }
 }
 
-async function readRequestBody(request: Request): Promise<ArrayBuffer | undefined> {
+async function readRequestBody(
+  request: Request,
+  maxBytes: number
+): Promise<ArrayBuffer | undefined> {
   if (!request.body || request.method === "GET" || request.method === "HEAD") {
     return undefined
   }
@@ -233,13 +257,31 @@ async function readRequestBody(request: Request): Promise<ArrayBuffer | undefine
     const { done, value } = await reader.read()
     if (done) break
     total += value.byteLength
-    if (total > MAX_AGENT_API_BODY_BYTES) {
-      throw new PayloadTooLargeError("Agent API gateway request body exceeds 1MB.")
+    if (total > maxBytes) {
+      throw new PayloadTooLargeError(
+        maxBytes === MAX_AGENT_API_BODY_BYTES
+          ? "Agent API gateway request body exceeds 1MB."
+          : `Agent API gateway file upload request body exceeds the ${maxBytes} byte limit.`
+      )
     }
     chunks.push(value)
   }
 
   return concatChunks(chunks, total)
+}
+
+function isSimpleFileUpload(method: string, pathname: string): boolean {
+  return method === "POST" && normalizeRoutePath(pathname) === "/api/files"
+}
+
+function matchesWorkflowRunStart(pathname: string): boolean {
+  const segments = pathSegmentsFor(pathname)
+  return (
+    segments.length === 4 &&
+    segments[0] === "api" &&
+    segments[1] === "workflows" &&
+    segments[3] === "runs"
+  )
 }
 
 function concatChunks(chunks: readonly Uint8Array[], total: number): ArrayBuffer {

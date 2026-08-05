@@ -2822,6 +2822,9 @@ export type ListWorkflowsResponses = {
       input: {
         [key: string]: unknown
       }
+      output?: {
+        [key: string]: unknown
+      }
       queuedAt?: string
       startedAt: string
       finishedAt?: string
@@ -2921,6 +2924,9 @@ export type GetWorkflowResponses = {
       workflowId: string
       status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
       input: {
+        [key: string]: unknown
+      }
+      output?: {
         [key: string]: unknown
       }
       queuedAt?: string
@@ -3306,6 +3312,9 @@ export type ListWorkflowRunsResponses = {
       input: {
         [key: string]: unknown
       }
+      output?: {
+        [key: string]: unknown
+      }
       queuedAt?: string
       startedAt: string
       finishedAt?: string
@@ -3365,6 +3374,9 @@ export type GetWorkflowRunResponses = {
       workflowId: string
       status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
       input: {
+        [key: string]: unknown
+      }
+      output?: {
         [key: string]: unknown
       }
       queuedAt?: string
@@ -3523,6 +3535,9 @@ export type CancelWorkflowRunResponses = {
       workflowId: string
       status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
       input: {
+        [key: string]: unknown
+      }
+      output?: {
         [key: string]: unknown
       }
       queuedAt?: string

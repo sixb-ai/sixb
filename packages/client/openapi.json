@@ -7959,6 +7959,10 @@
                             "type": "object",
                             "additionalProperties": {}
                           },
+                          "output": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
                           "queuedAt": {
                             "type": "string"
                           },
@@ -8199,6 +8203,10 @@
                           ]
                         },
                         "input": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "output": {
                           "type": "object",
                           "additionalProperties": {}
                         },
@@ -9210,6 +9218,11 @@
         "summary": "List workflow run history",
         "tags": ["Workflow Runs"],
         "operationId": "listWorkflowRuns",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "workflowId",
@@ -9304,6 +9317,10 @@
                             ]
                           },
                           "input": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "output": {
                             "type": "object",
                             "additionalProperties": {}
                           },
@@ -9402,6 +9419,11 @@
         "summary": "Get workflow run detail",
         "tags": ["Workflow Runs"],
         "operationId": "getWorkflowRun",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "runId",
@@ -9445,6 +9467,10 @@
                           ]
                         },
                         "input": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "output": {
                           "type": "object",
                           "additionalProperties": {}
                         },
@@ -9896,6 +9922,10 @@
                           ]
                         },
                         "input": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "output": {
                           "type": "object",
                           "additionalProperties": {}
                         },
@@ -13908,6 +13938,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "requestBody": {
@@ -14807,6 +14840,11 @@
         "summary": "List action run history",
         "tags": ["Action Runs"],
         "operationId": "listActionRuns",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "actionId",
@@ -18901,6 +18939,11 @@
         "summary": "List object links",
         "tags": ["Links"],
         "operationId": "listObjectLinks",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "objectTypeId",

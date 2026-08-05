@@ -154,20 +154,31 @@ data, not a snapshot. These routes are allowed (everything else returns `403`):
 | --- | --- |
 | Project | `GET /api/project` |
 | Object types | `GET /api/object-types`, `GET /api/object-types/:id` |
-| Objects | `GET /api/objects`, `POST /api/objects/query` (+ `/count`, `/exists`, `/facets`), `GET /api/objects/:objectTypeId/:objectId` |
+| Objects | `GET /api/objects`, `POST /api/objects/query` (+ `/count`, `/exists`, `/facets`), `GET /api/objects/:objectTypeId/:objectId`, `GET .../:objectId/links` |
 | Telemetry | `POST /api/telemetry/history`, `GET .../telemetry/:propertyId/history`, `.../latest` |
-| Actions | `GET /api/actions`, `GET /api/actions/:actionId`, `POST /api/actions/:actionId`, `GET /api/action-runs/:runId` |
-| Files | `GET /api/objects/:objectTypeId/:objectId/files/content`, `GET /api/action-runs/:runId/files/content`, `GET /api/agent-threads/:threadId/messages/:messageId/files/content` |
+| Actions | `GET /api/actions`, `GET /api/actions/:actionId`, `POST /api/actions/:actionId`, `GET /api/action-runs`, `GET /api/action-runs/:runId` |
+| Workflows | `GET /api/workflows`, `GET /api/workflows/:workflowId`, `POST .../:workflowId/runs`, `GET /api/workflow-runs`, `GET /api/workflow-runs/:runId` |
+| Files | `POST /api/files`, object/action/workflow-run/message `GET .../files/content` routes |
 
 Requests run under the agent's [execution identity](./authorization.md), so the agent can only see
 and act on what its groups allow — the same checks as any other caller, and only while the run is
 active.
 
+The upload route keeps its normal simple-file ceiling and gets a route-specific gateway body limit;
+other gateway requests remain capped at 1 MB. Staged and direct-provider uploads are not exposed.
+Agents must preview and ask for confirmation before starting a domain-changing action or workflow.
+Workflow agent nodes cannot start another workflow, which bounds recursive execution. Generic
+object/link writes, telemetry append, workflow cancellation/interventions/node diagnostics, and
+infrastructure or administration routes remain outside the gateway.
+
+Workflow run detail includes the run's top-level output after success. Agent gateway responses omit
+the route's internal node records, and only top-level input/output file paths are available.
+
 ## Agent Skills in the sandbox
 
-Every run also gets Agent Skills under `$SIXB_SKILLS_DIR`. Sixb installs built-in API skills such as
-`sixb-query`, `sixb-telemetry`, and `sixb-actions`, then adds project skills from
-`skills/<name>/SKILL.md` when that folder exists.
+Every run also gets Agent Skills under `$SIXB_SKILLS_DIR`. Sixb installs built-in API skills
+`sixb-query`, `sixb-telemetry`, `sixb-actions`, `sixb-files`, and `sixb-workflows`, then adds project
+skills from `skills/<name>/SKILL.md` when that folder exists.
 
 A project skill follows the Agent Skills folder format:
 

@@ -15,6 +15,7 @@ import {
   FileUploadSessionError,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
+import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
@@ -102,7 +103,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           summary: "Upload a file",
           tags: [OPENAPI_TAGS.files.name],
           operationId: "uploadFileRaw",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("uploadFileRaw"),
           requestBody: {
             required: true,
             content: {

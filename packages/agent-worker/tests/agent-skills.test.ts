@@ -16,8 +16,10 @@ describe("Agent Skills", () => {
       const skills = await loadAgentSkills({ projectSkillsDir: join(projectRoot, "skills") })
       expect(skills.map((skill) => skill.name)).toEqual([
         "sixb-actions",
+        "sixb-files",
         "sixb-query",
         "sixb-telemetry",
+        "sixb-workflows",
       ])
       for (const skill of skills) {
         const skillFile = skill.files.find((file) => file.relativePath === "SKILL.md")

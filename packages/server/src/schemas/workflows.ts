@@ -116,6 +116,7 @@ export const WorkflowRunSchema = z.object({
   workflowId: z.string(),
   status: WorkflowRunStatusSchema,
   input: z.record(z.unknown()),
+  output: z.record(z.unknown()).optional(),
   queuedAt: z.string().optional(),
   startedAt: z.string(),
   finishedAt: z.string().optional(),

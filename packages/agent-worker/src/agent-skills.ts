@@ -70,7 +70,7 @@ export function renderAgentSkillCatalog(skills: readonly AgentSkill[]): string {
     "Do not add Authorization or Cookie headers. The gateway authenticates allowed requests.",
     [
       "Operate through the ontology layer: object types, object reads/queries, telemetry reads,",
-      "and declared actions.",
+      "file publication, and declared actions or workflows.",
     ].join(" "),
     "",
     "Available Agent Skills:",

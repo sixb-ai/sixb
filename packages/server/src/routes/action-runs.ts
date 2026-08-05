@@ -32,7 +32,10 @@ const ActionRunFileContentQuerySchema = FileContentQuerySchema.extend({
   path: z
     .string()
     .min(1)
-    .regex(/^\/params(?:\/|$)/, "Action run file content paths must start with /params/"),
+    .regex(
+      /^\/(?:params|writeback\/result)(?:\/|$)/,
+      "Action run file content paths must start with /params/ or /writeback/result/"
+    ),
 })
 
 function serializeActionRunSummary(
@@ -164,6 +167,7 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
           summary: "List action run history",
           tags: [OPENAPI_TAGS.actionRuns.name],
           operationId: "listActionRuns",
+          security: bearerSecurityRequirement("listActionRuns"),
         },
       }
     )

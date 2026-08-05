@@ -68,6 +68,7 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           summary: "List object links",
           tags: [OPENAPI_TAGS.links.name],
           operationId: "listObjectLinks",
+          security: bearerSecurityRequirement("listObjectLinks"),
         },
       }
     )

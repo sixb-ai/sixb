@@ -1042,6 +1042,7 @@ export const listWorkflowRuns = <ThrowOnError extends boolean = false>(
   options?: Options<ListWorkflowRunsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListWorkflowRunsResponses, ListWorkflowRunsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/workflow-runs",
     ...options,
   })
@@ -1053,6 +1054,7 @@ export const getWorkflowRun = <ThrowOnError extends boolean = false>(
   options: Options<GetWorkflowRunData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetWorkflowRunResponses, GetWorkflowRunErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/workflow-runs/{runId}",
     ...options,
   })
@@ -1454,7 +1456,10 @@ export const uploadFileRaw = <ThrowOnError extends boolean = false>(
 ) =>
   (options.client ?? client).post<UploadFileRawResponses, UploadFileRawErrors, ThrowOnError>({
     ...formDataBodySerializer,
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/files",
     ...options,
     headers: {
@@ -1553,6 +1558,7 @@ export const listActionRuns = <ThrowOnError extends boolean = false>(
   options?: Options<ListActionRunsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListActionRunsResponses, ListActionRunsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/action-runs",
     ...options,
   })
@@ -1787,6 +1793,7 @@ export const listObjectLinks = <ThrowOnError extends boolean = false>(
   options: Options<ListObjectLinksData, ThrowOnError>
 ) =>
   (options.client ?? client).get<ListObjectLinksResponses, ListObjectLinksErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/objects/{objectTypeId}/{objectId}/links",
     ...options,
   })

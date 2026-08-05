@@ -36,6 +36,16 @@ curl -sS "$SIXB_API_BASE_URL/api/objects/customer/cust-001"
 The path form is only for reading one object by id: `/api/objects/{objectTypeId}/{primaryId}`.
 It is not the collection route for a type.
 
+## Read Exact Object Links
+
+Use this route when you need the persisted relationships for one object, including relationship
+properties. It returns only links whose source and target object types are both visible to you.
+
+```bash
+curl -sS "$SIXB_API_BASE_URL/api/objects/customer/cust-001/links"
+curl -sS "$SIXB_API_BASE_URL/api/objects/customer/cust-001/links?linkId=accountManager&direction=outgoing"
+```
+
 ## Object Query
 
 Use `POST /api/objects/query` for ontology-property filters, search, sorting, graph traversal,
