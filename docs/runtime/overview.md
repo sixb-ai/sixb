@@ -204,6 +204,7 @@ export const sixb = createSixb({
 ## Related
 
 - [Failed run notifications](error-handling.md) — route terminal run failures to project code
+- [Runtime error codes](error-codes.md) — branch on stable failure identities
 - [Project structure](../fundamentals/project-structure.md) — folder layout and discovery
 - [Objects](../objects/overview.md) — the typed `sixb.objects(Type)` surface
 - [Events](../events/overview.md) — domain events and `sixb.events`
