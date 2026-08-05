@@ -1,4 +1,5 @@
 import type { DatasetDefinition, OntologySource, Sixb } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type {
   DatasetCatalogState,
   DatasetLatestVersionSummary,
@@ -176,7 +177,9 @@ function requireDataset(
 ) {
   const dataset = scoped ? scoped.getDatasetById(datasetId) : sixb.getDatasetById(datasetId)
   if (!dataset) {
-    throw new Error("Dataset not found")
+    throw createSixbError("dataset.not_found", "Dataset not found", {
+      details: { datasetId },
+    })
   }
   return dataset
 }
