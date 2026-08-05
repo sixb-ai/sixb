@@ -727,31 +727,21 @@ export {
 
 // ── Errors ──────────────────────────────────────────────────
 
-export type { SixbErrorKind } from "./errors"
 /**
- * The failure vocabulary. There is one error type: app code catches with
- * `isSixbError(error, code)` and branches on the code. The five `SIXB_*_ERROR_CODES` sets are the
- * coarser grouping a caller sometimes wants instead, read through `sixbErrorKind(error)`.
+ * What an app author calls, and its type closure — nothing more.
+ *
+ * `isSixbError(error, code)` to branch, `toSixbFailure(error)` to read the record off anything that
+ * was thrown. The rest of the vocabulary — the `SixbError` constructor, the code list, the retry
+ * table, the coarse kinds — is on `@sixb/core/errors`, whose audience is a provider implementation
+ * and this repo's own packages. An app author minting a framework code is the thing the closed
+ * enum exists to prevent, so the constructor does not belong on the surface they import.
  */
 export {
   isSixbError,
-  isSixbErrorCode,
-  SIXB_AUTHORIZATION_ERROR_CODES,
-  SIXB_CONFLICT_ERROR_CODES,
-  SIXB_ERROR_CODES,
-  SIXB_ERROR_RETRYABLE,
-  SIXB_PROVIDER_ERROR_CODES,
-  SIXB_TIMEOUT_ERROR_CODES,
-  SIXB_VALIDATION_ERROR_CODES,
-  SixbError,
   type SixbErrorCode,
   type SixbErrorLike,
-  type SixbErrorNamespace,
-  type SixbErrorOptions,
   type SixbFailure,
   type SixbFailureDetails,
-  sixbErrorKind,
-  sixbErrorNamespace,
   type ToSixbFailureOptions,
   toSixbFailure,
 } from "./errors"

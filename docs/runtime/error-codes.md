@@ -16,26 +16,32 @@ reworded in a patch release. Never parse it.
 ## Catching
 
 ```ts
-import { isSixbError } from "@sixb/core"
+import { isSixbError, toSixbFailure } from "@sixb/core"
 
 try {
   await sixb.objects(Invoice).upsert(invoice)
 } catch (error) {
-  if (isSixbError(error, "storage.conflict")) return retryAfterReread()
-  if (isSixbError(error, "ontology.invalid_value")) return showFieldErrors(error.details)
+  // The ontology refused the write — a property value, or a link's cardinality.
+  if (isSixbError(error, "ontology.invalid_value")) {
+    return showFieldErrors(toSixbFailure(error).details)
+  }
   throw error
 }
 ```
 
 `isSixbError` is structural: it recognizes a Sixb failure that crossed a bundle boundary — a custom
-app and the client are bundled separately from the runtime — where `instanceof` would not.
+app and the client are bundled separately from the runtime — where `instanceof` would not. It
+verifies the code and the message, and narrows to exactly those two; `details` is read through
+`toSixbFailure`, which keeps the scalar entries of an untrusted bag and drops the rest.
 
-For the coarser question — *is this a conflict?* — ask for the kind instead of listing its codes:
+For the coarser question — *did the state move under me?* — ask for the kind instead of listing its
+codes. `retryable` does not answer this one: two of the conflict codes are retryable and six are not,
+and a hand-written list of the eight breaks silently the next time one is added.
 
 ```ts
-import { sixbErrorKind } from "@sixb/core"
+import { sixbErrorKind } from "@sixb/core/errors"
 
-if (sixbErrorKind(error) === "conflict") return retryAfterReread()
+if (sixbErrorKind(error) === "conflict") return rereadThenDecide()
 ```
 
 | Kind | Means | Codes |
@@ -51,6 +57,13 @@ A code may belong to no kind — `sixbErrorKind` then answers `undefined`. It ne
 `SixbError` is what the framework throws, whatever failed: the code says which condition it was, and
 `details` carries the context. There is no subclass to import and nothing that stops working when a
 failure crosses a bundle boundary.
+
+`@sixb/core` exports what an app author calls — `isSixbError`, `toSixbFailure`, and the types that go
+with them. The rest of the vocabulary lives on `@sixb/core/errors`: the `SixbError` constructor, the
+code list, the retry table, the kinds. That split is deliberate. The enum is closed so that an older
+Atlas or client meets a code it can still render, and an app minting one of its own is exactly what
+that buys — so the constructor sits on the surface a provider implementation imports, not the one an
+app does.
 
 Two failures carry more than a code, and only because a flat `details` cannot hold what they carry:
 an invalid or unsupported object query answers with a full `issues` list, and a connector failure
