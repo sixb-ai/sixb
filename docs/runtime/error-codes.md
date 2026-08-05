@@ -31,8 +31,7 @@ try {
 
 `isSixbError` is structural: it recognizes a Sixb failure that crossed a bundle boundary — a custom
 app and the client are bundled separately from the runtime — where `instanceof` would not. It
-verifies the code and the message, and narrows to exactly those two; `details` is read through
-`toSixbFailure`, which keeps the scalar entries of an untrusted bag and drops the rest.
+narrows to `code` and `message`; read `details` through `toSixbFailure`.
 
 For the coarser question — *did the state move under me?* — ask for the kind instead of listing its
 codes. `retryable` does not answer this one: two of the conflict codes are retryable and six are not,
@@ -54,42 +53,24 @@ if (sixbErrorKind(error) === "conflict") return rereadThenDecide()
 
 A code may belong to no kind — `sixbErrorKind` then answers `undefined`. It never belongs to two.
 
-`SixbError` is what the framework throws, whatever failed: the code says which condition it was, and
-`details` carries the context. There is no subclass to import and nothing that stops working when a
-failure crosses a bundle boundary.
+Import `isSixbError`, `toSixbFailure` and the types from `@sixb/core`. The rest of the vocabulary —
+the `SixbError` constructor, the code list, the kinds — is on `@sixb/core/errors`, for a provider
+implementation rather than an app.
 
-`@sixb/core` exports what an app author calls — `isSixbError`, `toSixbFailure`, and the types that go
-with them. The rest of the vocabulary lives on `@sixb/core/errors`: the `SixbError` constructor, the
-code list, the retry table, the kinds. That split is deliberate. The enum is closed so that an older
-Atlas or client meets a code it can still render, and an app minting one of its own is exactly what
-that buys — so the constructor sits on the surface a provider implementation imports, not the one an
-app does.
-
-Two failures carry more than a code, and only because a flat `details` cannot hold what they carry:
-an invalid or unsupported object query answers with a full `issues` list, and a connector failure
-carries the third-party HTTP response it got. Both are still `SixbError`s with a code — branch on the
-code, and reach for `objectQueryIssues(error)` when you want the list.
+Two failures carry more than a code: an invalid or unsupported object query answers with an `issues`
+list, read with `objectQueryIssues(error)`, and a connector failure carries the third-party HTTP
+response. Both still branch on `code`.
 
 ## Retryable
 
 `retryable` answers one question: can running the same operation again, unchanged, plausibly
-succeed? It is a property of the condition, so it travels with the code — `SIXB_ERROR_RETRYABLE`
-maps every code to its answer — rather than being re-decided at each `throw`. A call site with
-better information overrides it on the instance — a provider that read `Retry-After`, say:
+succeed? Every code has an answer, in the tables below — that is where to look it up. The verdict
+also rides on the thrown error for code holding a live `SixbError`, which in practice means a
+provider implementation.
 
-```ts
-import { SixbError } from "@sixb/core/errors"
-
-throw new SixbError("provider.failed", message, { retryable: true })
-```
-
-The verdict lives on the thrown error, where a `catch` can act on it, and stops there: it is not
-part of the recorded failure below. A stored copy would be the same lookup frozen at the moment it
-was written, and reading it later would say what the runtime believed then rather than what it
-believes now.
-
-It is a hint for the caller, not a promise from the runtime. Which failures Sixb itself retries,
-and how many times, is a property of each worker.
+It is a hint for the caller, not a promise: which failures Sixb itself retries, and how many times,
+is a property of each worker. It is deliberately not part of the recorded failure below — a stored
+copy would say what the runtime believed when it was written, not now.
 
 ## The failure record
 
@@ -106,16 +87,11 @@ interface SixbFailure {
 }
 ```
 
-`details` is flat and scalar on purpose: it is shown as key/value beside the message and searched
-as text, and nothing branches into it. `cause` is what the failure wrapped, outermost first, joined
-with `: ` — it names the call that actually refused, which is the part a code is too coarse to say.
+`details` is flat and scalar: shown as key/value beside the message, searched as text, never
+branched into. `cause` is what the failure wrapped, outermost first — it names the call that actually
+refused. One primitive adds a typed field of its own: an action run failure carries its `phase`.
 
-Nothing else is in there. No timestamp, because the row, the response, and the log line each carry
-their own; no `retryable`, for the reason above. A primitive may add one typed field it genuinely
-owns — an action run failure carries the `phase` it died in — and may never re-specify a field the
-record already has.
-
-`toSixbFailure(error)` builds one out of anything that was thrown, and never throws doing it.
+`toSixbFailure(error)` builds a record out of anything that was thrown, and never throws doing it.
 
 ## On the wire
 
@@ -356,11 +332,7 @@ be wrong. A failure you see often under this code is worth a real code — open 
 
 ## Third-party providers
 
-The list above is closed, and the HTTP schema is closed with it: the OpenAPI document declares an
-enum, the generated client autocompletes it, and Atlas switches over it exhaustively. An open union
-would cost all three.
-
-So a provider Sixb does not ship never mints a code. A storage, queue, broker, sandbox, or blob
+The list above is closed, so a provider Sixb does not ship never mints a code. A storage, queue, broker, sandbox, or blob
 provider reports `provider.failed` or `provider.unavailable`; a connector reports `connector.*`.
 Both name themselves in `details`:
 
