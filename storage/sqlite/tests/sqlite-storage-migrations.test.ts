@@ -5,6 +5,8 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { migrateStorage } from "@sixb/core"
+import { parseSixbFailure } from "@sixb/core/internal/errors"
+import { SYNC_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import {
   createSqliteStorageMigrators,
@@ -86,6 +88,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 10,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "011-sync-failure-record",
+    status: "applied",
+    version: 11,
+  },
 ]
 
 afterEach(async () => {
@@ -121,6 +130,53 @@ describe("SQLite storage migrations", () => {
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
     } finally {
       storage.close()
+    }
+  })
+
+  test("migrates legacy failed Sync runs from the version 10 schema", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps.slice(0, 10)) migration.up(db)
+      db.query(`
+        INSERT INTO sync_runs (
+          project_id, id, sync_id, dataset_id, mode, status, started_at, finished_at,
+          error_name, error_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "project-a",
+        "sync-legacy",
+        "sync.orders",
+        "orders",
+        "snapshot",
+        "failed",
+        "2026-08-10T12:00:00.000Z",
+        "2026-08-10T12:01:00.000Z",
+        "ProviderError",
+        "secret sync diagnostic"
+      )
+
+      sqliteStorageMigrations.steps[10]?.up(db)
+
+      const row = db
+        .query("SELECT error FROM sync_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "sync-legacy") as { readonly error: string }
+      const failure = parseSixbFailure(row.error, SYNC_RUN_FAILURE_CODES)
+
+      expect(failure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: "2026-08-10T12:01:00.000Z",
+        details: {
+          syncId: "sync.orders",
+          runId: "sync-legacy",
+          datasetId: "orders",
+          migratedFromLegacyError: true,
+        },
+      })
+      expect(JSON.stringify(failure)).not.toContain("secret sync diagnostic")
+    } finally {
+      db.close()
     }
   })
 

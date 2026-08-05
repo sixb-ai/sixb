@@ -1,12 +1,15 @@
-import { cloneJsonValue, type ReadonlyJsonValue } from "../json"
-import { SIXB_ERROR_DEFINITIONS } from "./catalog"
+import { cloneJsonValue, isJsonValue, isPlainRecord, type ReadonlyJsonValue } from "../json"
+import { SIXB_ERROR_CODES, SIXB_ERROR_DEFINITIONS } from "./catalog"
 import type { SixbErrorCode, SixbFailure } from "./types"
 
 export const SIXB_FAILURE_MAX_MESSAGE_BYTES = 4 * 1024
 export const SIXB_FAILURE_MAX_SERIALIZED_BYTES = 32 * 1024
 const TRUNCATION_SUFFIX = "… [truncated]"
+const SIXB_ERROR_CODE_SET: ReadonlySet<string> = new Set(SIXB_ERROR_CODES)
 
 type SixbErrorCodeTuple = readonly [SixbErrorCode, ...SixbErrorCode[]]
+
+export { SIXB_ERROR_CODES }
 
 export interface SixbErrorOptions {
   readonly cause?: unknown
@@ -124,19 +127,18 @@ export function toSixbFailure(
   if (allowedCodes && !allowedCodes.has(error.code)) {
     throw new Error(`[Sixb] Error code '${error.code}' is not allowed by this failure contract.`)
   }
-
+  const code = error.code
+  const details = error.details
   const message = truncateUtf8(
-    SIXB_ERROR_DEFINITIONS[error.code].publicMessage,
+    SIXB_ERROR_DEFINITIONS[code].publicMessage,
     SIXB_FAILURE_MAX_MESSAGE_BYTES
   )
   const failure: SixbFailure = {
-    code: error.code,
+    code,
     message: message.value,
-    retryable: SIXB_ERROR_DEFINITIONS[error.code].retryable,
+    retryable: SIXB_ERROR_DEFINITIONS[code].retryable,
     at: failureTimestamp(options.at),
-    ...(error.details === undefined
-      ? {}
-      : { details: cloneJsonValue(error.details, "Sixb failure details") }),
+    ...(details === undefined ? {} : { details: cloneJsonValue(details, "Sixb failure details") }),
     ...(message.truncated ? { truncated: true } : {}),
   }
 
@@ -149,6 +151,104 @@ export function toSixbFailure(
     at: failure.at,
     truncated: true,
   }
+}
+
+/** Serializes a validated failure for durable storage. */
+export function serializeSixbFailure<const TCodes extends SixbErrorCodeTuple>(
+  failure: SixbFailure<TCodes[number]>,
+  allowedCodes: TCodes
+): string
+export function serializeSixbFailure(failure: SixbFailure): string
+export function serializeSixbFailure(
+  failure: SixbFailure,
+  allowedCodes?: SixbErrorCodeTuple
+): string {
+  const parsed = allowedCodes ? parseSixbFailure(failure, allowedCodes) : parseSixbFailure(failure)
+  return JSON.stringify(parsed)
+}
+
+/**
+ * Validates and detaches a failure read from a storage boundary.
+ *
+ * Strings are accepted for SQLite; PostgreSQL adapters can pass their decoded JSON value directly.
+ */
+export function parseSixbFailure<const TCodes extends SixbErrorCodeTuple>(
+  value: unknown,
+  allowedCodes: TCodes
+): SixbFailure<TCodes[number]>
+export function parseSixbFailure(value: unknown): SixbFailure
+export function parseSixbFailure(
+  value: unknown,
+  allowedCodes: SixbErrorCodeTuple = SIXB_ERROR_CODES
+): SixbFailure {
+  const candidate = parseStoredFailureValue(value)
+  if (!isPlainRecord(candidate)) {
+    throw invalidStoredFailure("expected a JSON object")
+  }
+
+  const { code, message, retryable, at, details, truncated } = candidate
+  if (typeof code !== "string" || !SIXB_ERROR_CODE_SET.has(code)) {
+    throw invalidStoredFailure("code is not a known Sixb error code")
+  }
+  if (!(allowedCodes as readonly string[]).includes(code)) {
+    throw invalidStoredFailure("code is not allowed by this failure contract")
+  }
+  if (typeof message !== "string") {
+    throw invalidStoredFailure("message is not a string")
+  }
+  if (utf8ByteLength(message) > SIXB_FAILURE_MAX_MESSAGE_BYTES) {
+    throw invalidStoredFailure(`message exceeds ${SIXB_FAILURE_MAX_MESSAGE_BYTES} UTF-8 bytes`)
+  }
+  if (typeof retryable !== "boolean") {
+    throw invalidStoredFailure("retryable is not a boolean")
+  }
+  if (retryable !== SIXB_ERROR_DEFINITIONS[code as SixbErrorCode].retryable) {
+    throw invalidStoredFailure("retryable does not match the error code policy")
+  }
+  if (typeof at !== "string" || !isCanonicalIsoTimestamp(at)) {
+    throw invalidStoredFailure("at is not a canonical ISO-8601 timestamp")
+  }
+  if (details !== undefined && !isJsonValue(details)) {
+    throw invalidStoredFailure("details is not a JSON value")
+  }
+  if (truncated !== undefined && truncated !== true) {
+    throw invalidStoredFailure("truncated must be true when present")
+  }
+
+  const failure: SixbFailure = {
+    code: code as SixbErrorCode,
+    message,
+    retryable,
+    at,
+    ...(details === undefined
+      ? {}
+      : { details: cloneJsonValue(details, "Stored Sixb failure details") }),
+    ...(truncated === true ? { truncated: true } : {}),
+  }
+  if (serializedByteLength(failure) > SIXB_FAILURE_MAX_SERIALIZED_BYTES) {
+    throw invalidStoredFailure(
+      `record exceeds ${SIXB_FAILURE_MAX_SERIALIZED_BYTES} serialized UTF-8 bytes`
+    )
+  }
+  return failure
+}
+
+function parseStoredFailureValue(value: unknown): unknown {
+  if (typeof value !== "string") return value
+  try {
+    return JSON.parse(value) as unknown
+  } catch {
+    throw invalidStoredFailure("value is not valid JSON")
+  }
+}
+
+function isCanonicalIsoTimestamp(value: string): boolean {
+  const timestamp = new Date(value)
+  return Number.isFinite(timestamp.getTime()) && timestamp.toISOString() === value
+}
+
+function invalidStoredFailure(reason: string): Error {
+  return new Error(`[Sixb] Stored failure is invalid: ${reason}.`)
 }
 
 /**

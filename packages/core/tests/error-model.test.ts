@@ -8,10 +8,13 @@ import {
   captureSixbFailure,
   createSixbError,
   isSixbError,
+  parseSixbFailure,
   SIXB_FAILURE_MAX_SERIALIZED_BYTES,
+  serializeSixbFailure,
   summarizeErrorMessage,
   toSixbFailure,
 } from "../src/errors/internal"
+import { SYNC_RUN_FAILURE_CODES } from "../src/storage"
 
 const AT = new Date("2026-08-05T12:00:00.000Z")
 
@@ -87,6 +90,56 @@ describe("Sixb error model", () => {
       // @ts-expect-error Unknown values must go through captureSixbFailure.
       toSixbFailure(new Error("uncoded"))
     ).toThrow("A durable failure can only be created from a coded Sixb error")
+  })
+
+  test("round-trips and validates failure records at storage boundaries", () => {
+    const failure = captureSixbFailure(new Error("provider offline"), {
+      allowedCodes: SYNC_RUN_FAILURE_CODES,
+      defaultCode: "internal.unexpected",
+      at: AT,
+      details: { syncId: "sync-1", runId: "run-1" },
+    })
+    const serialized = serializeSixbFailure(failure)
+
+    expect(parseSixbFailure(serialized)).toEqual(failure)
+    expect(parseSixbFailure(JSON.parse(serialized))).toEqual(failure)
+    expect(() => parseSixbFailure({ ...failure, code: "future.unknown" })).toThrow(
+      "code is not a known Sixb error code"
+    )
+    expect(() => parseSixbFailure({ ...failure, retryable: true })).toThrow(
+      "retryable does not match the error code policy"
+    )
+    expect(() => parseSixbFailure({ ...failure, at: "2026-08-05" })).toThrow(
+      "at is not a canonical ISO-8601 timestamp"
+    )
+  })
+
+  test("constrains a failure to the codes declared by its boundary", () => {
+    const datasetError = createSixbError("dataset.not_found", "Dataset is missing", {
+      details: { datasetId: "foreign" },
+    })
+
+    expect(() =>
+      toSixbFailure(datasetError, {
+        allowedCodes: SYNC_RUN_FAILURE_CODES,
+        at: AT,
+      })
+    ).toThrow("Error code 'dataset.not_found' is not allowed by this failure contract")
+
+    const scopedFailure = captureSixbFailure(datasetError, {
+      allowedCodes: SYNC_RUN_FAILURE_CODES,
+      defaultCode: "internal.unexpected",
+      details: { syncId: "sync-1", runId: "run-1" },
+      at: AT,
+    })
+    expect(scopedFailure.code).toBe("internal.unexpected")
+    expect(scopedFailure.details).toEqual({ syncId: "sync-1", runId: "run-1" })
+
+    const datasetFailure = toSixbFailure(datasetError, { at: AT })
+    expect(parseSixbFailure(datasetFailure)).toEqual(datasetFailure)
+    expect(() => parseSixbFailure(datasetFailure, SYNC_RUN_FAILURE_CODES)).toThrow(
+      "code is not allowed by this failure contract"
+    )
   })
 
   test("bounds durable records and rejects non-serializable details", () => {

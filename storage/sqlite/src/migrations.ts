@@ -30,6 +30,7 @@ import agentExecutionsSql from "./migrations/009-agent-executions.sql" with { ty
 import aiUsageAccountingFoundationSql from "./migrations/010-ai-usage-accounting-foundation.sql" with {
   type: "text",
 }
+import syncFailureRecordSql from "./migrations/011-sync-failure-record.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -60,6 +61,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("008-action-executions", actionExecutionsSql),
     sqliteSql("009-agent-executions", agentExecutionsSql),
     sqliteSql("010-ai-usage-accounting-foundation", aiUsageAccountingFoundationSql),
+    sqliteSql("011-sync-failure-record", syncFailureRecordSql),
   ],
 })
 
