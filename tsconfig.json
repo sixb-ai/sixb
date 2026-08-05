@@ -60,6 +60,7 @@
       "@sixb/core/internal/bootstrap": ["./packages/core/src/bootstrap/index.ts"],
       "@sixb/core/internal/edits": ["./packages/core/src/edits/index.ts"],
       "@sixb/core/internal/error-reporting": ["./packages/core/src/error-reporting/internal.ts"],
+      "@sixb/core/internal/errors": ["./packages/core/src/errors/internal.ts"],
       "@sixb/core/internal/events": ["./packages/core/src/events/index.ts"],
       "@sixb/core/internal/http": ["./packages/core/src/http/index.ts"],
       "@sixb/core/internal/logging": ["./packages/core/src/logging/index.ts"],

@@ -10,6 +10,10 @@ interface SixbErrorDefinition {
  * `SixbFailure` values, not a mutable registry.
  */
 export const SIXB_ERROR_DEFINITIONS = {
+  "dataset.not_found": {
+    publicMessage: "Dataset not found.",
+    retryable: false,
+  },
   "internal.unexpected": {
     publicMessage: "An unexpected internal error occurred.",
     retryable: false,

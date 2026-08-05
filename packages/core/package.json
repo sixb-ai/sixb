@@ -137,6 +137,12 @@
       "import": "./dist/error-reporting/internal.js",
       "default": "./dist/error-reporting/internal.js"
     },
+    "./internal/errors": {
+      "types": "./dist/errors/internal.d.ts",
+      "bun": "./src/errors/internal.ts",
+      "import": "./dist/errors/internal.js",
+      "default": "./dist/errors/internal.js"
+    },
     "./internal/events": {
       "types": "./dist/events/index.d.ts",
       "bun": "./src/events/index.ts",

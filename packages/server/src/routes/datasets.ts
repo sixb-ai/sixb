@@ -1,4 +1,5 @@
 import type { DatasetDefinition, SixbHostView } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type {
   DatasetCatalogState,
   DatasetLatestVersionSummary,
@@ -164,7 +165,9 @@ async function serializeDatasetCatalogItems(
 function requireDataset(sixb: ReturnType<typeof requireRequestSixb>, datasetId: string) {
   const dataset = sixb.datasets.getById(datasetId)
   if (!dataset) {
-    throw new Error("Dataset not found")
+    throw createSixbError("dataset.not_found", "Dataset not found", {
+      details: { datasetId },
+    })
   }
   return dataset
 }
