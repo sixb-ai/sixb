@@ -10,3 +10,4 @@ export interface GoogleConnectorOptions {
 
 export type * from "./calendar"
 export type * from "./drive"
+export type * from "./gmail"
