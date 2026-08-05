@@ -82,6 +82,7 @@ import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPrefe
 
 type PipelineSummary = ListPipelinesResponse[number] | GetPipelineResponse
 type PipelineRun = NonNullable<PipelineSummary["latestRun"]>
+type PipelineFailure = NonNullable<PipelineRun["error"]>
 type PipelineRunStatus = PipelineRun["status"]
 type PipelineGraphNode = PipelineSummary["graph"]["nodes"][number]
 type PipelineStep = PipelineGraphNode["step"]
@@ -92,6 +93,21 @@ const pipelineListViewOptions = [
   { value: "cards", label: "Cards" },
   { value: "table", label: "Table" },
 ] as const
+
+function PipelineFailureSummary({
+  failure,
+  className,
+}: {
+  failure: PipelineFailure
+  className?: string
+}) {
+  return (
+    <div className={cn("min-w-0", className)}>
+      <p className="break-words text-destructive">{failure.message}</p>
+      <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{failure.code}</p>
+    </div>
+  )
+}
 
 function pipelineName(pipeline: Pick<PipelineSummary, "id">): string {
   return humanizeIdentifier(pipeline.id)
@@ -952,10 +968,7 @@ function RunsListPanel({
                       {formatRelativeTime(run.startedAt)} · {runDuration(run)}
                     </p>
                     {run.error ? (
-                      <p className="mt-1 break-words text-[11px] text-destructive">
-                        {run.error.name ? `${run.error.name}: ` : ""}
-                        {run.error.message}
-                      </p>
+                      <PipelineFailureSummary failure={run.error} className="mt-1 text-[11px]" />
                     ) : null}
                   </div>
                   <RunStatusBadge status={run.status} />
@@ -1017,10 +1030,10 @@ function RunSummaryPanel({
             </div>
 
             {run.error ? (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-                {run.error.name ? `${run.error.name}: ` : ""}
-                {run.error.message}
-              </div>
+              <PipelineFailureSummary
+                failure={run.error}
+                className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs"
+              />
             ) : null}
 
             {run.output ? (
@@ -1077,10 +1090,7 @@ function RunSummaryPanel({
                         </button>
                       ) : null}
                       {step.error ? (
-                        <p className="mt-2 break-words text-[11px] text-destructive">
-                          {step.error.name ? `${step.error.name}: ` : ""}
-                          {step.error.message}
-                        </p>
+                        <PipelineFailureSummary failure={step.error} className="mt-2 text-[11px]" />
                       ) : null}
                     </li>
                   ))}

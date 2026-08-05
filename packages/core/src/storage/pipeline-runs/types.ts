@@ -1,11 +1,15 @@
+import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { DatasetVersionRef, DatasetWriteMode } from "../../lake-storage"
 
 export type PipelineRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 
-export interface PipelineRunFailure {
-  readonly name?: string
-  readonly message: string
-}
+/** Error codes a pipeline or pipeline-step run can persist and expose. */
+export const PIPELINE_RUN_FAILURE_CODES = [
+  "internal.unexpected",
+  "runtime.cancelled",
+] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
+
+export type PipelineRunFailureCode = (typeof PIPELINE_RUN_FAILURE_CODES)[number]
 
 export interface PipelineRunRecord {
   readonly id: string
@@ -16,7 +20,7 @@ export interface PipelineRunRecord {
   readonly finishedAt?: Date
   /** Final step output in sequential V1. */
   readonly output?: DatasetVersionRef
-  readonly error?: PipelineRunFailure
+  readonly error?: SixbFailure<PipelineRunFailureCode>
 }
 
 export interface PipelineStepRunRecord {
@@ -33,7 +37,7 @@ export interface PipelineStepRunRecord {
   readonly inputs: readonly DatasetVersionRef[]
   readonly output?: DatasetVersionRef
   readonly rowsWritten?: number
-  readonly error?: PipelineRunFailure
+  readonly error?: SixbFailure<PipelineRunFailureCode>
 }
 
 export interface StartPipelineRunInput {
@@ -56,7 +60,7 @@ export type FinishPipelineRunInput =
       readonly projectId: string
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
-      readonly error?: PipelineRunFailure
+      readonly error?: SixbFailure<PipelineRunFailureCode>
     }
 
 export interface StartPipelineStepRunInput {
@@ -86,7 +90,7 @@ export type FinishPipelineStepRunInput =
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
       readonly rowsWritten?: number
-      readonly error?: PipelineRunFailure
+      readonly error?: SixbFailure<PipelineRunFailureCode>
     }
 
 export interface ListPipelineRunsInput {

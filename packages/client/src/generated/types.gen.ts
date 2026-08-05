@@ -2502,8 +2502,23 @@ export type ListPipelinesResponses = {
         versionId: string
       }
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     } | null
   }>
@@ -2618,8 +2633,23 @@ export type GetPipelineResponses = {
         versionId: string
       }
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     } | null
   }
@@ -2676,8 +2706,23 @@ export type ListPipelineRunsResponses = {
         versionId: string
       }
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     }>
     hasMore: boolean
@@ -2736,8 +2781,23 @@ export type GetPipelineRunResponses = {
         versionId: string
       }
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     }
     steps: Array<{
@@ -2761,8 +2821,23 @@ export type GetPipelineRunResponses = {
       }
       rowsWritten?: number
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     }>
   }

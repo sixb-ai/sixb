@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { migrateStorage } from "@sixb/core"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
-import { SYNC_RUN_FAILURE_CODES } from "@sixb/core/storage"
+import { PIPELINE_RUN_FAILURE_CODES, SYNC_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import {
   createSqliteStorageMigrators,
@@ -95,6 +95,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 11,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "012-pipeline-failure-record",
+    status: "applied",
+    version: 12,
+  },
 ]
 
 afterEach(async () => {
@@ -133,7 +140,7 @@ describe("SQLite storage migrations", () => {
     }
   })
 
-  test("migrates legacy failed Sync runs from the version 10 schema", () => {
+  test("migrates legacy failed run records from the version 10 schema", () => {
     const db = new Database(":memory:")
     try {
       for (const migration of sqliteStorageMigrations.steps.slice(0, 10)) migration.up(db)
@@ -155,7 +162,43 @@ describe("SQLite storage migrations", () => {
         "secret sync diagnostic"
       )
 
-      sqliteStorageMigrations.steps[10]?.up(db)
+      db.query(`
+        INSERT INTO pipeline_runs (
+          project_id, id, pipeline_id, status, started_at, finished_at, error_name, error_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "project-a",
+        "pipeline-legacy",
+        "orders",
+        "failed",
+        "2026-08-10T12:00:00.000Z",
+        "2026-08-10T12:01:00.000Z",
+        "PipelineError",
+        "secret pipeline diagnostic"
+      )
+
+      db.query(`
+        INSERT INTO pipeline_step_runs (
+          project_id, id, pipeline_run_id, pipeline_id, step_id, dataset_id, mode, status,
+          started_at, finished_at, inputs, error_name, error_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "project-a",
+        "step-legacy",
+        "pipeline-legacy",
+        "orders",
+        "extract",
+        "orders",
+        "snapshot",
+        "failed",
+        "2026-08-10T12:00:00.000Z",
+        "2026-08-10T12:01:00.000Z",
+        "{}",
+        "StepError",
+        "secret step diagnostic"
+      )
+
+      for (const migration of sqliteStorageMigrations.steps.slice(10)) migration.up(db)
 
       const row = db
         .query("SELECT error FROM sync_runs WHERE project_id = ? AND id = ?")
@@ -175,6 +218,33 @@ describe("SQLite storage migrations", () => {
         },
       })
       expect(JSON.stringify(failure)).not.toContain("secret sync diagnostic")
+
+      const pipelineRow = db
+        .query("SELECT error FROM pipeline_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "pipeline-legacy") as { readonly error: string }
+      const pipelineFailure = parseSixbFailure(pipelineRow.error, PIPELINE_RUN_FAILURE_CODES)
+      expect(pipelineFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: { pipelineId: "orders", runId: "pipeline-legacy" },
+      })
+      expect(JSON.stringify(pipelineFailure)).not.toContain("secret pipeline diagnostic")
+
+      const stepRow = db
+        .query("SELECT error FROM pipeline_step_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "step-legacy") as { readonly error: string }
+      const stepFailure = parseSixbFailure(stepRow.error, PIPELINE_RUN_FAILURE_CODES)
+      expect(stepFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: {
+          pipelineId: "orders",
+          pipelineRunId: "pipeline-legacy",
+          stepId: "extract",
+          stepRunId: "step-legacy",
+        },
+      })
+      expect(JSON.stringify(stepFailure)).not.toContain("secret step diagnostic")
     } finally {
       db.close()
     }
