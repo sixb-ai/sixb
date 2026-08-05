@@ -816,6 +816,7 @@ export type {
   SixbRuleEvaluationFailedContext,
   SixbRunFailedContext,
 } from "./error-reporting/types"
+export type { SixbErrorCode, SixbFailure } from "./errors/types"
 export type { EventsRuntime } from "./events/execution"
 export type { LogsRuntime } from "./logging/execution"
 export type {
