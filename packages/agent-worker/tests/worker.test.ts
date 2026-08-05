@@ -2963,6 +2963,19 @@ describe("AgentWorker", () => {
       expect(actionsApiReference).toContain("without a `kind`")
       expect(actionsApiReference).toContain('"objectTypeId": "customer", "primaryId": "cust-001"')
 
+      const filesSkill = sandbox.readFileContents(
+        join(env.SIXB_SKILLS_DIR, "sixb-files", "SKILL.md")
+      )
+      expect(filesSkill).toContain("name: sixb-files")
+      expect(filesSkill).toContain("POST /api/files")
+
+      const workflowsSkill = sandbox.readFileContents(
+        join(env.SIXB_SKILLS_DIR, "sixb-workflows", "SKILL.md")
+      )
+      expect(workflowsSkill).toContain("name: sixb-workflows")
+      expect(workflowsSkill).toContain("ask for approval")
+      expect(workflowsSkill).toContain("cannot start another workflow")
+
       const runContext = JSON.parse(sandbox.readFileContents(env.SIXB_RUN_CONTEXT)) as unknown
       expect(runContext).toMatchObject({
         projectId: PROJECT_ID,

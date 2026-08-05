@@ -119,7 +119,6 @@ describe("OpenAPI docs", () => {
       ["patch", "/api/auth/members/{userId}/groups"],
       ["post", "/api/auth/members/{userId}/suspend"],
       ["post", "/api/auth/members/{userId}/reactivate"],
-      ["post", "/api/files"],
       ["post", "/api/files/uploads"],
       ["put", "/api/files/uploads/{uploadId}/content"],
       ["post", "/api/files/uploads/{uploadId}/parts/{partNumber}"],
@@ -131,8 +130,8 @@ describe("OpenAPI docs", () => {
       ["post", "/api/workflow-interventions/{interventionId}/cancel"],
       ["post", "/api/agent-threads"],
       ["post", "/api/agent-threads/{threadId}/messages"],
-      // The object, link, and telemetry writes are CSRF-*or*-bearer now that they enforce
-      // `edit:object` / `append:telemetry`. The derived ACCESS_TOKEN_ROUTES loop below covers them.
+      // The simple file upload and object, link, and telemetry writes are CSRF-*or*-bearer now.
+      // The derived ACCESS_TOKEN_ROUTES loop below covers them.
     ] as const
 
     for (const [method, path] of csrfOnlyRoutes) {

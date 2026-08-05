@@ -43,3 +43,27 @@ curl -sS "$SIXB_API_BASE_URL/api/action-runs/action_run_id"
 
 Use the run id returned by an action request. The detail response includes status, phase, params,
 writeback, commit diff, effects, and error details when available.
+
+## List Action Run History
+
+```bash
+curl -sS "$SIXB_API_BASE_URL/api/action-runs?limit=20&order=desc"
+```
+
+The list is restricted to actions you may apply and object subjects you may view. Filter with
+`actionId`, `objectTypeId`, `primaryId`, or `status` when useful.
+
+## Read Action Run Files
+
+The `path` query parameter is a JSON Pointer and must start with `/params/` or
+`/writeback/result/`.
+
+```bash
+curl -sS \
+  "$SIXB_API_BASE_URL/api/action-runs/action_run_id/files/content?path=%2Fparams%2FsourcePdf" \
+  -o source.pdf
+
+curl -sS \
+  "$SIXB_API_BASE_URL/api/action-runs/action_run_id/files/content?path=%2Fwriteback%2Fresult%2Freport" \
+  -o report.pdf
+```

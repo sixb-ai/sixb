@@ -15,12 +15,13 @@ Use this skill before reading object data or answering questions about current o
 3. Use `GET /api/objects` for simple browsing by primary-id prefix/suffix or timestamp. Use
    `POST /api/objects/query` for ontology-property filters, search, graph traversal, expansion, or
    token pagination.
-4. Prefer the smallest query that answers the question.
-5. Start with a low limit when exploring, then widen only when needed.
-6. Use count, exists, and facets endpoints for aggregate questions instead of listing everything.
-7. Only use the exact endpoint patterns documented in the references. Do not invent alternative
+4. Use the object's links route when you need exact persisted links and relationship properties.
+5. Prefer the smallest query that answers the question.
+6. Start with a low limit when exploring, then widen only when needed.
+7. Use count, exists, and facets endpoints for aggregate questions instead of listing everything.
+8. Only use the exact endpoint patterns documented in the references. Do not invent alternative
    URL forms; the agent API gateway only allows documented routes.
-8. Inspect API error messages and query plan issues before retrying.
+9. Inspect API error messages and query plan issues before retrying.
 
 ## References
 

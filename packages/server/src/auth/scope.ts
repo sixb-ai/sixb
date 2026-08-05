@@ -32,6 +32,10 @@ export interface RequestAuthState {
   readonly scoped: ScopedSixb<readonly OntologySource[]> | null
   /** Present for requests proxied through the run-scoped agent API gateway. */
   readonly agentRun?: AgentRunRecord
+  /** Identifies which kind of active agent execution owns a gateway request. */
+  readonly agentExecution?:
+    | { readonly kind: "conversation"; readonly runId: string }
+    | { readonly kind: "workflow"; readonly nodeRunId: string }
 }
 
 const internalRequestAuthState = new WeakMap<Request, RequestAuthState>()
@@ -59,6 +63,16 @@ export function consumeInternalRequestAuthState(request: Request): RequestAuthSt
  * point until route registration carries the derived context type.
  */
 export function requestAuthState(context: unknown): RequestAuthState {
-  const { authz = null, scoped = null, agentRun } = context as Partial<RequestAuthState>
-  return { authz, scoped, ...(agentRun === undefined ? {} : { agentRun }) }
+  const {
+    authz = null,
+    scoped = null,
+    agentRun,
+    agentExecution,
+  } = context as Partial<RequestAuthState>
+  return {
+    authz,
+    scoped,
+    ...(agentRun === undefined ? {} : { agentRun }),
+    ...(agentExecution === undefined ? {} : { agentExecution }),
+  }
 }

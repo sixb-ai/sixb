@@ -65,7 +65,10 @@ const WorkflowRunFileContentQuerySchema = FileContentQuerySchema.extend({
   path: z
     .string()
     .min(1)
-    .regex(/^\/input(?:\/|$)/, "Workflow run file content paths must start with /input/"),
+    .regex(
+      /^\/(?:input|output)(?:\/|$)/,
+      "Workflow run file content paths must start with /input/ or /output/"
+    ),
 })
 
 const WorkflowNodeFileContentQuerySchema = FileContentQuerySchema.extend({
@@ -98,6 +101,27 @@ function serializeWorkflowRun(run: WorkflowRunRecord) {
 }
 
 type SerializedWorkflowRun = ReturnType<typeof serializeWorkflowRun>
+
+async function resolveWorkflowRunOutput(
+  storage: WorkflowRunStorage,
+  run: WorkflowRunRecord
+): Promise<Record<string, unknown> | undefined> {
+  if (run.status !== "succeeded") {
+    return undefined
+  }
+
+  const result = await storage.nodes.list({
+    projectId: run.projectId,
+    workflowRunId: run.id,
+    statuses: ["succeeded"],
+    order: "desc",
+  })
+  const outputNode = result.nodes.find((node) => node.nodeType !== "action")
+
+  // Actions do not advance the workflow's dataflow value. An all-action workflow therefore
+  // returns its input; otherwise the latest data-producing node holds the final value.
+  return outputNode ? (outputNode.output ?? {}) : run.input
+}
 
 function serializeWorkflowNodeRun(
   node: WorkflowNodeRunRecord,
@@ -229,13 +253,20 @@ async function workflowRunFileContentResponse(
     request: context.request,
     set: context.set,
     head: options.head,
-    resolveRoot: async () => {
+    resolveRoot: async (query) => {
       const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
       if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
         return null
       }
 
-      return serializeWorkflowRun(run)
+      if (!query.path.startsWith("/output")) {
+        return serializeWorkflowRun(run)
+      }
+
+      return {
+        ...serializeWorkflowRun(run),
+        output: (await resolveWorkflowRunOutput(storage, run)) ?? {},
+      }
     },
   })
 }
@@ -957,6 +988,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           summary: "List workflow run history",
           tags: [OPENAPI_TAGS.workflowRuns.name],
           operationId: "listWorkflowRuns",
+          security: bearerSecurityRequirement("listWorkflowRuns"),
         },
       }
     )
@@ -964,7 +996,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-runs/:runId",
       async (context) => {
         const { params, set } = context
-        const { authz, scoped } = requestAuthState(context)
+        const { agentExecution, authz, scoped } = requestAuthState(context)
         try {
           const storage = sixb.storage.workflowRuns
           if (!storage) {
@@ -977,6 +1009,16 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             return { error: "Workflow run not found" }
           }
 
+          const output = await resolveWorkflowRunOutput(storage, run)
+          const serializedRun = {
+            ...serializeWorkflowRun(run),
+            ...(output === undefined ? {} : { output }),
+          }
+
+          if (agentExecution) {
+            return WorkflowRunDetailResponseSchema.parse({ run: serializedRun, nodes: [] })
+          }
+
           const nodes = await storage.nodes.list({
             projectId: sixb.id,
             workflowRunId: run.id,
@@ -984,7 +1026,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           })
 
           return WorkflowRunDetailResponseSchema.parse({
-            run: serializeWorkflowRun(run),
+            run: serializedRun,
             nodes: await Promise.all(
               nodes.nodes.map((node) => serializeWorkflowNodeWithExecution(storage, node))
             ),
@@ -1005,6 +1047,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           summary: "Get workflow run detail",
           tags: [OPENAPI_TAGS.workflowRuns.name],
           operationId: "getWorkflowRun",
+          security: bearerSecurityRequirement("getWorkflowRun"),
         },
       }
     )

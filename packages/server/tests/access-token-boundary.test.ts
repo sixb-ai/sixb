@@ -32,6 +32,7 @@ describe("access token auth boundary", () => {
       ["POST", "/api/objects/query/exists"],
       ["POST", "/api/objects/query/facets"],
       ["GET", "/api/objects/device/fan-1"],
+      ["GET", "/api/objects/device/fan-1/links"],
       ["PUT", "/api/objects/device/fan-1"],
       ["PUT", "/api/objects/device/fan-1/links/located-at"],
       ["DELETE", "/api/objects/device/fan-1/links/located-at"],
@@ -42,10 +43,15 @@ describe("access token auth boundary", () => {
       ["GET", "/api/actions"],
       ["GET", "/api/actions/start-fan"],
       ["POST", "/api/actions/start-fan"],
+      ["POST", "/api/files"],
+      ["GET", "/api/action-runs"],
       ["GET", "/api/action-runs/act_run_1"],
       ["GET", "/api/workflows"],
       ["GET", "/api/workflows/renew-contract"],
       ["POST", "/api/workflows/renew-contract/runs"],
+      ["GET", "/api/workflow-runs"],
+      ["GET", "/api/workflow-runs/run_1"],
+      ["GET", "/api/workflow-runs/run_1/files/content?path=/input/document"],
       ["GET", "/api/agent-threads/thr_1/messages/msg_1/files/content?path=/parts/1/fileRef"],
       ["GET", "/api/events"],
     ] as const
@@ -59,8 +65,7 @@ describe("access token auth boundary", () => {
     const rejectedRoutes = [
       // The object, link, and telemetry writes moved out of this list: they enforce `edit:object`
       // and `append:telemetry` now, which is the precondition SIXB_API_ROUTES states for bearer
-      // eligibility. `GET .../links` stays here — `listLinks` has no read grant covering it.
-      ["GET", "/api/objects/device/fan-1/links"],
+      // eligibility. Link reads moved out too now that they enforce both source and target view.
       ["GET", "/api/workflow-interventions"],
       ["POST", "/api/workflow-interventions/int_1/submit"],
       ["GET", "/api/workflows/renew-contract/runs/run_1"],

@@ -72,6 +72,11 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
     fileName: "action.pdf",
     mediaType: "application/pdf",
   })
+  const actionResult = await blobStorage.put({
+    body: new TextEncoder().encode("action result"),
+    fileName: "action-result.json",
+    mediaType: "application/json",
+  })
   const workflowInput = await blobStorage.put({
     body: new TextEncoder().encode("workflow input"),
     fileName: "workflow-input.pdf",
@@ -94,6 +99,18 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
     },
     idempotencyKey: "action_run_1",
     queuedAt: new Date("2026-06-30T12:00:00.000Z"),
+  })
+  await storage.actionRuns.start({
+    id: "action_run_1",
+    projectId: sixb.id,
+    startedAt: new Date("2026-06-30T12:00:30.000Z"),
+  })
+  await storage.actionRuns.recordWriteback({
+    id: "action_run_1",
+    projectId: sixb.id,
+    status: "succeeded",
+    result: { report: fileRefJson(actionResult) },
+    completedAt: new Date("2026-06-30T12:00:45.000Z"),
   })
 
   await storage.workflowRuns.start({
@@ -129,6 +146,12 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
       notes: "not a file",
     },
     finishedAt: new Date("2026-06-30T12:03:00.000Z"),
+  })
+  await storage.workflowRuns.finish({
+    id: "workflow_run_1",
+    projectId: sixb.id,
+    status: "succeeded",
+    finishedAt: new Date("2026-06-30T12:04:00.000Z"),
   })
 
   return {
@@ -195,7 +218,7 @@ function contentRequest(
 }
 
 describe("run file content routes", () => {
-  test("streams action run FileRef content", async () => {
+  test("streams action run input and writeback FileRef content", async () => {
     const { app } = await createRunFileApi()
 
     const response = await app.fetch(
@@ -207,6 +230,13 @@ describe("run file content routes", () => {
     expect(response.headers.get("content-length")).toBe("10")
     expect(response.headers.get("content-disposition")).toContain('inline; filename="action.pdf"')
     expect(await response.text()).toBe("action pdf")
+
+    const result = await app.fetch(
+      contentRequest("/api/action-runs/action_run_1/files/content?path=/writeback/result/report")
+    )
+    expect(result.status).toBe(200)
+    expect(result.headers.get("content-type")).toBe("application/json")
+    expect(await result.text()).toBe("action result")
   })
 
   test("streams workflow run and node FileRef content", async () => {
@@ -220,6 +250,13 @@ describe("run file content routes", () => {
       'inline; filename="workflow-input.pdf"'
     )
     expect(await input.text()).toBe("workflow input")
+
+    const topLevelOutput = await app.fetch(
+      contentRequest("/api/workflow-runs/workflow_run_1/files/content?path=/output/report")
+    )
+    expect(topLevelOutput.status).toBe(200)
+    expect(topLevelOutput.headers.get("content-type")).toBe("text/markdown")
+    expect(await topLevelOutput.text()).toBe("workflow output")
 
     const output = await app.fetch(
       contentRequest(
@@ -256,6 +293,8 @@ describe("run file content routes", () => {
       "/api/action-runs/missing/files/content?path=/params/sourcePdf",
       "/api/action-runs/action_run_1/files/content?path=/params/missing",
       "/api/action-runs/action_run_1/files/content?path=/params/title",
+      "/api/action-runs/action_run_1/files/content?path=/writeback/result/missing",
+      "/api/workflow-runs/workflow_run_1/files/content?path=/output/notes",
       "/api/workflow-runs/workflow_run_1/nodes/missing/files/content?path=/output/report",
       "/api/workflow-runs/workflow_run_1/nodes/extract/files/content?path=/output/notes",
     ]) {
@@ -270,6 +309,7 @@ describe("run file content routes", () => {
 
     for (const path of [
       "/api/action-runs/action_run_1/files/content?path=/subject",
+      "/api/action-runs/action_run_1/files/content?path=/writeback",
       "/api/workflow-runs/workflow_run_1/files/content?path=/workflowId",
       "/api/workflow-runs/workflow_run_1/nodes/extract/files/content?path=/status",
     ]) {

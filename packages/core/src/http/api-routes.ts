@@ -159,6 +159,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: true,
   },
+  {
+    operationId: "listObjectLinks",
+    method: "GET",
+    path: "/api/objects/:objectTypeId/:objectId/links",
+    accessToken: true,
+    agentApi: true,
+  },
   // The four write routes. Bearer-capable because they now enforce scoped authorization
   // (`edit:object` / `append:telemetry`), which is exactly the precondition this table's rule states.
   // NOT agent-proxied: letting an agent turn write objects on its own is a separate decision, and
@@ -253,6 +260,20 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: true,
   },
   {
+    operationId: "uploadFileRaw",
+    method: "POST",
+    path: "/api/files",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
+    operationId: "listActionRuns",
+    method: "GET",
+    path: "/api/action-runs",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
     operationId: "getActionRun",
     method: "GET",
     path: "/api/action-runs/:runId",
@@ -278,21 +299,35 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     method: "GET",
     path: "/api/workflows",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "getWorkflow",
     method: "GET",
     path: "/api/workflows/:workflowId",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "requestWorkflowRun",
     method: "POST",
     path: "/api/workflows/:workflowId/runs",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
+  },
+  {
+    operationId: "listWorkflowRuns",
+    method: "GET",
+    path: "/api/workflow-runs",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
+    operationId: "getWorkflowRun",
+    method: "GET",
+    path: "/api/workflow-runs/:runId",
+    accessToken: true,
+    agentApi: true,
   },
   {
     operationId: "cancelWorkflowRun",
@@ -313,7 +348,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     method: "GET",
     path: "/api/workflow-runs/:runId/files/content",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "headWorkflowRunFileContent",

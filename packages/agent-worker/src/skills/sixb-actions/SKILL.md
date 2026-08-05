@@ -17,7 +17,9 @@ Actions are the preferred mutation path.
 4. Before calling the action request route, show the user a concise preview of the action id, subject, params, and expected effect, then ask for approval.
 5. Only call the action request route after the user approves. Send the smallest valid params object. Do not invent fields.
 6. Use the returned run id to inspect action run detail when the user needs status, errors, or commit effects.
-7. Report the action request result back to the user.
+7. Use action run history when you need to find an earlier authorized run.
+8. Download FileRefs from action params or writeback results through the contextual file route.
+9. Report the action request result back to the user.
 
 ## References
 
