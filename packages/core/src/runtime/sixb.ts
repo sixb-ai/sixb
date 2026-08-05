@@ -34,11 +34,8 @@ import { ConnectorRuntime } from "../connectors/runtime"
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
-import {
-  attachSixbErrorReporter,
-  reportEventDeliveryFailure,
-  shareSixbErrorReporter,
-} from "../error-reporting/capability"
+import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
+import { reportEventDeliveryFailure } from "../error-reporting/reports"
 import type { SixbErrorHandler } from "../error-reporting/types"
 import { type DomainEventLog, EventsRuntime, OntologyOutboxDispatcher } from "../events"
 import type { LakeStorage } from "../lake-storage"
@@ -196,15 +193,14 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   private schedulerRuntime: SchedulerRuntime | null = null
 
   constructor(options: SixbOptions<TOntologySources>) {
-    attachSixbErrorReporter(this, options.onError)
+    const errorReporter = attachSixbErrorReporter(this, options.onError)
     this.projectId = options.id ?? "default"
     this.ontologySources = options.ontology
     this.broker = options.broker
-    // `host: this` is how `events.emit()` reaches the reporter attached at the top of this constructor.
     this.eventsRuntime = new EventsRuntime({
       projectId: this.projectId,
       broker: this.broker,
-      host: this,
+      errorReporter,
     })
     this.events = this.eventsRuntime
     this.logs = new LogsRuntime({
@@ -382,7 +378,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       storage: this.storage,
       events: this.eventsRuntime,
       onDeliveryFailure: (error, failure) =>
-        reportEventDeliveryFailure(this, error, {
+        reportEventDeliveryFailure(errorReporter, error, {
           projectId: this.projectId,
           ...failure,
         }),
