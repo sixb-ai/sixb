@@ -3,17 +3,25 @@ import type { SixbErrorContext, SixbErrorHandler } from "./types"
 
 const DEFAULT_FLUSH_TIMEOUT_MS = 5_000
 
+export interface ErrorReporter {
+  report(error: unknown, context: SixbErrorContext): void
+}
+
 /** Failure-isolated, non-blocking adapter around the configured callback. */
-export class SixbErrorReporter {
+export class SixbErrorReporter implements ErrorReporter {
   private readonly pending = new Set<Promise<void>>()
 
   constructor(private readonly handler?: SixbErrorHandler) {}
 
   report(error: unknown, context: SixbErrorContext): void {
-    if (!this.handler) return
+    const normalizedError = normalizeReportedError(error)
+    if (!this.handler) {
+      reportToConsole(normalizedError, context)
+      return
+    }
 
     const invocation = Promise.resolve()
-      .then(() => this.handler?.(normalizeReportedError(error), context))
+      .then(() => this.handler?.(normalizedError, context))
       .then(() => undefined)
       .catch((handlerError) => {
         try {
@@ -44,6 +52,14 @@ export class SixbErrorReporter {
         return
       }
     }
+  }
+}
+
+function reportToConsole(error: Error, context: SixbErrorContext): void {
+  try {
+    console.error(`[Sixb] Unhandled ${context.type}:`, error, context)
+  } catch {
+    // Error reporting must never escape back into framework execution.
   }
 }
 

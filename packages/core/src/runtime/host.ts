@@ -20,11 +20,8 @@ import type { Broker } from "../broker"
 import { ConnectorService } from "../connectors/service"
 import type { ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets/types"
-import {
-  attachSixbErrorReporter,
-  reportEventDeliveryFailure,
-  shareSixbErrorReporter,
-} from "../error-reporting/capability"
+import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
+import { reportEventDeliveryFailure } from "../error-reporting/reports"
 import type { SixbErrorHandler } from "../error-reporting/types"
 import {
   createDomainEventService,
@@ -136,14 +133,13 @@ export class SixbHost<
   readonly auth: AuthRuntime
 
   constructor(options: SixbHostOptions<TOntologySources>) {
-    attachSixbErrorReporter(this, options.onError)
+    const errorReporter = attachSixbErrorReporter(this, options.onError)
     this.projectId = options.id ?? "default"
     this.broker = options.broker
-    // `host: this` is how `events.emit()` reaches the reporter attached at the top of this constructor.
     this.eventService = createDomainEventService({
       projectId: this.projectId,
       broker: this.broker,
-      host: this,
+      errorReporter,
     })
     this.events = this.eventService
     this.logging = new LoggingService({
@@ -187,7 +183,7 @@ export class SixbHost<
       storage: this.storage,
       events: this.eventService,
       onDeliveryFailure: (error, failure) =>
-        reportEventDeliveryFailure(this, error, {
+        reportEventDeliveryFailure(errorReporter, error, {
           projectId: this.projectId,
           ...failure,
         }),

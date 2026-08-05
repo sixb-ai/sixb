@@ -1,3 +1,4 @@
+export type { ErrorReporter } from "../error-reporting/reporter"
 export type { EventDefinition, EventDefinitionGroup, EventDefinitionMap } from "./definitions"
 export {
   ACTION_EVENT_DEFINITIONS,
