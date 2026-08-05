@@ -5276,9 +5276,14 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["dataset.not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
                     }
                   },
-                  "required": ["error"],
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }
@@ -5457,9 +5462,14 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["dataset.not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
                     }
                   },
-                  "required": ["error"],
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }
@@ -5626,9 +5636,14 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["dataset.not_found", "dataset.version_not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
                     }
                   },
-                  "required": ["error"],
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }
@@ -5869,9 +5884,14 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["dataset.not_found", "dataset.version_not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
                     }
                   },
-                  "required": ["error"],
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }

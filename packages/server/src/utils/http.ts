@@ -15,6 +15,7 @@ import { RequestBodyTooLargeError } from "./request-body"
 /** Explicit transport policy for coded failures that are safe to surface as non-500 responses. */
 const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
   "dataset.not_found": 404,
+  "dataset.version_not_found": 404,
 }
 
 export function toIsoString(value: Date): string {
@@ -69,10 +70,11 @@ export function handleRouteError(
   set: { status?: number | string }
 ): {
   error: string
+  code?: SixbErrorCode
 } {
   if (isSixbError(error)) {
     set.status = HTTP_STATUS_BY_ERROR_CODE[error.code] ?? 500
-    return { error: error.message }
+    return { error: error.message, code: error.code }
   }
 
   if (error instanceof AuthorizationError) {
