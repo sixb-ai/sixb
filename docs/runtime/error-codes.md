@@ -75,9 +75,11 @@ code, and reach for `objectQueryIssues(error)` when you want the list.
 `retryable` answers one question: can running the same operation again, unchanged, plausibly
 succeed? It is a property of the condition, so it travels with the code — `SIXB_ERROR_RETRYABLE`
 maps every code to its answer — rather than being re-decided at each `throw`. A call site with
-better information overrides it on the instance:
+better information overrides it on the instance — a provider that read `Retry-After`, say:
 
 ```ts
+import { SixbError } from "@sixb/core/errors"
+
 throw new SixbError("provider.failed", message, { retryable: true })
 ```
 
