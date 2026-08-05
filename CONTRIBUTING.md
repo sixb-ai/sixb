@@ -1,10 +1,10 @@
 # Contributing to Sixb
 
-Sixb uses a lightweight, proposal-first workflow for both human contributors and AI-assisted contributors.
+Sixb uses a lightweight, idea-first workflow for both human contributors and AI-assisted contributors.
 
 The aim is simple:
 
-- make ideas easy to share
+- make ideas easy to share and review
 - make approved work easy to pick up
 - keep feedback loops short
 - keep the process lighter than the work
@@ -13,27 +13,33 @@ We mostly rely on GitHub issues, assignees, small pull requests, and CI. If the 
 
 ## Default flow
 
-1. Open a proposal issue for any meaningful change, even if the idea is still rough.
-2. Discuss it in the issue until the direction feels clear enough to build.
-3. When the team agrees, add the `approved` label.
-4. Any approved issue with no assignee is open for anyone to claim.
-5. Claim it by assigning yourself and opening a small PR as soon as the first slice is ready.
-6. Merge in small slices. If the work grows, split it into follow-up issues or PRs.
+1. Open an issue for any meaningful idea with the `idea` and `status:draft` labels.
+2. When the issue body is ready for team feedback, replace `status:draft` with `status:review`.
+3. Discuss it in the issue until the direction feels clear enough to build.
+4. When the team agrees, replace `status:review` with `status:approved`.
+5. Any approved idea with no assignee is open for anyone to claim.
+6. Claim it by assigning yourself and opening a small PR as soon as the first slice is ready.
+7. When the work is finished, replace the current status with `status:completed` and close the
+   issue. Merge in small slices, splitting follow-up issues or PRs when useful.
 
 ## GitHub signals
 
-- Proposal issue: an idea is being shaped.
-- `approved`: ready to build.
+- `idea`: classifies an issue as an idea rather than its lifecycle stage.
+- `status:draft`: the idea is still being written or shaped by its author.
+- `status:review`: the idea is ready for team feedback and a decision.
+- `status:approved`: the direction is agreed and ready to build.
+- `status:completed`: the work is finished and the issue is closed.
 - No assignee: open to claim.
 - Assignee: someone is carrying it.
 - Linked PR: active implementation.
-- `blocked`: waiting on a decision, dependency, or outside event.
 - Merged PR: done.
 
-Recommended labels:
+Every issue labeled `idea` should have exactly one lifecycle label:
 
-- `approved`
-- `blocked`
+- `status:draft`
+- `status:review`
+- `status:approved`
+- `status:completed`
 
 Everything else should come from the issue, assignee, and linked PR.
 
@@ -43,13 +49,13 @@ Keep titles short, specific, and outcome-focused. A good title should tell a tea
 
 Issue titles:
 
-- `Proposal: <desired outcome>`
+- `Idea: <desired outcome>`
 - `Task: <small shippable slice>`
 
 Examples:
 
-- `Proposal: simplify createSixb auto-discovery`
-- `Proposal: add a clearer object action API`
+- `Idea: simplify createSixb auto-discovery`
+- `Idea: add a clearer object action API`
 - `Task: add tests for createSixb auto-discovery`
 - `Task: document action request examples`
 
@@ -61,13 +67,14 @@ Examples:
 
 - `core: simplify createSixb auto-discovery`
 - `server: add tests for object action routes`
-- `docs: clarify proposal approval flow`
+- `docs: clarify idea review flow`
 
-Good titles name the result, not the activity. Prefer `docs: clarify proposal approval flow` over `docs: update docs`.
+Good titles name the result, not the activity. Prefer `docs: clarify idea review flow` over
+`docs: update docs`.
 
-## Writing a good proposal
+## Writing a good idea
 
-A good proposal is short, concrete, and easy to react to.
+A good idea is short, concrete, and easy to react to.
 
 It should answer:
 
@@ -76,13 +83,14 @@ It should answer:
 - What does done look like?
 - What is still unclear?
 
-Using AI locally to help draft a proposal is welcome. Before posting it, turn it into a clean issue that another person can understand in a minute or two.
+Using AI locally to help draft an idea is welcome. Before moving it to `status:review`, make the
+issue understandable to another person in a minute or two.
 
-## Proposals start rough
+## Ideas start rough
 
-Proposals are not expected to be fully thought out.
+Ideas are not expected to be fully thought out.
 
-The point of opening one is to give the team something real to react to. A good proposal can start as:
+The point of opening one is to give the team something real to react to. A good draft can start as:
 
 - a problem plus a possible direction
 - a sketch of an API or workflow
@@ -95,9 +103,10 @@ When the direction gets clearer, update the issue body so the latest thinking is
 
 ## Claiming and shipping work
 
-Most approved proposals can be claimed directly.
+Most approved ideas can be claimed directly.
 
-If an approved issue becomes too large, split it into smaller task issues linked back to the proposal. Use that only when it helps. The goal is flow.
+If an approved issue becomes too large, split it into smaller task issues linked back to the idea.
+Use that only when it helps. The goal is flow.
 
 When you take work:
 
@@ -111,7 +120,7 @@ If you pause or get blocked, leave a short note. If you are stepping away, unass
 
 For now, we are a team of three working across France and the US. The rules should stay simple.
 
-An issue is ready for `approved` when:
+An issue is ready for `status:approved` when:
 
 - the issue body reflects the current direction
 - the outcome feels clear enough to implement
@@ -120,7 +129,7 @@ An issue is ready for `approved` when:
 
 A PR is ready to merge when:
 
-- the linked issue is approved, or the change is small and obvious
+- the linked issue has `status:approved`, or the change is small and obvious
 - CI passes
 - at least one other teammate approves
 - blocking comments are resolved
@@ -203,6 +212,6 @@ still authenticates; to rehearse without credentials, point `--registry` at a lo
 
 ## The feeling we want
 
-Clear proposals. Easy claims. Small PRs. Fast feedback. Small merges. No silent waiting.
+Clear ideas. Easy claims. Small PRs. Fast feedback. Small merges. No silent waiting.
 
 That is the experience we are aiming for: steady flow, shared ownership, and a contribution process that feels calm, clear, and energizing.

@@ -149,19 +149,22 @@ repo's `typecheck` chain reads source.
 
 ## Contribution Flow
 
-- `CONTRIBUTING.md` describes the repo's proposal, approval, async handoff, and merge flow.
-- Rough proposals are acceptable. Help shape them toward the clearest outcome and the simplest implementation.
+- `CONTRIBUTING.md` describes the repo's idea lifecycle, async handoff, and merge flow.
+- Rough ideas are acceptable. Help shape them toward the clearest outcome and the simplest
+  implementation.
 - Issue and PR title patterns are:
-  - `Proposal: <desired outcome>`
+  - `Idea: <desired outcome>`
   - `Task: <small shippable slice>`
   - `<area>: <what changed>`
+- Ideas use the `idea` label and exactly one lifecycle label: `status:draft`, `status:review`,
+  `status:approved`, or `status:completed`.
 - AI-authored changes must still be cleaned up, verified, and human-readable before review.
 
 ## Local Drafts
 
 - `/.local/` is a gitignored scratchpad for local-only working notes.
 - Keep longer-running product or architecture notes in `/.local/bible.md`.
-- Put draft proposals, draft specs, and issue writeups in `/.local/drafts/`.
+- Put draft ideas, draft specs, and issue writeups in `/.local/drafts/`.
 - Treat `/.local/` files as staging material that will usually become GitHub issues, not committed repo docs.
 - Only create or commit tracked docs when the content is ready to be shared, referenced, and maintained in the repository.
 
