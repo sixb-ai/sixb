@@ -1,4 +1,5 @@
 import type { JsonValue } from "@sixb/core"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
 import type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
@@ -6,11 +7,10 @@ import type {
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
-  SyncRunFailure,
   SyncRunRecord,
   SyncRunStorage,
 } from "@sixb/core/storage"
-import { SyncRunError } from "@sixb/core/storage"
+import { SYNC_RUN_FAILURE_CODES, SyncRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
@@ -94,8 +94,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
                 finished_at = ${input.finishedAt ?? new Date()},
                 rows_read = ${input.rowsRead},
                 output_version_id = ${input.output?.versionId ?? null},
-                error_name = ${null},
-                error_message = ${null},
+                error = ${null},
                 checkpoint = ${serializeCheckpoint(input.checkpoint)}::text::jsonb
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *, checkpoint IS NOT NULL AS checkpoint_present
@@ -107,8 +106,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
                 finished_at = ${input.finishedAt ?? new Date()},
                 rows_read = ${input.rowsRead ?? existing.rows_read ?? null},
                 output_version_id = ${null},
-                error_name = ${input.error?.name ?? null},
-                error_message = ${input.error?.message ?? null},
+                error = ${input.error === undefined ? null : serializeSixbFailure(input.error, SYNC_RUN_FAILURE_CODES)}::text::jsonb,
                 checkpoint = ${null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *, checkpoint IS NOT NULL AS checkpoint_present
@@ -198,17 +196,6 @@ function serializeCheckpoint(checkpoint: JsonValue | undefined): string | null {
   return checkpoint !== undefined ? JSON.stringify(checkpoint) : null
 }
 
-function toSyncRunFailure(row: DatabaseRow): SyncRunFailure | undefined {
-  if (!row.error_message) {
-    return undefined
-  }
-
-  return {
-    name: row.error_name ?? undefined,
-    message: row.error_message,
-  }
-}
-
 function rowToSyncRunRecord(row: DatabaseRow): SyncRunRecord {
   return {
     id: row.id,
@@ -228,7 +215,7 @@ function rowToSyncRunRecord(row: DatabaseRow): SyncRunRecord {
       : undefined,
     expectedLatestVersionId: row.expected_latest_version_id ?? undefined,
     commitMessage: row.commit_message ?? undefined,
-    error: toSyncRunFailure(row),
+    error: row.error === null ? undefined : parseSixbFailure(row.error, SYNC_RUN_FAILURE_CODES),
     checkpoint: hasCheckpoint(row) ? row.checkpoint : undefined,
   }
 }
@@ -256,8 +243,7 @@ interface DatabaseRow {
   output_version_id: string | null
   expected_latest_version_id: string | null
   commit_message: string | null
-  error_name: string | null
-  error_message: string | null
+  error: JsonValue | null
   checkpoint: JsonValue | null
   checkpoint_present: boolean | number | string
 }

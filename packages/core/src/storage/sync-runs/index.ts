@@ -7,8 +7,9 @@ export type {
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
-  SyncRunFailure,
+  SyncRunFailureCode,
   SyncRunRecord,
   SyncRunStatus,
   SyncRunStorage,
 } from "./types"
+export { SYNC_RUN_FAILURE_CODES } from "./types"

@@ -447,10 +447,12 @@ function SyncRunCard({ run }: { run: DisplayRun }) {
         </div>
       </div>
       {run.error && (
-        <p className="mt-3 break-words text-xs text-destructive">
-          {run.error.name ? `${run.error.name}: ` : ""}
-          {run.error.message}
-        </p>
+        <div className="mt-3 min-w-0">
+          <p className="break-words text-xs text-destructive">{run.error.message}</p>
+          <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
+            {run.error.code}
+          </p>
+        </div>
       )}
     </div>
   )
@@ -521,10 +523,12 @@ function SyncRunList({ runs, queuedRun }: { runs: SyncRun[]; queuedRun: QueuedRu
                     </p>
                   )}
                   {run.error && (
-                    <p className="mt-1 text-xs text-destructive">
-                      {run.error.name ? `${run.error.name}: ` : ""}
-                      {run.error.message}
-                    </p>
+                    <div className="mt-1 min-w-0">
+                      <p className="text-xs text-destructive">{run.error.message}</p>
+                      <p className="truncate font-mono text-[10px] text-muted-foreground">
+                        {run.error.code}
+                      </p>
+                    </div>
                   )}
                 </td>
                 <td className="px-3 py-3">

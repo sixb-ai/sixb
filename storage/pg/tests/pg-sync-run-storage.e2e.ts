@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { SyncRunError } from "@sixb/core/storage"
+import { type SixbFailure, SyncRunError, type SyncRunFailureCode } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
+
+const FAILURE: SixbFailure<SyncRunFailureCode> = {
+  code: "internal.unexpected",
+  message: "Database connection lost",
+  retryable: false,
+  at: "2026-04-06T15:00:00.420Z",
+  details: { provider: "erp" },
+  causeChain: [{ name: "Error", message: "socket closed" }],
+}
 
 describe("PgSyncRunStorage", () => {
   let storage: PostgresStorage
@@ -120,10 +129,7 @@ describe("PgSyncRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       rowsRead: 23,
-      error: {
-        name: "Error",
-        message: "Database connection lost",
-      },
+      error: FAILURE,
     })
 
     await storage.syncRuns.start({
@@ -171,7 +177,7 @@ describe("PgSyncRunStorage", () => {
       projectId: "my-app",
       id: "run-1",
     })
-    expect(failed?.error?.message).toBe("Database connection lost")
+    expect(failed?.error).toEqual(FAILURE)
     expect(failed?.rowsRead).toBe(23)
   })
 
@@ -241,9 +247,7 @@ describe("PgSyncRunStorage", () => {
         id: "missing",
         projectId: "my-app",
         status: "failed",
-        error: {
-          message: "boom",
-        },
+        error: { ...FAILURE, message: "boom" },
       })
     ).rejects.toBeInstanceOf(SyncRunError)
 

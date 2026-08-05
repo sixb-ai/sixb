@@ -4,6 +4,8 @@
  * A type in a public interface signature must be exported from the same subpath as the interface, or
  * the interface cannot be implemented from outside the package.
  */
+
+export type { SixbFailure } from "../errors/types"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
 export { stableJsonStringify } from "../json"
 export type {
@@ -387,12 +389,12 @@ export type {
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
-  SyncRunFailure,
+  SyncRunFailureCode,
   SyncRunRecord,
   SyncRunStatus,
   SyncRunStorage,
 } from "./sync-runs"
-export { InMemorySyncRunStorage, SyncRunError } from "./sync-runs"
+export { InMemorySyncRunStorage, SYNC_RUN_FAILURE_CODES, SyncRunError } from "./sync-runs"
 export type {
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,

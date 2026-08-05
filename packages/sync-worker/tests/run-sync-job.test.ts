@@ -671,8 +671,12 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 1,
       error: {
+        code: "internal.unexpected",
         message:
           "[SixbSyncWorker] Sync 'sync-orders' returned an invalid row at item 2. Dataset rows must be plain objects.",
+        retryable: false,
+        at: expect.any(String),
+        details: { syncId: "sync-orders", runId: "run_1" },
       },
     })
   })
@@ -705,8 +709,12 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 0,
       error: {
+        code: "internal.unexpected",
         message:
           "[SixbSyncWorker] Sync 'sync-orders' returned an unsupported read result. Expected a row object, iterable, or async iterable.",
+        retryable: false,
+        at: expect.any(String),
+        details: { syncId: "sync-orders", runId: "run_1" },
       },
     })
   })
@@ -739,8 +747,12 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 0,
       error: {
+        code: "internal.unexpected",
         message:
           "[SixbSyncWorker] Sync 'sync-orders' returned an invalid row at item 1. Dataset 'raw.erp.orders' row contains unknown column 'unexpected'.",
+        retryable: false,
+        at: expect.any(String),
+        details: { syncId: "sync-orders", runId: "run_schema_error" },
       },
     })
   })
@@ -782,8 +794,12 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 0,
       error: {
+        code: "internal.unexpected",
         message:
           "[SixbSyncWorker] Sync 'sync-docs' returned row 1 with dataset 'raw.docs' column 'attachment' referencing unknown blob 'blob_missing'.",
+        retryable: false,
+        at: expect.any(String),
+        details: { syncId: "sync-docs", runId: "run_missing_blob" },
       },
     })
   })
@@ -885,7 +901,10 @@ describe("runSyncJob", () => {
       status: "cancelled",
       rowsRead: 1,
       error: {
-        name: "AbortError",
+        code: "runtime.cancelled",
+        retryable: false,
+        at: expect.any(String),
+        details: { syncId: "sync-orders", runId: "run_1" },
       },
     })
   })
