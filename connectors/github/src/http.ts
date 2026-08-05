@@ -43,6 +43,13 @@ export async function readNoContent(response: Response): Promise<void> {
   }
 }
 
+/** Read GitHub's 204/404 membership-check response as a boolean. */
+export async function readPresence(response: Response): Promise<boolean> {
+  if (response.status === 204) return true
+  if (response.status === 404) return false
+  throw new GitHubApiError(response.status, await response.text().catch(() => ""))
+}
+
 export async function readPage<T>(response: Response, apiBaseUrl: URL): Promise<GitHubPage<T>> {
   const items = await readJson<T[]>(response)
   const links = parseLinkHeader(response.headers.get("link"))

@@ -4,6 +4,7 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 
 - **Repositories** — list authenticated-user/org repositories, get a repository
 - **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues
+- **People** — query users, organization members, memberships, outside collaborators, and invitations
 - **Webhooks** — receive GitHub events through one inbound route
 
 ## Register
@@ -29,7 +30,10 @@ export const githubConnector = defineConnector(
 | `webhookSecret` | Secret used to verify inbound webhooks. See [Webhooks](#webhooks).       |
 | `onEvent`       | Handler for inbound webhook events. See [Webhooks](#webhooks).           |
 
-**Token permissions** (fine-grained PAT): `Metadata: read` and `Issues: read & write`.
+**Token permissions** (fine-grained PAT): `Metadata: read` and `Issues: read & write` for
+repository and issue APIs. Organization people APIs require `Members: read`. Public user profiles
+and public organization membership can be queried without that organization permission, but private
+membership visibility depends on the authenticated user's organization access.
 
 ## Client API
 
@@ -55,6 +59,19 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).issues.comments.delete()` | `DELETE /repos/{owner}/{repo}/issues/comments/{id}` |
 | `gh.org(org).repos.list()`               | `GET /orgs/{org}/repos`                       |
 | `gh.org(org).issues.listForAuthenticatedUser()` | `GET /orgs/{org}/issues`              |
+| `gh.users.getAuthenticated()`             | `GET /user`                                      |
+| `gh.users.get(username)`                  | `GET /users/{username}`                          |
+| `gh.users.getById(accountId)`             | `GET /user/{account_id}`                         |
+| `gh.users.list()`                         | `GET /users`                                     |
+| `gh.memberships.list()`                   | `GET /user/memberships/orgs`                     |
+| `gh.memberships.get(org)`                 | `GET /user/memberships/orgs/{org}`               |
+| `gh.org(org).members.list()`              | `GET /orgs/{org}/members`                        |
+| `gh.org(org).members.listPublic()`        | `GET /orgs/{org}/public_members`                 |
+| `gh.org(org).members.check(username)`     | `GET /orgs/{org}/members/{username}`             |
+| `gh.org(org).members.checkPublic(username)` | `GET /orgs/{org}/public_members/{username}`    |
+| `gh.org(org).members.getMembership(username)` | `GET /orgs/{org}/memberships/{username}`     |
+| `gh.org(org).outsideCollaborators.list()` | `GET /orgs/{org}/outside_collaborators`          |
+| `gh.org(org).invitations.list()`          | `GET /orgs/{org}/invitations`                    |
 
 ```ts
 const userRepos = await gh.repos.listForAuthenticatedUser({
@@ -68,6 +85,10 @@ const orgRepos = await gh.org("acme").repos.list({
   type: "sources",
   pageSize: 100,
 })
+
+const members = await gh.org("acme").members.list({ role: "member", pageSize: 100 })
+const profile = await gh.users.get(members.items[0]!.login)
+const membership = await gh.org("acme").members.getMembership(profile.login)
 
 const repo = gh.repo({ owner: "acme", repo: "web" })
 const issue = await repo.issues.create({ title: "Bug", labels: ["triage"] })
