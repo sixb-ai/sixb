@@ -104,8 +104,7 @@ CREATE TABLE pipeline_runs (
   finished_at TIMESTAMPTZ,
   output_dataset_id TEXT,
   output_version_id TEXT,
-  error_name TEXT,
-  error_message TEXT,
+  error JSONB,
   PRIMARY KEY (project_id, id)
 );
 
@@ -130,8 +129,7 @@ CREATE TABLE pipeline_step_runs (
   inputs JSONB NOT NULL,
   output_version_id TEXT,
   rows_written INTEGER CHECK (rows_written IS NULL OR rows_written >= 0),
-  error_name TEXT,
-  error_message TEXT,
+  error JSONB,
   PRIMARY KEY (project_id, id)
 );
 

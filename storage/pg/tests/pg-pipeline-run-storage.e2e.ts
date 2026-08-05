@@ -1,8 +1,23 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { PipelineRunError } from "@sixb/core/storage"
+import { PipelineRunError, type PipelineRunFailureCode, type SixbFailure } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { PgPipelineRunStorage } from "../src/pg-pipeline-run-storage"
 import { createTestStorage } from "./helpers"
+
+const FAILURE: SixbFailure<PipelineRunFailureCode> = {
+  code: "internal.unexpected",
+  message: "Pipeline failed",
+  retryable: false,
+  at: "2026-05-08T10:00:01.000Z",
+  details: { pipelineId: "customers" },
+  causeChain: [{ name: "Error", message: "root cause" }],
+}
+
+const CANCELLED_FAILURE: SixbFailure<PipelineRunFailureCode> = {
+  ...FAILURE,
+  code: "runtime.cancelled",
+  message: "Stopped",
+}
 
 describe("PgPipelineRunStorage", () => {
   let storage: PostgresStorage
@@ -60,10 +75,7 @@ describe("PgPipelineRunStorage", () => {
       id: "run-1",
       projectId: "my-app",
       status: "failed",
-      error: {
-        name: "Error",
-        message: "No committed source version",
-      },
+      error: { ...FAILURE, message: "No committed source version" },
     })
 
     await storage.pipelineRuns.start({
@@ -128,10 +140,7 @@ describe("PgPipelineRunStorage", () => {
       id: "run-1",
     })
     expect(failed?.status).toBe("failed")
-    expect(failed?.error).toEqual({
-      name: "Error",
-      message: "No committed source version",
-    })
+    expect(failed?.error).toEqual({ ...FAILURE, message: "No committed source version" })
   })
 
   test("lists the latest run for multiple pipeline ids", async () => {
@@ -252,10 +261,7 @@ describe("PgPipelineRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       rowsWritten: 3,
-      error: {
-        name: "Error",
-        message: "Invalid row",
-      },
+      error: { ...FAILURE, message: "Invalid row" },
     })
 
     await storage.pipelineRuns.startStep({
@@ -308,10 +314,7 @@ describe("PgPipelineRunStorage", () => {
       projectId: "my-app",
       statuses: ["failed"],
     })
-    expect(failedSteps.steps[0]?.error).toEqual({
-      name: "Error",
-      message: "Invalid row",
-    })
+    expect(failedSteps.steps[0]?.error).toEqual({ ...FAILURE, message: "Invalid row" })
     expect(failedSteps.steps[0]?.rowsWritten).toBe(3)
   })
 
@@ -335,9 +338,7 @@ describe("PgPipelineRunStorage", () => {
         id: "missing",
         projectId: "my-app",
         status: "failed",
-        error: {
-          message: "boom",
-        },
+        error: { ...FAILURE, message: "boom" },
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
 
@@ -368,9 +369,7 @@ describe("PgPipelineRunStorage", () => {
       id: "step_1",
       projectId: "my-app",
       status: "cancelled",
-      error: {
-        message: "Stopped",
-      },
+      error: CANCELLED_FAILURE,
     })
 
     await expect(
@@ -378,9 +377,7 @@ describe("PgPipelineRunStorage", () => {
         id: "step_1",
         projectId: "my-app",
         status: "failed",
-        error: {
-          message: "Too late",
-        },
+        error: { ...FAILURE, message: "Too late" },
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
 
@@ -388,9 +385,7 @@ describe("PgPipelineRunStorage", () => {
       id: "piperun_1",
       projectId: "my-app",
       status: "cancelled",
-      error: {
-        message: "Stopped",
-      },
+      error: CANCELLED_FAILURE,
     })
 
     await expect(

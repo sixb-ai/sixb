@@ -9,7 +9,7 @@ export type {
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
   ListPipelineStepRunsResult,
-  PipelineRunFailure,
+  PipelineRunFailureCode,
   PipelineRunRecord,
   PipelineRunStatus,
   PipelineRunStorage,
@@ -17,3 +17,4 @@ export type {
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./types"
+export { PIPELINE_RUN_FAILURE_CODES } from "./types"

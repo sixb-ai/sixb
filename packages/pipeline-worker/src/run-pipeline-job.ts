@@ -1,13 +1,13 @@
+import { toSixbFailure } from "@sixb/core/internal/errors"
 import { resolveLogsRuntime } from "@sixb/core/internal/logging"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import type { PipelineRunRecord } from "@sixb/core/storage"
+import { PIPELINE_RUN_FAILURE_CODES, type PipelineRunRecord } from "@sixb/core/storage"
 import {
   createPipelineBookkeepingError,
   requireFinishedAt,
   requirePipeline,
   statusForFailure,
   throwIfAborted,
-  toPipelineRunFailure,
 } from "./errors"
 import { runStep } from "./run-step"
 import type { PipelineRunResult, PipelineStepRunResult, RunPipelineJobInput } from "./types"
@@ -115,7 +115,11 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
           projectId: runtime.id,
           id: job.id,
           status,
-          error: toPipelineRunFailure(error),
+          error: toSixbFailure(error, {
+            allowedCodes: PIPELINE_RUN_FAILURE_CODES,
+            fallbackCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+            fallbackDetails: { pipelineId: pipeline.id, runId: job.id },
+          }),
         })
         if (status === "failed" && run.status === "failed") input.onRunFailed?.(error, run)
       } catch {

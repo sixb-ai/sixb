@@ -1,12 +1,12 @@
 import type { DatasetDefinition, PipelineDefinition, PipelineStepDefinition } from "@sixb/core"
+import { toSixbFailure } from "@sixb/core/internal/errors"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import type { PipelineStepRunRecord } from "@sixb/core/storage"
+import { PIPELINE_RUN_FAILURE_CODES, type PipelineStepRunRecord } from "@sixb/core/storage"
 import {
   createStepBookkeepingError,
   requireRegisteredDataset,
   statusForFailure,
   throwIfAborted,
-  toPipelineRunFailure,
 } from "./errors"
 import { executeRunStep } from "./execute-run-step"
 import { executeSqlStep } from "./execute-sql-step"
@@ -116,13 +116,23 @@ export async function runStep(input: {
     }
   } catch (error) {
     if (!committedVersion) {
+      const status = statusForFailure(signal, error)
       const failedStepRun = await runtime.pipelineRunsStorage
         .finishStep({
           projectId: runtime.id,
           id: stepRunId,
-          status: statusForFailure(signal, error),
+          status,
           rowsWritten,
-          error: toPipelineRunFailure(error),
+          error: toSixbFailure(error, {
+            allowedCodes: PIPELINE_RUN_FAILURE_CODES,
+            fallbackCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+            fallbackDetails: {
+              pipelineId: pipeline.id,
+              pipelineRunId: job.id,
+              stepId: step.id,
+              stepRunId,
+            },
+          }),
         })
         .catch(() => null)
 
