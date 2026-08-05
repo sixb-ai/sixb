@@ -14,6 +14,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Dataset not found.",
     retryable: false,
   },
+  "dataset.version_not_found": {
+    publicMessage: "Dataset version not found.",
+    retryable: false,
+  },
   "internal.unexpected": {
     publicMessage: "An unexpected internal error occurred.",
     retryable: false,

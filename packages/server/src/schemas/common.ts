@@ -1,7 +1,16 @@
+import type { SixbErrorCode } from "@sixb/core"
 import { z } from "zod"
 import { ignoreOverride, type JsonSchema7Type, type OverrideCallback } from "zod-to-json-schema"
 
 export const ErrorResponseSchema = z.object({ error: z.string() })
+
+export function codedErrorResponseSchema<
+  const TCodes extends readonly [SixbErrorCode, ...SixbErrorCode[]],
+>(codes: TCodes) {
+  return ErrorResponseSchema.extend({
+    code: z.enum(codes).describe("Stable machine-readable failure code for programmatic handling."),
+  })
+}
 
 export const SuccessResponseSchema = z.object({ success: z.boolean() })
 
