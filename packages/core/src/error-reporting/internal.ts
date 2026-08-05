@@ -10,4 +10,4 @@ export {
   shareSixbErrorReporter,
 } from "./capability"
 export { normalizeReportedError } from "./normalize"
-export { SixbErrorReporter } from "./reporter"
+export { type ErrorReporter, SixbErrorReporter } from "./reporter"
