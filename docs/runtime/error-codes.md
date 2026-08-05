@@ -8,4 +8,5 @@ legacy exceptions use `internal.unexpected` until their call site receives a spe
 
 | Code | Retryable | What happened | What to do |
 | --- | --- | --- | --- |
+| `dataset.not_found` | No | The requested dataset is not registered or is not visible to the caller. | Check the dataset ID and the caller's access. |
 | `internal.unexpected` | No | Sixb caught an exception that has not yet been assigned a more specific code. | Inspect the failure and its cause chain. Do not retry automatically. |
