@@ -1795,6 +1795,10 @@ export type GetDatasetErrors = {
    */
   404: {
     error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "dataset.not_found"
   }
 }
 
@@ -1865,6 +1869,10 @@ export type ListDatasetVersionsErrors = {
    */
   404: {
     error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "dataset.not_found"
   }
 }
 
@@ -1938,6 +1946,10 @@ export type GetDatasetVersionErrors = {
    */
   404: {
     error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "dataset.not_found" | "dataset.version_not_found"
   }
 }
 
@@ -2011,6 +2023,10 @@ export type ListDatasetRowsErrors = {
    */
   404: {
     error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "dataset.not_found" | "dataset.version_not_found"
   }
 }
 

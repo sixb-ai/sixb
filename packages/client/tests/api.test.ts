@@ -126,6 +126,7 @@ describe("SixbApiError", () => {
 
     const error = (await promise.catch((caught) => caught)) as SixbApiError
     expect(error.status).toBe(404)
+    expect(error.code).toBeUndefined()
     expect(error.body).toBe("Not Found")
     expect(error.method).toBe("GET")
     expect(error.url).toContain("/api/auth/access-tokens")
@@ -135,12 +136,12 @@ describe("SixbApiError", () => {
     expect(isSixbApiError(error)).toBe(true)
   })
 
-  test("keeps the parsed JSON body and folds its error string into the message", async () => {
+  test("surfaces a stable code from a structured error response", async () => {
     const client = createSixbClient({
       baseUrl: "http://localhost:3002",
       fetch: createRespondingFetch(
         () =>
-          new Response(JSON.stringify({ error: "Object not found" }), {
+          new Response(JSON.stringify({ error: "Dataset not found", code: "dataset.not_found" }), {
             status: 404,
             headers: { "Content-Type": "application/json" },
           })
@@ -151,8 +152,27 @@ describe("SixbApiError", () => {
       (caught) => caught
     )) as SixbApiError
     expect(error.status).toBe(404)
-    expect(error.body).toEqual({ error: "Object not found" })
-    expect(error.message).toContain("Object not found")
+    expect(error.code).toBe("dataset.not_found")
+    expect(error.body).toEqual({ error: "Dataset not found", code: "dataset.not_found" })
+    expect(error.message).toContain("Dataset not found")
+  })
+
+  test("preserves codes introduced by a newer server", async () => {
+    const client = createSixbClient({
+      baseUrl: "http://localhost:3002",
+      fetch: createRespondingFetch(
+        () =>
+          new Response(JSON.stringify({ error: "Future failure", code: "future.new_code" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          })
+      ),
+    })
+
+    const error = (await listAuthAccessTokens({ client, throwOnError: true }).catch(
+      (caught) => caught
+    )) as SixbApiError
+    expect(error.code).toBe("future.new_code")
   })
 
   test("surfaces the structured error on the non-throwing result path too", async () => {

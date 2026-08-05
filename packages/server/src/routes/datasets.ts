@@ -8,7 +8,7 @@ import type {
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
-import { ErrorResponseSchema } from "../schemas/common"
+import { codedErrorResponseSchema, ErrorResponseSchema } from "../schemas/common"
 import {
   DatasetCatalogItemSchema,
   DatasetParamsSchema,
@@ -25,6 +25,12 @@ const DEFAULT_VERSION_LIMIT = 20
 const MAX_VERSION_LIMIT = 100
 const DEFAULT_ROW_LIMIT = 100
 const MAX_ROW_LIMIT = 1_000
+
+const DatasetNotFoundErrorResponseSchema = codedErrorResponseSchema(["dataset.not_found"])
+const DatasetVersionNotFoundErrorResponseSchema = codedErrorResponseSchema([
+  "dataset.not_found",
+  "dataset.version_not_found",
+])
 
 function parseLimit(value: string | undefined, fallback: number, max: number): number {
   const parsed = parseOptionalInt(value) ?? fallback
@@ -184,6 +190,12 @@ function requireDataset(
   return dataset
 }
 
+function datasetVersionNotFound(datasetId: string, versionId?: string) {
+  return createSixbError("dataset.version_not_found", "Dataset version not found", {
+    details: { datasetId, ...(versionId === undefined ? {} : { versionId }) },
+  })
+}
+
 function parseColumns(value: string | undefined): readonly string[] | undefined {
   if (!value) return undefined
 
@@ -261,7 +273,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
         response: {
           200: DatasetCatalogItemSchema,
           400: ErrorResponseSchema,
-          404: ErrorResponseSchema,
+          404: DatasetNotFoundErrorResponseSchema,
         },
         detail: {
           summary: "Get dataset metadata",
@@ -295,7 +307,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
         response: {
           200: DatasetVersionListResponseSchema,
           400: ErrorResponseSchema,
-          404: ErrorResponseSchema,
+          404: DatasetNotFoundErrorResponseSchema,
         },
         detail: {
           summary: "List dataset versions",
@@ -313,8 +325,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
           requireDataset(sixb, scoped, params.datasetId)
           const version = await sixb.lakeStorage.getVersion(params.datasetId, params.versionId)
           if (!version) {
-            set.status = 404
-            return { error: "Dataset version not found" }
+            throw datasetVersionNotFound(params.datasetId, params.versionId)
           }
 
           return serializeDatasetVersion(version)
@@ -327,7 +338,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
         response: {
           200: DatasetVersionSchema,
           400: ErrorResponseSchema,
-          404: ErrorResponseSchema,
+          404: DatasetVersionNotFoundErrorResponseSchema,
         },
         detail: {
           summary: "Get dataset version",
@@ -351,8 +362,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
             : await sixb.lakeStorage.getLatestVersion(params.datasetId)
 
           if (!version) {
-            set.status = 404
-            return { error: "Dataset version not found" }
+            throw datasetVersionNotFound(params.datasetId, parsed.versionId)
           }
 
           const requestedColumns = parseColumns(parsed.columns)
@@ -393,7 +403,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
         response: {
           200: DatasetRowsResponseSchema,
           400: ErrorResponseSchema,
-          404: ErrorResponseSchema,
+          404: DatasetVersionNotFoundErrorResponseSchema,
         },
         detail: {
           summary: "Preview dataset rows",

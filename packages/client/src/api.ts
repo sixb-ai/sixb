@@ -1,3 +1,4 @@
+import type { SixbErrorCode } from "@sixb/core"
 import { type Auth, type Client, type Config, createClient, createConfig } from "./generated/client"
 
 export const SIXB_CSRF_HEADER_NAME = "x-sixb-csrf"
@@ -34,13 +35,16 @@ export interface SixbApiErrorInit {
   readonly body?: unknown
 }
 
+/** Known Sixb codes with a forward-compatible escape hatch for newer servers. */
+export type SixbApiErrorCode = SixbErrorCode | (string & Record<never, never>)
+
 /**
  * A structured HTTP error thrown by the Sixb client. The raw generated client
  * throws the bare response body (a string, or parsed JSON) with no status code
  * or identity, which makes failures impossible to branch on and prints as
  * cryptic quoted text in dev tooling. `SixbApiError` carries the status, the
- * parsed `body`, and a readable `message`, so callers and error boundaries can
- * tell a `404` apart from a `500` instead of catching a stringy blob.
+ * parsed `body`, an optional stable `code`, and a readable `message`, so callers
+ * and error boundaries can branch without parsing prose.
  */
 export class SixbApiError extends Error {
   readonly status: number
@@ -48,6 +52,7 @@ export class SixbApiError extends Error {
   readonly url: string
   readonly method: string
   readonly body: unknown
+  readonly code?: SixbApiErrorCode
 
   constructor(message: string, init: SixbApiErrorInit) {
     super(message)
@@ -57,6 +62,7 @@ export class SixbApiError extends Error {
     this.url = init.url ?? ""
     this.method = init.method ?? ""
     this.body = init.body
+    this.code = extractErrorCode(init.body)
   }
 }
 
@@ -212,6 +218,19 @@ function extractErrorDetail(body: unknown): string | undefined {
     }
   }
   return undefined
+}
+
+function extractErrorCode(body: unknown): SixbApiErrorCode | undefined {
+  if (!body || typeof body !== "object") {
+    return undefined
+  }
+
+  try {
+    const code = Reflect.get(body, "code")
+    return typeof code === "string" && code.trim() === code && code.length > 0 ? code : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function safeRequestPath(url: string): string {
