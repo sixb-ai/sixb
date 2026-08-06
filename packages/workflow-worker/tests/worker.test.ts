@@ -376,7 +376,12 @@ describe("WorkflowWorker", () => {
         }),
       (value) => value?.status === "failed"
     )
-    expect(run?.error).toBe("workflow exploded")
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      message: "workflow exploded",
+      retryable: false,
+      details: { workflowId: workflow.id, runId: "wfrun_worker_failed" },
+    })
 
     const reported = await waitFor(
       async () => reports,
@@ -789,7 +794,12 @@ describe("WorkflowWorker", () => {
       (value) => value.length === 1
     )
 
-    expect(run?.error).toBe(resumeError.message)
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      message: resumeError.message,
+      retryable: false,
+      details: { workflowId: workflow.id, runId: "wfrun_worker_resume_failed" },
+    })
     expect(reported[0]?.error).toBe(resumeError)
     expect(reported[0]?.context).toMatchObject({
       attempt: 1,

@@ -483,6 +483,7 @@ export type {
   WorkflowNodeRunStorage,
   WorkflowNodeRunType,
   WorkflowRunExecution,
+  WorkflowRunFailureCode,
   WorkflowRunRecord,
   WorkflowRunStatus,
   WorkflowRunStorage,
@@ -491,5 +492,6 @@ export {
   InMemoryWorkflowAgentNodeRunStorage,
   InMemoryWorkflowNodeRunStorage,
   InMemoryWorkflowRunStorage,
+  WORKFLOW_RUN_FAILURE_CODES,
   WorkflowRunError,
 } from "./workflow-runs"

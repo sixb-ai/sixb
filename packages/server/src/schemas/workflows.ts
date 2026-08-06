@@ -1,7 +1,16 @@
+import {
+  type SixbFailure,
+  WORKFLOW_RUN_FAILURE_CODES,
+  type WorkflowRunFailureCode,
+} from "@sixb/core/storage"
 import { z } from "zod"
-import { JsonValueSchema } from "./common"
+import { JsonValueSchema, sixbFailureSchema } from "./common"
 
 export const WorkflowIOSnapshotSchema = z.record(JsonValueSchema)
+
+const WorkflowRunFailureSchema: z.ZodType<SixbFailure<WorkflowRunFailureCode>> = sixbFailureSchema(
+  WORKFLOW_RUN_FAILURE_CODES
+)
 
 export const WorkflowParamsSchema = z.object({
   workflowId: z.string().min(1),
@@ -121,7 +130,7 @@ export const WorkflowRunSummarySchema = z.object({
   queuedAt: z.string().optional(),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
-  error: z.string().optional(),
+  error: WorkflowRunFailureSchema.optional(),
   requestedBy: WorkflowInterventionActorSchema,
 })
 
@@ -165,7 +174,7 @@ export const WorkflowNodeRunSchema = z.object({
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   output: WorkflowIOSnapshotSchema.optional(),
-  error: z.string().optional(),
+  error: WorkflowRunFailureSchema.optional(),
   agentExecution: WorkflowAgentNodeExecutionSummarySchema.optional(),
 })
 

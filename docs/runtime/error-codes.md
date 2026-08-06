@@ -29,7 +29,7 @@ interface SixbFailure<TCode extends SixbErrorCode = SixbErrorCode> {
 }
 ```
 
-Each primitive specializes `TCode` to the codes it can actually persist and expose. Sync runs, pipeline runs, and pipeline step runs currently declare `internal.unexpected | runtime.cancelled`.
+Each primitive specializes `TCode` to the codes it can actually persist and expose. Sync runs, pipeline runs, pipeline step runs, workflow runs, and workflow node runs currently declare `internal.unexpected | runtime.cancelled`.
 
 Other run primitives keep their legacy error shape until their own vertical migration. This keeps
 each storage and wire change independently reviewable.

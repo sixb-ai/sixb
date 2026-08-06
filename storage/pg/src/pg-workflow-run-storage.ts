@@ -1,4 +1,5 @@
-import type { Principal, WorkflowRunSource } from "@sixb/core"
+import type { JsonValue, Principal, WorkflowRunSource } from "@sixb/core"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowAgentNodeRunInput,
@@ -32,7 +33,7 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { WorkflowRunError } from "@sixb/core/storage"
+import { WORKFLOW_RUN_FAILURE_CODES, WorkflowRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
@@ -258,7 +259,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
                 status = ${input.status},
                 finished_at = ${input.finishedAt ?? new Date()},
                 output = ${null},
-                error = ${input.error ?? null},
+                error = ${input.error === undefined ? null : serializeSixbFailure(input.error, WORKFLOW_RUN_FAILURE_CODES)}::text::jsonb,
                 execution_token = ${null},
                 execution_queue_lease_expires_at = ${null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
@@ -698,7 +699,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
                 status = ${input.status},
                 finished_at = ${input.finishedAt ?? new Date()},
                 output = ${null},
-                error = ${input.error ?? null}
+                error = ${input.error === undefined ? null : serializeSixbFailure(input.error, WORKFLOW_RUN_FAILURE_CODES)}::text::jsonb
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
             `
@@ -831,7 +832,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     queuedAt: row.queued_at ? new Date(row.queued_at) : undefined,
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
-    error: row.error ?? undefined,
+    error: row.error === null ? undefined : parseSixbFailure(row.error, WORKFLOW_RUN_FAILURE_CODES),
     source: parseSource(row.source),
     requestedByPrincipal: {
       type: row.requested_by_principal_type,
@@ -872,7 +873,7 @@ function rowToWorkflowNodeRunRecord(row: WorkflowNodeRunDatabaseRow): WorkflowNo
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     output: row.output ? parseRecord(row.output) : undefined,
-    error: row.error ?? undefined,
+    error: row.error === null ? undefined : parseSixbFailure(row.error, WORKFLOW_RUN_FAILURE_CODES),
   }
 }
 
@@ -903,7 +904,7 @@ interface WorkflowRunDatabaseRow {
   queued_at: Date | string | null
   started_at: Date | string
   finished_at: Date | string | null
-  error: string | null
+  error: JsonValue | null
   source: WorkflowRunSource | string | null
   requested_by_principal_type: Principal["type"]
   requested_by_principal_id: string
@@ -926,7 +927,7 @@ interface WorkflowNodeRunDatabaseRow {
   started_at: Date | string
   finished_at: Date | string | null
   output: WorkflowIOSnapshot | string | null
-  error: string | null
+  error: JsonValue | null
 }
 
 interface WorkflowAgentNodeRunDatabaseRow {

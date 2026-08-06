@@ -40,6 +40,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { SixbFailureSummary } from "../components/SixbFailureSummary"
 import {
   isUnconfiguredStorageError,
   UnrecordedHistoryState,
@@ -446,14 +447,7 @@ function SyncRunCard({ run }: { run: DisplayRun }) {
           <p className="mt-0.5 truncate text-foreground">{run.rowsRead ?? 0}</p>
         </div>
       </div>
-      {run.error && (
-        <div className="mt-3 min-w-0">
-          <p className="break-words text-xs text-destructive">{run.error.message}</p>
-          <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
-            {run.error.code}
-          </p>
-        </div>
-      )}
+      {run.error && <SixbFailureSummary failure={run.error} className="mt-3 text-xs" />}
     </div>
   )
 }
@@ -522,14 +516,7 @@ function SyncRunList({ runs, queuedRun }: { runs: SyncRun[]; queuedRun: QueuedRu
                       {run.output.versionId}
                     </p>
                   )}
-                  {run.error && (
-                    <div className="mt-1 min-w-0">
-                      <p className="text-xs text-destructive">{run.error.message}</p>
-                      <p className="truncate font-mono text-[10px] text-muted-foreground">
-                        {run.error.code}
-                      </p>
-                    </div>
-                  )}
+                  {run.error && <SixbFailureSummary failure={run.error} className="mt-1 text-xs" />}
                 </td>
                 <td className="px-3 py-3">
                   <RunStatusBadge status={run.status} />

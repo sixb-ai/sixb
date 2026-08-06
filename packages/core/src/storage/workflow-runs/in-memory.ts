@@ -1,4 +1,6 @@
 import { SYSTEM_PRINCIPAL } from "../../auth"
+import { parseSixbFailure } from "../../errors/internal"
+import type { SixbFailure } from "../../errors/types"
 import {
   cloneRecord,
   compareStartedAt,
@@ -39,9 +41,17 @@ import type {
   WorkflowAgentNodeRunStorage,
   WorkflowNodeRunRecord,
   WorkflowNodeRunStorage,
+  WorkflowRunFailureCode,
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "./types"
+import { WORKFLOW_RUN_FAILURE_CODES } from "./types"
+
+function normalizeFailure(
+  failure: SixbFailure<WorkflowRunFailureCode> | undefined
+): SixbFailure<WorkflowRunFailureCode> | undefined {
+  return failure ? parseSixbFailure(failure, WORKFLOW_RUN_FAILURE_CODES) : undefined
+}
 
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
@@ -180,7 +190,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
         : {
             ...base,
             output: undefined,
-            error: input.error,
+            error: normalizeFailure(input.error),
           }
 
     this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
@@ -466,7 +476,7 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
         : {
             ...base,
             output: undefined,
-            error: input.error,
+            error: normalizeFailure(input.error),
           }
 
     this.nodes.set(storageKey(input.projectId, input.id), cloneRecord(next))

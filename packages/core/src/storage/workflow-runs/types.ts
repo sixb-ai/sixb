@@ -1,5 +1,6 @@
 import type { AgentMessagePart } from "../../agents/message"
 import type { Principal } from "../../auth"
+import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonValue } from "../../json"
 import type { WorkflowIOSnapshot, WorkflowRunSource } from "../../workflows/types"
 import type { AgentExecutionStatus, AgentRunFinishReason, AgentRunUsage } from "../agents"
@@ -15,6 +16,14 @@ export type WorkflowRunStatus =
   | "cancelled"
 export type WorkflowNodeRunStatus = Exclude<WorkflowRunStatus, "queued">
 export type WorkflowNodeRunType = "step" | "action" | "intervention" | "agent"
+
+/** Error codes a workflow or workflow-node run can persist and expose. */
+export const WORKFLOW_RUN_FAILURE_CODES = [
+  "internal.unexpected",
+  "runtime.cancelled",
+] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
+
+export type WorkflowRunFailureCode = (typeof WORKFLOW_RUN_FAILURE_CODES)[number]
 
 export interface WorkflowRunExecution {
   readonly token: string
@@ -125,7 +134,7 @@ export interface WorkflowRunRecord {
   readonly queuedAt?: Date
   readonly startedAt: Date
   readonly finishedAt?: Date
-  readonly error?: string
+  readonly error?: SixbFailure<WorkflowRunFailureCode>
   readonly source?: WorkflowRunSource
   readonly requestedByPrincipal: Principal
   readonly attempt: number
@@ -146,7 +155,7 @@ export interface WorkflowNodeRunRecord {
   readonly startedAt: Date
   readonly finishedAt?: Date
   readonly output?: WorkflowIOSnapshot
-  readonly error?: string
+  readonly error?: SixbFailure<WorkflowRunFailureCode>
 }
 
 export interface StartWorkflowRunInput {
@@ -211,7 +220,7 @@ export type FinishWorkflowRunInput =
       readonly projectId: string
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
-      readonly error?: string
+      readonly error?: SixbFailure<WorkflowRunFailureCode>
       readonly executionToken?: string
     }
 
@@ -250,7 +259,7 @@ export type FinishWorkflowNodeRunInput =
       readonly projectId: string
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
-      readonly error?: string
+      readonly error?: SixbFailure<WorkflowRunFailureCode>
       readonly executionToken?: string
     }
 

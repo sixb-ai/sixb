@@ -3046,7 +3046,28 @@ export type ListWorkflowsResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        causeChain?: Array<{
+          name: string
+          message: string
+        }>
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -3208,7 +3229,28 @@ export type GetWorkflowResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        causeChain?: Array<{
+          name: string
+          message: string
+        }>
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -3692,7 +3734,28 @@ export type ListWorkflowRunsResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        causeChain?: Array<{
+          name: string
+          message: string
+        }>
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -3750,7 +3813,28 @@ export type GetWorkflowRunResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        causeChain?: Array<{
+          name: string
+          message: string
+        }>
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -3812,7 +3896,28 @@ export type GetWorkflowRunResponses = {
             }
           | null
       }
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        causeChain?: Array<{
+          name: string
+          message: string
+        }>
+      }
       agentExecution?: {
         agentId: string
         status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -3943,7 +4048,28 @@ export type CancelWorkflowRunResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        causeChain?: Array<{
+          name: string
+          message: string
+        }>
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -4005,7 +4131,28 @@ export type CancelWorkflowRunResponses = {
             }
           | null
       }
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        causeChain?: Array<{
+          name: string
+          message: string
+        }>
+      }
       agentExecution?: {
         agentId: string
         status: "queued" | "running" | "succeeded" | "failed" | "cancelled"

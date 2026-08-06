@@ -552,7 +552,7 @@ CREATE TABLE workflow_runs (
   queued_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ NOT NULL,
   finished_at TIMESTAMPTZ,
-  error TEXT,
+  error JSONB,
   source JSONB,
   attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
   execution_token TEXT,
@@ -585,7 +585,7 @@ CREATE TABLE workflow_node_runs (
   started_at TIMESTAMPTZ NOT NULL,
   finished_at TIMESTAMPTZ,
   output JSONB,
-  error TEXT,
+  error JSONB,
   PRIMARY KEY (project_id, id)
 );
 
