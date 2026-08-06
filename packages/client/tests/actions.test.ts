@@ -57,6 +57,21 @@ function createActionRun(overrides: Partial<ActionRunDetail> = {}): ActionRunDet
   }
 }
 
+type ActionRunFailure = NonNullable<ActionRunDetail["error"]>
+
+function actionFailure(
+  phase: ActionRunFailure["details"]["phase"],
+  message: string
+): ActionRunFailure {
+  return {
+    code: phase === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+    message,
+    retryable: false,
+    at: "2026-06-29T12:00:02.000Z",
+    details: { actionId: "approveQuote", runId: "act_1", phase },
+  }
+}
+
 function actionEvent(type: "action.completed" | "action.failed", runId = "act_1"): SixbEvent {
   return {
     id: `evt_${type}`,
@@ -78,7 +93,7 @@ function actionEvent(type: "action.completed" | "action.failed", runId = "act_1"
             actionId: "approveQuote",
             runId,
             subject: { kind: "object", objectTypeId: "Quote", primaryId: "q_123" },
-            error: { message: "Action failed", phase: "writeback" },
+            error: actionFailure("writeback", "Action failed"),
             finishedAt: "2026-06-29T12:00:02.000Z",
           },
   } as SixbEvent
@@ -348,7 +363,7 @@ describe("action wait helpers", () => {
             status: "failed",
             phase: "writeback",
             finishedAt: "2026-06-29T12:00:02.000Z",
-            error: { name: "WritebackError", message: "Writeback failed", phase: "writeback" },
+            error: actionFailure("writeback", "Writeback failed"),
           })
         )
       }
@@ -377,7 +392,7 @@ describe("action wait helpers", () => {
             status: "cancelled",
             phase: "cancelled",
             finishedAt: "2026-06-29T12:00:02.000Z",
-            error: { message: "Action was cancelled", phase: "cancelled" },
+            error: actionFailure("cancelled", "Action was cancelled"),
           })
         )
       }
@@ -400,7 +415,7 @@ describe("action wait helpers", () => {
     const failed = createActionRun({
       status: "failed",
       finishedAt: "2026-06-29T12:00:02.000Z",
-      error: { message: "Handled manually", phase: "effects" },
+      error: actionFailure("effects", "Handled manually"),
     })
     const { client } = createTestClient((request) => {
       const url = new URL(request.url)

@@ -17,6 +17,7 @@ export type {
 export type {
   ActionRunEffectsRecord,
   ActionRunFailure,
+  ActionRunFailureCode,
   ActionRunParams,
   ActionRunPhase,
   ActionRunPhaseRecord,
@@ -36,6 +37,8 @@ export type {
   StartActionRunInput,
 } from "./action-runs"
 export {
+  ACTION_RUN_FAILURE_CODES,
+  ACTION_RUN_PHASES,
   ActionRunError,
   actionRunParamsEqual,
   actionRunPhaseRecordsEqual,

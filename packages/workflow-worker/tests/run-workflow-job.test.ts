@@ -25,6 +25,8 @@ import {
 import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import { snapshotWorkflowInput } from "@sixb/core/internal/workflows"
 import type {
+  ActionRunFailure,
+  ActionRunPhase,
   ActionRunStorage,
   QueueWorkflowRunInput,
   WorkflowRunStorage,
@@ -35,6 +37,21 @@ import { EventsRuntimeWorkflowRunObserver } from "../src/events"
 import { runWorkflowJob as executeWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"
 import type { RunWorkflowJobInput, WorkflowRunObserver, WorkflowWorkerContext } from "../src/types"
 import type { WorkflowWorkerHost } from "../src/worker"
+
+const ACTION_FAILURE_AT = "2026-05-08T10:00:00.000Z"
+
+function actionFailure<TPhase extends ActionRunPhase>(
+  phase: TPhase,
+  message: string
+): ActionRunFailure<TPhase> {
+  return {
+    code: phase === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+    message,
+    retryable: false,
+    at: ACTION_FAILURE_AT,
+    details: { actionId: "sendInvoice", runId: "action-run", phase },
+  }
+}
 
 const Transaction = defineObjectType({
   id: "Transaction",
@@ -375,10 +392,7 @@ async function completeRequestedActions(
               projectId: sixb.id,
               id: event.payload.runId,
               status: "failed",
-              error: {
-                message: options.effectsErrorMessage,
-                phase: "effects",
-              },
+              error: actionFailure("effects", options.effectsErrorMessage),
             })
           }
 
@@ -395,10 +409,7 @@ async function completeRequestedActions(
                   id: event.payload.runId,
                   status: "failed",
                   finishedAt: new Date("2026-05-08T10:00:00.000Z"),
-                  error: {
-                    message: errorMessage,
-                    phase: "writeback",
-                  },
+                  error: actionFailure("writeback", errorMessage),
                 }
           )
 
@@ -420,10 +431,7 @@ async function completeRequestedActions(
                       actionId: event.payload.actionId,
                       runId: event.payload.runId,
                       subject: event.payload.subject,
-                      error: {
-                        message: errorMessage,
-                        phase: "writeback",
-                      },
+                      error: actionFailure("writeback", errorMessage),
                       finishedAt: "2026-05-08T10:00:00.000Z",
                     },
                   },
@@ -1611,7 +1619,7 @@ describe("runWorkflowJob", () => {
       expect(actionRun?.status).toBe("succeeded")
       expect(actionRun?.effects).toMatchObject({
         status: "failed",
-        error: { message: "notification failed", phase: "effects" },
+        error: { message: "notification failed", details: { phase: "effects" } },
       })
     } finally {
       unsubscribe()

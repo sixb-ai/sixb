@@ -1,8 +1,10 @@
 import { SixbErrorReporter } from "./reporter"
 import {
+  type ReportActionPhaseFailureInput,
   type ReportEventDeliveryFailureInput,
   type ReportRuleEvaluationFailureInput,
   type ReportRunFailureInput,
+  reportActionPhaseFailure as reportActionPhaseFailureWith,
   reportEventDeliveryFailure as reportEventDeliveryFailureWith,
   reportRuleEvaluationFailure as reportRuleEvaluationFailureWith,
   reportRunFailure as reportRunFailureWith,
@@ -42,9 +44,18 @@ export function shareSixbErrorReporter(source: object, target: object): void {
 }
 
 export type {
+  ReportActionPhaseFailureInput,
   ReportEventDeliveryFailureInput,
   ReportRuleEvaluationFailureInput,
   ReportRunFailureInput,
+}
+
+export function reportActionPhaseFailure(
+  host: unknown,
+  error: unknown,
+  input: ReportActionPhaseFailureInput
+): void {
+  reportActionPhaseFailureWith(resolveSixbErrorReporter(host), error, input)
 }
 
 export function reportRunFailure(

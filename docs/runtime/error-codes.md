@@ -25,18 +25,22 @@ interface SixbFailure<TCode extends SixbErrorCode = SixbErrorCode> {
   readonly retryable: boolean
   readonly at: string
   readonly details?: JsonValue
-  readonly causeChain?: readonly { readonly name: string; readonly message: string }[]
+  readonly truncated?: true
 }
 ```
 
-Each primitive specializes `TCode` to the codes it can actually persist and expose. Sync runs, pipeline runs, pipeline step runs, workflow runs, workflow node runs, agent executions (conversation or workflow-owned), and projection runs currently declare `internal.unexpected | runtime.cancelled`. Webhook runs declare only `internal.unexpected`: their lifecycle has no cancellation state, while expected delivery outcomes remain represented by their HTTP status and delivery claim result.
+Each primitive specializes `TCode` to the codes it can persist. Most migrated runs currently allow
+`internal.unexpected | runtime.cancelled`. Action failures also allow the retryable
+`queue.enqueue_failed` code and require `{ actionId, runId, phase }` in `details`.
+Webhook runs declare only `internal.unexpected`: their lifecycle has no cancellation state,
+while expected delivery outcomes remain represented by their HTTP status and delivery claim result.
 
-Other run primitives keep their legacy error shape until their own vertical migration. This keeps
-each storage and wire change independently reviewable.
+Each storage and wire change remains independently reviewable even though every migrated primitive shares the same portable base record.
 
 | Code | Retryable | What happened | What to do |
 | --- | --- | --- | --- |
 | `dataset.not_found` | No | The requested dataset is not registered or is not visible to the caller. | Check the dataset ID and the caller's access. |
 | `dataset.version_not_found` | No | The requested dataset version does not exist, or the dataset has no committed version yet. | Check the version ID or materialize the dataset before reading rows. |
-| `internal.unexpected` | No | Sixb caught an exception that has not yet been assigned a more specific code. | Inspect the failure and its cause chain. Do not retry automatically. |
+| `internal.unexpected` | No | Sixb caught an exception that has not yet been assigned a more specific code. | Inspect internal logs. Do not retry automatically. |
+| `queue.enqueue_failed` | Yes | A job could not be handed to its queue. | Retry the unchanged request while the durable run remains in its enqueue phase. |
 | `runtime.cancelled` | No | An in-flight operation was cancelled before completion. | Confirm the cancellation was intentional before requesting another run. |

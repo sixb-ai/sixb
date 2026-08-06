@@ -21,6 +21,9 @@ type _everyFailedRunIsIdentifiable = Expect<Equal<SixbFailedRun["runId"], string
 
 /** The error context is discriminated on `type`, and every member carries a dedup key. */
 type _errorContextIsDiscriminated = Expect<
-  Equal<SixbErrorContext["type"], "run.failed" | "event.delivery.failed" | "rule.evaluation.failed">
+  Equal<
+    SixbErrorContext["type"],
+    "action.phase.failed" | "run.failed" | "event.delivery.failed" | "rule.evaluation.failed"
+  >
 >
 type _errorContextAlwaysDeduplicable = Expect<Equal<SixbErrorContext["notificationId"], string>>

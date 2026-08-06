@@ -1,9 +1,22 @@
 import { randomUUID } from "node:crypto"
 import { reportRunFailure } from "../error-reporting/capability"
+import { createSixbError, toSixbFailure } from "../errors/internal"
 import type { DomainEventLog } from "../events"
 import type { Queues } from "../queues"
-import type { ActionRunParams, ActionRunRecord, CreateExecutionInput, Storage } from "../storage"
-import { ActionRunError, actionRunParamsEqual, actionSubjectsEqual } from "../storage"
+import type {
+  ActionRunFailure,
+  ActionRunParams,
+  ActionRunRecord,
+  CreateExecutionInput,
+  Storage,
+} from "../storage"
+import {
+  ACTION_RUN_FAILURE_CODES,
+  ActionRunError,
+  actionRunParamsEqual,
+  actionSubjectsEqual,
+} from "../storage"
+import { parseActionRunFailure } from "../storage/action-runs/failure"
 import type { RequestActionResult } from "./request"
 import { createActionRunId, createActionRunIdempotencyKey } from "./run-id"
 import type { ActionSubject } from "./types"
@@ -187,12 +200,14 @@ async function failActionRunPublication(
   run: ActionRunRecord,
   error: unknown
 ): Promise<void> {
+  const failedAt = new Date()
+  const failure = toActionRunFailure(error, run, failedAt)
   const failed = await requireActionRunStorage(input.storage).finish({
     projectId: input.projectId,
     id: run.id,
     status: "failed",
-    phase: "enqueue",
-    error: toActionRunFailure(error),
+    finishedAt: failedAt,
+    error: failure,
   })
   reportRunFailure(input.errorReporterHost, error, {
     projectId: input.projectId,
@@ -224,7 +239,9 @@ function assertExistingRunMatchesRequest(
 }
 
 function isRetryableEnqueueFailure(record: ActionRunRecord): boolean {
-  return record.status === "failed" && record.phase === "enqueue"
+  return (
+    record.status === "failed" && record.phase === "enqueue" && record.error?.retryable === true
+  )
 }
 
 function existingActionRunResult(existing: ActionRunRecord): RequestActionResult {
@@ -235,9 +252,24 @@ function existingActionRunResult(existing: ActionRunRecord): RequestActionResult
   }
 }
 
-function toActionRunFailure(error: unknown): { name?: string; message: string; phase: "enqueue" } {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message, phase: "enqueue" }
-  }
-  return { message: String(error), phase: "enqueue" }
+function toActionRunFailure(
+  error: unknown,
+  run: ActionRunRecord,
+  at: Date
+): ActionRunFailure<"enqueue"> {
+  const enqueueError = createSixbError(
+    "queue.enqueue_failed",
+    `[Sixb] Could not enqueue Action run '${run.id}'.`,
+    {
+      cause: error,
+      details: { actionId: run.actionId, runId: run.id, phase: "enqueue" },
+    }
+  )
+  return parseActionRunFailure(
+    toSixbFailure(enqueueError, {
+      allowedCodes: ACTION_RUN_FAILURE_CODES,
+      at,
+    }),
+    "enqueue"
+  )
 }

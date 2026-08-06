@@ -809,6 +809,7 @@ export type { BlobsRuntime } from "./blob-storage/execution"
 export type { ConnectorRuntime } from "./connectors/execution"
 export type { DatasetsRuntime } from "./datasets/execution"
 export type {
+  SixbActionPhaseFailedContext,
   SixbErrorContext,
   SixbErrorHandler,
   SixbEventDeliveryFailedContext,

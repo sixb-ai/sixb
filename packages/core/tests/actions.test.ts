@@ -934,9 +934,15 @@ describe("requestAction", () => {
       status: "failed",
       phase: "enqueue",
       error: {
-        name: "Error",
-        message: "queue unavailable",
-        phase: "enqueue",
+        code: "queue.enqueue_failed",
+        message: "The job could not be enqueued.",
+        retryable: true,
+        at: failed?.finishedAt?.toISOString(),
+        details: {
+          actionId: "setTemperature",
+          runId: "act_enqueue_retry",
+          phase: "enqueue",
+        },
       },
     })
     await flushSixbErrors(sixb)

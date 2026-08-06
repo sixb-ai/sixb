@@ -4,6 +4,7 @@ import { Card, CardContent } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { Navigate, useParams } from "react-router-dom"
 import { DataPanel, ErrorPage, LoadingPage, PageFrame } from "../components/common"
+import { SixbFailureSummary } from "../components/SixbFailureSummary"
 import { useActionLiveUpdates } from "../features/actions/hooks/useActionLiveUpdates"
 import { actionRunFileContentUrl } from "../lib/files"
 import { ActionRunMetaGrid, ActionRunStatusBadge, formatSubject } from "./ActionsPage"
@@ -67,7 +68,13 @@ export function ActionRunDetailPage() {
               <ActionRunStatusBadge status={run.status} />
               <span className="text-sm font-medium text-foreground">Failure</span>
             </div>
-            <DataPanel value={run.error} />
+            <SixbFailureSummary failure={run.error} />
+            <p className="mt-2 text-xs text-muted-foreground">
+              Phase <span className="font-mono text-foreground">{run.error.details.phase}</span>
+            </p>
+            <div className="mt-4">
+              <DataPanel label="Details" value={run.error.details} />
+            </div>
           </CardContent>
         </Card>
       ) : null}

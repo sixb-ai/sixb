@@ -551,9 +551,15 @@ describe("SixbServer HTTP contract", () => {
       status: "failed",
       completedAt: new Date("2026-02-18T09:12:04.000Z"),
       error: {
-        name: "NotificationError",
+        code: "internal.unexpected",
         message: "Notification failed",
-        phase: "effects",
+        retryable: false,
+        at: "2026-02-18T09:12:04.000Z",
+        details: {
+          actionId: "syncDeviceLabel",
+          runId: "act_audit_previous",
+          phase: "effects",
+        },
       },
     })
     await sixb.storage.actionRuns!.finish({
@@ -2171,9 +2177,15 @@ describe("SixbServer HTTP contract", () => {
           status: "failed",
           completedAt: "2026-02-18T09:12:04.000Z",
           error: {
-            name: "NotificationError",
+            code: "internal.unexpected",
             message: "Notification failed",
-            phase: "effects",
+            retryable: false,
+            at: "2026-02-18T09:12:04.000Z",
+            details: {
+              actionId: "syncDeviceLabel",
+              runId: "act_audit_previous",
+              phase: "effects",
+            },
           },
         },
       })

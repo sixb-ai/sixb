@@ -410,7 +410,13 @@ describe("actionRunMutationOptions", () => {
     const failed = createActionRun({
       status: "failed",
       finishedAt: "2026-06-29T12:00:02.000Z",
-      error: { message: "Writeback failed", phase: "writeback" },
+      error: {
+        code: "internal.unexpected",
+        message: "Writeback failed",
+        retryable: false,
+        at: "2026-06-29T12:00:02.000Z",
+        details: { actionId: "approveQuote", runId: "act_1", phase: "writeback" },
+      },
     })
     const actionRunKey = getActionRunQueryKey({ path: { runId: "act_1" } })
     const actionRunsKey = listActionRunsQueryKey()

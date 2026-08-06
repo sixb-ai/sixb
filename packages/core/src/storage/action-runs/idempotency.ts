@@ -37,7 +37,7 @@ export function finishActionRunPhase(
     return input.phase ?? current ?? "validation"
   }
 
-  return input.phase ?? input.error?.phase ?? current ?? "validation"
+  return input.error.details.phase
 }
 
 export function canRequeueActionRunAfterEnqueueFailure(
@@ -48,6 +48,7 @@ export function canRequeueActionRunAfterEnqueueFailure(
     existing.status === "failed" &&
     existing.phase === "enqueue" &&
     existing.executionId === input.executionId &&
+    existing.error?.retryable === true &&
     existing.actionId === input.actionId &&
     existing.idempotencyKey === input.idempotencyKey &&
     actionSubjectsEqual(existing.subject, input.subject) &&

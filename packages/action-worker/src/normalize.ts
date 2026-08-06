@@ -1,5 +1,16 @@
+import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
+import {
+  createSixbError,
+  isSixbError,
+  summarizeErrorMessage,
+  toSixbFailure,
+} from "@sixb/core/internal/errors"
 import { WorkerAbortError } from "@sixb/core/internal/workers"
-import type { ActionRunFailure } from "@sixb/core/storage"
+import {
+  ACTION_RUN_FAILURE_CODES,
+  type ActionRunFailure,
+  type ActionRunPhase,
+} from "@sixb/core/storage"
 
 export function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) {
@@ -9,20 +20,39 @@ export function throwIfAborted(signal: AbortSignal): void {
   }
 }
 
-export function toActionRunFailure(
+export function toActionRunFailure<TPhase extends ActionRunPhase>(
   error: unknown,
-  phase: ActionRunFailure["phase"]
-): ActionRunFailure {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      phase,
+  phase: TPhase,
+  input: {
+    readonly actionId: string
+    readonly runId: string
+    readonly at: Date
+  }
+): ActionRunFailure<TPhase> {
+  const code =
+    isSixbError(error) && (ACTION_RUN_FAILURE_CODES as readonly string[]).includes(error.code)
+      ? (error.code as ActionRunFailure<TPhase>["code"])
+      : phase === "cancelled"
+        ? "runtime.cancelled"
+        : "internal.unexpected"
+  const normalized = createSixbError(
+    code,
+    summarizeErrorMessage(error, "Action execution failed."),
+    {
+      cause: error,
+      details: {
+        actionId: input.actionId,
+        runId: input.runId,
+        phase,
+      },
     }
-  }
+  )
 
-  return {
-    message: String(error),
-    phase,
-  }
+  return parseActionRunFailure(
+    toSixbFailure(normalized, {
+      allowedCodes: ACTION_RUN_FAILURE_CODES,
+      at: input.at,
+    }),
+    phase
+  )
 }

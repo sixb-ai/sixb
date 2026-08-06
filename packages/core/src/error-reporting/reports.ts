@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import type { ActionRunFailure } from "../storage/action-runs"
 import type { ErrorReporter } from "./reporter"
 import type { SixbFailedRun } from "./types"
 
@@ -27,6 +28,31 @@ export function reportRunFailure(
     occurredAt,
     ...(input.attempt === undefined ? {} : { attempt: input.attempt }),
     run: input.run,
+  })
+}
+
+export interface ReportActionPhaseFailureInput {
+  readonly projectId: string
+  readonly actionId: string
+  readonly runId: string
+  readonly phase: "effects"
+  readonly failure: ActionRunFailure<"effects">
+}
+
+export function reportActionPhaseFailure(
+  reporter: ErrorReporter,
+  error: unknown,
+  input: ReportActionPhaseFailureInput
+): void {
+  reporter.report(error, {
+    type: "action.phase.failed",
+    notificationId: `project:${input.projectId}:action:${input.actionId}:run:${input.runId}:phase:${input.phase}:failed:${input.failure.at}`,
+    projectId: input.projectId,
+    occurredAt: input.failure.at,
+    actionId: input.actionId,
+    runId: input.runId,
+    phase: input.phase,
+    failure: input.failure,
   })
 }
 

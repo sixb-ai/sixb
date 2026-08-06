@@ -1,40 +1,72 @@
 import type { ActionSubject } from "../../actions"
+import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonValue } from "../../json"
 
 export type ActionRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
 
-export type ActionRunPhase =
-  | "request"
-  | "enqueue"
-  | "validation"
-  | "writeback"
-  | "edits"
-  | "commit"
-  | "effects"
-  | "cancelled"
+export const ACTION_RUN_PHASES = [
+  "request",
+  "enqueue",
+  "validation",
+  "writeback",
+  "edits",
+  "commit",
+  "effects",
+  "cancelled",
+] as const
+
+export type ActionRunPhase = (typeof ACTION_RUN_PHASES)[number]
 
 export type ActionRunParams = Readonly<Record<string, JsonValue>>
 
 export type ActionRunPhaseStatus = "succeeded" | "failed"
 
-export interface ActionRunFailure {
-  readonly name?: string
-  readonly message: string
-  readonly phase?: ActionRunPhase
+/** Error codes an action run or phase record can persist and expose. */
+export const ACTION_RUN_FAILURE_CODES = [
+  "internal.unexpected",
+  "runtime.cancelled",
+  "queue.enqueue_failed",
+] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
+
+export type ActionRunFailureCode = (typeof ACTION_RUN_FAILURE_CODES)[number]
+
+export interface ActionRunFailureDetails<TPhase extends ActionRunPhase = ActionRunPhase> {
+  readonly actionId: string
+  readonly runId: string
+  readonly phase: TPhase
 }
 
-export interface ActionRunWritebackRecord {
-  readonly status: ActionRunPhaseStatus
-  readonly completedAt: Date
-  readonly result?: JsonValue
-  readonly error?: ActionRunFailure
+/** Portable failure record with Action's required correlation details. */
+export interface ActionRunFailure<TPhase extends ActionRunPhase = ActionRunPhase>
+  extends Omit<SixbFailure<ActionRunFailureCode>, "details"> {
+  readonly details: ActionRunFailureDetails<TPhase>
 }
 
-export interface ActionRunEffectsRecord {
-  readonly status: ActionRunPhaseStatus
-  readonly completedAt: Date
-  readonly error?: ActionRunFailure
-}
+export type ActionRunWritebackRecord =
+  | {
+      readonly status: "succeeded"
+      readonly completedAt: Date
+      readonly result: JsonValue
+      readonly error?: never
+    }
+  | {
+      readonly status: "failed"
+      readonly completedAt: Date
+      readonly result?: never
+      readonly error: ActionRunFailure<"writeback">
+    }
+
+export type ActionRunEffectsRecord =
+  | {
+      readonly status: "succeeded"
+      readonly completedAt: Date
+      readonly error?: never
+    }
+  | {
+      readonly status: "failed"
+      readonly completedAt: Date
+      readonly error: ActionRunFailure<"effects">
+    }
 
 export interface ActionRunRecord {
   readonly id: string
@@ -94,7 +126,7 @@ export type RecordActionWritebackInput =
       readonly projectId: string
       readonly status: "failed"
       readonly completedAt?: Date
-      readonly error: ActionRunFailure
+      readonly error: ActionRunFailure<"writeback">
     }
 
 export type RecordActionEffectsInput =
@@ -109,7 +141,7 @@ export type RecordActionEffectsInput =
       readonly projectId: string
       readonly status: "failed"
       readonly completedAt?: Date
-      readonly error: ActionRunFailure
+      readonly error: ActionRunFailure<"effects">
     }
 
 export type FinishActionRunInput =
@@ -125,8 +157,7 @@ export type FinishActionRunInput =
       readonly projectId: string
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
-      readonly error?: ActionRunFailure
-      readonly phase?: ActionRunPhase
+      readonly error: ActionRunFailure
     }
 
 export interface ListActionRunsInput {

@@ -52,6 +52,7 @@ describe("Postgres storage migrations", () => {
             "014-agent-failure-record",
             "015-projection-failure-record",
             "016-webhook-run-failure-record",
+            "017-action-failure-record",
           ],
         },
       ])
@@ -167,6 +168,13 @@ describe("Postgres storage migrations", () => {
           id: "016-webhook-run-failure-record",
           status: "applied",
           version: 16,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "017-action-failure-record",
+          status: "applied",
+          version: 17,
         },
       ])
     })
@@ -865,6 +873,13 @@ describe("Postgres storage migrations", () => {
           id: "016-webhook-run-failure-record",
           status: "applied",
           version: 16,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "017-action-failure-record",
+          status: "applied",
+          version: 17,
         },
       ])
     } finally {

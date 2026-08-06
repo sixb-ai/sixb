@@ -5864,17 +5864,24 @@ export type ListActionRunsResponses = {
       startedAt?: string
       finishedAt?: string
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled" | "queue.enqueue_failed"
         message: string
-        phase?:
-          | "request"
-          | "enqueue"
-          | "validation"
-          | "writeback"
-          | "edits"
-          | "commit"
-          | "effects"
-          | "cancelled"
+        retryable: boolean
+        at: string
+        details: {
+          actionId: string
+          runId: string
+          phase:
+            | "request"
+            | "enqueue"
+            | "validation"
+            | "writeback"
+            | "edits"
+            | "commit"
+            | "effects"
+            | "cancelled"
+        }
+        truncated?: true
       }
     }>
     hasMore: boolean
@@ -5947,56 +5954,82 @@ export type GetActionRunResponses = {
     startedAt?: string
     finishedAt?: string
     error?: {
-      name?: string
+      code: "internal.unexpected" | "runtime.cancelled" | "queue.enqueue_failed"
       message: string
-      phase?:
-        | "request"
-        | "enqueue"
-        | "validation"
-        | "writeback"
-        | "edits"
-        | "commit"
-        | "effects"
-        | "cancelled"
+      retryable: boolean
+      at: string
+      details: {
+        actionId: string
+        runId: string
+        phase:
+          | "request"
+          | "enqueue"
+          | "validation"
+          | "writeback"
+          | "edits"
+          | "commit"
+          | "effects"
+          | "cancelled"
+      }
+      truncated?: true
     }
     params: {
       [key: string]: unknown
     }
-    writeback?: {
-      status: "succeeded" | "failed"
-      completedAt: string
-      result?: unknown
-      error?: {
-        name?: string
-        message: string
-        phase?:
-          | "request"
-          | "enqueue"
-          | "validation"
-          | "writeback"
-          | "edits"
-          | "commit"
-          | "effects"
-          | "cancelled"
-      }
-    }
-    effects?: {
-      status: "succeeded" | "failed"
-      completedAt: string
-      error?: {
-        name?: string
-        message: string
-        phase?:
-          | "request"
-          | "enqueue"
-          | "validation"
-          | "writeback"
-          | "edits"
-          | "commit"
-          | "effects"
-          | "cancelled"
-      }
-    }
+    writeback?:
+      | {
+          status: "succeeded"
+          completedAt: string
+          /**
+           * Any JSON-compatible value.
+           */
+          result:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          status: "failed"
+          completedAt: string
+          error: {
+            code: "internal.unexpected" | "runtime.cancelled" | "queue.enqueue_failed"
+            message: string
+            retryable: boolean
+            at: string
+            details: {
+              actionId: string
+              runId: string
+              phase: "writeback"
+            }
+            truncated?: true
+          }
+        }
+    effects?:
+      | {
+          status: "succeeded"
+          completedAt: string
+        }
+      | {
+          status: "failed"
+          completedAt: string
+          error: {
+            code: "internal.unexpected" | "runtime.cancelled" | "queue.enqueue_failed"
+            message: string
+            retryable: boolean
+            at: string
+            details: {
+              actionId: string
+              runId: string
+              phase: "effects"
+            }
+            truncated?: true
+          }
+        }
   }
 }
 

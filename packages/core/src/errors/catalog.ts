@@ -22,6 +22,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "An unexpected internal error occurred.",
     retryable: false,
   },
+  "queue.enqueue_failed": {
+    publicMessage: "The job could not be enqueued.",
+    retryable: true,
+  },
   "runtime.cancelled": {
     publicMessage: "Execution was cancelled.",
     retryable: false,

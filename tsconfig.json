@@ -50,6 +50,9 @@
       "@sixb/core/broker": ["./packages/core/src/broker/index.ts"],
       "@sixb/core/events/scope": ["./packages/core/src/events/scope.ts"],
       "@sixb/core/events/selectors": ["./packages/core/src/events/selectors/index.ts"],
+      "@sixb/core/internal/action-run-storage": [
+        "./packages/core/src/storage/action-runs/failure.ts"
+      ],
       "@sixb/core/internal/actions": ["./packages/core/src/actions/index.ts"],
       "@sixb/core/internal/agents": ["./packages/core/src/agents/index.ts"],
       "@sixb/core/internal/agent-run-storage-provider": [
