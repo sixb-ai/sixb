@@ -11,6 +11,7 @@ import {
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import {
   type DuckLakeCatalogColumn,
+  duckLakeCatalogColumnsToDatasetPrimaryKey,
   duckLakeCatalogColumnsToDatasetSchema,
 } from "./ducklake-catalog-schema"
 import { decodeDatasetTableName, encodeDatasetTableName } from "./names"
@@ -56,14 +57,14 @@ export async function readCurrentDatasetDefinitions(
   const definitions = new Map<string, DatasetDefinition>()
 
   for (const table of tables) {
+    const columns = columnsByTableName.get(table.tableName) ?? []
+    const primaryKey = duckLakeCatalogColumnsToDatasetPrimaryKey(table.tableName, columns)
     const partitionBy = partitionByTableName.get(table.tableName) ?? []
     definitions.set(table.datasetId, {
       kind: "dataset",
       id: table.datasetId,
-      schema: duckLakeCatalogColumnsToDatasetSchema(
-        table.tableName,
-        columnsByTableName.get(table.tableName) ?? []
-      ),
+      schema: duckLakeCatalogColumnsToDatasetSchema(table.tableName, columns),
+      ...(primaryKey !== undefined ? { primaryKey } : {}),
       ...(partitionBy.length > 0 ? { partitionBy } : {}),
       ...(table.comment !== undefined ? { description: table.comment } : {}),
     })
@@ -121,6 +122,7 @@ async function readCurrentDatasetColumns(
 
   const ducklakeTable = duckLakeMetadataTableName(input.options, "ducklake_table")
   const ducklakeColumn = duckLakeMetadataTableName(input.options, "ducklake_column")
+  const ducklakeColumnTag = duckLakeMetadataTableName(input.options, "ducklake_column_tag")
   const rows = await input.runtime.query(`
     SELECT
       table_meta.table_name,
@@ -129,11 +131,17 @@ async function readCurrentDatasetColumns(
       column_meta.column_name,
       column_meta.column_type,
       CAST(column_meta.nulls_allowed AS BOOLEAN) AS nulls_allowed,
-      column_meta.parent_column
+      column_meta.parent_column,
+      column_tag."value" AS comment
     FROM ${ducklakeTable} table_meta
     JOIN ${ducklakeColumn} column_meta
       ON column_meta.table_id = table_meta.table_id
       AND column_meta.end_snapshot IS NULL
+    LEFT JOIN ${ducklakeColumnTag} column_tag
+      ON column_tag.table_id = column_meta.table_id
+      AND column_tag.column_id = column_meta.column_id
+      AND column_tag."key" = 'comment'
+      AND column_tag.end_snapshot IS NULL
     WHERE table_meta.end_snapshot IS NULL
       AND table_meta.table_name IN (${quoteSqlStringList(tableNames)})
     ORDER BY table_meta.table_name, column_meta.column_order
@@ -147,6 +155,7 @@ async function readCurrentDatasetColumns(
     columnType: getString(row, "column_type"),
     nullsAllowed: getBoolean(row, "nulls_allowed"),
     parentColumnId: getOptionalBigIntLike(row, "parent_column"),
+    comment: getOptionalString(row, "comment"),
   }))
 }
 

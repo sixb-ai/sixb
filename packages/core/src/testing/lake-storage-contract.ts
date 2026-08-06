@@ -34,6 +34,12 @@ const reorderedDefinitionDataset = defineDataset("contract.definitions.orders", 
   description: "Contract orders",
 })
 
+const keyedDefinitionDataset = defineDataset("contract.definitions.keyed_orders", {
+  schema: [col("tenantId", "string"), col("orderId", "string"), col("customerName", "string")],
+  primaryKey: ["tenantId", "orderId"],
+  description: "Contract keyed orders",
+})
+
 const writeDataset = defineDataset("contract.writes.orders", {
   schema: [col("orderId", "string"), col("customerName", "string")],
 })
@@ -98,6 +104,23 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
           expect(await storage.getDataset("missing.dataset")).toBeNull()
           expect(await storage.listDatasets()).toEqual([definitionDataset])
           expect(await storage.listVersions(definitionDataset.id)).toEqual([])
+        })
+      })
+
+      test("round-trips keyed definitions through create, get, list, and reuse", async () => {
+        // Regression guard: omitting primaryKey from mergeDatasetDefinition makes reuse lose
+        // the key and fails this contract case.
+        await withStorage(async (storage) => {
+          const created = await storage.createDataset(keyedDefinitionDataset)
+          const repeated = await storage.createDataset(keyedDefinitionDataset)
+
+          expect(created).toEqual(keyedDefinitionDataset)
+          expect(repeated).toEqual(keyedDefinitionDataset)
+          expect(await storage.getDataset(keyedDefinitionDataset.id)).toEqual(
+            keyedDefinitionDataset
+          )
+          expect(await storage.listDatasets()).toEqual([keyedDefinitionDataset])
+          expect(await storage.listVersions(keyedDefinitionDataset.id)).toEqual([])
         })
       })
 

@@ -39,6 +39,116 @@ const canonicalOrdersDataset = defineDataset("canonical.orders", {
 })
 
 describe("defineDataset", () => {
+  test("builds single and composite primary keys", () => {
+    const customers = defineDataset("canonical.customers", {
+      schema: [col("id", "string")],
+      primaryKey: "id",
+    })
+    const lineItems = defineDataset("canonical.line-items", {
+      schema: [col("invoiceId", "string"), col("lineItemId", "string", { nullable: false })],
+      primaryKey: ["invoiceId", "lineItemId"],
+    })
+
+    expect(customers.primaryKey).toBe("id")
+    expect(lineItems.primaryKey).toEqual(["invoiceId", "lineItemId"])
+  })
+
+  test("snapshots composite primary keys", () => {
+    // Regression guard: assigning options.primaryKey directly in createDatasetDefinition makes
+    // this test fail after the caller mutates its tuple.
+    const primaryKey: ["invoiceId", "lineItemId"] = ["invoiceId", "lineItemId"]
+    const lineItems = defineDataset("canonical.line-items", {
+      schema: [col("invoiceId", "string"), col("lineItemId", "string")],
+      primaryKey,
+    })
+
+    primaryKey.reverse()
+
+    expect(lineItems.primaryKey).toEqual(["invoiceId", "lineItemId"])
+    expect(lineItems.primaryKey).not.toBe(primaryKey)
+  })
+
+  test("validates primary-key shape", () => {
+    // Regression guard: removing assertDatasetPrimaryKey from assertDatasetDefinition makes these
+    // invalid definitions succeed.
+    expect(() =>
+      defineDataset("canonical.invalid-key", {
+        schema: [col("id", "string")],
+        primaryKey: 42,
+      } as never)
+    ).toThrow("Dataset primaryKey must be a column name or an array of at least two column names.")
+    expect(() =>
+      defineDataset("canonical.invalid-key", {
+        schema: [col("id", "string")],
+        primaryKey: [],
+      } as never)
+    ).toThrow(
+      "Dataset primaryKey arrays must contain at least two column names. Use a string for a single-column key."
+    )
+    expect(() =>
+      defineDataset("canonical.invalid-key", {
+        schema: [col("id", "string")],
+        primaryKey: "",
+      } as never)
+    ).toThrow("Dataset primaryKey columns must be non-empty strings.")
+    expect(() =>
+      defineDataset("canonical.invalid-key", {
+        schema: [col("id", "string")],
+        primaryKey: ["id"],
+      } as never)
+    ).toThrow(
+      "Dataset primaryKey arrays must contain at least two column names. Use a string for a single-column key."
+    )
+    expect(() =>
+      defineDataset("canonical.invalid-key", {
+        schema: [col("id", "string"), col("tenantId", "string")],
+        primaryKey: ["id", ""],
+      } as never)
+    ).toThrow("Dataset primaryKey columns must be non-empty strings.")
+    expect(() =>
+      defineDataset("canonical.invalid-key", {
+        schema: [col("id", "string"), col("tenantId", "string")],
+        primaryKey: ["id", 42],
+      } as never)
+    ).toThrow("Dataset primaryKey columns must be non-empty strings.")
+  })
+
+  test("rejects duplicate primary-key columns", () => {
+    expect(() =>
+      defineDataset("canonical.invalid-key", {
+        schema: [col("id", "string")],
+        primaryKey: ["id", "id"],
+      } as never)
+    ).toThrow("Dataset primaryKey contains duplicate column 'id'.")
+  })
+
+  test("requires primary-key columns to exist in the schema", () => {
+    expect(() =>
+      defineDataset("canonical.invalid-key", {
+        schema: [col("id", "string")],
+        primaryKey: "missing",
+      } as never)
+    ).toThrow("Dataset primaryKey column 'missing' is not declared in the schema.")
+  })
+
+  test("requires primary-key columns to be strings", () => {
+    expect(() =>
+      defineDataset("canonical.invalid-key", {
+        schema: [col("id", "int64")],
+        primaryKey: "id",
+      } as never)
+    ).toThrow("Dataset primaryKey column 'id' must have type 'string'.")
+  })
+
+  test("requires primary-key columns to be non-nullable", () => {
+    expect(() =>
+      defineDataset("canonical.invalid-key", {
+        schema: [col("id", "string", { nullable: true })],
+        primaryKey: "id",
+      } as never)
+    ).toThrow("Dataset primaryKey column 'id' must not be nullable.")
+  })
+
   test("builds a dataset definition with a wrapped schema", () => {
     expect(rawOrdersDataset).toEqual({
       kind: "dataset",
@@ -77,6 +187,7 @@ describe("defineDataset", () => {
       {
         pick: ["orderId"],
         add: [col("priority", "int64")],
+        primaryKey: "orderId",
         partitionBy: ["orderId"],
         description: "Order summaries",
       }
@@ -91,6 +202,7 @@ describe("defineDataset", () => {
           { name: "priority", type: "int64" },
         ],
       },
+      primaryKey: "orderId",
       partitionBy: ["orderId"],
       description: "Order summaries",
     })

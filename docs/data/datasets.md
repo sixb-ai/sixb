@@ -25,6 +25,7 @@ export const rawInvoicesDataset = defineDataset("erp.invoices", {
     col("customer_id", "string"),
     col("project_id", "string"),
   ],
+  primaryKey: "id",
   description: "Raw invoice rows from the ERP.",
 })
 ```
@@ -36,8 +37,37 @@ The id `erp.invoices` is the name every other part of the project references.
 | Option | Type | Description |
 | --- | --- | --- |
 | `schema` | `col(...)[]` | Required. The ordered list of column definitions. |
+| `primaryKey` | `string \| string[]` | Optional. One key column or an ordered composite key. |
 | `partitionBy` | `string[]` | Optional. Logical partition columns; each name must exist in `schema`. |
 | `description` | `string` | Optional. Human-readable description. |
+
+### Primary keys
+
+Use one non-nullable string column for a single-column key, or two or more for a composite key:
+
+```ts
+export const invoices = defineDataset("erp.invoices", {
+  schema: [col("id", "string"), col("status", "string")],
+  primaryKey: "id",
+})
+
+export const invoiceLines = defineDataset("erp.invoice_lines", {
+  schema: [
+    col("invoiceId", "string"),
+    col("lineItemId", "string"),
+    col("description", "string"),
+  ],
+  primaryKey: ["invoiceId", "lineItemId"],
+})
+```
+
+V1 primary keys have these constraints:
+
+- Every key column must exist in the schema, have type `string`, and be non-nullable.
+- Composite keys contain at least two unique columns. Column order is significant.
+- A key cannot be added, removed, changed, or reordered after the dataset is created.
+- Rows are expected to be unique by key, and a row's key is expected to be immutable. This initial
+  contract persists key metadata but does not yet enforce row uniqueness or add keyed merge writes.
 
 ### `col` options
 
@@ -164,8 +194,12 @@ export const invoicesSummary = defineDataset("invoices.summary").derive(rawInvoi
 | --- | --- | --- |
 | `pick` | `string[]` | Keep only these parent columns. Each name must exist on the parent. |
 | `add` | `col(...)[]` | Append these columns after the kept ones. |
+| `primaryKey` | `string \| string[]` | Optional key over the resulting columns. |
 | `partitionBy` | `string[]` | Optional partition columns for the derived dataset. |
 | `description` | `string` | Optional description for the derived dataset. |
+
+Derived datasets do not inherit their parent's primary key. Declare `primaryKey` explicitly when
+the derived rows preserve the same identity contract.
 
 ## Dataset vs ontology
 
