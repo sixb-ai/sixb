@@ -25,7 +25,6 @@ const failure = {
   retryable: false,
   at: "2026-06-01T12:00:00.000Z",
   details: { projectionId: "contract.devices", runId: "failed-run" },
-  causeChain: [{ name: "Error", message: "Source failure" }],
 } as const satisfies SixbFailure<ProjectionRunFailureCode>
 
 const replacementIdentity = {

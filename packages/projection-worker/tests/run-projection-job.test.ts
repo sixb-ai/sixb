@@ -2316,7 +2316,7 @@ describe("runProjectionJob", () => {
     expect(run?.progress.sourceRowsSkipped).toBe(0)
     expect(run?.error).toMatchObject({
       code: "internal.unexpected",
-      message: expect.stringContaining("must be one of"),
+      message: "An unexpected internal error occurred.",
       details: {
         projectionId: "device-proj",
         runId: canonicalRunId("projrun-invalid-property"),
@@ -2444,7 +2444,7 @@ describe("runProjectionJob", () => {
     expect(run?.progress.sourceRowsSkipped).toBe(0)
     expect(run?.error).toMatchObject({
       code: "internal.unexpected",
-      message: expect.stringContaining("cannot safely coerce"),
+      message: "An unexpected internal error occurred.",
     })
   })
 
@@ -2713,7 +2713,7 @@ describe("runProjectionJob", () => {
       progress: { sourceRowsRead: 0 },
       error: {
         code: "runtime.cancelled",
-        message: expect.stringContaining("Cancelled by test."),
+        message: "Execution was cancelled.",
         retryable: false,
         details: {
           projectionId: "room-proj",
@@ -2892,7 +2892,7 @@ describe("runProjectionJob", () => {
     expect(run?.progress.sourceRowsRead).toBe(0)
     expect(run?.error).toMatchObject({
       code: "internal.unexpected",
-      message: expect.stringContaining("Invalid unit"),
+      message: "An unexpected internal error occurred.",
     })
 
     // The fixed physical batch is atomic: no prefix of it is committed.
