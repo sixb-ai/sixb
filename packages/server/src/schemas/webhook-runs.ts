@@ -1,4 +1,11 @@
+import type { SixbFailure } from "@sixb/core"
+import type { WebhookRunFailureCode } from "@sixb/core/storage"
+import { WEBHOOK_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { z } from "zod"
+import { sixbFailureSchema } from "./common"
+
+const WebhookRunFailureSchema: z.ZodType<SixbFailure<WebhookRunFailureCode>> =
+  sixbFailureSchema(WEBHOOK_RUN_FAILURE_CODES)
 
 export const WebhookRunStatusSchema = z.enum(["running", "succeeded", "failed", "skipped"])
 
@@ -30,7 +37,7 @@ export const WebhookRunSchema = z.object({
   responseStatus: z.number().optional(),
   idempotencyKey: z.string().optional(),
   deliveryClaimResult: WebhookDeliveryClaimResultSchema.optional(),
-  error: z.string().optional(),
+  error: WebhookRunFailureSchema.optional(),
 })
 
 export const WebhookRunListResponseSchema = z.object({

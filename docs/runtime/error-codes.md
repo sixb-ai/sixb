@@ -29,7 +29,7 @@ interface SixbFailure<TCode extends SixbErrorCode = SixbErrorCode> {
 }
 ```
 
-Each primitive specializes `TCode` to the codes it can actually persist and expose. Sync runs, pipeline runs, pipeline step runs, workflow runs, workflow node runs, agent executions (conversation or workflow-owned), and projection runs currently declare `internal.unexpected | runtime.cancelled`.
+Each primitive specializes `TCode` to the codes it can actually persist and expose. Sync runs, pipeline runs, pipeline step runs, workflow runs, workflow node runs, agent executions (conversation or workflow-owned), and projection runs currently declare `internal.unexpected | runtime.cancelled`. Webhook runs declare only `internal.unexpected`: their lifecycle has no cancellation state, while expected delivery outcomes remain represented by their HTTP status and delivery claim result.
 
 Other run primitives keep their legacy error shape until their own vertical migration. This keeps
 each storage and wire change independently reviewable.

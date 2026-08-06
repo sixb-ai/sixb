@@ -6,7 +6,9 @@ export type {
   ListWebhookRunsInput,
   ListWebhookRunsResult,
   StartWebhookRunInput,
+  WebhookRunFailureCode,
   WebhookRunRecord,
   WebhookRunStatus,
   WebhookRunStorage,
 } from "./types"
+export { WEBHOOK_RUN_FAILURE_CODES } from "./types"
