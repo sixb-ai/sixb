@@ -7,6 +7,7 @@ import { join } from "node:path"
 import { migrateStorage } from "@sixb/core"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
+  AGENT_RUN_FAILURE_CODES,
   PIPELINE_RUN_FAILURE_CODES,
   SYNC_RUN_FAILURE_CODES,
   WORKFLOW_RUN_FAILURE_CODES,
@@ -113,6 +114,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 13,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "014-agent-failure-record",
+    status: "applied",
+    version: 14,
+  },
 ]
 
 afterEach(async () => {
@@ -210,6 +218,13 @@ describe("SQLite storage migrations", () => {
       )
 
       db.run(`
+        INSERT INTO auth_service_accounts (
+          project_id, id, name, status, created_by_principal_type, created_at, updated_at
+        ) VALUES (
+          'project-a', 'svc_agent_reviewer', 'Reviewer Agent', 'active', 'system',
+          '2026-08-10T11:00:00.000Z', '2026-08-10T11:00:00.000Z'
+        );
+
         INSERT INTO executions (
           project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
           authority_kind, authority_primitive_kind, authority_primitive_id, created_at
@@ -218,6 +233,32 @@ describe("SQLite storage migrations", () => {
           'event-workflow-legacy', 'correlation-workflow-legacy', 'trustedPrimitive', 'workflow',
           'orders', '2026-08-10T12:00:00.000Z'
         );
+
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          authority_kind, created_at
+        ) VALUES (
+          'project-a', 'execution-agent-parent-legacy', 'request',
+          'request-agent-parent-legacy', 'http', 'request-agent-parent-legacy',
+          'correlation-agent-legacy', 'disabled', '2026-08-10T11:59:00.000Z'
+        );
+
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          parent_execution_id, authority_kind, authority_service_account_id, created_at
+        ) VALUES
+          (
+            'project-a', 'execution-agent-legacy', 'agent', 'agent-legacy', 'execution',
+            'execution-agent-parent-legacy', 'correlation-agent-legacy',
+            'execution-agent-parent-legacy', 'principal', 'svc_agent_reviewer',
+            '2026-08-10T12:00:00.000Z'
+          ),
+          (
+            'project-a', 'execution-workflow-agent-legacy', 'agent', 'node-legacy', 'execution',
+            'execution-workflow-legacy', 'correlation-workflow-legacy',
+            'execution-workflow-legacy', 'principal', 'svc_agent_reviewer',
+            '2026-08-10T12:00:00.000Z'
+          );
 
         INSERT INTO workflow_runs (
           project_id, id, workflow_id, status, input, started_at, finished_at, error, execution_id
@@ -231,9 +272,27 @@ describe("SQLite storage migrations", () => {
           project_id, id, workflow_run_id, workflow_id, node_index, node_type, node_id, node_key,
           status, input, started_at, finished_at, error
         ) VALUES (
-          'project-a', 'node-legacy', 'workflow-legacy', 'orders', 0, 'step', 'extract', 'extract',
+          'project-a', 'node-legacy', 'workflow-legacy', 'orders', 0, 'agent', 'review', 'review',
           'failed', '{}', '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z',
           'secret workflow node diagnostic'
+        );
+
+        INSERT INTO workflow_agent_node_runs (
+          project_id, node_run_id, execution_id, agent_id, status, prompt, error, created_at,
+          completed_at
+        ) VALUES (
+          'project-a', 'node-legacy', 'execution-workflow-agent-legacy', 'reviewer', 'failed',
+          'Review this order', 'secret workflow Agent diagnostic',
+          '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z'
+        );
+
+        INSERT INTO agent_runs (
+          project_id, id, execution_id, thread_id, agent_id, trigger_message_id, status, error,
+          created_at, completed_at
+        ) VALUES (
+          'project-a', 'agent-legacy', 'execution-agent-legacy', 'thread-legacy', 'reviewer',
+          'message-legacy', 'failed', 'secret Agent diagnostic',
+          '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z'
         );
       `)
 
@@ -306,11 +365,45 @@ describe("SQLite storage migrations", () => {
         details: {
           workflowId: "orders",
           workflowRunId: "workflow-legacy",
-          nodeId: "extract",
+          nodeId: "review",
           nodeRunId: "node-legacy",
         },
       })
       expect(JSON.stringify(nodeFailure)).not.toContain("secret workflow node diagnostic")
+
+      const agentRow = db
+        .query("SELECT error FROM agent_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "agent-legacy") as { readonly error: string }
+      const agentFailure = parseSixbFailure(agentRow.error, AGENT_RUN_FAILURE_CODES)
+      expect(agentFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: {
+          agentId: "reviewer",
+          runId: "agent-legacy",
+          threadId: "thread-legacy",
+        },
+      })
+      expect(JSON.stringify(agentFailure)).not.toContain("secret Agent diagnostic")
+
+      const agentNodeRow = db
+        .query(
+          "SELECT error FROM workflow_agent_node_runs WHERE project_id = ? AND node_run_id = ?"
+        )
+        .get("project-a", "node-legacy") as { readonly error: string }
+      const agentNodeFailure = parseSixbFailure(agentNodeRow.error, AGENT_RUN_FAILURE_CODES)
+      expect(agentNodeFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: {
+          agentId: "reviewer",
+          workflowId: "orders",
+          workflowRunId: "workflow-legacy",
+          nodeId: "review",
+          nodeRunId: "node-legacy",
+        },
+      })
+      expect(JSON.stringify(agentNodeFailure)).not.toContain("secret workflow Agent diagnostic")
     } finally {
       db.close()
     }

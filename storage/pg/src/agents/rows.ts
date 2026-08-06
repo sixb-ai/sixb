@@ -1,5 +1,7 @@
-import type { AgentMessagePart, Principal } from "@sixb/core"
+import type { AgentMessagePart, JsonValue, Principal } from "@sixb/core"
+import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
+  AGENT_RUN_FAILURE_CODES,
   type AgentMessageRecord,
   type AgentRunDiagnostic,
   type AgentRunRecord,
@@ -43,7 +45,7 @@ export interface AgentRunRow {
   usage_total_tokens: number | string | null
   usage_reasoning_tokens: number | string | null
   usage_cached_input_tokens: number | string | null
-  error: string | null
+  error: JsonValue | null
   diagnostics: AgentRunDiagnostic[] | string | null
   attempt: number | string
   execution_token: string | null
@@ -103,7 +105,7 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     modelId: row.model_id ?? undefined,
     finishReason: coerceAgentRunFinishReason(row.finish_reason),
     usage: rowToUsage(row),
-    error: row.error ?? undefined,
+    error: row.error === null ? undefined : parseSixbFailure(row.error, AGENT_RUN_FAILURE_CODES),
     diagnostics: normalizeDiagnostics(row.diagnostics),
     attempt: Number(row.attempt),
     execution:

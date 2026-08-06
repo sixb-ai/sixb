@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../agents/message"
 import type { Principal } from "../auth"
+import type { SixbFailure } from "../errors/types"
 import {
   type AgentRunExecution,
+  type AgentRunFailureCode,
   type AgentStorage,
   AgentStorageError,
   type AgentStorageErrorCode,
@@ -35,6 +37,14 @@ const owner: Principal = { type: "user", id: "usr_1" }
 const serviceAccount: Extract<Principal, { readonly type: "serviceAccount" }> = {
   type: "serviceAccount",
   id: "svc_agent_sales",
+}
+
+function failure(
+  message: string,
+  at: string,
+  code: AgentRunFailureCode = "internal.unexpected"
+): SixbFailure<AgentRunFailureCode> {
+  return { code, message, retryable: false, at }
 }
 
 function at(value: string): Date {
@@ -301,13 +311,21 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           projectId,
           id: "run_1",
           status: "cancelled",
-          error: "Cancelled before execution",
+          error: failure(
+            "Cancelled before execution",
+            "2026-06-23T10:01:00.000Z",
+            "runtime.cancelled"
+          ),
           completedAt: at("2026-06-23T10:01:00.000Z"),
         })
         expect(cancelled).toMatchObject({
           status: "cancelled",
           attempt: 0,
-          error: "Cancelled before execution",
+          error: failure(
+            "Cancelled before execution",
+            "2026-06-23T10:01:00.000Z",
+            "runtime.cancelled"
+          ),
         })
         await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toMatchObject({
           activeRunId: null,
@@ -327,9 +345,14 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
             projectId,
             id: "run_2",
             status: "failed",
-            error: "Agent is unavailable",
+            error: failure("Agent is unavailable", "2026-06-23T10:02:00.000Z"),
+            completedAt: at("2026-06-23T10:02:00.000Z"),
           })
-        ).resolves.toMatchObject({ status: "failed", attempt: 0, error: "Agent is unavailable" })
+        ).resolves.toMatchObject({
+          status: "failed",
+          attempt: 0,
+          error: failure("Agent is unavailable", "2026-06-23T10:02:00.000Z"),
+        })
       })
     })
 
@@ -589,7 +612,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
             id: "run_1",
             executionToken: "wrong",
             status: "failed",
-            error: "boom",
+            error: failure("boom", "2026-06-23T10:08:00.000Z"),
           }),
           "execution_lost"
         )
@@ -599,11 +622,11 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           id: "run_1",
           executionToken: "exec_1",
           status: "failed",
-          error: "ProviderError: boom",
+          error: failure("ProviderError: boom", "2026-06-23T10:08:00.000Z"),
           completedAt: at("2026-06-23T10:08:00.000Z"),
         })
         expect(failed.status).toBe("failed")
-        expect(failed.error).toBe("ProviderError: boom")
+        expect(failed.error).toEqual(failure("ProviderError: boom", "2026-06-23T10:08:00.000Z"))
 
         // Already terminal → cannot finish again.
         await expectAgentError(

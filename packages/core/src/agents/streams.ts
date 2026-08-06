@@ -149,7 +149,7 @@ export function agentRunFinishedEvent(
     attempt: run.attempt,
     status: run.status,
     ...(run.finishReason === undefined ? {} : { finishReason: run.finishReason }),
-    ...(run.error === undefined ? {} : { error: run.error }),
+    ...(run.error === undefined ? {} : { error: run.error.message }),
     occurredAt: occurredAt.toISOString(),
   }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
 import {
+  type AgentRunFailureCode,
   InMemoryWorkflowRunStorage,
   type QueueWorkflowRunInput,
   type SixbFailure,
@@ -68,6 +69,13 @@ function failure(
   message: string,
   code: WorkflowRunFailureCode = "internal.unexpected"
 ): SixbFailure<WorkflowRunFailureCode> {
+  return { code, message, retryable: false, at: FAILURE_AT }
+}
+
+function agentFailure(
+  message: string,
+  code: AgentRunFailureCode = "internal.unexpected"
+): SixbFailure<AgentRunFailureCode> {
   return { code, message, retryable: false, at: FAILURE_AT }
 }
 
@@ -856,12 +864,12 @@ describe("InMemoryWorkflowRunStorage", () => {
     const cancelled = await storage.agentNodes.cancel({
       projectId: "my-app",
       nodeRunId: execution.nodeRunId,
-      error: "Workflow cancelled.",
+      error: agentFailure("Workflow cancelled.", "runtime.cancelled"),
     })
     expect(cancelled).toMatchObject({
       status: "cancelled",
       prompt: "Resolve txn_1.",
-      error: "Workflow cancelled.",
+      error: agentFailure("Workflow cancelled.", "runtime.cancelled"),
     })
     expect(
       (await storage.nodes.getById({ projectId: "my-app", id: execution.nodeRunId }))?.input

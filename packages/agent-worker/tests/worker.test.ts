@@ -1773,7 +1773,17 @@ describe("AgentWorker", () => {
       )
 
       expect(execution.status).toBe("failed")
-      expect(execution.error).toContain("deferred to durable recovery")
+      expect(execution.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: {
+          agentId: "workflow-usage-agent",
+          workflowId: "workflow-usage-test",
+          workflowRunId: "workflow-accounting-failure",
+          nodeRunId,
+        },
+      })
       await expect(
         runs.getById({ projectId: PROJECT_ID, id: "workflow-accounting-failure" })
       ).resolves.toMatchObject({ status: "failed" })
@@ -1857,7 +1867,17 @@ describe("AgentWorker", () => {
       )
 
       expect(execution.status).toBe("failed")
-      expect(execution.error).toContain("Could not preserve AI usage")
+      expect(execution.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: {
+          agentId: "workflow-usage-agent",
+          workflowId: "workflow-usage-test",
+          workflowRunId: "workflow-final-callback-failure",
+          nodeRunId,
+        },
+      })
       expect(modelCalls).toBe(1)
       expect(appendAttempts).toBe(4)
       expect(recoveryAttempts).toBe(4)
@@ -1889,7 +1909,17 @@ describe("AgentWorker", () => {
       )
 
       expect(execution.status).toBe("failed")
-      expect(execution.error).toContain("workflow node finalization unavailable")
+      expect(execution.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: {
+          agentId: "workflow-usage-agent",
+          workflowId: "workflow-usage-test",
+          workflowRunId: "workflow-finalization-failure",
+          nodeRunId,
+        },
+      })
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
           projectId: PROJECT_ID,
@@ -1939,11 +1969,24 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       await toolStarted
+      const cancelledAt = new Date()
+      const agentCancellationFailure = {
+        code: "runtime.cancelled",
+        message: "Execution was cancelled.",
+        retryable: false,
+        at: cancelledAt.toISOString(),
+        details: {
+          agentId: "workflow-usage-agent",
+          workflowId: "workflow-usage-test",
+          workflowRunId: runId,
+          nodeRunId,
+        },
+      } as const
       const workflowCancellationFailure = {
         code: "runtime.cancelled",
         message: "Execution was cancelled.",
         retryable: false,
-        at: new Date().toISOString(),
+        at: cancelledAt.toISOString(),
         details: {
           workflowId: "workflow-usage-test",
           workflowRunId: runId,
@@ -1956,7 +1999,7 @@ describe("AgentWorker", () => {
         await transactionalRuns.agentNodes.cancel({
           projectId: PROJECT_ID,
           nodeRunId,
-          error: "Workflow run cancelled.",
+          error: agentCancellationFailure,
         })
         await transactionalRuns.nodes.finish({
           projectId: PROJECT_ID,
@@ -3278,7 +3321,16 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("failed")
-      expect(run.error).toContain("deferred to durable recovery")
+      expect(run.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: {
+          agentId: "assistant",
+          runId: request.run.id,
+          threadId: request.run.threadId,
+        },
+      })
       const summary = await waitFor(
         async () => {
           const value = await aiUsage.summarizeExecution({
@@ -3415,7 +3467,16 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("failed")
-      expect(run.error).toContain("Could not preserve AI usage")
+      expect(run.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: {
+          agentId: "assistant",
+          runId: request.run.id,
+          threadId: request.run.threadId,
+        },
+      })
       expect(modelCalls).toBe(1)
       expect(appendAttempts).toBe(4)
       expect(recoveryAttempts).toBe(4)
@@ -4783,7 +4844,12 @@ describe("AgentWorker", () => {
         { label: "run failed" }
       )
       expect(run.status).toBe("failed")
-      expect(run.error).toBeDefined()
+      expect(run.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: { agentId: "assistant", runId: run.id, threadId },
+      })
+      expect(run.error?.at).toBe(run.completedAt?.toISOString())
       await reporter.flush()
       expect(reports).toHaveLength(1)
       expect(reports[0]?.error).toBe(originalError)
@@ -4846,7 +4912,7 @@ describe("AgentWorker", () => {
         { label: "run failed" }
       )
       expect(run.status).toBe("failed")
-      expect(run.error).toContain("sandbox provisioning unavailable")
+      expect(run.error?.message).toBe("An unexpected internal error occurred.")
 
       // The turn threw before finalizing, so no assistant message was persisted.
       const messages = await listMessages(storage, threadId)
@@ -5068,7 +5134,7 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("failed")
-      expect(run.error).toContain("turn budget")
+      expect(run.error?.message).toBe("An unexpected internal error occurred.")
       expect(
         (await listRunStreamRecords(sixb.broker, run.id)).find(
           (record) => record.name === "agent.run.finished"
@@ -5148,7 +5214,7 @@ describe("AgentWorker", () => {
         { label: "missing agent run failed" }
       )
       expect(failed).toMatchObject({ status: "failed", attempt: 0 })
-      expect(failed.error).toContain("not registered")
+      expect(failed.error?.message).toBe("An unexpected internal error occurred.")
       await reporter.flush()
       expect(reports).toHaveLength(1)
       expect(reports[0]?.error).toBeInstanceOf(AgentWorkerError)

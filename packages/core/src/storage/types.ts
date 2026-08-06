@@ -39,6 +39,7 @@ export { ActionRunError } from "./action-runs"
 export type {
   AgentMessageRecord,
   AgentRunExecution,
+  AgentRunFailureCode,
   AgentRunRecord,
   AgentStorage,
   AgentThreadRecord,
@@ -57,7 +58,7 @@ export type {
   ReclaimAgentRunInput,
   StartAgentRunInput,
 } from "./agents"
-export { AgentStorageError } from "./agents"
+export { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "./agents"
 export type {
   AiModelCallUsage,
   AiModelCallUsageInput,
