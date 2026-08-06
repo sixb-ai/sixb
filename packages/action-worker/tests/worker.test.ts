@@ -20,7 +20,6 @@ import { EventsRuntime } from "@sixb/core/internal/events"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import type { ActionRunRecord, ObjectRow } from "@sixb/core/storage"
 import { ActionWorker } from "../src"
-import { ActionWorkerError } from "../src/errors"
 import { waitFor } from "./helpers"
 
 const Device = defineObjectType({
@@ -79,6 +78,15 @@ function createSixb(actions: readonly ActionDefinition[]): TestSixb {
   })
 }
 
+function captureThrown(callback: () => unknown): unknown {
+  try {
+    callback()
+  } catch (error) {
+    return error
+  }
+  throw new Error("Expected callback to throw")
+}
+
 describe("ActionWorker", () => {
   test("idles without action definitions or action-run storage", async () => {
     const storage = createStorageWithoutActionRuns()
@@ -99,14 +107,14 @@ describe("ActionWorker", () => {
     await worker.stop()
   })
 
-  test("throws ActionWorkerError when action-run storage is missing", () => {
+  test("throws a coded internal error when action-run storage is missing", () => {
     const noop = defineAction("noop")
       .on(Device)
       .params({})
       .writeback(() => {})
     const storage = createStorageWithoutActionRuns()
 
-    expect(
+    const error = captureThrown(
       () =>
         new ActionWorker({
           id: "missing-action-runs",
@@ -123,10 +131,16 @@ describe("ActionWorker", () => {
             return actionId === "noop" ? noop : null
           },
         })
-    ).toThrow(ActionWorkerError)
+    )
+
+    expect(error).toMatchObject({
+      code: "internal.unexpected",
+      message: "[SixbActionWorker] Action workers require storage.actionRuns support.",
+      retryable: false,
+    })
   })
 
-  test("throws ActionWorkerError when blob storage is missing", () => {
+  test("throws a coded internal error when blob storage is missing", () => {
     const noop = defineAction("noop")
       .on(Device)
       .params({})
@@ -135,9 +149,12 @@ describe("ActionWorker", () => {
     const runtimeWithoutBlobStorage = Object.create(sixb) as TestSixb
     Object.defineProperty(runtimeWithoutBlobStorage, "blobStorage", { value: undefined })
 
-    expect(() => new ActionWorker(runtimeWithoutBlobStorage)).toThrow(
-      "Action worker runtime is missing sixb.blobStorage support."
-    )
+    const error = captureThrown(() => new ActionWorker(runtimeWithoutBlobStorage))
+    expect(error).toMatchObject({
+      code: "internal.unexpected",
+      message: "[SixbActionWorker] Action worker runtime is missing sixb.blobStorage support.",
+      retryable: false,
+    })
   })
 
   test("streams a run-scoped log line to the broker", async () => {

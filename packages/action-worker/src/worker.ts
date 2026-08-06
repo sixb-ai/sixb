@@ -1,10 +1,10 @@
 import type { ActionDefinition, DomainEventLog, Queues, Storage } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ActionRunRequestedQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
-import { ActionWorkerError } from "./errors"
 import { runActionJob } from "./run-action-job"
 import type {
   ActionJob,
@@ -74,12 +74,20 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
   ): Promise<void> {
     const context = this.context
     if (!context) {
-      throw new ActionWorkerError("No action definitions are registered.")
+      throw createSixbError(
+        "internal.unexpected",
+        "[SixbActionWorker] No action definitions are registered.",
+        { details: { actionId: claimed.job.payload.actionId, runId: claimed.job.payload.runId } }
+      )
     }
 
     const { job } = claimed
     if (job.type !== "action.run.requested") {
-      throw new ActionWorkerError(`Unsupported action job type '${job.type}'.`)
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbActionWorker] Unsupported action job type '${job.type}'.`,
+        { details: { actionId: job.payload.actionId, runId: job.payload.runId } }
+      )
     }
 
     const actionJob: ActionJob = {
@@ -159,7 +167,10 @@ async function emitActionTerminalEvent(
 function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
   const actionRunsStorage = sixb.storage.actionRuns
   if (!actionRunsStorage) {
-    throw new ActionWorkerError("Action workers require storage.actionRuns support.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbActionWorker] Action workers require storage.actionRuns support."
+    )
   }
   assertActionWorkerSixbFacade(sixb)
 
@@ -193,7 +204,10 @@ function assertActionWorkerSixbFacade(
   const candidate = sixb as Partial<Record<(typeof requiredFacadeMethods)[number], unknown>>
   for (const method of requiredFacadeMethods) {
     if (typeof candidate[method] !== "function") {
-      throw new ActionWorkerError(`Action worker runtime is missing sixb.${method}(...).`)
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbActionWorker] Action worker runtime is missing sixb.${method}(...).`
+      )
     }
   }
 
@@ -204,6 +218,9 @@ function assertActionWorkerSixbFacade(
     typeof blobStorage.open !== "function" ||
     typeof blobStorage.stat !== "function"
   ) {
-    throw new ActionWorkerError("Action worker runtime is missing sixb.blobStorage support.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbActionWorker] Action worker runtime is missing sixb.blobStorage support."
+    )
   }
 }

@@ -57,7 +57,10 @@ export async function runWritebackPhase(
           ...input.baseContext,
           sixb: toActionRuntimeFacade(input.runtime),
           read,
-          target: requireObjectTarget(input.objectTarget, input.action.id).snapshot,
+          target: requireObjectTarget(input.objectTarget, {
+            actionId: input.action.id,
+            runId: input.run.id,
+          }).snapshot,
         })
       : await handler({ ...input.baseContext, sixb: toActionRuntimeFacade(input.runtime), read })
     const result = normalizeWritebackResult(rawResult)
