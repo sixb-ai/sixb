@@ -13,6 +13,7 @@ import {
   type OntologySource,
   param,
   prop,
+  type SixbErrorContext,
   SixbHost,
 } from "@sixb/core"
 import { findActionEditCommit } from "@sixb/core/internal/actions"
@@ -259,11 +260,13 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error).toEqual({
-        name: "Error",
-        message: "external API failed",
-        phase: "writeback",
+      expect(result.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: { actionId: "failWriteback", runId: "act_1", phase: "writeback" },
       })
+      expect(result.error.at).toEqual(expect.any(String))
     }
 
     const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
@@ -781,8 +784,8 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error.message).toBe("[SixbActionWorker] Unknown action 'missingAction'.")
-      expect(result.error.phase).toBe("validation")
+      expect(result.error.message).toBe("An unexpected internal error occurred.")
+      expect(result.error.details.phase).toBe("validation")
     }
     const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
     expect(run?.status).toBe("failed")
@@ -823,8 +826,9 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error.name).toBe("ActionRunLeaseLostError")
-      expect(result.error.phase).toBe("validation")
+      expect(result.error.code).toBe("internal.unexpected")
+      expect(result.error.message).toBe("An unexpected internal error occurred.")
+      expect(result.error.details.phase).toBe("validation")
     }
     expect(invoked).toBe(0)
 
@@ -942,9 +946,9 @@ describe("runActionJob", () => {
       })
 
     const { host, sixb } = createSixb([setStatus])
-    let reportCount = 0
-    const reporter = attachSixbErrorReporter(sixb, () => {
-      reportCount += 1
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reporter = attachSixbErrorReporter(host, (error, context) => {
+      reports.push({ error, context })
     })
     await sixb.objects.upsert("Device", {
       id: "device-1",
@@ -971,13 +975,22 @@ describe("runActionJob", () => {
     expect(run?.effects).toMatchObject({
       status: "failed",
       error: {
-        name: "Error",
-        message: "notification failed",
-        phase: "effects",
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: { actionId: "setStatus", runId: "act_1", phase: "effects" },
       },
     })
     await reporter.flush()
-    expect(reportCount).toBe(0)
+    expect(reports).toHaveLength(1)
+    expect(reports[0]?.error.message).toBe("notification failed")
+    expect(reports[0]?.context).toMatchObject({
+      type: "action.phase.failed",
+      actionId: "setStatus",
+      runId: "act_1",
+      phase: "effects",
+      failure: run?.effects?.error,
+    })
   })
 
   test("does not report cancelled runs", async () => {
@@ -1022,6 +1035,14 @@ describe("runActionJob", () => {
     const result = await execution
 
     expect(result.status).toBe("cancelled")
+    if ("error" in result) {
+      expect(result.error).toMatchObject({
+        code: "runtime.cancelled",
+        message: "Execution was cancelled.",
+        retryable: false,
+        details: { actionId: "waitForCancel", runId: "act_cancelled", phase: "cancelled" },
+      })
+    }
     await reporter.flush()
     expect(reportCount).toBe(0)
   })
@@ -1057,10 +1078,8 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error.message).toBe(
-        "[SixbActionWorker] Action 'setStatus' is not valid for object type 'Sensor'."
-      )
-      expect(result.error.phase).toBe("validation")
+      expect(result.error.message).toBe("An unexpected internal error occurred.")
+      expect(result.error.details.phase).toBe("validation")
     }
     expect(invoked).toBe(0)
   })

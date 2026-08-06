@@ -27,6 +27,8 @@ export const sixb = createSixb({
     let failure: string
     if (context.type === "run.failed") {
       failure = `${context.run.kind} run '${context.run.runId}' failed`
+    } else if (context.type === "action.phase.failed") {
+      failure = `action '${context.actionId}' phase '${context.phase}' failed with ${context.failure.code}`
     } else if (context.type === "event.delivery.failed") {
       failure = `event delivery failed after ${context.attempts} attempt(s)`
     } else {

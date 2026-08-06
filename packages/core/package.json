@@ -95,6 +95,12 @@
       "import": "./dist/storage/action-runs/provider.js",
       "default": "./dist/storage/action-runs/provider.js"
     },
+    "./internal/action-run-storage": {
+      "types": "./dist/storage/action-runs/failure.d.ts",
+      "bun": "./src/storage/action-runs/failure.ts",
+      "import": "./dist/storage/action-runs/failure.js",
+      "default": "./dist/storage/action-runs/failure.js"
+    },
     "./internal/agents": {
       "types": "./dist/agents/index.d.ts",
       "bun": "./src/agents/index.ts",

@@ -1,3 +1,5 @@
+import type { ActionRunFailure } from "../storage/action-runs"
+
 /**
  * The failed unit of work, discriminated by primitive. Each variant carries the correlation its
  * primitive actually has, and there is exactly one variant per `SixbRunKind`.
@@ -65,6 +67,14 @@ export interface SixbRunFailedContext extends SixbFailureContext<"run.failed"> {
   readonly run: SixbFailedRun
 }
 
+/** A post-commit Action effects phase failed without changing the committed Action outcome. */
+export interface SixbActionPhaseFailedContext extends SixbFailureContext<"action.phase.failed"> {
+  readonly actionId: string
+  readonly runId: string
+  readonly phase: "effects"
+  readonly failure: ActionRunFailure<"effects">
+}
+
 /**
  * A batch of domain events never reached its subscribers.
  *
@@ -117,6 +127,7 @@ export interface SixbRuleEvaluationFailedContext
  * Failure notifications never change the outcome of the operation they observe.
  */
 export type SixbErrorContext =
+  | SixbActionPhaseFailedContext
   | SixbRunFailedContext
   | SixbEventDeliveryFailedContext
   | SixbRuleEvaluationFailedContext

@@ -1,6 +1,7 @@
 import type { JsonValue } from "@sixb/core"
 import { isObjectActionDefinition } from "@sixb/core"
 import type { ActionEditCommitResult } from "@sixb/core/internal/actions"
+import { reportActionPhaseFailure } from "@sixb/core/internal/error-reporting"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { toActionRunFailure } from "../normalize"
 import { type BasePhaseContext, requireObjectSubject, toActionRuntimeFacade } from "./context"
@@ -55,14 +56,27 @@ export async function runEffectsPhase(
     input.updateActiveRun(run)
     return run
   } catch (error) {
-    const failure = toActionRunFailure(error, "effects")
+    const completedAt = new Date()
+    const failure = toActionRunFailure(error, "effects", {
+      actionId: input.action.id,
+      runId: input.run.id,
+      at: completedAt,
+    })
     run = await input.runtime.actionRunsStorage.recordEffects({
       projectId: input.runtime.id,
       id: input.run.id,
       status: "failed",
+      completedAt,
       error: failure,
     })
     input.updateActiveRun(run)
+    reportActionPhaseFailure(input.runtime.errorReporterHost, error, {
+      projectId: input.runtime.id,
+      actionId: input.action.id,
+      runId: input.run.id,
+      phase: "effects",
+      failure,
+    })
     return run
   }
 }

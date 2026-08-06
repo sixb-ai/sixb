@@ -16680,27 +16680,57 @@
                           "error": {
                             "type": "object",
                             "properties": {
-                              "name": {
-                                "type": "string"
-                              },
-                              "message": {
-                                "type": "string"
-                              },
-                              "phase": {
+                              "code": {
                                 "type": "string",
                                 "enum": [
-                                  "request",
-                                  "enqueue",
-                                  "validation",
-                                  "writeback",
-                                  "edits",
-                                  "commit",
-                                  "effects",
-                                  "cancelled"
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "queue.enqueue_failed"
                                 ]
+                              },
+                              "message": {
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "type": "object",
+                                "properties": {
+                                  "actionId": {
+                                    "type": "string"
+                                  },
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "phase": {
+                                    "type": "string",
+                                    "enum": [
+                                      "request",
+                                      "enqueue",
+                                      "validation",
+                                      "writeback",
+                                      "edits",
+                                      "commit",
+                                      "effects",
+                                      "cancelled"
+                                    ]
+                                  }
+                                },
+                                "required": ["actionId", "runId", "phase"],
+                                "additionalProperties": false
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
                               }
                             },
-                            "required": ["message"],
+                            "required": ["code", "message", "retryable", "at", "details"],
                             "additionalProperties": false
                           }
                         },
@@ -16866,27 +16896,57 @@
                     "error": {
                       "type": "object",
                       "properties": {
-                        "name": {
-                          "type": "string"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "phase": {
+                        "code": {
                           "type": "string",
                           "enum": [
-                            "request",
-                            "enqueue",
-                            "validation",
-                            "writeback",
-                            "edits",
-                            "commit",
-                            "effects",
-                            "cancelled"
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "queue.enqueue_failed"
                           ]
+                        },
+                        "message": {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        },
+                        "at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "details": {
+                          "type": "object",
+                          "properties": {
+                            "actionId": {
+                              "type": "string"
+                            },
+                            "runId": {
+                              "type": "string"
+                            },
+                            "phase": {
+                              "type": "string",
+                              "enum": [
+                                "request",
+                                "enqueue",
+                                "validation",
+                                "writeback",
+                                "edits",
+                                "commit",
+                                "effects",
+                                "cancelled"
+                              ]
+                            }
+                          },
+                          "required": ["actionId", "runId", "phase"],
+                          "additionalProperties": false
+                        },
+                        "truncated": {
+                          "type": "boolean",
+                          "enum": [true]
                         }
                       },
-                      "required": ["message"],
+                      "required": ["code", "message", "retryable", "at", "details"],
                       "additionalProperties": false
                     },
                     "params": {
@@ -16894,85 +16954,185 @@
                       "additionalProperties": {}
                     },
                     "writeback": {
-                      "type": "object",
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "enum": ["succeeded", "failed"]
-                        },
-                        "completedAt": {
-                          "type": "string"
-                        },
-                        "result": {},
-                        "error": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "name": {
-                              "type": "string"
-                            },
-                            "message": {
-                              "type": "string"
-                            },
-                            "phase": {
+                            "status": {
                               "type": "string",
-                              "enum": [
-                                "request",
-                                "enqueue",
-                                "validation",
-                                "writeback",
-                                "edits",
-                                "commit",
-                                "effects",
-                                "cancelled"
+                              "enum": ["succeeded"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "result": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
                               ]
                             }
                           },
-                          "required": ["message"],
+                          "required": ["status", "completedAt", "result"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["failed"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "internal.unexpected",
+                                    "runtime.cancelled",
+                                    "queue.enqueue_failed"
+                                  ]
+                                },
+                                "message": {
+                                  "type": "string",
+                                  "maxLength": 4096
+                                },
+                                "retryable": {
+                                  "type": "boolean"
+                                },
+                                "at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "details": {
+                                  "type": "object",
+                                  "properties": {
+                                    "actionId": {
+                                      "type": "string"
+                                    },
+                                    "runId": {
+                                      "type": "string"
+                                    },
+                                    "phase": {
+                                      "type": "string",
+                                      "enum": ["writeback"]
+                                    }
+                                  },
+                                  "required": ["actionId", "runId", "phase"],
+                                  "additionalProperties": false
+                                },
+                                "truncated": {
+                                  "type": "boolean",
+                                  "enum": [true]
+                                }
+                              },
+                              "required": ["code", "message", "retryable", "at", "details"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": ["status", "completedAt", "error"],
                           "additionalProperties": false
                         }
-                      },
-                      "required": ["status", "completedAt"],
-                      "additionalProperties": false
+                      ]
                     },
                     "effects": {
-                      "type": "object",
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "enum": ["succeeded", "failed"]
-                        },
-                        "completedAt": {
-                          "type": "string"
-                        },
-                        "error": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "name": {
-                              "type": "string"
-                            },
-                            "message": {
-                              "type": "string"
-                            },
-                            "phase": {
+                            "status": {
                               "type": "string",
-                              "enum": [
-                                "request",
-                                "enqueue",
-                                "validation",
-                                "writeback",
-                                "edits",
-                                "commit",
-                                "effects",
-                                "cancelled"
-                              ]
+                              "enum": ["succeeded"]
+                            },
+                            "completedAt": {
+                              "type": "string"
                             }
                           },
-                          "required": ["message"],
+                          "required": ["status", "completedAt"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["failed"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "internal.unexpected",
+                                    "runtime.cancelled",
+                                    "queue.enqueue_failed"
+                                  ]
+                                },
+                                "message": {
+                                  "type": "string",
+                                  "maxLength": 4096
+                                },
+                                "retryable": {
+                                  "type": "boolean"
+                                },
+                                "at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "details": {
+                                  "type": "object",
+                                  "properties": {
+                                    "actionId": {
+                                      "type": "string"
+                                    },
+                                    "runId": {
+                                      "type": "string"
+                                    },
+                                    "phase": {
+                                      "type": "string",
+                                      "enum": ["effects"]
+                                    }
+                                  },
+                                  "required": ["actionId", "runId", "phase"],
+                                  "additionalProperties": false
+                                },
+                                "truncated": {
+                                  "type": "boolean",
+                                  "enum": [true]
+                                }
+                              },
+                              "required": ["code", "message", "retryable", "at", "details"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": ["status", "completedAt", "error"],
                           "additionalProperties": false
                         }
-                      },
-                      "required": ["status", "completedAt"],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "required": [

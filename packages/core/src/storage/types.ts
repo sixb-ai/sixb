@@ -23,6 +23,7 @@ export type {
 } from "../materialization/model"
 export type {
   ActionRunFailure,
+  ActionRunFailureCode,
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
@@ -35,7 +36,7 @@ export type {
   QueueActionRunInput,
   StartActionRunInput,
 } from "./action-runs"
-export { ActionRunError } from "./action-runs"
+export { ACTION_RUN_FAILURE_CODES, ACTION_RUN_PHASES, ActionRunError } from "./action-runs"
 export type {
   AgentMessageRecord,
   AgentRunExecution,

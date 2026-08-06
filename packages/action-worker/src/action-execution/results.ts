@@ -3,6 +3,7 @@ import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { ActionRunFailure, ActionRunRecord } from "@sixb/core/storage"
 import { isTerminalActionRun } from "@sixb/core/storage"
 import { ActionWorkerError } from "../errors"
+import { toActionRunFailure } from "../normalize"
 import type { ActionRunResult, RunActionJobInput } from "../types"
 
 export function requireFinishedAt(runId: string, finishedAt: Date | undefined): Date {
@@ -70,12 +71,13 @@ async function resolveRunningRunUnderFence(input: RunActionJobInput, run: Action
         return { kind: "resume" as const, run: locked }
       }
 
-      const failure = redeliveryFailure(input.job.id, locked)
+      const failedAt = new Date()
+      const failure = redeliveryFailure(input.job.id, locked, failedAt)
       const finished = await storage.actionRuns.finish({
         projectId: input.runtime.id,
         id: input.job.id,
         status: "failed",
-        phase: failure.phase,
+        finishedAt: failedAt,
         error: failure,
       })
       return { kind: "failed" as const, run: finished, failure }
@@ -102,12 +104,19 @@ export function failedResult(
   }
 }
 
-function redeliveryFailure(runId: string, run: ActionRunRecord): ActionRunFailure {
-  return {
-    name: "ActionRunLeaseLostError",
-    message: `Action run '${runId}' was redelivered while already running. The previous worker may have lost its queue lease or crashed before reaching a resumable phase boundary.`,
-    phase: run.phase ?? "validation",
-  }
+function redeliveryFailure(runId: string, run: ActionRunRecord, failedAt: Date): ActionRunFailure {
+  return toActionRunFailure(
+    {
+      name: "ActionRunLeaseLostError",
+      message: `Action run '${runId}' was redelivered while already running. The previous worker may have lost its queue lease or crashed before reaching a resumable phase boundary.`,
+    },
+    run.phase ?? "validation",
+    {
+      actionId: run.actionId,
+      runId,
+      at: failedAt,
+    }
+  )
 }
 
 function reportRedeliveryFailure(input: RunActionJobInput, run: ActionRunRecord): void {

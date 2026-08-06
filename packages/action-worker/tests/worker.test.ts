@@ -309,7 +309,7 @@ describe("ActionWorker", () => {
       actionId: "fail",
     })
     expect(failed.status).toBe("failed")
-    expect(failed.error?.message).toBe("writeback failed")
+    expect(failed.error?.message).toBe("An unexpected internal error occurred.")
 
     await worker.stop()
   })

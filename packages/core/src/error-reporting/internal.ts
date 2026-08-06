@@ -1,9 +1,11 @@
 export {
   attachSixbErrorReporter,
   flushSixbErrors,
+  type ReportActionPhaseFailureInput,
   type ReportEventDeliveryFailureInput,
   type ReportRuleEvaluationFailureInput,
   type ReportRunFailureInput,
+  reportActionPhaseFailure,
   reportEventDeliveryFailure,
   reportRuleEvaluationFailure,
   reportRunFailure,

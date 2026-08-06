@@ -44,6 +44,9 @@ import projectionFailureRecordSql from "./migrations/015-projection-failure-reco
 import webhookRunFailureRecordSql from "./migrations/016-webhook-run-failure-record.sql" with {
   type: "text",
 }
+import actionFailureRecordSql from "./migrations/017-action-failure-record.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -80,6 +83,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("014-agent-failure-record", agentFailureRecordSql),
     sqliteSql("015-projection-failure-record", projectionFailureRecordSql),
     sqliteSql("016-webhook-run-failure-record", webhookRunFailureRecordSql),
+    sqliteSql("017-action-failure-record", actionFailureRecordSql),
   ],
 })
 

@@ -1,7 +1,27 @@
 import { describe, expect, test } from "bun:test"
-import type { QueueActionRunInput } from "../src/storage"
+import type { ActionRunFailure, ActionRunPhase, QueueActionRunInput } from "../src/storage"
 import { ActionRunError, InMemoryStorage } from "../src/storage"
 import { createTestActionExecution, queueTestActionRun } from "../src/testing"
+
+const FAILURE_AT = "2026-04-29T10:00:00.000Z"
+
+function actionFailure<TPhase extends ActionRunPhase>(
+  phase: TPhase,
+  message: string
+): ActionRunFailure<TPhase> {
+  return {
+    code:
+      phase === "cancelled"
+        ? "runtime.cancelled"
+        : phase === "enqueue"
+          ? "queue.enqueue_failed"
+          : "internal.unexpected",
+    message,
+    retryable: phase === "enqueue",
+    at: FAILURE_AT,
+    details: { actionId: "sendQuote", runId: "act_1", phase },
+  }
+}
 
 function createActionRunFixture() {
   const provider = new InMemoryStorage()
@@ -163,10 +183,7 @@ describe("InMemoryActionRunStorage", () => {
         id: "missing",
         projectId: "my-app",
         status: "failed",
-        error: {
-          message: "boom",
-          phase: "validation",
-        },
+        error: actionFailure("validation", "boom"),
       })
     ).rejects.toBeInstanceOf(ActionRunError)
   })
@@ -190,10 +207,7 @@ describe("InMemoryActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       status: "failed",
-      error: {
-        message: "writeback failed",
-        phase: "writeback",
-      },
+      error: actionFailure("writeback", "writeback failed"),
     })
 
     await expect(
@@ -226,11 +240,7 @@ describe("InMemoryActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       status: "failed",
-      error: {
-        name: "FetchError",
-        message: "TeamLeader API returned 503 Service Unavailable",
-        phase: "writeback",
-      },
+      error: actionFailure("writeback", "TeamLeader API returned 503 Service Unavailable"),
     })
 
     await queue({
@@ -279,11 +289,9 @@ describe("InMemoryActionRunStorage", () => {
       projectId: "my-app",
       id: "act_1",
     })
-    expect(failed?.error).toEqual({
-      name: "FetchError",
-      message: "TeamLeader API returned 503 Service Unavailable",
-      phase: "writeback",
-    })
+    expect(failed?.error).toEqual(
+      actionFailure("writeback", "TeamLeader API returned 503 Service Unavailable")
+    )
   })
 
   test("records V2 lifecycle records without failing committed actions on effects errors", async () => {
@@ -320,19 +328,11 @@ describe("InMemoryActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       status: "failed",
-      error: {
-        name: "SlackError",
-        message: "Slack timed out",
-        phase: "effects",
-      },
+      error: actionFailure("effects", "Slack timed out"),
     })
     expect(effects.effects).toMatchObject({
       status: "failed",
-      error: {
-        name: "SlackError",
-        message: "Slack timed out",
-        phase: "effects",
-      },
+      error: actionFailure("effects", "Slack timed out"),
     })
 
     const finished = await storage.finish({

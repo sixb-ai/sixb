@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { migrateStorage } from "@sixb/core"
+import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
   AGENT_RUN_FAILURE_CODES,
@@ -137,6 +138,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 16,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "017-action-failure-record",
+    status: "applied",
+    version: 17,
+  },
 ]
 
 afterEach(async () => {
@@ -252,6 +260,15 @@ describe("SQLite storage migrations", () => {
 
         INSERT INTO executions (
           project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+        ) VALUES (
+          'project-a', 'execution-action-legacy', 'action', 'action-legacy', 'event',
+          'event-action-legacy', 'correlation-action-legacy', 'trustedPrimitive', 'action',
+          'approve', '2026-08-10T12:00:00.000Z'
+        );
+
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
           authority_kind, created_at
         ) VALUES (
           'project-a', 'execution-agent-parent-legacy', 'request',
@@ -329,6 +346,21 @@ describe("SQLite storage migrations", () => {
           'project-a', 'webhook-legacy', 'github', 'events', 'failed', 'POST', '/hooks/github',
           '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z',
           'secret webhook diagnostic'
+        );
+
+        INSERT INTO action_runs (
+          project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
+          finished_at, params, idempotency_key, writeback_status, writeback_completed_at,
+          writeback_error_name, writeback_error_message, writeback_error_phase, effects_status,
+          effects_completed_at, effects_error_name, effects_error_message, effects_error_phase,
+          error_name, error_message, error_phase
+        ) VALUES (
+          'project-a', 'action-legacy', 'execution-action-legacy', 'approve', 'none', 'failed',
+          'effects', '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z', '{}',
+          'action-legacy', 'failed', '2026-08-10T12:00:30.000Z', 'WritebackError',
+          'secret writeback diagnostic', 'writeback', 'failed', '2026-08-10T12:00:45.000Z',
+          'EffectsError', 'secret effects diagnostic', 'effects', 'ActionError',
+          'secret Action diagnostic', 'effects'
         );
       `)
 
@@ -475,6 +507,26 @@ describe("SQLite storage migrations", () => {
         },
       })
       expect(JSON.stringify(webhookFailure)).not.toContain("secret webhook diagnostic")
+
+      const actionRow = db
+        .query("SELECT error, writeback_error, effects_error FROM action_runs WHERE id = ?")
+        .get("action-legacy") as {
+        readonly error: string
+        readonly writeback_error: string
+        readonly effects_error: string
+      }
+      expect(parseActionRunFailure(actionRow.error)).toMatchObject({
+        code: "internal.unexpected",
+        details: { actionId: "approve", runId: "action-legacy", phase: "effects" },
+      })
+      expect(parseActionRunFailure(actionRow.writeback_error, "writeback")).toMatchObject({
+        details: { actionId: "approve", runId: "action-legacy", phase: "writeback" },
+      })
+      expect(parseActionRunFailure(actionRow.effects_error, "effects")).toMatchObject({
+        details: { actionId: "approve", runId: "action-legacy", phase: "effects" },
+      })
+      expect(JSON.stringify(actionRow)).not.toContain("secret")
+      expect(readMemoryTableColumns(db, "action_runs")).not.toContain("error_phase")
     } finally {
       db.close()
     }
