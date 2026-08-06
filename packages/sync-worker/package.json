@@ -1,6 +1,6 @@
 {
   "name": "@sixb/sync-worker",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Worker that runs Sixb syncs",
   "keywords": [
     "sixb",

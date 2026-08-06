@@ -222,8 +222,8 @@ independently against the same durable providers.
 
 ## Status
 
-Sixb is currently `0.1.0`, the first minimally stable and tested release promoted to npm's
-`latest` tag. APIs may change between minor releases, and database upgrades may require manual
+Sixb core is currently `0.1.1`. Packages are versioned independently and publish only when they
+change. APIs may change between minor releases, and database upgrades may require manual
 migration before 1.0. See the [changelog](CHANGELOG.md) for compatibility notes.
 
 ## Contributing

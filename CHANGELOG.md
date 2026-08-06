@@ -1,6 +1,24 @@
 # Changelog
 
-All Sixb packages ship on one version. A release publishes all of them or none.
+Sixb packages are versioned independently. Each release entry names the packages that shipped.
+
+## 2026-08-05
+
+### 0.1.1
+
+- `@sixb/core` and `@sixb/agent-worker`: define reusable agent tools and run the tools selected by
+  each agent.
+- `@sixb/connector-github`: add users, memberships, members, invitations, and outside collaborators.
+- `@sixb/sync-worker`, `@sixb/pg`, and `@sixb/sqlite`: handle empty initial snapshots without
+  creating an unusable dataset version.
+
+### `@sixb/connector-exa` 0.1.0
+
+Add bounded web search and fetch tools as a new connector package.
+
+### `@sixb/connector-google` 0.1.1
+
+Add the complete typed Gmail v1 surface.
 
 ## 0.1.0
 

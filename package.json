@@ -19,6 +19,7 @@
     "build:js": "bun --filter './packages/*' --filter './auth/*' --filter './connectors/*' --filter './broker/*' --filter './loggers/*' --filter './queues/*' --filter './sandboxes/*' --filter './storage/*' build",
     "build:clean": "rm -rf {packages,auth,connectors,broker,queues,sandboxes,storage,loggers}/*/{dist,.tsbuild} examples/*/.sixb",
     "release": "bun install --frozen-lockfile && bun run build && bun run test:publish",
+    "release:plan": "bun scripts/publish.ts --plan",
     "release:publish": "bun scripts/publish.ts",
     "dev": "bun sixb dev",
     "test": "bun test --parallel=2",

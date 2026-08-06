@@ -19,7 +19,6 @@ import {
 const root = process.cwd()
 const packages = await discoverPublishablePackages(root)
 
-assertLockstepVersions(packages)
 await assertSourceAliasesMirrorExports(packages)
 
 // A cycle makes the release unpublishable, because a package cannot go to the registry before
@@ -33,29 +32,6 @@ for (const packageInfo of packages) {
 }
 
 console.log(`[SixbPublish] Verified ${packages.length} publishable packages.`)
-
-/**
- * Every package ships on one train. A stray version means a `workspace:*` dependency resolves to
- * a version its sibling never published, which only shows up as an install failure downstream.
- */
-function assertLockstepVersions(all: PublishablePackage[]): void {
-  const byVersion = new Map<string, string[]>()
-  for (const packageInfo of all) {
-    const version = packageInfo.packageJson.version
-    if (!version) {
-      throw new Error(`[SixbPublish] ${packageName(packageInfo)} has no version.`)
-    }
-    byVersion.set(version, [...(byVersion.get(version) ?? []), packageName(packageInfo)])
-  }
-
-  if (byVersion.size <= 1) return
-
-  const detail = [...byVersion.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([version, names]) => `  ${version}: ${names.join(", ")}`)
-    .join("\n")
-  throw new Error(`[SixbPublish] Publishable packages must share one version.\n${detail}`)
-}
 
 /**
  * The root `paths` map and `exports.bun` must name the same file for every source-first subpath.
@@ -91,6 +67,10 @@ async function assertSourceAliasesMirrorExports(all: PublishablePackage[]): Prom
 function validatePackage(packageInfo: PublishablePackage): void {
   const name = packageName(packageInfo)
   const { packageJson } = packageInfo
+
+  if (!packageJson.version?.trim()) {
+    throw new Error(`[SixbPublish] ${name} has no version.`)
+  }
 
   // Command packages can expose supported utility subpaths without exposing an
   // importable package root. They do not need root main/types entries.
