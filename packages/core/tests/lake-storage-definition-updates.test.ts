@@ -11,6 +11,7 @@ describe("dataset definition update planning", () => {
   test("returns no change for an unchanged definition", () => {
     const dataset = defineDataset("raw.erp.invoices", {
       schema: [col("invoiceId", "string"), col("total", "int64")],
+      primaryKey: "invoiceId",
     })
 
     expect(planDatasetDefinitionUpdate(dataset, dataset)).toMatchObject({
@@ -23,10 +24,12 @@ describe("dataset definition update planning", () => {
 
   test("ignores declaration reordering for existing columns", () => {
     const existing = defineDataset("raw.erp.invoices", {
-      schema: [col("invoiceId", "string"), col("total", "int64")],
+      schema: [col("invoiceId", "string"), col("tenantId", "string"), col("total", "int64")],
+      primaryKey: ["tenantId", "invoiceId"],
     })
     const requested = defineDataset("raw.erp.invoices", {
-      schema: [col("total", "int64"), col("invoiceId", "string")],
+      schema: [col("total", "int64"), col("tenantId", "string"), col("invoiceId", "string")],
+      primaryKey: ["tenantId", "invoiceId"],
     })
 
     expect(planDatasetDefinitionUpdate(existing, requested)).toMatchObject({
@@ -39,6 +42,7 @@ describe("dataset definition update planning", () => {
   test("allows adding nullable columns anywhere in the requested definition", () => {
     const existing = defineDataset("raw.erp.invoices", {
       schema: [col("invoiceId", "string"), col("total", "int64")],
+      primaryKey: "invoiceId",
     })
     const requested = defineDataset("raw.erp.invoices", {
       schema: [
@@ -47,6 +51,7 @@ describe("dataset definition update planning", () => {
         col("total", "int64"),
         col("memo", "string", { nullable: true }),
       ],
+      primaryKey: "invoiceId",
     })
 
     expect(planDatasetDefinitionUpdate(existing, requested)).toMatchObject({
@@ -57,6 +62,7 @@ describe("dataset definition update planning", () => {
           col("currency", "string", { nullable: true }),
           col("memo", "string", { nullable: true }),
         ],
+        primaryKey: "invoiceId",
       }),
       schema: {
         kind: "addNullableColumns",
@@ -67,6 +73,38 @@ describe("dataset definition update planning", () => {
       },
       changed: true,
     })
+  })
+
+  test("rejects adding, removing, changing, or reordering a primary key", () => {
+    // Regression guard: removing assertPrimaryKeyUnchanged from the planner makes these
+    // incompatible definitions succeed.
+    const schema = [col("tenantId", "string"), col("invoiceId", "string")] as const
+    const unkeyed = defineDataset("raw.erp.invoices", { schema })
+    const singleKey = defineDataset("raw.erp.invoices", {
+      schema,
+      primaryKey: "invoiceId",
+    })
+    const changedSingleKey = defineDataset("raw.erp.invoices", {
+      schema,
+      primaryKey: "tenantId",
+    })
+    const compositeKey = defineDataset("raw.erp.invoices", {
+      schema,
+      primaryKey: ["tenantId", "invoiceId"],
+    })
+    const reorderedCompositeKey = defineDataset("raw.erp.invoices", {
+      schema,
+      primaryKey: ["invoiceId", "tenantId"],
+    })
+
+    expect(() => planDatasetDefinitionUpdate(unkeyed, singleKey)).toThrow("incompatible primaryKey")
+    expect(() => planDatasetDefinitionUpdate(singleKey, unkeyed)).toThrow("incompatible primaryKey")
+    expect(() => planDatasetDefinitionUpdate(singleKey, changedSingleKey)).toThrow(
+      "incompatible primaryKey"
+    )
+    expect(() => planDatasetDefinitionUpdate(compositeKey, reorderedCompositeKey)).toThrow(
+      "incompatible primaryKey"
+    )
   })
 
   test("detects compatible metadata additions", () => {

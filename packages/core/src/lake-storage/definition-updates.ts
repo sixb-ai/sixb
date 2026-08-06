@@ -36,6 +36,7 @@ export function planDatasetDefinitionUpdate(
   requested: DatasetDefinition
 ): DatasetDefinitionUpdatePlan {
   assertSameDataset(existing, requested)
+  assertPrimaryKeyUnchanged(existing, requested)
 
   const addedColumns = getAddedColumnsAfterValidatingExistingColumns(existing, requested)
   assertAddedColumnsAreNullable(requested.id, addedColumns)
@@ -94,6 +95,24 @@ function assertSameDataset(existing: DatasetDefinition, requested: DatasetDefini
   if (existing.id !== requested.id) {
     throw new LakeStorageError(
       `[SixbLake] Cannot update dataset '${existing.id}' with definition for '${requested.id}'.`
+    )
+  }
+}
+
+function assertPrimaryKeyUnchanged(
+  existing: DatasetDefinition,
+  requested: DatasetDefinition
+): void {
+  const existingPrimaryKey = existing.primaryKey
+  const requestedPrimaryKey = requested.primaryKey
+  const unchanged =
+    existingPrimaryKey === undefined || requestedPrimaryKey === undefined
+      ? existingPrimaryKey === requestedPrimaryKey
+      : areDefinitionValuesEqual(existingPrimaryKey, requestedPrimaryKey)
+
+  if (!unchanged) {
+    throw new LakeStorageError(
+      `[SixbLake] Dataset '${requested.id}' cannot be redefined with an incompatible primaryKey. Primary keys are immutable.`
     )
   }
 }
@@ -193,6 +212,7 @@ function mergeDatasetDefinition(
   )
 
   const columns = [...cloneColumns(existing.schema.columns), ...cloneColumns(addedColumns)]
+  const primaryKey = existing.primaryKey
   const partitionBy = requested.partitionBy ?? existing.partitionBy
   const description = requested.description ?? existing.description
 
@@ -200,6 +220,7 @@ function mergeDatasetDefinition(
     kind: "dataset",
     id: requested.id,
     schema: { columns },
+    ...(primaryKey !== undefined ? { primaryKey: structuredClone(primaryKey) } : {}),
     ...(partitionBy !== undefined ? { partitionBy: [...partitionBy] } : {}),
     ...(description !== undefined ? { description } : {}),
   }

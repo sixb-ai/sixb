@@ -12,6 +12,7 @@ import {
   setupDuckLake,
 } from "../src/internal/duckdb-runtime"
 import { encodeDatasetTableName } from "../src/internal/names"
+import { quoteSqlString } from "../src/internal/sql"
 import { createLocalDuckLakeStorage, localDuckLakeOptions } from "./test-utils"
 
 interface DuckLakeStorageInternals {
@@ -87,6 +88,148 @@ describe("DuckLakeStorage dataset metadata", () => {
     expect(await storage.getDataset("raw.erp.orders")).toEqual(ordersDataset)
     expect(await storage.getDataset("missing.dataset")).toBeNull()
     expect(await storage.listDatasets()).toEqual([ordersDataset])
+  })
+
+  test("persists and reconstructs ordered primary-key column comments", async () => {
+    // Regression guard: removing the column comments or their catalog join loses primaryKey on
+    // the first metadata read.
+    const dataset = defineDataset("raw.erp.keyed_invoices", {
+      schema: [col("tenantId", "string"), col("invoiceId", "string"), col("status", "string")],
+      primaryKey: ["invoiceId", "tenantId"],
+    })
+
+    await expect(storage.createDataset(dataset)).resolves.toEqual(dataset)
+    await expect(storage.getDataset(dataset.id)).resolves.toEqual(dataset)
+    await expect(storage.listDatasets()).resolves.toEqual([dataset])
+    await expect(storage.createDataset(dataset)).resolves.toEqual(dataset)
+    await expect(storage.listVersions(dataset.id)).resolves.toEqual([])
+
+    const runtime = await runtimeForStorage(storage)
+    const tableName = encodeDatasetTableName(dataset.id)
+    const comments = await runtime.query(`
+      SELECT column_name, comment
+      FROM duckdb_columns()
+      WHERE database_name = 'sixb_lake'
+        AND schema_name = 'main'
+        AND table_name = ${quoteSqlString(tableName)}
+      ORDER BY column_index
+    `)
+    expect(comments).toEqual([
+      { column_name: "tenantId", comment: "sixb:primary-key:v1:1" },
+      { column_name: "invoiceId", comment: "sixb:primary-key:v1:0" },
+      { column_name: "status", comment: null },
+    ])
+
+    await storage.close()
+    storage = createLocalDuckLakeStorage(rootDir)
+
+    await expect(storage.getDataset(dataset.id)).resolves.toEqual(dataset)
+    await expect(storage.listDatasets()).resolves.toEqual([dataset])
+    await expect(storage.createDataset(dataset)).resolves.toEqual(dataset)
+    await expect(storage.listVersions(dataset.id)).resolves.toEqual([])
+  })
+
+  test("atomically creates every part of a dataset definition", async () => {
+    // Regression guard: removing BEGIN TRANSACTION leaves the table and earlier metadata behind
+    // when the injected final partition statement fails.
+    const dataset = defineDataset("raw.erp.atomic_definition", {
+      schema: [col("tenantId", "string"), col("invoiceId", "string"), col("orderDate", "date")],
+      primaryKey: ["invoiceId", "tenantId"],
+      partitionBy: ["orderDate"],
+      description: "Atomic ERP invoices",
+    })
+    const runtime = await runtimeForStorage(storage)
+    const injected = failNextExclusiveRun(runtime, (sql) => sql.startsWith("ALTER TABLE "))
+
+    await expect(storage.createDataset(dataset)).rejects.toThrow("injected DDL failure")
+    injected.restore()
+
+    expect(injected.statements[0]).toBe("BEGIN TRANSACTION")
+    expect(injected.statements.some((sql) => sql.startsWith("CREATE TABLE "))).toBe(true)
+    expect(injected.statements.some((sql) => sql.startsWith("COMMENT ON TABLE "))).toBe(true)
+    expect(injected.statements.filter((sql) => sql.startsWith("COMMENT ON COLUMN "))).toHaveLength(
+      2
+    )
+    expect(injected.statements.some((sql) => sql.startsWith("ALTER TABLE "))).toBe(true)
+    expect(injected.statements).not.toContain("COMMIT")
+    expect(injected.statements.at(-1)).toBe("ROLLBACK")
+
+    await expect(storage.getDataset(dataset.id)).resolves.toBeNull()
+    await expect(storage.listDatasets()).resolves.toEqual([])
+    await expect(storage.listVersions(dataset.id)).resolves.toEqual([])
+
+    await expect(storage.createDataset(dataset)).resolves.toEqual(dataset)
+    await expect(storage.getDataset(dataset.id)).resolves.toEqual(dataset)
+    await expect(storage.listVersions(dataset.id)).resolves.toEqual([])
+  })
+
+  test("rejects corrupt reserved primary-key column comments", async () => {
+    const malformedId = "raw.erp.key_metadata_malformed"
+    const duplicateId = "raw.erp.key_metadata_duplicate"
+    const gapId = "raw.erp.key_metadata_gap"
+    const nullableId = "raw.erp.key_metadata_nullable"
+    const nonStringId = "raw.erp.key_metadata_non_string"
+    const runtime = await createDuckDbRuntime()
+
+    try {
+      await setupDuckLake(runtime, localDuckLakeOptions(rootDir))
+
+      const malformedTable = encodeDatasetTableName(malformedId)
+      await runtime.run(`CREATE TABLE sixb_lake.main.${malformedTable} (id VARCHAR NOT NULL)`)
+      await runtime.run(
+        `COMMENT ON COLUMN sixb_lake.main.${malformedTable}.id IS 'sixb:primary-key:v2:0'`
+      )
+
+      const duplicateTable = encodeDatasetTableName(duplicateId)
+      await runtime.run(
+        `CREATE TABLE sixb_lake.main.${duplicateTable} (tenantId VARCHAR NOT NULL, invoiceId VARCHAR NOT NULL)`
+      )
+      await runtime.run(
+        `COMMENT ON COLUMN sixb_lake.main.${duplicateTable}.tenantId IS 'sixb:primary-key:v1:0'`
+      )
+      await runtime.run(
+        `COMMENT ON COLUMN sixb_lake.main.${duplicateTable}.invoiceId IS 'sixb:primary-key:v1:0'`
+      )
+
+      const gapTable = encodeDatasetTableName(gapId)
+      await runtime.run(
+        `CREATE TABLE sixb_lake.main.${gapTable} (tenantId VARCHAR NOT NULL, invoiceId VARCHAR NOT NULL)`
+      )
+      await runtime.run(
+        `COMMENT ON COLUMN sixb_lake.main.${gapTable}.tenantId IS 'sixb:primary-key:v1:0'`
+      )
+      await runtime.run(
+        `COMMENT ON COLUMN sixb_lake.main.${gapTable}.invoiceId IS 'sixb:primary-key:v1:2'`
+      )
+
+      const nullableTable = encodeDatasetTableName(nullableId)
+      await runtime.run(`CREATE TABLE sixb_lake.main.${nullableTable} (id VARCHAR)`)
+      await runtime.run(
+        `COMMENT ON COLUMN sixb_lake.main.${nullableTable}.id IS 'sixb:primary-key:v1:0'`
+      )
+
+      const nonStringTable = encodeDatasetTableName(nonStringId)
+      await runtime.run(`CREATE TABLE sixb_lake.main.${nonStringTable} (id BIGINT NOT NULL)`)
+      await runtime.run(
+        `COMMENT ON COLUMN sixb_lake.main.${nonStringTable}.id IS 'sixb:primary-key:v1:0'`
+      )
+    } finally {
+      await runtime.close()
+    }
+
+    await expect(storage.getDataset(malformedId)).rejects.toThrow("malformed primary-key metadata")
+    await expect(storage.getDataset(duplicateId)).rejects.toThrow(
+      "duplicate primary-key ordinal '0'"
+    )
+    await expect(storage.getDataset(gapId)).rejects.toThrow(
+      "primary-key ordinals must be contiguous from 0"
+    )
+    await expect(storage.getDataset(nullableId)).rejects.toThrow(
+      "primary-key column 'id' must not be nullable"
+    )
+    await expect(storage.getDataset(nonStringId)).rejects.toThrow(
+      "primary-key column 'id' must map to type 'string'"
+    )
   })
 
   test("preserves compatible definitions and rejects incompatible definitions", async () => {
@@ -223,6 +366,7 @@ describe("DuckLakeStorage dataset metadata", () => {
           col("metadata", "json", { nullable: true }),
           col("attachment", "fileRef", { nullable: true }),
         ],
+        primaryKey: "id",
       })
       await storage.createDataset(dataset)
       definitions.push(dataset)
@@ -268,6 +412,7 @@ describe("DuckLakeStorage dataset metadata", () => {
   test("applies schema evolution and partition changes in one definition update", async () => {
     const initialDataset = defineDataset("raw.erp.schema_partition_policy", {
       schema: [col("orderId", "string"), col("orderDate", "date")],
+      primaryKey: "orderId",
     })
     const evolvedPartitionedDataset = defineDataset("raw.erp.schema_partition_policy", {
       schema: [
@@ -275,6 +420,7 @@ describe("DuckLakeStorage dataset metadata", () => {
         col("orderDate", "date"),
         col("currency", "string", { nullable: true }),
       ],
+      primaryKey: "orderId",
       partitionBy: ["orderDate"],
     })
 
@@ -445,6 +591,43 @@ function pauseAfterNextBeginTransaction(runtime: DuckDbRuntime): {
   return {
     paused: paused.promise,
     resume: () => resumed.resolve(),
+  }
+}
+
+function failNextExclusiveRun(
+  runtime: DuckDbRuntime,
+  matches: (sql: string) => boolean
+): {
+  readonly statements: string[]
+  restore(): void
+} {
+  const originalWithExclusive = runtime.withExclusive.bind(runtime)
+  const statements: string[] = []
+  let failed = false
+
+  runtime.withExclusive = (useRuntime) =>
+    originalWithExclusive((exclusiveRuntime) =>
+      useRuntime({
+        run: async (sql, values) => {
+          statements.push(sql)
+          if (!failed && matches(sql)) {
+            failed = true
+            throw new Error("injected DDL failure")
+          }
+          await exclusiveRuntime.run(sql, values)
+        },
+        runStatements: (sql) => exclusiveRuntime.runStatements(sql),
+        query: (sql, values) => exclusiveRuntime.query(sql, values),
+        withAppender: (tableName, useAppender) =>
+          exclusiveRuntime.withAppender(tableName, useAppender),
+      })
+    )
+
+  return {
+    statements,
+    restore: () => {
+      runtime.withExclusive = originalWithExclusive
+    },
   }
 }
 

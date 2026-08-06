@@ -24,6 +24,10 @@ export interface DatasetSchema<
   readonly columns: TColumns
 }
 
+export type DatasetPrimaryKey<TColumnName extends string = string> =
+  | TColumnName
+  | readonly [TColumnName, TColumnName, ...TColumnName[]]
+
 export interface DatasetDefinition<
   TId extends string = string,
   TColumns extends readonly DatasetColumnDefinition[] = readonly DatasetColumnDefinition[],
@@ -31,6 +35,7 @@ export interface DatasetDefinition<
   readonly kind: "dataset"
   readonly id: TId
   readonly schema: DatasetSchema<TColumns>
+  readonly primaryKey?: DatasetPrimaryKey
   readonly partitionBy?: readonly string[]
   readonly description?: string
 }

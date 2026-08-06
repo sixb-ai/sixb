@@ -13,6 +13,7 @@ describe("DuckLakeStorage remote catalogs", () => {
     const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-local-"))
     const dataset = defineDataset(`raw.pg.local.${randomId()}`, {
       schema: [col("orderId", "string")],
+      primaryKey: "orderId",
     })
     const storage = new DuckLakeStorage({
       catalog: postgresCatalog(),
@@ -21,6 +22,7 @@ describe("DuckLakeStorage remote catalogs", () => {
 
     try {
       await storage.createDataset(dataset)
+      await expect(storage.getDataset(dataset.id)).resolves.toEqual(dataset)
       const write = await storage.beginWrite({ dataset, mode: "snapshot" })
       await write.writeRows([{ orderId: "ord_1" }])
       await write.commit()
