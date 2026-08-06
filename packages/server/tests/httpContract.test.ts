@@ -1860,7 +1860,15 @@ describe("SixbServer HTTP contract", () => {
       expect(cancelledRun).toMatchObject({
         id: pending.workflowRunId,
         status: "cancelled",
-        error: "Workflow intervention cancelled.",
+        error: {
+          code: "runtime.cancelled",
+          message: "Execution was cancelled.",
+          retryable: false,
+          details: {
+            workflowId: "review-device-health-workflow",
+            workflowRunId: pending.workflowRunId,
+          },
+        },
       })
 
       const cancelledNode = await sixb.storage.workflowRuns!.nodes.getById({
@@ -1870,7 +1878,16 @@ describe("SixbServer HTTP contract", () => {
       expect(cancelledNode).toMatchObject({
         id: pending.nodeRunId,
         status: "cancelled",
-        error: "Workflow intervention cancelled.",
+        error: {
+          code: "runtime.cancelled",
+          message: "Execution was cancelled.",
+          retryable: false,
+          details: {
+            workflowId: "review-device-health-workflow",
+            workflowRunId: pending.workflowRunId,
+            nodeRunId: pending.nodeRunId,
+          },
+        },
       })
 
       const workflowEvents = await events.read({

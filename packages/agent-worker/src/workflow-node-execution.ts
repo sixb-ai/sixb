@@ -4,6 +4,7 @@ import {
   resolveAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { captureSixbFailure } from "@sixb/core/internal/errors"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
@@ -16,6 +17,7 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
+import { WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { AgentUsageRecordingError, AgentWorkerError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { AiModelCallRecorder } from "./model-call-recorder"
@@ -366,6 +368,17 @@ async function finishWorkflowAgentNodeFailed(input: {
   readonly error: unknown
 }): Promise<{ readonly node: WorkflowNodeRunRecord; readonly run: WorkflowRunRecord }> {
   const message = errorMessage(input.error)
+  const at = new Date()
+  const failure = captureSixbFailure(input.error, {
+    allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
+    defaultCode: input.status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+    at,
+    details: {
+      workflowId: input.nodeRun.workflowId,
+      workflowRunId: input.nodeRun.workflowRunId,
+      nodeRunId: input.nodeRun.id,
+    },
+  })
   return input.context.storage.transaction(async (tx) => {
     const runs = tx.workflowRuns
     if (!runs) throw new AgentWorkerError("Workflow storage disappeared during finalization.")
@@ -381,13 +394,13 @@ async function finishWorkflowAgentNodeFailed(input: {
       projectId: input.context.id,
       id: input.nodeRun.id,
       status: input.status,
-      error: message,
+      error: failure,
     })
     const run = await runs.finish({
       projectId: input.context.id,
       id: input.nodeRun.workflowRunId,
       status: input.status,
-      error: message,
+      error: failure,
     })
     return { node, run }
   })
@@ -448,7 +461,7 @@ async function emitNodeAndRunFailed(
             nodeKey: failed.node.nodeKey,
             status,
             finishedAt: requireFinishedAt(failed.node).toISOString(),
-            ...(failed.node.error ? { error: failed.node.error } : {}),
+            ...(failed.node.error ? { error: failed.node.error.message } : {}),
           },
         },
         {
@@ -458,7 +471,7 @@ async function emitNodeAndRunFailed(
             runId: failed.run.id,
             status,
             finishedAt: requireFinishedAt(failed.run).toISOString(),
-            ...(failed.run.error ? { error: failed.run.error } : {}),
+            ...(failed.run.error ? { error: failed.run.error.message } : {}),
           },
         },
       ],

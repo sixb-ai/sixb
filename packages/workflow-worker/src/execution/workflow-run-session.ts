@@ -1,4 +1,5 @@
 import type { ValueType, WorkflowDefinition } from "@sixb/core"
+import { captureSixbFailure } from "@sixb/core/internal/errors"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type {
   WorkflowAgentNodeDefinition,
@@ -15,14 +16,17 @@ import {
   validateWorkflowStepOutput,
 } from "@sixb/core/internal/workflows"
 import type {
+  SixbFailure,
   WorkflowInterventionRecord,
   WorkflowInterventionStorage,
   WorkflowNodeRunRecord,
+  WorkflowRunFailureCode,
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
+import { WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { WorkflowWorkerError } from "../errors"
-import { statusForFailure, throwIfAborted, toWorkflowRunError } from "../normalize"
+import { statusForFailure, throwIfAborted } from "../normalize"
 import { noopWorkflowRunObserver, WorkflowRunRecorder } from "../recorder"
 import type {
   RunWorkflowJobInput,
@@ -550,12 +554,24 @@ export class WorkflowRunSession {
       return
     }
 
+    const at = new Date()
+    const activeNodeRunId = this.dependencies.recorder.activeNodeId
+    const failure = captureSixbFailure(error, {
+      allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
+      defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+      details: {
+        workflowId: this.dependencies.workflow.id,
+        workflowRunId: this.dependencies.job.id,
+        ...(activeNodeRunId ? { nodeRunId: activeNodeRunId } : {}),
+      },
+      at,
+    })
     await this.dependencies.recorder.finishActiveNodeAfterError({
       status,
-      error: toWorkflowRunError(error),
+      error: failure,
     })
 
-    await this.finishWorkflowRunAfterError({ error, status })
+    await this.finishWorkflowRunAfterError({ error, failure, status })
   }
 
   flushLogs(): Promise<void> {
@@ -585,12 +601,13 @@ export class WorkflowRunSession {
 
   private async finishWorkflowRunAfterError(input: {
     readonly error: unknown
+    readonly failure: SixbFailure<WorkflowRunFailureCode>
     readonly status: "failed" | "cancelled"
   }): Promise<void> {
     const finishError = await this.dependencies.recorder
       .finishRunAfterError({
         status: input.status,
-        error: toWorkflowRunError(input.error),
+        error: input.failure,
         onTransition:
           input.status === "failed"
             ? (run) => this.dependencies.onRunFailed?.(input.error, run)

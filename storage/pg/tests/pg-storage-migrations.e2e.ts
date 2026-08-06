@@ -48,6 +48,7 @@ describe("Postgres storage migrations", () => {
             "010-ai-usage-accounting-foundation",
             "011-sync-failure-record",
             "012-pipeline-failure-record",
+            "013-workflow-failure-record",
           ],
         },
       ])
@@ -135,6 +136,13 @@ describe("Postgres storage migrations", () => {
           id: "012-pipeline-failure-record",
           status: "applied",
           version: 12,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "013-workflow-failure-record",
+          status: "applied",
+          version: 13,
         },
       ])
     })
@@ -804,6 +812,13 @@ describe("Postgres storage migrations", () => {
           id: "012-pipeline-failure-record",
           status: "applied",
           version: 12,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "013-workflow-failure-record",
+          status: "applied",
+          version: 13,
         },
       ])
     } finally {

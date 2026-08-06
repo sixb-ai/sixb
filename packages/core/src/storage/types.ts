@@ -272,11 +272,12 @@ export type {
   WorkflowNodeRunStorage,
   WorkflowNodeRunType,
   WorkflowRunExecution,
+  WorkflowRunFailureCode,
   WorkflowRunRecord,
   WorkflowRunStatus,
   WorkflowRunStorage,
 } from "./workflow-runs"
-export { WorkflowRunError } from "./workflow-runs"
+export { WORKFLOW_RUN_FAILURE_CODES, WorkflowRunError } from "./workflow-runs"
 
 export interface StorageTransactionOptions {
   readonly isolation?: "default" | "serializable"

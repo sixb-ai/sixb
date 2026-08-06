@@ -69,6 +69,7 @@ import {
 } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { SixbFailureSummary } from "../components/SixbFailureSummary"
 import {
   isUnconfiguredStorageError,
   UnrecordedHistoryState,
@@ -82,7 +83,6 @@ import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPrefe
 
 type PipelineSummary = ListPipelinesResponse[number] | GetPipelineResponse
 type PipelineRun = NonNullable<PipelineSummary["latestRun"]>
-type PipelineFailure = NonNullable<PipelineRun["error"]>
 type PipelineRunStatus = PipelineRun["status"]
 type PipelineGraphNode = PipelineSummary["graph"]["nodes"][number]
 type PipelineStep = PipelineGraphNode["step"]
@@ -93,21 +93,6 @@ const pipelineListViewOptions = [
   { value: "cards", label: "Cards" },
   { value: "table", label: "Table" },
 ] as const
-
-function PipelineFailureSummary({
-  failure,
-  className,
-}: {
-  failure: PipelineFailure
-  className?: string
-}) {
-  return (
-    <div className={cn("min-w-0", className)}>
-      <p className="break-words text-destructive">{failure.message}</p>
-      <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{failure.code}</p>
-    </div>
-  )
-}
 
 function pipelineName(pipeline: Pick<PipelineSummary, "id">): string {
   return humanizeIdentifier(pipeline.id)
@@ -968,7 +953,7 @@ function RunsListPanel({
                       {formatRelativeTime(run.startedAt)} · {runDuration(run)}
                     </p>
                     {run.error ? (
-                      <PipelineFailureSummary failure={run.error} className="mt-1 text-[11px]" />
+                      <SixbFailureSummary failure={run.error} className="mt-1 text-[11px]" />
                     ) : null}
                   </div>
                   <RunStatusBadge status={run.status} />
@@ -1030,7 +1015,7 @@ function RunSummaryPanel({
             </div>
 
             {run.error ? (
-              <PipelineFailureSummary
+              <SixbFailureSummary
                 failure={run.error}
                 className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs"
               />
@@ -1090,7 +1075,7 @@ function RunSummaryPanel({
                         </button>
                       ) : null}
                       {step.error ? (
-                        <PipelineFailureSummary failure={step.error} className="mt-2 text-[11px]" />
+                        <SixbFailureSummary failure={step.error} className="mt-2 text-[11px]" />
                       ) : null}
                     </li>
                   ))}
