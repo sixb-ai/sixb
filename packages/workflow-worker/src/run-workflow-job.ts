@@ -1,6 +1,8 @@
+import { captureSixbFailure } from "@sixb/core/internal/errors"
+import { WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { workflowNodeExecutors } from "./execution/node-executors"
 import { WorkflowRunSession } from "./execution/workflow-run-session"
-import { statusForFailure, toWorkflowRunError } from "./normalize"
+import { statusForFailure } from "./normalize"
 import type { RunWorkflowJobInput, RunWorkflowResumeJobInput, WorkflowRunResult } from "./types"
 
 export async function runWorkflowJob(input: RunWorkflowJobInput): Promise<WorkflowRunResult> {
@@ -117,11 +119,16 @@ async function failQueuedRun(input: RunWorkflowJobInput, error: unknown): Promis
     return
   }
 
+  const status = statusForFailure(input.signal ?? new AbortController().signal, error)
   const failed = await input.runtime.workflowRuns.finish({
     projectId: input.runtime.projectId,
     id: input.job.id,
-    status: statusForFailure(input.signal ?? new AbortController().signal, error),
-    error: toWorkflowRunError(error),
+    status,
+    error: captureSixbFailure(error, {
+      allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
+      defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+      details: { workflowId: input.job.workflowId, runId: input.job.id },
+    }),
   })
 
   if (failed.status === "failed") {

@@ -3,8 +3,10 @@ import { InMemoryStorage } from "../src"
 import {
   InMemoryWorkflowRunStorage,
   type QueueWorkflowRunInput,
+  type SixbFailure,
   type StartWorkflowRunInput,
   WorkflowRunError,
+  type WorkflowRunFailureCode,
 } from "../src/storage"
 import {
   createTestAgentExecution,
@@ -58,6 +60,15 @@ function createWorkflowRunStorage() {
       })
     },
   })
+}
+
+const FAILURE_AT = "2026-05-08T10:00:00.000Z"
+
+function failure(
+  message: string,
+  code: WorkflowRunFailureCode = "internal.unexpected"
+): SixbFailure<WorkflowRunFailureCode> {
+  return { code, message, retryable: false, at: FAILURE_AT }
 }
 
 describe("InMemoryWorkflowRunStorage", () => {
@@ -241,10 +252,10 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "wf-run-failed-before-start",
       projectId: "my-app",
       status: "failed",
-      error: "queue dispatch failed",
+      error: failure("queue dispatch failed"),
     })
     expect(finished.status).toBe("failed")
-    expect(finished.error).toBe("queue dispatch failed")
+    expect(finished.error).toEqual(failure("queue dispatch failed"))
   })
 
   test("waits and resumes workflow and node runs", async () => {
@@ -324,7 +335,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "wf-run-cancelled-while-waiting",
       projectId: "my-app",
       status: "cancelled",
-      error: "Reviewer cancelled",
+      error: failure("Reviewer cancelled", "runtime.cancelled"),
     })
     expect(cancelled.status).toBe("cancelled")
   })
@@ -343,7 +354,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "run-1",
       projectId: "my-app",
       status: "failed",
-      error: "No invoice candidate",
+      error: failure("No invoice candidate"),
     })
 
     await storage.start({
@@ -396,7 +407,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "run-1",
     })
     expect(failed?.status).toBe("failed")
-    expect(failed?.error).toBe("No invoice candidate")
+    expect(failed?.error).toEqual(failure("No invoice candidate"))
   })
 
   test("lists the latest run for multiple workflow ids", async () => {
@@ -520,7 +531,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "node-1",
       projectId: "my-app",
       status: "failed",
-      error: "No match",
+      error: failure("No match"),
     })
 
     await storage.nodes.start({
@@ -573,7 +584,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       statuses: ["failed"],
     })
     expect(failedNodes.nodes[0]?.output).toBeUndefined()
-    expect(failedNodes.nodes[0]?.error).toBe("No match")
+    expect(failedNodes.nodes[0]?.error).toEqual(failure("No match"))
   })
 
   test("rejects invalid workflow and node run lifecycle transitions", async () => {
@@ -600,7 +611,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         id: "missing",
         projectId: "my-app",
         status: "failed",
-        error: "boom",
+        error: failure("boom"),
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -676,7 +687,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "node-1",
       projectId: "my-app",
       status: "cancelled",
-      error: "Stopped",
+      error: failure("Stopped", "runtime.cancelled"),
     })
 
     await expect(
@@ -684,7 +695,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         id: "node-1",
         projectId: "my-app",
         status: "failed",
-        error: "Too late",
+        error: failure("Too late"),
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -692,7 +703,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "wf-run-1",
       projectId: "my-app",
       status: "cancelled",
-      error: "Stopped",
+      error: failure("Stopped", "runtime.cancelled"),
     })
 
     await expect(
@@ -714,7 +725,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         id: "wf-run-1",
         projectId: "my-app",
         status: "failed",
-        error: "Too late",
+        error: failure("Too late"),
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
   })

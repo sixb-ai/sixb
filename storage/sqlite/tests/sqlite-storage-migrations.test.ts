@@ -6,7 +6,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { migrateStorage } from "@sixb/core"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
-import { PIPELINE_RUN_FAILURE_CODES, SYNC_RUN_FAILURE_CODES } from "@sixb/core/storage"
+import {
+  PIPELINE_RUN_FAILURE_CODES,
+  SYNC_RUN_FAILURE_CODES,
+  WORKFLOW_RUN_FAILURE_CODES,
+} from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import {
   createSqliteStorageMigrators,
@@ -101,6 +105,13 @@ const expectedStorageMigrationRows = [
     id: "012-pipeline-failure-record",
     status: "applied",
     version: 12,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "013-workflow-failure-record",
+    status: "applied",
+    version: 13,
   },
 ]
 
@@ -198,6 +209,34 @@ describe("SQLite storage migrations", () => {
         "secret step diagnostic"
       )
 
+      db.run(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+        ) VALUES (
+          'project-a', 'execution-workflow-legacy', 'workflow', 'workflow-legacy', 'event',
+          'event-workflow-legacy', 'correlation-workflow-legacy', 'trustedPrimitive', 'workflow',
+          'orders', '2026-08-10T12:00:00.000Z'
+        );
+
+        INSERT INTO workflow_runs (
+          project_id, id, workflow_id, status, input, started_at, finished_at, error, execution_id
+        ) VALUES (
+          'project-a', 'workflow-legacy', 'orders', 'failed', '{}',
+          '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z',
+          'secret workflow diagnostic', 'execution-workflow-legacy'
+        );
+
+        INSERT INTO workflow_node_runs (
+          project_id, id, workflow_run_id, workflow_id, node_index, node_type, node_id, node_key,
+          status, input, started_at, finished_at, error
+        ) VALUES (
+          'project-a', 'node-legacy', 'workflow-legacy', 'orders', 0, 'step', 'extract', 'extract',
+          'failed', '{}', '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z',
+          'secret workflow node diagnostic'
+        );
+      `)
+
       for (const migration of sqliteStorageMigrations.steps.slice(10)) migration.up(db)
 
       const row = db
@@ -245,6 +284,33 @@ describe("SQLite storage migrations", () => {
         },
       })
       expect(JSON.stringify(stepFailure)).not.toContain("secret step diagnostic")
+
+      const workflowRow = db
+        .query("SELECT error FROM workflow_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "workflow-legacy") as { readonly error: string }
+      const workflowFailure = parseSixbFailure(workflowRow.error, WORKFLOW_RUN_FAILURE_CODES)
+      expect(workflowFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: { workflowId: "orders", workflowRunId: "workflow-legacy" },
+      })
+      expect(JSON.stringify(workflowFailure)).not.toContain("secret workflow diagnostic")
+
+      const nodeRow = db
+        .query("SELECT error FROM workflow_node_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "node-legacy") as { readonly error: string }
+      const nodeFailure = parseSixbFailure(nodeRow.error, WORKFLOW_RUN_FAILURE_CODES)
+      expect(nodeFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: {
+          workflowId: "orders",
+          workflowRunId: "workflow-legacy",
+          nodeId: "extract",
+          nodeRunId: "node-legacy",
+        },
+      })
+      expect(JSON.stringify(nodeFailure)).not.toContain("secret workflow node diagnostic")
     } finally {
       db.close()
     }

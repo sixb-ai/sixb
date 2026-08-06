@@ -391,7 +391,16 @@ describe("WorkflowWorker", () => {
         }),
       (value) => value?.status === "failed"
     )
-    expect(run?.error).toBe("workflow exploded")
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      message: "An unexpected internal error occurred.",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_worker_failed",
+        nodeRunId: "wfrun_worker_failed:node:0",
+      },
+    })
 
     const reported = await waitFor(
       async () => reports,
@@ -434,14 +443,14 @@ describe("WorkflowWorker", () => {
       runId: "wfrun_worker_failed",
       nodeRunId: "wfrun_worker_failed:node:0",
       status: "failed",
-      error: "workflow exploded",
+      error: "An unexpected internal error occurred.",
     })
     expect(events[3]?.payload).toMatchObject({
       workflowId: workflow.id,
       runId: "wfrun_worker_failed",
       status: "failed",
       finishedAt: expect.any(String),
-      error: "workflow exploded",
+      error: "An unexpected internal error occurred.",
     })
 
     await Bun.sleep(50)
@@ -769,7 +778,16 @@ describe("WorkflowWorker", () => {
       (value) => value.length === 1
     )
 
-    expect(run?.error).toBe(resumeError.message)
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      message: "An unexpected internal error occurred.",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_worker_resume_failed",
+        nodeRunId: "wfrun_worker_resume_failed:node:2",
+      },
+    })
     expect(reported[0]?.error).toBe(resumeError)
     expect(reported[0]?.context).toMatchObject({
       attempt: 1,

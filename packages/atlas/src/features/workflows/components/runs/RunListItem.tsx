@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom"
+import { SixbFailureSummary } from "../../../../components/SixbFailureSummary"
 import {
   formatDate,
   formatRunDuration,
@@ -44,7 +45,7 @@ export function RunListItem({
               {formatDate(run.queuedAt ?? run.startedAt)}
             </p>
           ) : null}
-          {run.error ? <p className="break-words text-xs text-destructive">{run.error}</p> : null}
+          {run.error ? <SixbFailureSummary failure={run.error} className="text-xs" /> : null}
         </div>
         <StatusBadge status={run.status} />
       </div>

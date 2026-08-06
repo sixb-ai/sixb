@@ -1939,6 +1939,17 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       await toolStarted
+      const workflowCancellationFailure = {
+        code: "runtime.cancelled",
+        message: "Execution was cancelled.",
+        retryable: false,
+        at: new Date().toISOString(),
+        details: {
+          workflowId: "workflow-usage-test",
+          workflowRunId: runId,
+          nodeRunId,
+        },
+      } as const
       await sixb.storage.transaction(async (tx) => {
         const transactionalRuns = tx.workflowRuns
         if (!transactionalRuns) throw new Error("expected transactional workflow storage")
@@ -1951,13 +1962,13 @@ describe("AgentWorker", () => {
           projectId: PROJECT_ID,
           id: nodeRunId,
           status: "cancelled",
-          error: "Workflow run cancelled.",
+          error: workflowCancellationFailure,
         })
         await transactionalRuns.finish({
           projectId: PROJECT_ID,
           id: runId,
           status: "cancelled",
-          error: "Workflow run cancelled.",
+          error: workflowCancellationFailure,
         })
       })
       await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: nodeRunId })

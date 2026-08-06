@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { isDeepStrictEqual } from "node:util"
 import { SYSTEM_PRINCIPAL } from "../auth"
 import { reportRunFailure } from "../error-reporting/capability"
+import { captureSixbFailure } from "../errors/internal"
 import type { DomainEventLog } from "../events"
 import type { RunDispatcher } from "../execution/dispatch"
 import { createPrimitiveExecutionRecord } from "../execution/durable"
@@ -9,7 +10,7 @@ import type { ValueType } from "../ontology"
 import type { Queues } from "../queues"
 import type { SixbDefinitions } from "../runtime/definitions"
 import type { CreateExecutionInput, Storage, WorkflowRunRecord } from "../storage"
-import { WorkflowRunError } from "../storage"
+import { WORKFLOW_RUN_FAILURE_CODES, WorkflowRunError } from "../storage"
 import { WorkflowValidationError } from "./errors"
 import type { WorkflowRunRequestResult } from "./request"
 import { snapshotWorkflowInput } from "./snapshot"
@@ -273,7 +274,11 @@ async function failWorkflowRunPublication(
     projectId: input.projectId,
     id: run.id,
     status: "failed",
-    error: error instanceof Error ? error.message : String(error),
+    error: captureSixbFailure(error, {
+      allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
+      defaultCode: "internal.unexpected",
+      details: { workflowId: run.workflowId, runId: run.id },
+    }),
   })
   reportRunFailure(input.errorReporterHost, error, {
     projectId: input.projectId,
