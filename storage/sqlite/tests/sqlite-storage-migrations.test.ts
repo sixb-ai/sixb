@@ -11,6 +11,7 @@ import {
   PIPELINE_RUN_FAILURE_CODES,
   PROJECTION_RUN_FAILURE_CODES,
   SYNC_RUN_FAILURE_CODES,
+  WEBHOOK_RUN_FAILURE_CODES,
   WORKFLOW_RUN_FAILURE_CODES,
 } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
@@ -128,6 +129,13 @@ const expectedStorageMigrationRows = [
     id: "015-projection-failure-record",
     status: "applied",
     version: 15,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "016-webhook-run-failure-record",
+    status: "applied",
+    version: 16,
   },
 ]
 
@@ -313,6 +321,15 @@ describe("SQLite storage migrations", () => {
           'failed', '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z', 1,
           'secret projection diagnostic'
         );
+
+        INSERT INTO webhook_runs (
+          project_id, id, connector_id, webhook_id, status, method, route, started_at, finished_at,
+          error
+        ) VALUES (
+          'project-a', 'webhook-legacy', 'github', 'events', 'failed', 'POST', '/hooks/github',
+          '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z',
+          'secret webhook diagnostic'
+        );
       `)
 
       for (const migration of sqliteStorageMigrations.steps.slice(10)) migration.up(db)
@@ -440,6 +457,24 @@ describe("SQLite storage migrations", () => {
         },
       })
       expect(JSON.stringify(projectionFailure)).not.toContain("secret projection diagnostic")
+
+      const webhookRow = db
+        .query("SELECT error FROM webhook_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "webhook-legacy") as { readonly error: string }
+      const webhookFailure = parseSixbFailure(webhookRow.error, WEBHOOK_RUN_FAILURE_CODES)
+      expect(webhookFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: "2026-08-10T12:01:00.000Z",
+        details: {
+          connectorId: "github",
+          webhookId: "events",
+          runId: "webhook-legacy",
+          migratedFromLegacyError: true,
+        },
+      })
+      expect(JSON.stringify(webhookFailure)).not.toContain("secret webhook diagnostic")
     } finally {
       db.close()
     }

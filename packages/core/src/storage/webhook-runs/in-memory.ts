@@ -1,3 +1,4 @@
+import { parseSixbFailure } from "../../errors/internal"
 import {
   cloneRecord,
   compareStartedAt,
@@ -16,6 +17,7 @@ import type {
   WebhookRunRecord,
   WebhookRunStorage,
 } from "./types"
+import { WEBHOOK_RUN_FAILURE_CODES } from "./types"
 
 export class InMemoryWebhookRunStorage implements WebhookRunStorage {
   private readonly runs = new Map<string, WebhookRunRecord>()
@@ -64,7 +66,10 @@ export class InMemoryWebhookRunStorage implements WebhookRunStorage {
       responseStatus: input.responseStatus,
       idempotencyKey: input.idempotencyKey,
       deliveryClaimResult: input.deliveryClaimResult,
-      error: input.status === "succeeded" ? undefined : input.error,
+      error:
+        input.status === "failed"
+          ? parseSixbFailure(input.error, WEBHOOK_RUN_FAILURE_CODES)
+          : undefined,
     }
 
     this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))

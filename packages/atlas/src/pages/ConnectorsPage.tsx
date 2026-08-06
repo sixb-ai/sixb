@@ -41,6 +41,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { SixbFailureSummary } from "../components/SixbFailureSummary"
 import {
   isUnconfiguredStorageError,
   UnrecordedHistoryState,
@@ -344,7 +345,7 @@ function WebhookRunCard({ run }: { run: WebhookRun }) {
           {formatClaimResult(run.deliveryClaimResult)} · {run.idempotencyKey}
         </p>
       )}
-      {run.error && <p className="mt-3 break-words text-xs text-destructive">{run.error}</p>}
+      {run.error && <SixbFailureSummary failure={run.error} className="mt-3 text-xs" />}
     </div>
   )
 }
@@ -393,9 +394,11 @@ function WebhookRunsList({ runs }: { runs: WebhookRun[] }) {
                       {run.id}
                     </p>
                     {run.error && (
-                      <p className="mt-1 max-w-[260px] break-words text-xs text-destructive">
-                        {run.error}
-                      </p>
+                      <SixbFailureSummary
+                        failure={run.error}
+                        className="mt-1 max-w-[260px] text-xs"
+                        truncateMessage
+                      />
                     )}
                   </div>
                 </TableCell>

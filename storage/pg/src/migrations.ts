@@ -38,6 +38,9 @@ import agentFailureRecordSql from "./migrations/014-agent-failure-record.sql" wi
 import projectionFailureRecordSql from "./migrations/015-projection-failure-record.sql" with {
   type: "text",
 }
+import webhookRunFailureRecordSql from "./migrations/016-webhook-run-failure-record.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -306,6 +309,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("013-workflow-failure-record", workflowFailureRecordSql),
     pgSql("014-agent-failure-record", agentFailureRecordSql),
     pgSql("015-projection-failure-record", projectionFailureRecordSql),
+    pgSql("016-webhook-run-failure-record", webhookRunFailureRecordSql),
   ],
 })
 
