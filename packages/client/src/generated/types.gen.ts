@@ -10126,7 +10126,25 @@ export type ListWebhookRunsResponses = {
       responseStatus?: number
       idempotencyKey?: string
       deliveryClaimResult?: "claimed" | "duplicate" | "in_progress"
-      error?: string
+      error?: {
+        code: "internal.unexpected"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
     }>
     hasMore: boolean
     total: number
