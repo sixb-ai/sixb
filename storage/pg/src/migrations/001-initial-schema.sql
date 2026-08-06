@@ -170,7 +170,7 @@ CREATE TABLE projection_runs (
   missing_target_first_seen_at TIMESTAMPTZ,
   source_rows_read BIGINT NOT NULL DEFAULT 0 CHECK (source_rows_read >= 0),
   source_rows_skipped BIGINT NOT NULL DEFAULT 0 CHECK (source_rows_skipped >= 0),
-  error JSONB,
+  error_message TEXT,
   PRIMARY KEY (project_id, id),
   CHECK (source_rows_skipped <= source_rows_read),
   CHECK ((status = 'running') = (finished_at IS NULL)),

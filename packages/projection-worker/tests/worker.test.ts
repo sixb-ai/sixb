@@ -220,7 +220,7 @@ describe("ProjectionWorker", () => {
       )
       expect(run?.error).toMatchObject({
         code: "internal.unexpected",
-        message: expect.stringContaining("room_id"),
+        message: "An unexpected internal error occurred.",
       })
 
       await waitFor(

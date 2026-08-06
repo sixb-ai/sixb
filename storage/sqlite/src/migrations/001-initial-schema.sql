@@ -113,7 +113,7 @@ CREATE TABLE projection_runs (
   missing_target_first_seen_at TEXT,
   source_rows_read INTEGER NOT NULL DEFAULT 0 CHECK (source_rows_read >= 0),
   source_rows_skipped INTEGER NOT NULL DEFAULT 0 CHECK (source_rows_skipped >= 0),
-  error TEXT CHECK (error IS NULL OR json_valid(error)),
+  error_message TEXT,
   PRIMARY KEY (project_id, id),
   CHECK (source_rows_skipped <= source_rows_read),
   CHECK ((status = 'running') = (finished_at IS NULL)),

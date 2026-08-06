@@ -9,6 +9,7 @@ import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
   AGENT_RUN_FAILURE_CODES,
   PIPELINE_RUN_FAILURE_CODES,
+  PROJECTION_RUN_FAILURE_CODES,
   SYNC_RUN_FAILURE_CODES,
   WORKFLOW_RUN_FAILURE_CODES,
 } from "@sixb/core/storage"
@@ -120,6 +121,13 @@ const expectedStorageMigrationRows = [
     id: "014-agent-failure-record",
     status: "applied",
     version: 14,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "015-projection-failure-record",
+    status: "applied",
+    version: 15,
   },
 ]
 
@@ -294,6 +302,17 @@ describe("SQLite storage migrations", () => {
           'message-legacy', 'failed', 'secret Agent diagnostic',
           '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z'
         );
+
+        INSERT INTO projection_runs (
+          project_id, id, projection_id, projection_kind, materialization_protocol, dataset_id,
+          dataset_version_id, dataset_version_created_at, ontology_revision, projection_revision,
+          ownership_hash, object_type_id, status, started_at, finished_at, attempt, error_message
+        ) VALUES (
+          'project-a', 'projection-legacy', 'orders', 'object', 'replacement', 'orders', 'version-1',
+          '2026-08-10T11:00:00.000Z', 'ontology-1', 'projection-1', 'ownership-1', 'Order',
+          'failed', '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z', 1,
+          'secret projection diagnostic'
+        );
       `)
 
       for (const migration of sqliteStorageMigrations.steps.slice(10)) migration.up(db)
@@ -404,6 +423,23 @@ describe("SQLite storage migrations", () => {
         },
       })
       expect(JSON.stringify(agentNodeFailure)).not.toContain("secret workflow Agent diagnostic")
+
+      const projectionRow = db
+        .query("SELECT error FROM projection_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "projection-legacy") as { readonly error: string }
+      const projectionFailure = parseSixbFailure(projectionRow.error, PROJECTION_RUN_FAILURE_CODES)
+      expect(projectionFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: "2026-08-10T12:01:00.000Z",
+        details: {
+          projectionId: "orders",
+          runId: "projection-legacy",
+          migratedFromLegacyError: true,
+        },
+      })
+      expect(JSON.stringify(projectionFailure)).not.toContain("secret projection diagnostic")
     } finally {
       db.close()
     }

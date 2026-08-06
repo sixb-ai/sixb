@@ -3,14 +3,19 @@ import {
   MaterializationCancellationError,
   MaterializationValidationError,
   type ProjectionDefinition,
+  type SixbFailure,
 } from "@sixb/core"
-import { toSixbFailure } from "@sixb/core/internal/errors"
+import { captureSixbFailure } from "@sixb/core/internal/errors"
 import {
   MaterializationObjectNotFoundError,
   type ProjectionRunTerminalDecision,
 } from "@sixb/core/internal/materialization"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
-import { PROJECTION_RUN_FAILURE_CODES, type ProjectionRunRecord } from "@sixb/core/storage"
+import {
+  PROJECTION_RUN_FAILURE_CODES,
+  type ProjectionRunFailureCode,
+  type ProjectionRunRecord,
+} from "@sixb/core/storage"
 import { ProjectionWorkerPermanentError } from "./errors"
 import {
   assertProjectionJobId,
@@ -204,17 +209,21 @@ function projectionFailure(
   input: RunProjectionJobInput,
   error: unknown,
   status: "failed" | "cancelled"
-): ProjectionRunTerminalDecision & { readonly finishedAt: Date } {
+): ProjectionRunTerminalDecision & {
+  readonly status: "failed" | "cancelled"
+  readonly finishedAt: Date
+  readonly error: SixbFailure<ProjectionRunFailureCode>
+} {
   const finishedAt = new Date(input.now?.() ?? Date.now())
   return {
     protocol: input.job.protocol,
     status,
     finishedAt,
-    error: toSixbFailure(error, {
+    error: captureSixbFailure(error, {
       allowedCodes: PROJECTION_RUN_FAILURE_CODES,
-      fallbackCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+      defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+      details: { projectionId: input.job.projectionId, runId: input.job.id },
       at: finishedAt,
-      fallbackDetails: { projectionId: input.job.projectionId, runId: input.job.id },
     }),
   }
 }
