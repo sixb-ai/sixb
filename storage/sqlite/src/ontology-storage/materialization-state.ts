@@ -142,33 +142,44 @@ export class SqliteMaterializationStateReader {
         json_extract(value, '$.primaryId') AS primary_id
       FROM json_each(?)
     `
+    // Keep the JSON request set on the outer side of each lookup. SQLite cannot estimate the
+    // cardinality of json_each() and otherwise scans every project row once per requested key.
+    // CROSS JOIN deliberately fixes the loop order so the existing composite indexes are used.
     const effectiveRows = this.db
       .query(
         `WITH requested AS (${requestedObjects})
-         SELECT objects.* FROM objects
-         JOIN requested USING (object_type_id, primary_id)
-         WHERE objects.project_id = ?`
+         SELECT objects.* FROM requested
+         CROSS JOIN objects
+           ON objects.project_id = ?
+          AND objects.object_type_id = requested.object_type_id
+          AND objects.primary_id = requested.primary_id`
       )
       .all(requested, this.projectId) as EffectiveObjectRow[]
     const sourceRows = this.db
       .query(
         `WITH requested AS (${requestedObjects})
-         SELECT rows.* FROM ontology_source_rows AS rows
-         JOIN requested USING (object_type_id, primary_id)
+         SELECT rows.* FROM requested
+         CROSS JOIN ontology_source_rows AS rows
+           ON rows.project_id = ?
+          AND rows.entity_kind = 'object'
+          AND rows.object_type_id = requested.object_type_id
+          AND rows.primary_id = requested.primary_id
          JOIN ontology_sources AS sources
            ON sources.project_id = rows.project_id
           AND sources.source_id = rows.source_id
           AND sources.materialization_id = rows.materialization_id
-         WHERE rows.project_id = ? AND rows.entity_kind = 'object'
-           AND sources.status = 'active'`
+         WHERE sources.status = 'active'`
       )
       .all(requested, this.projectId) as SqliteOntologySourceAssertionRow[]
     const overrideRows = this.db
       .query(
         `WITH requested AS (${requestedObjects})
-         SELECT overrides.* FROM ontology_overrides AS overrides
-         JOIN requested USING (object_type_id, primary_id)
-         WHERE overrides.project_id = ? AND overrides.entity_kind = 'object'`
+         SELECT overrides.* FROM requested
+         CROSS JOIN ontology_overrides AS overrides
+           ON overrides.project_id = ?
+          AND overrides.entity_kind = 'object'
+          AND overrides.object_type_id = requested.object_type_id
+          AND overrides.primary_id = requested.primary_id`
       )
       .all(requested, this.projectId) as ObjectOverrideRow[]
     const telemetryRows = this.db
@@ -180,11 +191,11 @@ export class SqliteMaterializationStateReader {
                  timeseries.property_id
                ORDER BY timeseries.at DESC
              ) AS rank
-           FROM timeseries
-           JOIN requested
-             ON requested.object_type_id = timeseries.object_type_id
-            AND requested.primary_id = timeseries.object_id
-           WHERE timeseries.project_id = ?
+           FROM requested
+           CROSS JOIN timeseries
+             ON timeseries.project_id = ?
+            AND timeseries.object_type_id = requested.object_type_id
+            AND timeseries.object_id = requested.primary_id
          )
          SELECT * FROM ranked WHERE rank = 1`
       )
@@ -261,34 +272,47 @@ export class SqliteMaterializationStateReader {
     const effectiveRows = this.db
       .query(
         `WITH requested AS (${effectiveRequest})
-         SELECT links.* FROM links
-         JOIN requested USING (source_type_id, source_id, link_id, target_type_id, target_id)
-         WHERE links.project_id = ?`
+         SELECT links.* FROM requested
+         CROSS JOIN links
+           ON links.project_id = ?
+          AND links.source_type_id = requested.source_type_id
+          AND links.source_id = requested.source_id
+          AND links.link_id = requested.link_id
+          AND links.target_type_id = requested.target_type_id
+          AND links.target_id = requested.target_id`
       )
       .all(requested, this.projectId) as EffectiveLinkRow[]
     const sourceRows = this.db
       .query(
         `WITH requested AS (${sourceRequest})
-         SELECT rows.* FROM ontology_source_rows AS rows
-         JOIN requested USING (
-           source_type_id, source_primary_id, link_id, target_type_id, target_primary_id
-         )
+         SELECT rows.* FROM requested
+         CROSS JOIN ontology_source_rows AS rows
+           ON rows.project_id = ?
+          AND rows.entity_kind = 'link'
+          AND rows.source_type_id = requested.source_type_id
+          AND rows.source_primary_id = requested.source_primary_id
+          AND rows.link_id = requested.link_id
+          AND rows.target_type_id = requested.target_type_id
+          AND rows.target_primary_id = requested.target_primary_id
          JOIN ontology_sources AS sources
            ON sources.project_id = rows.project_id
           AND sources.source_id = rows.source_id
           AND sources.materialization_id = rows.materialization_id
-         WHERE rows.project_id = ? AND rows.entity_kind = 'link'
-           AND sources.status = 'active'`
+         WHERE sources.status = 'active'`
       )
       .all(requested, this.projectId) as SqliteOntologySourceAssertionRow[]
     const overrideRows = this.db
       .query(
         `WITH requested AS (${sourceRequest})
-         SELECT overrides.* FROM ontology_overrides AS overrides
-         JOIN requested USING (
-           source_type_id, source_primary_id, link_id, target_type_id, target_primary_id
-         )
-         WHERE overrides.project_id = ? AND overrides.entity_kind = 'link'`
+         SELECT overrides.* FROM requested
+         CROSS JOIN ontology_overrides AS overrides
+           ON overrides.project_id = ?
+          AND overrides.entity_kind = 'link'
+          AND overrides.source_type_id = requested.source_type_id
+          AND overrides.source_primary_id = requested.source_primary_id
+          AND overrides.link_id = requested.link_id
+          AND overrides.target_type_id = requested.target_type_id
+          AND overrides.target_primary_id = requested.target_primary_id`
       )
       .all(requested, this.projectId) as LinkOverrideRow[]
     const effective = new Map(
@@ -337,9 +361,13 @@ export class SqliteMaterializationStateReader {
              json_extract(value, '$.at') AS at
            FROM json_each(?)
          )
-         SELECT timeseries.* FROM timeseries
-         JOIN requested USING (object_type_id, object_id, property_id, at)
-         WHERE timeseries.project_id = ?`
+         SELECT timeseries.* FROM requested
+         CROSS JOIN timeseries
+           ON timeseries.project_id = ?
+          AND timeseries.object_type_id = requested.object_type_id
+          AND timeseries.object_id = requested.object_id
+          AND timeseries.property_id = requested.property_id
+          AND timeseries.at = requested.at`
       )
       .all(requested, this.projectId) as TelemetryRow[]
     const found = new Map(
@@ -382,9 +410,12 @@ export class SqliteMaterializationStateReader {
             FROM json_each(?)
           )
           SELECT requested.scope_sort_key, links.*
-          FROM links
-          JOIN requested USING (source_type_id, source_id, link_id)
-          WHERE links.project_id = ?
+          FROM requested
+          CROSS JOIN links
+            ON links.project_id = ?
+           AND links.source_type_id = requested.source_type_id
+           AND links.source_id = requested.source_id
+           AND links.link_id = requested.link_id
           ORDER BY requested.scope_sort_key, ${linkSortExpression("links")}
         `
       )
@@ -610,22 +641,30 @@ export class SqliteMaterializationStateReader {
     if (materializationIds.length === 0 || refs.length === 0) {
       return { owned: new Set(), byMaterialization: new Map() }
     }
-    const requestedKeys = canonicalJson(refs.map((ref) => projectionEntityKey(ref)))
+    const requestedEntities = canonicalJson(
+      refs.map((ref) => ({ entityKind: ref.kind, entityKey: projectionEntityKey(ref) }))
+    )
     const requestedMaterializations = canonicalJson([...new Set(materializationIds)])
     const rows = this.db
       .query(
         `WITH requested_entities AS (
-           SELECT value AS entity_key FROM json_each(?)
+           SELECT DISTINCT json_extract(value, '$.entityKind') AS entity_kind,
+             json_extract(value, '$.entityKey') AS entity_key
+           FROM json_each(?)
          ), requested_materializations AS (
            SELECT value AS materialization_id FROM json_each(?)
          )
-         SELECT rows.* FROM ontology_source_rows AS rows
-         JOIN requested_entities USING (entity_key)
-         JOIN requested_materializations USING (materialization_id)
-         WHERE rows.project_id = ? AND rows.source_id = ?`
+         SELECT rows.* FROM requested_materializations
+         CROSS JOIN requested_entities
+         CROSS JOIN ontology_source_rows AS rows
+           ON rows.project_id = ?
+          AND rows.source_id = ?
+          AND rows.materialization_id = requested_materializations.materialization_id
+          AND rows.entity_kind = requested_entities.entity_kind
+          AND rows.entity_key = requested_entities.entity_key`
       )
       .all(
-        requestedKeys,
+        requestedEntities,
         requestedMaterializations,
         this.projectId,
         sourceId
