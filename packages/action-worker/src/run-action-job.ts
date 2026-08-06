@@ -43,11 +43,17 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
   const action = runtime.getActionById(job.actionId)
   if (!action) {
     const error = new ActionWorkerError(`Unknown action '${job.actionId}'.`)
-    const failure = toActionRunFailure(error, "validation")
+    const failedAt = new Date()
+    const failure = toActionRunFailure(error, "validation", {
+      actionId: job.actionId,
+      runId: job.id,
+      at: failedAt,
+    })
     const finishedRun = await runtime.actionRunsStorage.finish({
       projectId: runtime.id,
       id: job.id,
       status: "failed",
+      finishedAt: failedAt,
       error: failure,
     })
     reportActionFailure(input, error, finishedRun)
@@ -103,16 +109,29 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     }
   } catch (error) {
     const status = signal.aborted ? "cancelled" : "failed"
-    const failure = toActionRunFailure(
-      error,
-      status === "cancelled" ? "cancelled" : (activeRun?.phase ?? "validation")
-    )
+    const finishedAt = new Date()
+    const writebackFailure =
+      status === "failed" && activeRun?.writeback?.status === "failed"
+        ? activeRun.writeback.error
+        : undefined
+    const failure =
+      writebackFailure ??
+      toActionRunFailure(
+        error,
+        status === "cancelled" ? "cancelled" : (activeRun?.phase ?? "validation"),
+        {
+          actionId: job.actionId,
+          runId: job.id,
+          at: finishedAt,
+        }
+      )
 
     const finishedRun = await runtime.actionRunsStorage
       .finish({
         projectId: runtime.id,
         id: job.id,
         status,
+        finishedAt,
         error: failure,
       })
       .catch(() => null)

@@ -63,19 +63,29 @@ function serializeActionRunDetail(
     ...serializeActionRunSummary(run),
     params: run.params,
     writeback: run.writeback
-      ? {
-          status: run.writeback.status,
-          completedAt: toIsoString(run.writeback.completedAt),
-          ...(run.writeback.result !== undefined ? { result: run.writeback.result } : {}),
-          error: run.writeback.error,
-        }
+      ? run.writeback.status === "succeeded"
+        ? {
+            status: "succeeded",
+            completedAt: toIsoString(run.writeback.completedAt),
+            result: run.writeback.result,
+          }
+        : {
+            status: "failed",
+            completedAt: toIsoString(run.writeback.completedAt),
+            error: run.writeback.error,
+          }
       : undefined,
     effects: run.effects
-      ? {
-          status: run.effects.status,
-          completedAt: toIsoString(run.effects.completedAt),
-          error: run.effects.error,
-        }
+      ? run.effects.status === "succeeded"
+        ? {
+            status: "succeeded",
+            completedAt: toIsoString(run.effects.completedAt),
+          }
+        : {
+            status: "failed",
+            completedAt: toIsoString(run.effects.completedAt),
+            error: run.effects.error,
+          }
       : undefined,
   })
 }

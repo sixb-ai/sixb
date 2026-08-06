@@ -1,11 +1,14 @@
 import { assertAuthorized } from "../authorization"
 import { reportRunFailure } from "../error-reporting/capability"
+import { toSixbFailure } from "../errors/internal"
 import { ActionRunTimeoutError } from "../objects/action/errors"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
+  ACTION_RUN_FAILURE_CODES,
   ActionRunError,
+  type ActionRunFailure,
   type ActionRunParams,
   type ActionRunRecord,
   type ActionRunStorage,
@@ -191,12 +194,18 @@ async function enqueueActionRunJob(
     })
     jobId = job?.id
   } catch (error) {
+    const failedAt = new Date()
+    const failure = toActionRunFailure(error, "enqueue", {
+      actionId: params.actionId,
+      runId: params.runId,
+      at: failedAt,
+    })
     const failed = await params.actionRuns.finish({
       projectId: runtime.projectId,
       id: params.runId,
       status: "failed",
-      phase: "enqueue",
-      error: toActionRunFailure(error, "enqueue"),
+      finishedAt: failedAt,
+      error: failure,
     })
     reportRunFailure(runtime, error, {
       projectId: runtime.projectId,
@@ -391,17 +400,19 @@ function isRetryableEnqueueFailure(record: ActionRunRecord): boolean {
 
 function toActionRunFailure(
   error: unknown,
-  phase: "enqueue"
-): { name?: string; message: string; phase: "enqueue" } {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      phase,
-    }
-  }
+  phase: "enqueue",
+  input: { readonly actionId: string; readonly runId: string; readonly at: Date }
+): ActionRunFailure<"enqueue"> {
   return {
-    message: String(error),
+    ...toSixbFailure(error, {
+      allowedCodes: ACTION_RUN_FAILURE_CODES,
+      fallbackCode: "internal.unexpected",
+      at: input.at,
+      fallbackDetails: {
+        actionId: input.actionId,
+        runId: input.runId,
+      },
+    }),
     phase,
   }
 }

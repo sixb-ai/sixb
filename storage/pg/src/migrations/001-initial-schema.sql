@@ -767,50 +767,11 @@ CREATE TABLE action_runs (
   writeback_status TEXT CHECK (writeback_status IS NULL OR writeback_status IN ('succeeded', 'failed')),
   writeback_completed_at TIMESTAMPTZ,
   writeback_result JSONB,
-  writeback_error_name TEXT,
-  writeback_error_message TEXT,
-  writeback_error_phase TEXT CHECK (
-    writeback_error_phase IS NULL OR writeback_error_phase IN (
-      'request',
-      'enqueue',
-      'validation',
-      'writeback',
-      'edits',
-      'commit',
-      'effects',
-      'cancelled'
-    )
-  ),
+  writeback_error JSONB,
   effects_status TEXT CHECK (effects_status IS NULL OR effects_status IN ('succeeded', 'failed')),
   effects_completed_at TIMESTAMPTZ,
-  effects_error_name TEXT,
-  effects_error_message TEXT,
-  effects_error_phase TEXT CHECK (
-    effects_error_phase IS NULL OR effects_error_phase IN (
-      'request',
-      'enqueue',
-      'validation',
-      'writeback',
-      'edits',
-      'commit',
-      'effects',
-      'cancelled'
-    )
-  ),
-  error_name TEXT,
-  error_message TEXT,
-  error_phase TEXT CHECK (
-    error_phase IS NULL OR error_phase IN (
-      'request',
-      'enqueue',
-      'validation',
-      'writeback',
-      'edits',
-      'commit',
-      'effects',
-      'cancelled'
-    )
-  ),
+  effects_error JSONB,
+  error JSONB,
   CHECK (
     (subject_kind = 'none' AND object_type_id IS NULL AND primary_id IS NULL)
     OR (subject_kind = 'object' AND object_type_id IS NOT NULL AND primary_id IS NOT NULL)

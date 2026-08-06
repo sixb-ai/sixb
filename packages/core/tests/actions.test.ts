@@ -857,8 +857,14 @@ describe("requestAction", () => {
       status: "failed",
       phase: "enqueue",
       error: {
-        name: "Error",
+        code: "internal.unexpected",
         message: "queue unavailable",
+        retryable: false,
+        at: failed?.finishedAt?.toISOString(),
+        details: {
+          actionId: "setTemperature",
+          runId: "act_enqueue_retry",
+        },
         phase: "enqueue",
       },
     })

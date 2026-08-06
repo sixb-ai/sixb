@@ -5908,9 +5908,27 @@ export type ListActionRunsResponses = {
       startedAt?: string
       finishedAt?: string
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled"
         message: string
-        phase?:
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        causeChain?: Array<{
+          name: string
+          message: string
+        }>
+        phase:
           | "request"
           | "enqueue"
           | "validation"
@@ -5991,9 +6009,27 @@ export type GetActionRunResponses = {
     startedAt?: string
     finishedAt?: string
     error?: {
-      name?: string
+      code: "internal.unexpected" | "runtime.cancelled"
       message: string
-      phase?:
+      retryable: boolean
+      at: string
+      /**
+       * Any JSON-compatible value.
+       */
+      details?:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
+      causeChain?: Array<{
+        name: string
+        message: string
+      }>
+      phase:
         | "request"
         | "enqueue"
         | "validation"
@@ -6006,41 +6042,82 @@ export type GetActionRunResponses = {
     params: {
       [key: string]: unknown
     }
-    writeback?: {
-      status: "succeeded" | "failed"
-      completedAt: string
-      result?: unknown
-      error?: {
-        name?: string
-        message: string
-        phase?:
-          | "request"
-          | "enqueue"
-          | "validation"
-          | "writeback"
-          | "edits"
-          | "commit"
-          | "effects"
-          | "cancelled"
-      }
-    }
-    effects?: {
-      status: "succeeded" | "failed"
-      completedAt: string
-      error?: {
-        name?: string
-        message: string
-        phase?:
-          | "request"
-          | "enqueue"
-          | "validation"
-          | "writeback"
-          | "edits"
-          | "commit"
-          | "effects"
-          | "cancelled"
-      }
-    }
+    writeback?:
+      | {
+          status: "succeeded"
+          completedAt: string
+          /**
+           * Any JSON-compatible value.
+           */
+          result:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          status: "failed"
+          completedAt: string
+          error: {
+            code: "internal.unexpected" | "runtime.cancelled"
+            message: string
+            retryable: boolean
+            at: string
+            /**
+             * Any JSON-compatible value.
+             */
+            details?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            causeChain?: Array<{
+              name: string
+              message: string
+            }>
+            phase: "writeback"
+          }
+        }
+    effects?:
+      | {
+          status: "succeeded"
+          completedAt: string
+        }
+      | {
+          status: "failed"
+          completedAt: string
+          error: {
+            code: "internal.unexpected" | "runtime.cancelled"
+            message: string
+            retryable: boolean
+            at: string
+            /**
+             * Any JSON-compatible value.
+             */
+            details?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            causeChain?: Array<{
+              name: string
+              message: string
+            }>
+            phase: "effects"
+          }
+        }
   }
 }
 

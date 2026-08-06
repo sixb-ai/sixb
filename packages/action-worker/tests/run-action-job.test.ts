@@ -237,11 +237,14 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error).toEqual({
-        name: "Error",
+      expect(result.error).toMatchObject({
+        code: "internal.unexpected",
         message: "external API failed",
+        retryable: false,
         phase: "writeback",
+        details: { actionId: "failWriteback", runId: "act_1" },
       })
+      expect(result.error.at).toEqual(expect.any(String))
     }
 
     const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
@@ -798,7 +801,8 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error.name).toBe("ActionRunLeaseLostError")
+      expect(result.error.code).toBe("internal.unexpected")
+      expect(result.error.message).toContain("was redelivered while already running")
       expect(result.error.phase).toBe("validation")
     }
     expect(invoked).toBe(0)
@@ -946,9 +950,11 @@ describe("runActionJob", () => {
     expect(run?.effects).toMatchObject({
       status: "failed",
       error: {
-        name: "Error",
+        code: "internal.unexpected",
         message: "notification failed",
+        retryable: false,
         phase: "effects",
+        details: { actionId: "setStatus", runId: "act_1" },
       },
     })
     await reporter.flush()
@@ -997,6 +1003,15 @@ describe("runActionJob", () => {
     const result = await execution
 
     expect(result.status).toBe("cancelled")
+    if ("error" in result) {
+      expect(result.error).toMatchObject({
+        code: "runtime.cancelled",
+        message: "worker stopping",
+        retryable: false,
+        phase: "cancelled",
+        details: { actionId: "waitForCancel", runId: "act_cancelled" },
+      })
+    }
     await reporter.flush()
     expect(reportCount).toBe(0)
   })

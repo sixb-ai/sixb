@@ -1,6 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import type { ActionRunFailure, ActionRunPhase } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
+
+const FAILURE_AT = "2026-04-29T10:00:00.000Z"
+
+function actionFailure<TPhase extends ActionRunPhase>(
+  phase: TPhase,
+  message: string
+): ActionRunFailure<TPhase> {
+  return {
+    code: phase === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+    message,
+    retryable: false,
+    at: FAILURE_AT,
+    phase,
+  }
+}
 
 describe("PgActionRunStorage", () => {
   let storage: PostgresStorage
@@ -41,11 +57,7 @@ describe("PgActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       status: "failed",
-      error: {
-        name: "SlackError",
-        message: "Slack timed out",
-        phase: "effects",
-      },
+      error: actionFailure("effects", "Slack timed out"),
     })
 
     await storage.actionRuns.finish({
@@ -69,11 +81,7 @@ describe("PgActionRunStorage", () => {
       },
       effects: {
         status: "failed",
-        error: {
-          name: "SlackError",
-          message: "Slack timed out",
-          phase: "effects",
-        },
+        error: actionFailure("effects", "Slack timed out"),
       },
     })
     const page = await storage.actionRuns.list({

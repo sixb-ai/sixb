@@ -70,11 +70,17 @@ export async function runWritebackPhase(
     input.updateActiveRun(run)
     return { run, value: result }
   } catch (error) {
-    const failure = toActionRunFailure(error, "writeback")
+    const completedAt = new Date()
+    const failure = toActionRunFailure(error, "writeback", {
+      actionId: input.action.id,
+      runId: input.run.id,
+      at: completedAt,
+    })
     run = await input.runtime.actionRunsStorage.recordWriteback({
       projectId: input.runtime.id,
       id: input.run.id,
       status: "failed",
+      completedAt,
       error: failure,
     })
     input.updateActiveRun(run)

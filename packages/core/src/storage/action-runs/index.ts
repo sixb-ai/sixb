@@ -12,6 +12,7 @@ export { InMemoryActionRunStorage } from "./in-memory"
 export type {
   ActionRunEffectsRecord,
   ActionRunFailure,
+  ActionRunFailureCode,
   ActionRunParams,
   ActionRunPhase,
   ActionRunPhaseStatus,
@@ -29,3 +30,4 @@ export type {
   RecordActionWritebackInput,
   StartActionRunInput,
 } from "./types"
+export { ACTION_RUN_FAILURE_CODES, ACTION_RUN_PHASES } from "./types"
