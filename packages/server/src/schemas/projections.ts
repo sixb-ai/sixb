@@ -1,4 +1,10 @@
+import type { SixbFailure } from "@sixb/core"
+import { PROJECTION_RUN_FAILURE_CODES, type ProjectionRunFailureCode } from "@sixb/core/storage"
 import { z } from "zod"
+import { sixbFailureSchema } from "./common"
+
+const ProjectionRunFailureSchema: z.ZodType<SixbFailure<ProjectionRunFailureCode>> =
+  sixbFailureSchema(PROJECTION_RUN_FAILURE_CODES)
 
 export const ProjectionKindSchema = z.enum(["object", "link", "telemetry"])
 export const ProjectionRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"])
@@ -26,7 +32,7 @@ const ProjectionRunBaseSchema = z.object({
   }),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
-  errorMessage: z.string().optional(),
+  error: ProjectionRunFailureSchema.optional(),
 })
 
 const ObjectProjectionRunSchema = ProjectionRunBaseSchema.extend({

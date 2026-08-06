@@ -1,3 +1,13 @@
+import type { SixbErrorCode } from "../errors/types"
+
+/** Error codes a projection run can persist and expose through its public contract. */
+export const PROJECTION_RUN_FAILURE_CODES = [
+  "internal.unexpected",
+  "runtime.cancelled",
+] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
+
+export type ProjectionRunFailureCode = (typeof PROJECTION_RUN_FAILURE_CODES)[number]
+
 /**
  * Lowered, serializable definition interfaces for projection DSL.
  *

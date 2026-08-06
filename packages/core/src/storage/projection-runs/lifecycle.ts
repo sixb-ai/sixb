@@ -1,8 +1,15 @@
+import { parseSixbFailure } from "../../errors/internal"
+import type { SixbFailure } from "../../errors/types"
 import type {
   ProjectionMaterializationIdentity,
   ProjectionRunTerminalDecision,
 } from "../../materialization/model"
-import type { ProjectionKind, ProjectionTarget } from "../../projections/types"
+import type {
+  ProjectionKind,
+  ProjectionRunFailureCode,
+  ProjectionTarget,
+} from "../../projections/types"
+import { PROJECTION_RUN_FAILURE_CODES } from "../../projections/types"
 import { ProjectionRunError } from "./errors"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
@@ -51,7 +58,7 @@ export interface PersistedProjectionRunRecord {
   readonly missingTargetBatchOrdinal?: number
   readonly missingTargetFirstSeenAt?: Date
   readonly progress: ProjectionRunProgress
-  readonly errorMessage?: string
+  readonly error?: unknown
 }
 
 export interface ProjectionTelemetryAdvance {
@@ -64,7 +71,7 @@ export interface ProjectionRunFinishPlan {
   readonly finishedAt: Date
   readonly progress: ProjectionRunProgress
   readonly inputExhausted?: true
-  readonly errorMessage?: string
+  readonly error?: SixbFailure<ProjectionRunFailureCode>
 }
 
 // ── Scalar and identity validation ──────────────────────────
@@ -353,9 +360,9 @@ export function planProjectionRunFinish(
     ...(input.status === "succeeded" && input.protocol === "telemetry"
       ? { inputExhausted: true as const }
       : {}),
-    ...(input.status === "succeeded" || input.errorMessage === undefined
+    ...(input.status === "succeeded" || input.error === undefined
       ? {}
-      : { errorMessage: input.errorMessage }),
+      : { error: parseSixbFailure(input.error, PROJECTION_RUN_FAILURE_CODES) }),
   }
 }
 
@@ -370,7 +377,7 @@ export function finishProjectionRunRecord(
     status: plan.status,
     finishedAt: plan.finishedAt,
     progress: plan.progress,
-    errorMessage: plan.errorMessage,
+    error: plan.error,
   }
   if (plan.inputExhausted) {
     const telemetry = requireTelemetryProjectionRun(record)
@@ -412,7 +419,10 @@ export function restoreProjectionRun(row: PersistedProjectionRunRecord): StoredP
     finishedAt: row.finishedAt ? new Date(row.finishedAt) : undefined,
     attempt: row.attempt,
     progress: { ...row.progress },
-    errorMessage: row.errorMessage,
+    error:
+      row.error === undefined
+        ? undefined
+        : parseSixbFailure(row.error, PROJECTION_RUN_FAILURE_CODES),
     executionToken: row.executionToken,
   }
 

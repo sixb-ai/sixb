@@ -385,6 +385,7 @@ describe("Postgres storage migrations", () => {
           "next_batch_ordinal",
           "next_row_offset",
           "input_exhausted",
+          "error",
         ])
       )
       expect(await readTableColumns(schemaName, "workflow_runs")).toEqual(

@@ -38,7 +38,7 @@ function serializeProjectionRun(run: ProjectionRunRecord) {
     progress: run.progress,
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
-    errorMessage: run.errorMessage,
+    error: run.error,
   })
 }
 

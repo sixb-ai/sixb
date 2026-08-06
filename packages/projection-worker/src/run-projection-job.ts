@@ -4,12 +4,13 @@ import {
   MaterializationValidationError,
   type ProjectionDefinition,
 } from "@sixb/core"
+import { toSixbFailure } from "@sixb/core/internal/errors"
 import {
   MaterializationObjectNotFoundError,
   type ProjectionRunTerminalDecision,
 } from "@sixb/core/internal/materialization"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
-import type { ProjectionRunRecord } from "@sixb/core/storage"
+import { PROJECTION_RUN_FAILURE_CODES, type ProjectionRunRecord } from "@sixb/core/storage"
 import { ProjectionWorkerPermanentError } from "./errors"
 import {
   assertProjectionJobId,
@@ -45,19 +46,11 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
     if (succeeded) return terminalResult(succeeded)
 
     if (isExplicitCancellation(error)) {
-      await finishProjection(input, execution, {
-        protocol: input.job.protocol,
-        status: "cancelled",
-        errorMessage: error.message,
-      })
+      await finishProjection(input, execution, projectionFailure(input, error, "cancelled"))
       throw error
     }
     if ((await isPermanentFailure(input, execution, error)) && !signal.aborted) {
-      await finishProjection(input, execution, {
-        protocol: input.job.protocol,
-        status: "failed",
-        errorMessage: errorMessage(error),
-      })
+      await finishProjection(input, execution, projectionFailure(input, error, "failed"))
       const run = await requireRun(input)
       input.onRunFailed?.(error, run)
     }
@@ -194,7 +187,7 @@ function replacementEntries(
 async function finishProjection(
   input: RunProjectionJobInput,
   execution: ClaimedProjectionExecution,
-  decision: ProjectionRunTerminalDecision
+  decision: ProjectionRunTerminalDecision & { readonly finishedAt?: Date }
 ): Promise<void> {
   const common = {
     source: { projectionId: input.job.projectionId },
@@ -205,6 +198,25 @@ async function finishProjection(
     ...common,
     ...decision,
   })
+}
+
+function projectionFailure(
+  input: RunProjectionJobInput,
+  error: unknown,
+  status: "failed" | "cancelled"
+): ProjectionRunTerminalDecision & { readonly finishedAt: Date } {
+  const finishedAt = new Date(input.now?.() ?? Date.now())
+  return {
+    protocol: input.job.protocol,
+    status,
+    finishedAt,
+    error: toSixbFailure(error, {
+      allowedCodes: PROJECTION_RUN_FAILURE_CODES,
+      fallbackCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+      at: finishedAt,
+      fallbackDetails: { projectionId: input.job.projectionId, runId: input.job.id },
+    }),
+  }
 }
 
 type ProjectionSuccessfulCompletion =
@@ -281,10 +293,6 @@ function isPermanentSyncFailure(error: unknown): boolean {
 
 function isExplicitCancellation(error: unknown): error is MaterializationCancellationError {
   return error instanceof MaterializationCancellationError
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /**
