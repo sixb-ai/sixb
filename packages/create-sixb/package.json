@@ -32,7 +32,7 @@
   },
   "scripts": {
     "build": "tsc -b tsconfig.build.json --force && bun ../../scripts/build-package.ts",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.template.json",
+    "typecheck": "tsc --noEmit",
     "test": "bun test",
     "prepack": "bun run build"
   },

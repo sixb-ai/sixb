@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { scaffoldProject } from "../src/scaffold"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const createPackageDir = join(repoRoot, "packages", "create-sixb")
@@ -122,6 +123,16 @@ describe("create-sixb packed artifacts", () => {
       expect(await Bun.file(join(target, "package.json")).exists()).toBe(false)
     }
   })
+
+  test("never overwrites an existing project tsconfig during init", async () => {
+    const target = await createRunDirectory("existing-tsconfig")
+    const tsconfigPath = join(target, "tsconfig.json")
+    const existing = '{"compilerOptions":{"strict":false}}\n'
+    await writeFile(tsconfigPath, existing)
+
+    await expect(scaffoldProject(target, { allowExisting: true })).rejects.toThrow()
+    expect(await readFile(tsconfigPath, "utf8")).toBe(existing)
+  })
 })
 
 async function readPackageManifest(packageDir: string): Promise<{
@@ -197,7 +208,9 @@ async function assertScaffold(projectDir: string, name: string): Promise<void> {
   await stat(join(projectDir, "app", "page.tsx"))
   await stat(join(projectDir, "app", "public", "sixb-wordmark.svg"))
   await stat(join(projectDir, ".gitignore"))
+  await stat(join(projectDir, "tsconfig.json"))
   expect(await Bun.file(join(projectDir, "gitignore")).exists()).toBe(false)
+  expect(await Bun.file(join(projectDir, "tsconfig.scaffold.json")).exists()).toBe(false)
 
   const configSource = await readFile(join(projectDir, "sixb.config.ts"), "utf8")
   expect(configSource).toContain(`const projectId = "${name}"`)

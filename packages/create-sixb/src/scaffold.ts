@@ -27,6 +27,7 @@ export async function scaffoldProject(
     errorOnExist: true,
   })
   await installGitignore(targetDir)
+  await installProjectTsconfig(targetDir)
 
   const name = basename(targetDir)
   await rewritePackageJson(targetDir, name, await resolvePackageVersion())
@@ -109,6 +110,14 @@ async function installGitignore(targetDir: string): Promise<void> {
     if (!isMissingPathError(error)) throw error
     await rename(source, target)
   }
+}
+
+async function installProjectTsconfig(targetDir: string): Promise<void> {
+  const source = join(targetDir, "tsconfig.scaffold.json")
+  const target = join(targetDir, "tsconfig.json")
+
+  await cp(source, target, { force: false, errorOnExist: true })
+  await rm(source)
 }
 
 async function rewritePackageJson(
