@@ -21,7 +21,6 @@ import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import type { ActionRunParams, ActionRunRecord } from "@sixb/core/storage"
 import { createTestSixb, queueTestActionRun } from "@sixb/core/testing"
-import { ActionWorkerError } from "../src/errors"
 import { runActionJob } from "../src/run-action-job"
 import type { ActionWorkerContext, RunActionJobInput } from "../src/types"
 import type { ActionWorkerHost } from "../src/worker"
@@ -152,7 +151,19 @@ describe("runActionJob", () => {
         },
         run,
       })
-    ).rejects.toBeInstanceOf(ActionWorkerError)
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      message:
+        "[SixbActionWorker] Action job 'act_other' does not match durable run 'act_stored' in project 'action-worker-tests'.",
+      retryable: false,
+      details: {
+        actionId: "count",
+        runId: "act_other",
+        durableActionId: "count",
+        durableRunId: "act_stored",
+        durableProjectId: "action-worker-tests",
+      },
+    })
   })
 
   test("passes nullable params to action handlers unchanged", async () => {
