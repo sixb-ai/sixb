@@ -1,7 +1,8 @@
+import type { SixbFailure } from "../errors/types"
 import type { EventActor, EventOrigin } from "../events/envelope"
 import type { PropertyChange, PropertyChangeMap } from "../events/property-changes"
 import type { JsonValue } from "../json"
-import type { ProjectionProtocolIdentity } from "../projections/types"
+import type { ProjectionProtocolIdentity, ProjectionRunFailureCode } from "../projections/types"
 
 export type { ProjectionProtocolIdentity } from "../projections/types"
 
@@ -177,6 +178,7 @@ interface ProjectionRunFinishBase {
   readonly source: ProjectionSourceRef
   readonly datasetVersion: PinnedDatasetVersion
   readonly execution: ProjectionExecution
+  readonly finishedAt?: Date
 }
 
 export type ProjectionRunTerminalDecision =
@@ -194,7 +196,7 @@ export type ProjectionRunTerminalDecision =
   | {
       readonly protocol: ProjectionProtocolIdentity["protocol"]
       readonly status: "failed" | "cancelled"
-      readonly errorMessage?: string
+      readonly error?: SixbFailure<ProjectionRunFailureCode>
       readonly inputExhausted?: never
     }
 

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import type { SixbFailure } from "../errors/types"
 import type { ProjectionMaterializationIdentity } from "../materialization/model"
-import type { ProjectionRunClaim, ProjectionRunStorage } from "../storage/projection-runs"
+import type {
+  ProjectionRunClaim,
+  ProjectionRunFailureCode,
+  ProjectionRunStorage,
+} from "../storage/projection-runs"
 
 export interface ProjectionRunStorageContractSuiteOptions<
   TStorage extends ProjectionRunStorage = ProjectionRunStorage,
@@ -13,6 +18,15 @@ export interface ProjectionRunStorageContractSuiteOptions<
 
 const projectId = "contract-project"
 const objectTarget = { objectTypeId: "Device" } as const
+
+const failure = {
+  code: "internal.unexpected",
+  message: "Projection failed",
+  retryable: false,
+  at: "2026-06-01T12:00:00.000Z",
+  details: { projectionId: "contract.devices", runId: "failed-run" },
+  causeChain: [{ name: "Error", message: "Source failure" }],
+} as const satisfies SixbFailure<ProjectionRunFailureCode>
 
 const replacementIdentity = {
   projectionId: "contract.devices",
@@ -342,6 +356,39 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
         await expect(storage.lockForMaterialization(executionInput(claim))).rejects.toThrow(
           "already terminal"
         )
+      })
+    })
+
+    test("validates, detaches, and persists scoped failures", async () => {
+      await withStorage(async (storage) => {
+        const claim = await storage.startOrReclaim(replacementInput("failed-run"))
+        const finished = await storage.finish({
+          ...executionInput(claim),
+          protocol: "replacement",
+          status: "failed",
+          finishedAt: new Date(failure.at),
+          error: failure,
+        })
+
+        expect(finished).toMatchObject({
+          status: "failed",
+          finishedAt: new Date(failure.at),
+          error: failure,
+        })
+        expect(finished.error).not.toBe(failure)
+        await expect(storage.getById({ projectId, id: "failed-run" })).resolves.toMatchObject({
+          error: failure,
+        })
+
+        const invalid = await storage.startOrReclaim(replacementInput("invalid-failure-run"))
+        await expect(
+          storage.finish({
+            ...executionInput(invalid),
+            protocol: "replacement",
+            status: "failed",
+            error: { ...failure, code: "dataset.not_found" } as never,
+          })
+        ).rejects.toThrow("code is not allowed by this failure contract")
       })
     })
 

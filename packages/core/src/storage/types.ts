@@ -172,6 +172,7 @@ export type {
   ObjectProjectionTarget,
   ProjectionKind,
   ProjectionRunClaim,
+  ProjectionRunFailureCode,
   ProjectionRunProgress,
   ProjectionRunRecord,
   ProjectionRunStatus,
@@ -182,7 +183,7 @@ export type {
   TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
 } from "./projection-runs"
-export { ProjectionRunError } from "./projection-runs"
+export { PROJECTION_RUN_FAILURE_CODES, ProjectionRunError } from "./projection-runs"
 export type {
   ListActiveRuleStatesInput,
   ListActiveRuleStatesResult,

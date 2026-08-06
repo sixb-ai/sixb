@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import { randomUUID } from "node:crypto"
+import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
   advanceProjectionTelemetry,
   assertGenericProgressDoesNotAdvanceTelemetry,
@@ -41,7 +42,7 @@ import type {
   TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
 } from "@sixb/core/storage"
-import { ProjectionRunError } from "@sixb/core/storage"
+import { PROJECTION_RUN_FAILURE_CODES, ProjectionRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
@@ -221,7 +222,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
             source_rows_read = ?,
             source_rows_skipped = ?,
             input_exhausted = ?,
-            error_message = ?
+            error = ?
           WHERE project_id = ? AND id = ? AND status = 'running' AND execution_token = ?
         `
         )
@@ -231,7 +232,9 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
           plan.progress.sourceRowsRead,
           plan.progress.sourceRowsSkipped,
           plan.inputExhausted ? 1 : existingRow.input_exhausted,
-          plan.errorMessage ?? null,
+          plan.error === undefined
+            ? null
+            : serializeSixbFailure(plan.error, PROJECTION_RUN_FAILURE_CODES),
           input.projectId,
           input.id,
           input.executionToken
@@ -528,7 +531,7 @@ function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
       sourceRowsRead: databaseSafeInteger(row.source_rows_read, "sourceRowsRead"),
       sourceRowsSkipped: databaseSafeInteger(row.source_rows_skipped, "sourceRowsSkipped"),
     },
-    errorMessage: row.error_message ?? undefined,
+    error: row.error ?? undefined,
   }
   return restoreProjectionRun(persisted)
 }
@@ -588,5 +591,5 @@ interface DatabaseRow {
   missing_target_first_seen_at: string | null
   source_rows_read: number
   source_rows_skipped: number
-  error_message: string | null
+  error: string | null
 }

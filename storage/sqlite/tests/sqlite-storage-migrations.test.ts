@@ -716,6 +716,7 @@ describe("SQLite storage migrations", () => {
           "next_batch_ordinal",
           "next_row_offset",
           "input_exhausted",
+          "error",
         ])
       )
     } finally {
