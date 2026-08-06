@@ -8,6 +8,7 @@ export type {
   DatasetColumnTypeOf,
   DatasetColumnUnionOf,
   DatasetDefinition,
+  DatasetPrimaryKey,
   DatasetSchema,
 } from "./types"
 export { getDatasetRowValidationError, isDatasetDefinition } from "./validation"

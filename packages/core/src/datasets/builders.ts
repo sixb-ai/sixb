@@ -4,6 +4,7 @@ import type {
   DatasetColumnNameOf,
   DatasetColumnType,
   DatasetDefinition,
+  DatasetPrimaryKey,
 } from "./types"
 import { assertDatasetColumnDefinition, assertDatasetDefinition } from "./validation"
 
@@ -13,6 +14,7 @@ type DatasetColumnOptions = {
 
 type DefineDatasetOptions = {
   readonly schema: readonly DatasetColumnDefinition[]
+  readonly primaryKey?: DatasetPrimaryKey
   readonly partitionBy?: readonly string[]
   readonly description?: string
 }
@@ -20,6 +22,7 @@ type DefineDatasetOptions = {
 type DeriveDatasetOptions<TParent extends DatasetDefinition> = {
   readonly pick?: readonly DatasetColumnNameOf<TParent>[]
   readonly add?: readonly DatasetColumnDefinition[]
+  readonly primaryKey?: DatasetPrimaryKey
   readonly partitionBy?: readonly string[]
   readonly description?: string
 }
@@ -38,6 +41,24 @@ type ColumnDefinitionOf<
   TColumns extends readonly DatasetColumnDefinition[],
   TName extends ColumnNameOf<TColumns>,
 > = Extract<TColumns[number], { readonly name: TName }>
+
+type PrimaryKeyColumnNameOf<TColumns extends readonly DatasetColumnDefinition[]> =
+  string extends ColumnNameOf<TColumns>
+    ? string
+    : {
+        [TName in ColumnNameOf<TColumns>]: ColumnDefinitionOf<
+          TColumns,
+          TName
+        >["type"] extends "string"
+          ? ColumnDefinitionOf<TColumns, TName> extends { readonly nullable: true }
+            ? never
+            : TName
+          : never
+      }[ColumnNameOf<TColumns>]
+
+type CheckedDefineDatasetOptions<TOptions extends DefineDatasetOptions> = TOptions & {
+  readonly primaryKey?: DatasetPrimaryKey<PrimaryKeyColumnNameOf<TOptions["schema"]>>
+}
 
 type PickColumns<
   TColumns extends readonly DatasetColumnDefinition[],
@@ -86,8 +107,9 @@ type DatasetColumnResult<
 
 type DatasetDefinitionResult<TId extends string, TOptions extends DefineDatasetOptions> = Omit<
   DatasetDefinition<TId, TOptions["schema"]>,
-  "partitionBy" | "description"
+  "primaryKey" | "partitionBy" | "description"
 > &
+  FieldFromOptions<TOptions, "primaryKey", DatasetPrimaryKey> &
   FieldFromOptions<TOptions, "partitionBy", readonly string[]> &
   FieldFromOptions<TOptions, "description", string>
 
@@ -95,9 +117,20 @@ type DerivedDatasetDefinitionResult<
   TId extends string,
   TParent extends DatasetDefinition,
   TOptions extends DeriveDatasetOptions<TParent> | undefined,
-> = Omit<DatasetDefinition<TId, DerivedColumns<TParent, TOptions>>, "partitionBy" | "description"> &
+> = Omit<
+  DatasetDefinition<TId, DerivedColumns<TParent, TOptions>>,
+  "primaryKey" | "partitionBy" | "description"
+> &
+  FieldFromOptions<TOptions, "primaryKey", DatasetPrimaryKey> &
   FieldFromOptions<TOptions, "partitionBy", readonly string[]> &
   FieldFromOptions<TOptions, "description", string>
+
+type CheckedDeriveDatasetOptions<
+  TParent extends DatasetDefinition,
+  TOptions extends DeriveDatasetOptions<TParent>,
+> = TOptions & {
+  readonly primaryKey?: DatasetPrimaryKey<PrimaryKeyColumnNameOf<DerivedColumns<TParent, TOptions>>>
+}
 
 export function col<const TName extends string, const TType extends DatasetColumnType>(
   name: TName,
@@ -130,12 +163,19 @@ function assertDatasetId(id: string): void {
 }
 
 function createDatasetDefinition(id: string, options: DefineDatasetOptions): DatasetDefinition {
-  const definition: DatasetDefinition = {
+  const definition: unknown = {
     kind: "dataset",
     id,
     schema: {
       columns: [...options.schema],
     },
+    ...(options.primaryKey !== undefined
+      ? {
+          primaryKey: Array.isArray(options.primaryKey)
+            ? [...options.primaryKey]
+            : options.primaryKey,
+        }
+      : {}),
     ...(options.partitionBy !== undefined ? { partitionBy: [...options.partitionBy] } : {}),
     ...(options.description !== undefined ? { description: options.description } : {}),
   }
@@ -189,6 +229,7 @@ function deriveDatasetDefinition(
 
   return createDatasetDefinition(id, {
     schema: [...pickedColumns, ...(options.add ?? [])],
+    ...(options.primaryKey !== undefined ? { primaryKey: options.primaryKey } : {}),
     ...(options.partitionBy !== undefined ? { partitionBy: options.partitionBy } : {}),
     ...(options.description !== undefined ? { description: options.description } : {}),
   })
@@ -203,7 +244,10 @@ function createDatasetDeriveBuilder<TId extends string>(id: TId) {
   function derive<
     const TParent extends DatasetDefinition,
     const TOptions extends DeriveDatasetOptions<TParent>,
-  >(parent: TParent, options: TOptions): DerivedDatasetDefinitionResult<TId, TParent, TOptions>
+  >(
+    parent: TParent,
+    options: CheckedDeriveDatasetOptions<TParent, TOptions>
+  ): DerivedDatasetDefinitionResult<TId, TParent, TOptions>
   function derive(
     parent: DatasetDefinition,
     options?: DeriveDatasetOptions<DatasetDefinition>
@@ -220,7 +264,7 @@ export function defineDataset<const TId extends string>(
 export function defineDataset<
   const TId extends string,
   const TOptions extends DefineDatasetOptions,
->(id: TId, options: TOptions): DatasetDefinitionResult<TId, TOptions>
+>(id: TId, options: CheckedDefineDatasetOptions<TOptions>): DatasetDefinitionResult<TId, TOptions>
 export function defineDataset(
   id: string,
   options?: DefineDatasetOptions

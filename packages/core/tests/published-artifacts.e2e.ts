@@ -174,8 +174,13 @@ describe("published artifacts", () => {
     )
     await writeFile(
       join(consumerDir, "index.ts"),
-      `${subpaths.map((subpath, index) => `import * as m${index} from "${subpath}"`).join("\n")}
+      `import type { DatasetPrimaryKey as RootDatasetPrimaryKey } from "@sixb/core"
+import type { DatasetPrimaryKey as LakeDatasetPrimaryKey } from "@sixb/core/lake-storage"
+${subpaths.map((subpath, index) => `import * as m${index} from "${subpath}"`).join("\n")}
+const rootPrimaryKey: RootDatasetPrimaryKey<"tenantId" | "id"> = ["tenantId", "id"]
+const lakePrimaryKey: LakeDatasetPrimaryKey<"tenantId" | "id"> = rootPrimaryKey
 export const loaded = [${subpaths.map((_, index) => `m${index}`).join(", ")}].length
+void lakePrimaryKey
 `
     )
 

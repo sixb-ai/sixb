@@ -119,6 +119,53 @@ function assertDatasetSchema(
   }
 }
 
+function assertDatasetPrimaryKey(
+  primaryKey: unknown,
+  schema: DatasetSchema,
+  createError: (message: string) => Error
+): void {
+  let keyColumns: readonly unknown[]
+  if (typeof primaryKey === "string") {
+    keyColumns = [primaryKey]
+  } else if (Array.isArray(primaryKey)) {
+    if (primaryKey.length < 2) {
+      throw createError(
+        "Dataset primaryKey arrays must contain at least two column names. Use a string for a single-column key."
+      )
+    }
+    keyColumns = primaryKey
+  } else {
+    throw createError(
+      "Dataset primaryKey must be a column name or an array of at least two column names."
+    )
+  }
+
+  const columnsByName = new Map(schema.columns.map((column) => [column.name, column] as const))
+  const seenColumnNames = new Set<string>()
+
+  for (const columnName of keyColumns) {
+    if (typeof columnName !== "string" || columnName.trim().length === 0) {
+      throw createError("Dataset primaryKey columns must be non-empty strings.")
+    }
+
+    if (seenColumnNames.has(columnName)) {
+      throw createError(`Dataset primaryKey contains duplicate column '${columnName}'.`)
+    }
+    seenColumnNames.add(columnName)
+
+    const column = columnsByName.get(columnName)
+    if (column === undefined) {
+      throw createError(`Dataset primaryKey column '${columnName}' is not declared in the schema.`)
+    }
+    if (column.type !== "string") {
+      throw createError(`Dataset primaryKey column '${columnName}' must have type 'string'.`)
+    }
+    if (column.nullable === true) {
+      throw createError(`Dataset primaryKey column '${columnName}' must not be nullable.`)
+    }
+  }
+}
+
 export function assertDatasetDefinition(
   definition: unknown,
   createError: (message: string) => Error = (message) => new DatasetValidationError(message)
@@ -133,6 +180,10 @@ export function assertDatasetDefinition(
 
   assertNonEmptyString(definition.id, "Dataset id", createError)
   assertDatasetSchema(definition.schema, createError)
+
+  if (definition.primaryKey !== undefined) {
+    assertDatasetPrimaryKey(definition.primaryKey, definition.schema, createError)
+  }
 
   if (definition.partitionBy !== undefined) {
     if (!Array.isArray(definition.partitionBy)) {

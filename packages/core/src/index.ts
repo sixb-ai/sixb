@@ -140,6 +140,7 @@ export type {
   DatasetColumnTypeOf,
   DatasetColumnUnionOf,
   DatasetDefinition,
+  DatasetPrimaryKey,
   DatasetSchema,
 } from "./datasets"
 export {

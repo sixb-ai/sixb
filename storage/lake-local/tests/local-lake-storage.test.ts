@@ -23,6 +23,31 @@ runLakeStorageContractSuite("LocalLakeStorage", {
   },
 })
 
+describe("LocalLakeStorage definition persistence", () => {
+  test("round-trips a keyed definition after reopening", async () => {
+    // Regression guard: stripping primaryKey from definition.json makes the reopened reads fail.
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-lake-local-reopen-definition-"))
+    const path = join(rootDir, "lake")
+    try {
+      const dataset = defineDataset("stable.reopen-definition", {
+        schema: [col("tenantId", "string"), col("invoiceId", "string"), col("status", "string")],
+        primaryKey: ["tenantId", "invoiceId"],
+      })
+      const initial = new LocalLakeStorage({ path })
+      await initial.createDataset(dataset)
+
+      const reopened = new LocalLakeStorage({ path })
+
+      await expect(reopened.getDataset(dataset.id)).resolves.toEqual(dataset)
+      await expect(reopened.listDatasets()).resolves.toEqual([dataset])
+      await expect(reopened.createDataset(dataset)).resolves.toEqual(dataset)
+      await expect(reopened.listVersions(dataset.id)).resolves.toEqual([])
+    } finally {
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe("LocalLakeStorage stable pinned reads", () => {
   test("preserves physical row order and offsets after reopening", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "sixb-lake-local-reopen-order-"))

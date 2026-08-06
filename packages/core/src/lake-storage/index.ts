@@ -2,6 +2,7 @@ export type {
   DatasetColumnDefinition,
   DatasetColumnType,
   DatasetDefinition,
+  DatasetPrimaryKey,
   DatasetSchema,
 } from "../datasets"
 export type { JsonValue } from "../json"

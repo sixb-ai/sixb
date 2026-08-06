@@ -1,4 +1,4 @@
-import type { DatasetColumnDefinition, DatasetSchema } from "@sixb/core"
+import type { DatasetColumnDefinition, DatasetPrimaryKey, DatasetSchema } from "@sixb/core"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import { duckDbTypeToDatasetColumnType } from "./schema"
 
@@ -10,7 +10,11 @@ export interface DuckLakeCatalogColumn {
   readonly columnType: string
   readonly nullsAllowed: boolean
   readonly parentColumnId?: bigint
+  readonly comment?: string
 }
+
+const SIXB_PRIMARY_KEY_COMMENT_NAMESPACE = "sixb:primary-key:"
+const SIXB_PRIMARY_KEY_COMMENT_PREFIX = `${SIXB_PRIMARY_KEY_COMMENT_NAMESPACE}v1:`
 
 const FILE_REF_STRUCT_CHILDREN = [
   { name: "blobId", type: "string" },
@@ -44,6 +48,91 @@ export function duckLakeCatalogColumnsToDatasetSchema(
       .sort(compareDuckLakeCatalogColumnOrder)
       .map((column) => duckLakeCatalogColumnToDefinition(tableName, column, childrenByParentId)),
   }
+}
+
+export function duckLakePrimaryKeyColumnComment(ordinal: number): string {
+  return `${SIXB_PRIMARY_KEY_COMMENT_PREFIX}${ordinal}`
+}
+
+export function duckLakeCatalogColumnsToDatasetPrimaryKey(
+  tableName: string,
+  rows: readonly DuckLakeCatalogColumn[]
+): DatasetPrimaryKey | undefined {
+  const keyedColumns: { readonly column: DuckLakeCatalogColumn; readonly ordinal: number }[] = []
+  const seenOrdinals = new Set<number>()
+
+  for (const column of rows) {
+    const comment = column.comment
+    if (comment === undefined || !comment.startsWith(SIXB_PRIMARY_KEY_COMMENT_NAMESPACE)) {
+      continue
+    }
+
+    if (
+      column.parentColumnId !== undefined ||
+      !comment.startsWith(SIXB_PRIMARY_KEY_COMMENT_PREFIX)
+    ) {
+      throwInvalidPrimaryKeyMetadata(tableName, column, comment)
+    }
+
+    const ordinalText = comment.slice(SIXB_PRIMARY_KEY_COMMENT_PREFIX.length)
+    if (!/^(0|[1-9]\d*)$/.test(ordinalText)) {
+      throwInvalidPrimaryKeyMetadata(tableName, column, comment)
+    }
+
+    const ordinal = Number(ordinalText)
+    if (!Number.isSafeInteger(ordinal)) {
+      throwInvalidPrimaryKeyMetadata(tableName, column, comment)
+    }
+    if (seenOrdinals.has(ordinal)) {
+      throw new LakeStorageError(
+        `[SixbDuckLake] Dataset table '${tableName}' has duplicate primary-key ordinal '${ordinal}'.`
+      )
+    }
+    seenOrdinals.add(ordinal)
+
+    if (duckDbTypeToDatasetColumnType(column.columnType) !== "string") {
+      throw new LakeStorageError(
+        `[SixbDuckLake] Dataset table '${tableName}' primary-key column '${column.columnName}' must map to type 'string'.`
+      )
+    }
+    if (column.nullsAllowed) {
+      throw new LakeStorageError(
+        `[SixbDuckLake] Dataset table '${tableName}' primary-key column '${column.columnName}' must not be nullable.`
+      )
+    }
+
+    keyedColumns.push({ column, ordinal })
+  }
+
+  if (keyedColumns.length === 0) {
+    return undefined
+  }
+
+  keyedColumns.sort((left, right) => left.ordinal - right.ordinal)
+  for (const [expectedOrdinal, keyedColumn] of keyedColumns.entries()) {
+    if (keyedColumn.ordinal !== expectedOrdinal) {
+      throw new LakeStorageError(
+        `[SixbDuckLake] Dataset table '${tableName}' primary-key ordinals must be contiguous from 0.`
+      )
+    }
+  }
+
+  const columnNames = keyedColumns.map(({ column }) => column.columnName)
+  if (columnNames.length === 1) {
+    return columnNames[0]
+  }
+
+  return columnNames as [string, string, ...string[]]
+}
+
+function throwInvalidPrimaryKeyMetadata(
+  tableName: string,
+  column: DuckLakeCatalogColumn,
+  comment: string
+): never {
+  throw new LakeStorageError(
+    `[SixbDuckLake] Dataset table '${tableName}' has malformed primary-key metadata '${comment}' on column '${column.columnName}'.`
+  )
 }
 
 function duckLakeCatalogColumnToDefinition(

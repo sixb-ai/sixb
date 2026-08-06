@@ -8,6 +8,7 @@ import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import {
   type DuckLakeCatalogColumn,
   duckLakeCatalogColumnsToDatasetSchema,
+  duckLakePrimaryKeyColumnComment,
 } from "./ducklake-catalog-schema"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import { readCurrentDatasetDefinitions } from "./ducklake-current-dataset-definitions"
@@ -59,19 +60,32 @@ export class DuckLakeDatasetCatalog {
     const qualifiedName = qualifiedTableName(this.options, tableName)
 
     // Creating a dataset can be several catalog DDL statements. Keep them in
-    // one runtime slot so writes cannot observe a half-created table.
+    // one transaction and runtime slot so nothing can observe a partial definition.
     await this.connections.withExclusiveAttached(async (runtime) => {
-      await runtime.run(
-        `CREATE TABLE ${qualifiedName} (${datasetSchemaToDuckDbColumnsSql(definition.schema)})`
-      )
-
-      if (definition.description !== undefined) {
+      await runtime.run("BEGIN TRANSACTION")
+      let committed = false
+      try {
         await runtime.run(
-          `COMMENT ON TABLE ${qualifiedName} IS ${quoteSqlString(definition.description)}`
+          `CREATE TABLE ${qualifiedName} (${datasetSchemaToDuckDbColumnsSql(definition.schema)})`
         )
-      }
 
-      await this.applyPartitionBy(runtime, qualifiedName, definition)
+        if (definition.description !== undefined) {
+          await runtime.run(
+            `COMMENT ON TABLE ${qualifiedName} IS ${quoteSqlString(definition.description)}`
+          )
+        }
+
+        await this.applyPrimaryKey(runtime, qualifiedName, definition)
+        await this.applyPartitionBy(runtime, qualifiedName, definition)
+
+        await runtime.run("COMMIT")
+        committed = true
+      } catch (error) {
+        if (!committed) {
+          await this.rollbackTransaction(runtime)
+        }
+        throw error
+      }
     })
     this.connections.markLocalCatalogChanged()
 
@@ -285,6 +299,26 @@ export class DuckLakeDatasetCatalog {
       const message = error instanceof Error ? error.message : String(error)
       throw new LakeStorageError(
         `[SixbDuckLake] Dataset '${definition.id}' cannot apply partitionBy because DuckLake rejected ALTER TABLE SET PARTITIONED BY: ${message}`
+      )
+    }
+  }
+
+  private async applyPrimaryKey(
+    runtime: DuckDbQueryRuntime,
+    qualifiedName: string,
+    definition: DatasetDefinition
+  ): Promise<void> {
+    if (definition.primaryKey === undefined) {
+      return
+    }
+
+    const columnNames =
+      typeof definition.primaryKey === "string" ? [definition.primaryKey] : definition.primaryKey
+    for (const [ordinal, columnName] of columnNames.entries()) {
+      await runtime.run(
+        `COMMENT ON COLUMN ${qualifiedName}.${quoteIdentifier(columnName)} IS ${quoteSqlString(
+          duckLakePrimaryKeyColumnComment(ordinal)
+        )}`
       )
     }
   }
