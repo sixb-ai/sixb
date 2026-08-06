@@ -19,7 +19,6 @@ import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { ActionWorker } from "../src"
-import { ActionWorkerError } from "../src/errors"
 import type { ActionExecutionFacade } from "../src/types"
 import { waitFor } from "./helpers"
 
@@ -68,6 +67,15 @@ function createSixb(
   return { host, sixb: createTestSixb(host) }
 }
 
+function captureThrown(callback: () => unknown): unknown {
+  try {
+    callback()
+  } catch (error) {
+    return error
+  }
+  throw new Error("Expected callback to throw")
+}
+
 describe("ActionWorker", () => {
   test("idles without action definitions or action-run storage", async () => {
     const storage = createStorageWithoutActionRuns()
@@ -77,14 +85,20 @@ describe("ActionWorker", () => {
     await worker.stop()
   })
 
-  test("throws ActionWorkerError when action-run storage is missing", () => {
+  test("throws a coded internal error when action-run storage is missing", () => {
     const noop = defineAction("noop")
       .on(Device)
       .params({})
       .writeback(() => {})
     const storage = createStorageWithoutActionRuns()
 
-    expect(() => new ActionWorker(createSixb([noop], storage).host)).toThrow(ActionWorkerError)
+    const error = captureThrown(() => new ActionWorker(createSixb([noop], storage).host))
+
+    expect(error).toMatchObject({
+      code: "internal.unexpected",
+      message: "[SixbActionWorker] Action workers require storage.actionRuns support.",
+      retryable: false,
+    })
   })
 
   test("streams a run-scoped log line to the broker", async () => {

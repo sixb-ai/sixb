@@ -1,17 +1,25 @@
 import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { ActionRunFailure, ActionRunRecord } from "@sixb/core/storage"
 import { isTerminalActionRun } from "@sixb/core/storage"
-import { ActionWorkerError } from "../errors"
 import { toActionRunFailure } from "../normalize"
 import type { ActionRunResult, RunActionJobInput } from "../types"
 
-export function requireFinishedAt(runId: string, finishedAt: Date | undefined): Date {
-  if (finishedAt) {
-    return finishedAt
+export function requireFinishedAt(input: {
+  readonly actionId: string
+  readonly runId: string
+  readonly finishedAt: Date | undefined
+}): Date {
+  if (input.finishedAt) {
+    return input.finishedAt
   }
 
-  throw new ActionWorkerError(`Action run '${runId}' finished without a finishedAt timestamp.`)
+  throw createSixbError(
+    "internal.unexpected",
+    `[SixbActionWorker] Action run '${input.runId}' finished without a finishedAt timestamp.`,
+    { details: { actionId: input.actionId, runId: input.runId } }
+  )
 }
 
 /**
@@ -53,8 +61,10 @@ async function resolveRunningRunUnderFence(input: RunActionJobInput, run: Action
   return input.runtime.storage.transaction(
     async (storage) => {
       if (!storage.actionRuns) {
-        throw new ActionWorkerError(
-          "Action workers require transactional Action materialization fencing."
+        throw createSixbError(
+          "internal.unexpected",
+          "[SixbActionWorker] Action workers require transactional Action materialization fencing.",
+          { details: { actionId: input.job.actionId, runId: input.job.id } }
         )
       }
       const locked = await storage.actionRuns.lockForMaterialization({
@@ -98,7 +108,7 @@ export function failedResult(
     subject: run.subject,
     status: "failed",
     startedAt: run.startedAt ?? run.queuedAt,
-    finishedAt: requireFinishedAt(runId, run.finishedAt),
+    finishedAt: requireFinishedAt({ actionId, runId, finishedAt: run.finishedAt }),
     error: failure,
     record: run,
   }
@@ -120,8 +130,10 @@ function redeliveryFailure(runId: string, run: ActionRunRecord, failedAt: Date):
 }
 
 function reportRedeliveryFailure(input: RunActionJobInput, run: ActionRunRecord): void {
-  const error = new ActionWorkerError(
-    run.error?.message ?? `Action run '${run.id}' lost its lease.`
+  const error = createSixbError(
+    "internal.unexpected",
+    `[SixbActionWorker] ${run.error?.message ?? `Action run '${run.id}' lost its lease.`}`,
+    { details: { actionId: input.job.actionId, runId: input.job.id } }
   )
   reportRunFailure(input.runtime.errorReporterHost, error, {
     projectId: input.runtime.id,
