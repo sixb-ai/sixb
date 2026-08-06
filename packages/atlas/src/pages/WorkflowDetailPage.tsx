@@ -1565,7 +1565,7 @@ function AgentExecutionPanel({
             </div>
           ) : null}
           {execution?.error ? (
-            <p className="break-words text-sm text-destructive">{execution.error}</p>
+            <SixbFailureSummary failure={execution.error} className="text-sm" />
           ) : null}
         </div>
       ) : loading ? (

@@ -13,7 +13,7 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
+import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { AgentWorkerError } from "./errors"
 import { reconcileAgentExecutionIdentity } from "./identity"
 import {
@@ -175,12 +175,25 @@ async function loadWorkflowAgentNodeExecution(
 
   const workflowRun = await runs.getById({ projectId: context.id, id: nodeRun.workflowRunId })
   if (!workflowRun || workflowRun.status !== "waiting" || nodeRun.status !== "waiting") {
+    const completedAt = new Date()
+    const message = workflowRun
+      ? `Parent workflow run is ${workflowRun.status}.`
+      : "Parent workflow run is missing."
     await runs.agentNodes.cancel({
       projectId: context.id,
       nodeRunId: nodeRun.id,
-      error: workflowRun
-        ? `Parent workflow run is ${workflowRun.status}.`
-        : "Parent workflow run is missing.",
+      error: toSixbFailure(message, {
+        allowedCodes: AGENT_RUN_FAILURE_CODES,
+        fallbackCode: "runtime.cancelled",
+        at: completedAt,
+        fallbackDetails: {
+          agentId: executionRecord.agentId,
+          workflowId: nodeRun.workflowId,
+          workflowRunId: nodeRun.workflowRunId,
+          nodeRunId: nodeRun.id,
+        },
+      }),
+      completedAt,
     })
     return null
   }
@@ -301,7 +314,6 @@ async function finishWorkflowAgentNodeFailed(input: {
   readonly status: "failed" | "cancelled"
   readonly error: unknown
 }): Promise<{ readonly node: WorkflowNodeRunRecord; readonly run: WorkflowRunRecord }> {
-  const message = errorMessage(input.error)
   const at = new Date()
   const fallbackCode = input.status === "cancelled" ? "runtime.cancelled" : "internal.unexpected"
   return input.context.storage.transaction(async (tx) => {
@@ -313,12 +325,24 @@ async function finishWorkflowAgentNodeFailed(input: {
       executionToken: input.executionToken,
       status: input.status,
       modelId: input.agent.model.modelId,
-      error: message,
+      error: toSixbFailure(input.error, {
+        allowedCodes: AGENT_RUN_FAILURE_CODES,
+        fallbackCode,
+        at,
+        fallbackDetails: {
+          agentId: input.agent.id,
+          workflowId: input.nodeRun.workflowId,
+          workflowRunId: input.nodeRun.workflowRunId,
+          nodeRunId: input.nodeRun.id,
+        },
+      }),
+      completedAt: at,
     })
     const node = await runs.nodes.finish({
       projectId: input.context.id,
       id: input.nodeRun.id,
       status: input.status,
+      finishedAt: at,
       error: toSixbFailure(input.error, {
         allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
         fallbackCode,
@@ -334,6 +358,7 @@ async function finishWorkflowAgentNodeFailed(input: {
       projectId: input.context.id,
       id: input.nodeRun.workflowRunId,
       status: input.status,
+      finishedAt: at,
       error: toSixbFailure(input.error, {
         allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
         fallbackCode,
@@ -480,8 +505,4 @@ function requireFinishedAt(
     throw new AgentWorkerError(`Workflow run record '${record.id}' has no finishedAt.`)
   }
   return record.finishedAt
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

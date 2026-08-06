@@ -18,7 +18,7 @@ import {
 import { agentRunControlStreamId, agentRunStreamId } from "@sixb/core/agents/streams"
 import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
 import { createSessionCredential } from "@sixb/core/internal/auth"
-import type { AgentStorage } from "@sixb/core/storage"
+import type { AgentRunFailureCode, AgentStorage, SixbFailure } from "@sixb/core/storage"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -29,6 +29,14 @@ const model = {
   provider: "test",
   modelId: "test-model",
 } as unknown as Parameters<typeof defineAgent>[1]["model"]
+
+const FAILURE: SixbFailure<AgentRunFailureCode> = {
+  code: "internal.unexpected",
+  message: "dispatch failed",
+  retryable: false,
+  at: "2026-06-27T10:00:02.000Z",
+  details: { agentId: "assistant" },
+}
 
 type StartedRunInput = Parameters<AgentStorage["runs"]["create"]>[0] &
   Omit<Parameters<AgentStorage["runs"]["start"]>[0], "id" | "projectId">
@@ -726,8 +734,15 @@ describe("agent routes", () => {
       id: request.run.id,
       projectId: sixb.id,
       status: "failed",
-      error: "dispatch failed",
+      error: FAILURE,
+      completedAt: new Date(FAILURE.at),
     })
+
+    const failedResponse = await app.fetch(
+      new Request(`http://localhost/api/agent-runs/${request.run.id}`)
+    )
+    expect(failedResponse.status).toBe(200)
+    expect(await failedResponse.json()).toMatchObject({ error: FAILURE })
 
     const response = await app.fetch(
       jsonRequest(

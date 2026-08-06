@@ -7,11 +7,12 @@ import {
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { toSixbFailure } from "@sixb/core/internal/errors"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
-import { AgentStorageError } from "@sixb/core/storage"
+import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
 import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } from "./errors"
@@ -172,11 +173,17 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
         run.threadId === threadId &&
         run.triggerMessageId === triggerMessageId
       ) {
+        const completedAt = new Date()
         const failed = await context.storage.agents.runs.finishQueued({
           projectId: context.id,
           id: run.id,
           status: "failed",
-          error: `Agent '${agentId}' is not registered.`,
+          error: toAgentRunFailure(new AgentWorkerError(`Agent '${agentId}' is not registered.`), {
+            status: "failed",
+            at: completedAt,
+            run,
+          }),
+          completedAt,
         })
         this.reportFailure(error, failed, job.attempt)
         await context.streamSink.publishRunFinished(failed)
@@ -266,7 +273,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       const aborted = signal.aborted || cancel.signal.aborted || isAbortError(error)
       const finalized = await this.recordFate(
         context,
-        run.id,
+        run,
         executionToken,
         aborted ? "cancelled" : "failed",
         error
@@ -326,11 +333,13 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       run.threadId === threadId &&
       run.triggerMessageId === triggerMessageId
     ) {
+      const completedAt = new Date()
       const failed = await this.requireContext().storage.agents.runs.finishQueued({
         projectId: this.sixb.id,
         id: run.id,
         status: "failed",
-        error: toErrorMessage(error),
+        error: toAgentRunFailure(error, { status: "failed", at: completedAt, run }),
+        completedAt,
       })
       this.reportFailure(error, failed, claimed.job.attempt)
       await this.requireContext().streamSink.publishRunFinished(failed)
@@ -550,18 +559,20 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
 
   private async recordFate(
     context: AgentWorkerContext,
-    runId: string,
+    run: AgentRunRecord,
     executionToken: string,
     status: "failed" | "cancelled",
     error: unknown
   ): Promise<AgentRunRecord | undefined> {
     try {
+      const completedAt = new Date()
       return await finishRunOrThrow(context.storage.agents, {
         projectId: context.id,
-        id: runId,
+        id: run.id,
         executionToken,
         status,
-        error: toErrorMessage(error),
+        error: toAgentRunFailure(error, { status, at: completedAt, run }),
+        completedAt,
       })
     } catch (finalizeError) {
       // Execution already lost / run already terminal — nothing more to record.
@@ -635,11 +646,24 @@ function backoff(ms: number): string {
   return new Date(Date.now() + ms).toISOString()
 }
 
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
+function toAgentRunFailure(
+  error: unknown,
+  input: {
+    readonly status: "failed" | "cancelled"
+    readonly at: Date
+    readonly run: Pick<AgentRunRecord, "id" | "agentId" | "threadId">
   }
-  return String(error)
+) {
+  return toSixbFailure(error, {
+    allowedCodes: AGENT_RUN_FAILURE_CODES,
+    fallbackCode: input.status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+    at: input.at,
+    fallbackDetails: {
+      agentId: input.run.agentId,
+      runId: input.run.id,
+      threadId: input.run.threadId,
+    },
+  })
 }
 
 function normalizeRequiredString(value: string | undefined): string {
