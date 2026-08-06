@@ -34,6 +34,7 @@ import pipelineFailureRecordSql from "./migrations/012-pipeline-failure-record.s
 import workflowFailureRecordSql from "./migrations/013-workflow-failure-record.sql" with {
   type: "text",
 }
+import agentFailureRecordSql from "./migrations/014-agent-failure-record.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -300,6 +301,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("011-sync-failure-record", syncFailureRecordSql),
     pgSql("012-pipeline-failure-record", pipelineFailureRecordSql),
     pgSql("013-workflow-failure-record", workflowFailureRecordSql),
+    pgSql("014-agent-failure-record", agentFailureRecordSql),
   ],
 })
 

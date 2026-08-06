@@ -13,12 +13,13 @@ type WorkflowAgentExecution = GetWorkflowAgentNodeExecutionResponses[200]
 type LatestFailureCode = NonNullable<LatestWorkflowRun["error"]>["code"]
 type ListedFailureCode = NonNullable<ListedWorkflowRun["error"]>["code"]
 type NodeFailureCode = NonNullable<WorkflowNodeRun["error"]>["code"]
+type AgentExecutionFailureCode = NonNullable<WorkflowAgentExecution["error"]>["code"]
 
 const latestUnexpected: LatestFailureCode = "internal.unexpected"
 const latestCancelled: LatestFailureCode = "runtime.cancelled"
 const listedUnexpected: ListedFailureCode = "internal.unexpected"
 const nodeCancelled: NodeFailureCode = "runtime.cancelled"
-const agentExecutionError: NonNullable<WorkflowAgentExecution["error"]> = "agent failed"
+const agentExecutionCancelled: AgentExecutionFailureCode = "runtime.cancelled"
 
 // Dataset lookup codes belong to HTTP route failures, not persisted workflow failures.
 // @ts-expect-error the generated latest-run failure contract must stay scoped to its producer
@@ -27,14 +28,17 @@ const unrelatedLatest: LatestFailureCode = "dataset.not_found"
 const unrelatedListed: ListedFailureCode = "dataset.not_found"
 // @ts-expect-error the generated node-run failure contract must stay scoped to its producer
 const unrelatedNode: NodeFailureCode = "dataset.not_found"
+// @ts-expect-error workflow-owned agent executions keep the scoped agent-run failure contract
+const unrelatedAgentExecution: AgentExecutionFailureCode = "dataset.not_found"
 
 void [
   latestUnexpected,
   latestCancelled,
   listedUnexpected,
   nodeCancelled,
-  agentExecutionError,
+  agentExecutionCancelled,
   unrelatedLatest,
   unrelatedListed,
   unrelatedNode,
+  unrelatedAgentExecution,
 ]

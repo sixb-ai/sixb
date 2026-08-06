@@ -37,6 +37,7 @@ import pipelineFailureRecordSql from "./migrations/012-pipeline-failure-record.s
 import workflowFailureRecordSql from "./migrations/013-workflow-failure-record.sql" with {
   type: "text",
 }
+import agentFailureRecordSql from "./migrations/014-agent-failure-record.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -70,6 +71,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("011-sync-failure-record", syncFailureRecordSql),
     sqliteSql("012-pipeline-failure-record", pipelineFailureRecordSql),
     sqliteSql("013-workflow-failure-record", workflowFailureRecordSql),
+    sqliteSql("014-agent-failure-record", agentFailureRecordSql),
   ],
 })
 

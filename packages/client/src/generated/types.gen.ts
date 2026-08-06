@@ -3958,7 +3958,25 @@ export type GetWorkflowAgentNodeExecutionResponses = {
     prompt: string
     trace?: Array<unknown>
     diagnostics?: Array<unknown>
-    error?: string
+    error?: {
+      code: "internal.unexpected" | "runtime.cancelled"
+      message: string
+      retryable: boolean
+      at: string
+      /**
+       * Any JSON-compatible value.
+       */
+      details?:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
+      truncated?: true
+    }
     createdAt: string
   }
 }
@@ -6714,7 +6732,25 @@ export type PostAgentThreadMessageResponses = {
         path?: string
         message: string
       }>
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       attempt: number
       streamId: string
       createdAt: string
@@ -6907,7 +6943,25 @@ export type CancelAgentRunResponses = {
         path?: string
         message: string
       }>
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       attempt: number
       streamId: string
       createdAt: string
@@ -7003,7 +7057,25 @@ export type RetryAgentRunResponses = {
         path?: string
         message: string
       }>
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       attempt: number
       streamId: string
       createdAt: string
@@ -7097,7 +7169,25 @@ export type ListAgentThreadRunsResponses = {
         path?: string
         message: string
       }>
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       attempt: number
       streamId: string
       createdAt: string
@@ -7188,7 +7278,25 @@ export type GetAgentRunResponses = {
       path?: string
       message: string
     }>
-    error?: string
+    error?: {
+      code: "internal.unexpected" | "runtime.cancelled"
+      message: string
+      retryable: boolean
+      at: string
+      /**
+       * Any JSON-compatible value.
+       */
+      details?:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
+      truncated?: true
+    }
     attempt: number
     streamId: string
     createdAt: string

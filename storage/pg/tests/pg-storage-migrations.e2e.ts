@@ -49,6 +49,7 @@ describe("Postgres storage migrations", () => {
             "011-sync-failure-record",
             "012-pipeline-failure-record",
             "013-workflow-failure-record",
+            "014-agent-failure-record",
           ],
         },
       ])
@@ -143,6 +144,13 @@ describe("Postgres storage migrations", () => {
           id: "013-workflow-failure-record",
           status: "applied",
           version: 13,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "014-agent-failure-record",
+          status: "applied",
+          version: 14,
         },
       ])
     })
@@ -819,6 +827,13 @@ describe("Postgres storage migrations", () => {
           id: "013-workflow-failure-record",
           status: "applied",
           version: 13,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "014-agent-failure-record",
+          status: "applied",
+          version: 14,
         },
       ])
     } finally {

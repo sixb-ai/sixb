@@ -4,6 +4,7 @@ import {
   type WorkflowRunFailureCode,
 } from "@sixb/core/storage"
 import { z } from "zod"
+import { AgentRunFailureSchema } from "./agents"
 import { JsonValueSchema, sixbFailureSchema } from "./common"
 
 export const WorkflowIOSnapshotSchema = z.record(JsonValueSchema)
@@ -155,7 +156,7 @@ export const WorkflowAgentNodeExecutionSchema = WorkflowAgentNodeExecutionSummar
   prompt: z.string(),
   trace: z.array(z.unknown()).optional(),
   diagnostics: z.array(z.unknown()).optional(),
-  error: z.string().optional(),
+  error: AgentRunFailureSchema.optional(),
   createdAt: z.string(),
 })
 

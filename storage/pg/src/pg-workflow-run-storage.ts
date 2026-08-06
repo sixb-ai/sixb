@@ -39,7 +39,11 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { WORKFLOW_RUN_FAILURE_CODES, WorkflowRunError } from "@sixb/core/storage"
+import {
+  AGENT_RUN_FAILURE_CODES,
+  WORKFLOW_RUN_FAILURE_CODES,
+  WorkflowRunError,
+} from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
@@ -493,7 +497,7 @@ export class PgWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorag
           usage = ${input.usage ? JSON.stringify(input.usage) : null}::text::jsonb,
           trace = ${input.trace ? JSON.stringify(input.trace) : null}::text::jsonb,
           diagnostics = ${input.diagnostics ? JSON.stringify(input.diagnostics) : null}::text::jsonb,
-          error = ${input.status === "succeeded" ? null : (input.error ?? null)},
+          error = ${input.status === "succeeded" || input.error === undefined ? null : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES)}::text::jsonb,
           execution_token = ${null},
           execution_queue_lease_expires_at = ${null},
           completed_at = ${input.completedAt ?? new Date()}
@@ -524,7 +528,7 @@ export class PgWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorag
       const [updated] = await tx<WorkflowAgentNodeRunDatabaseRow[]>`
         UPDATE workflow_agent_node_runs SET
           status = ${"cancelled"},
-          error = ${input.error ?? null},
+          error = ${input.error === undefined ? null : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES)}::text::jsonb,
           execution_token = ${null},
           execution_queue_lease_expires_at = ${null},
           completed_at = ${input.completedAt ?? new Date()}
@@ -915,7 +919,7 @@ interface WorkflowAgentNodeRunDatabaseRow {
   usage: WorkflowAgentNodeRunRecord["usage"] | string | null
   trace: WorkflowAgentNodeRunRecord["trace"] | string | null
   diagnostics: WorkflowAgentNodeRunRecord["diagnostics"] | string | null
-  error: string | null
+  error: JsonValue | null
   attempt: number | string
   execution_token: string | null
   execution_queue_lease_expires_at: Date | string | null
@@ -974,7 +978,7 @@ function rowToWorkflowAgentNodeRunRecord(
     ...(row.usage ? { usage: parseJson(row.usage) } : {}),
     ...(row.trace ? { trace: parseJson(row.trace) } : {}),
     ...(row.diagnostics ? { diagnostics: parseJson(row.diagnostics) } : {}),
-    ...(row.error ? { error: row.error } : {}),
+    ...(row.error ? { error: parseSixbFailure(row.error, AGENT_RUN_FAILURE_CODES) } : {}),
     attempt: Number(row.attempt),
     ...(row.execution_token && row.execution_queue_lease_expires_at
       ? {

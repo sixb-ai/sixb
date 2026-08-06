@@ -4,7 +4,7 @@ import {
   resolveAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { captureSixbFailure } from "@sixb/core/internal/errors"
+import { captureSixbFailure, createSixbError, toSixbFailure } from "@sixb/core/internal/errors"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
@@ -17,7 +17,7 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
+import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { AgentUsageRecordingError, AgentWorkerError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { AiModelCallRecorder } from "./model-call-recorder"
@@ -229,12 +229,28 @@ async function loadWorkflowAgentNodeExecution(
 
   const workflowRun = await runs.getById({ projectId: context.id, id: nodeRun.workflowRunId })
   if (!workflowRun || workflowRun.status !== "waiting" || nodeRun.status !== "waiting") {
+    const completedAt = new Date()
+    const message = workflowRun
+      ? `Parent workflow run is ${workflowRun.status}.`
+      : "Parent workflow run is missing."
     await runs.agentNodes.cancel({
       projectId: context.id,
       nodeRunId: nodeRun.id,
-      error: workflowRun
-        ? `Parent workflow run is ${workflowRun.status}.`
-        : "Parent workflow run is missing.",
+      error: toSixbFailure(
+        createSixbError("runtime.cancelled", message, {
+          details: {
+            agentId: executionRecord.agentId,
+            workflowId: nodeRun.workflowId,
+            workflowRunId: nodeRun.workflowRunId,
+            nodeRunId: nodeRun.id,
+          },
+        }),
+        {
+          allowedCodes: AGENT_RUN_FAILURE_CODES,
+          at: completedAt,
+        }
+      ),
+      completedAt,
     })
     return null
   }
@@ -367,13 +383,23 @@ async function finishWorkflowAgentNodeFailed(input: {
   readonly status: "failed" | "cancelled"
   readonly error: unknown
 }): Promise<{ readonly node: WorkflowNodeRunRecord; readonly run: WorkflowRunRecord }> {
-  const message = errorMessage(input.error)
   const at = new Date()
   const failure = captureSixbFailure(input.error, {
     allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
     defaultCode: input.status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
     at,
     details: {
+      workflowId: input.nodeRun.workflowId,
+      workflowRunId: input.nodeRun.workflowRunId,
+      nodeRunId: input.nodeRun.id,
+    },
+  })
+  const agentFailure = captureSixbFailure(input.error, {
+    allowedCodes: AGENT_RUN_FAILURE_CODES,
+    defaultCode: input.status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+    at,
+    details: {
+      agentId: input.agent.id,
       workflowId: input.nodeRun.workflowId,
       workflowRunId: input.nodeRun.workflowRunId,
       nodeRunId: input.nodeRun.id,
@@ -388,19 +414,22 @@ async function finishWorkflowAgentNodeFailed(input: {
       executionToken: input.executionToken,
       status: input.status,
       modelId: input.agent.model.modelId,
-      error: message,
+      error: agentFailure,
+      completedAt: at,
     })
     const node = await runs.nodes.finish({
       projectId: input.context.id,
       id: input.nodeRun.id,
       status: input.status,
       error: failure,
+      finishedAt: at,
     })
     const run = await runs.finish({
       projectId: input.context.id,
       id: input.nodeRun.workflowRunId,
       status: input.status,
       error: failure,
+      finishedAt: at,
     })
     return { node, run }
   })
@@ -537,8 +566,4 @@ function requireFinishedAt(
     throw new AgentWorkerError(`Workflow run record '${record.id}' has no finishedAt.`)
   }
   return record.finishedAt
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

@@ -2000,6 +2000,29 @@ describe("SixbServer HTTP contract", () => {
           },
         ],
       })
+
+      const cancelledExecutionResponse = await fetch(
+        `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
+      )
+      expect(cancelledExecutionResponse.status).toBe(200)
+      const cancelledExecution = (await cancelledExecutionResponse.json()) as {
+        completedAt: string
+        error: { at: string }
+      }
+      expect(cancelledExecution).toMatchObject({
+        status: "cancelled",
+        error: {
+          code: "runtime.cancelled",
+          message: "Execution was cancelled.",
+          details: {
+            agentId: "device-resolver",
+            workflowId: "review-device-health-workflow",
+            workflowRunId: runId,
+            nodeRunId,
+          },
+        },
+      })
+      expect(cancelledExecution.error.at).toBe(cancelledExecution.completedAt)
     })
   })
 
