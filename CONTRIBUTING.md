@@ -185,18 +185,21 @@ Prefer targeted checks while iterating, then broader checks before review.
 
 ## Versioning
 
-Every publishable package shares one version and ships together — a release publishes all of them or
-none. `bun run test:publish` fails if they drift apart, so a version bump touches every manifest.
+Publishable packages are versioned independently. A package manifest is its release intent: bump the
+packages that should ship and leave unrelated manifests alone. The publisher reads registry state
+before its first write, publishes only local versions that do not exist yet, and keeps dependency
+order across that smaller plan.
 
 The `0.0.x` line is for public validation. Publish those versions only under npm's `next` tag and
 increment the patch for every new artifact: npm versions are immutable. The `latest` tag is reserved
 for `0.1.0`, the first minimally stable, tested release, and later versions.
 
-Releasing is two commands. The first produces exactly what gets published and proves it; the second
-publishes, in dependency order, skipping anything already on the registry so an interrupted run can
-be re-run:
+Preview the selective plan first. Releasing itself remains two commands: the first produces and
+verifies every package artifact; the second publishes the plan in dependency order. Existing package
+versions are skipped so an interrupted run can be re-run:
 
 ```bash
+bun run release:plan -- --tag next
 bun run release
 bun run release:publish -- --tag next
 ```
@@ -205,10 +208,11 @@ The tag changes how npm resolves an install, not the package version: consumers 
 with `bun add @sixb/core@next` or `bunx create-sixb@next my-app`. Publishing another preview moves
 `next` forward without making it the default install.
 
-For `0.1.0` and later, publish to `next` first, verify it, then move the same immutable version to
-`latest`. The publish script prints the `npm dist-tag` commands only when that promotion is allowed,
-and refuses to publish a `0.0.x` version directly to `latest`. Note that `bun publish --dry-run`
-still authenticates; to rehearse without credentials, point `--registry` at a local registry.
+For `0.1.0` and later, publish to `next` first, verify it, then move those immutable package versions
+to `latest`. The publish script prints promotion commands only for packages in the release, including
+packages staged by an interrupted earlier run, and refuses to publish a `0.0.x` version directly to
+`latest`. Note that `bun publish --dry-run` still authenticates; to rehearse without credentials,
+point `--registry` at a local registry.
 
 ## The feeling we want
 

@@ -1,6 +1,7 @@
 /**
- * Publish every Sixb package to npm, in dependency order.
+ * Publish every locally-versioned Sixb package that is not yet on npm, in dependency order.
  *
+ *   bun scripts/publish.ts --plan
  *   bun scripts/publish.ts --dry-run
  *   bun scripts/publish.ts --tag next
  *   bun scripts/publish.ts --tag next --otp 123456
@@ -10,9 +11,9 @@
  * publish gate. This script only publishes. Preview 0.0.x versions must use `--tag next`; `latest`
  * starts at 0.1.0.
  *
- * Publishing 46 packages is 46 separate registry writes, so it is resumable by design: a version
- * already on the registry is skipped rather than retried, and a failure stops the run naming exactly
- * what got through. Re-running after fixing the cause continues where it stopped.
+ * A package manifest is its release intent: bump the packages that should ship and leave every other
+ * manifest alone. Registry state is read for the whole workspace before the first write, and an
+ * existing package version is skipped so an interrupted run can resume safely.
  *
  * Note that `bun publish --dry-run` still authenticates, so a dry run needs a token. To rehearse the
  * whole thing with no credentials and no public side effects, point `--registry` at a local registry.
@@ -20,75 +21,86 @@
 import { join } from "node:path"
 import {
   discoverPublishablePackages,
-  type PublishablePackage,
   packageName,
   topologicalPublishOrder,
 } from "./publishable-packages"
+import {
+  createPackageReleasePlan,
+  type PackageRegistryState,
+  type PlannedPackageRelease,
+  packageReleaseId,
+} from "./release-plan"
 import { assertReleaseTagAllowed, isPreviewRelease } from "./release-policy"
 
 const root = process.cwd()
 const options = parseOptions(process.argv.slice(2))
 const ordered = topologicalPublishOrder(await discoverPublishablePackages(root))
-
-const versions = new Set(ordered.map((packageInfo) => packageInfo.packageJson.version))
-if (versions.size !== 1) {
-  throw new Error(
-    `[SixbPublish] Packages are not on one version (${[...versions].join(", ")}). Run \`bun run test:publish\`.`
+const registryByName = new Map(
+  await Promise.all(
+    ordered.map(async (packageInfo) => {
+      const name = packageName(packageInfo)
+      return [name, await readRegistryState(name)] as const
+    })
   )
+)
+const plan = createPackageReleasePlan(ordered, registryByName, options.tag)
+
+for (const release of plan.publish) {
+  assertReleaseTagAllowed(release.version, options.tag)
 }
-const [version] = [...versions]
-if (!version) throw new Error("[SixbPublish] Packages have no version.")
-assertReleaseTagAllowed(version, options.tag)
 
 console.log(
-  `[SixbPublish] ${options.dryRun ? "Dry run: " : ""}publishing ${ordered.length} packages at ${version} to tag "${options.tag}".`
+  `[SixbPublish] ${options.planOnly ? "Plan: " : options.dryRun ? "Dry run: " : ""}` +
+    `${plan.publish.length} to publish, ` +
+    `${plan.alreadyPublished} already on the registry, tag "${options.tag}".`
 )
+for (const release of plan.publish) console.log(`  ${packageReleaseId(release)}`)
 
-const skipped: string[] = []
 const published: string[] = []
 
-for (const [index, packageInfo] of ordered.entries()) {
-  const name = packageName(packageInfo)
-  const position = `${String(index + 1).padStart(2, " ")}/${ordered.length}`
-
-  if (await isAlreadyPublished(name, version)) {
-    skipped.push(name)
-    console.log(`[SixbPublish] ${position} ${name}@${version} already on the registry, skipping.`)
-    continue
-  }
-
-  console.log(`[SixbPublish] ${position} ${name}`)
-  await publishPackage(packageInfo, name)
-  published.push(name)
+for (const [index, release] of (options.planOnly ? [] : plan.publish).entries()) {
+  const position = `${String(index + 1).padStart(2, " ")}/${plan.publish.length}`
+  const id = packageReleaseId(release)
+  console.log(`[SixbPublish] ${position} ${id}`)
+  await publishPackage(release)
+  published.push(id)
 }
 
 console.log(
-  `[SixbPublish] Done. ${published.length} published, ${skipped.length} already on the registry.`
+  options.planOnly
+    ? "[SixbPublish] Plan complete. Nothing was published."
+    : options.dryRun
+      ? `[SixbPublish] Dry run complete. ${published.length} validated.`
+      : `[SixbPublish] Done. ${published.length} published.`
 )
-if (options.tag !== "latest" && !options.dryRun && published.length > 0) {
-  if (isPreviewRelease(version)) {
+
+if (options.tag !== "latest" && !options.dryRun && !options.planOnly) {
+  const promotion = uniqueReleases([...plan.stagedForPromotion, ...plan.publish])
+  const previews = promotion.filter((release) => isPreviewRelease(release.version))
+  const stable = promotion.filter((release) => !isPreviewRelease(release.version))
+
+  if (previews.length > 0) {
     console.log(
-      `[SixbPublish] ${version} remains on "${options.tag}". ` +
+      `[SixbPublish] ${previews.map(packageReleaseId).join(", ")} remain on "${options.tag}". ` +
         'The "latest" tag is reserved for 0.1.0 and later.'
     )
-  } else {
+  }
+  if (stable.length > 0) {
     console.log(
-      `[SixbPublish] Nothing is on "latest" yet. Promote once you have verified the tag:\n` +
-        ordered
-          .map((packageInfo) => `  npm dist-tag add ${packageName(packageInfo)}@${version} latest`)
-          .join("\n")
+      `[SixbPublish] Promote once you have verified the tag:\n` +
+        stable.map((release) => `  npm dist-tag add ${packageReleaseId(release)} latest`).join("\n")
     )
   }
 }
 
-async function publishPackage(packageInfo: PublishablePackage, name: string): Promise<void> {
+async function publishPackage(release: PlannedPackageRelease): Promise<void> {
   const args = [process.execPath, "publish", "--tag", options.tag]
   if (options.dryRun) args.push("--dry-run")
   if (options.otp) args.push("--otp", options.otp)
   if (options.registry) args.push("--registry", options.registry)
 
   const proc = Bun.spawn(args, {
-    cwd: join(root, packageInfo.dir),
+    cwd: join(root, release.packageInfo.dir),
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -110,7 +122,7 @@ async function publishPackage(packageInfo: PublishablePackage, name: string): Pr
     .join("\n")
 
   throw new Error(
-    `[SixbPublish] Failed to publish ${name}.\n${reason}\n\n` +
+    `[SixbPublish] Failed to publish ${packageReleaseId(release)}.\n${reason}\n\n` +
       (output.includes("missing authentication")
         ? "Run `bunx npm login` first — `bun publish` authenticates even for --dry-run.\n"
         : "") +
@@ -120,26 +132,37 @@ async function publishPackage(packageInfo: PublishablePackage, name: string): Pr
 }
 
 /**
- * Ask the registry directly rather than trusting a local marker, so a run interrupted anywhere —
- * including between the registry write and this process exiting — resumes correctly.
+ * Read registry state before any write so a network or authentication-adjacent lookup failure
+ * cannot leave a release half-published. A 404 is a new package with no versions or tags yet.
  */
-async function isAlreadyPublished(name: string, target: string): Promise<boolean> {
+async function readRegistryState(name: string): Promise<PackageRegistryState> {
   const registry = (options.registry ?? "https://registry.npmjs.org").replace(/\/+$/, "")
   const response = await fetch(`${registry}/${encodeURIComponent(name)}`, {
     headers: { accept: "application/vnd.npm.install-v1+json" },
   })
 
-  if (response.status === 404) return false
+  if (response.status === 404) return { versions: new Set(), tags: {} }
   if (!response.ok) {
     throw new Error(`[SixbPublish] Could not query the registry for ${name}: ${response.status}`)
   }
 
-  const body = (await response.json()) as { versions?: Record<string, unknown> }
-  return Boolean(body.versions?.[target])
+  const body = (await response.json()) as {
+    versions?: Record<string, unknown>
+    "dist-tags"?: Record<string, string>
+  }
+  return {
+    versions: new Set(Object.keys(body.versions ?? {})),
+    tags: body["dist-tags"] ?? {},
+  }
+}
+
+function uniqueReleases(releases: readonly PlannedPackageRelease[]): PlannedPackageRelease[] {
+  return [...new Map(releases.map((release) => [packageReleaseId(release), release])).values()]
 }
 
 interface PublishOptions {
   readonly dryRun: boolean
+  readonly planOnly: boolean
   readonly tag: string
   readonly otp?: string
   readonly registry?: string
@@ -148,11 +171,16 @@ interface PublishOptions {
 function parseOptions(argv: string[]): PublishOptions {
   const values = new Map<string, string>()
   let dryRun = false
+  let planOnly = false
 
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index]
     if (arg === "--dry-run") {
       dryRun = true
+      continue
+    }
+    if (arg === "--plan") {
+      planOnly = true
       continue
     }
     if (arg === "--tag" || arg === "--otp" || arg === "--registry") {
@@ -166,7 +194,7 @@ function parseOptions(argv: string[]): PublishOptions {
     }
     throw new Error(
       `[SixbPublish] Unknown argument ${arg}. Usage: bun scripts/publish.ts ` +
-        "[--dry-run] [--tag <tag>] [--otp <code>] [--registry <url>]"
+        "[--plan] [--dry-run] [--tag <tag>] [--otp <code>] [--registry <url>]"
     )
   }
 
@@ -174,6 +202,7 @@ function parseOptions(argv: string[]): PublishOptions {
   const registry = values.get("--registry")
   return {
     dryRun,
+    planOnly,
     tag: values.get("--tag") ?? "latest",
     ...(otp ? { otp } : {}),
     ...(registry ? { registry } : {}),

@@ -105,7 +105,7 @@
     },
     "connectors/github": {
       "name": "@sixb/connector-github",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@octokit/webhooks-types": "^7.6.1",
         "@sixb/connector-rest": "workspace:*",
@@ -118,7 +118,7 @@
     },
     "connectors/google": {
       "name": "@sixb/connector-google",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@sixb/connector-rest": "workspace:*",
         "@sixb/core": "workspace:*",
@@ -396,7 +396,7 @@
     },
     "packages/agent-worker": {
       "name": "@sixb/agent-worker",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@sixb/core": "workspace:*",
         "ai": "^7.0.4",
@@ -512,7 +512,7 @@
     },
     "packages/core": {
       "name": "@sixb/core",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@ai-sdk/provider": "^4.0.0",
       },
@@ -602,7 +602,7 @@
     },
     "packages/sync-worker": {
       "name": "@sixb/sync-worker",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@sixb/core": "workspace:*",
       },
@@ -778,7 +778,7 @@
     },
     "storage/pg": {
       "name": "@sixb/pg",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@sixb/core": "workspace:*",
         "postgres": "^3.4.5",
@@ -790,7 +790,7 @@
     },
     "storage/sqlite": {
       "name": "@sixb/sqlite",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@sixb/core": "workspace:*",
       },
