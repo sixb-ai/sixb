@@ -1,9 +1,16 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, migrateStorage, OntologyRegistry, prop } from "@sixb/core"
+import { defineMigrations } from "@sixb/core/storage"
 import { createMaterializerTestFixture } from "@sixb/core/testing"
 import { SQL } from "bun"
 import { PostgresStorage, type PostgresStorage as PostgresStorageType } from "../src"
-import { POSTGRES_STORAGE_ADAPTER_ID, quoteIdent } from "../src/migrations"
+import {
+  createPostgresMigrator,
+  POSTGRES_STORAGE_ADAPTER_ID,
+  postgresStorageMigrations,
+  quoteIdent,
+} from "../src/migrations"
+import { createPgClient } from "../src/pg-client"
 import { createTestStorage } from "./helpers"
 
 const Room = defineObjectType({
@@ -27,7 +34,7 @@ describe("Postgres storage migrations", () => {
         {
           adapterId: POSTGRES_STORAGE_ADAPTER_ID,
           status: "migrated",
-          applied: ["001-initial-schema"],
+          applied: ["001-initial-schema", "002-merge-sync-runs"],
         },
       ])
       expect(await readMigrationRows(schemaName)).toEqual([
@@ -38,6 +45,13 @@ describe("Postgres storage migrations", () => {
           status: "applied",
           version: 1,
         },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "002-merge-sync-runs",
+          status: "applied",
+          version: 2,
+        },
       ])
     })
   })
@@ -46,6 +60,58 @@ describe("Postgres storage migrations", () => {
     await withStorage(false, async (storage) => {
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
+    })
+  })
+
+  test("merge sync migration preserves existing runs and admits merge mode", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      const initialSchema = postgresStorageMigrations.steps[0]
+      if (!initialSchema) throw new Error("Initial PostgreSQL storage migration is missing.")
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+
+      const initialSql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        const initialOnly = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: [initialSchema],
+        })
+        await createPostgresMigrator({
+          sql: initialSql,
+          schemaName,
+          migrations: initialOnly,
+        }).migrate()
+        await initialSql.unsafe(
+          `
+            INSERT INTO ${quoteIdent(schemaName)}.sync_runs (
+              project_id, id, sync_id, dataset_id, mode, status, started_at
+            ) VALUES ($1, $2, $3, $4, 'append', 'succeeded', $5)
+          `,
+          ["project-a", "run-append", "sync-orders", "raw.orders", "2026-08-07T12:00:00.000Z"]
+        )
+      } finally {
+        await initialSql.end()
+      }
+
+      await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+
+      await withSql(async (sql) => {
+        const rows = await sql.unsafe<{ mode: string }[]>(
+          `SELECT mode FROM ${quoteIdent(schemaName)}.sync_runs WHERE project_id = $1 AND id = $2`,
+          ["project-a", "run-append"]
+        )
+        expect(rows).toEqual([{ mode: "append" }])
+        await expect(
+          sql.unsafe(
+            `
+              INSERT INTO ${quoteIdent(schemaName)}.sync_runs (
+                project_id, id, sync_id, dataset_id, mode, status, started_at
+              ) VALUES ($1, $2, $3, $4, 'merge', 'running', $5)
+            `,
+            ["project-a", "run-merge", "sync-invoices", "raw.invoices", "2026-08-07T12:01:00.000Z"]
+          )
+        ).resolves.toBeDefined()
+      })
     })
   })
 
@@ -239,7 +305,7 @@ describe("Postgres storage migrations", () => {
       expect(await migrator?.status()).toMatchObject({
         adapterId: POSTGRES_STORAGE_ADAPTER_ID,
         state: "current",
-        appliedVersion: 1,
+        appliedVersion: 2,
       })
     })
   })
@@ -268,6 +334,13 @@ describe("Postgres storage migrations", () => {
           id: "001-initial-schema",
           status: "applied",
           version: 1,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "002-merge-sync-runs",
+          status: "applied",
+          version: 2,
         },
       ])
     } finally {

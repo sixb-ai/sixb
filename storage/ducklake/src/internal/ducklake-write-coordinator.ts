@@ -121,6 +121,14 @@ export class DuckLakeWriteCoordinator {
     const latestVersion = await this.connections.withAttachedRuntime((runtime) =>
       this.snapshots.getLatestVersionForDefinition(runtime, definition)
     )
+    if (
+      input.expectedLatestVersionId !== undefined &&
+      latestVersion?.versionId !== input.expectedLatestVersionId
+    ) {
+      throw new LakeStorageError(
+        `[SixbDuckLake] Optimistic merge start failed for dataset '${definition.id}': expected latest version '${input.expectedLatestVersionId}', found '${latestVersion?.versionId ?? "none"}'.`
+      )
+    }
     const runtime = await this.connections.stagingRuntime()
     return createDuckLakeMergeSession({
       commitMerge: (options) => this.commitMerge(options),

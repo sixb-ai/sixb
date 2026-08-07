@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import {
+  change,
   col,
   defineConnector,
   defineDataset,
   defineObjectType,
+  definePipeline,
+  definePipelineStep,
+  defineProjection,
   defineSchedule,
   defineSync,
   events,
@@ -44,6 +48,20 @@ const rawOrdersCopyDataset = defineDataset("raw.erp.orders.copy", {
   schema: [col("orderId", "string")],
 })
 
+const keyedOrdersDataset = defineDataset("raw.erp.keyed-orders", {
+  schema: [col("orderId", "string"), col("status", "string")],
+  primaryKey: "orderId",
+})
+
+const RoomReading = defineObjectType({
+  id: "RoomReading",
+  name: "Room reading",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("temperature", "double", { mode: "telemetry" }),
+  ],
+})
+
 describe("defineSync", () => {
   test("rejects empty ids", () => {
     expect(() => defineSync("")).toThrow("Sync id must not be empty")
@@ -73,6 +91,27 @@ describe("defineSync", () => {
       .intoDataset(rawOrderEventsDataset)
 
     expect(sync.config.mode).toBe("append")
+  })
+
+  test("preserves merge mode for a keyed dataset", () => {
+    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
+      .from(erpDb)
+      .read(() => [
+        change.upsert({ orderId: "ord_1", status: "open" }),
+        change.delete({ orderId: "ord_2" }),
+      ])
+      .intoDataset(keyedOrdersDataset)
+
+    expect(sync.config).toEqual({ kind: "batch", mode: "merge" })
+  })
+
+  test("rejects an unkeyed merge target defensively", () => {
+    expect(() =>
+      defineSync("sync-orders-merge", { mode: "merge" })
+        .from(erpDb)
+        .read(() => [])
+        .intoDataset(rawOrdersDataset as never)
+    ).toThrow("Merge sync dataset 'raw.erp.orders' must define a primaryKey")
   })
 
   test("attaches schedule via .when()", () => {
@@ -267,5 +306,101 @@ describe("Sixb sync registration", () => {
           ...createTestRuntimeDeps(),
         })
     ).toThrow("Sync 'sync-orders' references unknown schedule 'missing'")
+  })
+
+  test("allows only one registered writer for a keyed dataset", () => {
+    const first = defineSync("sync-keyed-orders", { mode: "merge" })
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(keyedOrdersDataset)
+    const second = defineSync("snapshot-keyed-orders")
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(keyedOrdersDataset)
+
+    expect(
+      () =>
+        new Sixb<readonly []>({
+          ontology: [],
+          datasets: [keyedOrdersDataset],
+          syncs: [first, second],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow(
+      "Keyed dataset 'raw.erp.keyed-orders' has multiple registered writers: sync 'sync-keyed-orders' and sync 'snapshot-keyed-orders'"
+    )
+  })
+
+  test("counts pipeline outputs as keyed dataset writers", () => {
+    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(keyedOrdersDataset)
+    const step = definePipelineStep("copy-keyed-orders")
+      .inputs({ orders: rawOrdersDataset })
+      .output(keyedOrdersDataset)
+      .run(() => {})
+    const pipeline = definePipeline("orders-pipeline").then(step)
+
+    expect(
+      () =>
+        new Sixb<readonly []>({
+          ontology: [],
+          datasets: [rawOrdersDataset, keyedOrdersDataset],
+          syncs: [sync],
+          pipelines: [pipeline],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow("sync 'sync-keyed-orders' and pipeline 'orders-pipeline' step 'copy-keyed-orders'")
+  })
+
+  test("validates the registered merge target instead of trusting the builder copy", () => {
+    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(keyedOrdersDataset)
+    const unkeyedRegisteredCopy = defineDataset(keyedOrdersDataset.id, {
+      schema: keyedOrdersDataset.schema.columns,
+    })
+
+    expect(
+      () =>
+        new Sixb<readonly []>({
+          ontology: [],
+          datasets: [unkeyedRegisteredCopy],
+          syncs: [sync],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow("Merge sync 'sync-keyed-orders' targets dataset 'raw.erp.keyed-orders'")
+  })
+
+  test("rejects telemetry projections backed by merge-written datasets", () => {
+    const readings = defineDataset("raw.room-readings", {
+      schema: [
+        col("id", "string"),
+        col("room_id", "string"),
+        col("observed_at", "timestamp"),
+        col("temperature", "float64"),
+      ],
+      primaryKey: "id",
+    })
+    const sync = defineSync("sync-room-readings", { mode: "merge" })
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(readings)
+    const projection = defineProjection("room-temperatures", RoomReading.p.temperature)
+      .fromDataset(readings)
+      .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
+
+    expect(
+      () =>
+        new Sixb<readonly []>({
+          ontology: [RoomReading] as never,
+          datasets: [readings],
+          syncs: [sync],
+          projections: [projection],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow("Telemetry projection 'room-temperatures' cannot read merge-written dataset")
   })
 })

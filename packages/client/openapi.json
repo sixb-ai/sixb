@@ -5872,7 +5872,7 @@
                       },
                       "mode": {
                         "type": "string",
-                        "enum": ["snapshot", "append"]
+                        "enum": ["snapshot", "append", "merge"]
                       },
                       "connector": {
                         "type": "object",
@@ -5988,7 +5988,7 @@
                           },
                           "mode": {
                             "type": "string",
-                            "enum": ["snapshot", "append"]
+                            "enum": ["snapshot", "append", "merge"]
                           },
                           "status": {
                             "type": "string",
@@ -6088,7 +6088,7 @@
                     },
                     "mode": {
                       "type": "string",
-                      "enum": ["snapshot", "append"]
+                      "enum": ["snapshot", "append", "merge"]
                     },
                     "connector": {
                       "type": "object",
@@ -6204,7 +6204,7 @@
                         },
                         "mode": {
                           "type": "string",
-                          "enum": ["snapshot", "append"]
+                          "enum": ["snapshot", "append", "merge"]
                         },
                         "status": {
                           "type": "string",
@@ -6391,7 +6391,7 @@
                           },
                           "mode": {
                             "type": "string",
-                            "enum": ["snapshot", "append"]
+                            "enum": ["snapshot", "append", "merge"]
                           },
                           "status": {
                             "type": "string",

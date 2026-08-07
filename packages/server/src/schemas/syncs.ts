@@ -6,6 +6,7 @@ export const SyncParamsSchema = z.object({
 })
 
 export const SyncRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"])
+const SyncModeSchema = z.enum(["snapshot", "append", "merge"])
 
 export const SyncRunsQuerySchema = z.object({
   syncId: z.string().optional(),
@@ -33,7 +34,7 @@ export const SyncRunSchema = z.object({
   projectId: z.string(),
   syncId: z.string(),
   datasetId: z.string(),
-  mode: z.enum(["snapshot", "append"]),
+  mode: SyncModeSchema,
   status: SyncRunStatusSchema,
   startedAt: z.string(),
   finishedAt: z.string().optional(),
@@ -56,7 +57,7 @@ export const SyncRunSchema = z.object({
 
 export const SyncSchema = z.object({
   id: z.string(),
-  mode: z.enum(["snapshot", "append"]),
+  mode: SyncModeSchema,
   connector: z.object({
     id: z.string(),
     type: z.string(),

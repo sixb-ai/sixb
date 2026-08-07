@@ -14,6 +14,7 @@ import type {
   SyncDefinition,
 } from "@sixb/core"
 import {
+  change,
   col,
   defineConnector,
   defineDataset,
@@ -69,8 +70,20 @@ const rawOrdersDataset = makeDataset("raw.erp.orders")
 const rawSingleDataset = makeDataset("raw.erp.single")
 const rawIterableDataset = makeDataset("raw.erp.iterable")
 const rawAsyncDataset = makeDataset("raw.erp.async")
+const keyedOrdersDataset = defineDataset("raw.erp.keyed-orders", {
+  schema: rawOrdersDataset.schema.columns,
+  primaryKey: "orderId",
+})
+const keyedLineItemsDataset = defineDataset("raw.erp.invoice-line-items", {
+  schema: [col("invoiceId", "string"), col("lineItemId", "string"), col("status", "string")],
+  primaryKey: ["invoiceId", "lineItemId"],
+})
 const rawDocsDataset = defineDataset("raw.docs", {
   schema: [col("id", "string"), col("attachment", "fileRef", { nullable: true })],
+})
+const keyedDocsDataset = defineDataset("raw.keyed-docs", {
+  schema: rawDocsDataset.schema.columns,
+  primaryKey: "id",
 })
 
 function createRuntime(options: {
@@ -359,6 +372,261 @@ describe("runSyncJob", () => {
     })
     expect(seenCheckpoint).toEqual({ cursor: "cursor-1" })
     expect(run?.checkpoint).toEqual({ cursor: "cursor-2" })
+  })
+
+  test("streams ordered merge changes and stores the successful checkpoint", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    const syncRunsStorage = new InMemorySyncRunStorage()
+    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
+      .checkpoint<{ cursor: string }>()
+      .from(erpDb)
+      .read(async function* (_client, context) {
+        yield change.upsert({ orderId: "ord_1", status: "open" })
+        context.setCheckpoint({ cursor: "event-1" })
+        yield change.delete({ orderId: "missing" })
+        context.setCheckpoint({ cursor: "event-2" })
+      })
+      .intoDataset(keyedOrdersDataset)
+
+    const result = await runSyncJob({
+      runtime: createRuntime({ sync, syncRunsStorage, lakeStorage }),
+      job: { id: "run_merge", syncId: sync.id },
+    })
+
+    expect(result).toMatchObject({
+      mode: "merge",
+      rowsRead: 2,
+      versionCreated: true,
+      version: {
+        mode: "merge",
+        rowCount: 1,
+        producer: { kind: "sync", id: sync.id, runId: "run_merge" },
+      },
+    })
+    expect(await collectRows(lakeStorage.readRows({ datasetId: keyedOrdersDataset.id }))).toEqual([
+      { orderId: "ord_1", status: "open" },
+    ])
+    expect(
+      await syncRunsStorage.getById({ projectId: "project-1", id: "run_merge" })
+    ).toMatchObject({
+      mode: "merge",
+      status: "succeeded",
+      rowsRead: 2,
+      checkpoint: { cursor: "event-2" },
+    })
+  })
+
+  test("passes composite-key changes through the merge worker", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    const sync = defineSync("sync-invoice-line-items", { mode: "merge" })
+      .from(erpDb)
+      .read(() => [
+        change.upsert({ invoiceId: "inv_1", lineItemId: "line_1", status: "open" }),
+        change.delete({ invoiceId: "inv_1", lineItemId: "missing" }),
+      ])
+      .intoDataset(keyedLineItemsDataset)
+
+    const result = await runSyncJob({
+      runtime: createRuntime({ sync, lakeStorage }),
+      job: { id: "run_composite_merge", syncId: sync.id },
+    })
+
+    expect(result).toMatchObject({ rowsRead: 2, versionCreated: true })
+    expect(
+      await collectRows(lakeStorage.readRows({ datasetId: keyedLineItemsDataset.id }))
+    ).toEqual([{ invoiceId: "inv_1", lineItemId: "line_1", status: "open" }])
+  })
+
+  test("verifies file references for merge upserts but not deletes", async () => {
+    const syncRunsStorage = new InMemorySyncRunStorage()
+    const sync = defineSync("sync-keyed-docs", { mode: "merge" })
+      .from(erpDb)
+      .read(() => [
+        change.delete({ id: "doc_deleted" }),
+        change.upsert({
+          id: "doc_1",
+          attachment: {
+            blobId: "blob_missing",
+            digest: "sha256:missing",
+            sizeBytes: 12,
+          },
+        }),
+      ])
+      .intoDataset(keyedDocsDataset)
+
+    await expect(
+      runSyncJob({
+        runtime: createRuntime({ sync, syncRunsStorage }),
+        job: { id: "run_merge_missing_blob", syncId: sync.id },
+      })
+    ).rejects.toThrow("row 2 with dataset 'raw.keyed-docs' column 'attachment'")
+
+    expect(
+      await syncRunsStorage.getById({ projectId: "project-1", id: "run_merge_missing_blob" })
+    ).toMatchObject({ status: "failed", rowsRead: 1 })
+  })
+
+  test("advances a checkpoint for an initial merge no-op without inventing a version", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    const syncRunsStorage = new InMemorySyncRunStorage()
+    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
+      .checkpoint<{ cursor: string }>()
+      .from(erpDb)
+      .read(function* (_client, context) {
+        yield change.delete({ orderId: "missing" })
+        context.setCheckpoint({ cursor: "event-1" })
+      })
+      .intoDataset(keyedOrdersDataset)
+
+    const result = await runSyncJob({
+      runtime: createRuntime({ sync, syncRunsStorage, lakeStorage }),
+      job: { id: "run_initial_noop", syncId: sync.id },
+    })
+
+    expect(result).toMatchObject({ rowsRead: 1, versionCreated: false })
+    expect(result.version).toBeUndefined()
+    expect(await lakeStorage.listVersions(keyedOrdersDataset.id)).toEqual([])
+    expect(
+      await syncRunsStorage.getById({ projectId: "project-1", id: "run_initial_noop" })
+    ).toMatchObject({
+      status: "succeeded",
+      rowsRead: 1,
+      checkpoint: { cursor: "event-1" },
+      output: undefined,
+    })
+  })
+
+  test("reuses a later no-op version with a matching requested latest-version guard", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    await lakeStorage.createDataset(keyedOrdersDataset)
+    const seed = await lakeStorage.beginMerge({ dataset: keyedOrdersDataset })
+    await seed.writeChanges([change.upsert({ orderId: "ord_1", status: "open" })])
+    const seedResult = await seed.commit()
+    if (!seedResult.version) throw new Error("Expected a seed version")
+
+    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
+      .from(erpDb)
+      .read(() => [change.upsert({ orderId: "ord_1", status: "open" })])
+      .intoDataset(keyedOrdersDataset)
+    const result = await runSyncJob({
+      runtime: createRuntime({ sync, lakeStorage }),
+      job: {
+        id: "run_later_noop",
+        syncId: sync.id,
+        expectedLatestVersionId: seedResult.version.versionId,
+      },
+    })
+
+    expect(result).toMatchObject({
+      rowsRead: 1,
+      versionCreated: false,
+      version: { versionId: seedResult.version.versionId },
+    })
+    expect(await lakeStorage.listVersions(keyedOrdersDataset.id)).toHaveLength(1)
+  })
+
+  test("rejects a stale requested merge version before connecting to the source", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    const syncRunsStorage = new InMemorySyncRunStorage()
+    await lakeStorage.createDataset(keyedOrdersDataset)
+    const seed = await lakeStorage.beginMerge({ dataset: keyedOrdersDataset })
+    await seed.writeChanges([change.upsert({ orderId: "ord_1", status: "open" })])
+    await seed.commit()
+
+    let connectorCalls = 0
+    let readCalls = 0
+    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
+      .from(erpDb)
+      .read(() => {
+        readCalls += 1
+        return [change.upsert({ orderId: "ord_2", status: "open" })]
+      })
+      .intoDataset(keyedOrdersDataset)
+
+    await expect(
+      runSyncJob({
+        runtime: createRuntime({
+          sync,
+          syncRunsStorage,
+          lakeStorage,
+          onConnect() {
+            connectorCalls += 1
+          },
+        }),
+        job: {
+          id: "run_stale_request",
+          syncId: sync.id,
+          expectedLatestVersionId: "stale-version",
+        },
+      })
+    ).rejects.toThrow("Optimistic merge start failed")
+
+    expect(connectorCalls).toBe(0)
+    expect(readCalls).toBe(0)
+    expect(
+      await syncRunsStorage.getById({ projectId: "project-1", id: "run_stale_request" })
+    ).toMatchObject({ status: "failed", rowsRead: 0 })
+    expect(await lakeStorage.listVersions(keyedOrdersDataset.id)).toHaveLength(1)
+  })
+
+  test("does not store a checkpoint when a concurrent merge makes the session stale", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    const syncRunsStorage = new InMemorySyncRunStorage()
+    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
+      .checkpoint<{ cursor: string }>()
+      .from(erpDb)
+      .read(async function* (_client, context) {
+        yield change.upsert({ orderId: "ord_worker", status: "open" })
+        context.setCheckpoint({ cursor: "event-1" })
+
+        const concurrent = await lakeStorage.beginMerge({ dataset: keyedOrdersDataset })
+        await concurrent.writeChanges([
+          change.upsert({ orderId: "ord_concurrent", status: "paid" }),
+        ])
+        await concurrent.commit()
+      })
+      .intoDataset(keyedOrdersDataset)
+
+    await expect(
+      runSyncJob({
+        runtime: createRuntime({ sync, syncRunsStorage, lakeStorage }),
+        job: { id: "run_stale", syncId: sync.id },
+      })
+    ).rejects.toThrow("Optimistic merge commit failed")
+
+    const run = await syncRunsStorage.getById({ projectId: "project-1", id: "run_stale" })
+    expect(run).toMatchObject({ status: "failed", rowsRead: 1 })
+    expect(run?.checkpoint).toBeUndefined()
+    expect(await collectRows(lakeStorage.readRows({ datasetId: keyedOrdersDataset.id }))).toEqual([
+      { orderId: "ord_concurrent", status: "paid" },
+    ])
+  })
+
+  test("cancels and discards an in-flight merge", async () => {
+    const controller = new AbortController()
+    const lakeStorage = new InMemoryLakeStorage()
+    const syncRunsStorage = new InMemorySyncRunStorage()
+    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
+      .from(erpDb)
+      .read(async function* () {
+        yield change.upsert({ orderId: "ord_1", status: "open" })
+        controller.abort()
+        yield change.upsert({ orderId: "ord_2", status: "open" })
+      })
+      .intoDataset(keyedOrdersDataset)
+
+    await expect(
+      runSyncJob({
+        runtime: createRuntime({ sync, syncRunsStorage, lakeStorage }),
+        job: { id: "run_cancelled_merge", syncId: sync.id },
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ name: "AbortError" })
+
+    expect(
+      await syncRunsStorage.getById({ projectId: "project-1", id: "run_cancelled_merge" })
+    ).toMatchObject({ status: "cancelled", rowsRead: 1 })
+    expect(await lakeStorage.listVersions(keyedOrdersDataset.id)).toEqual([])
   })
 
   test("succeeds and advances the checkpoint for a first empty append", async () => {
@@ -1018,6 +1286,36 @@ describe("runSyncJob", () => {
     expect(rows).toEqual([
       { orderId: "ord_1", customerName: "Ada" },
       { orderId: "ord_2", customerName: "Grace" },
+    ])
+  })
+
+  test("runs a merge end-to-end against LocalLakeStorage", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-sync-worker-merge-"))
+    tempDirs.push(rootDir)
+
+    const lakeStorage = new LocalLakeStorage({ path: rootDir })
+    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
+      .from(erpDb)
+      .read(() => [
+        change.upsert({ orderId: "ord_1", status: "open" }),
+        change.upsert({ orderId: "ord_2", status: "paid" }),
+        change.delete({ orderId: "ord_1" }),
+      ])
+      .intoDataset(keyedOrdersDataset)
+
+    const result = await runSyncJob({
+      runtime: createRuntime({ sync, lakeStorage }),
+      job: { id: "run_local_merge", syncId: sync.id },
+    })
+
+    expect(result).toMatchObject({
+      mode: "merge",
+      rowsRead: 3,
+      versionCreated: true,
+      version: { mode: "merge", rowCount: 1 },
+    })
+    expect(await collectRows(lakeStorage.readRows({ datasetId: keyedOrdersDataset.id }))).toEqual([
+      { orderId: "ord_2", status: "paid" },
     ])
   })
 

@@ -22,6 +22,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 1,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "002-merge-sync-runs",
+    status: "applied",
+    version: 2,
+  },
 ]
 
 afterEach(async () => {
@@ -57,6 +64,67 @@ describe("SQLite storage migrations", () => {
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
     } finally {
       storage.close()
+    }
+  })
+
+  test("merge sync migration preserves existing runs and admits merge mode", () => {
+    const db = new Database(":memory:")
+    try {
+      sqliteStorageMigrations.steps[0]?.up(db)
+      db.query(`
+        INSERT INTO sync_runs (
+          project_id, id, sync_id, dataset_id, mode, status, started_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "project-a",
+        "run-append",
+        "sync-orders",
+        "raw.orders",
+        "append",
+        "succeeded",
+        "2026-08-07T12:00:00.000Z"
+      )
+
+      expect(() =>
+        db
+          .query(`
+          INSERT INTO sync_runs (
+            project_id, id, sync_id, dataset_id, mode, status, started_at
+          ) VALUES (?, ?, ?, ?, 'merge', 'running', ?)
+        `)
+          .run(
+            "project-a",
+            "run-before-migration",
+            "sync-invoices",
+            "raw.invoices",
+            "2026-08-07T12:01:00.000Z"
+          )
+      ).toThrow()
+
+      sqliteStorageMigrations.steps[1]?.up(db)
+
+      expect(
+        db
+          .query("SELECT mode FROM sync_runs WHERE project_id = ? AND id = ?")
+          .get("project-a", "run-append")
+      ).toEqual({ mode: "append" })
+      expect(() =>
+        db
+          .query(`
+          INSERT INTO sync_runs (
+            project_id, id, sync_id, dataset_id, mode, status, started_at
+          ) VALUES (?, ?, ?, ?, 'merge', 'running', ?)
+        `)
+          .run(
+            "project-a",
+            "run-merge",
+            "sync-invoices",
+            "raw.invoices",
+            "2026-08-07T12:02:00.000Z"
+          )
+      ).not.toThrow()
+    } finally {
+      db.close()
     }
   })
 
@@ -406,7 +474,7 @@ describe("SQLite migration status is read-only", () => {
     expect(await migrator?.status()).toMatchObject({
       adapterId: SQLITE_STORAGE_ADAPTER_ID,
       state: "current",
-      appliedVersion: 1,
+      appliedVersion: 2,
     })
 
     expect(statSync(path).mtimeMs).toBe(before)
