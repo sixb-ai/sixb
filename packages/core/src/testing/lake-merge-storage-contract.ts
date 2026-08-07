@@ -177,6 +177,25 @@ export function runLakeMergeStorageContractSuite<TStorage extends LakeStorage>(
       })
     })
 
+    test("checks an explicit latest-version guard against the captured merge base", async () => {
+      await withStorage(async (storage) => {
+        await storage.createDataset(invoices)
+        const seed = await storage.beginMerge({ dataset: invoices })
+        await seed.writeChanges([change.upsert({ id: "inv_1", status: "open" })])
+        const version = expectCreated(await seed.commit())
+
+        await expect(
+          storage.beginMerge({ dataset: invoices, expectedLatestVersionId: "stale-version" })
+        ).rejects.toThrow("Optimistic merge start failed")
+
+        const guarded = await storage.beginMerge({
+          dataset: invoices,
+          expectedLatestVersionId: version.versionId,
+        })
+        await guarded.abort()
+      })
+    })
+
     test("serializes concurrent commits from the same base", async () => {
       // Regression guard: bypassing a provider's per-dataset commit lock lets both commits create
       // versions from the same base and makes the fulfilled-count assertion fail.

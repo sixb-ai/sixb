@@ -26,7 +26,7 @@ bun add @sixb/core
 
 **Connectors** -- Typed external system clients that you register with the runtime and resolve lazily with `sixb.connector(...)`.
 
-**Syncs** -- Declarative batch sync definitions that read from one connector and write into one raw dataset. V1 supports `snapshot` and `append` modes with optional triggers and typed source checkpoints.
+**Syncs** -- Declarative batch sync definitions that read from one connector and write into one raw dataset. V1 supports `snapshot`, `append`, and keyed `merge` modes with optional triggers and typed source checkpoints.
 
 **Queues** -- Typed durable work lanes for executable jobs such as sync runs, pipeline runs, and projection runs. App setup passes one `Queues` provider, while workers claim from lanes like `sixb.queues.syncRuns`.
 
@@ -247,7 +247,7 @@ Use `.json(schema)` for JSON bodies so payloads are validated at runtime. The `.
 Syncs are declarative definitions in `@sixb/core` v1. They do not start background work on their own; they just declare how to read from a connector into a dataset.
 
 ```ts
-import { col, defineDataset, defineSync } from "@sixb/core"
+import { change, col, defineDataset, defineSync } from "@sixb/core"
 
 const rawOrdersDataset = defineDataset("raw.erp.orders", {
   schema: [
@@ -258,6 +258,11 @@ const rawOrdersDataset = defineDataset("raw.erp.orders", {
 
 const rawOrderEventsDataset = defineDataset("raw.erp.order-events", {
   schema: [col("eventId", "string")],
+})
+
+const rawInvoicesDataset = defineDataset("raw.erp.invoices", {
+  schema: [col("invoiceId", "string"), col("status", "string")],
+  primaryKey: "invoiceId",
 })
 
 const syncOrders = defineSync("sync-orders")
@@ -275,14 +280,25 @@ const syncOrderEvents = defineSync("sync-order-events", { mode: "append" })
   })
   .intoDataset(rawOrderEventsDataset)
 
+const syncInvoices = defineSync("sync-invoices", { mode: "merge" })
+  .from(erpDb)
+  .read(async function* (client) {
+    for await (const event of client.invoiceChanges()) {
+      yield event.deleted
+        ? change.delete({ invoiceId: event.invoiceId })
+        : change.upsert(event.invoice)
+    }
+  })
+  .intoDataset(rawInvoicesDataset)
+
 const sixb = new Sixb({
   ontology: [Room],
   broker: myBroker,
   storage: myStorage,
   queues: myQueues,
-  datasets: [rawOrdersDataset, rawOrderEventsDataset],
+  datasets: [rawOrdersDataset, rawOrderEventsDataset, rawInvoicesDataset],
   connectors: [erpDb],
-  syncs: [syncOrders, syncOrderEvents],
+  syncs: [syncOrders, syncOrderEvents, syncInvoices],
 })
 
 sixb.listSyncs()
@@ -292,6 +308,8 @@ sixb.getSyncById("sync-orders")
 Call `.checkpoint<T>()` before `.from(...)` to type `context.checkpoint` and
 `context.setCheckpoint(...)` in a sync read handler. The sync worker loads the checkpoint from the
 latest successful run and stores the next checkpoint only after the dataset commit succeeds.
+Merge syncs require a string primary key, consume complete-row upserts and exact-key deletes, and
+allow only one registered writer for their keyed dataset.
 
 ## Convention-based Setup
 

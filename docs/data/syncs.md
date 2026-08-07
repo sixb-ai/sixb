@@ -35,15 +35,16 @@ This runs every hour, calls `listInvoices()` on the connector's client, and writ
 
 | Step | Meaning |
 | --- | --- |
-| `defineSync("sync-erp-invoices", { mode })` | Names the sync; `mode` is `"snapshot"` (default) or `"append"` |
+| `defineSync("sync-erp-invoices", { mode })` | Names the sync; `mode` is `"snapshot"` (default), `"append"`, or `"merge"` |
 | `.when(schedule)` | Declares when the sync runs; callable multiple times (OR semantics) |
 | `.checkpoint<T>()` | Opts into a typed incremental checkpoint (optional) |
 | `.from(connector)` | Chooses the source connector |
 | `.read((client, context) => ...)` | Fetches rows from the connector's client |
 | `.intoDataset(dataset)` | Chooses the target dataset |
 
-The read handler receives the `client` returned by the connector's `connect()` and a `context`. It
-may return one row, an iterable, or an async iterable.
+The read handler receives the `client` returned by the connector's `connect()` and a `context`.
+Snapshot and append handlers return rows; merge handlers return `change.upsert(...)` and
+`change.delete(...)` values. Each handler may return one value, an iterable, or an async iterable.
 
 ## Schedules
 
@@ -89,7 +90,7 @@ export const syncErpCustomers = defineSync("sync-erp-customers")
   .intoDataset(erpCustomersDataset)
 ```
 
-## Snapshot vs. append
+## Sync modes
 
 The sync mode controls how each run writes to the target dataset.
 
@@ -97,6 +98,7 @@ The sync mode controls how each run writes to the target dataset.
 | --- | --- | --- |
 | `"snapshot"` (default) | Replaces the dataset with the current full view | Current customers, open invoices, active projects |
 | `"append"` | Adds new rows to the dataset | Audit logs, webhook deliveries, invoice events |
+| `"merge"` | Upserts and deletes rows by primary key | Ordered source change logs |
 
 Snapshot is the default — omit `mode` for it. Use append when the source is event-like:
 
@@ -107,6 +109,42 @@ export const syncErpInvoiceEvents = defineSync("sync-erp-invoice-events", { mode
   .read((erp) => erp.listInvoiceEvents())
   .intoDataset(erpInvoiceEventsDataset)
 ```
+
+Use merge when the source exposes ordered row changes and the dataset should remain a current view:
+
+```ts
+import { change, col, defineDataset, defineSync } from "@sixb/core"
+
+const erpInvoicesDataset = defineDataset("erp.invoices", {
+  schema: [
+    col("invoiceId", "string"),
+    col("status", "string"),
+    col("customerId", "string"),
+  ],
+  primaryKey: "invoiceId",
+})
+
+export const syncErpInvoices = defineSync("sync-erp-invoices", { mode: "merge" })
+  .checkpoint<{ cursor: string }>()
+  .from(acmeErpConnector)
+  .read(async function* (erp, context) {
+    for await (const event of erp.changesSince(context.checkpoint?.cursor)) {
+      yield event.deleted
+        ? change.delete({ invoiceId: event.invoiceId })
+        : change.upsert(event.invoice)
+
+      context.setCheckpoint({ cursor: event.cursor })
+    }
+  })
+  .intoDataset(erpInvoicesDataset)
+```
+
+Each upsert is a complete row, not a patch. Deletes provide exactly the primary-key fields. The
+final change for a repeated key wins, identical upserts and deletes of absent keys are no-ops, and
+no dataset version is created when the visible rows do not change. V1 requires non-null string
+keys, ordered changes, immutable keys, and one registered writer per keyed dataset. Object and link
+projections evaluate the complete committed dataset; telemetry projections from merge-written
+datasets are not supported yet.
 
 ## Incremental syncs with checkpoints
 
@@ -144,6 +182,10 @@ rows.
 A first snapshot that returns no rows behaves the same way: it succeeds without creating a dataset
 version. Once a previous version exists, an empty snapshot still commits a new empty version so
 projections can withdraw source-owned objects that disappeared upstream.
+
+A merge run may also succeed and advance its checkpoint without creating a version. This happens
+when an initial run only deletes absent keys, or when every staged change leaves the current rows
+unchanged. Later no-op runs continue to reference the existing dataset version.
 
 ## Read context
 

@@ -2084,7 +2084,7 @@ export type ListSyncsResponses = {
    */
   200: Array<{
     id: string
-    mode: "snapshot" | "append"
+    mode: "snapshot" | "append" | "merge"
     connector: {
       id: string
       type: string
@@ -2122,7 +2122,7 @@ export type ListSyncsResponses = {
       projectId: string
       syncId: string
       datasetId: string
-      mode: "snapshot" | "append"
+      mode: "snapshot" | "append" | "merge"
       status: "running" | "succeeded" | "failed" | "cancelled"
       startedAt: string
       finishedAt?: string
@@ -2169,7 +2169,7 @@ export type GetSyncResponses = {
    */
   200: {
     id: string
-    mode: "snapshot" | "append"
+    mode: "snapshot" | "append" | "merge"
     connector: {
       id: string
       type: string
@@ -2207,7 +2207,7 @@ export type GetSyncResponses = {
       projectId: string
       syncId: string
       datasetId: string
-      mode: "snapshot" | "append"
+      mode: "snapshot" | "append" | "merge"
       status: "running" | "succeeded" | "failed" | "cancelled"
       startedAt: string
       finishedAt?: string
@@ -2271,7 +2271,7 @@ export type ListSyncRunsResponses = {
       projectId: string
       syncId: string
       datasetId: string
-      mode: "snapshot" | "append"
+      mode: "snapshot" | "append" | "merge"
       status: "running" | "succeeded" | "failed" | "cancelled"
       startedAt: string
       finishedAt?: string
