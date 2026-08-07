@@ -84,6 +84,7 @@ function datasetSearchText(dataset: DatasetListItem): string {
     dataset.materialized ? "materialized" : "declared",
     dataset.latestVersion?.mode,
     ...dataset.schema.columns.map((column) => column.name),
+    ...(typeof dataset.primaryKey === "string" ? [dataset.primaryKey] : (dataset.primaryKey ?? [])),
     ...(dataset.partitionBy ?? []),
     ...dataset.syncIds,
     ...dataset.sourcePipelineIds,

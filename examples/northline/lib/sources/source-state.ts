@@ -17,6 +17,7 @@ export const fieldServiceStore = new AtomicJsonStore(
   fieldServiceStateSchema
 )
 export const controlsStore = new AtomicJsonStore(sourcePaths.controls, controlsStateSchema)
+let businessChangeHistoryReady = false
 
 export async function initializeDemoSources(anchor = new Date()): Promise<boolean> {
   const existing = await Promise.all(Object.values(sourcePaths).map(fileExists))
@@ -37,7 +38,27 @@ export async function initializeDemoSources(anchor = new Date()): Promise<boolea
   return true
 }
 
+export async function ensureBusinessChangeHistory(): Promise<void> {
+  if (businessChangeHistoryReady) return
+
+  const current = await businessStore.read()
+  if ((current.quoteChanges?.length ?? 0) > 0 || current.quotes.length === 0) {
+    businessChangeHistoryReady = true
+    return
+  }
+
+  await businessStore.update((state) => {
+    if ((state.quoteChanges?.length ?? 0) > 0) return
+    state.quoteChanges = []
+    state.quoteChanges.push(
+      ...state.quotes.map((row) => ({ kind: "upsert" as const, row: structuredClone(row) }))
+    )
+  })
+  businessChangeHistoryReady = true
+}
+
 export async function resetDemoSources(anchor = new Date()): Promise<void> {
+  businessChangeHistoryReady = false
   await rm(sourceDirectory(), { recursive: true, force: true })
   await initializeDemoSources(anchor)
 }

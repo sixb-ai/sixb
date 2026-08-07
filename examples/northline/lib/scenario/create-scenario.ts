@@ -22,6 +22,7 @@ export function createNorthlineScenario(
   const business: BusinessState = {
     schemaVersion: 1,
     idempotency: {},
+    quoteChanges: [],
     customers: [
       customer(
         "customer-harbor-foods",
@@ -272,6 +273,9 @@ export function createNorthlineScenario(
       },
     ],
   }
+  business.quoteChanges = business.quotes.map(
+    (row) => ({ kind: "upsert", row: structuredClone(row) }) as const
+  )
 
   const equipment = createEquipment(clock)
   const fieldService: FieldServiceState = {

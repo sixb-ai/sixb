@@ -111,6 +111,31 @@ actions, workflows, and the app use those clients rather than importing fixtures
 uses a local DuckDB catalog and local DuckLake storage; its pipeline transformations execute as
 DuckDB SQL rather than row-by-row TypeScript.
 
+## Keyed merge example
+
+Northline's `business.quotes` dataset is a complete worked merge sync. The dataset declares
+`quote_id` as its primary key, the file-backed business system keeps an ordered quote change log,
+and `sync-business-quotes` stores the log cursor as its checkpoint. Initial quotes and later quote
+decisions are complete-row upserts; the sync also handles exact-key deletes.
+
+Follow the implementation through
+[`datasets/business-system.ts`](./datasets/business-system.ts),
+[`syncs/business-system.ts`](./syncs/business-system.ts), and
+[`lib/sources/business-system-client.ts`](./lib/sources/business-system-client.ts).
+
+With Northline running, use the demo commands to see an update flow through the same path:
+
+```bash
+bun run demo:sync
+bun run demo:approve-quote
+bun run demo:sync
+```
+
+The second sync reads only the new source event, merges the updated quote, advances the checkpoint,
+and reevaluates the existing Quote projection against the complete dataset. Run `demo:sync` again
+without another source change and the successful no-op creates no dataset version. Atlas shows the
+dataset's primary key and `merge` versions in its dataset details.
+
 ## Read the code in this order
 
 Follow one connected path rather than browsing by feature:

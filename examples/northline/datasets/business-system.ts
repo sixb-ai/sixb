@@ -68,4 +68,5 @@ export const businessQuotes = defineDataset("business.quotes", {
     col("decision_at", "timestamp", { nullable: true }),
     col("updated_at", "timestamp"),
   ],
+  primaryKey: "quote_id",
 })

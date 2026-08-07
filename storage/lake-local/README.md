@@ -101,7 +101,8 @@ first. The final change for a repeated key wins. Deletes of absent keys, identic
 other changes that leave the visible rows unchanged do not create a version. An initial no-op
 returns `{ outcome: "unchanged", version: null }`.
 
-These are provider-level APIs. User-facing sync `mode: "merge"` is delivered separately.
+Application authors normally use `defineSync(..., { mode: "merge" })`; the sync worker executes the
+same provider contract and advances its source checkpoint only after commit succeeds.
 
 ## What Gets Stored On Disk
 
