@@ -11,6 +11,7 @@ import type { WorkflowJob, WorkflowLogSession, WorkflowWorkerContext } from "../
 export interface WorkflowExecutionState {
   readonly workflowInput: Readonly<Record<string, unknown>>
   current: Readonly<Record<string, unknown>>
+  currentSnapshot: WorkflowIOSnapshot
   readonly steps: WorkflowStepOutputs
 }
 

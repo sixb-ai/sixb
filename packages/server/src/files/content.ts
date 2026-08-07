@@ -53,6 +53,17 @@ export interface FileContentResponsesOptions {
   readonly optionalStorage?: boolean
 }
 
+export function handleFileContentQueryValidationError(context: {
+  readonly code: string | number
+  readonly error: { readonly type?: string }
+  readonly set: { status?: number | string }
+}): { readonly error: string } | undefined {
+  if (context.code !== "VALIDATION" || context.error.type !== "query") return
+
+  context.set.status = 400
+  return { error: "Invalid file content query" }
+}
+
 export function fileContentGetResponses(options: FileContentResponsesOptions = {}) {
   return {
     200: {

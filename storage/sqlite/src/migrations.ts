@@ -17,6 +17,7 @@ import {
   step,
 } from "@sixb/core/storage"
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
+import workflowRunOutputSql from "./migrations/002-workflow-run-output.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -36,7 +37,10 @@ export const SQLITE_STORAGE_FILE = "storage.sqlite"
 
 export const sqliteStorageMigrations = defineMigrations({
   adapterId: SQLITE_STORAGE_ADAPTER_ID,
-  steps: [sqliteSql("001-initial-schema", initialSchemaSql)],
+  steps: [
+    sqliteSql("001-initial-schema", initialSchemaSql),
+    sqliteSql("002-workflow-run-output", workflowRunOutputSql),
+  ],
 })
 
 export function sqliteStoragePath(basePath: string): string {

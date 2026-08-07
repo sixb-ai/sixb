@@ -25,6 +25,11 @@ const Device = defineObjectType({
 })
 
 interface OpenApiOperation {
+  readonly parameters?: readonly {
+    readonly in?: string
+    readonly name?: string
+    readonly schema?: { readonly pattern?: string }
+  }[]
   readonly responses?: Record<string, unknown>
   readonly security?: unknown
   readonly tags?: readonly string[]
@@ -200,6 +205,24 @@ describe("OpenAPI docs", () => {
       for (const status of ["200", "206"]) {
         const schema = getResponses[status]?.content?.["application/octet-stream"]?.schema
         expect(schema, `GET ${path} ${status}`).toEqual({ type: "string", format: "binary" })
+      }
+    }
+
+    const expectedPathPatterns = new Map([
+      ["/api/action-runs/{runId}/files/content", "^\\/(?:params|writeback\\/result)(?:\\/|$)"],
+      ["/api/workflow-runs/{runId}/files/content", "^\\/(?:input|output)(?:\\/|$)"],
+      ["/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content", "^\\/(?:input|output)(?:\\/|$)"],
+    ])
+
+    for (const [path, expectedPattern] of expectedPathPatterns) {
+      const operations = spec.paths?.[path]
+      for (const method of ["get", "head"] as const) {
+        const pathParameter = operations?.[method]?.parameters?.find(
+          (parameter) => parameter.in === "query" && parameter.name === "path"
+        )
+        expect(pathParameter?.schema?.pattern, `${method.toUpperCase()} ${path}`).toBe(
+          expectedPattern
+        )
       }
     }
   })

@@ -22,6 +22,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 1,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "002-workflow-run-output",
+    status: "applied",
+    version: 2,
+  },
 ]
 
 afterEach(async () => {
@@ -117,6 +124,50 @@ describe("SQLite storage migrations", () => {
           "input_exhausted",
         ])
       )
+    } finally {
+      db.close()
+    }
+  })
+
+  test("backfills canonical workflow outputs by node index", () => {
+    const db = new Database(":memory:")
+    try {
+      sqliteStorageMigrations.steps[0]?.up(db)
+      db.run(`
+        INSERT INTO workflow_runs (
+          project_id, id, workflow_id, status, input, started_at
+        ) VALUES
+          ('project-a', 'data-run', 'data-workflow', 'succeeded', '{"seed":true}', '2026-01-01T00:00:00.000Z'),
+          ('project-a', 'action-run', 'action-workflow', 'succeeded', '{"seed":"kept"}', '2026-01-01T00:00:00.000Z'),
+          ('project-a', 'failed-run', 'data-workflow', 'failed', '{"seed":false}', '2026-01-01T00:00:00.000Z');
+
+        INSERT INTO workflow_node_runs (
+          project_id, id, workflow_run_id, workflow_id, node_index, node_type,
+          node_id, node_key, status, input, started_at, output
+        ) VALUES
+          ('project-a', 'data-run:node:2', 'data-run', 'data-workflow', 2, 'step',
+           'early', 'early', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"winner":2}'),
+          ('project-a', 'data-run:node:10', 'data-run', 'data-workflow', 10, 'step',
+           'final-data', 'finalData', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"winner":10}'),
+          ('project-a', 'data-run:node:11', 'data-run', 'data-workflow', 11, 'action',
+           'notify', 'notify', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"actionRunId":"act-1"}'),
+          ('project-a', 'action-run:node:0', 'action-run', 'action-workflow', 0, 'action',
+           'notify', 'notify', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"actionRunId":"act-2"}');
+      `)
+
+      sqliteStorageMigrations.steps[1]?.up(db)
+
+      const rows = db.query("SELECT id, output FROM workflow_runs ORDER BY id").all() as Array<{
+        readonly id: string
+        readonly output: string | null
+      }>
+      expect(
+        rows.map((row) => ({ id: row.id, output: row.output && JSON.parse(row.output) }))
+      ).toEqual([
+        { id: "action-run", output: { seed: "kept" } },
+        { id: "data-run", output: { winner: 10 } },
+        { id: "failed-run", output: null },
+      ])
     } finally {
       db.close()
     }
@@ -406,7 +457,7 @@ describe("SQLite migration status is read-only", () => {
     expect(await migrator?.status()).toMatchObject({
       adapterId: SQLITE_STORAGE_ADAPTER_ID,
       state: "current",
-      appliedVersion: 1,
+      appliedVersion: 2,
     })
 
     expect(statSync(path).mtimeMs).toBe(before)

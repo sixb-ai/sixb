@@ -77,6 +77,7 @@ export class WorkflowRunSession {
     const state: WorkflowExecutionState = {
       workflowInput,
       current: workflowInput,
+      currentSnapshot: workflowInputSnapshot,
       steps: {},
     }
     const recorder = new WorkflowRunRecorder({
@@ -312,6 +313,7 @@ export class WorkflowRunSession {
       session.markSideEffectBoundaryPassed()
       const outputRecord: Record<string, unknown> = { ...output }
       state.current = outputRecord
+      state.currentSnapshot = completedNode.output
       state.steps[agentNode.key] = outputRecord
       session.resumeFromIndex = completedNode.nodeIndex + 1
       return session
@@ -462,6 +464,7 @@ export class WorkflowRunSession {
     }
 
     state.current = responseOutput
+    state.currentSnapshot = responseSnapshot
     state.steps[interventionNode.key] = responseOutput
     session.resumeFromIndex = intervention.nodeIndex + 1
 
@@ -568,7 +571,9 @@ export class WorkflowRunSession {
 
   private async finishWorkflowRun(): Promise<WorkflowRunRecord> {
     try {
-      return await this.dependencies.recorder.finishRunSucceeded()
+      return await this.dependencies.recorder.finishRunSucceeded(
+        this.dependencies.state.currentSnapshot
+      )
     } catch (error) {
       if (this.sideEffectBoundaryPassed) {
         throw createWorkflowBookkeepingError({
@@ -757,6 +762,7 @@ function reconstructWorkflowState(input: {
   const state: WorkflowExecutionState = {
     workflowInput,
     current: workflowInput,
+    currentSnapshot: input.run.input,
     steps: {},
   }
   const nodeRunsByIndex = new Map(input.nodeRuns.map((nodeRun) => [nodeRun.nodeIndex, nodeRun]))
@@ -799,6 +805,7 @@ function applyCompletedNodeToState(input: {
   if (!stateOutput) return
 
   input.state.current = stateOutput
+  input.state.currentSnapshot = input.nodeRun.output ?? {}
   input.state.steps[input.node.key] = stateOutput
 }
 

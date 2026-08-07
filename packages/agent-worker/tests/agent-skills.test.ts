@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { loadAgentSkills } from "../src/agent-skills"
+import { loadAgentSkills, renderAgentSkillCatalog } from "../src/agent-skills"
 import { writeProjectSkill } from "./helpers"
 
 async function createProjectRoot(label: string): Promise<string> {
@@ -10,6 +10,17 @@ async function createProjectRoot(label: string): Promise<string> {
 }
 
 describe("Agent Skills", () => {
+  test("renders execution-mode-specific workflow boundaries", async () => {
+    const skills = await loadAgentSkills()
+
+    expect(renderAgentSkillCatalog(skills, "conversation")).toContain(
+      "Execution mode: conversation. You may start a declared workflow"
+    )
+    expect(renderAgentSkillCatalog(skills, "workflow-task")).toContain(
+      "Execution mode: workflow-task. This is a headless workflow node: never start another workflow"
+    )
+  })
+
   test("discovers packaged built-ins and tolerates a missing project skills directory", async () => {
     const projectRoot = await createProjectRoot("missing")
     try {

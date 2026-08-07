@@ -290,14 +290,17 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
           SET
             status = ?,
             finished_at = ?,
-            error = ?
-            , execution_token = NULL, execution_queue_lease_expires_at = NULL
+            output = ?,
+            error = ?,
+            execution_token = NULL,
+            execution_queue_lease_expires_at = NULL
           WHERE project_id = ? AND id = ?
         `
         )
         .run(
           input.status,
           (input.finishedAt ?? new Date()).toISOString(),
+          input.status === "succeeded" ? serializeRecord(input.output) : null,
           input.status === "succeeded" ? null : (input.error ?? null),
           input.projectId,
           input.id
@@ -974,6 +977,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     workflowId: row.workflow_id,
     status: row.status,
     input: parseRecord(row.input),
+    output: row.output ? parseRecord(row.output) : undefined,
     queuedAt: row.queued_at ? new Date(row.queued_at) : undefined,
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
@@ -1039,6 +1043,7 @@ interface WorkflowRunDatabaseRow {
   workflow_id: string
   status: WorkflowRunRecord["status"]
   input: string
+  output: string | null
   queued_at: string | null
   started_at: string
   finished_at: string | null

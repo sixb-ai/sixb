@@ -422,6 +422,7 @@ async function createGatewayRuntime(
     id: "completed-workflow-run",
     projectId: PROJECT_ID,
     status: "succeeded",
+    output: { document: fileRefJson(completedWorkflowOutput) },
     finishedAt: NOW,
   })
 

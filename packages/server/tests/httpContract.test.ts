@@ -470,6 +470,7 @@ describe("SixbServer HTTP contract", () => {
       id: "workflow-run-previous",
       projectId: "contract-project",
       status: "succeeded",
+      output: { deviceId: "fan-1", healthy: true },
       finishedAt: new Date("2026-02-18T09:07:02.000Z"),
     })
 
@@ -991,7 +992,6 @@ describe("SixbServer HTTP contract", () => {
           latestRun: expect.objectContaining({
             id: "workflow-run-previous",
             status: "succeeded",
-            input: { deviceId: "fan-1" },
           }),
         }
       )
@@ -1034,7 +1034,10 @@ describe("SixbServer HTTP contract", () => {
         `${baseUrl}/api/workflow-runs?workflowId=inspect-device-workflow&limit=5`
       )
       expect(workflowRunsResponse.status).toBe(200)
-      expect(await workflowRunsResponse.json()).toMatchObject({
+      const workflowRunList = (await workflowRunsResponse.json()) as {
+        runs: Array<Record<string, unknown>>
+      }
+      expect(workflowRunList).toMatchObject({
         total: 1,
         hasMore: false,
         runs: [
@@ -1042,10 +1045,11 @@ describe("SixbServer HTTP contract", () => {
             id: "workflow-run-previous",
             workflowId: "inspect-device-workflow",
             status: "succeeded",
-            input: { deviceId: "fan-1" },
           },
         ],
       })
+      expect(workflowRunList.runs[0]).not.toHaveProperty("input")
+      expect(workflowRunList.runs[0]).not.toHaveProperty("output")
 
       const workflowRunResponse = await fetch(`${baseUrl}/api/workflow-runs/workflow-run-previous`)
       expect(workflowRunResponse.status).toBe(200)
@@ -1055,6 +1059,7 @@ describe("SixbServer HTTP contract", () => {
           workflowId: "inspect-device-workflow",
           status: "succeeded",
           input: { deviceId: "fan-1" },
+          output: { deviceId: "fan-1", healthy: true },
         },
         nodes: [
           {

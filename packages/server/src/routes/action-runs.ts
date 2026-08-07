@@ -9,6 +9,7 @@ import {
   createContextualFileContentResponse,
   fileContentGetResponses,
   fileContentHeadResponses,
+  handleFileContentQueryValidationError,
 } from "../files/content"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
@@ -214,7 +215,8 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
       (context) => actionRunFileContentResponse(sixb, context),
       {
         params: ActionRunIdParamsSchema,
-        query: FileContentQuerySchema,
+        query: ActionRunFileContentQuerySchema,
+        error: handleFileContentQueryValidationError,
         detail: {
           summary: "Get action run file content",
           tags: ["Actions"],
@@ -229,7 +231,8 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
       (context) => actionRunFileContentResponse(sixb, context, { head: true }),
       {
         params: ActionRunIdParamsSchema,
-        query: FileContentQuerySchema,
+        query: ActionRunFileContentQuerySchema,
+        error: handleFileContentQueryValidationError,
         detail: {
           summary: "Head action run file content",
           tags: ["Actions"],

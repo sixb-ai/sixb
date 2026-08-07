@@ -2,7 +2,7 @@ import type { AgentDefinition, Sandbox } from "@sixb/core"
 import { resolveLogsRuntime } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { AgentRunRecord, WorkflowAgentNodeRunRecord } from "@sixb/core/storage"
-import { renderAgentSkillCatalog } from "./agent-skills"
+import { type AgentExecutionMode, renderAgentSkillCatalog } from "./agent-skills"
 import { aiSdkToolsFromAgentDefinitions } from "./ai-sdk-adapters"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
 import {
@@ -71,6 +71,7 @@ export async function createConversationAgentEnvironment(
   })
 
   return startAgentEnvironment({
+    mode: "conversation",
     context,
     agent,
     runId: run.id,
@@ -102,6 +103,7 @@ export async function createWorkflowAgentNodeEnvironment(
   ])
 
   return startAgentEnvironment({
+    mode: "workflow-task",
     context,
     agent,
     runId: run.nodeRunId,
@@ -118,6 +120,7 @@ export async function createWorkflowAgentNodeEnvironment(
 }
 
 interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
+  readonly mode: AgentExecutionMode
   readonly runId: string
   readonly threadId?: string
   readonly apiBaseUrl: string
@@ -130,7 +133,7 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
  * Sandbox boot stays concurrent with the model call; the bash tool awaits it only when used.
  */
 function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvironment {
-  const { context, agent, runId, threadId, apiBaseUrl, attachmentContext, skills } = input
+  const { mode, context, agent, runId, threadId, apiBaseUrl, attachmentContext, skills } = input
 
   const logSession = resolveLogsRuntime(context.id, context.logs).startExecution({
     kind: "agent",
@@ -182,7 +185,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       apiBaseUrl,
       attachmentContext,
       tools,
-      systemAddendum: renderAgentSkillCatalog(skills),
+      systemAddendum: renderAgentSkillCatalog(skills, mode),
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
       streamSink: context.streamSink,

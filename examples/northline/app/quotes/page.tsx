@@ -1,4 +1,7 @@
-import type { ListWorkflowInterventionsResponse } from "@sixb/client"
+import type {
+  ListWorkflowInterventionsResponse,
+  SubmitWorkflowInterventionData,
+} from "@sixb/client"
 import {
   listWorkflowInterventionsOptions,
   listWorkflowInterventionsQueryKey,
@@ -53,6 +56,7 @@ const sortOptions = [
 type QuoteRow = QueryRow<typeof allQuotes>
 type ServiceCaseRow = QueryRow<typeof linkedServiceCases>
 type Intervention = ListWorkflowInterventionsResponse["interventions"][number]
+type InterventionResponse = SubmitWorkflowInterventionData["body"]["response"]
 type View = (typeof views)[number][0]
 type Sort = (typeof sortOptions)[number][0]
 type QuoteDecision = "approved" | "declined"
@@ -278,7 +282,7 @@ function QuoteWorklistRow({
   expanded: boolean
   reviewPending: boolean
   onToggle(): void
-  onApproveReview(response: Record<string, unknown>): void
+  onApproveReview(response: InterventionResponse): void
 }) {
   const navigate = useNavigate()
   const decide = useActionRunMutation<{
@@ -482,7 +486,7 @@ function ReviewDecision({
   intervention: Intervention
   pending: boolean
   onCancel(): void
-  onApprove(response: Record<string, unknown>): void
+  onApprove(response: InterventionResponse): void
 }) {
   const scope = text(intervention.defaultResponse.scope ?? intervention.input.scope)
   const amount = numeric(intervention.defaultResponse.amount ?? intervention.input.amount)
@@ -570,7 +574,7 @@ function UnmatchedReview({
 }: {
   intervention: Intervention
   pending: boolean
-  onApprove(response: Record<string, unknown>): void
+  onApprove(response: InterventionResponse): void
 }) {
   const scope = text(intervention.defaultResponse.scope ?? intervention.input.scope)
   const amount = numeric(intervention.defaultResponse.amount ?? intervention.input.amount)

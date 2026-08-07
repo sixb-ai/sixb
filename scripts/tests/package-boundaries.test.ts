@@ -159,7 +159,7 @@ describe("findUndeclaredImports", () => {
     ])
   })
 
-  test("reports each package once, at the first file that imports it", async () => {
+  test("reports each package once, at the lexically first file that imports it", async () => {
     const { packageRoot, manifest } = await packageWith(
       { name: "@sixb/example" },
       {

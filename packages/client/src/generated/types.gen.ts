@@ -2762,7 +2762,15 @@ export type ListWorkflowsResponses = {
   200: Array<{
     id: string
     input: {
-      [key: string]: unknown
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
     }
     triggers: Array<{
       type: "schedule"
@@ -2774,10 +2782,26 @@ export type ListWorkflowsResponses = {
           id: string
           key: string
           input: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
           output: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
         }
       | {
@@ -2786,7 +2810,15 @@ export type ListWorkflowsResponses = {
           key: string
           objectTypeId?: string
           params: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
         }
       | {
@@ -2794,10 +2826,26 @@ export type ListWorkflowsResponses = {
           id: string
           key: string
           input: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
           response: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
           description?: string
         }
@@ -2807,10 +2855,26 @@ export type ListWorkflowsResponses = {
           key: string
           agentId: string
           input: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
           output: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
         }
     >
@@ -2819,12 +2883,6 @@ export type ListWorkflowsResponses = {
       projectId: string
       workflowId: string
       status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
-      input: {
-        [key: string]: unknown
-      }
-      output?: {
-        [key: string]: unknown
-      }
       queuedAt?: string
       startedAt: string
       finishedAt?: string
@@ -2866,7 +2924,15 @@ export type GetWorkflowResponses = {
   200: {
     id: string
     input: {
-      [key: string]: unknown
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
     }
     triggers: Array<{
       type: "schedule"
@@ -2878,10 +2944,26 @@ export type GetWorkflowResponses = {
           id: string
           key: string
           input: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
           output: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
         }
       | {
@@ -2890,7 +2972,15 @@ export type GetWorkflowResponses = {
           key: string
           objectTypeId?: string
           params: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
         }
       | {
@@ -2898,10 +2988,26 @@ export type GetWorkflowResponses = {
           id: string
           key: string
           input: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
           response: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
           description?: string
         }
@@ -2911,10 +3017,26 @@ export type GetWorkflowResponses = {
           key: string
           agentId: string
           input: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
           output: {
-            [key: string]: unknown
+            [key: string]:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
           }
         }
     >
@@ -2923,12 +3045,6 @@ export type GetWorkflowResponses = {
       projectId: string
       workflowId: string
       status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
-      input: {
-        [key: string]: unknown
-      }
-      output?: {
-        [key: string]: unknown
-      }
       queuedAt?: string
       startedAt: string
       finishedAt?: string
@@ -2997,10 +3113,26 @@ export type ListWorkflowInterventionsResponses = {
       nodeKey: string
       interventionId: string
       input: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       defaultResponse: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       status: "pending" | "submitted" | "cancelled" | "expired"
       requestedAt: string
@@ -3011,7 +3143,15 @@ export type ListWorkflowInterventionsResponses = {
         principalId: string
       }
       response?: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       cancelledAt?: string
       cancelledBy?: {
@@ -3076,10 +3216,26 @@ export type GetWorkflowInterventionResponses = {
     nodeKey: string
     interventionId: string
     input: {
-      [key: string]: unknown
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
     }
     defaultResponse: {
-      [key: string]: unknown
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
     }
     status: "pending" | "submitted" | "cancelled" | "expired"
     requestedAt: string
@@ -3090,7 +3246,15 @@ export type GetWorkflowInterventionResponses = {
       principalId: string
     }
     response?: {
-      [key: string]: unknown
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
     }
     cancelledAt?: string
     cancelledBy?: {
@@ -3107,7 +3271,15 @@ export type GetWorkflowInterventionResponse =
 export type SubmitWorkflowInterventionData = {
   body: {
     response: {
-      [key: string]: unknown
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
     }
   }
   path: {
@@ -3157,10 +3329,26 @@ export type SubmitWorkflowInterventionResponses = {
       nodeKey: string
       interventionId: string
       input: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       defaultResponse: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       status: "pending" | "submitted" | "cancelled" | "expired"
       requestedAt: string
@@ -3171,7 +3359,15 @@ export type SubmitWorkflowInterventionResponses = {
         principalId: string
       }
       response?: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       cancelledAt?: string
       cancelledBy?: {
@@ -3238,10 +3434,26 @@ export type CancelWorkflowInterventionResponses = {
       nodeKey: string
       interventionId: string
       input: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       defaultResponse: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       status: "pending" | "submitted" | "cancelled" | "expired"
       requestedAt: string
@@ -3252,7 +3464,15 @@ export type CancelWorkflowInterventionResponses = {
         principalId: string
       }
       response?: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       cancelledAt?: string
       cancelledBy?: {
@@ -3309,12 +3529,6 @@ export type ListWorkflowRunsResponses = {
       projectId: string
       workflowId: string
       status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
-      input: {
-        [key: string]: unknown
-      }
-      output?: {
-        [key: string]: unknown
-      }
       queuedAt?: string
       startedAt: string
       finishedAt?: string
@@ -3373,12 +3587,6 @@ export type GetWorkflowRunResponses = {
       projectId: string
       workflowId: string
       status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
-      input: {
-        [key: string]: unknown
-      }
-      output?: {
-        [key: string]: unknown
-      }
       queuedAt?: string
       startedAt: string
       finishedAt?: string
@@ -3386,6 +3594,28 @@ export type GetWorkflowRunResponses = {
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
+      }
+      input: {
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+      }
+      output?: {
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
     }
     nodes: Array<{
@@ -3399,12 +3629,28 @@ export type GetWorkflowRunResponses = {
       nodeKey: string
       status: "running" | "waiting" | "succeeded" | "failed" | "cancelled"
       input: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       startedAt: string
       finishedAt?: string
       output?: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       error?: string
       agentExecution?: {
@@ -3534,12 +3780,6 @@ export type CancelWorkflowRunResponses = {
       projectId: string
       workflowId: string
       status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
-      input: {
-        [key: string]: unknown
-      }
-      output?: {
-        [key: string]: unknown
-      }
       queuedAt?: string
       startedAt: string
       finishedAt?: string
@@ -3547,6 +3787,28 @@ export type CancelWorkflowRunResponses = {
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
+      }
+      input: {
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+      }
+      output?: {
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
     }
     nodes: Array<{
@@ -3560,12 +3822,28 @@ export type CancelWorkflowRunResponses = {
       nodeKey: string
       status: "running" | "waiting" | "succeeded" | "failed" | "cancelled"
       input: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       startedAt: string
       finishedAt?: string
       output?: {
-        [key: string]: unknown
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
       }
       error?: string
       agentExecution?: {
@@ -3777,7 +4055,15 @@ export type HeadWorkflowNodeRunFileContentResponses = {
 export type RequestWorkflowRunData = {
   body: {
     input?: {
-      [key: string]: unknown
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
     }
   }
   path: {

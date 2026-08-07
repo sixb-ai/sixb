@@ -27,6 +27,7 @@ import {
   createContextualFileContentResponse,
   fileContentGetResponses,
   fileContentHeadResponses,
+  handleFileContentQueryValidationError,
 } from "../files/content"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
@@ -85,13 +86,12 @@ const WorkflowNodeFileContentParamsSchema = WorkflowRunParamsSchema.extend({
   nodeKey: z.string().min(1),
 })
 
-function serializeWorkflowRun(run: WorkflowRunRecord) {
+function serializeWorkflowRunSummary(run: WorkflowRunRecord) {
   return {
     id: run.id,
     projectId: run.projectId,
     workflowId: run.workflowId,
     status: run.status,
-    input: run.input,
     queuedAt: run.queuedAt ? toIsoString(run.queuedAt) : undefined,
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
@@ -100,28 +100,15 @@ function serializeWorkflowRun(run: WorkflowRunRecord) {
   }
 }
 
-type SerializedWorkflowRun = ReturnType<typeof serializeWorkflowRun>
-
-async function resolveWorkflowRunOutput(
-  storage: WorkflowRunStorage,
-  run: WorkflowRunRecord
-): Promise<Record<string, unknown> | undefined> {
-  if (run.status !== "succeeded") {
-    return undefined
+function serializeWorkflowRunDetail(run: WorkflowRunRecord) {
+  return {
+    ...serializeWorkflowRunSummary(run),
+    input: run.input,
+    output: run.output,
   }
-
-  const result = await storage.nodes.list({
-    projectId: run.projectId,
-    workflowRunId: run.id,
-    statuses: ["succeeded"],
-    order: "desc",
-  })
-  const outputNode = result.nodes.find((node) => node.nodeType !== "action")
-
-  // Actions do not advance the workflow's dataflow value. An all-action workflow therefore
-  // returns its input; otherwise the latest data-producing node holds the final value.
-  return outputNode ? (outputNode.output ?? {}) : run.input
 }
+
+type SerializedWorkflowRun = ReturnType<typeof serializeWorkflowRunSummary>
 
 function serializeWorkflowNodeRun(
   node: WorkflowNodeRunRecord,
@@ -253,20 +240,13 @@ async function workflowRunFileContentResponse(
     request: context.request,
     set: context.set,
     head: options.head,
-    resolveRoot: async (query) => {
+    resolveRoot: async () => {
       const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
       if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
         return null
       }
 
-      if (!query.path.startsWith("/output")) {
-        return serializeWorkflowRun(run)
-      }
-
-      return {
-        ...serializeWorkflowRun(run),
-        output: (await resolveWorkflowRunOutput(storage, run)) ?? {},
-      }
+      return serializeWorkflowRunDetail(run)
     },
   })
 }
@@ -333,7 +313,7 @@ async function getLatestWorkflowRun(
   })
 
   const [latest] = result.runs
-  return latest ? serializeWorkflowRun(latest) : null
+  return latest ? serializeWorkflowRunSummary(latest) : null
 }
 
 async function getLatestWorkflowRuns(
@@ -350,7 +330,7 @@ async function getLatestWorkflowRuns(
     workflowIds,
   })
 
-  return new Map(result.runs.map((run) => [run.workflowId, serializeWorkflowRun(run)]))
+  return new Map(result.runs.map((run) => [run.workflowId, serializeWorkflowRunSummary(run)]))
 }
 
 function serializeWorkflow(
@@ -969,7 +949,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           })
 
           return {
-            runs: result.runs.map(serializeWorkflowRun),
+            runs: result.runs.map(serializeWorkflowRunSummary),
             hasMore: result.hasMore,
             total: result.total,
           }
@@ -1009,11 +989,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             return { error: "Workflow run not found" }
           }
 
-          const output = await resolveWorkflowRunOutput(storage, run)
-          const serializedRun = {
-            ...serializeWorkflowRun(run),
-            ...(output === undefined ? {} : { output }),
-          }
+          const serializedRun = serializeWorkflowRunDetail(run)
 
           if (agentExecution) {
             return WorkflowRunDetailResponseSchema.parse({ run: serializedRun, nodes: [] })
@@ -1135,7 +1111,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           })
           if (existing.status === "cancelled") {
             return CancelWorkflowRunResponseSchema.parse({
-              run: serializeWorkflowRun(existing),
+              run: serializeWorkflowRunDetail(existing),
               nodes: await Promise.all(
                 listed.nodes.map((node) => serializeWorkflowNodeWithExecution(storage, node))
               ),
@@ -1232,7 +1208,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             order: "asc",
           })
           return CancelWorkflowRunResponseSchema.parse({
-            run: serializeWorkflowRun(result.run),
+            run: serializeWorkflowRunDetail(result.run),
             nodes: await Promise.all(
               nodes.nodes.map((node) => serializeWorkflowNodeWithExecution(storage, node))
             ),
@@ -1263,7 +1239,8 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       (context) => workflowRunFileContentResponse(sixb, context),
       {
         params: WorkflowRunParamsSchema,
-        query: FileContentQuerySchema,
+        query: WorkflowRunFileContentQuerySchema,
+        error: handleFileContentQueryValidationError,
         detail: {
           summary: "Get workflow run file content",
           tags: ["Workflows"],
@@ -1278,7 +1255,8 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       (context) => workflowRunFileContentResponse(sixb, context, { head: true }),
       {
         params: WorkflowRunParamsSchema,
-        query: FileContentQuerySchema,
+        query: WorkflowRunFileContentQuerySchema,
+        error: handleFileContentQueryValidationError,
         detail: {
           summary: "Head workflow run file content",
           tags: ["Workflows"],
@@ -1293,7 +1271,8 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       (context) => workflowNodeFileContentResponse(sixb, context),
       {
         params: WorkflowNodeFileContentParamsSchema,
-        query: FileContentQuerySchema,
+        query: WorkflowNodeFileContentQuerySchema,
+        error: handleFileContentQueryValidationError,
         detail: {
           summary: "Get workflow node run file content",
           tags: ["Workflows"],
@@ -1308,7 +1287,8 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       (context) => workflowNodeFileContentResponse(sixb, context, { head: true }),
       {
         params: WorkflowNodeFileContentParamsSchema,
-        query: FileContentQuerySchema,
+        query: WorkflowNodeFileContentQuerySchema,
+        error: handleFileContentQueryValidationError,
         detail: {
           summary: "Head workflow node run file content",
           tags: ["Workflows"],

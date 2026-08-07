@@ -143,8 +143,8 @@ export function workspaceBoundaryPlugins(manifest: ManifestDependencies): BunPlu
 }
 
 /**
- * Bare specifiers under `scope` that the manifest does not declare, with the first file importing
- * each one.
+ * Bare specifiers under `scope` that the manifest does not declare, with the lexically first file
+ * importing each one.
  *
  * Bun's transpiler is the parser on purpose. Type-only imports have to erase — they resolve
  * against devDependencies legitimately — and `@sixb/app` emits real `import` lines inside a
@@ -165,8 +165,10 @@ export async function findUndeclaredImports(
     for (const specifier of importedSpecifiers(contents, file)) {
       const owner = packageOwner(specifier)
       // A package may reference itself through its own `exports`; that resolves for consumers.
-      if (!owner || owner === manifest.name || declared.has(owner) || offenders.has(owner)) continue
-      offenders.set(owner, file)
+      if (!owner || owner === manifest.name || declared.has(owner)) continue
+
+      const existing = offenders.get(owner)
+      if (existing === undefined || file < existing) offenders.set(owner, file)
     }
   }
 

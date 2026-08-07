@@ -12,10 +12,11 @@ curl -sS "$SIXB_API_BASE_URL/api/workflows/workflowId"
 Only workflows you may run are returned. Inspect the workflow's `input` contract before composing a
 request.
 
-## Start A Workflow
+## Start A Workflow — Conversation Mode Only
 
-Before calling this route, show the user a concise preview and ask for approval. Do not request the
-workflow until the user approves.
+Only use this route when the execution catalog says `conversation`. Before calling it, show the
+user a concise preview and ask for approval. Do not request the workflow until the user approves.
+In `workflow-task` mode, do not call this route.
 
 ```bash
 curl -sS \
