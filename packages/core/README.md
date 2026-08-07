@@ -281,12 +281,14 @@ const syncOrderEvents = defineSync("sync-order-events", { mode: "append" })
   .intoDataset(rawOrderEventsDataset)
 
 const syncInvoices = defineSync("sync-invoices", { mode: "merge" })
+  .checkpoint<{ cursor: string }>()
   .from(erpDb)
-  .read(async function* (client) {
-    for await (const event of client.invoiceChanges()) {
+  .read(async function* (client, context) {
+    for await (const event of client.invoiceChangesSince(context.checkpoint?.cursor)) {
       yield event.deleted
         ? change.delete({ invoiceId: event.invoiceId })
         : change.upsert(event.invoice)
+      context.setCheckpoint({ cursor: event.cursor })
     }
   })
   .intoDataset(rawInvoicesDataset)

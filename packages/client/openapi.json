@@ -4941,6 +4941,20 @@
                       "description": {
                         "type": "string"
                       },
+                      "primaryKey": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "minItems": 2
+                          }
+                        ]
+                      },
                       "partitionBy": {
                         "type": "array",
                         "items": {
@@ -5106,6 +5120,20 @@
                     },
                     "description": {
                       "type": "string"
+                    },
+                    "primaryKey": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "minItems": 2
+                        }
+                      ]
                     },
                     "partitionBy": {
                       "type": "array",
@@ -5903,6 +5931,20 @@
                               "description": {
                                 "type": "string"
                               },
+                              "primaryKey": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "minItems": 2
+                                  }
+                                ]
+                              },
                               "partitionBy": {
                                 "type": "array",
                                 "items": {
@@ -6118,6 +6160,20 @@
                             },
                             "description": {
                               "type": "string"
+                            },
+                            "primaryKey": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "minItems": 2
+                                }
+                              ]
                             },
                             "partitionBy": {
                               "type": "array",
@@ -6758,6 +6814,20 @@
                                               "description": {
                                                 "type": "string"
                                               },
+                                              "primaryKey": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string"
+                                                  },
+                                                  {
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "string"
+                                                    },
+                                                    "minItems": 2
+                                                  }
+                                                ]
+                                              },
                                               "partitionBy": {
                                                 "type": "array",
                                                 "items": {
@@ -6818,6 +6888,20 @@
                                         },
                                         "description": {
                                           "type": "string"
+                                        },
+                                        "primaryKey": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string"
+                                            },
+                                            {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string"
+                                              },
+                                              "minItems": 2
+                                            }
+                                          ]
                                         },
                                         "partitionBy": {
                                           "type": "array",
@@ -7060,6 +7144,20 @@
                                             "description": {
                                               "type": "string"
                                             },
+                                            "primaryKey": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "string"
+                                                  },
+                                                  "minItems": 2
+                                                }
+                                              ]
+                                            },
                                             "partitionBy": {
                                               "type": "array",
                                               "items": {
@@ -7120,6 +7218,20 @@
                                       },
                                       "description": {
                                         "type": "string"
+                                      },
+                                      "primaryKey": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            },
+                                            "minItems": 2
+                                          }
+                                        ]
                                       },
                                       "partitionBy": {
                                         "type": "array",

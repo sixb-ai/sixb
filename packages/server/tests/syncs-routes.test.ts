@@ -89,6 +89,7 @@ describe("sync routes", () => {
 
     const body = (await response.json()) as Array<{
       id: string
+      target: { dataset: { primaryKey?: string | string[] } }
       latestRun: { id: string; syncId: string; status: string } | null
     }>
 
@@ -100,5 +101,8 @@ describe("sync routes", () => {
       ["sync-customers", null],
       ["sync-invoices", "run-invoices"],
     ])
+    expect(body.find((sync) => sync.id === "sync-invoices")?.target.dataset.primaryKey).toBe(
+      "invoiceId"
+    )
   })
 })
