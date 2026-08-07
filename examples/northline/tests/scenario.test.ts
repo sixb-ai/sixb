@@ -17,6 +17,10 @@ describe("Northline scenario", () => {
     expect(() => fieldServiceStateSchema.parse(scenario.fieldService)).not.toThrow()
     expect(() => controlsStateSchema.parse(scenario.controls)).not.toThrow()
     expect(scenario.business.customers).toHaveLength(5)
+    expect(scenario.business.quoteChanges).toHaveLength(scenario.business.quotes.length)
+    expect(scenario.business.quoteChanges).toEqual(
+      scenario.business.quotes.map((row) => ({ kind: "upsert", row }))
+    )
     expect(scenario.controls.equipment).toHaveLength(10)
     expect(scenario.fieldService.technicians).toHaveLength(7)
     expect(scenario.controls.readings).toHaveLength(40)

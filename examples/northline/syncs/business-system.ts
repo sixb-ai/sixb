@@ -1,4 +1,4 @@
-import { defineSync } from "@sixb/core"
+import { change, defineSync } from "@sixb/core"
 import { businessSystemConnector } from "../connectors/business-system"
 import {
   businessContracts,
@@ -26,8 +26,14 @@ export const syncBusinessContracts = defineSync("sync-business-contracts")
   .read(async (client) => (await client.listContracts()).rows)
   .intoDataset(businessContracts)
 
-export const syncBusinessQuotes = defineSync("sync-business-quotes")
+export const syncBusinessQuotes = defineSync("sync-business-quotes", { mode: "merge" })
   .when(hourlyBusinessSync)
+  .checkpoint<{ cursor: string }>()
   .from(businessSystemConnector)
-  .read(async (client) => (await client.listQuotes()).rows)
+  .read(async function* (client, context) {
+    for (const event of await client.quoteChangesSince(context.checkpoint?.cursor)) {
+      yield event.kind === "delete" ? change.delete(event.key) : change.upsert(event.row)
+      context.setCheckpoint({ cursor: event.cursor })
+    }
+  })
   .intoDataset(businessQuotes)

@@ -80,6 +80,11 @@ export const quoteRowSchema = z.object({
   updated_at: timestamp,
 })
 
+export const quoteChangeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("upsert"), row: quoteRowSchema }),
+  z.object({ kind: z.literal("delete"), key: z.object({ quote_id: z.string() }) }),
+])
+
 export const technicianRowSchema = z.object({
   technician_id: z.string(),
   full_name: z.string(),
@@ -203,6 +208,7 @@ export const businessStateSchema = z.object({
   facilities: z.array(facilityRowSchema),
   contracts: z.array(contractRowSchema),
   quotes: z.array(quoteRowSchema),
+  quoteChanges: z.array(quoteChangeSchema).optional(),
   idempotency: z.record(idempotencyReceipt),
 })
 
@@ -227,6 +233,7 @@ export type CustomerRow = z.infer<typeof customerRowSchema>
 export type FacilityRow = z.infer<typeof facilityRowSchema>
 export type ContractRow = z.infer<typeof contractRowSchema>
 export type QuoteRow = z.infer<typeof quoteRowSchema>
+export type QuoteChange = z.infer<typeof quoteChangeSchema>
 export type TechnicianRow = z.infer<typeof technicianRowSchema>
 export type WorkOrderRow = z.infer<typeof workOrderRowSchema>
 export type VisitRow = z.infer<typeof visitRowSchema>

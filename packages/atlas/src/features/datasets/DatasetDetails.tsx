@@ -27,6 +27,8 @@ export function DatasetDetails({
   onNavigate,
 }: DatasetDetailsProps) {
   const hasReferences = sourceCount(dataset) + consumerCount(dataset) > 0
+  const primaryKey =
+    typeof dataset.primaryKey === "string" ? [dataset.primaryKey] : (dataset.primaryKey ?? [])
   const producer = versionSummary.producer
     ? `${versionSummary.producer.kind}${
         versionSummary.producer.id ? ` · ${versionSummary.producer.id}` : ""
@@ -76,6 +78,18 @@ export function DatasetDetails({
         <Field label="Partitioned by">
           <div className="flex flex-wrap gap-1.5">
             {dataset.partitionBy.map((column) => (
+              <Badge key={column} variant="outline" className="font-mono text-[11px] font-normal">
+                {column}
+              </Badge>
+            ))}
+          </div>
+        </Field>
+      ) : null}
+
+      {primaryKey.length > 0 ? (
+        <Field label="Primary key">
+          <div className="flex flex-wrap gap-1.5">
+            {primaryKey.map((column) => (
               <Badge key={column} variant="outline" className="font-mono text-[11px] font-normal">
                 {column}
               </Badge>
