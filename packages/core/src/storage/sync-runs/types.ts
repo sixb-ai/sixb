@@ -1,6 +1,8 @@
 import type { JsonValue } from "../../json"
 import type { DatasetVersionRef, DatasetWriteMode } from "../../lake-storage"
 
+export type SyncRunMode = DatasetWriteMode | "merge"
+
 export type SyncRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 
 export interface SyncRunFailure {
@@ -13,7 +15,7 @@ export interface SyncRunRecord {
   readonly projectId: string
   readonly syncId: string
   readonly datasetId: string
-  readonly mode: DatasetWriteMode
+  readonly mode: SyncRunMode
   readonly status: SyncRunStatus
   readonly startedAt: Date
   readonly finishedAt?: Date
@@ -30,7 +32,7 @@ export interface StartSyncRunInput {
   readonly projectId: string
   readonly syncId: string
   readonly datasetId: string
-  readonly mode: DatasetWriteMode
+  readonly mode: SyncRunMode
   readonly startedAt?: Date
   readonly expectedLatestVersionId?: string
   readonly commitMessage?: string
@@ -43,7 +45,7 @@ export type FinishSyncRunInput =
       readonly status: "succeeded"
       readonly finishedAt?: Date
       readonly rowsRead: number
-      /** Absent only when a run succeeds without rows before the dataset has a version. */
+      /** Absent when a successful run has no dataset version to reference. */
       readonly output?: DatasetVersionRef
       readonly checkpoint?: JsonValue
     }

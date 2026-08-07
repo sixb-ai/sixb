@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  change,
   col,
   type DatasetDefinition,
   type DatasetRow,
@@ -19,6 +20,7 @@ import {
   MaterializationCancellationError,
   MaterializationConflictError,
   MaterializationValidationError,
+  type MergeChange,
   type ProjectionDefinition,
   prop,
   Sixb,
@@ -93,8 +95,18 @@ const roomsDataset = defineDataset("canonical.rooms", {
   ],
 })
 
+const keyedRoomsDataset = defineDataset("canonical.rooms", {
+  schema: roomsDataset.schema.columns,
+  primaryKey: "room_id",
+})
+
 const roomSensorsDataset = defineDataset("canonical.room-sensors", {
   schema: [col("room_id", "string"), col("sensor_id", "string")],
+})
+
+const keyedRoomSensorsDataset = defineDataset("canonical.room-sensors", {
+  schema: roomSensorsDataset.schema.columns,
+  primaryKey: ["room_id", "sensor_id"],
 })
 
 const roomReadingsDataset = defineDataset("canonical.room-readings", {
@@ -414,6 +426,19 @@ async function commitDatasetVersion(
   return write.commit({ commitMessage: "test projection input" })
 }
 
+async function commitDatasetMerge(
+  lakeStorage: LakeStorage,
+  dataset: DatasetDefinition,
+  changes: readonly MergeChange<DatasetRow, DatasetRow>[]
+) {
+  await lakeStorage.createDataset(dataset)
+  const merge = await lakeStorage.beginMerge({ dataset })
+  await merge.writeChanges(changes)
+  const result = await merge.commit({ commitMessage: "test merged projection input" })
+  if (!result.version) throw new Error("Expected merge changes to produce a dataset version.")
+  return result.version
+}
+
 describe("runProjectionJob", () => {
   test("classifies only terminal materialization conflicts as permanent", () => {
     expect(
@@ -475,6 +500,69 @@ describe("runProjectionJob", () => {
       primaryId: "r1",
     })
     expect(room?.properties.name).toBe("Kitchen")
+  })
+
+  test("fully replaces an object projection from each committed merge version", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [keyedRoomsDataset],
+        projections: [roomProjection],
+      },
+      deps
+    )
+    const first = await commitDatasetMerge(deps.lakeStorage, keyedRoomsDataset, [
+      change.upsert({ room_id: "r1", room_name: "Kitchen", building_ref: null }),
+      change.upsert({ room_id: "r2", room_name: "Office", building_ref: null }),
+    ])
+    await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-merge-objects-first",
+        projectionId: roomProjection.id,
+        projectionKind: "object",
+        datasetId: keyedRoomsDataset.id,
+        versionId: first.versionId,
+      },
+    })
+
+    const second = await commitDatasetMerge(deps.lakeStorage, keyedRoomsDataset, [
+      change.upsert({ room_id: "r1", room_name: "Updated kitchen", building_ref: null }),
+      change.delete({ room_id: "r2" }),
+      change.upsert({ room_id: "r3", room_name: "Studio", building_ref: null }),
+    ])
+    await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-merge-objects-second",
+        projectionId: roomProjection.id,
+        projectionKind: "object",
+        datasetId: keyedRoomsDataset.id,
+        versionId: second.versionId,
+      },
+    })
+
+    expect(
+      await deps.storage.objects.getByPrimaryId({
+        projectId: sixb.id,
+        objectTypeId: Room.id,
+        primaryId: "r1",
+      })
+    ).toMatchObject({ properties: { name: "Updated kitchen" } })
+    expect(
+      await deps.storage.objects.getByPrimaryId({
+        projectId: sixb.id,
+        objectTypeId: Room.id,
+        primaryId: "r2",
+      })
+    ).toBeNull()
+    expect(
+      await deps.storage.objects.getByPrimaryId({
+        projectId: sixb.id,
+        objectTypeId: Room.id,
+        primaryId: "r3",
+      })
+    ).toMatchObject({ properties: { name: "Studio" } })
   })
 
   test("replays an object projection without emitting no-op mutations", async () => {
@@ -1938,6 +2026,70 @@ describe("runProjectionJob", () => {
     })
     expect(links).toHaveLength(1)
     expect(links[0]?.targetId).toBe("s1")
+  })
+
+  test("fully replaces a link projection from each committed merge version", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [keyedRoomSensorsDataset],
+        projections: [roomSensorProjection],
+      },
+      deps
+    )
+    for (const roomId of ["r1", "r2"]) {
+      await sixb.upsertObject("Room", { id: roomId, name: roomId })
+    }
+    for (const sensorId of ["s1", "s2", "s3"]) {
+      await sixb.upsertObject("Sensor", { id: sensorId, name: sensorId })
+    }
+
+    const first = await commitDatasetMerge(deps.lakeStorage, keyedRoomSensorsDataset, [
+      change.upsert({ room_id: "r1", sensor_id: "s1" }),
+      change.upsert({ room_id: "r1", sensor_id: "s2" }),
+    ])
+    await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-merge-links-first",
+        projectionId: roomSensorProjection.id,
+        projectionKind: "link",
+        datasetId: keyedRoomSensorsDataset.id,
+        versionId: first.versionId,
+      },
+    })
+
+    const second = await commitDatasetMerge(deps.lakeStorage, keyedRoomSensorsDataset, [
+      change.delete({ room_id: "r1", sensor_id: "s1" }),
+      change.upsert({ room_id: "r2", sensor_id: "s3" }),
+    ])
+    await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-merge-links-second",
+        projectionId: roomSensorProjection.id,
+        projectionKind: "link",
+        datasetId: keyedRoomSensorsDataset.id,
+        versionId: second.versionId,
+      },
+    })
+
+    expect(
+      await deps.storage.objects.listLinks({
+        projectId: sixb.id,
+        objectTypeId: Room.id,
+        objectId: "r1",
+        linkId: "hasSensors",
+      })
+    ).toMatchObject([{ targetId: "s2" }])
+    expect(
+      await deps.storage.objects.listLinks({
+        projectId: sixb.id,
+        objectTypeId: Room.id,
+        objectId: "r2",
+        linkId: "hasSensors",
+      })
+    ).toMatchObject([{ targetId: "s3" }])
   })
 
   test("link projections read only source and target columns", async () => {

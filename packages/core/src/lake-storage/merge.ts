@@ -4,6 +4,8 @@ import type { DatasetProducer, DatasetRow, DatasetVersion, DatasetVersionRef } f
 export interface BeginDatasetMergeInput {
   /** Stored definition for the keyed dataset whose latest version is captured by `beginMerge`. */
   readonly dataset: DatasetDefinition
+  /** Optional caller guard checked against the same latest version captured by the session. */
+  readonly expectedLatestVersionId?: string
   readonly producer?: DatasetProducer
   readonly inputs?: readonly DatasetVersionRef[]
 }

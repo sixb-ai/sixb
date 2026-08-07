@@ -6,9 +6,10 @@ import type {
   DatasetDefinition,
   LakeStorage,
   SyncDefinition,
+  SyncMode,
 } from "@sixb/core"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
-import type { DatasetVersion, DatasetWriteMode } from "@sixb/core/lake-storage"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
 
 export interface SyncWorkerContext {
@@ -49,7 +50,7 @@ interface SyncRunResultBase {
   readonly id: string
   readonly syncId: string
   readonly datasetId: string
-  readonly mode: DatasetWriteMode
+  readonly mode: SyncMode
   readonly startedAt: Date
   readonly finishedAt: Date
   readonly rowsRead: number
@@ -63,7 +64,7 @@ export type SyncRunResult = SyncRunResultBase &
         readonly versionCreated: boolean
       }
     | {
-        /** A first empty sync has no dataset version yet. */
+        /** A successful initial no-op has no dataset version yet. */
         readonly version?: undefined
         readonly versionCreated: false
       }

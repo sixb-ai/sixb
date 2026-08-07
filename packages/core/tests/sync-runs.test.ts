@@ -95,6 +95,33 @@ describe("InMemorySyncRunStorage", () => {
     expect(finished.output).toBeUndefined()
   })
 
+  test("stores an initial merge no-op with consumed changes and no output version", async () => {
+    const storage = new InMemorySyncRunStorage()
+    const started = await storage.start({
+      id: "syncrun_merge_noop",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "merge",
+    })
+
+    const finished = await storage.finish({
+      id: started.id,
+      projectId: started.projectId,
+      status: "succeeded",
+      rowsRead: 1,
+      checkpoint: { cursor: "cursor-2" },
+    })
+
+    expect(finished).toMatchObject({
+      mode: "merge",
+      status: "succeeded",
+      rowsRead: 1,
+      checkpoint: { cursor: "cursor-2" },
+    })
+    expect(finished.output).toBeUndefined()
+  })
+
   test("stores a successful empty snapshot without an output version", async () => {
     const storage = new InMemorySyncRunStorage()
     await storage.start({

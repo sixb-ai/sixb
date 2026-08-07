@@ -96,6 +96,10 @@ import {
   requestSyncRun,
   type SyncRunRequestResult,
 } from "../syncs/request"
+import {
+  validateKeyedDatasetWriterTopology,
+  validateMergeSyncProjectionSafety,
+} from "../syncs/validation"
 import type { RegisteredWebhook } from "../webhooks"
 import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webhooks"
 import type {
@@ -328,6 +332,12 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       this.pipelinesById.set(pipeline.id, pipeline)
     }
 
+    validateKeyedDatasetWriterTopology({
+      datasetsById: this.datasetsById,
+      syncs: [...this.syncsById.values()],
+      pipelines: [...this.pipelinesById.values()],
+    })
+
     // Rules validate against the resolved ontology so inherited properties and
     // links are available before checking predicate references.
     validateRulesAtStartup(this.rules, this.ontology)
@@ -368,6 +378,10 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       projections: options.projections ?? [],
       ontology: this.ontology,
       datasetsById: this.datasetsById,
+    })
+    validateMergeSyncProjectionSafety({
+      syncs: [...this.syncsById.values()],
+      telemetryProjections: this.projectionRegistry.listTelemetryProjections(),
     })
     registerProjectionRegistry(this, this.projectionRegistry)
 

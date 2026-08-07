@@ -632,6 +632,7 @@ export type {
   RequestSyncRunInput,
   SyncBuilder,
   SyncDefinition,
+  SyncMode,
   SyncReadBuilder,
   SyncReadContext,
   SyncReadHandler,

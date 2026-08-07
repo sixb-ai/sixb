@@ -8,6 +8,7 @@ import type {
   BatchSyncDefinitionConfig,
   SyncBuilder,
   SyncDefinition,
+  SyncMode,
   SyncReadBuilder,
   SyncTargetBuilder,
 } from "./types"
@@ -18,16 +19,19 @@ function assertNonEmpty(value: string, field: string): void {
   }
 }
 
-function assertDataset(dataset: DatasetDefinition): void {
+function assertDataset(dataset: DatasetDefinition, mode: SyncMode): void {
   assertNonEmpty(dataset.id, "dataset id")
+  if (mode === "merge" && dataset.primaryKey === undefined) {
+    throw new SyncValidationError(`Merge sync dataset '${dataset.id}' must define a primaryKey.`)
+  }
 }
 
 function normalizeBatchSyncConfig(options: BatchSyncConfig | undefined): BatchSyncDefinitionConfig {
   const mode = options?.mode ?? "snapshot"
 
-  if (mode !== "snapshot" && mode !== "append") {
+  if (mode !== "snapshot" && mode !== "append" && mode !== "merge") {
     throw new SyncValidationError(
-      `Invalid sync mode '${String(mode)}'. Expected 'snapshot' or 'append'.`
+      `Invalid sync mode '${String(mode)}'. Expected 'snapshot', 'append', or 'merge'.`
     )
   }
 
@@ -41,39 +45,46 @@ function normalizeBatchSyncConfig(options: BatchSyncConfig | undefined): BatchSy
  * Define a batch sync that reads from one connector and writes into one dataset.
  *
  * The returned definition is inert and safe to export from `syncs/` modules.
- * V1 supports `snapshot` and `append` modes with optional triggers and checkpoints.
+ * Supports `snapshot`, `append`, and keyed `merge` modes with optional triggers and checkpoints.
  */
-export function defineSync<TId extends string>(
-  id: TId,
-  options?: BatchSyncConfig
-): SyncBuilder<TId> {
+type SyncModeFromConfig<TConfig extends BatchSyncConfig | undefined> = TConfig extends {
+  readonly mode: infer TMode extends SyncMode
+}
+  ? TMode
+  : "snapshot"
+
+export function defineSync<
+  TId extends string,
+  const TConfig extends BatchSyncConfig | undefined = undefined,
+>(id: TId, options?: TConfig): SyncBuilder<TId, never, SyncModeFromConfig<TConfig>> {
   assertNonEmpty(id, "id")
 
-  const config = normalizeBatchSyncConfig(options)
+  type TMode = SyncModeFromConfig<TConfig>
+  const config = normalizeBatchSyncConfig(options) as BatchSyncDefinitionConfig<TMode>
   const triggers: ScheduleReference[] = []
 
-  function createBuilder<TCheckpoint>(): SyncBuilder<TId, TCheckpoint> {
-    const builder: SyncBuilder<TId, TCheckpoint> = {
-      when(schedule: ScheduleDefinition): SyncBuilder<TId, TCheckpoint> {
+  function createBuilder<TCheckpoint>(): SyncBuilder<TId, TCheckpoint, TMode> {
+    const builder: SyncBuilder<TId, TCheckpoint, TMode> = {
+      when(schedule: ScheduleDefinition): SyncBuilder<TId, TCheckpoint, TMode> {
         if (!isScheduleDefinition(schedule)) {
           throw new SyncValidationError("Sync .when(...) only accepts schedules.")
         }
         triggers.push({ type: "schedule", scheduleId: schedule.id })
         return builder
       },
-      checkpoint<TNextCheckpoint>(): SyncBuilder<TId, TNextCheckpoint> {
+      checkpoint<TNextCheckpoint>(): SyncBuilder<TId, TNextCheckpoint, TMode> {
         return createBuilder<TNextCheckpoint>()
       },
       from<TConnector extends ConnectorDefinition>(
         connector: TConnector
-      ): SyncReadBuilder<TId, TConnector, TCheckpoint> {
+      ): SyncReadBuilder<TId, TConnector, TCheckpoint, TMode> {
         return {
-          read(handler): SyncTargetBuilder<TId, TConnector, TCheckpoint> {
+          read(handler): SyncTargetBuilder<TId, TConnector, TCheckpoint, TMode> {
             return {
               intoDataset(
                 dataset: DatasetDefinition
-              ): SyncDefinition<TId, TConnector, TCheckpoint> {
-                assertDataset(dataset)
+              ): SyncDefinition<TId, TConnector, TCheckpoint, TMode> {
+                assertDataset(dataset, config.mode)
 
                 return {
                   kind: "sync",

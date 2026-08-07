@@ -13,6 +13,7 @@ export type {
   SyncBlobContext,
   SyncBuilder,
   SyncDefinition,
+  SyncMode,
   SyncReadBuilder,
   SyncReadContext,
   SyncReadHandler,
