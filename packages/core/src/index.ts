@@ -142,8 +142,10 @@ export type {
   DatasetDefinition,
   DatasetPrimaryKey,
   DatasetSchema,
+  MergeChange,
 } from "./datasets"
 export {
+  change,
   col,
   DatasetValidationError,
   defineDataset,

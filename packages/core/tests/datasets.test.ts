@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  change,
   col,
   DatasetValidationError,
   defineConnector,
@@ -36,6 +37,16 @@ const rawOrdersDataset = defineDataset("raw.erp.orders", {
 
 const canonicalOrdersDataset = defineDataset("canonical.orders", {
   schema: [col("id", "string")],
+})
+
+describe("change", () => {
+  test("builds complete-row upserts and keyed deletes", () => {
+    const row = { id: "inv_1", status: "open" }
+    const key = { id: "inv_2" }
+
+    expect(change.upsert(row)).toEqual({ kind: "upsert", row })
+    expect(change.delete(key)).toEqual({ kind: "delete", key })
+  })
 })
 
 describe("defineDataset", () => {

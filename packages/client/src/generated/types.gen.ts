@@ -1761,7 +1761,7 @@ export type ListDatasetsResponses = {
     latestVersion: {
       datasetId: string
       versionId: string
-      mode: "snapshot" | "append" | "schema"
+      mode: "snapshot" | "append" | "merge" | "schema"
       createdAt: string
       rowCount?: number
     } | null
@@ -1829,7 +1829,7 @@ export type GetDatasetResponses = {
     latestVersion: {
       datasetId: string
       versionId: string
-      mode: "snapshot" | "append" | "schema"
+      mode: "snapshot" | "append" | "merge" | "schema"
       createdAt: string
       rowCount?: number
     } | null
@@ -1879,7 +1879,7 @@ export type ListDatasetVersionsResponses = {
       datasetId: string
       versionId: string
       parentVersionId?: string
-      mode: "snapshot" | "append" | "schema"
+      mode: "snapshot" | "append" | "merge" | "schema"
       createdAt: string
       schema: {
         columns: Array<{
@@ -1951,7 +1951,7 @@ export type GetDatasetVersionResponses = {
     datasetId: string
     versionId: string
     parentVersionId?: string
-    mode: "snapshot" | "append" | "schema"
+    mode: "snapshot" | "append" | "merge" | "schema"
     createdAt: string
     schema: {
       columns: Array<{
@@ -2027,7 +2027,7 @@ export type ListDatasetRowsResponses = {
       datasetId: string
       versionId: string
       parentVersionId?: string
-      mode: "snapshot" | "append" | "schema"
+      mode: "snapshot" | "append" | "merge" | "schema"
       createdAt: string
       schema: {
         columns: Array<{

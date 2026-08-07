@@ -38,7 +38,7 @@ const sixb = await createSixb({
 You can also use the provider directly:
 
 ```ts
-import { col, defineDataset } from "@sixb/core"
+import { change, col, defineDataset } from "@sixb/core"
 import { LocalBlobStorage } from "@sixb/blob-local"
 import { LocalLakeStorage } from "@sixb/lake-local"
 
@@ -50,6 +50,7 @@ const invoicesDataset = defineDataset("raw.accounting.invoices", {
     col("invoiceId", "string"),
     col("pdf", "fileRef", { nullable: true }),
   ],
+  primaryKey: "invoiceId",
 })
 
 await lake.createDataset(invoicesDataset)
@@ -77,6 +78,31 @@ await write.writeRows([
 await write.commit()
 ```
 
+### Keyed merges
+
+For a dataset with a primary key, `beginMerge()` stages complete-row upserts and keyed deletes:
+
+```ts
+const merge = await lake.beginMerge({
+  dataset: invoicesDataset,
+  producer: { kind: "sync", id: "sync-invoice-changes" },
+})
+
+await merge.writeChanges([
+  change.delete({ invoiceId: "inv_1001" }),
+  change.upsert({ invoiceId: "inv_1002", pdf: null }),
+])
+
+const result = await merge.commit()
+```
+
+The session captures the latest version when it begins and rejects its commit if another write wins
+first. The final change for a repeated key wins. Deletes of absent keys, identical upserts, and
+other changes that leave the visible rows unchanged do not create a version. An initial no-op
+returns `{ outcome: "unchanged", version: null }`.
+
+These are provider-level APIs. User-facing sync `mode: "merge"` is delivered separately.
+
 ## What Gets Stored On Disk
 
 Given `path: ".sixb/lake"` and a dataset id of `raw.erp.orders`, the provider creates a layout like this:
@@ -96,6 +122,9 @@ Given `path: ".sixb/lake"` and a dataset id of `raw.erp.orders`, the provider cr
   .tmp/
     session-<uuid>/
       rows.jsonl
+    session-<uuid>/
+      changes.jsonl
+      result.jsonl
 ```
 
 ### Dataset Metadata
@@ -110,6 +139,7 @@ Given `path: ".sixb/lake"` and a dataset id of `raw.erp.orders`, the provider cr
 - rows are stored as line-delimited JSON
 - `snapshot` writes create a version containing exactly the rows written in that session
 - `append` writes materialize a new JSONL file containing the parent version's visible rows plus the newly written rows
+- `merge` writes materialize a new JSONL file containing the complete resulting keyed dataset
 
 That last point is important: V1 keeps append semantics simple and explicit. The provider does not mutate old row files.
 
@@ -117,4 +147,6 @@ That last point is important: V1 keeps append semantics simple and explicit. The
 
 - dataset ids and version ids are path-encoded before being used as file names
 - this provider is intentionally simple and favors inspectable files over compaction or query acceleration
+- keyed writes reject duplicate primary keys, and merge commits are serialized per dataset within
+  one process; V1 still assumes one writer process per keyed dataset
 - `partitionBy` is stored as dataset metadata today; it does not yet change the on-disk row layout

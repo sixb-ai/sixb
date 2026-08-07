@@ -61,7 +61,7 @@ export const DatasetVersionSchema = z.object({
   datasetId: z.string(),
   versionId: z.string(),
   parentVersionId: z.string().optional(),
-  mode: z.enum(["snapshot", "append", "schema"]),
+  mode: z.enum(["snapshot", "append", "merge", "schema"]),
   createdAt: z.string(),
   schema: DatasetSchema,
   producer: DatasetProducerSchema.optional(),
@@ -73,7 +73,7 @@ export const DatasetVersionSchema = z.object({
 export const DatasetLatestVersionSummarySchema = z.object({
   datasetId: z.string(),
   versionId: z.string(),
-  mode: z.enum(["snapshot", "append", "schema"]),
+  mode: z.enum(["snapshot", "append", "merge", "schema"]),
   createdAt: z.string(),
   rowCount: z.number().optional(),
 })
