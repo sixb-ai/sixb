@@ -180,8 +180,8 @@ change. An initial no-op returns `{ outcome: "unchanged", version: null }`; a la
 existing latest version.
 
 Snapshot, append, and SQL-transform writes to keyed datasets also enforce unique keys so a later
-merge never starts from an ambiguous baseline. Sync-level `mode: "merge"` activation will arrive
-with the follow-up sync-worker integration rather than this provider contract.
+merge never starts from an ambiguous baseline. Application authors normally use
+`defineSync(..., { mode: "merge" })`; the sync worker stages those changes through this contract.
 
 ## DuckLake SQL Transforms
 

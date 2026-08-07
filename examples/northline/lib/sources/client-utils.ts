@@ -18,6 +18,23 @@ export function pageRows<T>(rows: readonly T[], input: SourceListInput = {}): So
   }
 }
 
+export function orderedChangesSince<T extends object>(
+  changes: readonly T[],
+  cursor?: string
+): Array<T & { readonly cursor: string }> {
+  const offset = parseCursor(cursor)
+  if (offset > changes.length) {
+    throw new Error(
+      `[NorthlineSource] Source cursor '${cursor}' is beyond the retained change history.`
+    )
+  }
+
+  return changes.slice(offset).map((change, index) => ({
+    ...structuredClone(change),
+    cursor: String(offset + index + 1),
+  }))
+}
+
 export function runIdempotently<T>(
   receipts: Record<string, Receipt>,
   key: string,

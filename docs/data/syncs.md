@@ -146,6 +146,21 @@ keys, ordered changes, immutable keys, and one registered writer per keyed datas
 projections evaluate the complete committed dataset; telemetry projections from merge-written
 datasets are not supported yet.
 
+### Merge source requirements
+
+Use merge only when the source provides a durable, ordered change log. Each source event needs a
+stable cursor, a complete row for an upsert or the exact key for a delete, and deterministic replay.
+Set the next checkpoint after yielding each event as shown above. Sixb stores the latest checkpoint
+only after the entire merge commits, so retrying a failed run safely replays its changes.
+
+Changing a row's key is two changes: delete the old key, then upsert the complete row under the new
+key. Do not model it as a partial update.
+
+If the source no longer recognizes the saved cursor because its retained log has a gap, stop the
+merge and rebuild from a trusted snapshot or backfill before resuming. Missing lake-side change
+history does not require source recovery: current projections evaluate the complete committed
+dataset version rather than depending on incremental row history.
+
 ## Incremental syncs with checkpoints
 
 For append sources you usually want each run to read only what is new. Call `.checkpoint<T>()` to

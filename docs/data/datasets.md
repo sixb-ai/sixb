@@ -67,8 +67,10 @@ V1 primary keys have these constraints:
 - Composite keys contain at least two unique columns. Column order is significant.
 - A key cannot be added, removed, changed, or reordered after the dataset is created.
 - Rows must be unique by key, and a row's key is immutable. Merge-capable lake providers enforce
-  uniqueness for keyed snapshots, appends, and provider-level merges. User-facing merge syncs and
-  DuckLake merge execution are delivered separately.
+  uniqueness for keyed snapshots, appends, transforms, and merges.
+
+Use a keyed dataset with a [merge sync](./syncs.md#sync-modes) when the source exposes ordered row
+changes and the dataset should stay current without replacing every row on each run.
 
 ### `col` options
 

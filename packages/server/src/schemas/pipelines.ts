@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { DatasetDefinitionSchema } from "./datasets"
 
 export const PipelineParamsSchema = z.object({
   pipelineId: z.string().min(1),
@@ -23,31 +24,6 @@ export const PipelineRunsQuerySchema = z.object({
 const DatasetVersionRefSchema = z.object({
   datasetId: z.string(),
   versionId: z.string(),
-})
-
-const DatasetColumnSchema = z.object({
-  name: z.string(),
-  type: z.enum([
-    "string",
-    "boolean",
-    "int64",
-    "float64",
-    "decimal",
-    "date",
-    "timestamp",
-    "json",
-    "fileRef",
-  ]),
-  nullable: z.boolean().optional(),
-})
-
-const DatasetDefinitionSchema = z.object({
-  id: z.string(),
-  description: z.string().optional(),
-  partitionBy: z.array(z.string()).optional(),
-  schema: z.object({
-    columns: z.array(DatasetColumnSchema),
-  }),
 })
 
 const PipelineTriggerSchema = z.object({
