@@ -70,18 +70,21 @@ describe("Postgres storage migrations", () => {
       const connectionString = process.env.DATABASE_URL
       if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
 
-      const initialSql = createPgClient({ connectionString, schemaName, max: 1 })
+      // Keep the upgrade and its verification on postgres.js. Replacing the verification with
+      // two sequential Bun SQL queries at max: 1 reproduces a five-second test timeout, then
+      // leaves the test process alive because the second query is never dispatched.
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
       try {
         const initialOnly = defineMigrations({
           adapterId: POSTGRES_STORAGE_ADAPTER_ID,
           steps: [initialSchema],
         })
         await createPostgresMigrator({
-          sql: initialSql,
+          sql,
           schemaName,
           migrations: initialOnly,
         }).migrate()
-        await initialSql.unsafe(
+        await sql.unsafe(
           `
             INSERT INTO ${quoteIdent(schemaName)}.sync_runs (
               project_id, id, sync_id, dataset_id, mode, status, started_at
@@ -89,29 +92,27 @@ describe("Postgres storage migrations", () => {
           `,
           ["project-a", "run-append", "sync-orders", "raw.orders", "2026-08-07T12:00:00.000Z"]
         )
-      } finally {
-        await initialSql.end()
-      }
 
-      await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
-
-      await withSql(async (sql) => {
-        const rows = await sql.unsafe<{ mode: string }[]>(
-          `SELECT mode FROM ${quoteIdent(schemaName)}.sync_runs WHERE project_id = $1 AND id = $2`,
-          ["project-a", "run-append"]
+        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+        await sql.unsafe(
+          `
+            INSERT INTO ${quoteIdent(schemaName)}.sync_runs (
+              project_id, id, sync_id, dataset_id, mode, status, started_at
+            ) VALUES ($1, $2, $3, $4, 'merge', 'running', $5)
+          `,
+          ["project-a", "run-merge", "sync-invoices", "raw.invoices", "2026-08-07T12:01:00.000Z"]
         )
-        expect(rows).toEqual([{ mode: "append" }])
-        await expect(
-          sql.unsafe(
-            `
-              INSERT INTO ${quoteIdent(schemaName)}.sync_runs (
-                project_id, id, sync_id, dataset_id, mode, status, started_at
-              ) VALUES ($1, $2, $3, $4, 'merge', 'running', $5)
-            `,
-            ["project-a", "run-merge", "sync-invoices", "raw.invoices", "2026-08-07T12:01:00.000Z"]
-          )
-        ).resolves.toBeDefined()
-      })
+
+        const rows = await sql.unsafe<{ id: string; mode: string }[]>(
+          `SELECT id, mode FROM ${quoteIdent(schemaName)}.sync_runs ORDER BY id`
+        )
+        expect([...rows]).toEqual([
+          { id: "run-append", mode: "append" },
+          { id: "run-merge", mode: "merge" },
+        ])
+      } finally {
+        await sql.end()
+      }
     })
   })
 
