@@ -379,6 +379,50 @@ describe("DuckLake SQL transforms", () => {
     ).rejects.toThrow("SQL transform result schema does not match target dataset")
   })
 
+  test("rejects duplicate keys from snapshot and append SQL transforms", async () => {
+    const keyedTarget = defineDataset("analytics.keyed_sql_target", {
+      schema: [col("id", "string"), col("value", "string")],
+      primaryKey: "id",
+    })
+    await storage.createDataset(keyedTarget)
+
+    await expect(
+      storage.sql.execute({
+        sources: {},
+        target: keyedTarget,
+        mode: "snapshot",
+        sql: () => `
+          SELECT *
+          FROM (VALUES ('row_1', 'first'), ('row_1', 'second')) rows(id, value)
+        `,
+      })
+    ).rejects.toThrow("snapshot source contains duplicate primary key")
+    expect(await storage.listVersions(keyedTarget.id)).toEqual([])
+
+    const seed = await storage.sql.execute({
+      sources: {},
+      target: keyedTarget,
+      mode: "snapshot",
+      sql: () => "SELECT 'row_1' AS id, 'first' AS value",
+    })
+    await expect(
+      storage.sql.execute({
+        sources: {},
+        target: keyedTarget,
+        mode: "append",
+        sql: () => "SELECT 'row_1' AS id, 'second' AS value",
+      })
+    ).rejects.toThrow("append contains duplicate primary key")
+
+    expect(await storage.listVersions(keyedTarget.id)).toHaveLength(1)
+    expect(await storage.getLatestVersion(keyedTarget.id)).toMatchObject({
+      versionId: seed.versionId,
+    })
+    await expect(collectRows(storage.readRows({ datasetId: keyedTarget.id }))).resolves.toEqual([
+      { id: "row_1", value: "first" },
+    ])
+  })
+
   test("preserves the write error when temp-table cleanup sees an aborted transaction", async () => {
     const previous = await storage.sql.execute({
       sources: {},

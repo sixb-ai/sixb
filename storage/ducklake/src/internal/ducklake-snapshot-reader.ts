@@ -549,7 +549,10 @@ export class DuckLakeSnapshotReader {
       return null
     }
 
-    if (!options.includeParent || (row.mode !== "append" && row.mode !== "schema")) {
+    if (
+      !options.includeParent ||
+      (row.mode !== "append" && row.mode !== "merge" && row.mode !== "schema")
+    ) {
       return row
     }
 

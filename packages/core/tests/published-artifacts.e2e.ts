@@ -186,7 +186,7 @@ const mergeVersionMode: DatasetVersionMode = "merge"
 declare const lakeStorage: LakeStorage
 const rootLakeStorage: RootLakeStorage = lakeStorage
 declare const beginMergeInput: BeginDatasetMergeInput
-const mergeSession = lakeStorage.beginMerge?.(beginMergeInput)
+const mergeSession = lakeStorage.beginMerge(beginMergeInput)
 export const loaded = [${subpaths.map((_, index) => `m${index}`).join(", ")}].length
 void lakePrimaryKey
 void lakeMergeChange

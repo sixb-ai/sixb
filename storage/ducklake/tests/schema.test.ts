@@ -6,6 +6,7 @@ import {
   datasetColumnToDuckDbSql,
   datasetColumnTypeToDuckDbSql,
   datasetSchemaToDuckDbColumnsSql,
+  datasetSchemaToDuckDbNullableColumnsSql,
   duckDbColumnsToDatasetSchema,
   duckDbTypeToDatasetColumnType,
 } from "../src/internal/schema"
@@ -48,6 +49,14 @@ describe("DuckLake schema mapping", () => {
         ],
       })
     ).toBe('"orderId" VARCHAR NOT NULL, "amount" DECIMAL(38, 9) NOT NULL, "metadata" JSON')
+  })
+
+  test("creates an all-nullable column list for merge staging", () => {
+    expect(
+      datasetSchemaToDuckDbNullableColumnsSql({
+        columns: [col("orderId", "string"), col("metadata", "json", { nullable: true })],
+      })
+    ).toBe('"orderId" VARCHAR, "metadata" JSON')
   })
 
   test("maps DuckDB metadata back to a Sixb schema", () => {
