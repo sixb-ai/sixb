@@ -34,7 +34,11 @@ import {
 } from "@sixb/core/internal/projections"
 import { shareOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import { decorateOperationScopedMethodForTesting } from "@sixb/core/internal/storage-operation-scope"
-import type { BeginDatasetWriteInput, ReadDatasetRowsInput } from "@sixb/core/lake-storage"
+import type {
+  BeginDatasetMergeInput,
+  BeginDatasetWriteInput,
+  ReadDatasetRowsInput,
+} from "@sixb/core/lake-storage"
 import type {
   AbandonSourceMaterializationCandidateInput,
   OntologySourceRecord,
@@ -194,6 +198,10 @@ class RecordingLakeStorage implements LakeStorage {
 
   beginWrite(input: BeginDatasetWriteInput) {
     return this.delegate.beginWrite(input)
+  }
+
+  beginMerge(input: BeginDatasetMergeInput) {
+    return this.delegate.beginMerge(input)
   }
 
   getLatestVersion(datasetId: string) {

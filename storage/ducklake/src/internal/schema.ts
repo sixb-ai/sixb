@@ -49,6 +49,13 @@ export function datasetSchemaToDuckDbColumnsSql(schema: DatasetSchema): string {
   return schema.columns.map((column) => datasetColumnToDuckDbSql(column)).join(", ")
 }
 
+/** Render a dataset schema for merge staging, where delete rows leave non-key values null. */
+export function datasetSchemaToDuckDbNullableColumnsSql(schema: DatasetSchema): string {
+  return schema.columns
+    .map((column) => `${quoteIdentifier(column.name)} ${datasetColumnTypeToDuckDbSql(column.type)}`)
+    .join(", ")
+}
+
 /**
  * Render the column list used by INSERT ... SELECT operations.
  */

@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto"
 import type { DatasetDefinition } from "@sixb/core"
 import type {
+  BeginDatasetMergeInput,
   BeginDatasetWriteInput,
+  DatasetMergeCommitResult,
   DatasetVersion,
   DatasetWriteCommitResult,
   DatasetWriteMode,
+  LakeMergeSession,
   LakeWriteSession,
 } from "@sixb/core/lake-storage"
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import { getDatasetPrimaryKeyColumns, LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { localCatalogCoordinationKey } from "./catalog-key"
 import {
@@ -16,10 +19,12 @@ import {
   assertDatasetWriteMode,
   type CommitRowCount,
 } from "./dataset-row-commit"
+import { applyDatasetMergeFromRelation } from "./dataset-row-merge"
 import { getBigIntLike } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
+import { createDuckLakeMergeSession, type DuckLakeCommitMergeInput } from "./ducklake-merge-session"
 import type { DuckLakeSnapshotReader, DuckLakeVersionSummary } from "./ducklake-snapshot-reader"
 import { createDuckLakeWriteSession, type DuckLakeCommitWriteInput } from "./ducklake-write-session"
 import { duckLakeAlias, duckLakeMetadataTableName, quoteIdentifier, quoteSqlString } from "./sql"
@@ -38,7 +43,16 @@ export interface DuckLakeCommitDatasetVersionInput {
   ): Promise<ApplyDatasetRowsResult>
 }
 
-interface DuckLakeCommitDatasetVersionRuntimeInput extends DuckLakeCommitDatasetVersionInput {
+interface DuckLakeCommitVersionOutcomeInput
+  extends Omit<DuckLakeCommitDatasetVersionInput, "expectedLatestVersionId" | "mode"> {
+  readonly mode: DatasetWriteMode | "merge"
+  readonly expectedLatestVersionId?: string | null
+  readonly allowInitialNoOp?: boolean
+  readonly disableRetries?: boolean
+  readonly optimisticOperation?: "commit" | "merge commit"
+}
+
+interface DuckLakeCommitVersionOutcomeRuntimeInput extends DuckLakeCommitVersionOutcomeInput {
   readonly runtime: DuckDbQueryRuntime
 }
 
@@ -90,6 +104,32 @@ export class DuckLakeWriteCoordinator {
     })
   }
 
+  async beginMerge(input: BeginDatasetMergeInput): Promise<LakeMergeSession> {
+    this.connections.assertOpen()
+
+    const definition = await this.datasets.getDataset(input.dataset.id)
+    if (!definition) {
+      throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.dataset.id}'.`)
+    }
+    if (getDatasetPrimaryKeyColumns(definition) === null) {
+      throw new LakeStorageError(
+        `[SixbDuckLake] Dataset '${definition.id}' must define a primaryKey before it can be merged.`
+      )
+    }
+
+    this.datasets.assertSchema(definition)
+    const latestVersion = await this.connections.withAttachedRuntime((runtime) =>
+      this.snapshots.getLatestVersionForDefinition(runtime, definition)
+    )
+    const runtime = await this.connections.stagingRuntime()
+    return createDuckLakeMergeSession({
+      commitMerge: (options) => this.commitMerge(options),
+      runtime,
+      merge: { ...input, dataset: definition },
+      baseVersionId: latestVersion?.versionId ?? null,
+    })
+  }
+
   private async commitWrite(input: DuckLakeCommitWriteInput): Promise<DatasetWriteCommitResult> {
     const definition = await this.datasets.getDataset(input.write.dataset.id)
     if (!definition) {
@@ -115,6 +155,48 @@ export class DuckLakeWriteCoordinator {
     })
   }
 
+  private async commitMerge(input: DuckLakeCommitMergeInput): Promise<DatasetMergeCommitResult> {
+    const definition = await this.datasets.getDataset(input.merge.dataset.id)
+    if (!definition) {
+      throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.merge.dataset.id}'.`)
+    }
+    if (getDatasetPrimaryKeyColumns(definition) === null) {
+      throw new LakeStorageError(
+        `[SixbDuckLake] Dataset '${definition.id}' must define a primaryKey before it can be merged.`
+      )
+    }
+
+    return this.withCommitRuntime((runtime) =>
+      this.commitVersionOutcomeOnExclusiveRuntime(runtime, {
+        dataset: definition,
+        mode: "merge",
+        expectedLatestVersionId: input.baseVersionId,
+        allowInitialNoOp: true,
+        disableRetries: true,
+        optimisticOperation: "merge commit",
+        commitMessage: input.commit?.commitMessage ?? `merge dataset ${definition.id}`,
+        producer: input.merge.producer,
+        inputs: input.merge.inputs,
+        applyChanges: async (commitRuntime) => {
+          const result = await applyDatasetMergeFromRelation({
+            options: this.options,
+            runtime: commitRuntime,
+            dataset: definition,
+            stagingTableName: input.stagingTableName,
+            sequenceColumnName: input.sequenceColumnName,
+            kindColumnName: input.kindColumnName,
+          })
+          if (result.sourceRowCount !== input.changesWritten) {
+            throw new LakeStorageError(
+              `[SixbDuckLake] Staged merge for dataset '${definition.id}' accepted ${input.changesWritten} change(s), but DuckLake saw ${result.sourceRowCount} source change(s) at commit time.`
+            )
+          }
+          return result
+        },
+      })
+    )
+  }
+
   async commitDatasetVersion(
     input: DuckLakeCommitDatasetVersionInput
   ): Promise<DatasetWriteCommitResult> {
@@ -135,6 +217,26 @@ export class DuckLakeWriteCoordinator {
     runtime: DuckDbQueryRuntime,
     input: DuckLakeCommitDatasetVersionInput
   ): Promise<DatasetWriteCommitResult> {
+    const result = await this.commitVersionOutcomeOnExclusiveRuntime(runtime, {
+      ...input,
+      // DuckLake has no primary-key constraint. Do not let its automatic retry replay a keyed
+      // append after the collision checks ran against an older transaction snapshot.
+      disableRetries:
+        input.mode === "append" && getDatasetPrimaryKeyColumns(input.dataset) !== null,
+    })
+    if (result.version === null) {
+      throw new LakeStorageError(
+        `[SixbDuckLake] No DuckLake changes were committed for dataset '${input.dataset.id}', and no previous version exists.`
+      )
+    }
+
+    return { ...result.version, outcome: result.outcome }
+  }
+
+  private async commitVersionOutcomeOnExclusiveRuntime(
+    runtime: DuckDbQueryRuntime,
+    input: DuckLakeCommitVersionOutcomeInput
+  ): Promise<DatasetMergeCommitResult> {
     const runtimeInput = { ...input, runtime }
     return this.withGuardedRetrySetting(runtimeInput, () =>
       this.commitDatasetVersionUnlocked(runtimeInput)
@@ -142,16 +244,16 @@ export class DuckLakeWriteCoordinator {
   }
 
   private async withGuardedRetrySetting<T>(
-    input: DuckLakeCommitDatasetVersionRuntimeInput,
+    input: DuckLakeCommitVersionOutcomeRuntimeInput,
     run: () => Promise<T>
   ): Promise<T> {
-    if (input.expectedLatestVersionId === undefined) {
+    if (input.expectedLatestVersionId === undefined && !input.disableRetries) {
       return run()
     }
 
-    // DuckLake can retry transactions internally. Guarded Sixb commits need a
-    // strict compare-and-swap check, so disable retries only for this exclusive
-    // commit and always restore the runtime setting before releasing the queue.
+    // DuckLake can retry transactions internally. Optimistic guards and keyed append constraint
+    // checks must not be replayed against a different snapshot, so disable retries for this
+    // exclusive commit and restore the runtime setting before releasing the queue.
     await input.runtime.run("SET ducklake_max_retry_count = 0")
     let outcome:
       | { readonly kind: "success"; readonly value: T }
@@ -185,8 +287,8 @@ export class DuckLakeWriteCoordinator {
   }
 
   private async commitDatasetVersionUnlocked(
-    input: DuckLakeCommitDatasetVersionRuntimeInput
-  ): Promise<DatasetWriteCommitResult> {
+    input: DuckLakeCommitVersionOutcomeRuntimeInput
+  ): Promise<DatasetMergeCommitResult> {
     // Capture the write connection's last committed DuckLake snapshot before
     // and after COMMIT. The commitId in DuckLake commit_extra_info proves
     // which snapshot belongs to this transaction.
@@ -204,6 +306,7 @@ export class DuckLakeWriteCoordinator {
           datasetId: input.dataset.id,
           expectedLatestVersionId: input.expectedLatestVersionId,
           actualLatestVersionId: latestVersion?.versionId ?? null,
+          operation: input.optimisticOperation ?? "commit",
         })
       }
 
@@ -241,13 +344,13 @@ export class DuckLakeWriteCoordinator {
   }
 
   private async versionForCommittedWrite(
-    input: DuckLakeCommitDatasetVersionRuntimeInput & {
+    input: DuckLakeCommitVersionOutcomeRuntimeInput & {
       readonly commitId: string
       readonly previousWriteSnapshotId: string | null
       readonly committedWriteSnapshotId: string | null
       readonly changeResult: ApplyDatasetRowsResult
     }
-  ): Promise<DatasetWriteCommitResult> {
+  ): Promise<DatasetMergeCommitResult> {
     // Hydrate the committed version on the same exclusive runtime. That keeps
     // snapshot matching and row-count fallback inside the same serialized
     // connection state that just committed.
@@ -266,7 +369,7 @@ export class DuckLakeWriteCoordinator {
         ownSnapshotId
       )
       if (version) {
-        return { ...version, outcome: "created" }
+        return { outcome: "created", version }
       }
 
       throw new LakeStorageError(
@@ -275,9 +378,22 @@ export class DuckLakeWriteCoordinator {
     }
 
     if (!input.changeResult.dataChangeExpected) {
+      const version = await this.versionForNoOpCommit(
+        input.runtime,
+        input.dataset,
+        input.allowInitialNoOp ?? false
+      )
+      if (input.expectedLatestVersionId !== undefined) {
+        this.assertExpectedLatestVersion({
+          datasetId: input.dataset.id,
+          expectedLatestVersionId: input.expectedLatestVersionId,
+          actualLatestVersionId: version?.versionId ?? null,
+          operation: input.optimisticOperation ?? "commit",
+        })
+      }
       return {
-        ...(await this.versionForNoOpCommit(input.runtime, input.dataset)),
         outcome: "unchanged",
+        version,
       }
     }
 
@@ -318,7 +434,7 @@ export class DuckLakeWriteCoordinator {
   }
 
   private async setCommitMetadata(
-    input: DuckLakeCommitDatasetVersionRuntimeInput,
+    input: DuckLakeCommitVersionOutcomeRuntimeInput,
     commitId: string,
     rowCount: CommitRowCount
   ): Promise<void> {
@@ -347,11 +463,16 @@ export class DuckLakeWriteCoordinator {
 
   private async versionForNoOpCommit(
     runtime: DuckDbQueryRuntime,
-    definition: DatasetDefinition
-  ): Promise<DatasetVersion> {
+    definition: DatasetDefinition,
+    allowInitialNoOp: boolean
+  ): Promise<DatasetVersion | null> {
     const latestVersion = await this.snapshots.getLatestVersionForDefinition(runtime, definition)
     if (latestVersion) {
       return latestVersion
+    }
+
+    if (allowInitialNoOp) {
+      return null
     }
 
     throw new LakeStorageError(
@@ -369,7 +490,7 @@ export class DuckLakeWriteCoordinator {
   }
 
   private async latestVersionForCommit(
-    input: DuckLakeCommitDatasetVersionRuntimeInput
+    input: DuckLakeCommitVersionOutcomeRuntimeInput
   ): Promise<DuckLakeVersionSummary | null> {
     if (input.expectedLatestVersionId === undefined && input.mode !== "append") {
       return null
@@ -451,8 +572,9 @@ export class DuckLakeWriteCoordinator {
 
   private assertExpectedLatestVersion(input: {
     readonly datasetId: string
-    readonly expectedLatestVersionId?: string
+    readonly expectedLatestVersionId?: string | null
     readonly actualLatestVersionId: string | null
+    readonly operation: "commit" | "merge commit"
   }): void {
     if (input.expectedLatestVersionId === undefined) {
       return
@@ -460,14 +582,14 @@ export class DuckLakeWriteCoordinator {
 
     if (input.actualLatestVersionId !== input.expectedLatestVersionId) {
       throw new LakeStorageError(
-        `[SixbDuckLake] Optimistic commit failed for dataset '${input.datasetId}': expected latest version '${input.expectedLatestVersionId}', found '${input.actualLatestVersionId ?? "none"}'.`
+        `[SixbDuckLake] Optimistic ${input.operation} failed for dataset '${input.datasetId}': expected latest version '${input.expectedLatestVersionId ?? "none"}', found '${input.actualLatestVersionId ?? "none"}'.`
       )
     }
   }
 }
 
 function commitRowCount(
-  input: Pick<DuckLakeCommitDatasetVersionInput, "expectedLatestVersionId" | "mode">,
+  input: Pick<DuckLakeCommitVersionOutcomeInput, "expectedLatestVersionId" | "mode">,
   changeResult: ApplyDatasetRowsResult,
   latestVersion: DuckLakeVersionSummary | null
 ): CommitRowCount {

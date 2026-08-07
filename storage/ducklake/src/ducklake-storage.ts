@@ -1,8 +1,10 @@
 import type { DatasetDefinition, DatasetRow, LakeStorageWithSql } from "@sixb/core"
 import type {
+  BeginDatasetMergeInput,
   BeginDatasetWriteInput,
   DatasetCatalogState,
   DatasetVersion,
+  LakeMergeSession,
   LakeWriteSession,
   ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
@@ -102,6 +104,10 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
 
   async beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession> {
     return this.writes.beginWrite(input)
+  }
+
+  async beginMerge(input: BeginDatasetMergeInput): Promise<LakeMergeSession> {
+    return this.writes.beginMerge(input)
   }
 
   async getLatestVersion(datasetId: string): Promise<DatasetVersion | null> {

@@ -169,6 +169,9 @@ describe("runSyncJob", () => {
         calls.push(`begin:${input.dataset.id}`)
         return lakeStorage.beginWrite(input)
       },
+      beginMerge(input) {
+        return lakeStorage.beginMerge(input)
+      },
       getLatestVersion(datasetId) {
         return lakeStorage.getLatestVersion(datasetId)
       },
@@ -630,6 +633,9 @@ describe("runSyncJob", () => {
           },
         }
         return wrappedWrite
+      },
+      beginMerge(input) {
+        return lakeStorage.beginMerge(input)
       },
       getLatestVersion(datasetId) {
         return lakeStorage.getLatestVersion(datasetId)

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, defineDataset } from "@sixb/core"
+import { change, col, defineDataset } from "@sixb/core"
 import { SQL } from "bun"
 import { type DuckDbSecretOptions, DuckLakeStorage, type DuckLakeStorageOptions } from "../src"
 import { collectRows } from "./test-utils"
@@ -29,11 +29,27 @@ describe("DuckLakeStorage remote catalogs", () => {
 
       const append = await storage.beginWrite({ dataset, mode: "append" })
       await append.writeRows([{ orderId: "ord_2" }])
-      await append.commit()
+      const appendVersion = await append.commit()
+
+      const merge = await storage.beginMerge({ dataset })
+      await merge.writeChanges([
+        change.delete({ orderId: "ord_1" }),
+        change.upsert({ orderId: "ord_3" }),
+      ])
+      const mergeResult = await merge.commit()
+
+      expect(mergeResult).toMatchObject({
+        outcome: "created",
+        version: {
+          mode: "merge",
+          parentVersionId: appendVersion.versionId,
+          rowCount: 2,
+        },
+      })
 
       expect(await collectRows(storage.readRows({ datasetId: dataset.id }))).toEqual([
-        { orderId: "ord_1" },
         { orderId: "ord_2" },
+        { orderId: "ord_3" },
       ])
     } finally {
       await storage.close()
