@@ -1,4 +1,7 @@
-import type { ListWorkflowInterventionsResponse } from "@sixb/client"
+import type {
+  ListWorkflowInterventionsResponse,
+  SubmitWorkflowInterventionData,
+} from "@sixb/client"
 import {
   listWorkflowInterventionsOptions,
   listWorkflowInterventionsQueryKey,
@@ -18,6 +21,7 @@ import { WorkOrder } from "../../ontology/work-order"
 import { deadlineLabel, humanize, QueryState, StatusIndicator } from "../_components/ui"
 
 type Intervention = ListWorkflowInterventionsResponse["interventions"][number]
+type InterventionResponse = SubmitWorkflowInterventionData["body"]["response"]
 
 const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(50)
 
@@ -370,7 +374,7 @@ function AssignmentRow({
   submitting: boolean
   onReview(): void
   onCancel(): void
-  onApprove(response: Record<string, unknown>): void
+  onApprove(response: InterventionResponse): void
 }) {
   const technician =
     objectRef(intervention.defaultResponse.technician) ??

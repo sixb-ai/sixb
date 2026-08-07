@@ -151,6 +151,10 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
     id: "workflow_run_1",
     projectId: sixb.id,
     status: "succeeded",
+    output: {
+      report: fileRefJson(workflowOutput),
+      notes: "not a file",
+    },
     finishedAt: new Date("2026-06-30T12:04:00.000Z"),
   })
 
@@ -313,9 +317,15 @@ describe("run file content routes", () => {
       "/api/workflow-runs/workflow_run_1/files/content?path=/workflowId",
       "/api/workflow-runs/workflow_run_1/nodes/extract/files/content?path=/status",
     ]) {
-      const response = await app.fetch(contentRequest(path))
-      expect(response.status).toBe(400)
-      expect(await response.json()).toEqual({ error: "Invalid file content query" })
+      for (const method of ["GET", "HEAD"]) {
+        const response = await app.fetch(contentRequest(path, { method }))
+        expect(response.status).toBe(400)
+        if (method === "GET") {
+          expect(await response.json()).toEqual({ error: "Invalid file content query" })
+        } else {
+          expect(await response.text()).toBe("")
+        }
+      }
     }
   })
 

@@ -7801,7 +7801,29 @@
                       },
                       "input": {
                         "type": "object",
-                        "additionalProperties": {}
+                        "additionalProperties": {
+                          "description": "Any JSON-compatible value.",
+                          "nullable": true,
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "array",
+                              "items": {}
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          ]
+                        }
                       },
                       "triggers": {
                         "type": "array",
@@ -7839,11 +7861,55 @@
                                 },
                                 "input": {
                                   "type": "object",
-                                  "additionalProperties": {}
+                                  "additionalProperties": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  }
                                 },
                                 "output": {
                                   "type": "object",
-                                  "additionalProperties": {}
+                                  "additionalProperties": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  }
                                 }
                               },
                               "required": ["type", "id", "key", "input", "output"],
@@ -7867,7 +7933,29 @@
                                 },
                                 "params": {
                                   "type": "object",
-                                  "additionalProperties": {}
+                                  "additionalProperties": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  }
                                 }
                               },
                               "required": ["type", "id", "key", "params"],
@@ -7888,11 +7976,55 @@
                                 },
                                 "input": {
                                   "type": "object",
-                                  "additionalProperties": {}
+                                  "additionalProperties": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  }
                                 },
                                 "response": {
                                   "type": "object",
-                                  "additionalProperties": {}
+                                  "additionalProperties": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  }
                                 },
                                 "description": {
                                   "type": "string"
@@ -7919,11 +8051,55 @@
                                 },
                                 "input": {
                                   "type": "object",
-                                  "additionalProperties": {}
+                                  "additionalProperties": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  }
                                 },
                                 "output": {
                                   "type": "object",
-                                  "additionalProperties": {}
+                                  "additionalProperties": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  }
                                 }
                               },
                               "required": ["type", "id", "key", "agentId", "input", "output"],
@@ -7954,14 +8130,6 @@
                               "failed",
                               "cancelled"
                             ]
-                          },
-                          "input": {
-                            "type": "object",
-                            "additionalProperties": {}
-                          },
-                          "output": {
-                            "type": "object",
-                            "additionalProperties": {}
                           },
                           "queuedAt": {
                             "type": "string"
@@ -7996,7 +8164,6 @@
                           "projectId",
                           "workflowId",
                           "status",
-                          "input",
                           "startedAt",
                           "requestedBy"
                         ],
@@ -8048,7 +8215,29 @@
                     },
                     "input": {
                       "type": "object",
-                      "additionalProperties": {}
+                      "additionalProperties": {
+                        "description": "Any JSON-compatible value.",
+                        "nullable": true,
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "array",
+                            "items": {}
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        ]
+                      }
                     },
                     "triggers": {
                       "type": "array",
@@ -8086,11 +8275,55 @@
                               },
                               "input": {
                                 "type": "object",
-                                "additionalProperties": {}
+                                "additionalProperties": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
+                                }
                               },
                               "output": {
                                 "type": "object",
-                                "additionalProperties": {}
+                                "additionalProperties": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
+                                }
                               }
                             },
                             "required": ["type", "id", "key", "input", "output"],
@@ -8114,7 +8347,29 @@
                               },
                               "params": {
                                 "type": "object",
-                                "additionalProperties": {}
+                                "additionalProperties": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
+                                }
                               }
                             },
                             "required": ["type", "id", "key", "params"],
@@ -8135,11 +8390,55 @@
                               },
                               "input": {
                                 "type": "object",
-                                "additionalProperties": {}
+                                "additionalProperties": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
+                                }
                               },
                               "response": {
                                 "type": "object",
-                                "additionalProperties": {}
+                                "additionalProperties": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
+                                }
                               },
                               "description": {
                                 "type": "string"
@@ -8166,11 +8465,55 @@
                               },
                               "input": {
                                 "type": "object",
-                                "additionalProperties": {}
+                                "additionalProperties": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
+                                }
                               },
                               "output": {
                                 "type": "object",
-                                "additionalProperties": {}
+                                "additionalProperties": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
+                                }
                               }
                             },
                             "required": ["type", "id", "key", "agentId", "input", "output"],
@@ -8201,14 +8544,6 @@
                             "failed",
                             "cancelled"
                           ]
-                        },
-                        "input": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "output": {
-                          "type": "object",
-                          "additionalProperties": {}
                         },
                         "queuedAt": {
                           "type": "string"
@@ -8243,7 +8578,6 @@
                         "projectId",
                         "workflowId",
                         "status",
-                        "input",
                         "startedAt",
                         "requestedBy"
                       ],
@@ -8424,11 +8758,55 @@
                           },
                           "input": {
                             "type": "object",
-                            "additionalProperties": {}
+                            "additionalProperties": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            }
                           },
                           "defaultResponse": {
                             "type": "object",
-                            "additionalProperties": {}
+                            "additionalProperties": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            }
                           },
                           "status": {
                             "type": "string",
@@ -8460,7 +8838,29 @@
                           },
                           "response": {
                             "type": "object",
-                            "additionalProperties": {}
+                            "additionalProperties": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            }
                           },
                           "cancelledAt": {
                             "type": "string"
@@ -8605,11 +9005,55 @@
                     },
                     "input": {
                       "type": "object",
-                      "additionalProperties": {}
+                      "additionalProperties": {
+                        "description": "Any JSON-compatible value.",
+                        "nullable": true,
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "array",
+                            "items": {}
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        ]
+                      }
                     },
                     "defaultResponse": {
                       "type": "object",
-                      "additionalProperties": {}
+                      "additionalProperties": {
+                        "description": "Any JSON-compatible value.",
+                        "nullable": true,
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "array",
+                            "items": {}
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        ]
+                      }
                     },
                     "status": {
                       "type": "string",
@@ -8641,7 +9085,29 @@
                     },
                     "response": {
                       "type": "object",
-                      "additionalProperties": {}
+                      "additionalProperties": {
+                        "description": "Any JSON-compatible value.",
+                        "nullable": true,
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "array",
+                            "items": {}
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        ]
+                      }
                     },
                     "cancelledAt": {
                       "type": "string"
@@ -8769,7 +9235,29 @@
                 "properties": {
                   "response": {
                     "type": "object",
-                    "additionalProperties": {}
+                    "additionalProperties": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
                   }
                 },
                 "required": ["response"],
@@ -8782,7 +9270,29 @@
                 "properties": {
                   "response": {
                     "type": "object",
-                    "additionalProperties": {}
+                    "additionalProperties": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
                   }
                 },
                 "required": ["response"],
@@ -8795,7 +9305,29 @@
                 "properties": {
                   "response": {
                     "type": "object",
-                    "additionalProperties": {}
+                    "additionalProperties": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
                   }
                 },
                 "required": ["response"],
@@ -8844,11 +9376,55 @@
                         },
                         "input": {
                           "type": "object",
-                          "additionalProperties": {}
+                          "additionalProperties": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          }
                         },
                         "defaultResponse": {
                           "type": "object",
-                          "additionalProperties": {}
+                          "additionalProperties": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          }
                         },
                         "status": {
                           "type": "string",
@@ -8880,7 +9456,29 @@
                         },
                         "response": {
                           "type": "object",
-                          "additionalProperties": {}
+                          "additionalProperties": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          }
                         },
                         "cancelledAt": {
                           "type": "string"
@@ -9075,11 +9673,55 @@
                         },
                         "input": {
                           "type": "object",
-                          "additionalProperties": {}
+                          "additionalProperties": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          }
                         },
                         "defaultResponse": {
                           "type": "object",
-                          "additionalProperties": {}
+                          "additionalProperties": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          }
                         },
                         "status": {
                           "type": "string",
@@ -9111,7 +9753,29 @@
                         },
                         "response": {
                           "type": "object",
-                          "additionalProperties": {}
+                          "additionalProperties": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          }
                         },
                         "cancelledAt": {
                           "type": "string"
@@ -9316,14 +9980,6 @@
                               "cancelled"
                             ]
                           },
-                          "input": {
-                            "type": "object",
-                            "additionalProperties": {}
-                          },
-                          "output": {
-                            "type": "object",
-                            "additionalProperties": {}
-                          },
                           "queuedAt": {
                             "type": "string"
                           },
@@ -9357,7 +10013,6 @@
                           "projectId",
                           "workflowId",
                           "status",
-                          "input",
                           "startedAt",
                           "requestedBy"
                         ],
@@ -9466,14 +10121,6 @@
                             "cancelled"
                           ]
                         },
-                        "input": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "output": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
                         "queuedAt": {
                           "type": "string"
                         },
@@ -9500,6 +10147,58 @@
                           },
                           "required": ["principalType", "principalId"],
                           "additionalProperties": false
+                        },
+                        "input": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          }
+                        },
+                        "output": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          }
                         }
                       },
                       "required": [
@@ -9507,9 +10206,9 @@
                         "projectId",
                         "workflowId",
                         "status",
-                        "input",
                         "startedAt",
-                        "requestedBy"
+                        "requestedBy",
+                        "input"
                       ],
                       "additionalProperties": false
                     },
@@ -9549,7 +10248,29 @@
                           },
                           "input": {
                             "type": "object",
-                            "additionalProperties": {}
+                            "additionalProperties": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            }
                           },
                           "startedAt": {
                             "type": "string"
@@ -9559,7 +10280,29 @@
                           },
                           "output": {
                             "type": "object",
-                            "additionalProperties": {}
+                            "additionalProperties": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            }
                           },
                           "error": {
                             "type": "string"
@@ -9921,14 +10664,6 @@
                             "cancelled"
                           ]
                         },
-                        "input": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "output": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
                         "queuedAt": {
                           "type": "string"
                         },
@@ -9955,6 +10690,58 @@
                           },
                           "required": ["principalType", "principalId"],
                           "additionalProperties": false
+                        },
+                        "input": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          }
+                        },
+                        "output": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          }
                         }
                       },
                       "required": [
@@ -9962,9 +10749,9 @@
                         "projectId",
                         "workflowId",
                         "status",
-                        "input",
                         "startedAt",
-                        "requestedBy"
+                        "requestedBy",
+                        "input"
                       ],
                       "additionalProperties": false
                     },
@@ -10004,7 +10791,29 @@
                           },
                           "input": {
                             "type": "object",
-                            "additionalProperties": {}
+                            "additionalProperties": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            }
                           },
                           "startedAt": {
                             "type": "string"
@@ -10014,7 +10823,29 @@
                           },
                           "output": {
                             "type": "object",
-                            "additionalProperties": {}
+                            "additionalProperties": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            }
                           },
                           "error": {
                             "type": "string"
@@ -10214,7 +11045,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "pattern": "^\\/(?:input|output)(?:\\/|$)"
             }
           },
           {
@@ -10294,7 +11126,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "pattern": "^\\/(?:input|output)(?:\\/|$)"
             }
           },
           {
@@ -10401,7 +11234,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "pattern": "^\\/(?:input|output)(?:\\/|$)"
             }
           },
           {
@@ -10490,7 +11324,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "pattern": "^\\/(?:input|output)(?:\\/|$)"
             }
           },
           {
@@ -10538,7 +11373,29 @@
                 "properties": {
                   "input": {
                     "type": "object",
-                    "additionalProperties": {}
+                    "additionalProperties": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
                   }
                 },
                 "additionalProperties": false,
@@ -10551,7 +11408,29 @@
                 "properties": {
                   "input": {
                     "type": "object",
-                    "additionalProperties": {}
+                    "additionalProperties": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
                   }
                 },
                 "additionalProperties": false,
@@ -10564,7 +11443,29 @@
                 "properties": {
                   "input": {
                     "type": "object",
-                    "additionalProperties": {}
+                    "additionalProperties": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
                   }
                 },
                 "additionalProperties": false,
@@ -15452,7 +16353,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "pattern": "^\\/(?:params|writeback\\/result)(?:\\/|$)"
             }
           },
           {
@@ -15532,7 +16434,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "pattern": "^\\/(?:params|writeback\\/result)(?:\\/|$)"
             }
           },
           {

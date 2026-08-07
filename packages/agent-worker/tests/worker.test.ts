@@ -1205,6 +1205,7 @@ describe("AgentWorker", () => {
           },
         })
       )
+      expect(capturedSystem).toContain("Execution mode: workflow-task")
       expect(capturedSystem).toContain("headless Sixb workflow agent")
       expect(capturedSystem).toContain("Do not ask a user follow-up question")
       expect(await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })).toMatchObject({
@@ -1325,6 +1326,7 @@ describe("AgentWorker", () => {
         stdoutValue(secondBash.stdout, "context")
       )
       const systemAddendum = firstEnvironment.turnContext.systemAddendum ?? ""
+      expect(systemAddendum).toContain("Execution mode: conversation")
       expect(systemAddendum).toContain("Use $SIXB_SKILLS_DIR and attachment/output env vars")
       expect(systemAddendum).toContain("Path: $SIXB_SKILLS_DIR/sixb-query")
       expect(systemAddendum).not.toContain("/tmp/sixb-recording-sandbox")
@@ -2973,8 +2975,8 @@ describe("AgentWorker", () => {
         join(env.SIXB_SKILLS_DIR, "sixb-workflows", "SKILL.md")
       )
       expect(workflowsSkill).toContain("name: sixb-workflows")
-      expect(workflowsSkill).toContain("ask for approval")
-      expect(workflowsSkill).toContain("cannot start another workflow")
+      expect(workflowsSkill).toContain("Ask for approval")
+      expect(workflowsSkill).toContain("never start another workflow")
 
       const runContext = JSON.parse(sandbox.readFileContents(env.SIXB_RUN_CONTEXT)) as unknown
       expect(runContext).toMatchObject({

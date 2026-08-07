@@ -1,4 +1,5 @@
 import { listObjectsInfiniteOptions } from "@sixb/client/hooks"
+import type { JsonValue } from "@sixb/core"
 import { isFileRef } from "@sixb/core/blob-storage"
 import { normalizeDecimalValue } from "@sixb/core/ontology"
 import {
@@ -95,7 +96,7 @@ export function buildWorkflowInput(
   fields: Readonly<Record<string, unknown>>,
   values: WorkflowInputFormValues
 ) {
-  const input: Record<string, unknown> = {}
+  const input: Record<string, JsonValue> = {}
   const errors: WorkflowInputFormErrors = {}
 
   for (const [name, descriptor] of Object.entries(fields)) {
@@ -510,7 +511,7 @@ function parseFieldValue({
   path: readonly string[]
   values: WorkflowInputFormValues
   errors: WorkflowInputFormErrors
-}): { present: boolean; value?: unknown } {
+}): { present: false } | { present: true; value: JsonValue } {
   const schema = resolveRenderableSchema(spec.schema)
   const key = pathKey(path)
   const raw = values[key]
@@ -549,7 +550,7 @@ function parseFieldValue({
         errors[key] = `${fieldLabel(path)} must be an uploaded file.`
         return { present: false }
       }
-      return { present: true, value: parsed }
+      return { present: true, value: { ...parsed } }
     } catch {
       errors[key] = `${fieldLabel(path)} must be an uploaded file.`
       return { present: false }
@@ -603,7 +604,7 @@ function parseFieldValue({
       return { present: false }
     }
 
-    const objectValue: Record<string, unknown> = {}
+    const objectValue: Record<string, JsonValue> = {}
     let present = false
 
     for (const [fieldName, fieldDescriptor] of Object.entries(schema.properties)) {
@@ -637,20 +638,37 @@ function parseJsonField({
   path: readonly string[]
   values: WorkflowInputFormValues
   errors: WorkflowInputFormErrors
-}) {
+}): { present: false } | { present: true; value: JsonValue } {
   const key = pathKey(path)
   const raw = values[key]?.trim() ?? ""
   if (!raw) return missingField(spec, path, errors)
 
   try {
-    return { present: true, value: JSON.parse(raw) }
+    const value = JSON.parse(raw) as unknown
+    if (!isParsedJsonValue(value)) {
+      errors[key] = `${fieldLabel(path)} must be valid JSON.`
+      return { present: false }
+    }
+    return { present: true, value }
   } catch (error) {
     errors[key] = error instanceof Error ? error.message : `${fieldLabel(path)} must be valid JSON.`
     return { present: false }
   }
 }
 
-function missingField(spec: FieldSpec, path: readonly string[], errors: WorkflowInputFormErrors) {
+function isParsedJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true
+  if (typeof value === "number") return Number.isFinite(value)
+  if (Array.isArray(value)) return value.every(isParsedJsonValue)
+  if (typeof value === "object") return Object.values(value).every(isParsedJsonValue)
+  return false
+}
+
+function missingField(
+  spec: FieldSpec,
+  path: readonly string[],
+  errors: WorkflowInputFormErrors
+): { present: false } | { present: true; value: null } {
   if (spec.nullable) return { present: true, value: null }
   if (!spec.required) return { present: false }
   errors[pathKey(path)] = `${fieldLabel(path)} is required.`

@@ -209,11 +209,12 @@ export class WorkflowRunRecorder {
     await this.notify(() => this.dependencies.observer.onNodeFinished(node, this.nodeContext()))
   }
 
-  async finishRunSucceeded(): Promise<WorkflowRunRecord> {
+  async finishRunSucceeded(output: WorkflowIOSnapshot): Promise<WorkflowRunRecord> {
     const run = await this.dependencies.workflowRuns.finish({
       projectId: this.dependencies.projectId,
       id: this.dependencies.runId,
       status: "succeeded",
+      output,
       executionToken: this.dependencies.execution?.token,
     })
     this.finished = true

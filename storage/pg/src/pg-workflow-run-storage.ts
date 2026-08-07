@@ -245,6 +245,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
               SET
                 status = ${input.status},
                 finished_at = ${input.finishedAt ?? new Date()},
+                output = ${serializeRecord(input.output)}::text::jsonb,
                 error = ${null},
                 execution_token = ${null},
                 execution_queue_lease_expires_at = ${null}
@@ -256,6 +257,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
               SET
                 status = ${input.status},
                 finished_at = ${input.finishedAt ?? new Date()},
+                output = ${null},
                 error = ${input.error ?? null},
                 execution_token = ${null},
                 execution_queue_lease_expires_at = ${null}
@@ -825,6 +827,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     workflowId: row.workflow_id,
     status: row.status,
     input: parseRecord(row.input),
+    output: row.output ? parseRecord(row.output) : undefined,
     queuedAt: row.queued_at ? new Date(row.queued_at) : undefined,
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
@@ -896,6 +899,7 @@ interface WorkflowRunDatabaseRow {
   workflow_id: string
   status: WorkflowRunRecord["status"]
   input: WorkflowIOSnapshot | string
+  output: WorkflowIOSnapshot | string | null
   queued_at: Date | string | null
   started_at: Date | string
   finished_at: Date | string | null

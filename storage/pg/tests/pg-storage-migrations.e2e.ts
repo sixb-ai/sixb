@@ -3,7 +3,11 @@ import { defineObjectType, migrateStorage, OntologyRegistry, prop } from "@sixb/
 import { createMaterializerTestFixture } from "@sixb/core/testing"
 import { SQL } from "bun"
 import { PostgresStorage, type PostgresStorage as PostgresStorageType } from "../src"
-import { POSTGRES_STORAGE_ADAPTER_ID, quoteIdent } from "../src/migrations"
+import {
+  POSTGRES_STORAGE_ADAPTER_ID,
+  postgresStorageMigrations,
+  quoteIdent,
+} from "../src/migrations"
 import { createTestStorage } from "./helpers"
 
 const Room = defineObjectType({
@@ -27,7 +31,7 @@ describe("Postgres storage migrations", () => {
         {
           adapterId: POSTGRES_STORAGE_ADAPTER_ID,
           status: "migrated",
-          applied: ["001-initial-schema"],
+          applied: ["001-initial-schema", "002-workflow-run-output"],
         },
       ])
       expect(await readMigrationRows(schemaName)).toEqual([
@@ -37,6 +41,13 @@ describe("Postgres storage migrations", () => {
           id: "001-initial-schema",
           status: "applied",
           version: 1,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "002-workflow-run-output",
+          status: "applied",
+          version: 2,
         },
       ])
     })
@@ -112,6 +123,59 @@ describe("Postgres storage migrations", () => {
           "input_exhausted",
         ])
       )
+    })
+  })
+
+  test("backfills canonical workflow outputs by node index", async () => {
+    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    await withSql(async (sql) => {
+      const schema = quoteIdent(schemaName)
+      const context = {
+        exec: async (sqlText: string) => {
+          await sql.unsafe(sqlText)
+        },
+      }
+
+      try {
+        await sql.unsafe(`CREATE SCHEMA ${schema}`)
+        await sql.unsafe(`SET search_path TO ${schema}`)
+        await postgresStorageMigrations.steps[0]?.up(context)
+        await sql.unsafe(`
+          INSERT INTO workflow_runs (
+            project_id, id, workflow_id, status, input, started_at
+          ) VALUES
+            ('project-a', 'data-run', 'data-workflow', 'succeeded', '{"seed":true}', '2026-01-01T00:00:00.000Z'),
+            ('project-a', 'action-run', 'action-workflow', 'succeeded', '{"seed":"kept"}', '2026-01-01T00:00:00.000Z'),
+            ('project-a', 'failed-run', 'data-workflow', 'failed', '{"seed":false}', '2026-01-01T00:00:00.000Z');
+
+          INSERT INTO workflow_node_runs (
+            project_id, id, workflow_run_id, workflow_id, node_index, node_type,
+            node_id, node_key, status, input, started_at, output
+          ) VALUES
+            ('project-a', 'data-run:node:2', 'data-run', 'data-workflow', 2, 'step',
+             'early', 'early', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"winner":2}'),
+            ('project-a', 'data-run:node:10', 'data-run', 'data-workflow', 10, 'step',
+             'final-data', 'finalData', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"winner":10}'),
+            ('project-a', 'data-run:node:11', 'data-run', 'data-workflow', 11, 'action',
+             'notify', 'notify', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"actionRunId":"act-1"}'),
+            ('project-a', 'action-run:node:0', 'action-run', 'action-workflow', 0, 'action',
+             'notify', 'notify', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"actionRunId":"act-2"}');
+        `)
+
+        await postgresStorageMigrations.steps[1]?.up(context)
+
+        const rows = await sql.unsafe<{ id: string; output: unknown }[]>(
+          "SELECT id, output FROM workflow_runs ORDER BY id"
+        )
+        expect(rows).toEqual([
+          { id: "action-run", output: { seed: "kept" } },
+          { id: "data-run", output: { winner: 10 } },
+          { id: "failed-run", output: null },
+        ])
+      } finally {
+        await sql.unsafe("RESET search_path")
+        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      }
     })
   })
 
@@ -239,7 +303,7 @@ describe("Postgres storage migrations", () => {
       expect(await migrator?.status()).toMatchObject({
         adapterId: POSTGRES_STORAGE_ADAPTER_ID,
         state: "current",
-        appliedVersion: 1,
+        appliedVersion: 2,
       })
     })
   })
@@ -268,6 +332,13 @@ describe("Postgres storage migrations", () => {
           id: "001-initial-schema",
           status: "applied",
           version: 1,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "002-workflow-run-output",
+          status: "applied",
+          version: 2,
         },
       ])
     } finally {
@@ -372,6 +443,7 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     id: "workflow-run-1",
     projectId: "project-a",
     status: "succeeded",
+    output: { transactionId: "txn-1" },
     finishedAt: new Date("2026-04-19T12:00:01.000Z"),
   })
   await storage.webhookDeliveries.claim({

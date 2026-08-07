@@ -31,6 +31,7 @@ describe("PgWorkflowRunStorage", () => {
       id: "wf-run-1",
       projectId: "my-app",
       status: "succeeded",
+      output: { reconciled: true },
       finishedAt: new Date("2026-05-08T10:00:04.500Z"),
     })
 
@@ -40,6 +41,7 @@ describe("PgWorkflowRunStorage", () => {
     })
 
     expect(finished.status).toBe("succeeded")
+    expect(finished.output).toEqual({ reconciled: true })
     expect(finished.error).toBeUndefined()
     expect(stored?.input).toEqual({
       transaction: { objectTypeId: "Transaction", primaryId: "txn_123" },
@@ -170,6 +172,7 @@ describe("PgWorkflowRunStorage", () => {
         id: "wf-run-waiting",
         projectId: "my-app",
         status: "succeeded",
+        output: { decision: "approve" },
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -187,6 +190,7 @@ describe("PgWorkflowRunStorage", () => {
       id: "wf-run-waiting",
       projectId: "my-app",
       status: "succeeded",
+      output: { decision: "approve" },
     })
 
     expect(resumedRun.status).toBe("running")
@@ -220,6 +224,7 @@ describe("PgWorkflowRunStorage", () => {
       id: "run-2",
       projectId: "my-app",
       status: "succeeded",
+      output: { transactionId: "txn_2" },
     })
 
     await storage.workflowRuns.start({

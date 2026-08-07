@@ -641,6 +641,7 @@ describe("runWorkflowJob", () => {
     })
 
     expect(result.run.status).toBe("succeeded")
+    expect(result.run.output).toEqual(result.nodes[1]?.output)
     expect(result.nodes.map((node) => node.nodeId)).toEqual([
       "find-best-invoice",
       "review-invoice-match",
@@ -835,6 +836,7 @@ describe("runWorkflowJob", () => {
       },
     })
     expect(resumed.status).toBe("succeeded")
+    expect(resumed.run.output).toEqual(output)
     expect(resumed.steps.resolveInvoiceWithAgent).toEqual(output)
   })
 
@@ -943,6 +945,7 @@ describe("runWorkflowJob", () => {
 
     expect(resumed.status).toBe("succeeded")
     expect(run?.status).toBe("succeeded")
+    expect(run?.output).toEqual(nodes.nodes[2]?.output)
     expect(nodes.nodes.map((node) => `${node.nodeId}:${node.status}`)).toEqual([
       "find-best-invoice:succeeded",
       "review-before-attach:succeeded",
@@ -1198,6 +1201,35 @@ describe("runWorkflowJob", () => {
     expect(nodes.nodes[1]?.error).toBe("step exploded")
   })
 
+  test("uses the workflow input as output when every node is an action", async () => {
+    actionHandlerCalls = 0
+    const workflow = defineWorkflow("create-invoice-only-workflow")
+      .input({ invoice: ref(Invoice) })
+      .then(createInvoice)
+    const sixb = createSixb({ actions: [createInvoice], workflows: [workflow] })
+    const unsubscribe = await completeRequestedActions(sixb, "succeeded")
+    const input = {
+      invoice: { objectTypeId: "Invoice" as const, primaryId: "inv_1" },
+    }
+
+    try {
+      const result = await runWorkflowJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "wfrun_action_only",
+          workflowId: workflow.id,
+          input,
+        },
+      })
+
+      expect(result.nodes).toHaveLength(1)
+      expect(result.nodes[0]?.nodeType).toBe("action")
+      expect(result.run.output).toEqual(input)
+    } finally {
+      unsubscribe()
+    }
+  })
+
   test("waits for action nodes to finish without running the action handler inline", async () => {
     actionHandlerCalls = 0
     const workflow = defineWorkflow("attach-invoice-workflow")
@@ -1245,6 +1277,7 @@ describe("runWorkflowJob", () => {
       expect(result.nodes[1]?.output).toEqual({
         actionRunId: "wfrun_action:action:1",
       })
+      expect(result.run.output).toEqual(result.nodes[0]?.output)
     } finally {
       unsubscribe()
     }

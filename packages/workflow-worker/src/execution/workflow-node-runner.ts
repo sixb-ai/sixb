@@ -1,4 +1,4 @@
-import type { WorkflowNodeDefinition } from "@sixb/core/internal/workflows"
+import type { WorkflowIOSnapshot, WorkflowNodeDefinition } from "@sixb/core/internal/workflows"
 import type { WorkflowRunRecord } from "@sixb/core/storage"
 import { WorkflowWorkerError } from "../errors"
 import { throwIfAborted } from "../normalize"
@@ -82,12 +82,14 @@ export class WorkflowNodeRunner {
       }
     }
 
+    assertStatePatchIsPersistable(outcome.statePatch, outcome.outputSnapshot)
+
     await this.dependencies.recorder.finishNodeSucceeded({
       nodeRunId: nodeRun.id,
       output: outcome.outputSnapshot,
     })
 
-    applyStatePatch(input.context.state, outcome.statePatch)
+    applyStatePatch(input.context.state, outcome.statePatch, outcome.outputSnapshot)
 
     return {
       status: "succeeded",
@@ -105,9 +107,19 @@ export type WorkflowNodeRunResult =
   | { readonly status: "succeeded" }
   | { readonly status: "waiting"; readonly run: WorkflowRunRecord }
 
+function assertStatePatchIsPersistable(
+  patch: WorkflowNodeStatePatch | undefined,
+  outputSnapshot: WorkflowIOSnapshot | undefined
+): void {
+  if (patch?.current !== undefined) {
+    requireOutputSnapshot(outputSnapshot)
+  }
+}
+
 function applyStatePatch(
   state: WorkflowNodeExecutionContext["state"],
-  patch: WorkflowNodeStatePatch | undefined
+  patch: WorkflowNodeStatePatch | undefined,
+  outputSnapshot: WorkflowIOSnapshot | undefined
 ): void {
   if (!patch) {
     return
@@ -115,9 +127,19 @@ function applyStatePatch(
 
   if (patch.current !== undefined) {
     state.current = patch.current
+    state.currentSnapshot = requireOutputSnapshot(outputSnapshot)
   }
 
   if (patch.steps) {
     Object.assign(state.steps, patch.steps)
   }
+}
+
+function requireOutputSnapshot(outputSnapshot: WorkflowIOSnapshot | undefined): WorkflowIOSnapshot {
+  if (outputSnapshot === undefined) {
+    throw new WorkflowWorkerError(
+      "[SixbWorkflowWorker] A workflow node that advances the dataflow must persist its output snapshot."
+    )
+  }
+  return outputSnapshot
 }

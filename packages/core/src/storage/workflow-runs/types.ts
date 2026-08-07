@@ -121,6 +121,7 @@ export interface WorkflowRunRecord {
   readonly workflowId: string
   readonly status: WorkflowRunStatus
   readonly input: WorkflowIOSnapshot
+  readonly output?: WorkflowIOSnapshot
   readonly queuedAt?: Date
   readonly startedAt: Date
   readonly finishedAt?: Date
@@ -201,6 +202,7 @@ export type FinishWorkflowRunInput =
       readonly id: string
       readonly projectId: string
       readonly status: "succeeded"
+      readonly output: WorkflowIOSnapshot
       readonly finishedAt?: Date
       readonly executionToken?: string
     }

@@ -42,7 +42,7 @@ curl -sS "$SIXB_API_BASE_URL/api/action-runs/action_run_id"
 ```
 
 Use the run id returned by an action request. The detail response includes status, phase, params,
-writeback, commit diff, effects, and error details when available.
+writeback, effects, and error details when available.
 
 ## List Action Run History
 

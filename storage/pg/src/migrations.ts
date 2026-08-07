@@ -14,6 +14,7 @@ import {
   step,
 } from "@sixb/core/storage"
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
+import workflowRunOutputSql from "./migrations/002-workflow-run-output.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -266,7 +267,10 @@ function checksum(value: string): string {
 
 export const postgresStorageMigrations = defineMigrations<PostgresMigrationContext>({
   adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-  steps: [pgSql("001-initial-schema", initialSchemaSql)],
+  steps: [
+    pgSql("001-initial-schema", initialSchemaSql),
+    pgSql("002-workflow-run-output", workflowRunOutputSql),
+  ],
 })
 
 interface PostgresMigrationRow {

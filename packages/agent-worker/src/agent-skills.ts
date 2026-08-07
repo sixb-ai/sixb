@@ -15,6 +15,8 @@ export interface AgentSkill {
   readonly files: readonly AgentSkillFile[]
 }
 
+export type AgentExecutionMode = "conversation" | "workflow-task"
+
 interface AgentSkillMetadata {
   readonly name?: string
   readonly description?: string
@@ -56,8 +58,17 @@ export function buildAgentSkillFiles(
   )
 }
 
-export function renderAgentSkillCatalog(skills: readonly AgentSkill[]): string {
+export function renderAgentSkillCatalog(
+  skills: readonly AgentSkill[],
+  mode: AgentExecutionMode
+): string {
+  const executionGuidance =
+    mode === "conversation"
+      ? "Execution mode: conversation. You may start a declared workflow only after showing the user a concise preview and receiving approval."
+      : "Execution mode: workflow-task. This is a headless workflow node: never start another workflow and never ask the user for approval."
+
   return [
+    executionGuidance,
     "Sixb API access is available from the sandboxed bash tool through a per-run gateway URL.",
     "Agent Skills are installed under $SIXB_SKILLS_DIR.",
     "Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow.",

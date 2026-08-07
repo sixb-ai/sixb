@@ -24,6 +24,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "wf-run-1",
       projectId: "my-app",
       status: "succeeded",
+      output: { reconciled: true },
       finishedAt,
     })
 
@@ -33,6 +34,7 @@ describe("InMemoryWorkflowRunStorage", () => {
     })
 
     expect(finished.status).toBe("succeeded")
+    expect(finished.output).toEqual({ reconciled: true })
     expect(finished.error).toBeUndefined()
     expect(stored?.input).toEqual({
       transaction: { objectTypeId: "Transaction", primaryId: "txn_123" },
@@ -213,6 +215,7 @@ describe("InMemoryWorkflowRunStorage", () => {
         id: "wf-run-waiting",
         projectId: "my-app",
         status: "succeeded",
+        output: { decision: "approve" },
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -230,6 +233,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "wf-run-waiting",
       projectId: "my-app",
       status: "succeeded",
+      output: { decision: "approve" },
     })
 
     expect(resumedRun.status).toBe("running")
@@ -284,6 +288,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       id: "run-2",
       projectId: "my-app",
       status: "succeeded",
+      output: { transactionId: "txn_2" },
     })
 
     await storage.start({

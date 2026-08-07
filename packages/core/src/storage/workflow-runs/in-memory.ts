@@ -174,10 +174,12 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       input.status === "succeeded"
         ? {
             ...base,
+            output: cloneRecord(input.output),
             error: undefined,
           }
         : {
             ...base,
+            output: undefined,
             error: input.error,
           }
 
