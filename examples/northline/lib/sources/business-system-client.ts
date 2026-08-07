@@ -1,13 +1,15 @@
-import { pageRows, runIdempotently } from "./client-utils"
+import { orderedChangesSince, pageRows, runIdempotently } from "./client-utils"
 import type {
+  BusinessState,
   ContractRow,
   CustomerRow,
   FacilityRow,
+  QuoteChange,
   QuoteRow,
   SourceListInput,
   SourcePage,
 } from "./contracts"
-import { businessStore, initializeDemoSources } from "./source-state"
+import { businessStore, ensureBusinessChangeHistory, initializeDemoSources } from "./source-state"
 
 export interface CreateQuoteInput {
   readonly customerId: string
@@ -25,6 +27,7 @@ export interface BusinessSystemClient {
   listFacilities(input?: SourceListInput): Promise<SourcePage<FacilityRow>>
   listContracts(input?: SourceListInput): Promise<SourcePage<ContractRow>>
   listQuotes(input?: SourceListInput): Promise<SourcePage<QuoteRow>>
+  quoteChangesSince(cursor?: string): Promise<readonly QuoteChangeEvent[]>
   createQuote(input: CreateQuoteInput, idempotencyKey: string): Promise<QuoteRow>
   recordQuoteDecision(
     quoteId: string,
@@ -33,8 +36,16 @@ export interface BusinessSystemClient {
   ): Promise<QuoteRow>
 }
 
+export type QuoteChangeEvent = QuoteChange & { readonly cursor: string }
+
+function appendQuoteUpsert(state: BusinessState, quote: QuoteRow): void {
+  state.quoteChanges ??= []
+  state.quoteChanges.push({ kind: "upsert", row: structuredClone(quote) })
+}
+
 export async function createBusinessSystemClient(): Promise<BusinessSystemClient> {
   await initializeDemoSources()
+  await ensureBusinessChangeHistory()
 
   return {
     async listCustomers(input) {
@@ -48,6 +59,9 @@ export async function createBusinessSystemClient(): Promise<BusinessSystemClient
     },
     async listQuotes(input) {
       return pageRows((await businessStore.read()).quotes, input)
+    },
+    async quoteChangesSince(cursor) {
+      return orderedChangesSince((await businessStore.read()).quoteChanges ?? [], cursor)
     },
     async createQuote(input, idempotencyKey) {
       return businessStore.update((state) =>
@@ -78,6 +92,7 @@ export async function createBusinessSystemClient(): Promise<BusinessSystemClient
               updated_at: now,
             }
             state.quotes.push(quote)
+            appendQuoteUpsert(state, quote)
             return quote
           },
           (quote) => quote.quote_id
@@ -98,6 +113,7 @@ export async function createBusinessSystemClient(): Promise<BusinessSystemClient
             quote.status = decision
             quote.decision_at = new Date().toISOString()
             quote.updated_at = quote.decision_at
+            appendQuoteUpsert(state, quote)
             return quote
           },
           (quote) => quote.quote_id

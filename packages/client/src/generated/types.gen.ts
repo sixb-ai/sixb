@@ -1739,6 +1739,7 @@ export type ListDatasetsResponses = {
   200: Array<{
     id: string
     description?: string
+    primaryKey?: string | Array<string>
     partitionBy?: Array<string>
     schema: {
       columns: Array<{
@@ -1807,6 +1808,7 @@ export type GetDatasetResponses = {
   200: {
     id: string
     description?: string
+    primaryKey?: string | Array<string>
     partitionBy?: Array<string>
     schema: {
       columns: Array<{
@@ -2094,6 +2096,7 @@ export type ListSyncsResponses = {
       dataset: {
         id: string
         description?: string
+        primaryKey?: string | Array<string>
         partitionBy?: Array<string>
         schema: {
           columns: Array<{
@@ -2179,6 +2182,7 @@ export type GetSyncResponses = {
       dataset: {
         id: string
         description?: string
+        primaryKey?: string | Array<string>
         partitionBy?: Array<string>
         schema: {
           columns: Array<{
@@ -2380,6 +2384,7 @@ export type ListPipelinesResponses = {
             dataset: {
               id: string
               description?: string
+              primaryKey?: string | Array<string>
               partitionBy?: Array<string>
               schema: {
                 columns: Array<{
@@ -2402,6 +2407,7 @@ export type ListPipelinesResponses = {
           output: {
             id: string
             description?: string
+            primaryKey?: string | Array<string>
             partitionBy?: Array<string>
             schema: {
               columns: Array<{
@@ -2494,6 +2500,7 @@ export type GetPipelineResponses = {
             dataset: {
               id: string
               description?: string
+              primaryKey?: string | Array<string>
               partitionBy?: Array<string>
               schema: {
                 columns: Array<{
@@ -2516,6 +2523,7 @@ export type GetPipelineResponses = {
           output: {
             id: string
             description?: string
+            primaryKey?: string | Array<string>
             partitionBy?: Array<string>
             schema: {
               columns: Array<{

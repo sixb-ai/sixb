@@ -59,9 +59,15 @@ function createSixbStub(
   } as unknown as Sixb<readonly OntologySource[]>
 }
 
-const definitions: DatasetDefinition[] = Array.from({ length: 5 }, (_, index) =>
-  defineDataset(`raw.catalog.dataset_${index}`, { schema: [col("id", "string")] })
-)
+const definitions: DatasetDefinition[] = [
+  defineDataset("raw.catalog.dataset_0", {
+    schema: [col("source", "string"), col("id", "string")],
+    primaryKey: ["source", "id"],
+  }),
+  ...Array.from({ length: 4 }, (_, index) =>
+    defineDataset(`raw.catalog.dataset_${index + 1}`, { schema: [col("id", "string")] })
+  ),
+]
 
 const states: DatasetCatalogState[] = definitions.map((definition, index) => ({
   datasetId: definition.id,
@@ -85,11 +91,13 @@ describe("dataset catalog routes", () => {
 
     const body = (await response.json()) as Array<{
       id: string
+      primaryKey?: string | string[]
       materialized: boolean
       latestVersion: { versionId: string; mode: string; rowCount?: number } | null
     }>
 
     expect(body).toHaveLength(5)
+    expect(body[0]?.primaryKey).toEqual(["source", "id"])
     for (const item of body) {
       expect(item.materialized).toBe(true)
       expect(item.latestVersion?.mode).toBe("snapshot")
@@ -110,10 +118,12 @@ describe("dataset catalog routes", () => {
     expect(response.status).toBe(200)
 
     const item = (await response.json()) as {
+      primaryKey?: string | string[]
       materialized: boolean
       latestVersion: { mode: string } | null
     }
     expect(item.materialized).toBe(true)
+    expect(item.primaryKey).toEqual(["source", "id"])
     expect(item.latestVersion?.mode).toBe("snapshot")
 
     expect(calls()).toBe(1)
