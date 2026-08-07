@@ -1,6 +1,7 @@
 import { isBuiltin } from "node:module"
 import { join } from "node:path"
 import { type BunPlugin, Glob } from "bun"
+import { preProcessFile } from "typescript"
 import {
   type ExportTarget,
   internalDependencies,
@@ -54,6 +55,7 @@ export interface ManifestDependencies {
 export interface ImportScope {
   readonly directory: string
   readonly glob: string
+  readonly includeTypeOnly?: boolean
 }
 
 export interface UndeclaredImport {
@@ -81,6 +83,13 @@ export const sourceScope: ImportScope = {
 
 /** What every non-Bun consumer loads. `Bun.build` emits `.js` and nothing else. */
 export const artifactScope: ImportScope = { directory: "dist", glob: "**/*.js" }
+
+/** Public type dependencies that a TypeScript consumer must resolve from the published package. */
+export const declarationScope: ImportScope = {
+  directory: "dist",
+  glob: "**/*.d.{ts,mts,cts}",
+  includeTypeOnly: true,
+}
 
 /** The file that stops a `paths` map at a built artifact, relative to `artifactScope.directory`. */
 export const resolutionBoundaryFile = "tsconfig.json"
@@ -146,9 +155,10 @@ export function workspaceBoundaryPlugins(manifest: ManifestDependencies): BunPlu
  * Bare specifiers under `scope` that the manifest does not declare, with the lexically first file
  * importing each one.
  *
- * Bun's transpiler is the parser on purpose. Type-only imports have to erase — they resolve
- * against devDependencies legitimately — and `@sixb/app` emits real `import` lines inside a
- * template literal (the generated custom-app entry) that a regex reads as its own imports.
+ * Bun's transpiler is the runtime parser on purpose. Source-only type imports may resolve against
+ * devDependencies legitimately, and `@sixb/app` emits real `import` lines inside a template
+ * literal (the generated custom-app entry) that a regex reads as its own imports. Published
+ * declarations use TypeScript's preprocessor instead: their type imports are consumer dependencies.
  */
 export async function findUndeclaredImports(
   packageRoot: string,
@@ -162,7 +172,10 @@ export async function findUndeclaredImports(
   for await (const file of scanFiles(directory, scope.glob)) {
     const contents = stripShebang(await Bun.file(join(directory, file)).text())
 
-    for (const specifier of importedSpecifiers(contents, file)) {
+    const specifiers = scope.includeTypeOnly
+      ? importedDeclarationSpecifiers(contents)
+      : importedSpecifiers(contents, file)
+    for (const specifier of specifiers) {
       const owner = packageOwner(specifier)
       // A package may reference itself through its own `exports`; that resolves for consumers.
       if (!owner || owner === manifest.name || declared.has(owner)) continue
@@ -175,6 +188,11 @@ export async function findUndeclaredImports(
   return [...offenders]
     .map(([specifier, file]) => ({ specifier, file }))
     .sort((a, b) => a.specifier.localeCompare(b.specifier))
+}
+
+/** TypeScript declarations keep type-only imports that Bun's runtime scanner correctly erases. */
+function importedDeclarationSpecifiers(contents: string): string[] {
+  return preProcessFile(contents, true, true).importedFiles.map(({ fileName }) => fileName)
 }
 
 /**

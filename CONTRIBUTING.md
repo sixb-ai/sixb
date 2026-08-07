@@ -218,6 +218,10 @@ Changing a dependency field or protocol requires a package version bump. Core ch
 exact consumers to bump; compatible caret consumers release only when their published range no
 longer matches. `bun run test:publish` and the release planner enforce these rules.
 
+The `create-sixb` template keeps one explicit registry range per Sixb dependency. Do not derive
+those ranges from the `create-sixb` version: independently-versioned packages may cross a
+compatibility boundary at different times. The publish gate rejects only the stale template range.
+
 The `0.0.x` line is for public validation. Publish those versions only under npm's `next` tag and
 increment the patch for every new artifact: npm versions are immutable. The `latest` tag is reserved
 for `0.1.0`, the first minimally stable, tested release, and later versions.
@@ -239,8 +243,15 @@ with `bun add @sixb/core@next` or `bunx create-sixb@next my-app`. Publishing ano
 For `0.1.0` and later, publish to `next` first, verify it, then move those immutable package versions
 to `latest`. The publish script prints promotion commands only for packages in the release, including
 packages staged by an interrupted earlier run, and refuses to publish a `0.0.x` version directly to
-`latest`. Note that `bun publish --dry-run` still authenticates; to rehearse without credentials,
-point `--registry` at a local registry.
+`latest`. It also refuses any plan that would move `next` or `latest` to an older SemVer.
+
+Bun assigns `latest` on a package's first publication even when `--tag next` is requested. The
+publisher therefore lists but defers packages that do not exist on the registry yet, while staging
+independent existing packages normally. Rehearse each bootstrap against a local registry using
+`--tag latest`, and publish it publicly only when it is ready to become the default install. A
+dependent release remains blocked until its new dependency is available. Later releases use the
+normal `next` flow. Note that `bun publish --dry-run` still authenticates; to rehearse without
+credentials, point `--registry` at a local registry.
 
 ## The feeling we want
 

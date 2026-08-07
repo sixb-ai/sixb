@@ -26,6 +26,8 @@ letting packages that share core internals drift apart:
   `@sixb/sandboxes-vercel`.
 - `@sixb/connector-exa` adopts the compatible provider contract at `0.1.0`, while
   `@sixb/connector-google` advances to `0.1.2`.
+- `create-sixb` advances to `0.1.1` and keeps an explicit compatible range for each framework
+  package instead of deriving every range from its own version.
 
 ### Package updates
 

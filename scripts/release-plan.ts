@@ -26,6 +26,7 @@ export interface PlannedPackageRelease {
 
 export interface PackageReleasePlan {
   readonly publish: readonly PlannedPackageRelease[]
+  readonly deferredInitial: readonly PlannedPackageRelease[]
   readonly stagedForPromotion: readonly PlannedPackageRelease[]
   readonly alreadyPublished: number
 }
@@ -40,6 +41,7 @@ export function createPackageReleasePlan(
   tag: string
 ): PackageReleasePlan {
   const publish: PlannedPackageRelease[] = []
+  const deferredInitial: PlannedPackageRelease[] = []
   const stagedForPromotion: PlannedPackageRelease[] = []
 
   for (const packageInfo of ordered) {
@@ -56,11 +58,17 @@ export function createPackageReleasePlan(
 
     const release = { packageInfo, name, version }
     if (!registry.versions.has(version)) {
+      assertReleaseAdvancesTags(release, registry, tag)
+      if (registry.versions.size === 0 && tag !== "latest") {
+        deferredInitial.push(release)
+        continue
+      }
       publish.push(release)
       continue
     }
 
     if (tag !== "latest" && registry.tags[tag] === version && registry.tags.latest !== version) {
+      assertReleaseAdvancesTags(release, registry, tag)
       stagedForPromotion.push(release)
     }
   }
@@ -70,8 +78,9 @@ export function createPackageReleasePlan(
 
   return {
     publish,
+    deferredInitial,
     stagedForPromotion,
-    alreadyPublished: ordered.length - publish.length,
+    alreadyPublished: ordered.length - publish.length - deferredInitial.length,
   }
 }
 
@@ -142,6 +151,34 @@ function assertPublishedWorkspaceDependenciesCompatible(
           `Bump ${name} before publishing this workspace.`
       )
     }
+  }
+}
+
+/**
+ * Publishing writes the requested dist-tag, and every stable staged release is then offered for
+ * promotion to `latest`. Neither pointer may move backwards: doing so silently changes what a new
+ * install receives even though every package version is immutable.
+ */
+function assertReleaseAdvancesTags(
+  release: PlannedPackageRelease,
+  registry: PackageRegistryState,
+  tag: string
+): void {
+  const targets = new Map<string, string>()
+  const taggedVersion = registry.tags[tag]
+  if (taggedVersion) targets.set(tag, taggedVersion)
+
+  const latestVersion = registry.tags.latest
+  if (latestVersion) targets.set("latest", latestVersion)
+
+  for (const [targetTag, currentVersion] of targets) {
+    if (Bun.semver.order(release.version, currentVersion) >= 0) continue
+
+    throw new Error(
+      `[SixbPublish] ${packageReleaseId(release)} would move the "${targetTag}" tag backwards ` +
+        `from ${currentVersion}. Bump ${release.name} above ${currentVersion}, or leave its ` +
+        "manifest on the already-published version."
+    )
   }
 }
 
