@@ -1,6 +1,6 @@
 {
   "name": "@sixb/agent-ui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared Sixb agent chat UI for Atlas and custom apps",
   "keywords": [
     "sixb",
@@ -44,9 +44,9 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/client": "workspace:*",
-    "@sixb/core": "workspace:*",
-    "@sixb/ui": "workspace:*",
+    "@sixb/client": "workspace:^",
+    "@sixb/core": "workspace:^",
+    "@sixb/ui": "workspace:^",
     "lucide-react": "^0.562.0"
   },
   "peerDependencies": {

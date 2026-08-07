@@ -15,11 +15,17 @@ import {
   packageName,
   topologicalPublishOrder,
 } from "./publishable-packages"
+import {
+  coreInternalConsumerErrors,
+  workspaceDependencyPolicyErrors,
+} from "./workspace-dependency-policy"
 
 const root = process.cwd()
 const packages = await discoverPublishablePackages(root)
 
 await assertSourceAliasesMirrorExports(packages)
+assertWorkspaceDependencyPolicy(packages)
+await assertCoreInternalConsumerPolicy(packages)
 
 // A cycle makes the release unpublishable, because a package cannot go to the registry before
 // something it depends on. Failing here beats finding out halfway through a publish run.
@@ -120,9 +126,8 @@ function validatePackage(packageInfo: PublishablePackage): void {
 
   assertOnlyBunReadsSource(name, packageJson.exports)
 
-  // A `workspace:` range is rewritten to the exact version at pack time. Anywhere it is *not*
-  // rewritten, a literal "workspace:*" ships and the install fails for the consumer — so every
-  // dependency field has to be checked, not just `dependencies`.
+  // A `workspace:` range that names a third party cannot be resolved when this package is packed.
+  // Sixb edges are checked against the repo's exact/ranged/peer policy above.
   for (const field of ["dependencies", "peerDependencies", "optionalDependencies"] as const) {
     for (const [dependency, range] of Object.entries(packageJson[field] ?? {})) {
       const isSixbWorkspace = dependency.startsWith("@sixb/") || dependency === "create-sixb"
@@ -131,14 +136,24 @@ function validatePackage(packageInfo: PublishablePackage): void {
           `[SixbPublish] ${name} has non-Sixb workspace dependency ${dependency} in ${field}.`
         )
       }
-      if (isSixbWorkspace && range !== "workspace:*") {
-        throw new Error(
-          `[SixbPublish] ${name} must depend on ${dependency} as workspace:* in ${field} ` +
-            `(found ${range}).`
-        )
-      }
     }
   }
+}
+
+function assertWorkspaceDependencyPolicy(all: PublishablePackage[]): void {
+  const errors = all.flatMap(workspaceDependencyPolicyErrors)
+  if (errors.length === 0) return
+
+  throw new Error(`[SixbPublish] Workspace dependency policy failed:\n  ${errors.join("\n  ")}`)
+}
+
+async function assertCoreInternalConsumerPolicy(all: PublishablePackage[]): Promise<void> {
+  const errors = await coreInternalConsumerErrors(root, all)
+  if (errors.length === 0) return
+
+  throw new Error(
+    `[SixbPublish] Core internal compatibility policy failed:\n  ${errors.join("\n  ")}`
+  )
 }
 
 /**

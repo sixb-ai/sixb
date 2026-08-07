@@ -1,6 +1,6 @@
 {
   "name": "@sixb/sandboxes-apple-container",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Apple Container sandbox provider for Sixb agents",
   "keywords": [
     "sixb",
@@ -37,10 +37,11 @@
     "test": "bun test",
     "prepack": "bun run build"
   },
-  "dependencies": {
-    "@sixb/core": "workspace:*"
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
   },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

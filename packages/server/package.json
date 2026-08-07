@@ -1,6 +1,6 @@
 {
   "name": "@sixb/server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "HTTP and WebSocket API server for Sixb",
   "keywords": [
     "sixb",
@@ -32,14 +32,17 @@
   "dependencies": {
     "@elysiajs/cors": "^1.2.0",
     "@elysiajs/openapi": "^1.4.0",
-    "@sixb/core": "workspace:*",
     "elysia": "^1.2.0",
     "zod": "^3.24.0",
     "zod-to-json-schema": "^3.24.0"
   },
+  "peerDependencies": {
+    "@sixb/core": "workspace:*"
+  },
   "devDependencies": {
     "@sixb/auth-magic-link": "workspace:*",
     "@sixb/auth-oidc": "workspace:*",
+    "@sixb/core": "workspace:*",
     "@sixb/sqlite": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"

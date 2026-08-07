@@ -1,6 +1,6 @@
 {
   "name": "@sixb/ducklake",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DuckDB/DuckLake lake storage provider for Sixb",
   "keywords": [
     "sixb",
@@ -41,10 +41,13 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@duckdb/node-api": "^1.5.2-r.1",
-    "@sixb/core": "workspace:*"
+    "@duckdb/node-api": "^1.5.2-r.1"
+  },
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
   },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

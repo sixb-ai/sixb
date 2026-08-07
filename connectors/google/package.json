@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-google",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Typed Google Workspace connector for Sixb (Drive, Calendar, and Gmail)",
   "keywords": [
     "sixb",
@@ -37,11 +37,14 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/connector-rest": "workspace:*",
-    "@sixb/core": "workspace:*",
+    "@sixb/connector-rest": "workspace:^",
     "google-auth-library": "^10.9.1"
   },
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
+  },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

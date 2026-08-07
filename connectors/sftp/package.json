@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-sftp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "SFTP connector for Sixb built on ssh2",
   "keywords": [
     "sixb",
@@ -37,10 +37,13 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/core": "workspace:*",
     "ssh2": "^1.17.0"
   },
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
+  },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "@types/ssh2": "^1.15.5",
     "typescript": "^5.7.0"

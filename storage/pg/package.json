@@ -37,10 +37,13 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/core": "workspace:*",
     "postgres": "^3.4.5"
   },
+  "peerDependencies": {
+    "@sixb/core": "workspace:*"
+  },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },
