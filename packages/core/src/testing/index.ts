@@ -19,6 +19,10 @@ export {
   runEffectiveStorageContractSuite,
 } from "./effective-storage-contract"
 export {
+  type LakeMergeStorageContractSuiteOptions,
+  runLakeMergeStorageContractSuite,
+} from "./lake-merge-storage-contract"
+export {
   type LakeStorageContractSuiteOptions,
   type LakeStorageSchemaEvolutionCapability,
   runLakeStorageContractSuite,
