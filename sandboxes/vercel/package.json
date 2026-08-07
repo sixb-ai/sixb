@@ -1,6 +1,6 @@
 {
   "name": "@sixb/sandboxes-vercel",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vercel Sandbox provider for Sixb agents",
   "keywords": [
     "sixb",
@@ -37,10 +37,13 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/core": "workspace:*",
     "@vercel/sandbox": "^2.3.0"
   },
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
+  },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

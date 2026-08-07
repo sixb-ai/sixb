@@ -1,6 +1,6 @@
 {
   "name": "@sixb/app",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Custom app toolkit for Sixb projects — route scanning, dev serving, and production builds",
   "keywords": [
     "sixb",
@@ -41,9 +41,9 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/agent-ui": "workspace:*",
-    "@sixb/core": "workspace:*",
-    "@sixb/ui": "workspace:*",
+    "@sixb/agent-ui": "workspace:^",
+    "@sixb/core": "workspace:^",
+    "@sixb/ui": "workspace:^",
     "@tailwindcss/cli": "^4.2.2",
     "tailwindcss": "^4.1.18"
   },

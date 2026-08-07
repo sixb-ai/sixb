@@ -190,6 +190,34 @@ packages that should ship and leave unrelated manifests alone. The publisher rea
 before its first write, publishes only local versions that do not exist yet, and keeps dependency
 order across that smaller plan.
 
+### Workspace dependencies
+
+Bun resolves workspace protocols when packing. Use:
+
+- `dependencies` with `workspace:^` for compatible public package APIs.
+- `peerDependencies` with `workspace:^` for connectors and providers that use public core. Add
+  `devDependencies` with `workspace:*` for local development.
+- Exact `workspace:*` peers for packages that import `@sixb/core/internal/*`. The CLI also pins core
+  and the internal runtime packages it owns exactly.
+
+For example, a provider declares core as a compatible peer while developing against the workspace
+version:
+
+```json
+{
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
+  },
+  "devDependencies": {
+    "@sixb/core": "workspace:*"
+  }
+}
+```
+
+Changing a dependency field or protocol requires a package version bump. Core changes also require
+exact consumers to bump; compatible caret consumers release only when their published range no
+longer matches. `bun run test:publish` and the release planner enforce these rules.
+
 The `0.0.x` line is for public validation. Publish those versions only under npm's `next` tag and
 increment the patch for every new artifact: npm versions are immutable. The `latest` tag is reserved
 for `0.1.0`, the first minimally stable, tested release, and later versions.

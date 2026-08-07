@@ -1,8 +1,20 @@
 import type { PublishablePackage } from "./publishable-packages"
 import { internalDependencies, packageName } from "./publishable-packages"
+import {
+  compatibleWorkspaceProtocol,
+  exactWorkspaceProtocol,
+  type ShippedDependencyField,
+  workspaceDependencyEntries,
+} from "./workspace-dependency-policy"
+
+export interface PublishedPackageManifest {
+  readonly dependencies?: Readonly<Record<string, string>>
+  readonly peerDependencies?: Readonly<Record<string, string>>
+  readonly optionalDependencies?: Readonly<Record<string, string>>
+}
 
 export interface PackageRegistryState {
-  readonly versions: ReadonlySet<string>
+  readonly versions: ReadonlyMap<string, PublishedPackageManifest>
   readonly tags: Readonly<Record<string, string>>
 }
 
@@ -53,6 +65,7 @@ export function createPackageReleasePlan(
     }
   }
 
+  assertPublishedWorkspaceDependenciesCompatible(ordered, registryByName)
   assertInternalDependenciesAvailable(ordered, publish, registryByName)
 
   return {
@@ -64,6 +77,109 @@ export function createPackageReleasePlan(
 
 export function packageReleaseId(release: PlannedPackageRelease): string {
   return `${release.name}@${release.version}`
+}
+
+/**
+ * An existing package version is immutable, but a workspace protocol is resolved from today's
+ * sibling version every time Bun packs it. Compare the published requirement with the current
+ * workspace before skipping that package.
+ *
+ * Exact edges must still name today's sibling exactly. Compatible edges may keep an older caret
+ * floor as long as it remains in range; that is what lets public packages release independently.
+ */
+function assertPublishedWorkspaceDependenciesCompatible(
+  ordered: readonly PublishablePackage[],
+  registryByName: ReadonlyMap<string, PackageRegistryState>
+): void {
+  const byName = new Map(ordered.map((packageInfo) => [packageName(packageInfo), packageInfo]))
+
+  for (const packageInfo of ordered) {
+    const name = packageName(packageInfo)
+    const version = packageInfo.packageJson.version
+    if (!version) continue
+
+    const published = registryByName.get(name)?.versions.get(version)
+    if (!published) continue
+
+    const localEntries = workspaceDependencyEntries(packageInfo.packageJson)
+    const dependencies = new Set([
+      ...localEntries.map((entry) => entry.dependency),
+      ...publishedDependencyNames(published).filter((dependency) => byName.has(dependency)),
+    ])
+
+    for (const dependencyName of dependencies) {
+      const localMatches = localEntries.filter((entry) => entry.dependency === dependencyName)
+      const entry = localMatches.length === 1 ? localMatches[0] : undefined
+      const dependency = byName.get(dependencyName)
+      const dependencyVersion = dependency?.packageJson.version
+      if (!dependency || !dependencyVersion?.trim()) {
+        throw new Error(
+          `[SixbPublish] ${name}@${version} depends on unpublished workspace package ${dependencyName}.`
+        )
+      }
+
+      const publishedEntries = publishedDependencyEntries(published, dependencyName)
+      const publishedEntry = publishedEntries.length === 1 ? publishedEntries[0] : undefined
+      const compatible =
+        entry !== undefined &&
+        publishedEntry?.field === entry.field &&
+        publishedRangeAccepts(entry.range, publishedEntry.range, dependencyVersion)
+
+      if (compatible) continue
+
+      const actual =
+        publishedEntries.length === 0
+          ? "nothing"
+          : publishedEntries.map(({ field, range }) => `${field} ${range}`).join(" and ")
+      const expected = entry
+        ? `${entry.field} ${
+            entry.range === exactWorkspaceProtocol ? dependencyVersion : `^${dependencyVersion}`
+          }`
+        : "nothing"
+      throw new Error(
+        `[SixbPublish] ${name}@${version} is already published with ` +
+          `${dependencyName} as ${actual}, but the workspace requires ${expected}. ` +
+          `Bump ${name} before publishing this workspace.`
+      )
+    }
+  }
+}
+
+function publishedDependencyNames(manifest: PublishedPackageManifest): string[] {
+  return [
+    ...Object.keys(manifest.dependencies ?? {}),
+    ...Object.keys(manifest.peerDependencies ?? {}),
+    ...Object.keys(manifest.optionalDependencies ?? {}),
+  ]
+}
+
+function publishedDependencyEntries(
+  manifest: PublishedPackageManifest,
+  dependency: string
+): Array<{ field: ShippedDependencyField; range: string }> {
+  const entries: Array<{ field: ShippedDependencyField; range: string }> = []
+
+  for (const field of ["dependencies", "peerDependencies", "optionalDependencies"] as const) {
+    const range = manifest[field]?.[dependency]
+    if (range) entries.push({ field, range })
+  }
+
+  return entries
+}
+
+function publishedRangeAccepts(
+  workspaceRange: string,
+  publishedRange: string,
+  dependencyVersion: string
+): boolean {
+  if (workspaceRange === exactWorkspaceProtocol) return publishedRange === dependencyVersion
+  if (workspaceRange === compatibleWorkspaceProtocol) {
+    return publishedRange.startsWith("^") && Bun.semver.satisfies(dependencyVersion, publishedRange)
+  }
+  throw new Error(
+    `[SixbPublish] Unsupported workspace dependency protocol ${workspaceRange}; ` +
+      `expected ${exactWorkspaceProtocol} or ${compatibleWorkspaceProtocol}.`
+  )
 }
 
 function assertInternalDependenciesAvailable(

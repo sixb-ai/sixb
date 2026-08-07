@@ -2,23 +2,41 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
-## 2026-08-05
+## 2026-08-07
 
-### 0.1.1
+### Workspace dependency compatibility
 
-- `@sixb/core` and `@sixb/agent-worker`: define reusable agent tools and run the tools selected by
-  each agent.
-- `@sixb/connector-github`: add users, memberships, members, invitations, and outside collaborators.
-- `@sixb/sync-worker`, `@sixb/pg`, and `@sixb/sqlite`: handle empty initial snapshots without
-  creating an unusable dataset version.
+Adopt hybrid workspace dependency contracts so public packages can release selectively without
+letting packages that share core internals drift apart:
 
-### `@sixb/connector-exa` 0.1.0
+- Exact core consumers at `0.1.1`: `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/cli`,
+  `@sixb/orchestrator`, `@sixb/pg`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/server`, `@sixb/sqlite`, `@sixb/sync-worker`, and
+  `@sixb/workflow-worker`.
+- Compatible public packages at `0.1.1`: `@sixb/agent-ui`, `@sixb/app`, `@sixb/atlas`, and
+  `@sixb/client`.
+- Compatible plugins and providers at `0.1.1`: `@sixb/auth-magic-link`, `@sixb/auth-oidc`,
+  `@sixb/blob-local`, `@sixb/blob-s3`, `@sixb/broker-nats`, `@sixb/broker-redis`,
+  `@sixb/connector-companycam`, `@sixb/connector-github`, `@sixb/connector-imap`,
+  `@sixb/connector-mercury`, `@sixb/connector-meta`, `@sixb/connector-pandadoc`,
+  `@sixb/connector-pennylane`, `@sixb/connector-pipedrive`, `@sixb/connector-rest`,
+  `@sixb/connector-sftp`, `@sixb/connector-sql`, `@sixb/connector-teamleader`, `@sixb/ducklake`,
+  `@sixb/lake-local`, `@sixb/logger-pino`, `@sixb/queues-bullmq`,
+  `@sixb/sandboxes-apple-container`, `@sixb/sandboxes-local`, `@sixb/sandboxes-smolvm`, and
+  `@sixb/sandboxes-vercel`.
+- `@sixb/connector-exa` adopts the compatible provider contract at `0.1.0`, while
+  `@sixb/connector-google` advances to `0.1.2`.
 
-Add bounded web search and fetch tools as a new connector package.
+### Package updates
 
-### `@sixb/connector-google` 0.1.1
-
-Add the complete typed Gmail v1 surface.
+- `@sixb/core` and `@sixb/agent-worker` `0.1.1`: define reusable agent tools and run the tools
+  selected by each agent.
+- `@sixb/connector-github` `0.1.1`: add users, memberships, members, invitations, and outside
+  collaborators.
+- `@sixb/sync-worker`, `@sixb/pg`, and `@sixb/sqlite` `0.1.1`: handle empty initial snapshots
+  without creating an unusable dataset version.
+- `@sixb/connector-exa` `0.1.0`: add bounded web search and fetch tools as a new connector package.
+- `@sixb/connector-google` `0.1.2`: add the complete typed Gmail v1 surface.
 
 ## 0.1.0
 

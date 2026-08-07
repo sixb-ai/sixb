@@ -1,6 +1,6 @@
 {
   "name": "@sixb/pipeline-worker",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Worker that runs Sixb pipelines",
   "keywords": [
     "sixb",
@@ -34,10 +34,11 @@
     "test": "bun test",
     "prepack": "bun run build"
   },
-  "dependencies": {
+  "peerDependencies": {
     "@sixb/core": "workspace:*"
   },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

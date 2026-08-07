@@ -1,6 +1,6 @@
 {
   "name": "@sixb/logger-pino",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pino output provider for Sixb handler logs",
   "keywords": [
     "sixb",
@@ -35,10 +35,13 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/core": "workspace:*",
     "pino": "^9.0.0"
   },
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
+  },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

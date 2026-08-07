@@ -33,74 +33,88 @@
     },
     "auth/magic-link": {
       "name": "@sixb/auth-magic-link",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "auth/oidc": {
       "name": "@sixb/auth-oidc",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/core": "workspace:*",
         "openid-client": "^6.8.4",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "broker/nats": {
       "name": "@sixb/broker-nats",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@nats-io/jetstream": "^3.3.1",
         "@nats-io/nats-core": "^3.3.1",
         "@nats-io/transport-node": "^3.3.1",
-        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "broker/redis": {
       "name": "@sixb/broker-redis",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/companycam": {
       "name": "@sixb/connector-companycam",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/connector-rest": "workspace:*",
-        "@sixb/core": "workspace:*",
+        "@sixb/connector-rest": "workspace:^",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/exa": {
       "name": "@sixb/connector-exa",
       "version": "0.1.0",
       "dependencies": {
-        "@sixb/connector-rest": "workspace:*",
-        "@sixb/core": "workspace:*",
+        "@sixb/connector-rest": "workspace:^",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/github": {
@@ -108,143 +122,173 @@
       "version": "0.1.1",
       "dependencies": {
         "@octokit/webhooks-types": "^7.6.1",
-        "@sixb/connector-rest": "workspace:*",
-        "@sixb/core": "workspace:*",
+        "@sixb/connector-rest": "workspace:^",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/google": {
       "name": "@sixb/connector-google",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
-        "@sixb/connector-rest": "workspace:*",
-        "@sixb/core": "workspace:*",
+        "@sixb/connector-rest": "workspace:^",
         "google-auth-library": "^10.9.1",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/imap": {
       "name": "@sixb/connector-imap",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/core": "workspace:*",
         "imapflow": "^1.4.7",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/mercury": {
       "name": "@sixb/connector-mercury",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/connector-rest": "workspace:*",
-        "@sixb/core": "workspace:*",
+        "@sixb/connector-rest": "workspace:^",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/meta": {
       "name": "@sixb/connector-meta",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/connector-rest": "workspace:*",
-        "@sixb/core": "workspace:*",
+        "@sixb/connector-rest": "workspace:^",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/pandadoc": {
       "name": "@sixb/connector-pandadoc",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/connector-rest": "workspace:*",
-        "@sixb/core": "workspace:*",
+        "@sixb/connector-rest": "workspace:^",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/pennylane": {
       "name": "@sixb/connector-pennylane",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/connector-rest": "workspace:*",
-        "@sixb/core": "workspace:*",
+        "@sixb/connector-rest": "workspace:^",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/pipedrive": {
       "name": "@sixb/connector-pipedrive",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/connector-rest": "workspace:*",
-        "@sixb/core": "workspace:*",
+        "@sixb/connector-rest": "workspace:^",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/rest": {
       "name": "@sixb/connector-rest",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/sftp": {
       "name": "@sixb/connector-sftp",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/core": "workspace:*",
         "ssh2": "^1.17.0",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "@types/ssh2": "^1.15.5",
         "typescript": "^5.7.0",
       },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
     },
     "connectors/sql": {
       "name": "@sixb/connector-sql",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/teamleader": {
       "name": "@sixb/connector-teamleader",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "examples/auth": {
@@ -347,34 +391,38 @@
     },
     "loggers/pino": {
       "name": "@sixb/logger-pino",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/core": "workspace:*",
         "pino": "^9.0.0",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "packages/action-worker": {
       "name": "@sixb/action-worker",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
       },
     },
     "packages/agent-ui": {
       "name": "@sixb/agent-ui",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/client": "workspace:*",
-        "@sixb/core": "workspace:*",
-        "@sixb/ui": "workspace:*",
+        "@sixb/client": "workspace:^",
+        "@sixb/core": "workspace:^",
+        "@sixb/ui": "workspace:^",
         "lucide-react": "^0.562.0",
       },
       "devDependencies": {
@@ -398,23 +446,26 @@
       "name": "@sixb/agent-worker",
       "version": "0.1.1",
       "dependencies": {
-        "@sixb/core": "workspace:*",
         "ai": "^7.0.4",
       },
       "devDependencies": {
         "@ai-sdk/provider": "^4.0.0",
         "@sixb/connector-exa": "workspace:*",
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
       },
     },
     "packages/app": {
       "name": "@sixb/app",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/agent-ui": "workspace:*",
-        "@sixb/core": "workspace:*",
-        "@sixb/ui": "workspace:*",
+        "@sixb/agent-ui": "workspace:^",
+        "@sixb/core": "workspace:^",
+        "@sixb/ui": "workspace:^",
         "@tailwindcss/cli": "^4.2.2",
         "tailwindcss": "^4.1.18",
       },
@@ -432,13 +483,13 @@
     },
     "packages/atlas": {
       "name": "@sixb/atlas",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/agent-ui": "workspace:*",
-        "@sixb/app": "workspace:*",
-        "@sixb/client": "workspace:*",
-        "@sixb/core": "workspace:*",
-        "@sixb/ui": "workspace:*",
+        "@sixb/agent-ui": "workspace:^",
+        "@sixb/app": "workspace:^",
+        "@sixb/client": "workspace:^",
+        "@sixb/core": "workspace:^",
+        "@sixb/ui": "workspace:^",
         "@tailwindcss/cli": "^4.2.2",
         "@tanstack/react-query": "^5.0.0",
         "@xyflow/react": "^12.10.2",
@@ -458,16 +509,16 @@
     },
     "packages/cli": {
       "name": "@sixb/cli",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "bin": {
         "sixb": "./src/index.tsx",
       },
       "dependencies": {
         "@sixb/action-worker": "workspace:*",
         "@sixb/agent-worker": "workspace:*",
-        "@sixb/app": "workspace:*",
-        "@sixb/atlas": "workspace:*",
-        "@sixb/client": "workspace:*",
+        "@sixb/app": "workspace:^",
+        "@sixb/atlas": "workspace:^",
+        "@sixb/client": "workspace:^",
         "@sixb/core": "workspace:*",
         "@sixb/orchestrator": "workspace:*",
         "@sixb/pipeline-worker": "workspace:*",
@@ -476,7 +527,7 @@
         "@sixb/server": "workspace:*",
         "@sixb/sync-worker": "workspace:*",
         "@sixb/workflow-worker": "workspace:*",
-        "create-sixb": "workspace:*",
+        "create-sixb": "workspace:^",
         "ink": "^6.0.0",
         "react": "^19.0.0",
         "react-devtools-core": "^4.19.1",
@@ -489,9 +540,9 @@
     },
     "packages/client": {
       "name": "@sixb/client",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/core": "workspace:*",
+        "@sixb/core": "workspace:^",
       },
       "devDependencies": {
         "@hey-api/openapi-ts": "0.90.10",
@@ -539,55 +590,58 @@
     },
     "packages/orchestrator": {
       "name": "@sixb/orchestrator",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
       },
     },
     "packages/pipeline-worker": {
       "name": "@sixb/pipeline-worker",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
       },
     },
     "packages/projection-worker": {
       "name": "@sixb/projection-worker",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
       },
     },
     "packages/rules-worker": {
       "name": "@sixb/rules-worker",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
       },
     },
     "packages/server": {
       "name": "@sixb/server",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@elysiajs/cors": "^1.2.0",
         "@elysiajs/openapi": "^1.4.0",
-        "@sixb/core": "workspace:*",
         "elysia": "^1.2.0",
         "zod": "^3.24.0",
         "zod-to-json-schema": "^3.24.0",
@@ -595,21 +649,26 @@
       "devDependencies": {
         "@sixb/auth-magic-link": "workspace:*",
         "@sixb/auth-oidc": "workspace:*",
+        "@sixb/core": "workspace:*",
         "@sixb/sqlite": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
       },
     },
     "packages/sync-worker": {
       "name": "@sixb/sync-worker",
       "version": "0.1.1",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@sixb/lake-local": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
       },
     },
     "packages/ui": {
@@ -659,144 +718,166 @@
     },
     "packages/workflow-worker": {
       "name": "@sixb/workflow-worker",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
       },
     },
     "queues/bullmq": {
       "name": "@sixb/queues-bullmq",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/core": "workspace:*",
         "bullmq": "^5.34.0",
         "ioredis": "^5.4.1",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "sandboxes/apple-container": {
       "name": "@sixb/sandboxes-apple-container",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "sandboxes/local": {
       "name": "@sixb/sandboxes-local",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "sandboxes/smolvm": {
       "name": "@sixb/sandboxes-smolvm",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "bin": {
         "sixb-agent-image": "./scripts/build-agent-image.ts",
       },
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "sandboxes/vercel": {
       "name": "@sixb/sandboxes-vercel",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@sixb/core": "workspace:*",
         "@vercel/sandbox": "^2.3.0",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "storage/blob-local": {
       "name": "@sixb/blob-local",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "storage/blob-s3": {
       "name": "@sixb/blob-s3",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@aws-sdk/client-s3": "^3.1090.0",
         "@aws-sdk/s3-request-presigner": "^3.1090.0",
-        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "storage/ducklake": {
       "name": "@sixb/ducklake",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@duckdb/node-api": "^1.5.2-r.1",
-        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "storage/lake-local": {
       "name": "@sixb/lake-local",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
+      "version": "0.1.1",
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "storage/pg": {
       "name": "@sixb/pg",
       "version": "0.1.1",
       "dependencies": {
-        "@sixb/core": "workspace:*",
         "postgres": "^3.4.5",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
       },
     },
     "storage/sqlite": {
       "name": "@sixb/sqlite",
       "version": "0.1.1",
-      "dependencies": {
-        "@sixb/core": "workspace:*",
-      },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
       },
     },
   },

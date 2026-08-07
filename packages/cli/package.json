@@ -1,6 +1,6 @@
 {
   "name": "@sixb/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Command-line interface for Sixb projects",
   "keywords": [
     "sixb",
@@ -29,11 +29,11 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/app": "workspace:*",
     "@sixb/action-worker": "workspace:*",
     "@sixb/agent-worker": "workspace:*",
-    "@sixb/atlas": "workspace:*",
-    "@sixb/client": "workspace:*",
+    "@sixb/app": "workspace:^",
+    "@sixb/atlas": "workspace:^",
+    "@sixb/client": "workspace:^",
     "@sixb/core": "workspace:*",
     "@sixb/orchestrator": "workspace:*",
     "@sixb/pipeline-worker": "workspace:*",
@@ -42,7 +42,7 @@
     "@sixb/server": "workspace:*",
     "@sixb/sync-worker": "workspace:*",
     "@sixb/workflow-worker": "workspace:*",
-    "create-sixb": "workspace:*",
+    "create-sixb": "workspace:^",
     "ink": "^6.0.0",
     "react": "^19.0.0",
     "react-devtools-core": "^4.19.1"

@@ -112,9 +112,9 @@ export function internalDependencies(
 /**
  * Order packages so each one is published only after everything it depends on.
  *
- * `bun pm pack` rewrites a `workspace:*` range to the exact version, so publishing a package before
- * its dependency means the registry briefly holds a package whose dependency does not resolve.
- * Alphabetical order within a wave keeps runs comparable.
+ * `bun pm pack` resolves workspace protocols to publishable version requirements. Publishing a
+ * package before a required workspace dependency means the registry briefly holds a package whose
+ * requirement does not resolve. Alphabetical order within a wave keeps runs comparable.
  */
 export function topologicalPublishOrder(packages: PublishablePackage[]): PublishablePackage[] {
   const byName = new Map(packages.map((packageInfo) => [packageName(packageInfo), packageInfo]))

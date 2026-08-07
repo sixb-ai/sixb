@@ -34,10 +34,11 @@
     "test": "bun test",
     "prepack": "bun run build"
   },
-  "dependencies": {
+  "peerDependencies": {
     "@sixb/core": "workspace:*"
   },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@sixb/lake-local": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"

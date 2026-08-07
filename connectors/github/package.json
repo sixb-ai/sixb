@@ -38,10 +38,13 @@
   },
   "dependencies": {
     "@octokit/webhooks-types": "^7.6.1",
-    "@sixb/connector-rest": "workspace:*",
-    "@sixb/core": "workspace:*"
+    "@sixb/connector-rest": "workspace:^"
+  },
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
   },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

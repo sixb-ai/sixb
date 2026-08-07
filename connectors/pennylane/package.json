@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-pennylane",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pennylane Company API connector for Sixb",
   "keywords": [
     "sixb",
@@ -37,10 +37,13 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/connector-rest": "workspace:*",
-    "@sixb/core": "workspace:*"
+    "@sixb/connector-rest": "workspace:^"
+  },
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
   },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

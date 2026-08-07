@@ -1,6 +1,6 @@
 {
   "name": "@sixb/broker-nats",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "NATS-backed event broker for Sixb",
   "keywords": [
     "sixb",
@@ -39,10 +39,13 @@
   "dependencies": {
     "@nats-io/jetstream": "^3.3.1",
     "@nats-io/nats-core": "^3.3.1",
-    "@nats-io/transport-node": "^3.3.1",
-    "@sixb/core": "workspace:*"
+    "@nats-io/transport-node": "^3.3.1"
+  },
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
   },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

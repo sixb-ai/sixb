@@ -1,6 +1,6 @@
 {
   "name": "@sixb/broker-redis",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Redis-backed event broker for Sixb",
   "keywords": [
     "sixb",
@@ -36,10 +36,11 @@
     "test:e2e": "bun test --preload ./tests/setup.ts ./tests/*.e2e.ts",
     "prepack": "bun run build"
   },
-  "dependencies": {
-    "@sixb/core": "workspace:*"
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
   },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

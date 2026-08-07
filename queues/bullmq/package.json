@@ -1,6 +1,6 @@
 {
   "name": "@sixb/queues-bullmq",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Redis/BullMQ-backed queue provider for Sixb",
   "keywords": [
     "sixb",
@@ -38,11 +38,14 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/core": "workspace:*",
     "bullmq": "^5.34.0",
     "ioredis": "^5.4.1"
   },
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
+  },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },
