@@ -22,8 +22,7 @@ type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
 type Expect<T extends true> = T
 
-type MergeCapableLakeStorage = LakeStorage & Required<Pick<LakeStorage, "beginMerge">>
-type _baseMergeIsOptional = Expect<undefined extends LakeStorage["beginMerge"] ? true : false>
+type _baseMergeIsRequired = Expect<undefined extends LakeStorage["beginMerge"] ? false : true>
 type _writeModesRemainNarrow = Expect<Equal<DatasetWriteMode, "snapshot" | "append">>
 type _versionModesIncludeMerge = Expect<
   Equal<DatasetVersionMode, "snapshot" | "append" | "merge" | "schema">
@@ -43,7 +42,7 @@ const commitInput: CommitDatasetMergeInput = { commitMessage: "merge invoices" }
 // @ts-expect-error beginMerge selects the operation without accepting an ordinary write mode
 const _mergeInputWithMode: BeginDatasetMergeInput = { dataset, mode: "merge" }
 
-declare const mergeStorage: MergeCapableLakeStorage
+declare const mergeStorage: LakeStorage
 declare const mergeSession: LakeMergeSession
 declare const version: DatasetVersion
 
@@ -76,9 +75,7 @@ function narrowMergeResult(result: DatasetMergeCommitResult): DatasetVersion | n
 }
 
 declare const baseStorage: LakeStorage
-const _optionalMerge = baseStorage.beginMerge?.(beginInput)
-// @ts-expect-error beginMerge remains optional until DuckLake implements it in the next PR
-baseStorage.beginMerge(beginInput)
+const _requiredMerge: Promise<LakeMergeSession> = baseStorage.beginMerge(beginInput)
 // @ts-expect-error merge commits guard the version captured at beginMerge automatically
 mergeSession.commit({ expectedLatestVersionId: "ver_1" })
 // @ts-expect-error merge is not an ordinary dataset write mode
@@ -97,5 +94,5 @@ void _created
 void _initialNoOp
 void _laterNoOp
 void _mergeInputWithMode
-void _optionalMerge
+void _requiredMerge
 void narrowMergeResult

@@ -2,12 +2,17 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, defineDataset } from "@sixb/core"
+import { change, col, defineDataset } from "@sixb/core"
 import { type DuckLakeStorage, DuckLakeStorage as DuckLakeStorageProvider } from "../src"
 import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
 
 const ordersDataset = defineDataset("raw.erp.orders", {
   schema: [col("orderId", "string"), col("customerName", "string")],
+})
+
+const keyedOrdersDataset = defineDataset("raw.erp.keyed_orders", {
+  schema: [col("orderId", "string"), col("customerName", "string")],
+  primaryKey: "orderId",
 })
 
 describe("DuckLakeStorage optimistic concurrency", () => {
@@ -183,6 +188,26 @@ describe("DuckLakeStorage optimistic concurrency", () => {
     )
     const rows = await collectRows(storage.readRows({ datasetId: ordersDataset.id }))
     expect(rows.map((row) => row.orderId).sort()).toEqual(["ord_1", ...committedOrderIds].sort())
+  })
+
+  test("lets only one provider commit a merge from the same absent base", async () => {
+    await storage.createDataset(keyedOrdersDataset)
+    const secondStorage = createLocalDuckLakeStorage(rootDir)
+    extraStorages.push(secondStorage)
+
+    const firstMerge = await storage.beginMerge({ dataset: keyedOrdersDataset })
+    const secondMerge = await secondStorage.beginMerge({ dataset: keyedOrdersDataset })
+    await firstMerge.writeChanges([change.upsert({ orderId: "ord_1", customerName: "Ada" })])
+    await secondMerge.writeChanges([change.upsert({ orderId: "ord_2", customerName: "Grace" })])
+
+    const results = await Promise.allSettled([firstMerge.commit(), secondMerge.commit()])
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1)
+    expect(await storage.listVersions(keyedOrdersDataset.id)).toHaveLength(1)
+    expect(await collectRows(storage.readRows({ datasetId: keyedOrdersDataset.id }))).toHaveLength(
+      1
+    )
   })
 })
 

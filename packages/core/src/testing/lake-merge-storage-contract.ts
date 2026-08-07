@@ -2,10 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { change, col, defineDataset } from "../datasets"
 import type { DatasetMergeCommitResult, DatasetRow, LakeStorage } from "../lake-storage"
 
-export interface LakeMergeStorageContractSuiteOptions<
-  TStorage extends LakeStorage & Required<Pick<LakeStorage, "beginMerge">> = LakeStorage &
-    Required<Pick<LakeStorage, "beginMerge">>,
-> {
+export interface LakeMergeStorageContractSuiteOptions<TStorage extends LakeStorage = LakeStorage> {
   readonly createStorage: () => TStorage | Promise<TStorage>
   readonly teardown?: (storage: TStorage) => void | Promise<void>
 }
@@ -24,9 +21,10 @@ const unkeyed = defineDataset("contract.merges.unkeyed", {
   schema: [col("id", "string")],
 })
 
-export function runLakeMergeStorageContractSuite<
-  TStorage extends LakeStorage & Required<Pick<LakeStorage, "beginMerge">>,
->(label: string, options: LakeMergeStorageContractSuiteOptions<TStorage>): void {
+export function runLakeMergeStorageContractSuite<TStorage extends LakeStorage>(
+  label: string,
+  options: LakeMergeStorageContractSuiteOptions<TStorage>
+): void {
   const withStorage = async (body: (storage: TStorage) => Promise<void>): Promise<void> => {
     const storage = await options.createStorage()
     try {
@@ -168,13 +166,13 @@ export function runLakeMergeStorageContractSuite<
         const first = await storage.beginMerge({ dataset: invoices })
         const stale = await storage.beginMerge({ dataset: invoices })
 
-        await first.writeChanges([change.upsert({ id: "inv_1", status: "open" })])
+        await first.writeChanges([change.upsert({ id: "inv_1", status: "open", note: null })])
         await first.commit()
         await stale.writeChanges([change.upsert({ id: "inv_2", status: "open" })])
 
         await expect(stale.commit()).rejects.toThrow("Optimistic merge commit failed")
         await expect(collectRows(storage.readRows({ datasetId: invoices.id }))).resolves.toEqual([
-          { id: "inv_1", status: "open" },
+          { id: "inv_1", status: "open", note: null },
         ])
       })
     })
@@ -246,7 +244,7 @@ export function runLakeMergeStorageContractSuite<
     test("clones staged changes and enforces the session lifecycle", async () => {
       await withStorage(async (storage) => {
         await storage.createDataset(invoices)
-        const row = { id: "inv_1", status: "open" }
+        const row = { id: "inv_1", status: "open", note: null }
         const merge = await storage.beginMerge({ dataset: invoices })
         await merge.writeChanges([change.upsert(row)])
         row.status = "paid"
@@ -255,7 +253,7 @@ export function runLakeMergeStorageContractSuite<
 
         await expect(merge.writeChanges([])).rejects.toThrow("already closed")
         await expect(collectRows(storage.readRows({ datasetId: invoices.id }))).resolves.toEqual([
-          { id: "inv_1", status: "open" },
+          { id: "inv_1", status: "open", note: null },
         ])
 
         const aborted = await storage.beginMerge({ dataset: invoices })

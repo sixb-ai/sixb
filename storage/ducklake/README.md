@@ -146,6 +146,43 @@ use the same schema that DuckLake materializes.
 
 DuckLake stores Sixb `decimal` columns as `DECIMAL(38, 9)` and returns them as exact strings, including from SQL previews. Writes that need more than 29 integer digits or 9 fractional digits are rejected before DuckDB can round or overflow them.
 
+## Keyed Merges
+
+Datasets with a primary key can apply ordered complete-row changes directly through the lake
+provider. Key columns must be non-null strings; composite key order is significant.
+
+```ts
+import { change, col, defineDataset } from "@sixb/core"
+
+const invoices = defineDataset("erp.invoices", {
+  schema: [
+    col("id", "string"),
+    col("status", "string"),
+    col("customerId", "string"),
+  ],
+  primaryKey: "id",
+})
+
+await lakeStorage.createDataset(invoices)
+
+const merge = await lakeStorage.beginMerge({ dataset: invoices })
+await merge.writeChanges([
+  change.upsert({ id: "inv_1", status: "paid", customerId: "cust_1" }),
+  change.delete({ id: "inv_2" }),
+])
+const result = await merge.commit()
+```
+
+Changes remain ordered across `writeChanges(...)` calls, and the final change for a repeated key
+wins. Upserts are complete rows rather than patches. Commit checks the dataset version captured by
+`beginMerge`, applies effective changes atomically, and creates a version only when visible rows
+change. An initial no-op returns `{ outcome: "unchanged", version: null }`; a later no-op returns the
+existing latest version.
+
+Snapshot, append, and SQL-transform writes to keyed datasets also enforce unique keys so a later
+merge never starts from an ambiguous baseline. Sync-level `mode: "merge"` activation will arrive
+with the follow-up sync-worker integration rather than this provider contract.
+
 ## DuckLake SQL Transforms
 
 DuckLake SQL transforms let the provider run dataset-to-dataset transforms in

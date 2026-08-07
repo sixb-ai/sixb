@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { DatasetRow } from "@sixb/core"
 import { col, defineDataset } from "@sixb/core"
-import { runLakeStorageContractSuite } from "@sixb/core/testing"
+import { runLakeMergeStorageContractSuite, runLakeStorageContractSuite } from "@sixb/core/testing"
 import type { DuckLakeStorage } from "../src"
 import { createLocalDuckLakeStorage } from "./test-utils"
 
@@ -15,6 +15,23 @@ runLakeStorageContractSuite("DuckLakeStorage LakeStorage contract", {
   missingVersionId: "ducklake:999999",
   async createStorage() {
     const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-contract-"))
+    const storage = createLocalDuckLakeStorage(rootDir)
+    roots.set(storage, rootDir)
+    return storage
+  },
+  async teardown(storage) {
+    await storage.close()
+
+    const rootDir = roots.get(storage)
+    if (rootDir) {
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  },
+})
+
+runLakeMergeStorageContractSuite("DuckLakeStorage merge contract", {
+  async createStorage() {
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-merge-contract-"))
     const storage = createLocalDuckLakeStorage(rootDir)
     roots.set(storage, rootDir)
     return storage

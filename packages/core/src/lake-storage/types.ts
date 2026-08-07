@@ -125,8 +125,7 @@ export interface LakeStorage {
   listVersions(datasetId: string, limit?: number): Promise<readonly DatasetVersion[]>
 
   beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession>
-  /** Optional until every built-in provider supports keyed merges. */
-  beginMerge?(input: BeginDatasetMergeInput): Promise<LakeMergeSession>
+  beginMerge(input: BeginDatasetMergeInput): Promise<LakeMergeSession>
 
   getLatestVersion(datasetId: string): Promise<DatasetVersion | null>
   getVersion(datasetId: string, versionId: string): Promise<DatasetVersion | null>

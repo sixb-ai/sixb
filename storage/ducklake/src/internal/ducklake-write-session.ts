@@ -7,7 +7,11 @@ import type {
   DatasetWriteCommitResult,
   LakeWriteSession,
 } from "@sixb/core/lake-storage"
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import {
+  encodeDatasetPrimaryKey,
+  getDatasetPrimaryKeyColumns,
+  LakeStorageError,
+} from "@sixb/core/lake-storage"
 import type { DuckDbRuntime } from "./duckdb-runtime"
 import { appendDatasetRow } from "./row-appender"
 import { datasetSchemaToDuckDbColumnsSql } from "./schema"
@@ -61,6 +65,7 @@ class DuckLakeWriteSession implements LakeWriteSession {
   private closed = false
   private cleanedUp = false
   private rowsWritten = 0
+  private readonly stagedPrimaryKeys = new Set<string>()
 
   constructor(
     private readonly commitWrite: DuckLakeCommitWrite,
@@ -76,6 +81,7 @@ class DuckLakeWriteSession implements LakeWriteSession {
     // reads (pagination, APIs, SFTP, retries) never hold a runtime slot. Only
     // appendBatchToStagingTable below briefly enters the queue.
     let batch: DatasetRow[] = []
+    let batchPrimaryKeys = new Set<string>()
     for await (const row of rows) {
       const validationError = getDatasetRowValidationError(row, this.input.dataset)
       if (validationError) {
@@ -84,20 +90,34 @@ class DuckLakeWriteSession implements LakeWriteSession {
 
       // Snapshot the validated row. Callers may reuse and mutate one row object
       // between yields, so the batch must not retain a live reference.
-      batch.push(structuredClone(row))
+      const clonedRow = structuredClone(row)
+      if (getDatasetPrimaryKeyColumns(this.input.dataset) !== null) {
+        const primaryKey = encodeDatasetPrimaryKey(this.input.dataset, clonedRow)
+        if (this.stagedPrimaryKeys.has(primaryKey) || batchPrimaryKeys.has(primaryKey)) {
+          throw new LakeStorageError(
+            `[SixbDuckLake] Dataset '${this.input.dataset.id}' ${this.input.mode ?? "snapshot"} source contains duplicate primary key.`
+          )
+        }
+        batchPrimaryKeys.add(primaryKey)
+      }
+      batch.push(clonedRow)
 
       if (batch.length >= WRITE_ROW_BATCH_SIZE) {
-        await this.appendBatchToStagingTable(batch)
+        await this.appendBatchToStagingTable(batch, batchPrimaryKeys)
         batch = []
+        batchPrimaryKeys = new Set()
       }
     }
 
     if (batch.length > 0) {
-      await this.appendBatchToStagingTable(batch)
+      await this.appendBatchToStagingTable(batch, batchPrimaryKeys)
     }
   }
 
-  private async appendBatchToStagingTable(batch: readonly DatasetRow[]): Promise<void> {
+  private async appendBatchToStagingTable(
+    batch: readonly DatasetRow[],
+    primaryKeys: ReadonlySet<string>
+  ): Promise<void> {
     // Synchronous callback: no awaits inside the queue slot. The appender
     // buffers and flushes the whole batch into the staging temp table on close.
     await this.runtime.withAppender(this.stagingTableName, (appender) => {
@@ -108,6 +128,9 @@ class DuckLakeWriteSession implements LakeWriteSession {
     // Count only rows actually appended -- commit asserts rowsWritten ===
     // sourceRowCount in the write coordinator.
     this.rowsWritten += batch.length
+    for (const primaryKey of primaryKeys) {
+      this.stagedPrimaryKeys.add(primaryKey)
+    }
   }
 
   async commit(input?: CommitDatasetWriteInput): Promise<DatasetWriteCommitResult> {
