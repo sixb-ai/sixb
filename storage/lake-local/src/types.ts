@@ -1,6 +1,8 @@
 import type { DatasetProducer, DatasetSchema } from "@sixb/core"
 import type {
+  BeginDatasetMergeInput,
   BeginDatasetWriteInput,
+  CommitDatasetMergeInput,
   CommitDatasetWriteInput,
   DatasetVersion,
   DatasetVersionMode,
@@ -37,6 +39,15 @@ export interface CommitWriteInput {
   readonly commit?: CommitDatasetWriteInput
   /** Canonical content key per staged row, used for row counts and unchanged-write detection. */
   readonly rowKeys: readonly string[]
+  readonly primaryKeys: readonly string[]
+  readonly sessionDir: string
+  readonly tempRowsPath: string
+}
+
+export interface CommitMergeInput {
+  readonly merge: BeginDatasetMergeInput
+  readonly commit?: CommitDatasetMergeInput
+  readonly baseVersionId: string | null
   readonly sessionDir: string
   readonly tempRowsPath: string
 }

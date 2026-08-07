@@ -66,8 +66,9 @@ V1 primary keys have these constraints:
 - Every key column must exist in the schema, have type `string`, and be non-nullable.
 - Composite keys contain at least two unique columns. Column order is significant.
 - A key cannot be added, removed, changed, or reordered after the dataset is created.
-- Rows are expected to be unique by key, and a row's key is expected to be immutable. This initial
-  contract persists key metadata but does not yet enforce row uniqueness or add keyed merge writes.
+- Rows must be unique by key, and a row's key is immutable. Merge-capable lake providers enforce
+  uniqueness for keyed snapshots, appends, and provider-level merges. User-facing merge syncs and
+  DuckLake merge execution are delivered separately.
 
 ### `col` options
 

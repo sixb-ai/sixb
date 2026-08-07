@@ -15,21 +15,31 @@ import {
   type DatasetDefinition,
   type DatasetRow,
   getDatasetRowValidationError,
-  type LakeStorage,
+  type MergeChange,
 } from "@sixb/core"
 import {
+  type BeginDatasetMergeInput,
   type BeginDatasetWriteInput,
+  type CommitDatasetMergeInput,
   type CommitDatasetWriteInput,
+  cloneDatasetMergeChange,
   type DatasetCatalogState,
+  type DatasetMergeCommitResult,
   type DatasetVersion,
   type DatasetWriteCommitResult,
   type DatasetWriteMode,
+  encodeDatasetPrimaryKey,
+  getDatasetMergeChangeValidationError,
+  getDatasetPrimaryKeyColumns,
+  type LakeMergeSession,
+  type LakeStorage,
   LakeStorageError,
   type LakeWriteSession,
   mergeStrictDatasetDefinition,
   type ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
 import type {
+  CommitMergeInput,
   CommitWriteInput,
   DatasetState,
   LocalLakeStorageOptions,
@@ -51,6 +61,7 @@ import {
 class LocalLakeWriteSession implements LakeWriteSession {
   private closed = false
   private readonly rowKeys: string[] = []
+  private readonly primaryKeys = new Set<string>()
 
   constructor(
     private readonly storage: LocalLakeStorage,
@@ -63,17 +74,34 @@ class LocalLakeWriteSession implements LakeWriteSession {
     this.assertOpen()
 
     const lines: string[] = []
+    const rowKeys: string[] = []
+    const primaryKeys: string[] = []
+    const batchPrimaryKeys = new Set<string>()
     for await (const row of rows) {
       const validationError = getDatasetRowValidationError(row, this.input.dataset)
       if (validationError) {
         throw new LakeStorageError(`[LakeLocal] ${validationError}`)
       }
       lines.push(`${JSON.stringify(row)}\n`)
-      this.rowKeys.push(rowContentKey(row, this.input.dataset.schema))
+      rowKeys.push(rowContentKey(row, this.input.dataset.schema))
+      if (getDatasetPrimaryKeyColumns(this.input.dataset) !== null) {
+        const primaryKey = encodeDatasetPrimaryKey(this.input.dataset, row)
+        if (this.primaryKeys.has(primaryKey) || batchPrimaryKeys.has(primaryKey)) {
+          throw new LakeStorageError(
+            `[LakeLocal] Dataset '${this.input.dataset.id}' write contains duplicate primary key ${primaryKey}.`
+          )
+        }
+        batchPrimaryKeys.add(primaryKey)
+        primaryKeys.push(primaryKey)
+      }
     }
 
     if (lines.length > 0) {
       await appendFile(this.tempRowsPath, lines.join(""), "utf8")
+    }
+    this.rowKeys.push(...rowKeys)
+    for (const primaryKey of primaryKeys) {
+      this.primaryKeys.add(primaryKey)
     }
   }
 
@@ -86,6 +114,7 @@ class LocalLakeWriteSession implements LakeWriteSession {
         write: this.input,
         commit: input,
         rowKeys: this.rowKeys,
+        primaryKeys: [...this.primaryKeys],
         sessionDir: this.sessionDir,
         tempRowsPath: this.tempRowsPath,
       })
@@ -103,6 +132,73 @@ class LocalLakeWriteSession implements LakeWriteSession {
   private assertOpen(): void {
     if (this.closed) {
       throw new LakeStorageError("[LakeLocal] Write session is already closed")
+    }
+  }
+
+  private async cleanup(): Promise<void> {
+    await rm(this.sessionDir, { recursive: true, force: true })
+  }
+}
+
+class LocalLakeMergeSession implements LakeMergeSession {
+  private closed = false
+
+  constructor(
+    private readonly storage: LocalLakeStorage,
+    private readonly input: BeginDatasetMergeInput,
+    private readonly baseVersionId: string | null,
+    private readonly sessionDir: string,
+    private readonly tempRowsPath: string
+  ) {}
+
+  async writeChanges(
+    changes:
+      | Iterable<MergeChange<DatasetRow, DatasetRow>>
+      | AsyncIterable<MergeChange<DatasetRow, DatasetRow>>
+  ): Promise<void> {
+    this.assertOpen()
+
+    const lines: string[] = []
+    for await (const change of changes) {
+      const validationError = getDatasetMergeChangeValidationError(change, this.input.dataset)
+      if (validationError) {
+        throw new LakeStorageError(`[LakeLocal] ${validationError}`)
+      }
+      const cloned = cloneDatasetMergeChange(change)
+      lines.push(`${JSON.stringify(cloned)}\n`)
+    }
+
+    if (lines.length > 0) {
+      await appendFile(this.tempRowsPath, lines.join(""), "utf8")
+    }
+  }
+
+  async commit(input?: CommitDatasetMergeInput): Promise<DatasetMergeCommitResult> {
+    this.assertOpen()
+    this.closed = true
+
+    try {
+      return await this.storage.commitMerge({
+        merge: this.input,
+        commit: input,
+        baseVersionId: this.baseVersionId,
+        sessionDir: this.sessionDir,
+        tempRowsPath: this.tempRowsPath,
+      })
+    } catch (error) {
+      await this.cleanup()
+      throw error
+    }
+  }
+
+  async abort(): Promise<void> {
+    this.closed = true
+    await this.cleanup()
+  }
+
+  private assertOpen(): void {
+    if (this.closed) {
+      throw new LakeStorageError("[LakeLocal] Merge session is already closed")
     }
   }
 
@@ -261,6 +357,34 @@ export class LocalLakeStorage implements LakeStorage {
     )
   }
 
+  async beginMerge(input: BeginDatasetMergeInput): Promise<LakeMergeSession> {
+    const definition = await this.getDataset(input.dataset.id)
+    if (!definition) {
+      throw new LakeStorageError(`[LakeLocal] Unknown dataset '${input.dataset.id}'`)
+    }
+    if (getDatasetPrimaryKeyColumns(definition) === null) {
+      throw new LakeStorageError(
+        `[LakeLocal] Dataset '${definition.id}' must define a primaryKey before it can be merged.`
+      )
+    }
+
+    const latestVersion = await this.getLatestVersion(definition.id)
+    await this.ensureBaseDirs()
+
+    const sessionDir = join(this.tempRootPath(), `session-${randomUUID()}`)
+    const tempRowsPath = join(sessionDir, "changes.jsonl")
+    await mkdir(sessionDir, { recursive: true })
+    await writeFile(tempRowsPath, "", "utf8")
+
+    return new LocalLakeMergeSession(
+      this,
+      { ...input, dataset: definition },
+      latestVersion?.versionId ?? null,
+      sessionDir,
+      tempRowsPath
+    )
+  }
+
   async getLatestVersion(datasetId: string): Promise<DatasetVersion | null> {
     const state = await readJsonFile<DatasetState>(this.statePath(datasetId))
     if (!state?.latestVersionId) {
@@ -324,6 +448,105 @@ export class LocalLakeStorage implements LakeStorage {
   }
 
   async commitWrite(options: CommitWriteInput): Promise<DatasetWriteCommitResult> {
+    return this.withDatasetCommitLock(options.write.dataset.id, () =>
+      this.commitWriteUnlocked(options)
+    )
+  }
+
+  async commitMerge(options: CommitMergeInput): Promise<DatasetMergeCommitResult> {
+    return this.withDatasetCommitLock(options.merge.dataset.id, async () => {
+      const definition = await this.getDataset(options.merge.dataset.id)
+      if (!definition) {
+        throw new LakeStorageError(`[LakeLocal] Unknown dataset '${options.merge.dataset.id}'`)
+      }
+
+      await this.ensureDatasetDirs(options.merge.dataset.id)
+      const latestVersion = await this.getLatestVersion(options.merge.dataset.id)
+      const actualVersionId = latestVersion?.versionId ?? null
+      if (actualVersionId !== options.baseVersionId) {
+        throw new LakeStorageError(
+          `[LakeLocal] Optimistic merge commit failed for dataset '${options.merge.dataset.id}': expected latest version '${options.baseVersionId ?? "none"}', found '${actualVersionId ?? "none"}'`
+        )
+      }
+
+      const previousRows = latestVersion
+        ? await this.readVersionRows(options.merge.dataset.id, latestVersion.versionId)
+        : []
+      const previousByKey = this.rowsByPrimaryKey(previousRows, definition)
+      const stagedChanges = await this.readMergeChanges(options.tempRowsPath, definition)
+      const finalChanges = new Map<string, MergeChange<DatasetRow, DatasetRow>>()
+      for (const change of stagedChanges) {
+        const value = change.kind === "upsert" ? change.row : change.key
+        finalChanges.set(encodeDatasetPrimaryKey(definition, value), change)
+      }
+
+      const nextByKey = new Map(previousByKey)
+      for (const [primaryKey, change] of finalChanges) {
+        if (change.kind === "upsert") {
+          nextByKey.set(primaryKey, structuredClone(change.row))
+        } else {
+          nextByKey.delete(primaryKey)
+        }
+      }
+
+      if (this.sameKeyedRowContent(previousByKey, nextByKey, definition.schema)) {
+        await rm(options.sessionDir, { recursive: true, force: true })
+        return { outcome: "unchanged", version: latestVersion }
+      }
+
+      const versionId = `ver_${randomUUID()}`
+      const versionRowsPath = this.rowsPath(options.merge.dataset.id, versionId)
+      const versionManifestPath = this.versionManifestPath(options.merge.dataset.id, versionId)
+      const visibleRows = [...nextByKey.values()]
+      const resultRowsPath = join(options.sessionDir, "result.jsonl")
+      let published = false
+
+      try {
+        const content = visibleRows.map((row) => JSON.stringify(row)).join("\n")
+        await writeFile(resultRowsPath, content.length > 0 ? `${content}\n` : "", "utf8")
+        await rename(resultRowsPath, versionRowsPath)
+
+        const versionRowsStat = await stat(versionRowsPath)
+        const version: DatasetVersion = {
+          datasetId: options.merge.dataset.id,
+          versionId,
+          parentVersionId: latestVersion?.versionId,
+          mode: "merge",
+          createdAt: new Date(),
+          schema: definition.schema,
+          producer: options.merge.producer ? structuredClone(options.merge.producer) : undefined,
+          inputs: options.merge.inputs ? structuredClone(options.merge.inputs) : undefined,
+          rowCount: visibleRows.length,
+          sizeBytes: versionRowsStat.size,
+        }
+
+        await writeJsonAtomic(
+          versionManifestPath,
+          toStoredManifest({
+            version,
+            rowFile: basename(versionRowsPath),
+            commitMessage: options.commit?.commitMessage,
+          })
+        )
+        await writeJsonAtomic(this.statePath(options.merge.dataset.id), {
+          latestVersionId: versionId,
+        })
+        published = true
+        await rm(options.sessionDir, { recursive: true, force: true }).catch(() => {})
+        return { outcome: "created", version }
+      } catch (error) {
+        if (!published) {
+          await Promise.all([
+            rm(versionRowsPath, { force: true }),
+            rm(versionManifestPath, { force: true }),
+          ]).catch(() => {})
+        }
+        throw error
+      }
+    })
+  }
+
+  private async commitWriteUnlocked(options: CommitWriteInput): Promise<DatasetWriteCommitResult> {
     const definition = await this.getDataset(options.write.dataset.id)
     if (!definition) {
       throw new LakeStorageError(`[LakeLocal] Unknown dataset '${options.write.dataset.id}'`)
@@ -342,6 +565,20 @@ export class LocalLakeStorage implements LakeStorage {
     }
 
     const mode = options.write.mode ?? "snapshot"
+
+    if (getDatasetPrimaryKeyColumns(definition) !== null) {
+      if (mode === "append" && latestVersion) {
+        const previousRows = await this.readVersionRows(definition.id, latestVersion.versionId)
+        const previousByKey = this.rowsByPrimaryKey(previousRows, definition)
+        for (const primaryKey of options.primaryKeys) {
+          if (previousByKey.has(primaryKey)) {
+            throw new LakeStorageError(
+              `[LakeLocal] Dataset '${definition.id}' append contains duplicate primary key ${primaryKey}.`
+            )
+          }
+        }
+      }
+    }
 
     // Content-identical snapshots and empty appends reuse the latest version
     // instead of creating a new one.
@@ -426,6 +663,82 @@ export class LocalLakeStorage implements LakeStorage {
     }
 
     return sameRowContent(options.rowKeys, previousKeys)
+  }
+
+  private async readVersionRows(datasetId: string, versionId: string): Promise<DatasetRow[]> {
+    const rowsPath = this.rowsPath(datasetId, versionId)
+    if (!(await pathExists(rowsPath))) {
+      throw new LakeStorageError(
+        `[LakeLocal] Missing rows for dataset '${datasetId}' version '${versionId}'`
+      )
+    }
+
+    const content = await readFile(rowsPath, "utf8")
+    return content
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as DatasetRow)
+  }
+
+  private async readMergeChanges(
+    path: string,
+    definition: DatasetDefinition
+  ): Promise<MergeChange<DatasetRow, DatasetRow>[]> {
+    const content = await readFile(path, "utf8")
+    const changes: MergeChange<DatasetRow, DatasetRow>[] = []
+    for (const line of content.split("\n")) {
+      if (line.length === 0) {
+        continue
+      }
+      const change = JSON.parse(line) as unknown
+      const validationError = getDatasetMergeChangeValidationError(change, definition)
+      if (validationError) {
+        throw new LakeStorageError(`[LakeLocal] ${validationError}`)
+      }
+      changes.push(change as MergeChange<DatasetRow, DatasetRow>)
+    }
+    return changes
+  }
+
+  private rowsByPrimaryKey(
+    rows: readonly DatasetRow[],
+    definition: DatasetDefinition
+  ): Map<string, DatasetRow> {
+    const byKey = new Map<string, DatasetRow>()
+    for (const row of rows) {
+      const primaryKey = encodeDatasetPrimaryKey(definition, row)
+      if (byKey.has(primaryKey)) {
+        throw new LakeStorageError(
+          `[LakeLocal] Dataset '${definition.id}' contains duplicate primary key ${primaryKey}.`
+        )
+      }
+      byKey.set(primaryKey, row)
+    }
+    return byKey
+  }
+
+  private sameKeyedRowContent(
+    left: ReadonlyMap<string, DatasetRow>,
+    right: ReadonlyMap<string, DatasetRow>,
+    schema: DatasetDefinition["schema"]
+  ): boolean {
+    if (left.size !== right.size) {
+      return false
+    }
+    for (const [primaryKey, leftRow] of left) {
+      const rightRow = right.get(primaryKey)
+      if (
+        rightRow === undefined ||
+        rowContentKey(leftRow, schema) !== rowContentKey(rightRow, schema)
+      ) {
+        return false
+      }
+    }
+    return true
+  }
+
+  private async withDatasetCommitLock<T>(datasetId: string, run: () => Promise<T>): Promise<T> {
+    return withLocalDatasetCommitLock(`${this.rootPath}\u0000${datasetId}`, run)
   }
 
   private async ensureBaseDirs(): Promise<void> {
@@ -527,4 +840,27 @@ export class LocalLakeStorage implements LakeStorage {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+const localDatasetCommitLocks = new Map<string, Promise<void>>()
+
+async function withLocalDatasetCommitLock<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const previous = localDatasetCommitLocks.get(key) ?? Promise.resolve()
+  const ready = previous.catch(() => {})
+  let release!: () => void
+  const next = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const current = ready.then(() => next)
+  localDatasetCommitLocks.set(key, current)
+
+  await ready
+  try {
+    return await run()
+  } finally {
+    release()
+    if (localDatasetCommitLocks.get(key) === current) {
+      localDatasetCommitLocks.delete(key)
+    }
+  }
 }

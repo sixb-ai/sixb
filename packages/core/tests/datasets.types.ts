@@ -6,9 +6,13 @@ import type {
   DatasetColumnUnionOf,
   DatasetDefinition,
   DatasetPrimaryKey,
+  MergeChange,
 } from "../src"
-import { col, defineDataset } from "../src"
-import type { DatasetPrimaryKey as DatasetSurfacePrimaryKey } from "../src/datasets"
+import { change, col, defineDataset } from "../src"
+import type {
+  MergeChange as DatasetSurfaceMergeChange,
+  DatasetPrimaryKey as DatasetSurfacePrimaryKey,
+} from "../src/datasets"
 import type { DatasetPrimaryKey as LakeStorageSurfacePrimaryKey } from "../src/lake-storage"
 
 /**
@@ -27,6 +31,47 @@ type _datasetSurfacePrimaryKey = Expect<
 type _lakeStorageSurfacePrimaryKey = Expect<
   Equal<LakeStorageSurfacePrimaryKey<"id">, DatasetPrimaryKey<"id">>
 >
+
+type InvoiceRow = { readonly id: string; readonly status: string }
+type InvoiceKey = { readonly id: string }
+type _datasetSurfaceMergeChange = Expect<
+  Equal<DatasetSurfaceMergeChange<InvoiceRow, InvoiceKey>, MergeChange<InvoiceRow, InvoiceKey>>
+>
+
+const invoiceUpsert = change.upsert({ id: "inv_1", status: "open" })
+type _inferredUpsert = Expect<
+  Equal<
+    typeof invoiceUpsert,
+    {
+      readonly kind: "upsert"
+      readonly row: { readonly id: "inv_1"; readonly status: "open" }
+    }
+  >
+>
+
+const invoiceDelete = change.delete({ id: "inv_1" })
+type _inferredDelete = Expect<
+  Equal<typeof invoiceDelete, { readonly kind: "delete"; readonly key: { readonly id: "inv_1" } }>
+>
+
+function narrowMergeChange(input: MergeChange<InvoiceRow, InvoiceKey>): string {
+  if (input.kind === "upsert") {
+    const _row: InvoiceRow = input.row
+    // @ts-expect-error an upsert does not carry a delete key
+    void input.key
+    return _row.id
+  }
+
+  const _key: InvoiceKey = input.key
+  // @ts-expect-error a delete does not carry an upsert row
+  void input.row
+  return _key.id
+}
+
+// @ts-expect-error upserts must receive row objects
+change.upsert("inv_1")
+// @ts-expect-error deletes must receive key objects
+change.delete("inv_1")
 
 const idColumn = col("customer_id", "string")
 type _columnName = Expect<Equal<typeof idColumn.name, "customer_id">>
@@ -208,3 +253,4 @@ void _broadColumn
 void _broadDataset
 void _broadPrimaryKey
 void defineDynamicDataset
+void narrowMergeChange

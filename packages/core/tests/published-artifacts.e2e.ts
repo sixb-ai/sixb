@@ -174,13 +174,25 @@ describe("published artifacts", () => {
     )
     await writeFile(
       join(consumerDir, "index.ts"),
-      `import type { DatasetPrimaryKey as RootDatasetPrimaryKey } from "@sixb/core"
-import type { DatasetPrimaryKey as LakeDatasetPrimaryKey } from "@sixb/core/lake-storage"
+      `import { change } from "@sixb/core"
+import type { DatasetPrimaryKey as RootDatasetPrimaryKey, LakeStorage as RootLakeStorage, MergeChange as RootMergeChange } from "@sixb/core"
+import type { BeginDatasetMergeInput, DatasetPrimaryKey as LakeDatasetPrimaryKey, DatasetVersionMode, LakeStorage, MergeChange as LakeMergeChange } from "@sixb/core/lake-storage"
 ${subpaths.map((subpath, index) => `import * as m${index} from "${subpath}"`).join("\n")}
 const rootPrimaryKey: RootDatasetPrimaryKey<"tenantId" | "id"> = ["tenantId", "id"]
 const lakePrimaryKey: LakeDatasetPrimaryKey<"tenantId" | "id"> = rootPrimaryKey
+const rootMergeChange: RootMergeChange<{ id: string }, { id: string }> = change.upsert({ id: "1" })
+const lakeMergeChange: LakeMergeChange<{ id: string }, { id: string }> = rootMergeChange
+const mergeVersionMode: DatasetVersionMode = "merge"
+declare const lakeStorage: LakeStorage
+const rootLakeStorage: RootLakeStorage = lakeStorage
+declare const beginMergeInput: BeginDatasetMergeInput
+const mergeSession = lakeStorage.beginMerge?.(beginMergeInput)
 export const loaded = [${subpaths.map((_, index) => `m${index}`).join(", ")}].length
 void lakePrimaryKey
+void lakeMergeChange
+void mergeVersionMode
+void rootLakeStorage
+void mergeSession
 `
     )
 

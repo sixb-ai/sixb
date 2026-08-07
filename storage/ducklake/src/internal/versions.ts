@@ -62,7 +62,9 @@ export function parseCommitMetadata(value: unknown): SixbCommitMetadata | undefi
     kind: "datasetVersion",
     datasetId: parsed.sixb.datasetId,
     ...(typeof commitId === "string" ? { commitId } : {}),
-    ...(mode === "snapshot" || mode === "append" || mode === "schema" ? { mode } : {}),
+    ...(mode === "snapshot" || mode === "append" || mode === "merge" || mode === "schema"
+      ? { mode }
+      : {}),
     ...(isDatasetProducer(parsed.sixb.producer) ? { producer: parsed.sixb.producer } : {}),
     ...(isDatasetVersionRefs(parsed.sixb.inputs) ? { inputs: parsed.sixb.inputs } : {}),
     ...(typeof commitId === "string" && isRowCount(rowCount) ? { rowCount } : {}),

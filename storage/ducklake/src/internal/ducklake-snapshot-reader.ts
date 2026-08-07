@@ -807,7 +807,7 @@ export class DuckLakeSnapshotReader {
       // Parent ids track versions that reuse the previous dataset state.
       // Snapshot versions replace the rows, so time travel stands on the snapshot id.
       const parentSnapshotId =
-        snapshot.mode === "append" || snapshot.mode === "schema"
+        snapshot.mode === "append" || snapshot.mode === "merge" || snapshot.mode === "schema"
           ? snapshots[index + 1]?.snapshotId
           : undefined
       return parentSnapshotId === undefined ? snapshot : { ...snapshot, parentSnapshotId }

@@ -1,7 +1,8 @@
 import type { DatasetDefinition, DatasetSchema } from "../datasets"
+import type { BeginDatasetMergeInput, LakeMergeSession } from "./merge"
 
 export type DatasetWriteMode = "snapshot" | "append"
-export type DatasetVersionMode = DatasetWriteMode | "schema"
+export type DatasetVersionMode = DatasetWriteMode | "merge" | "schema"
 
 export type DatasetRow = Readonly<Record<string, unknown>>
 
@@ -124,6 +125,8 @@ export interface LakeStorage {
   listVersions(datasetId: string, limit?: number): Promise<readonly DatasetVersion[]>
 
   beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession>
+  /** Optional until every built-in provider supports keyed merges. */
+  beginMerge?(input: BeginDatasetMergeInput): Promise<LakeMergeSession>
 
   getLatestVersion(datasetId: string): Promise<DatasetVersion | null>
   getVersion(datasetId: string, versionId: string): Promise<DatasetVersion | null>

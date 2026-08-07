@@ -4,6 +4,7 @@ export type {
   DatasetDefinition,
   DatasetPrimaryKey,
   DatasetSchema,
+  MergeChange,
 } from "../datasets"
 export type { JsonValue } from "../json"
 export type {
@@ -18,6 +19,18 @@ export {
 } from "./definition-updates"
 export { LakeStorageError } from "./errors"
 export { InMemoryLakeStorage } from "./in-memory"
+export type {
+  BeginDatasetMergeInput,
+  CommitDatasetMergeInput,
+  DatasetMergeCommitResult,
+  LakeMergeSession,
+} from "./merge"
+export {
+  cloneDatasetMergeChange,
+  encodeDatasetPrimaryKey,
+  getDatasetMergeChangeValidationError,
+  getDatasetPrimaryKeyColumns,
+} from "./merge-validation"
 export type {
   ExecuteSqlTransformInput,
   LakeSqlExecutor,

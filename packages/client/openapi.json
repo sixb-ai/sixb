@@ -5002,7 +5002,7 @@
                           },
                           "mode": {
                             "type": "string",
-                            "enum": ["snapshot", "append", "schema"]
+                            "enum": ["snapshot", "append", "merge", "schema"]
                           },
                           "createdAt": {
                             "type": "string"
@@ -5168,7 +5168,7 @@
                         },
                         "mode": {
                           "type": "string",
-                          "enum": ["snapshot", "append", "schema"]
+                          "enum": ["snapshot", "append", "merge", "schema"]
                         },
                         "createdAt": {
                           "type": "string"
@@ -5307,7 +5307,7 @@
                           },
                           "mode": {
                             "type": "string",
-                            "enum": ["snapshot", "append", "schema"]
+                            "enum": ["snapshot", "append", "merge", "schema"]
                           },
                           "createdAt": {
                             "type": "string"
@@ -5484,7 +5484,7 @@
                     },
                     "mode": {
                       "type": "string",
-                      "enum": ["snapshot", "append", "schema"]
+                      "enum": ["snapshot", "append", "merge", "schema"]
                     },
                     "createdAt": {
                       "type": "string"
@@ -5685,7 +5685,7 @@
                         },
                         "mode": {
                           "type": "string",
-                          "enum": ["snapshot", "append", "schema"]
+                          "enum": ["snapshot", "append", "merge", "schema"]
                         },
                         "createdAt": {
                           "type": "string"
