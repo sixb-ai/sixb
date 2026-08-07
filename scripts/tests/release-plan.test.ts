@@ -57,6 +57,130 @@ describe("createPackageReleasePlan", () => {
     expect(plan.alreadyPublished).toBe(1)
   })
 
+  test("rejects a release that would move latest backwards", () => {
+    // Regression proof: without assertReleaseAdvancesTags this returns a publish plan for 0.1.1.
+    const core = stub("@sixb/core", "0.1.1")
+
+    expect(() =>
+      createPackageReleasePlan(
+        [core],
+        new Map([["@sixb/core", registry({ "0.1.0": {}, "0.2.0": {} }, { latest: "0.2.0" })]]),
+        "latest"
+      )
+    ).toThrow(/would move the "latest" tag backwards from 0\.2\.0/)
+  })
+
+  test("rejects a staged release that would move next backwards", () => {
+    const core = stub("@sixb/core", "0.1.1")
+
+    expect(() =>
+      createPackageReleasePlan(
+        [core],
+        new Map([
+          [
+            "@sixb/core",
+            registry({ "0.1.0": {}, "0.2.0": {} }, { latest: "0.1.0", next: "0.2.0" }),
+          ],
+        ]),
+        "next"
+      )
+    ).toThrow(/would move the "next" tag backwards from 0\.2\.0/)
+  })
+
+  test("rejects staging a stable release below the current latest version", () => {
+    const core = stub("@sixb/core", "0.1.1")
+
+    expect(() =>
+      createPackageReleasePlan(
+        [core],
+        new Map([
+          [
+            "@sixb/core",
+            registry({ "0.1.0": {}, "0.2.0": {} }, { latest: "0.2.0", next: "0.1.0" }),
+          ],
+        ]),
+        "next"
+      )
+    ).toThrow(/would move the "latest" tag backwards from 0\.2\.0/)
+  })
+
+  test("rejects promoting an already-staged version below latest after a resumed run", () => {
+    const core = stub("@sixb/core", "0.1.1")
+
+    expect(() =>
+      createPackageReleasePlan(
+        [core],
+        new Map([
+          [
+            "@sixb/core",
+            registry({ "0.1.0": {}, "0.1.1": {}, "0.2.0": {} }, { latest: "0.2.0", next: "0.1.1" }),
+          ],
+        ]),
+        "next"
+      )
+    ).toThrow(/would move the "latest" tag backwards from 0\.2\.0/)
+  })
+
+  test("allows a release that advances both the staging and latest lines", () => {
+    const core = stub("@sixb/core", "0.2.0")
+
+    const plan = createPackageReleasePlan(
+      [core],
+      new Map([
+        ["@sixb/core", registry({ "0.1.0": {}, "0.1.1": {} }, { latest: "0.1.1", next: "0.1.1" })],
+      ]),
+      "next"
+    )
+
+    expect(plan.publish.map(packageReleaseId)).toEqual(["@sixb/core@0.2.0"])
+  })
+
+  test("defers a package's first publication from a staged release", () => {
+    // Regression proof: adding every missing version to publish puts this initial 0.1.0 on next.
+    const connector = stub("@sixb/connector-example", "0.1.0")
+
+    const plan = createPackageReleasePlan(
+      [connector],
+      new Map([["@sixb/connector-example", registry({})]]),
+      "next"
+    )
+
+    expect(plan.publish).toEqual([])
+    expect(plan.deferredInitial.map(packageReleaseId)).toEqual(["@sixb/connector-example@0.1.0"])
+    expect(plan.alreadyPublished).toBe(0)
+  })
+
+  test("allows a package's explicit initial latest publication", () => {
+    const connector = stub("@sixb/connector-example", "0.1.0")
+
+    const plan = createPackageReleasePlan(
+      [connector],
+      new Map([["@sixb/connector-example", registry({})]]),
+      "latest"
+    )
+
+    expect(plan.publish.map(packageReleaseId)).toEqual(["@sixb/connector-example@0.1.0"])
+    expect(plan.deferredInitial).toEqual([])
+  })
+
+  test("rejects publishing a dependent while its initial dependency is deferred", () => {
+    const core = stub("@sixb/core", "0.1.0")
+    const connector = stub("@sixb/connector-example", "0.1.1", {
+      dependencies: { "@sixb/core": "workspace:^" },
+    })
+
+    expect(() =>
+      createPackageReleasePlan(
+        [core, connector],
+        new Map([
+          ["@sixb/core", registry({})],
+          ["@sixb/connector-example", registry({ "0.1.0": {} })],
+        ]),
+        "next"
+      )
+    ).toThrow(/@sixb\/connector-example@0\.1\.1 requires @sixb\/core@0\.1\.0/)
+  })
+
   test("accepts an already-published internal dependency on its own version", () => {
     const rest = stub("@sixb/connector-rest", "0.1.0")
     const github = stub("@sixb/connector-github", "0.1.2", {

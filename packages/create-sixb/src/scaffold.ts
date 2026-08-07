@@ -13,7 +13,6 @@ export interface ScaffoldProjectResult {
 }
 
 let templateDirPromise: Promise<string> | null = null
-let packageVersionPromise: Promise<string> | null = null
 
 export async function scaffoldProject(
   directory: string,
@@ -30,7 +29,7 @@ export async function scaffoldProject(
   await installProjectTsconfig(targetDir)
 
   const name = basename(targetDir)
-  await rewritePackageJson(targetDir, name, await resolvePackageVersion())
+  await rewritePackageJson(targetDir, name)
   await rewriteProjectId(targetDir, name)
 
   return {
@@ -75,22 +74,6 @@ async function findTemplateDir(): Promise<string> {
   throw new Error("Could not find the create-sixb template files.")
 }
 
-async function resolvePackageVersion(): Promise<string> {
-  packageVersionPromise ??= readPackageVersion()
-  return await packageVersionPromise
-}
-
-async function readPackageVersion(): Promise<string> {
-  const packageJson = JSON.parse(
-    await readFile(resolve(import.meta.dir, "../package.json"), "utf8")
-  ) as { version?: unknown }
-
-  if (typeof packageJson.version !== "string" || packageJson.version.length === 0) {
-    throw new Error("Could not determine the create-sixb package version.")
-  }
-  return packageJson.version
-}
-
 async function installGitignore(targetDir: string): Promise<void> {
   const source = join(targetDir, "gitignore")
   const target = join(targetDir, ".gitignore")
@@ -120,23 +103,13 @@ async function installProjectTsconfig(targetDir: string): Promise<void> {
   await rm(source)
 }
 
-async function rewritePackageJson(
-  targetDir: string,
-  projectName: string,
-  packageVersion: string
-): Promise<void> {
+async function rewritePackageJson(targetDir: string, projectName: string): Promise<void> {
   const packageJsonPath = join(targetDir, "package.json")
   const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
     name?: string
-    dependencies?: Record<string, string>
   }
 
   packageJson.name = projectName
-  for (const dependency of Object.keys(packageJson.dependencies ?? {})) {
-    if (dependency.startsWith("@sixb/")) {
-      packageJson.dependencies![dependency] = `^${packageVersion}`
-    }
-  }
 
   await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
 }

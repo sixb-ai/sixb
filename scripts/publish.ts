@@ -53,9 +53,20 @@ for (const release of plan.publish) {
 console.log(
   `[SixbPublish] ${options.planOnly ? "Plan: " : options.dryRun ? "Dry run: " : ""}` +
     `${plan.publish.length} to publish, ` +
+    `${plan.deferredInitial.length} initial ${plan.deferredInitial.length === 1 ? "package" : "packages"} deferred, ` +
     `${plan.alreadyPublished} already on the registry, tag "${options.tag}".`
 )
 for (const release of plan.publish) console.log(`  ${packageReleaseId(release)}`)
+
+if (plan.deferredInitial.length > 0) {
+  console.log(
+    `[SixbPublish] Initial ${plan.deferredInitial.length === 1 ? "package" : "packages"} not staged:\n` +
+      plan.deferredInitial.map((release) => `  ${packageReleaseId(release)}`).join("\n") +
+      "\nBun assigns `latest` on an initial publish even with another `--tag`. " +
+      "Rehearse the bootstrap on a local registry, then publish it explicitly with `--tag latest` " +
+      "once it is ready to become the default install."
+  )
+}
 
 const published: string[] = []
 

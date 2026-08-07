@@ -1,7 +1,9 @@
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
+import { createSixbTemplateDependencyErrors } from "./create-sixb-template-policy"
 import {
   artifactScope,
+  declarationScope,
   findAliasDrift,
   findUndeclaredImports,
   resolutionBoundaryFile,
@@ -26,6 +28,7 @@ const packages = await discoverPublishablePackages(root)
 await assertSourceAliasesMirrorExports(packages)
 assertWorkspaceDependencyPolicy(packages)
 await assertCoreInternalConsumerPolicy(packages)
+await assertCreateSixbTemplatePolicy(packages)
 
 // A cycle makes the release unpublishable, because a package cannot go to the registry before
 // something it depends on. Failing here beats finding out halfway through a publish run.
@@ -156,6 +159,18 @@ async function assertCoreInternalConsumerPolicy(all: PublishablePackage[]): Prom
   )
 }
 
+async function assertCreateSixbTemplatePolicy(all: PublishablePackage[]): Promise<void> {
+  const template = (await Bun.file(
+    join(root, "packages/create-sixb/template/package.json")
+  ).json()) as PackageJson
+  const errors = createSixbTemplateDependencyErrors(template, all)
+  if (errors.length === 0) return
+
+  throw new Error(
+    `[SixbPublish] create-sixb template dependency policy failed:\n  ${errors.join("\n  ")}`
+  )
+}
+
 /**
  * Only the `bun` condition may resolve TypeScript out of `src`.
  *
@@ -228,7 +243,7 @@ async function assertImportsAreDeclared(packageInfo: PublishablePackage): Promis
   const name = packageName(packageInfo)
   const packageRoot = join(root, packageInfo.dir)
 
-  for (const scope of [sourceScope, artifactScope]) {
+  for (const scope of [sourceScope, artifactScope, declarationScope]) {
     const undeclared = await findUndeclaredImports(packageRoot, packageInfo.packageJson, scope)
     if (undeclared.length === 0) continue
 

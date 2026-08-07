@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import {
   artifactScope,
+  declarationScope,
   findAliasDrift,
   findUndeclaredImports,
   type ManifestDependencies,
@@ -128,6 +129,30 @@ describe("findUndeclaredImports", () => {
     )
 
     expect(await findUndeclaredImports(packageRoot, manifest, sourceScope)).toEqual([])
+  })
+
+  test("reports type dependencies exposed by published declarations", async () => {
+    // Regression proof: Bun.Transpiler.scanImports erases all three type-only specifiers below.
+    const { packageRoot, manifest } = await packageWith(
+      {
+        name: "@sixb/example",
+        peerDependencies: { "@sixb/core": "workspace:^" },
+      },
+      {
+        "dist/index.d.ts": [
+          'import type { Core } from "@sixb/core"',
+          'export type { Database } from "@sixb/sqlite"',
+          'export type Queue = import("@sixb/queues-bullmq").Queue',
+          "export type Example = Core",
+          "",
+        ].join("\n"),
+      }
+    )
+
+    expect(await findUndeclaredImports(packageRoot, manifest, declarationScope)).toEqual([
+      { specifier: "@sixb/queues-bullmq", file: "index.d.ts" },
+      { specifier: "@sixb/sqlite", file: "index.d.ts" },
+    ])
   })
 
   test("does not read import statements out of a template literal", async () => {
