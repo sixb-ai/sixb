@@ -1,4 +1,5 @@
 import {
+  type BatchSyncConfig,
   type BlobInfo,
   change,
   col,
@@ -7,6 +8,7 @@ import {
   defineSync,
   type FileRef,
   type SyncDefinition,
+  type SyncMode,
 } from "../src"
 
 const erpDb = defineConnector("erpDb", {
@@ -63,6 +65,8 @@ const syncOrders = defineSync("sync-orders")
   })
   .intoDataset(rawOrdersDataset)
 
+const _snapshotMode: "snapshot" = syncOrders.config.mode
+
 const syncOrdersWithCheckpoint = defineSync("sync-orders-with-checkpoint")
   .checkpoint<{ cursor: string }>()
   .from(erpDb)
@@ -92,6 +96,24 @@ const mergeOrders = defineSync("merge-orders", { mode: "merge" })
 
 const _mergeMode: "merge" = mergeOrders.config.mode
 
+const mergeOptions = { mode: "merge" } satisfies BatchSyncConfig
+const mergeOrdersFromSatisfiedOptions = defineSync("merge-orders-satisfied", mergeOptions)
+  .from(erpDb)
+  .read(() => [change.delete({ id: "ord_2" })])
+  .intoDataset(keyedOrdersDataset)
+const _satisfiedMergeMode: "merge" = mergeOrdersFromSatisfiedOptions.config.mode
+
+const annotatedMergeOptions: BatchSyncConfig = { mode: "merge" }
+const mergeOrdersFromAnnotatedOptions = defineSync("merge-orders-annotated", annotatedMergeOptions)
+  .from(erpDb)
+  .read(() => [change.delete({ id: "ord_2" })])
+  .intoDataset(keyedOrdersDataset)
+const _annotatedMode: SyncMode = mergeOrdersFromAnnotatedOptions.config.mode
+// Regression guard: restoring the former SyncModeFromConfig conditional makes this directive
+// unused because the annotated merge config is falsely narrowed to snapshot.
+// @ts-expect-error an annotated config must remain SyncMode, never a false snapshot literal
+const _falseSnapshotMode: "snapshot" = mergeOrdersFromAnnotatedOptions.config.mode
+
 defineSync("invalid-merge-row", { mode: "merge" })
   .from(erpDb)
   // @ts-expect-error merge readers must return MergeChange values, not raw rows
@@ -111,4 +133,8 @@ const _checkpointConnector = syncOrdersWithCheckpoint.connector
 void _syncDefinitions
 void _connector
 void _checkpointConnector
+void _snapshotMode
 void _mergeMode
+void _satisfiedMergeMode
+void _annotatedMode
+void _falseSnapshotMode
