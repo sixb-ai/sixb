@@ -1,23 +1,10 @@
 import type { DatasetDefinition, PipelineDefinition } from "@sixb/core"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import type { PipelineRunFailure, PipelineRunStatus } from "@sixb/core/storage"
+import type { PipelineRunStatus } from "@sixb/core/storage"
 import type { PipelineJob } from "./types"
 
 export class PipelineWorkerError extends Error {
   readonly name = "PipelineWorkerError"
-}
-
-export function toPipelineRunFailure(error: unknown): PipelineRunFailure {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-    }
-  }
-
-  return {
-    message: String(error),
-  }
 }
 
 export function throwIfAborted(signal: AbortSignal): void {

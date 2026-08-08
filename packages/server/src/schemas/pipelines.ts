@@ -1,4 +1,14 @@
+import {
+  PIPELINE_RUN_FAILURE_CODES,
+  type PipelineRunFailureCode,
+  type SixbFailure,
+} from "@sixb/core/storage"
 import { z } from "zod"
+import { sixbFailureSchema } from "./common"
+
+const PipelineRunFailureSchema: z.ZodType<SixbFailure<PipelineRunFailureCode>> = sixbFailureSchema(
+  PIPELINE_RUN_FAILURE_CODES
+)
 
 export const PipelineParamsSchema = z.object({
   pipelineId: z.string().min(1),
@@ -73,12 +83,7 @@ export const PipelineRunSchema = z.object({
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   output: DatasetVersionRefSchema.optional(),
-  error: z
-    .object({
-      name: z.string().optional(),
-      message: z.string(),
-    })
-    .optional(),
+  error: PipelineRunFailureSchema.optional(),
 })
 
 export const PipelineStepRunSchema = z.object({
@@ -95,12 +100,7 @@ export const PipelineStepRunSchema = z.object({
   inputs: z.array(DatasetVersionRefSchema),
   output: DatasetVersionRefSchema.optional(),
   rowsWritten: z.number().optional(),
-  error: z
-    .object({
-      name: z.string().optional(),
-      message: z.string(),
-    })
-    .optional(),
+  error: PipelineRunFailureSchema.optional(),
 })
 
 export const PipelineStepSchema = z.object({

@@ -1,6 +1,22 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
+import type { PipelineRunFailureCode, SixbFailure } from "../src/storage"
 import { InMemoryPipelineRunStorage, PipelineRunError } from "../src/storage"
+
+const FAILURE: SixbFailure<PipelineRunFailureCode> = {
+  code: "internal.unexpected",
+  message: "Pipeline failed",
+  retryable: false,
+  at: "2026-05-08T10:00:01.000Z",
+  details: { pipelineId: "customers" },
+  causeChain: [{ name: "Error", message: "root cause" }],
+}
+
+const CANCELLED_FAILURE: SixbFailure<PipelineRunFailureCode> = {
+  ...FAILURE,
+  code: "runtime.cancelled",
+  message: "Stopped",
+}
 
 describe("InMemoryPipelineRunStorage", () => {
   test("starts and finishes a successful pipeline run", async () => {
@@ -56,10 +72,7 @@ describe("InMemoryPipelineRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       finishedAt: new Date("2026-05-08T10:00:01.000Z"),
-      error: {
-        name: "Error",
-        message: "No committed source version",
-      },
+      error: { ...FAILURE, message: "No committed source version" },
     })
 
     await storage.start({
@@ -125,10 +138,7 @@ describe("InMemoryPipelineRunStorage", () => {
     })
     expect(failed?.status).toBe("failed")
     expect(failed?.output).toBeUndefined()
-    expect(failed?.error).toEqual({
-      name: "Error",
-      message: "No committed source version",
-    })
+    expect(failed?.error).toEqual({ ...FAILURE, message: "No committed source version" })
   })
 
   test("lists the latest run for multiple pipeline ids", async () => {
@@ -258,10 +268,7 @@ describe("InMemoryPipelineRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       rowsWritten: 3,
-      error: {
-        name: "Error",
-        message: "Invalid row",
-      },
+      error: { ...FAILURE, message: "Invalid row" },
     })
 
     await storage.startStep({
@@ -314,10 +321,7 @@ describe("InMemoryPipelineRunStorage", () => {
       projectId: "my-app",
       statuses: ["failed"],
     })
-    expect(failedSteps.steps[0]?.error).toEqual({
-      name: "Error",
-      message: "Invalid row",
-    })
+    expect(failedSteps.steps[0]?.error).toEqual({ ...FAILURE, message: "Invalid row" })
     expect(failedSteps.steps[0]?.rowsWritten).toBe(3)
   })
 
@@ -343,9 +347,7 @@ describe("InMemoryPipelineRunStorage", () => {
         id: "missing",
         projectId: "my-app",
         status: "failed",
-        error: {
-          message: "boom",
-        },
+        error: { ...FAILURE, message: "boom" },
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
 
@@ -376,9 +378,7 @@ describe("InMemoryPipelineRunStorage", () => {
       id: "step_1",
       projectId: "my-app",
       status: "cancelled",
-      error: {
-        message: "Stopped",
-      },
+      error: CANCELLED_FAILURE,
     })
 
     await expect(
@@ -386,9 +386,7 @@ describe("InMemoryPipelineRunStorage", () => {
         id: "step_1",
         projectId: "my-app",
         status: "failed",
-        error: {
-          message: "Too late",
-        },
+        error: { ...FAILURE, message: "Too late" },
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
 
@@ -396,9 +394,7 @@ describe("InMemoryPipelineRunStorage", () => {
       id: "piperun_1",
       projectId: "my-app",
       status: "cancelled",
-      error: {
-        message: "Stopped",
-      },
+      error: CANCELLED_FAILURE,
     })
 
     await expect(
@@ -419,9 +415,7 @@ describe("InMemoryPipelineRunStorage", () => {
         id: "piperun_1",
         projectId: "my-app",
         status: "failed",
-        error: {
-          message: "Too late",
-        },
+        error: { ...FAILURE, message: "Too late" },
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
   })
