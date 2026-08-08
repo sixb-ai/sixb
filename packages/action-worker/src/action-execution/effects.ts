@@ -32,7 +32,10 @@ export async function runEffectsPhase(
       const effects = input.action.phases.effects
       await effects({
         ...input.baseContext,
-        subject: requireObjectSubject(input.run.subject, input.action.id),
+        subject: requireObjectSubject(input.run.subject, {
+          actionId: input.action.id,
+          runId: input.run.id,
+        }),
         sixb: toActionRuntimeFacade(input.runtime),
         writeback: input.writeback,
         commit: input.commit,

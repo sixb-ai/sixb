@@ -19,7 +19,6 @@ import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import type { EventsRuntime } from "@sixb/core/internal/events"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { ActionRunParams, ObjectRow } from "@sixb/core/storage"
-import { ActionWorkerError } from "../src/errors"
 import { runActionJob } from "../src/run-action-job"
 import type { ActionWorkerContext } from "../src/types"
 
@@ -115,7 +114,7 @@ async function queueActionRun(
 }
 
 describe("runActionJob", () => {
-  test("throws ActionWorkerError when the stored run is missing", async () => {
+  test("throws a coded internal error when the stored run is missing", async () => {
     const count = defineAction("count")
       .params({})
       .writeback(() => {})
@@ -129,7 +128,12 @@ describe("runActionJob", () => {
           actionId: "count",
         },
       })
-    ).rejects.toBeInstanceOf(ActionWorkerError)
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      message: "[SixbActionWorker] Action run 'act_missing' was not found.",
+      retryable: false,
+      details: { actionId: "count", runId: "act_missing" },
+    })
   })
 
   test("passes nullable params to action handlers unchanged", async () => {
@@ -759,8 +763,13 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error.message).toBe("[SixbActionWorker] Unknown action 'missingAction'.")
-      expect(result.error.phase).toBe("validation")
+      expect(result.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "[SixbActionWorker] Unknown action 'missingAction'.",
+        retryable: false,
+        phase: "validation",
+        details: { actionId: "missingAction", runId: "act_1" },
+      })
     }
     const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
     expect(run?.status).toBe("failed")
@@ -1047,10 +1056,13 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error.message).toBe(
-        "[SixbActionWorker] Action 'setStatus' is not valid for object type 'Sensor'."
-      )
-      expect(result.error.phase).toBe("validation")
+      expect(result.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "[SixbActionWorker] Action 'setStatus' is not valid for object type 'Sensor'.",
+        retryable: false,
+        phase: "validation",
+        details: { actionId: "setStatus", runId: "act_1" },
+      })
     }
     expect(invoked).toBe(0)
   })

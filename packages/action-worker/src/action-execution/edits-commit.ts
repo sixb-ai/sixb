@@ -83,7 +83,10 @@ export async function runEditsAndCommitPhase(
       if (isObjectActionDefinition(input.action)) {
         await handler({
           ...baseContext,
-          subject: requireObjectSubject(input.run.subject, input.action.id),
+          subject: requireObjectSubject(input.run.subject, {
+            actionId: input.action.id,
+            runId: input.run.id,
+          }),
         })
         return
       }

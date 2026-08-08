@@ -9,8 +9,8 @@ import type {
 } from "@sixb/core"
 import { isObjectActionDefinition, ObjectNotFoundError } from "@sixb/core"
 import { coerceActionParamsToTyped } from "@sixb/core/internal/actions"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { ActionRunRecord } from "@sixb/core/storage"
-import { ActionWorkerError } from "../errors"
 import type { RunActionJobInput } from "../types"
 import type { LoadedObjectTarget } from "./types"
 
@@ -94,19 +94,28 @@ export async function loadObjectTarget(input: {
 }): Promise<LoadedObjectTarget | null> {
   if (!isObjectActionDefinition(input.action)) {
     if (input.run.subject.kind !== "none") {
-      throw new ActionWorkerError(`Action '${input.action.id}' does not accept a subject.`)
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbActionWorker] Action '${input.action.id}' does not accept a subject.`,
+        { details: { actionId: input.action.id, runId: input.run.id } }
+      )
     }
     return null
   }
 
-  const subject = requireObjectSubject(input.run.subject, input.action.id)
+  const subject = requireObjectSubject(input.run.subject, {
+    actionId: input.action.id,
+    runId: input.run.id,
+  })
   const subjectObjectType = input.runtime.sixb.resolveObjectType(subject.objectTypeId)
   const actionAppliesToSubject = input.runtime.sixb
     .listActionsForType(subjectObjectType)
     .some((candidate) => candidate.id === input.action.id)
   if (!actionAppliesToSubject) {
-    throw new ActionWorkerError(
-      `Action '${input.action.id}' is not valid for object type '${subjectObjectType.id}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbActionWorker] Action '${input.action.id}' is not valid for object type '${subjectObjectType.id}'.`,
+      { details: { actionId: input.action.id, runId: input.run.id } }
     )
   }
 
@@ -132,19 +141,30 @@ export async function loadObjectTarget(input: {
 
 export function requireObjectSubject<
   TObjectType extends ObjectTypeWithPropertyTokens = ObjectTypeWithPropertyTokens,
->(subject: ActionSubject, actionId: string): ActionObjectSubject<TObjectType> {
+>(
+  subject: ActionSubject,
+  input: { readonly actionId: string; readonly runId: string }
+): ActionObjectSubject<TObjectType> {
   if (subject.kind !== "object") {
-    throw new ActionWorkerError(`Action '${actionId}' requires an object subject.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbActionWorker] Action '${input.actionId}' requires an object subject.`,
+      { details: input }
+    )
   }
   return subject as ActionObjectSubject<TObjectType>
 }
 
 export function requireObjectTarget(
   target: LoadedObjectTarget | null,
-  actionId: string
+  input: { readonly actionId: string; readonly runId: string }
 ): LoadedObjectTarget {
   if (!target) {
-    throw new ActionWorkerError(`Action '${actionId}' requires an object target.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbActionWorker] Action '${input.actionId}' requires an object target.`,
+      { details: input }
+    )
   }
   return target
 }

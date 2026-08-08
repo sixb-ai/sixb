@@ -1,4 +1,5 @@
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { isTerminalActionRun } from "@sixb/core/storage"
 import { executeActionPhases } from "./action-execution/phases"
@@ -7,7 +8,6 @@ import {
   requireFinishedAt,
   resolveRedeliveredRunningRun,
 } from "./action-execution/results"
-import { ActionWorkerError } from "./errors"
 import { throwIfAborted, toActionRunFailure } from "./normalize"
 import type { ActionRunResult, RunActionJobInput } from "./types"
 
@@ -22,11 +22,17 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     id: job.id,
   })
   if (!existingRun) {
-    throw new ActionWorkerError(`Action run '${job.id}' was not found.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbActionWorker] Action run '${job.id}' was not found.`,
+      { details: { actionId: job.actionId, runId: job.id } }
+    )
   }
   if (existingRun.actionId !== job.actionId) {
-    throw new ActionWorkerError(
-      `Action job '${job.id}' references action '${job.actionId}' but the stored run references '${existingRun.actionId}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbActionWorker] Action job '${job.id}' references action '${job.actionId}' but the stored run references '${existingRun.actionId}'.`,
+      { details: { actionId: job.actionId, runId: job.id } }
     )
   }
   if (isTerminalActionRun(existingRun)) {
@@ -42,7 +48,11 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
 
   const action = runtime.getActionById(job.actionId)
   if (!action) {
-    const error = new ActionWorkerError(`Unknown action '${job.actionId}'.`)
+    const error = createSixbError(
+      "internal.unexpected",
+      `[SixbActionWorker] Unknown action '${job.actionId}'.`,
+      { details: { actionId: job.actionId, runId: job.id } }
+    )
     const failedAt = new Date()
     const failure = toActionRunFailure(error, "validation", {
       actionId: job.actionId,
@@ -67,8 +77,10 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     existingRun = resolution.run
   }
   if (existingRun.status !== "queued" && existingRun.status !== "running") {
-    throw new ActionWorkerError(
-      `Action run '${job.id}' cannot execute from status '${existingRun.status}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbActionWorker] Action run '${job.id}' cannot execute from status '${existingRun.status}'.`,
+      { details: { actionId: job.actionId, runId: job.id } }
     )
   }
 
@@ -104,7 +116,11 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       subject: finalRun.subject,
       status: "succeeded",
       startedAt: startedRun.startedAt ?? startedRun.queuedAt,
-      finishedAt: requireFinishedAt(job.id, finalRun.finishedAt),
+      finishedAt: requireFinishedAt({
+        actionId: job.actionId,
+        runId: job.id,
+        finishedAt: finalRun.finishedAt,
+      }),
       record: finalRun,
     }
   } catch (error) {
@@ -150,7 +166,11 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       subject: finishedRun.subject,
       status,
       startedAt,
-      finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
+      finishedAt: requireFinishedAt({
+        actionId: job.actionId,
+        runId: job.id,
+        finishedAt: finishedRun.finishedAt,
+      }),
       error: failure,
       record: finishedRun,
     }
