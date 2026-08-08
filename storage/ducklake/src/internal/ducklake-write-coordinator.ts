@@ -58,6 +58,7 @@ interface DuckLakeCommitVersionOutcomeRuntimeInput extends DuckLakeCommitVersion
 
 export interface DuckLakeApplyChangesContext {
   readonly previousRowCount?: number
+  readonly validatedPrimaryKeyColumns?: readonly string[]
 }
 
 /**
@@ -177,7 +178,7 @@ export class DuckLakeWriteCoordinator {
         commitMessage: input.commit?.commitMessage ?? `merge dataset ${definition.id}`,
         producer: input.merge.producer,
         inputs: input.merge.inputs,
-        applyChanges: async (commitRuntime) => {
+        applyChanges: async (commitRuntime, context) => {
           const result = await applyDatasetMergeFromRelation({
             options: this.options,
             runtime: commitRuntime,
@@ -185,6 +186,8 @@ export class DuckLakeWriteCoordinator {
             stagingTableName: input.stagingTableName,
             sequenceColumnName: input.sequenceColumnName,
             kindColumnName: input.kindColumnName,
+            previousRowCount: context.previousRowCount,
+            validatedPrimaryKeyColumns: context.validatedPrimaryKeyColumns,
           })
           if (result.sourceRowCount !== input.changesWritten) {
             throw new LakeStorageError(
@@ -312,6 +315,7 @@ export class DuckLakeWriteCoordinator {
 
       const changeResult = await input.applyChanges(input.runtime, {
         previousRowCount: latestVersion?.rowCount,
+        validatedPrimaryKeyColumns: latestVersion?.validatedPrimaryKeyColumns,
       })
       const commitId = randomUUID()
       await this.setCommitMetadata(
@@ -442,6 +446,9 @@ export class DuckLakeWriteCoordinator {
     // transaction. Version id, timestamp, and data-change detection still come
     // from DuckLake itself. commitId is only a transaction correlation token so
     // concurrent writers do not accidentally hydrate each other's snapshots.
+    // Every keyed data path either replaces the baseline or validates its uniqueness before this
+    // marker is persisted. Merge commits can therefore avoid repeating that full-table audit.
+    const validatedPrimaryKeyColumns = getDatasetPrimaryKeyColumns(input.dataset)
     const metadata: SixbCommitMetadata = {
       kind: "datasetVersion",
       datasetId: input.dataset.id,
@@ -450,6 +457,9 @@ export class DuckLakeWriteCoordinator {
       producer: input.producer ? structuredClone(input.producer) : undefined,
       inputs: input.inputs ? structuredClone(input.inputs) : undefined,
       ...(rowCount.kind === "exact" ? { rowCount: rowCount.value } : {}),
+      ...(validatedPrimaryKeyColumns !== null
+        ? { validatedPrimaryKeyColumns: [...validatedPrimaryKeyColumns] }
+        : {}),
     }
 
     await input.runtime.run(

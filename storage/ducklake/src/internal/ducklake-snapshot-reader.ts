@@ -60,6 +60,7 @@ export interface DuckLakeVersionSummary {
   readonly datasetId: string
   readonly versionId: string
   readonly rowCount?: number
+  readonly validatedPrimaryKeyColumns?: readonly string[]
 }
 
 /** One snapshot row from the shared catalog scan, before per-dataset filtering. */
@@ -444,6 +445,9 @@ export class DuckLakeSnapshotReader {
       datasetId: tableRef.datasetId,
       versionId: toVersionId(row.snapshotId),
       ...(row.metadata?.rowCount !== undefined ? { rowCount: row.metadata.rowCount } : {}),
+      ...(row.metadata?.validatedPrimaryKeyColumns !== undefined
+        ? { validatedPrimaryKeyColumns: row.metadata.validatedPrimaryKeyColumns }
+        : {}),
     }
   }
 
