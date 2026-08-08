@@ -182,9 +182,19 @@ describe("webhook routes", () => {
       webhookId: "telemetry",
       status: "failed",
       responseStatus: 400,
-      error: "value must be a number",
+      error: {
+        code: "internal.unexpected",
+        message: "value must be a number",
+        retryable: false,
+        details: {
+          connectorId: "edge",
+          webhookId: "telemetry",
+          runId: run?.id,
+        },
+      },
     })
     expect(run?.requestBodyBytes).toBe(new TextEncoder().encode(payload).byteLength)
+    expect(run?.error?.at).toBe(run?.finishedAt?.toISOString())
   })
 
   test("skips duplicate idempotent deliveries before handlers run", async () => {
@@ -390,26 +400,46 @@ describe("webhook routes", () => {
           method: "GET",
           status: "failed",
           responseStatus: 405,
-          error: "Method not allowed",
+          error: expect.objectContaining({
+            code: "internal.unexpected",
+            message: "Method not allowed",
+            retryable: false,
+          }),
         }),
         expect.objectContaining({
           webhookId: "events",
           method: "POST",
           status: "failed",
           responseStatus: 401,
-          error: "Webhook verification failed",
+          error: expect.objectContaining({
+            code: "internal.unexpected",
+            message: "Webhook verification failed",
+            retryable: false,
+          }),
         }),
         expect.objectContaining({
           webhookId: "failing",
           method: "POST",
           status: "failed",
           responseStatus: 500,
-          error: "Webhook handler failed",
+          error: expect.objectContaining({
+            code: "internal.unexpected",
+            message: "Webhook handler failed",
+            retryable: false,
+          }),
         }),
       ])
     )
 
     const failedRun = runs.runs.find((run) => run.webhookId === "failing")
+    expect(failedRun?.error).toMatchObject({
+      details: {
+        connectorId: "github",
+        webhookId: "failing",
+        runId: failedRun?.id,
+      },
+    })
+    expect(failedRun?.error?.at).toBe(failedRun?.finishedAt?.toISOString())
     expect(reports).toHaveLength(1)
     expect(reports[0]?.error).toBe(handlerError)
     expect(reports[0]?.context).toMatchObject({

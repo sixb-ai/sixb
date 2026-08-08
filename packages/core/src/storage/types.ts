@@ -200,11 +200,12 @@ export type {
   ListWebhookRunsInput,
   ListWebhookRunsResult,
   StartWebhookRunInput,
+  WebhookRunFailureCode,
   WebhookRunRecord,
   WebhookRunStatus,
   WebhookRunStorage,
 } from "./webhook-runs"
-export { WebhookRunError } from "./webhook-runs"
+export { WEBHOOK_RUN_FAILURE_CODES, WebhookRunError } from "./webhook-runs"
 export type {
   CancelWorkflowInterventionInput,
   CreateWorkflowInterventionInput,

@@ -1,7 +1,16 @@
+import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { WebhookDeliveryClaimResult } from "../webhook-deliveries"
 
 export type WebhookRunStatus = "running" | "succeeded" | "failed" | "skipped"
 export type FinishWebhookRunStatus = Exclude<WebhookRunStatus, "running">
+
+/** Error codes a webhook run can persist and expose through its public contract. */
+export const WEBHOOK_RUN_FAILURE_CODES = ["internal.unexpected"] as const satisfies readonly [
+  SixbErrorCode,
+  ...SixbErrorCode[],
+]
+
+export type WebhookRunFailureCode = (typeof WEBHOOK_RUN_FAILURE_CODES)[number]
 
 export interface WebhookRunRecord {
   readonly id: string
@@ -17,7 +26,7 @@ export interface WebhookRunRecord {
   readonly responseStatus?: number
   readonly idempotencyKey?: string
   readonly deliveryClaimResult?: WebhookDeliveryClaimResult
-  readonly error?: string
+  readonly error?: SixbFailure<WebhookRunFailureCode>
 }
 
 export interface StartWebhookRunInput {
@@ -30,17 +39,27 @@ export interface StartWebhookRunInput {
   readonly startedAt?: Date
 }
 
-export interface FinishWebhookRunInput {
+interface FinishWebhookRunBaseInput {
   readonly id: string
   readonly projectId: string
-  readonly status: FinishWebhookRunStatus
   readonly finishedAt?: Date
   readonly requestBodyBytes?: number
   readonly responseStatus?: number
   readonly idempotencyKey?: string
   readonly deliveryClaimResult?: WebhookDeliveryClaimResult
-  readonly error?: string
 }
+
+export type FinishWebhookRunInput = FinishWebhookRunBaseInput &
+  (
+    | {
+        readonly status: "succeeded" | "skipped"
+        readonly error?: never
+      }
+    | {
+        readonly status: "failed"
+        readonly error: SixbFailure<WebhookRunFailureCode>
+      }
+  )
 
 export interface ListWebhookRunsInput {
   readonly projectId: string

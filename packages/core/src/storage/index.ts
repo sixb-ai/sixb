@@ -431,11 +431,16 @@ export type {
   ListWebhookRunsInput,
   ListWebhookRunsResult,
   StartWebhookRunInput,
+  WebhookRunFailureCode,
   WebhookRunRecord,
   WebhookRunStatus,
   WebhookRunStorage,
 } from "./webhook-runs"
-export { InMemoryWebhookRunStorage, WebhookRunError } from "./webhook-runs"
+export {
+  InMemoryWebhookRunStorage,
+  WEBHOOK_RUN_FAILURE_CODES,
+  WebhookRunError,
+} from "./webhook-runs"
 export type {
   CancelWorkflowInterventionInput,
   CreateWorkflowInterventionInput,

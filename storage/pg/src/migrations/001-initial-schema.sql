@@ -711,7 +711,7 @@ CREATE TABLE webhook_runs (
   delivery_claim_result TEXT CHECK (
     delivery_claim_result IS NULL OR delivery_claim_result IN ('claimed', 'duplicate', 'in_progress')
   ),
-  error TEXT,
+  error JSONB,
   PRIMARY KEY (project_id, id)
 );
 

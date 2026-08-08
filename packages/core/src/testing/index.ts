@@ -67,3 +67,7 @@ export {
   type SandboxesContractCapabilities,
   type SandboxesContractSuiteOptions,
 } from "./sandboxes-contract"
+export {
+  runWebhookRunStorageContractSuite,
+  type WebhookRunStorageContractSuiteOptions,
+} from "./webhook-run-storage-contract"
