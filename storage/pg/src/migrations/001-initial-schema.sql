@@ -616,7 +616,7 @@ CREATE TABLE IF NOT EXISTS workflow_agent_node_runs (
   usage JSONB,
   trace JSONB,
   diagnostics JSONB,
-  error TEXT,
+  error JSONB,
   attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
   execution_token TEXT,
   execution_queue_lease_expires_at TIMESTAMPTZ,
@@ -1144,7 +1144,7 @@ CREATE TABLE agent_runs (
   usage_cached_input_tokens INTEGER CHECK (
     usage_cached_input_tokens IS NULL OR usage_cached_input_tokens >= 0
   ),
-  error TEXT,
+  error JSONB,
   diagnostics JSONB,
   attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
   execution_token TEXT,

@@ -1,6 +1,8 @@
 import type { Database } from "bun:sqlite"
 import { type AgentMessagePart, type Principal, SYSTEM_PRINCIPAL } from "@sixb/core"
+import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
+  AGENT_RUN_FAILURE_CODES,
   type AgentMessageRecord,
   type AgentRunDiagnostic,
   type AgentRunRecord,
@@ -107,7 +109,7 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     modelId: row.model_id ?? undefined,
     finishReason: coerceAgentRunFinishReason(row.finish_reason),
     usage: rowToUsage(row),
-    error: row.error ?? undefined,
+    error: row.error === null ? undefined : parseSixbFailure(row.error, AGENT_RUN_FAILURE_CODES),
     diagnostics:
       row.diagnostics === null ? undefined : (JSON.parse(row.diagnostics) as AgentRunDiagnostic[]),
     attempt: row.attempt,

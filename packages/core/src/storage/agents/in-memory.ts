@@ -1,9 +1,12 @@
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../../agents/message"
 import { principalsEqual } from "../../auth"
+import { parseSixbFailure } from "../../errors/internal"
+import type { SixbFailure } from "../../errors/types"
 import { AgentStorageError } from "./errors"
 import type {
   AgentMessageRecord,
   AgentMessageStore,
+  AgentRunFailureCode,
   AgentRunRecord,
   AgentRunStore,
   AgentStorage,
@@ -24,6 +27,13 @@ import type {
   ReclaimAgentRunInput,
   StartAgentRunInput,
 } from "./types"
+import { AGENT_RUN_FAILURE_CODES } from "./types"
+
+function normalizeFailure(
+  failure: SixbFailure<AgentRunFailureCode> | undefined
+): SixbFailure<AgentRunFailureCode> | undefined {
+  return failure ? parseSixbFailure(failure, AGENT_RUN_FAILURE_CODES) : undefined
+}
 
 function key(projectId: string, id: string): string {
   return `${projectId}:${id}`
@@ -225,7 +235,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
     const next: AgentRunRecord = {
       ...run,
       status: input.status,
-      ...(input.error === undefined ? {} : { error: input.error }),
+      ...(input.error === undefined ? {} : { error: normalizeFailure(input.error) }),
       completedAt,
     }
     this.state.runs.set(key(input.projectId, input.id), clone(next))
@@ -285,7 +295,9 @@ class InMemoryAgentRunStore implements AgentRunStore {
       ...(input.finishReason === undefined ? {} : { finishReason: input.finishReason }),
       ...(input.usage === undefined ? {} : { usage: clone(input.usage) }),
       ...(input.diagnostics === undefined ? {} : { diagnostics: clone(input.diagnostics) }),
-      ...(input.status === "succeeded" || input.error === undefined ? {} : { error: input.error }),
+      ...(input.status === "succeeded" || input.error === undefined
+        ? {}
+        : { error: normalizeFailure(input.error) }),
       execution: undefined,
       completedAt,
     }

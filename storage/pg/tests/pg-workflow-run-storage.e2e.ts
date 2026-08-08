@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { type SixbFailure, WorkflowRunError, type WorkflowRunFailureCode } from "@sixb/core/storage"
+import {
+  type AgentRunFailureCode,
+  type SixbFailure,
+  WorkflowRunError,
+  type WorkflowRunFailureCode,
+} from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { PgWorkflowRunStorage } from "../src/pg-workflow-run-storage"
 import { createTestStorage } from "./helpers"
@@ -16,6 +21,13 @@ function failure(
     details: { workflowId: "reconcile-transaction" },
     causeChain: [{ name: "Error", message: "root cause" }],
   }
+}
+
+function agentFailure(
+  message: string,
+  code: AgentRunFailureCode = "internal.unexpected"
+): SixbFailure<AgentRunFailureCode> {
+  return { code, message, retryable: false, at: "2026-05-08T10:00:01.000Z" }
 }
 
 describe("PgWorkflowRunStorage", () => {
@@ -672,11 +684,11 @@ describe("PgWorkflowRunStorage", () => {
     const cancelled = await storage.workflowRuns.agentNodes.cancel({
       projectId: "my-app",
       nodeRunId: running.nodeRunId,
-      error: "Workflow cancelled.",
+      error: agentFailure("Workflow cancelled.", "runtime.cancelled"),
     })
     expect(cancelled).toMatchObject({
       status: "cancelled",
-      error: "Workflow cancelled.",
+      error: agentFailure("Workflow cancelled.", "runtime.cancelled"),
       prompt: "Resolve tr_1.",
     })
     expect(cancelled.execution).toBeUndefined()

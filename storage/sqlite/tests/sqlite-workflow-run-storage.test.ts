@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { type SixbFailure, WorkflowRunError, type WorkflowRunFailureCode } from "@sixb/core/storage"
+import {
+  type AgentRunFailureCode,
+  type SixbFailure,
+  WorkflowRunError,
+  type WorkflowRunFailureCode,
+} from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import { SqliteWorkflowRunStorage } from "../src/workflow-run-storage"
 
@@ -15,6 +20,13 @@ function failure(
     details: { workflowId: "reconcile-transaction" },
     causeChain: [{ name: "Error", message: "root cause" }],
   }
+}
+
+function agentFailure(
+  message: string,
+  code: AgentRunFailureCode = "internal.unexpected"
+): SixbFailure<AgentRunFailureCode> {
+  return { code, message, retryable: false, at: "2026-05-08T10:00:01.000Z" }
 }
 
 describe("SqliteWorkflowRunStorage", () => {
@@ -628,11 +640,11 @@ describe("SqliteWorkflowRunStorage", () => {
     const cancelled = await storage.agentNodes.cancel({
       projectId: "my-app",
       nodeRunId: running.nodeRunId,
-      error: "Workflow cancelled.",
+      error: agentFailure("Workflow cancelled.", "runtime.cancelled"),
     })
     expect(cancelled).toMatchObject({
       status: "cancelled",
-      error: "Workflow cancelled.",
+      error: agentFailure("Workflow cancelled.", "runtime.cancelled"),
       prompt: "Resolve tr_1.",
     })
     expect(cancelled.execution).toBeUndefined()

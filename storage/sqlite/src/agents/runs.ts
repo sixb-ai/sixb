@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite"
+import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
+  AGENT_RUN_FAILURE_CODES,
   type AgentRunRecord,
   type AgentRunStore,
   AgentStorageError,
@@ -146,7 +148,9 @@ export class SqliteAgentRunStore implements AgentRunStore {
         )
         .run(
           input.status,
-          input.error ?? null,
+          input.error === undefined
+            ? null
+            : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES),
           completedAt.toISOString(),
           input.projectId,
           input.id
@@ -208,7 +212,10 @@ export class SqliteAgentRunStore implements AgentRunStore {
 
   async finish(input: FinishAgentRunInput): Promise<AgentRunRecord> {
     const completedAt = input.completedAt ?? new Date()
-    const errorValue = input.status === "succeeded" ? null : (input.error ?? null)
+    const errorValue =
+      input.status === "succeeded" || input.error === undefined
+        ? null
+        : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES)
 
     return this.db.transaction(() => {
       const run = this.requireRunning(input.projectId, input.id)

@@ -20,7 +20,7 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
+import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
@@ -201,6 +201,27 @@ function toWorkflowCancellationFailure(input: {
           nodeRunId: input.nodeRunId,
         }
       : { workflowId: input.workflowId, runId: input.runId },
+  })
+}
+
+function toAgentCancellationFailure(input: {
+  readonly message: string
+  readonly at: Date
+  readonly agentId: string
+  readonly workflowId: string
+  readonly runId: string
+  readonly nodeRunId: string
+}) {
+  return toSixbFailure(input.message, {
+    allowedCodes: AGENT_RUN_FAILURE_CODES,
+    fallbackCode: "runtime.cancelled",
+    at: input.at,
+    fallbackDetails: {
+      agentId: input.agentId,
+      workflowId: input.workflowId,
+      workflowRunId: input.runId,
+      nodeRunId: input.nodeRunId,
+    },
   })
 }
 
@@ -1182,7 +1203,14 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
                   projectId: sixb.id,
                   nodeRunId: active.id,
                   completedAt: cancelledAt,
-                  error: cancellationMessage,
+                  error: toAgentCancellationFailure({
+                    message: cancellationMessage,
+                    at: cancelledAt,
+                    agentId: execution.agentId,
+                    workflowId: run.workflowId,
+                    runId: run.id,
+                    nodeRunId: active.id,
+                  }),
                 })
               }
             }

@@ -9,6 +9,12 @@ import {
 import type { AgentRunRecord } from "../src/storage"
 
 const OCCURRED_AT = new Date("2026-01-02T03:04:05.000Z")
+const FAILURE = {
+  code: "internal.unexpected" as const,
+  message: "boom",
+  retryable: false,
+  at: "2026-01-02T03:04:04.000Z",
+}
 
 function runRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
   return {
@@ -28,7 +34,7 @@ function runRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
 describe("agent run stream records", () => {
   test("builds the finished event from a terminal run record", () => {
     const event = agentRunFinishedEvent(
-      runRecord({ status: "failed", attempt: 2, finishReason: "error", error: "boom" }),
+      runRecord({ status: "failed", attempt: 2, finishReason: "error", error: FAILURE }),
       OCCURRED_AT
     )
 

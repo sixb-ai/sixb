@@ -3,7 +3,12 @@ import type { Principal } from "../../auth"
 import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonValue } from "../../json"
 import type { WorkflowIOSnapshot, WorkflowRunSource } from "../../workflows/types"
-import type { AgentExecutionStatus, AgentRunFinishReason, AgentRunUsage } from "../agents"
+import type {
+  AgentExecutionStatus,
+  AgentRunFailureCode,
+  AgentRunFinishReason,
+  AgentRunUsage,
+} from "../agents"
 
 export type { WorkflowIOSnapshot, WorkflowRunSource } from "../../workflows/types"
 
@@ -50,7 +55,7 @@ export interface WorkflowAgentNodeRunRecord {
   readonly usage?: AgentRunUsage
   readonly trace?: readonly AgentMessagePart[]
   readonly diagnostics?: readonly JsonValue[]
-  readonly error?: string
+  readonly error?: SixbFailure<AgentRunFailureCode>
   readonly attempt: number
   readonly execution?: WorkflowAgentNodeRunExecution
   readonly createdAt: Date
@@ -88,24 +93,31 @@ export interface ConfirmWorkflowAgentNodeRunExecutionOwnershipInput {
   readonly queueLeaseExpiresAt: Date
 }
 
-export type FinishWorkflowAgentNodeRunInput = {
+interface FinishWorkflowAgentNodeRunBaseInput {
   readonly projectId: string
   readonly nodeRunId: string
   readonly executionToken: string
-  readonly status: "succeeded" | "failed" | "cancelled"
   readonly modelId?: string
   readonly finishReason?: AgentRunFinishReason
   readonly usage?: AgentRunUsage
   readonly trace?: readonly AgentMessagePart[]
   readonly diagnostics?: readonly JsonValue[]
-  readonly error?: string
   readonly completedAt?: Date
 }
+
+export type FinishWorkflowAgentNodeRunInput =
+  | (FinishWorkflowAgentNodeRunBaseInput & {
+      readonly status: "succeeded"
+    })
+  | (FinishWorkflowAgentNodeRunBaseInput & {
+      readonly status: "failed" | "cancelled"
+      readonly error?: SixbFailure<AgentRunFailureCode>
+    })
 
 export interface CancelWorkflowAgentNodeRunInput {
   readonly projectId: string
   readonly nodeRunId: string
-  readonly error?: string
+  readonly error?: SixbFailure<AgentRunFailureCode>
   readonly completedAt?: Date
 }
 

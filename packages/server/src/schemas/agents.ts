@@ -1,8 +1,16 @@
 import { AGENT_REASONING_LEVELS, MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
-import { AGENT_RUN_DIAGNOSTIC_CODES } from "@sixb/core/storage"
+import {
+  AGENT_RUN_DIAGNOSTIC_CODES,
+  AGENT_RUN_FAILURE_CODES,
+  type AgentRunFailureCode,
+  type SixbFailure,
+} from "@sixb/core/storage"
 import { z } from "zod"
-import { JsonValueSchema } from "./common"
+import { JsonValueSchema, sixbFailureSchema } from "./common"
 import { FileRefSchema } from "./files"
+
+export const AgentRunFailureSchema: z.ZodType<SixbFailure<AgentRunFailureCode>> =
+  sixbFailureSchema(AGENT_RUN_FAILURE_CODES)
 
 export const AgentIdParamsSchema = z.object({
   agentId: z.string().min(1),
@@ -259,7 +267,7 @@ export const AgentRunSchema = z.object({
   finishReason: AgentRunFinishReasonSchema.optional(),
   usage: AgentRunUsageSchema.optional(),
   diagnostics: z.array(AgentRunDiagnosticSchema).optional(),
-  error: z.string().optional(),
+  error: AgentRunFailureSchema.optional(),
   attempt: z.number(),
   streamId: z.string(),
   createdAt: z.string(),
