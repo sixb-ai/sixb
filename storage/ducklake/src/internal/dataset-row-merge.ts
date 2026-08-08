@@ -15,6 +15,8 @@ export interface ApplyDatasetMergeFromRelationInput {
   readonly stagingTableName: string
   readonly sequenceColumnName: string
   readonly kindColumnName: string
+  readonly previousRowCount?: number
+  readonly validatedPrimaryKeyColumns?: readonly string[]
 }
 
 interface MergeEffectCounts {
@@ -36,70 +38,121 @@ export async function applyDatasetMergeFromRelation(
   const stagingTable = quoteIdentifier(input.stagingTableName)
   const targetTable = qualifiedTableName(input.options, encodeDatasetTableName(input.dataset.id))
   const sourceRowCount = await countRows(input.runtime, stagingTable)
-  const previousRowCount = await inspectUniqueKeyedRelation({
+  const previousRowCount = await currentBaselineRowCount(input, targetTable, primaryKeyColumns)
+
+  return withMaterializedFinalChanges(input, primaryKeyColumns, async (finalChanges) => {
+    const effects = await countMergeEffects(input, targetTable, finalChanges, primaryKeyColumns)
+    const effectiveChangeCount = effects.inserts + effects.updates + effects.deletes
+
+    if (effectiveChangeCount === 0) {
+      return {
+        dataChangeExpected: false,
+        sourceRowCount,
+        resultingRowCount: { kind: "exact", value: previousRowCount },
+      }
+    }
+
+    const keyMatchSql = primaryKeyMatchSql(primaryKeyColumns, "target", "source")
+    const rowDifferenceSql = datasetRowDifferenceSql(input.dataset, "target", "source")
+    const kindColumn = `source.${quoteIdentifier(input.kindColumnName)}`
+
+    await input.runtime.run(`
+      DELETE FROM ${targetTable} AS target
+      USING ${finalChanges} AS source
+      WHERE ${keyMatchSql}
+        AND (
+          ${kindColumn} = ${quoteSqlString("delete")}
+          OR (
+            ${kindColumn} = ${quoteSqlString("upsert")}
+            AND (${rowDifferenceSql})
+          )
+        )
+    `)
+
+    const columnsSql = datasetSchemaColumnNamesSql(input.dataset.schema)
+    const selectedColumnsSql = input.dataset.schema.columns
+      .map((column) => `source.${quoteIdentifier(column.name)}`)
+      .join(", ")
+    const firstSequenceColumnName = firstSequenceName(input.sequenceColumnName)
+    await input.runtime.run(`
+      INSERT INTO ${targetTable} (${columnsSql})
+      SELECT ${selectedColumnsSql}
+      FROM ${finalChanges} AS source
+      WHERE ${kindColumn} = ${quoteSqlString("upsert")}
+        AND NOT EXISTS (
+          SELECT 1
+          FROM ${targetTable} AS target
+          WHERE ${keyMatchSql}
+        )
+      ORDER BY source.${quoteIdentifier(firstSequenceColumnName)}
+    `)
+
+    return {
+      dataChangeExpected: true,
+      sourceRowCount,
+      resultingRowCount: {
+        kind: "exact",
+        value: previousRowCount + effects.inserts - effects.deletes,
+      },
+    }
+  })
+}
+
+async function currentBaselineRowCount(
+  input: ApplyDatasetMergeFromRelationInput,
+  targetTable: string,
+  primaryKeyColumns: readonly string[]
+): Promise<number> {
+  // Sixb writes mark keyed versions only after the write path has enforced uniqueness. Older or
+  // external versions carry no marker and keep the full defensive audit.
+  if (sameColumns(input.validatedPrimaryKeyColumns, primaryKeyColumns)) {
+    return input.previousRowCount ?? countRows(input.runtime, targetTable)
+  }
+
+  return inspectUniqueKeyedRelation({
     runtime: input.runtime,
     dataset: input.dataset,
     relationSql: targetTable,
     context: "current baseline",
   })
-  const finalChanges = finalChangesRelationSql(input, primaryKeyColumns)
-  const effects = await countMergeEffects(input, targetTable, finalChanges, primaryKeyColumns)
-  const effectiveChangeCount = effects.inserts + effects.updates + effects.deletes
+}
 
-  if (effectiveChangeCount === 0) {
-    return {
-      dataChangeExpected: false,
-      sourceRowCount,
-      resultingRowCount: { kind: "exact", value: previousRowCount },
+async function withMaterializedFinalChanges<T>(
+  input: ApplyDatasetMergeFromRelationInput,
+  primaryKeyColumns: readonly string[],
+  run: (finalChangesTable: string) => Promise<T>
+): Promise<T> {
+  const table = quoteIdentifier(`${input.stagingTableName}_final`)
+  await input.runtime.run(`
+    CREATE TEMP TABLE ${table} AS
+    ${finalChangesSelectSql(input, primaryKeyColumns)}
+  `)
+
+  let outcome:
+    | { readonly kind: "success"; readonly value: T }
+    | { readonly kind: "error"; readonly error: unknown }
+  try {
+    outcome = { kind: "success", value: await run(table) }
+  } catch (error) {
+    outcome = { kind: "error", error }
+  }
+
+  try {
+    await input.runtime.run(`DROP TABLE IF EXISTS ${table}`)
+  } catch (cleanupError) {
+    if (outcome.kind === "success") {
+      throw cleanupError
     }
   }
 
-  const keyMatchSql = primaryKeyMatchSql(primaryKeyColumns, "target", "source")
-  const rowDifferenceSql = datasetRowDifferenceSql(input.dataset, "target", "source")
-  const kindColumn = `source.${quoteIdentifier(input.kindColumnName)}`
-
-  await input.runtime.run(`
-    DELETE FROM ${targetTable} AS target
-    USING ${finalChanges} AS source
-    WHERE ${keyMatchSql}
-      AND (
-        ${kindColumn} = ${quoteSqlString("delete")}
-        OR (
-          ${kindColumn} = ${quoteSqlString("upsert")}
-          AND (${rowDifferenceSql})
-        )
-      )
-  `)
-
-  const columnsSql = datasetSchemaColumnNamesSql(input.dataset.schema)
-  const selectedColumnsSql = input.dataset.schema.columns
-    .map((column) => `source.${quoteIdentifier(column.name)}`)
-    .join(", ")
-  const firstSequenceColumnName = firstSequenceName(input.sequenceColumnName)
-  await input.runtime.run(`
-    INSERT INTO ${targetTable} (${columnsSql})
-    SELECT ${selectedColumnsSql}
-    FROM ${finalChanges} AS source
-    WHERE ${kindColumn} = ${quoteSqlString("upsert")}
-      AND NOT EXISTS (
-        SELECT 1
-        FROM ${targetTable} AS target
-        WHERE ${keyMatchSql}
-      )
-    ORDER BY source.${quoteIdentifier(firstSequenceColumnName)}
-  `)
-
-  return {
-    dataChangeExpected: true,
-    sourceRowCount,
-    resultingRowCount: {
-      kind: "exact",
-      value: previousRowCount + effects.inserts - effects.deletes,
-    },
+  if (outcome.kind === "error") {
+    throw outcome.error
   }
+
+  return outcome.value
 }
 
-function finalChangesRelationSql(
+function finalChangesSelectSql(
   input: ApplyDatasetMergeFromRelationInput,
   primaryKeyColumns: readonly string[]
 ): string {
@@ -108,7 +161,7 @@ function finalChangesRelationSql(
   const rankColumn = quoteIdentifier(rankName(input.sequenceColumnName))
   const firstSequenceColumn = quoteIdentifier(firstSequenceName(input.sequenceColumnName))
 
-  return `(
+  return `
     SELECT * EXCLUDE (${rankColumn})
     FROM (
       SELECT
@@ -121,7 +174,7 @@ function finalChangesRelationSql(
       FROM ${quoteIdentifier(input.stagingTableName)}
     ) ranked_changes
     WHERE ${rankColumn} = 1
-  )`
+  `
 }
 
 async function countMergeEffects(
@@ -204,4 +257,12 @@ function rankName(sequenceColumnName: string): string {
 
 function firstSequenceName(sequenceColumnName: string): string {
   return `${sequenceColumnName}_first`
+}
+
+function sameColumns(left: readonly string[] | undefined, right: readonly string[]): boolean {
+  return (
+    left !== undefined &&
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  )
 }

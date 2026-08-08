@@ -71,7 +71,10 @@ describe("DuckLakeStorage keyed merges", () => {
       change.delete({ id: "inv_2" }),
       change.upsert({ id: "inv_3", status: "open", note: null }),
     ])
-    const result = await merge.commit({ commitMessage: "apply invoice changes" })
+    const runtime = await internals(storage).connections.runtime()
+    const { result, statements } = await captureExclusiveSql(runtime, () =>
+      merge.commit({ commitMessage: "apply invoice changes" })
+    )
 
     expect(result.outcome).toBe("created")
     if (result.outcome !== "created") {
@@ -86,6 +89,9 @@ describe("DuckLakeStorage keyed merges", () => {
     })
     expect(await snapshotCount(storage, options)).toBe(snapshotsAfterSeed + 1)
     expect(await latestCommitMessage(storage, options)).toBe("apply invoice changes")
+    expect(statements.filter((sql) => sql.includes("row_number() OVER"))).toHaveLength(1)
+    expect(statements.some((sql) => sql.includes("max_key_count"))).toBe(false)
+    expect(await temporaryMergeTableNames(storage)).toEqual([])
     await expect(
       collectRows(storage.readRows({ datasetId: invoices.id, versionId: seedVersion.versionId }))
     ).resolves.toEqual([
@@ -278,5 +284,39 @@ function wrapExclusiveRuntime(
     runStatements: (statements) => runtime.runStatements(statements),
     query: (sql, values) => runtime.query(sql, values),
     withAppender: (tableName, useAppender) => runtime.withAppender(tableName, useAppender),
+  }
+}
+
+async function captureExclusiveSql<T>(
+  runtime: DuckDbRuntime,
+  run: () => Promise<T>
+): Promise<{ readonly result: T; readonly statements: readonly string[] }> {
+  const originalWithExclusive = runtime.withExclusive.bind(runtime)
+  const statements: string[] = []
+
+  runtime.withExclusive = (useRuntime) =>
+    originalWithExclusive((exclusiveRuntime) =>
+      useRuntime({
+        run: async (sql, values) => {
+          statements.push(sql)
+          await exclusiveRuntime.run(sql, values)
+        },
+        runStatements: async (sqlStatements) => {
+          statements.push(...sqlStatements)
+          await exclusiveRuntime.runStatements(sqlStatements)
+        },
+        query: async (sql, values) => {
+          statements.push(sql)
+          return exclusiveRuntime.query(sql, values)
+        },
+        withAppender: (tableName, useAppender) =>
+          exclusiveRuntime.withAppender(tableName, useAppender),
+      })
+    )
+
+  try {
+    return { result: await run(), statements }
+  } finally {
+    runtime.withExclusive = originalWithExclusive
   }
 }

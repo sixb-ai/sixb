@@ -13,6 +13,7 @@ export interface SixbCommitMetadata {
   readonly producer?: DatasetVersion["producer"]
   readonly inputs?: DatasetVersion["inputs"]
   readonly rowCount?: number
+  readonly validatedPrimaryKeyColumns?: readonly string[]
   readonly schemaChange?: SixbSchemaChangeMetadata
 }
 
@@ -57,6 +58,7 @@ export function parseCommitMetadata(value: unknown): SixbCommitMetadata | undefi
   const mode = parsed.sixb.mode
   const commitId = parsed.sixb.commitId
   const rowCount = parsed.sixb.rowCount
+  const validatedPrimaryKeyColumns = parsed.sixb.validatedPrimaryKeyColumns
 
   return {
     kind: "datasetVersion",
@@ -68,6 +70,9 @@ export function parseCommitMetadata(value: unknown): SixbCommitMetadata | undefi
     ...(isDatasetProducer(parsed.sixb.producer) ? { producer: parsed.sixb.producer } : {}),
     ...(isDatasetVersionRefs(parsed.sixb.inputs) ? { inputs: parsed.sixb.inputs } : {}),
     ...(typeof commitId === "string" && isRowCount(rowCount) ? { rowCount } : {}),
+    ...(typeof commitId === "string" && isValidatedPrimaryKeyColumns(validatedPrimaryKeyColumns)
+      ? { validatedPrimaryKeyColumns }
+      : {}),
     ...(isSchemaChangeMetadata(parsed.sixb.schemaChange)
       ? { schemaChange: parsed.sixb.schemaChange }
       : {}),
@@ -139,4 +144,13 @@ function optionalString(value: unknown): boolean {
 
 function isRowCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+}
+
+function isValidatedPrimaryKeyColumns(value: unknown): value is readonly string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((column) => typeof column === "string" && column.trim().length > 0) &&
+    new Set(value).size === value.length
+  )
 }
