@@ -1,16 +1,8 @@
 import { AgentToolPublicError } from "@sixb/core"
 
-/** Infra-level failure in the agent worker (unknown agent, missing storage, malformed job). */
-export class AgentWorkerError extends Error {
-  readonly name: string = "AgentWorkerError"
-  constructor(message: string, options?: ErrorOptions) {
-    super(`[SixbAgentWorker] ${message}`, options)
-  }
-}
-
 /** A completed provider call was not recorded synchronously, so this turn must stop. */
-export class AgentUsageRecordingError extends AgentWorkerError {
-  override readonly name = "AgentUsageRecordingError"
+export class AgentUsageRecordingError extends Error {
+  readonly name = "AgentUsageRecordingError"
 
   constructor(
     readonly runId: string,
@@ -20,14 +12,14 @@ export class AgentUsageRecordingError extends AgentWorkerError {
   ) {
     super(
       recoveryScheduled
-        ? `AI usage for call '${callId}' in agent execution '${runId}' was deferred to durable recovery.`
-        : `Could not preserve AI usage for call '${callId}' in agent execution '${runId}'.`,
+        ? `[SixbAgentWorker] AI usage for call '${callId}' in agent execution '${runId}' was deferred to durable recovery.`
+        : `[SixbAgentWorker] Could not preserve AI usage for call '${callId}' in agent execution '${runId}'.`,
       options
     )
   }
 }
 
-/** This delivery's execution token is stale, so it must make no further run or message writes. */
+/** This delivery's execution token is stale, so it must make no further durable writes. */
 export class AgentExecutionLostError extends Error {
   readonly name = "AgentExecutionLostError"
   constructor(readonly runId: string) {

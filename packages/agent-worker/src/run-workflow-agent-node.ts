@@ -19,6 +19,8 @@ export interface RunWorkflowAgentNodeInput {
   readonly agent: AgentDefinition
   readonly agentStep: AgentStepDefinition
   readonly workflowId: string
+  readonly workflowRunId: string
+  readonly nodeRunId: string
   readonly prompt: string
   readonly valueTypesById: ReadonlyMap<string, ValueType>
   readonly usageRecorder: AiModelCallRecorder
@@ -100,7 +102,12 @@ export async function runWorkflowAgentNode(
       modelId: input.agent.model.modelId,
       finishReason: coerceAgentRunFinishReason(result.finishReason) ?? "unknown",
       ...(usage ? { usage } : {}),
-      trace: agentTraceFromAiSdkSteps(result.steps),
+      trace: agentTraceFromAiSdkSteps(result.steps, {
+        agentId: input.agent.id,
+        workflowId: input.workflowId,
+        workflowRunId: input.workflowRunId,
+        nodeRunId: input.nodeRunId,
+      }),
     }
   } finally {
     clearTimeout(timer)

@@ -18,6 +18,15 @@ import {
   aiSdkToolsFromAgentDefinitions,
 } from "../src/ai-sdk-adapters"
 
+function captureThrown(callback: () => unknown): unknown {
+  try {
+    callback()
+  } catch (error) {
+    return error
+  }
+  throw new Error("Expected callback to throw")
+}
+
 describe("AI SDK agent adapters", () => {
   test("converts Sixb tool definitions and supplies the narrow run-scoped context", async () => {
     const connectorDefinition = defineConnector("knowledge", {
@@ -389,9 +398,26 @@ describe("AI SDK agent adapters", () => {
   })
 
   test("rejects unsupported or non-JSON trace content instead of silently losing fidelity", () => {
-    expect(() => agentTraceFromAiSdkSteps([{ content: [{ type: "source" }] }])).toThrow(
-      "trace content 'source' is not supported"
+    const error = captureThrown(() =>
+      agentTraceFromAiSdkSteps([{ content: [{ type: "source" }] }], {
+        agentId: "workflow-agent",
+        workflowId: "review",
+        workflowRunId: "workflow-run-1",
+        nodeRunId: "node-run-1",
+      })
     )
+    expect(error).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message:
+        "[SixbAgentWorker] AI SDK trace content 'source' is not supported by the durable agent trace contract.",
+      details: {
+        agentId: "workflow-agent",
+        workflowId: "review",
+        workflowRunId: "workflow-run-1",
+        nodeRunId: "node-run-1",
+      },
+    })
 
     expect(() =>
       agentTraceFromAiSdkSteps([

@@ -50,6 +50,8 @@ import {
   resolveAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
+import { createSixbError } from "@sixb/core/internal/errors"
+import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import {
   type AgentStorage,
   AgentStorageError,
@@ -69,7 +71,7 @@ import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
-import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } from "../src/errors"
+import { AgentExecutionLostError, AgentFinalizationError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { enqueueAiModelCallRecovery } from "../src/model-call-recovery"
 import { runAgentTurn } from "../src/run-agent-turn"
@@ -621,6 +623,12 @@ const echoAgentTool = defineAgentTool("echo")
   .run(({ input }) => ({ echoed: input.value }))
 
 type TestSixb = AgentWorkerHost & { readonly blobStorage: BlobStorage }
+
+class InspectableAgentWorker extends AgentWorker {
+  decideExecutionError(claimed: ClaimedQueueJob<AgentQueueJob>, error: unknown) {
+    return this.onExecutionError(claimed, error)
+  }
+}
 
 function workerOptions(
   options: Omit<AgentWorkerOptions, "apiBaseUrl"> & { readonly apiBaseUrl?: string } = {}
@@ -1409,6 +1417,39 @@ describe("AgentWorker", () => {
     } finally {
       await worker.stop()
     }
+  })
+
+  test("fails coded non-retryable errors and retries unknown infrastructure failures", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const worker = new InspectableAgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const now = new Date().toISOString()
+    const claimed: ClaimedQueueJob<AgentQueueJob> = {
+      leaseId: "lease-1",
+      claimedAt: now,
+      leaseExpiresAt: now,
+      job: {
+        id: "job-1",
+        projectId: PROJECT_ID,
+        createdAt: now,
+        availableAt: now,
+        attempt: 1,
+        type: "agent.run.requested",
+        payload: { runId: "run-1" },
+      },
+    }
+
+    await expect(
+      worker.decideExecutionError(
+        claimed,
+        createSixbError("internal.unexpected", "[SixbAgentWorker] Deterministic worker failure.", {
+          details: { agentId: "assistant", runId: "run-1" },
+        })
+      )
+    ).resolves.toEqual({ kind: "fail" })
+
+    await expect(
+      worker.decideExecutionError(claimed, new Error("storage unavailable"))
+    ).resolves.toMatchObject({ kind: "retry", availableAt: expect.any(String) })
   })
 
   test("executes a headless workflow agent node and publishes its resume", async () => {
@@ -5213,11 +5254,24 @@ describe("AgentWorker", () => {
         },
         { label: "missing agent run failed" }
       )
-      expect(failed).toMatchObject({ status: "failed", attempt: 0 })
-      expect(failed.error?.message).toBe("An unexpected internal error occurred.")
+      expect(failed).toMatchObject({
+        status: "failed",
+        attempt: 0,
+        error: {
+          code: "internal.unexpected",
+          retryable: false,
+          message: "An unexpected internal error occurred.",
+          details: { agentId: "removed-agent", runId },
+        },
+      })
       await reporter.flush()
       expect(reports).toHaveLength(1)
-      expect(reports[0]?.error).toBeInstanceOf(AgentWorkerError)
+      expect(reports[0]?.error).toMatchObject({
+        code: "internal.unexpected",
+        retryable: false,
+        message: "[SixbAgentWorker] Unknown agent 'removed-agent'.",
+        details: { agentId: "removed-agent", runId },
+      })
       expect(reports[0]?.context).toMatchObject({
         projectId: PROJECT_ID,
         attempt: 1,
