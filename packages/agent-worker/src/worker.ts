@@ -8,7 +8,7 @@ import {
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { captureSixbFailure } from "@sixb/core/internal/errors"
+import { captureSixbFailure, createSixbError, isSixbError } from "@sixb/core/internal/errors"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
@@ -16,12 +16,7 @@ import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
-import {
-  AgentExecutionLostError,
-  AgentFinalizationError,
-  AgentUsageRecordingError,
-  AgentWorkerError,
-} from "./errors"
+import { AgentExecutionLostError, AgentFinalizationError, AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { finishRunOrThrow } from "./finalize"
 import {
@@ -172,25 +167,36 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       id: runId,
     })
     if (!queuedRun) {
-      throw new AgentWorkerError(`Queued agent run '${runId}' was not found.`)
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Queued agent run '${runId}' was not found.`,
+        { details: { runId } }
+      )
     }
     if (queuedRun.status !== "queued" && queuedRun.status !== "running") {
       return
     }
     const agent = this.host.definitions.agents.getById(queuedRun.agentId)
     if (!agent) {
-      const error = new AgentWorkerError(`Unknown agent '${queuedRun.agentId}'.`)
+      const error = createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Unknown agent '${queuedRun.agentId}'.`,
+        { details: { agentId: queuedRun.agentId, runId } }
+      )
       if (queuedRun.status === "queued") {
         const completedAt = new Date()
         const failed = await context.storage.agents.runs.finishQueued({
           projectId: context.id,
           id: queuedRun.id,
           status: "failed",
-          error: toAgentRunFailure(error, {
-            status: "failed",
-            at: completedAt,
-            run: queuedRun,
-          }),
+          error: toAgentRunFailure(
+            createSixbError(
+              "internal.unexpected",
+              `[SixbAgentWorker] Agent '${queuedRun.agentId}' is not registered.`,
+              { details: { agentId: queuedRun.agentId, runId } }
+            ),
+            { status: "failed", at: completedAt, run: queuedRun }
+          ),
           completedAt,
         })
         this.reportFailure(error, failed, job.attempt)
@@ -205,8 +211,16 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       id: queuedRun.executionId,
     })
     if (!durableExecution) {
-      throw new AgentWorkerError(
-        `Agent run '${runId}' references missing execution '${queuedRun.executionId}'.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Agent run '${runId}' references missing execution '${queuedRun.executionId}'.`,
+        {
+          details: {
+            agentId: queuedRun.agentId,
+            runId,
+            executionId: queuedRun.executionId,
+          },
+        }
       )
     }
     const resolved = await resolveAgentExecutionAuthorization({
@@ -237,7 +251,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     const run = reservation.run
     const executionToken = run.execution?.token
     if (!executionToken) {
-      throw new AgentWorkerError(`Agent run '${run.id}' has no execution token.`)
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Agent run '${run.id}' has no execution token.`,
+        { details: { agentId: run.agentId, runId: run.id } }
+      )
     }
     let environment: AgentExecutionEnvironment | null = null
     let stopOwnershipProjection: (() => void) | undefined
@@ -347,7 +365,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       }
       return { kind: "fail" }
     }
-    if (error instanceof AgentWorkerError) {
+    // Known deterministic failures honor the catalog policy; uncoded dependency failures retain
+    // the worker's bounded pre-start retry path below.
+    if (isSixbError(error) && !error.retryable) {
       return { kind: "fail" }
     }
 
@@ -491,7 +511,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
 
   private requireContext(): AgentWorkerContext {
     if (!this.context) {
-      throw new AgentWorkerError("Agent worker has no agent storage configured.")
+      throw createSixbError(
+        "internal.unexpected",
+        "[SixbAgentWorker] Agent worker has no agent storage configured."
+      )
     }
     return this.context
   }
@@ -616,8 +639,9 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
   const storage = host.storage
   assertAgentWorkerStorage(storage)
   if (!host.sandboxes) {
-    throw new AgentWorkerError(
-      "Agent workers require createSixb({ sandboxes }) for the built-in bash tool."
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require createSixb({ sandboxes }) for the built-in bash tool."
     )
   }
   const agentSkills = loadAgentSkills({
@@ -651,13 +675,22 @@ function assertAgentWorkerStorage(
   storage: AgentWorkerHost["storage"]
 ): asserts storage is AgentWorkerStorage {
   if (!storage.agents) {
-    throw new AgentWorkerError("Agent workers require storage.agents support.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require storage.agents support."
+    )
   }
   if (!storage.auth) {
-    throw new AgentWorkerError("Agent workers require storage.auth support.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require storage.auth support."
+    )
   }
   if (!storage.aiUsage) {
-    throw new AgentWorkerError("Agent workers require storage.aiUsage support.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require storage.aiUsage support."
+    )
   }
 }
 
@@ -712,7 +745,10 @@ function toAgentRunFailure(
 function normalizeRequiredString(value: string | undefined): string {
   const trimmed = value?.trim()
   if (!trimmed) {
-    throw new AgentWorkerError("Agent workers require options.apiBaseUrl.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require options.apiBaseUrl."
+    )
   }
   return trimmed
 }
@@ -735,7 +771,10 @@ function normalizeConcurrency(value: number | undefined): number {
     return DEFAULT_AGENT_CONCURRENCY
   }
   if (!Number.isFinite(value) || value < 1) {
-    throw new AgentWorkerError("Agent worker concurrency must be at least 1.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent worker concurrency must be at least 1."
+    )
   }
   return Math.floor(value)
 }

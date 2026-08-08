@@ -14,12 +14,23 @@ import {
   fromAiSdk,
   validateAndNormalizeAgentToolInput,
 } from "@sixb/core/internal/agents"
+import { createSixbError } from "@sixb/core/internal/errors"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import type { AgentRunUsage, AiModelCallUsageInput } from "@sixb/core/storage"
 import { jsonSchema, type LanguageModelUsage, type Tool, type ToolSet, tool } from "ai"
-import { AgentToolExecutionError, AgentToolOutputError, AgentWorkerError } from "./errors"
+import { AgentToolExecutionError, AgentToolOutputError } from "./errors"
 
 const NEVER_ABORTED_SIGNAL = new AbortController().signal
+
+type AgentErrorDetails =
+  | { readonly agentId: string; readonly runId: string }
+  | { readonly agentId: string; readonly nodeRunId: string }
+  | {
+      readonly agentId: string
+      readonly workflowId: string
+      readonly workflowRunId: string
+      readonly nodeRunId: string
+    }
 
 interface AiSdkToolsFromAgentDefinitionsInput {
   readonly definitions: readonly AgentToolDefinition[]
@@ -27,6 +38,7 @@ interface AiSdkToolsFromAgentDefinitionsInput {
   readonly run: AgentToolRunInfo
   readonly connector: AgentToolRunContext["connector"]
   readonly logger: Logger
+  readonly errorDetails?: AgentErrorDetails
 }
 
 /** Adapt one agent's explicitly selected Sixb definitions to executable AI SDK tools. */
@@ -36,8 +48,15 @@ export function aiSdkToolsFromAgentDefinitions(
   const tools = emptyToolSet()
   for (const definition of input.definitions) {
     if (Object.hasOwn(tools, definition.name)) {
-      throw new AgentWorkerError(
-        `Agent '${input.run.agentId}' has duplicate selected tool name '${definition.name}'.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Agent '${input.run.agentId}' has duplicate selected tool name '${definition.name}'.`,
+        {
+          details: input.errorDetails ?? {
+            agentId: input.run.agentId,
+            runId: input.run.id,
+          },
+        }
       )
     }
     tools[definition.name] = aiSdkToolFromAgentDefinition(definition, input)
@@ -51,7 +70,11 @@ function aiSdkToolFromAgentDefinition(
 ): Tool<Record<string, unknown>, JsonValue> {
   return tool({
     description: definition.description,
-    inputSchema: aiSdkInputSchemaFromAgentDefinition(definition, context.valueTypesById),
+    inputSchema: aiSdkInputSchemaFromAgentDefinition(
+      definition,
+      context.valueTypesById,
+      context.errorDetails ?? { agentId: context.run.agentId, runId: context.run.id }
+    ),
     async execute(input, { abortSignal }) {
       let result: JsonValue
       try {
@@ -76,7 +99,8 @@ function aiSdkToolFromAgentDefinition(
 
 function aiSdkInputSchemaFromAgentDefinition(
   definition: AgentToolDefinition,
-  valueTypesById: ReadonlyMap<string, ValueType>
+  valueTypesById: ReadonlyMap<string, ValueType>,
+  errorDetails: AgentErrorDetails
 ) {
   const inputSchema = schemaRecordToJsonSchema({ shape: definition.input, valueTypesById })
   return jsonSchema<Record<string, unknown>>(inputSchema as Parameters<typeof jsonSchema>[0], {
@@ -97,9 +121,14 @@ function aiSdkInputSchemaFromAgentDefinition(
           error:
             error instanceof Error
               ? error
-              : new AgentWorkerError(`Agent tool '${definition.name}' input validation failed.`, {
-                  cause: error,
-                }),
+              : createSixbError(
+                  "internal.unexpected",
+                  `[SixbAgentWorker] Agent tool '${definition.name}' input validation failed.`,
+                  {
+                    cause: error,
+                    details: errorDetails,
+                  }
+                ),
         }
       }
     },
@@ -135,27 +164,38 @@ type ToolOutcome =
 
 /** Convert final AI SDK steps into Sixb's durable, JSON-validated trace contract. */
 export function agentTraceFromAiSdkSteps(
-  steps: readonly AiSdkTraceStep[]
+  steps: readonly AiSdkTraceStep[],
+  errorDetails?: AgentErrorDetails
 ): readonly AgentMessagePart[] {
-  const parts = steps.flatMap(agentTracePartsFromAiSdkStep)
+  const parts = steps.flatMap((step) => agentTracePartsFromAiSdkStep(step, errorDetails))
   return fromAiSdk({ role: "assistant", parts }).parts
 }
 
-function agentTracePartsFromAiSdkStep(step: AiSdkTraceStep): AgentInboundUiMessagePart[] {
-  const toolOutcomes = indexToolOutcomes(step.content)
+function agentTracePartsFromAiSdkStep(
+  step: AiSdkTraceStep,
+  errorDetails?: AgentErrorDetails
+): AgentInboundUiMessagePart[] {
+  const toolOutcomes = indexToolOutcomes(step.content, errorDetails)
   return [
     { type: "step-start" },
-    ...step.content.flatMap((part) => agentTracePartsFromAiSdkContent(part, toolOutcomes)),
+    ...step.content.flatMap((part) =>
+      agentTracePartsFromAiSdkContent(part, toolOutcomes, errorDetails)
+    ),
   ]
 }
 
 function indexToolOutcomes(
-  content: readonly AiSdkTraceContentPart[]
+  content: readonly AiSdkTraceContentPart[],
+  errorDetails?: AgentErrorDetails
 ): ReadonlyMap<string, ToolOutcome> {
   const outcomes = new Map<string, ToolOutcome>()
   for (const part of content) {
     if (part.type !== "tool-result" && part.type !== "tool-error") continue
-    const toolCallId = requireNonEmptyString(part.toolCallId, `${part.type}.toolCallId`)
+    const toolCallId = requireNonEmptyString(
+      part.toolCallId,
+      `${part.type}.toolCallId`,
+      errorDetails
+    )
     outcomes.set(
       toolCallId,
       part.type === "tool-result"
@@ -168,7 +208,8 @@ function indexToolOutcomes(
 
 function agentTracePartsFromAiSdkContent(
   part: AiSdkTraceContentPart,
-  toolOutcomes: ReadonlyMap<string, ToolOutcome>
+  toolOutcomes: ReadonlyMap<string, ToolOutcome>,
+  errorDetails?: AgentErrorDetails
 ): AgentInboundUiMessagePart[] {
   switch (part.type) {
     case "text":
@@ -176,31 +217,34 @@ function agentTracePartsFromAiSdkContent(
       return [
         {
           type: part.type,
-          text: requireString(part.text, `${part.type}.text`),
+          text: requireString(part.text, `${part.type}.text`, errorDetails),
           ...(part.providerMetadata === undefined
             ? {}
             : { providerMetadata: part.providerMetadata }),
         },
       ]
     case "tool-call":
-      return [toolCallTracePart(part, toolOutcomes)]
+      return [toolCallTracePart(part, toolOutcomes, errorDetails)]
     case "tool-result":
     case "tool-error":
       // Results are folded into their tool-call part, which is Sixb's durable representation.
       return []
     default:
-      throw new AgentWorkerError(
-        `AI SDK trace content '${part.type}' is not supported by the durable agent trace contract.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] AI SDK trace content '${part.type}' is not supported by the durable agent trace contract.`,
+        errorDetails === undefined ? undefined : { details: errorDetails }
       )
   }
 }
 
 function toolCallTracePart(
   part: AiSdkTraceContentPart,
-  outcomes: ReadonlyMap<string, ToolOutcome>
+  outcomes: ReadonlyMap<string, ToolOutcome>,
+  errorDetails?: AgentErrorDetails
 ): AgentInboundUiMessagePart {
-  const toolCallId = requireNonEmptyString(part.toolCallId, "tool-call.toolCallId")
-  const toolName = requireNonEmptyString(part.toolName, "tool-call.toolName")
+  const toolCallId = requireNonEmptyString(part.toolCallId, "tool-call.toolCallId", errorDetails)
+  const toolName = requireNonEmptyString(part.toolName, "tool-call.toolName", errorDetails)
   const outcome =
     outcomes.get(toolCallId) ??
     (part.error === undefined
@@ -218,17 +262,29 @@ function toolCallTracePart(
   }
 }
 
-function requireString(value: unknown, field: string): string {
+function requireString(value: unknown, field: string, errorDetails?: AgentErrorDetails): string {
   if (typeof value !== "string") {
-    throw new AgentWorkerError(`AI SDK trace ${field} must be a string.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] AI SDK trace ${field} must be a string.`,
+      errorDetails === undefined ? undefined : { details: errorDetails }
+    )
   }
   return value
 }
 
-function requireNonEmptyString(value: unknown, field: string): string {
-  const string = requireString(value, field)
+function requireNonEmptyString(
+  value: unknown,
+  field: string,
+  errorDetails?: AgentErrorDetails
+): string {
+  const string = requireString(value, field, errorDetails)
   if (!string) {
-    throw new AgentWorkerError(`AI SDK trace ${field} must not be empty.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] AI SDK trace ${field} must not be empty.`,
+      errorDetails === undefined ? undefined : { details: errorDetails }
+    )
   }
   return string
 }
