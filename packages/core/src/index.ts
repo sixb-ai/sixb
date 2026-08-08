@@ -779,6 +779,7 @@ export type {
   SixbRuleEvaluationFailedContext,
   SixbRunFailedContext,
 } from "./error-reporting/types"
+export type { SixbErrorCode, SixbFailure, SixbFailureCause } from "./errors/types"
 export type {
   OntologyMaintenanceCleanupSnapshot,
   OntologyMaintenanceHandle,
