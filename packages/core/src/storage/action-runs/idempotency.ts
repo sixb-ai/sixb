@@ -37,7 +37,7 @@ export function finishActionRunPhase(
     return input.phase ?? current ?? "validation"
   }
 
-  return input.phase ?? input.error?.phase ?? current ?? "validation"
+  return input.error.phase
 }
 
 export function canRequeueActionRunAfterEnqueueFailure(

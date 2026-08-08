@@ -1,6 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { ActionRunError } from "@sixb/core/storage"
+import { ActionRunError, type ActionRunFailure, type ActionRunPhase } from "@sixb/core/storage"
 import { SqliteActionRunStorage } from "../src/action-run-storage"
+
+const FAILURE_AT = "2026-04-29T10:00:00.000Z"
+
+function actionFailure<TPhase extends ActionRunPhase>(
+  phase: TPhase,
+  message: string
+): ActionRunFailure<TPhase> {
+  return {
+    code: phase === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+    message,
+    retryable: false,
+    at: FAILURE_AT,
+    phase,
+  }
+}
 
 describe("SqliteActionRunStorage", () => {
   let storage: SqliteActionRunStorage
@@ -66,11 +81,7 @@ describe("SqliteActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       status: "failed",
-      error: {
-        name: "FetchError",
-        message: "TeamLeader API returned 503 Service Unavailable",
-        phase: "writeback",
-      },
+      error: actionFailure("writeback", "TeamLeader API returned 503 Service Unavailable"),
     })
 
     await storage.queue({
@@ -102,11 +113,9 @@ describe("SqliteActionRunStorage", () => {
       projectId: "my-app",
       id: "act_1",
     })
-    expect(failed?.error).toEqual({
-      name: "FetchError",
-      message: "TeamLeader API returned 503 Service Unavailable",
-      phase: "writeback",
-    })
+    expect(failed?.error).toEqual(
+      actionFailure("writeback", "TeamLeader API returned 503 Service Unavailable")
+    )
   })
 
   test("rejects duplicates and missing runs", async () => {
@@ -147,9 +156,7 @@ describe("SqliteActionRunStorage", () => {
         id: "missing",
         projectId: "my-app",
         status: "failed",
-        error: {
-          message: "boom",
-        },
+        error: actionFailure("validation", "boom"),
       })
     ).rejects.toBeInstanceOf(ActionRunError)
   })
@@ -171,10 +178,7 @@ describe("SqliteActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       status: "failed",
-      error: {
-        message: "writeback failed",
-        phase: "writeback",
-      },
+      error: actionFailure("writeback", "writeback failed"),
     })
 
     await expect(
@@ -200,12 +204,8 @@ describe("SqliteActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       status: "failed",
-      phase: "enqueue",
       finishedAt: new Date("2026-04-29T10:00:01.000Z"),
-      error: {
-        message: "queue unavailable",
-        phase: "enqueue",
-      },
+      error: actionFailure("enqueue", "queue unavailable"),
     })
 
     const requeued = await storage.queue({
@@ -265,11 +265,7 @@ describe("SqliteActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       status: "failed",
-      error: {
-        name: "SlackError",
-        message: "Slack timed out",
-        phase: "effects",
-      },
+      error: actionFailure("effects", "Slack timed out"),
     })
 
     await storage.finish({
@@ -293,11 +289,7 @@ describe("SqliteActionRunStorage", () => {
       },
       effects: {
         status: "failed",
-        error: {
-          name: "SlackError",
-          message: "Slack timed out",
-          phase: "effects",
-        },
+        error: actionFailure("effects", "Slack timed out"),
       },
     })
   })

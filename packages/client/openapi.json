@@ -16775,11 +16775,59 @@
                           "error": {
                             "type": "object",
                             "properties": {
-                              "name": {
-                                "type": "string"
+                              "code": {
+                                "type": "string",
+                                "enum": ["internal.unexpected", "runtime.cancelled"]
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "causeChain": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "message": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["name", "message"],
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 16
                               },
                               "phase": {
                                 "type": "string",
@@ -16795,7 +16843,7 @@
                                 ]
                               }
                             },
-                            "required": ["message"],
+                            "required": ["code", "message", "retryable", "at", "phase"],
                             "additionalProperties": false
                           }
                         },
@@ -16961,11 +17009,59 @@
                     "error": {
                       "type": "object",
                       "properties": {
-                        "name": {
-                          "type": "string"
+                        "code": {
+                          "type": "string",
+                          "enum": ["internal.unexpected", "runtime.cancelled"]
                         },
                         "message": {
                           "type": "string"
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        },
+                        "at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "details": {
+                          "description": "Any JSON-compatible value.",
+                          "nullable": true,
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "array",
+                              "items": {}
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          ]
+                        },
+                        "causeChain": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["name", "message"],
+                            "additionalProperties": false
+                          },
+                          "maxItems": 16
                         },
                         "phase": {
                           "type": "string",
@@ -16981,7 +17077,7 @@
                           ]
                         }
                       },
-                      "required": ["message"],
+                      "required": ["code", "message", "retryable", "at", "phase"],
                       "additionalProperties": false
                     },
                     "params": {
@@ -16989,85 +17085,221 @@
                       "additionalProperties": {}
                     },
                     "writeback": {
-                      "type": "object",
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "enum": ["succeeded", "failed"]
-                        },
-                        "completedAt": {
-                          "type": "string"
-                        },
-                        "result": {},
-                        "error": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "name": {
-                              "type": "string"
-                            },
-                            "message": {
-                              "type": "string"
-                            },
-                            "phase": {
+                            "status": {
                               "type": "string",
-                              "enum": [
-                                "request",
-                                "enqueue",
-                                "validation",
-                                "writeback",
-                                "edits",
-                                "commit",
-                                "effects",
-                                "cancelled"
+                              "enum": ["succeeded"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "result": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
                               ]
                             }
                           },
-                          "required": ["message"],
+                          "required": ["status", "completedAt", "result"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["failed"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": ["internal.unexpected", "runtime.cancelled"]
+                                },
+                                "message": {
+                                  "type": "string"
+                                },
+                                "retryable": {
+                                  "type": "boolean"
+                                },
+                                "at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "details": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
+                                },
+                                "causeChain": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "message": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name", "message"],
+                                    "additionalProperties": false
+                                  },
+                                  "maxItems": 16
+                                },
+                                "phase": {
+                                  "type": "string",
+                                  "enum": ["writeback"]
+                                }
+                              },
+                              "required": ["code", "message", "retryable", "at", "phase"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": ["status", "completedAt", "error"],
                           "additionalProperties": false
                         }
-                      },
-                      "required": ["status", "completedAt"],
-                      "additionalProperties": false
+                      ]
                     },
                     "effects": {
-                      "type": "object",
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "enum": ["succeeded", "failed"]
-                        },
-                        "completedAt": {
-                          "type": "string"
-                        },
-                        "error": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "name": {
-                              "type": "string"
-                            },
-                            "message": {
-                              "type": "string"
-                            },
-                            "phase": {
+                            "status": {
                               "type": "string",
-                              "enum": [
-                                "request",
-                                "enqueue",
-                                "validation",
-                                "writeback",
-                                "edits",
-                                "commit",
-                                "effects",
-                                "cancelled"
-                              ]
+                              "enum": ["succeeded"]
+                            },
+                            "completedAt": {
+                              "type": "string"
                             }
                           },
-                          "required": ["message"],
+                          "required": ["status", "completedAt"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["failed"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": ["internal.unexpected", "runtime.cancelled"]
+                                },
+                                "message": {
+                                  "type": "string"
+                                },
+                                "retryable": {
+                                  "type": "boolean"
+                                },
+                                "at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "details": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
+                                },
+                                "causeChain": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "message": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name", "message"],
+                                    "additionalProperties": false
+                                  },
+                                  "maxItems": 16
+                                },
+                                "phase": {
+                                  "type": "string",
+                                  "enum": ["effects"]
+                                }
+                              },
+                              "required": ["code", "message", "retryable", "at", "phase"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": ["status", "completedAt", "error"],
                           "additionalProperties": false
                         }
-                      },
-                      "required": ["status", "completedAt"],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "required": [

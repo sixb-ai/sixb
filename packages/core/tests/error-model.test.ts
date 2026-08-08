@@ -11,7 +11,11 @@ import {
   serializeSixbFailure,
   toSixbFailure,
 } from "../src/errors/internal"
-import { SYNC_RUN_FAILURE_CODES } from "../src/storage"
+import { ACTION_RUN_FAILURE_CODES, SYNC_RUN_FAILURE_CODES } from "../src/storage"
+import {
+  parseActionRunFailure,
+  serializeActionRunFailure,
+} from "../src/storage/action-runs/failure"
 
 const AT = new Date("2026-08-05T12:00:00.000Z")
 
@@ -124,6 +128,30 @@ describe("Sixb error model", () => {
     expect(parseSixbFailure(datasetFailure)).toEqual(datasetFailure)
     expect(() => parseSixbFailure(datasetFailure, SYNC_RUN_FAILURE_CODES)).toThrow(
       "code is not allowed by this failure contract"
+    )
+  })
+
+  test("round-trips the typed Action phase without weakening the base failure codec", () => {
+    const failure = {
+      ...toSixbFailure(new Error("writeback failed"), {
+        allowedCodes: ACTION_RUN_FAILURE_CODES,
+        fallbackCode: "internal.unexpected",
+        at: AT,
+        fallbackDetails: { actionId: "send-quote", runId: "act_1" },
+      }),
+      phase: "writeback" as const,
+    }
+    const serialized = serializeActionRunFailure(failure)
+
+    expect(parseActionRunFailure(serialized)).toEqual(failure)
+    expect(() => parseActionRunFailure({ ...failure, phase: "future" })).toThrow(
+      "phase is not a known Action run phase"
+    )
+    expect(() => parseActionRunFailure({ ...failure, code: "dataset.not_found" })).toThrow(
+      "code is not allowed by this failure contract"
+    )
+    expect(() => parseActionRunFailure(failure, "effects")).toThrow(
+      "Stored Action effects failure has phase 'writeback'"
     )
   })
 

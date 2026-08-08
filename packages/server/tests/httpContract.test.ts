@@ -524,8 +524,10 @@ describe("SixbServer HTTP contract", () => {
       status: "failed",
       completedAt: new Date("2026-02-18T09:12:04.000Z"),
       error: {
-        name: "NotificationError",
+        code: "internal.unexpected",
         message: "Notification failed",
+        retryable: false,
+        at: "2026-02-18T09:12:04.000Z",
         phase: "effects",
       },
     })
@@ -2130,8 +2132,10 @@ describe("SixbServer HTTP contract", () => {
           status: "failed",
           completedAt: "2026-02-18T09:12:04.000Z",
           error: {
-            name: "NotificationError",
+            code: "internal.unexpected",
             message: "Notification failed",
+            retryable: false,
+            at: "2026-02-18T09:12:04.000Z",
             phase: "effects",
           },
         },

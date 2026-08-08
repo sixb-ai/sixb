@@ -24,11 +24,31 @@ import {
   type WorkflowDefinition,
   WorkflowValidationError,
 } from "@sixb/core"
-import type { ActionRunStorage, WorkflowRunStorage } from "@sixb/core/storage"
+import type {
+  ActionRunFailure,
+  ActionRunPhase,
+  ActionRunStorage,
+  WorkflowRunStorage,
+} from "@sixb/core/storage"
 import { WorkflowWorkerError } from "../src/errors"
 import { EventsRuntimeWorkflowRunObserver } from "../src/events"
 import { runWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"
 import type { WorkflowRunObserver, WorkflowWorkerContext } from "../src/types"
+
+const ACTION_FAILURE_AT = "2026-05-08T10:00:00.000Z"
+
+function actionFailure<TPhase extends ActionRunPhase>(
+  phase: TPhase,
+  message: string
+): ActionRunFailure<TPhase> {
+  return {
+    code: phase === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+    message,
+    retryable: false,
+    at: ACTION_FAILURE_AT,
+    phase,
+  }
+}
 
 const Transaction = defineObjectType({
   id: "Transaction",
@@ -308,10 +328,7 @@ async function completeRequestedActions(
               projectId: sixb.id,
               id: event.payload.runId,
               status: "failed",
-              error: {
-                message: options.effectsErrorMessage,
-                phase: "effects",
-              },
+              error: actionFailure("effects", options.effectsErrorMessage),
             })
           }
 
@@ -328,10 +345,7 @@ async function completeRequestedActions(
                   id: event.payload.runId,
                   status: "failed",
                   finishedAt: new Date("2026-05-08T10:00:00.000Z"),
-                  error: {
-                    message: errorMessage,
-                    phase: "writeback",
-                  },
+                  error: actionFailure("writeback", errorMessage),
                 }
           )
 
@@ -353,10 +367,7 @@ async function completeRequestedActions(
                       actionId: event.payload.actionId,
                       runId: event.payload.runId,
                       subject: event.payload.subject,
-                      error: {
-                        message: errorMessage,
-                        phase: "writeback",
-                      },
+                      error: actionFailure("writeback", errorMessage),
                       finishedAt: "2026-05-08T10:00:00.000Z",
                     },
                   },

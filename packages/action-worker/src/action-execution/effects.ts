@@ -55,11 +55,17 @@ export async function runEffectsPhase(
     input.updateActiveRun(run)
     return run
   } catch (error) {
-    const failure = toActionRunFailure(error, "effects")
+    const completedAt = new Date()
+    const failure = toActionRunFailure(error, "effects", {
+      actionId: input.action.id,
+      runId: input.run.id,
+      at: completedAt,
+    })
     run = await input.runtime.actionRunsStorage.recordEffects({
       projectId: input.runtime.id,
       id: input.run.id,
       status: "failed",
+      completedAt,
       error: failure,
     })
     input.updateActiveRun(run)
