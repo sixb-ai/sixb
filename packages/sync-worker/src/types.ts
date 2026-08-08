@@ -53,6 +53,7 @@ interface SyncRunResultBase {
   readonly mode: SyncMode
   readonly startedAt: Date
   readonly finishedAt: Date
+  /** Source items successfully consumed. Merge runs count both upserts and deletes. */
   readonly rowsRead: number
 }
 
