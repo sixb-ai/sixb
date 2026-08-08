@@ -15,8 +15,8 @@ export interface SixbFailureCause {
  *
  * Unlike the internal error object, this value can cross storage, HTTP, and process boundaries.
  */
-export interface SixbFailure {
-  readonly code: SixbErrorCode
+export interface SixbFailure<TCode extends SixbErrorCode = SixbErrorCode> {
+  readonly code: TCode
   readonly message: string
   readonly retryable: boolean
   /** ISO-8601 UTC timestamp of the failure occurrence. */

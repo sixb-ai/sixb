@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test"
+import type { SixbFailure, SyncRunFailureCode } from "../src/storage"
 import { InMemorySyncRunStorage, SyncRunError } from "../src/storage"
+
+const FAILURE: SixbFailure<SyncRunFailureCode> = {
+  code: "internal.unexpected",
+  message: "Database connection lost",
+  retryable: false,
+  at: "2026-04-06T15:00:00.420Z",
+  details: { provider: "erp" },
+  causeChain: [{ name: "Error", message: "socket closed" }],
+}
 
 describe("InMemorySyncRunStorage", () => {
   test("starts and finishes a successful run with a checkpoint", async () => {
@@ -142,9 +152,7 @@ describe("InMemorySyncRunStorage", () => {
         id: "missing",
         projectId: "my-app",
         status: "failed",
-        error: {
-          message: "boom",
-        },
+        error: { ...FAILURE, message: "boom" },
       })
     ).rejects.toBeInstanceOf(SyncRunError)
   })
@@ -166,10 +174,7 @@ describe("InMemorySyncRunStorage", () => {
       status: "failed",
       finishedAt: new Date("2026-04-06T15:00:00.420Z"),
       rowsRead: 23,
-      error: {
-        name: "Error",
-        message: "Database connection lost",
-      },
+      error: FAILURE,
     })
 
     await storage.start({
@@ -232,10 +237,7 @@ describe("InMemorySyncRunStorage", () => {
 
     expect(failed?.status).toBe("failed")
     expect(failed?.rowsRead).toBe(23)
-    expect(failed?.error).toEqual({
-      name: "Error",
-      message: "Database connection lost",
-    })
+    expect(failed?.error).toEqual(FAILURE)
   })
 
   test("lists the latest run for multiple sync ids", async () => {

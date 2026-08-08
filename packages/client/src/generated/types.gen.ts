@@ -2150,8 +2150,26 @@ export type ListSyncsResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        causeChain?: Array<{
+          name: string
+          message: string
+        }>
       }
     } | null
   }>
@@ -2235,8 +2253,26 @@ export type GetSyncResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        causeChain?: Array<{
+          name: string
+          message: string
+        }>
       }
     } | null
   }
@@ -2299,8 +2335,26 @@ export type ListSyncRunsResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        causeChain?: Array<{
+          name: string
+          message: string
+        }>
       }
     }>
     hasMore: boolean

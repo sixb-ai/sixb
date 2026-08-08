@@ -171,7 +171,7 @@ export type {
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
-  SyncRunFailure,
+  SyncRunFailureCode,
   SyncRunRecord,
   SyncRunStatus,
   SyncRunStorage,

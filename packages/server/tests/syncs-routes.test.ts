@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import type { OntologySource, Sixb } from "@sixb/core"
 import { col, defineConnector, defineDataset, defineSync } from "@sixb/core"
-import type { ListLatestSyncRunsInput, SyncRunStorage } from "@sixb/core/storage"
+import type {
+  ListLatestSyncRunsInput,
+  SixbFailure,
+  SyncRunFailureCode,
+  SyncRunStorage,
+} from "@sixb/core/storage"
 import { Elysia } from "elysia"
 import { registerSyncRoutes } from "../src/routes/syncs"
 
@@ -30,6 +35,15 @@ const syncs = [
     .read(() => [])
     .intoDataset(customersDataset),
 ]
+
+const FAILURE: SixbFailure<SyncRunFailureCode> = {
+  code: "internal.unexpected",
+  message: "Provider offline",
+  retryable: false,
+  at: "2026-04-06T16:00:01.000Z",
+  details: { provider: "erp" },
+  causeChain: [{ name: "Error", message: "socket closed" }],
+}
 
 function createSixbStub(syncRuns: Partial<SyncRunStorage>): Sixb<readonly OntologySource[]> {
   return {
@@ -66,8 +80,10 @@ describe("sync routes", () => {
                 syncId: "sync-customers",
                 datasetId: "raw.crm.customers",
                 mode: "append",
-                status: "running",
+                status: "failed",
                 startedAt: new Date("2026-04-06T16:00:00.000Z"),
+                finishedAt: new Date("2026-04-06T16:00:01.000Z"),
+                error: FAILURE,
               },
             ],
           }
@@ -80,7 +96,12 @@ describe("sync routes", () => {
 
     const body = (await response.json()) as Array<{
       id: string
-      latestRun: { id: string; syncId: string; status: string } | null
+      latestRun: {
+        id: string
+        syncId: string
+        status: string
+        error?: SixbFailure<SyncRunFailureCode>
+      } | null
     }>
 
     expect(bulkCalls).toBe(1)
@@ -90,5 +111,6 @@ describe("sync routes", () => {
       ["sync-orders", null],
       ["sync-customers", "run-customers"],
     ])
+    expect(body[1]?.latestRun).toMatchObject({ status: "failed", error: FAILURE })
   })
 })

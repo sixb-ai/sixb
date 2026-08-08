@@ -4,7 +4,14 @@ import { resolve } from "node:path"
 import * as publicCore from "../src"
 import { SIXB_ERROR_DEFINITIONS } from "../src/errors/catalog"
 import * as internalErrorModel from "../src/errors/internal"
-import { createSixbError, isSixbError, toSixbFailure } from "../src/errors/internal"
+import {
+  createSixbError,
+  isSixbError,
+  parseSixbFailure,
+  serializeSixbFailure,
+  toSixbFailure,
+} from "../src/errors/internal"
+import { SYNC_RUN_FAILURE_CODES } from "../src/storage"
 
 const AT = new Date("2026-08-05T12:00:00.000Z")
 
@@ -76,6 +83,48 @@ describe("Sixb error model", () => {
       details: { provider: "example" },
       causeChain: [{ name: "Error", message: "connection refused" }],
     })
+  })
+
+  test("round-trips and validates failure records at storage boundaries", () => {
+    const failure = toSixbFailure(new Error("provider offline"), {
+      at: AT,
+      fallbackDetails: { provider: "example" },
+    })
+    const serialized = serializeSixbFailure(failure)
+
+    expect(parseSixbFailure(serialized)).toEqual(failure)
+    expect(parseSixbFailure(JSON.parse(serialized))).toEqual(failure)
+    expect(() => parseSixbFailure({ ...failure, code: "future.unknown" })).toThrow(
+      "code is not a known Sixb error code"
+    )
+    expect(() => parseSixbFailure({ ...failure, retryable: true })).toThrow(
+      "retryable does not match the error code policy"
+    )
+    expect(() => parseSixbFailure({ ...failure, at: "2026-08-05" })).toThrow(
+      "at is not a canonical ISO-8601 timestamp"
+    )
+  })
+
+  test("constrains a failure to the codes declared by its boundary", () => {
+    const datasetError = createSixbError("dataset.not_found", "Dataset is missing")
+
+    expect(
+      toSixbFailure(datasetError, {
+        allowedCodes: SYNC_RUN_FAILURE_CODES,
+        fallbackCode: "internal.unexpected",
+        fallbackDetails: { syncId: "sync-orders" },
+        at: AT,
+      })
+    ).toMatchObject({
+      code: "internal.unexpected",
+      details: { syncId: "sync-orders" },
+    })
+
+    const datasetFailure = toSixbFailure(datasetError, { at: AT })
+    expect(parseSixbFailure(datasetFailure)).toEqual(datasetFailure)
+    expect(() => parseSixbFailure(datasetFailure, SYNC_RUN_FAILURE_CODES)).toThrow(
+      "code is not allowed by this failure contract"
+    )
   })
 
   test("bounds hostile cause graphs and rejects non-serializable details", () => {

@@ -1,5 +1,14 @@
+import {
+  type SixbFailure,
+  SYNC_RUN_FAILURE_CODES,
+  type SyncRunFailureCode,
+} from "@sixb/core/storage"
 import { z } from "zod"
+import { sixbFailureSchema } from "./common"
 import { DatasetDefinitionSchema } from "./datasets"
+
+const SyncRunFailureSchema: z.ZodType<SixbFailure<SyncRunFailureCode>> =
+  sixbFailureSchema(SYNC_RUN_FAILURE_CODES)
 
 export const SyncParamsSchema = z.object({
   syncId: z.string().min(1),
@@ -46,12 +55,7 @@ export const SyncRunSchema = z.object({
     .optional(),
   expectedLatestVersionId: z.string().optional(),
   commitMessage: z.string().optional(),
-  error: z
-    .object({
-      name: z.string().optional(),
-      message: z.string(),
-    })
-    .optional(),
+  error: SyncRunFailureSchema.optional(),
 })
 
 export const SyncSchema = z.object({

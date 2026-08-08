@@ -66,8 +66,7 @@ CREATE TABLE sync_runs (
   output_version_id TEXT,
   expected_latest_version_id TEXT,
   commit_message TEXT,
-  error_name TEXT,
-  error_message TEXT,
+  error TEXT CHECK (error IS NULL OR json_valid(error)),
   checkpoint TEXT,
   PRIMARY KEY (project_id, id)
 );

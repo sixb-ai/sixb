@@ -1,9 +1,14 @@
-import { cloneJsonValue, type ReadonlyJsonValue } from "../json"
-import { SIXB_ERROR_DEFINITIONS } from "./catalog"
+import { cloneJsonValue, isJsonValue, isPlainRecord, type ReadonlyJsonValue } from "../json"
+import { SIXB_ERROR_CODES, SIXB_ERROR_DEFINITIONS } from "./catalog"
 import type { SixbErrorCode, SixbFailure, SixbFailureCause } from "./types"
 
 const DEFAULT_ERROR_CODE: SixbErrorCode = "internal.unexpected"
-const MAX_CAUSE_CHAIN_DEPTH = 16
+export const SIXB_FAILURE_MAX_CAUSE_CHAIN_DEPTH = 16
+const SIXB_ERROR_CODE_SET: ReadonlySet<string> = new Set(SIXB_ERROR_CODES)
+
+type SixbErrorCodeTuple = readonly [SixbErrorCode, ...SixbErrorCode[]]
+
+export { SIXB_ERROR_CODES }
 
 export interface SixbErrorOptions {
   readonly cause?: unknown
@@ -25,6 +30,14 @@ export interface ToSixbFailureOptions {
   readonly fallbackCode?: SixbErrorCode
   /** Details used only when `error` was not created by `createSixbError`. */
   readonly fallbackDetails?: ReadonlyJsonValue
+}
+
+export interface ToScopedSixbFailureOptions<TCodes extends SixbErrorCodeTuple>
+  extends ToSixbFailureOptions {
+  /** Codes this boundary is allowed to expose. */
+  readonly allowedCodes: TCodes
+  /** Used when the thrown value is uncoded or its code is outside this boundary's contract. */
+  readonly fallbackCode: TCodes[number]
 }
 
 /**
@@ -71,10 +84,20 @@ export function isSixbError(error: unknown): error is SixbCodedError {
  * New code should throw `createSixbError(...)`. The fallback fields are the migration bridge for
  * existing errors until their primitive receives its vertical refactor.
  */
-export function toSixbFailure(error: unknown, options: ToSixbFailureOptions = {}): SixbFailure {
+export function toSixbFailure<const TCodes extends SixbErrorCodeTuple>(
+  error: unknown,
+  options: ToScopedSixbFailureOptions<TCodes>
+): SixbFailure<TCodes[number]>
+export function toSixbFailure(error: unknown, options?: ToSixbFailureOptions): SixbFailure
+export function toSixbFailure(
+  error: unknown,
+  options: ToSixbFailureOptions | ToScopedSixbFailureOptions<SixbErrorCodeTuple> = {}
+): SixbFailure {
   const codedError = isSixbError(error) ? error : undefined
-  const code = codedError?.code ?? options.fallbackCode ?? DEFAULT_ERROR_CODE
-  const details = codedError ? codedError.details : options.fallbackDetails
+  const allowedCodes = "allowedCodes" in options ? new Set(options.allowedCodes) : undefined
+  const useCodedError = codedError && (!allowedCodes || allowedCodes.has(codedError.code))
+  const code = useCodedError ? codedError.code : (options.fallbackCode ?? DEFAULT_ERROR_CODE)
+  const details = useCodedError ? codedError.details : options.fallbackDetails
   const causeChain = collectCauseChain(error)
 
   return {
@@ -87,13 +110,120 @@ export function toSixbFailure(error: unknown, options: ToSixbFailureOptions = {}
   }
 }
 
+/** Serializes a validated failure for durable storage. */
+export function serializeSixbFailure<const TCodes extends SixbErrorCodeTuple>(
+  failure: SixbFailure<TCodes[number]>,
+  allowedCodes: TCodes
+): string
+export function serializeSixbFailure(failure: SixbFailure): string
+export function serializeSixbFailure(
+  failure: SixbFailure,
+  allowedCodes?: SixbErrorCodeTuple
+): string {
+  const parsed = allowedCodes ? parseSixbFailure(failure, allowedCodes) : parseSixbFailure(failure)
+  return JSON.stringify(parsed)
+}
+
+/**
+ * Validates and detaches a failure read from a storage boundary.
+ *
+ * Strings are accepted for SQLite; PostgreSQL adapters can pass their decoded JSON value directly.
+ */
+export function parseSixbFailure<const TCodes extends SixbErrorCodeTuple>(
+  value: unknown,
+  allowedCodes: TCodes
+): SixbFailure<TCodes[number]>
+export function parseSixbFailure(value: unknown): SixbFailure
+export function parseSixbFailure(
+  value: unknown,
+  allowedCodes: SixbErrorCodeTuple = SIXB_ERROR_CODES
+): SixbFailure {
+  const candidate = parseStoredFailureValue(value)
+  if (!isPlainRecord(candidate)) {
+    throw invalidStoredFailure("expected a JSON object")
+  }
+
+  const { code, message, retryable, at, details, causeChain } = candidate
+  if (typeof code !== "string" || !SIXB_ERROR_CODE_SET.has(code)) {
+    throw invalidStoredFailure("code is not a known Sixb error code")
+  }
+  if (!(allowedCodes as readonly string[]).includes(code)) {
+    throw invalidStoredFailure("code is not allowed by this failure contract")
+  }
+  if (typeof message !== "string") {
+    throw invalidStoredFailure("message is not a string")
+  }
+  if (typeof retryable !== "boolean") {
+    throw invalidStoredFailure("retryable is not a boolean")
+  }
+  if (retryable !== SIXB_ERROR_DEFINITIONS[code as SixbErrorCode].retryable) {
+    throw invalidStoredFailure("retryable does not match the error code policy")
+  }
+  if (typeof at !== "string" || !isCanonicalIsoTimestamp(at)) {
+    throw invalidStoredFailure("at is not a canonical ISO-8601 timestamp")
+  }
+  if (details !== undefined && !isJsonValue(details)) {
+    throw invalidStoredFailure("details is not a JSON value")
+  }
+
+  const parsedCauseChain = parseFailureCauseChain(causeChain)
+  return {
+    code: code as SixbErrorCode,
+    message,
+    retryable,
+    at,
+    ...(details === undefined
+      ? {}
+      : { details: cloneJsonValue(details, "Stored Sixb failure details") }),
+    ...(parsedCauseChain === undefined ? {} : { causeChain: parsedCauseChain }),
+  }
+}
+
+function parseStoredFailureValue(value: unknown): unknown {
+  if (typeof value !== "string") return value
+  try {
+    return JSON.parse(value) as unknown
+  } catch {
+    throw invalidStoredFailure("value is not valid JSON")
+  }
+}
+
+function parseFailureCauseChain(value: unknown): readonly SixbFailureCause[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > SIXB_FAILURE_MAX_CAUSE_CHAIN_DEPTH) {
+    throw invalidStoredFailure(
+      `causeChain must contain at most ${SIXB_FAILURE_MAX_CAUSE_CHAIN_DEPTH} entries`
+    )
+  }
+
+  return value.map((entry, index) => {
+    if (
+      !isPlainRecord(entry) ||
+      typeof entry.name !== "string" ||
+      typeof entry.message !== "string"
+    ) {
+      throw invalidStoredFailure(`causeChain[${index}] must contain string name and message fields`)
+    }
+    return { name: entry.name, message: entry.message }
+  })
+}
+
+function isCanonicalIsoTimestamp(value: string): boolean {
+  const timestamp = new Date(value)
+  return Number.isFinite(timestamp.getTime()) && timestamp.toISOString() === value
+}
+
+function invalidStoredFailure(reason: string): Error {
+  return new Error(`[Sixb] Stored failure is invalid: ${reason}.`)
+}
+
 function collectCauseChain(error: unknown): readonly SixbFailureCause[] {
   const causes: SixbFailureCause[] = []
   const seen = new Set<object>()
   if (isObjectLike(error)) seen.add(error)
 
   let cause = readCause(error)
-  while (cause !== undefined && causes.length < MAX_CAUSE_CHAIN_DEPTH) {
+  while (cause !== undefined && causes.length < SIXB_FAILURE_MAX_CAUSE_CHAIN_DEPTH) {
     if (isObjectLike(cause)) {
       if (seen.has(cause)) break
       seen.add(cause)

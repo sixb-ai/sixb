@@ -18,4 +18,15 @@ export const SIXB_ERROR_DEFINITIONS = {
   "internal.unexpected": {
     retryable: false,
   },
+  "runtime.cancelled": {
+    retryable: false,
+  },
 } as const satisfies Readonly<Record<string, SixbErrorDefinition>>
+
+type CatalogErrorCode = keyof typeof SIXB_ERROR_DEFINITIONS
+
+/** Runtime counterpart of `SixbErrorCode` for internal schema boundaries. */
+export const SIXB_ERROR_CODES = Object.freeze(Object.keys(SIXB_ERROR_DEFINITIONS)) as readonly [
+  CatalogErrorCode,
+  ...CatalogErrorCode[],
+]

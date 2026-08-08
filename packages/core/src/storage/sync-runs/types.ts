@@ -1,12 +1,16 @@
+import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonValue } from "../../json"
 import type { DatasetVersionRef, DatasetWriteMode } from "../../lake-storage"
 
 export type SyncRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 
-export interface SyncRunFailure {
-  readonly name?: string // Example: "AbortError"
-  readonly message: string // Example: "Sync cancelled by request"
-}
+/** Error codes a sync run can persist and expose through its public contract. */
+export const SYNC_RUN_FAILURE_CODES = [
+  "internal.unexpected",
+  "runtime.cancelled",
+] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
+
+export type SyncRunFailureCode = (typeof SYNC_RUN_FAILURE_CODES)[number]
 
 export interface SyncRunRecord {
   readonly id: string
@@ -21,7 +25,7 @@ export interface SyncRunRecord {
   readonly output?: DatasetVersionRef
   readonly expectedLatestVersionId?: string
   readonly commitMessage?: string
-  readonly error?: SyncRunFailure
+  readonly error?: SixbFailure<SyncRunFailureCode>
   readonly checkpoint?: JsonValue
 }
 
@@ -53,7 +57,7 @@ export type FinishSyncRunInput =
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
       readonly rowsRead?: number
-      readonly error?: SyncRunFailure
+      readonly error?: SixbFailure<SyncRunFailureCode>
     }
 
 export interface ListSyncRunsInput {
