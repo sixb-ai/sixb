@@ -23,6 +23,7 @@
       "@sixb/client/models": ["./packages/client/src/models.ts"],
       "@sixb/client/query": ["./packages/client/src/query.ts"],
       "create-sixb/scaffold": ["./packages/create-sixb/src/scaffold.ts"],
+      "@sixb/connector-ace-iot": ["./connectors/ace-iot/src/index.ts"],
       "@sixb/connector-companycam": ["./connectors/companycam/src/index.ts"],
       "@sixb/connector-exa": ["./connectors/exa/src/index.ts"],
       "@sixb/connector-exa/agent-tools": ["./connectors/exa/src/agent-tools.ts"],

@@ -184,9 +184,10 @@ describe("createCustomApp.start", () => {
 
     try {
       // Regression: an object id with percent-encoded slashes (`%2F`) and a dotted
-      // segment (the IP `10.75.35.6`) lives inside a single path segment. On a hard
+      // segment (the IP `10.0.0.10`) lives inside a single path segment. On a hard
       // refresh this must serve the SPA shell, not 404 as a "missing asset".
-      const deepRoute = "/point/point%3Asetty%3Asetty%2Fsetty%2F10.75.35.6-708112%2Fdevice%2F708112"
+      const deepRoute =
+        "/point/point%3Aacme%3Aacme%2Facme_north_campus%2F10.0.0.10-100%2Fdevice%2F100"
       const response = await fetch(`http://127.0.0.1:${port}${deepRoute}`)
       expect(response.status).toBe(200)
       expect(await response.text()).toContain('<div id="root"></div>')
