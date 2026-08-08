@@ -35,6 +35,7 @@ const dataset = defineDataset("contract.merge.invoices", {
 
 const beginInput: BeginDatasetMergeInput = {
   dataset,
+  expectedLatestVersionId: "ver_1",
   producer: { kind: "sync", id: "sync-invoices", runId: "run_1" },
   inputs: [{ datasetId: "source.invoices", versionId: "ver_1" }],
 }
@@ -80,8 +81,10 @@ const _requiredMerge: Promise<LakeMergeSession> = baseStorage.beginMerge(beginIn
 mergeSession.commit({ expectedLatestVersionId: "ver_1" })
 // @ts-expect-error merge is not an ordinary dataset write mode
 const _mergeWriteMode: DatasetWriteMode = "merge"
-// @ts-expect-error user-facing merge syncs are deferred to a later PR
 defineSync("sync-invoices-merge", { mode: "merge" })
+  .from({} as never)
+  .read(() => [change.delete({ id: "inv_1" })])
+  .intoDataset(dataset)
 definePipelineStep("merge-invoices").inputs({ invoices: dataset }).output(dataset, {
   // @ts-expect-error merge pipeline outputs are outside the V1 scope
   mode: "merge",

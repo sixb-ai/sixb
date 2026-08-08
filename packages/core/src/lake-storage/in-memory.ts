@@ -314,6 +314,14 @@ export class InMemoryLakeStorage implements LakeStorage {
     }
 
     const latestVersion = await this.getLatestVersion(definition.id)
+    if (
+      input.expectedLatestVersionId !== undefined &&
+      latestVersion?.versionId !== input.expectedLatestVersionId
+    ) {
+      throw new LakeStorageError(
+        `[LakeStorage] Optimistic merge start failed for dataset '${definition.id}': expected latest version '${input.expectedLatestVersionId}', found '${latestVersion?.versionId ?? "none"}'`
+      )
+    }
     return new InMemoryLakeMergeSession(
       this,
       {

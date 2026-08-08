@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  change,
   col,
   defineConnector,
   defineDataset,
@@ -463,6 +464,69 @@ describe("SyncWorker", () => {
     expect(payload.status).toBe("succeeded")
     expect(payload.datasetId).toBe("raw.erp.orders")
     expect(payload.versionId).toBe(datasetPayload.versionId)
+  })
+
+  test("emits a dataset event for a created merge but not for a later no-op", async () => {
+    const dataset = defineDataset("raw.erp.keyed-orders", {
+      schema: [col("orderId", "string"), col("status", "string")],
+      primaryKey: "orderId",
+    })
+    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
+      .checkpoint<{ cursor: string }>()
+      .from(erpDb)
+      .read((_client, context) => {
+        context.setCheckpoint({ cursor: context.checkpoint ? "cursor-2" : "cursor-1" })
+        return [change.upsert({ orderId: "ord_1", status: "open" })]
+      })
+      .intoDataset(dataset)
+    const sixb = createSixbForSync(sync)
+    const worker = new SyncWorker(sixb)
+
+    await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
+      jobs: [
+        {
+          type: "sync.run.requested",
+          payload: { syncId: sync.id, runId: "run-merge-created" },
+        },
+      ],
+    })
+    await worker.start()
+    const createdRun = await waitFor(
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-merge-created" }),
+      (run) => run?.status === "succeeded"
+    )
+
+    await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
+      jobs: [
+        {
+          type: "sync.run.requested",
+          payload: { syncId: sync.id, runId: "run-merge-noop" },
+        },
+      ],
+    })
+    const noOpRun = await waitFor(
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-merge-noop" }),
+      (run) => run?.status === "succeeded"
+    )
+    await Bun.sleep(50)
+    await worker.stop()
+
+    expect(createdRun?.checkpoint).toEqual({ cursor: "cursor-1" })
+    expect(noOpRun?.checkpoint).toEqual({ cursor: "cursor-2" })
+    expect(noOpRun?.output?.versionId).toBe(createdRun?.output?.versionId)
+
+    const events = await sixb.events.read({
+      types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
+    })
+    expect(events.map((event) => event.type)).toEqual([
+      "sync.run.started",
+      "dataset.version.committed",
+      "sync.run.finished",
+      "sync.run.started",
+      "sync.run.finished",
+    ])
   })
 
   test("does not emit a dataset event when storage reuses an existing version", async () => {

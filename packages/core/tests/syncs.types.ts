@@ -1,5 +1,6 @@
 import {
   type BlobInfo,
+  change,
   col,
   defineConnector,
   defineDataset,
@@ -21,6 +22,11 @@ const erpDb = defineConnector("erpDb", {
 
 const rawOrdersDataset = defineDataset("raw.erp.orders", {
   schema: [col("id", "int64")],
+})
+
+const keyedOrdersDataset = defineDataset("raw.erp.keyed-orders", {
+  schema: [col("id", "string"), col("status", "string")],
+  primaryKey: "id",
 })
 
 const syncOrders = defineSync("sync-orders")
@@ -73,10 +79,36 @@ const syncOrdersWithCheckpoint = defineSync("sync-orders-with-checkpoint")
   })
   .intoDataset(rawOrdersDataset)
 
-const _syncDefinitions: SyncDefinition[] = [syncOrders, syncOrdersWithCheckpoint]
+const mergeOrders = defineSync("merge-orders", { mode: "merge" })
+  .checkpoint<{ cursor: string }>()
+  .from(erpDb)
+  .read(async function* (_db, context) {
+    const _checkpoint: { cursor: string } | undefined = context.checkpoint
+    yield change.upsert({ id: "ord_1", status: "open" })
+    yield change.delete({ id: "ord_2" })
+    context.setCheckpoint({ cursor: "next" })
+  })
+  .intoDataset(keyedOrdersDataset)
+
+const _mergeMode: "merge" = mergeOrders.config.mode
+
+defineSync("invalid-merge-row", { mode: "merge" })
+  .from(erpDb)
+  // @ts-expect-error merge readers must return MergeChange values, not raw rows
+  .read(() => [{ id: "ord_1", status: "open" }])
+  .intoDataset(keyedOrdersDataset)
+
+defineSync("invalid-merge-target", { mode: "merge" })
+  .from(erpDb)
+  .read(() => [change.delete({ id: "ord_1" })])
+  // @ts-expect-error merge syncs require a dataset with a primary key
+  .intoDataset(rawOrdersDataset)
+
+const _syncDefinitions: SyncDefinition[] = [syncOrders, syncOrdersWithCheckpoint, mergeOrders]
 const _connector = syncOrders.connector
 const _checkpointConnector = syncOrdersWithCheckpoint.connector
 
 void _syncDefinitions
 void _connector
 void _checkpointConnector
+void _mergeMode

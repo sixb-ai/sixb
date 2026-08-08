@@ -15,6 +15,7 @@ import {
 } from "@sixb/core/storage"
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
 import workflowRunOutputSql from "./migrations/002-workflow-run-output.sql" with { type: "text" }
+import mergeSyncRunsSql from "./migrations/003-merge-sync-runs.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -270,6 +271,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
   steps: [
     pgSql("001-initial-schema", initialSchemaSql),
     pgSql("002-workflow-run-output", workflowRunOutputSql),
+    pgSql("003-merge-sync-runs", mergeSyncRunsSql),
   ],
 })
 

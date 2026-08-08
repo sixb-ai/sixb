@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { OntologySource, Sixb } from "@sixb/core"
-import { col, defineConnector, defineDataset, defineSync } from "@sixb/core"
+import { change, col, defineConnector, defineDataset, defineSync } from "@sixb/core"
 import type { ListLatestSyncRunsInput, SyncRunStorage } from "@sixb/core/storage"
 import { Elysia } from "elysia"
 import { registerSyncRoutes } from "../src/routes/syncs"
@@ -20,6 +20,11 @@ const customersDataset = defineDataset("raw.crm.customers", {
   schema: [col("customerId", "string")],
 })
 
+const invoicesDataset = defineDataset("raw.erp.invoices", {
+  schema: [col("invoiceId", "string")],
+  primaryKey: "invoiceId",
+})
+
 const syncs = [
   defineSync("sync-orders")
     .from(connector)
@@ -29,6 +34,10 @@ const syncs = [
     .from(connector)
     .read(() => [])
     .intoDataset(customersDataset),
+  defineSync("sync-invoices", { mode: "merge" })
+    .from(connector)
+    .read(() => change.delete({ invoiceId: "missing" }))
+    .intoDataset(invoicesDataset),
 ]
 
 function createSixbStub(syncRuns: Partial<SyncRunStorage>): Sixb<readonly OntologySource[]> {
@@ -61,11 +70,11 @@ describe("sync routes", () => {
           return {
             runs: [
               {
-                id: "run-customers",
+                id: "run-invoices",
                 projectId: "my-app",
-                syncId: "sync-customers",
-                datasetId: "raw.crm.customers",
-                mode: "append",
+                syncId: "sync-invoices",
+                datasetId: "raw.erp.invoices",
+                mode: "merge",
                 status: "running",
                 startedAt: new Date("2026-04-06T16:00:00.000Z"),
               },
@@ -85,10 +94,11 @@ describe("sync routes", () => {
 
     expect(bulkCalls).toBe(1)
     expect(listCalls).toBe(0)
-    expect(requestedSyncIds).toEqual([["sync-orders", "sync-customers"]])
+    expect(requestedSyncIds).toEqual([["sync-orders", "sync-customers", "sync-invoices"]])
     expect(body.map((sync) => [sync.id, sync.latestRun?.id ?? null])).toEqual([
       ["sync-orders", null],
-      ["sync-customers", "run-customers"],
+      ["sync-customers", null],
+      ["sync-invoices", "run-invoices"],
     ])
   })
 })

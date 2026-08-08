@@ -369,6 +369,14 @@ export class LocalLakeStorage implements LakeStorage {
     }
 
     const latestVersion = await this.getLatestVersion(definition.id)
+    if (
+      input.expectedLatestVersionId !== undefined &&
+      latestVersion?.versionId !== input.expectedLatestVersionId
+    ) {
+      throw new LakeStorageError(
+        `[LakeLocal] Optimistic merge start failed for dataset '${definition.id}': expected latest version '${input.expectedLatestVersionId}', found '${latestVersion?.versionId ?? "none"}'`
+      )
+    }
     await this.ensureBaseDirs()
 
     const sessionDir = join(this.tempRootPath(), `session-${randomUUID()}`)

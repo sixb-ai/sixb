@@ -104,6 +104,27 @@ describe("PgSyncRunStorage", () => {
       rowsRead: 0,
     })
     expect(emptySnapshotFinished.output).toBeUndefined()
+
+    const mergeStarted = await storage.syncRuns.start({
+      id: "run-merge-noop",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "merge",
+    })
+    const mergeFinished = await storage.syncRuns.finish({
+      id: mergeStarted.id,
+      projectId: mergeStarted.projectId,
+      status: "succeeded",
+      rowsRead: 1,
+      checkpoint: { cursor: "cursor-merge" },
+    })
+    expect(mergeFinished).toMatchObject({
+      mode: "merge",
+      rowsRead: 1,
+      checkpoint: { cursor: "cursor-merge" },
+    })
+    expect(mergeFinished.output).toBeUndefined()
   })
 
   test("stores failures and supports filtered paging", async () => {
