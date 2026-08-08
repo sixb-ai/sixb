@@ -24,6 +24,9 @@ export const sixb = await createSixb({
 })
 ```
 
+When `onError` is omitted, Sixb reports the same failures to `console.error`; they are never silently dropped.
+Configuring `onError` replaces that default console destination, so each failure is reported once.
+
 The callback covers failed action, agent, pipeline, projection, sync, workflow, and webhook runs,
 plus failed ontology-outbox publication attempts and Rules evaluation passes.
 It does not run for successes, cancellations, retries that remain recoverable, workflow nodes or
