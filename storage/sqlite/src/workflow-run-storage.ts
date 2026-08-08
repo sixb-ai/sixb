@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type { Principal, WorkflowRunSource } from "@sixb/core"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowAgentNodeRunInput,
@@ -33,7 +34,7 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { WorkflowRunError } from "@sixb/core/storage"
+import { WORKFLOW_RUN_FAILURE_CODES, WorkflowRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
@@ -301,7 +302,9 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
           input.status,
           (input.finishedAt ?? new Date()).toISOString(),
           input.status === "succeeded" ? serializeRecord(input.output) : null,
-          input.status === "succeeded" ? null : (input.error ?? null),
+          input.status === "succeeded" || input.error === undefined
+            ? null
+            : serializeSixbFailure(input.error, WORKFLOW_RUN_FAILURE_CODES),
           input.projectId,
           input.id
         )
@@ -835,7 +838,9 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
           input.status,
           (input.finishedAt ?? new Date()).toISOString(),
           input.status === "succeeded" && input.output ? serializeRecord(input.output) : null,
-          input.status === "succeeded" ? null : (input.error ?? null),
+          input.status === "succeeded" || input.error === undefined
+            ? null
+            : serializeSixbFailure(input.error, WORKFLOW_RUN_FAILURE_CODES),
           input.projectId,
           input.id
         )
@@ -981,7 +986,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     queuedAt: row.queued_at ? new Date(row.queued_at) : undefined,
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
-    error: row.error ?? undefined,
+    error: row.error === null ? undefined : parseSixbFailure(row.error, WORKFLOW_RUN_FAILURE_CODES),
     source: row.source ? (JSON.parse(row.source) as WorkflowRunSource) : undefined,
     requestedByPrincipal: {
       type: row.requested_by_principal_type,
@@ -1014,7 +1019,7 @@ function rowToWorkflowNodeRunRecord(row: WorkflowNodeRunDatabaseRow): WorkflowNo
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     output: row.output ? parseRecord(row.output) : undefined,
-    error: row.error ?? undefined,
+    error: row.error === null ? undefined : parseSixbFailure(row.error, WORKFLOW_RUN_FAILURE_CODES),
   }
 }
 

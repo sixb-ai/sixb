@@ -1,4 +1,5 @@
 import type { ValueType, WorkflowDefinition } from "@sixb/core"
+import { toSixbFailure } from "@sixb/core/internal/errors"
 import { resolveLogsRuntime } from "@sixb/core/internal/logging"
 import type {
   WorkflowAgentNodeDefinition,
@@ -21,8 +22,9 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
+import { WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { WorkflowWorkerError } from "../errors"
-import { statusForFailure, throwIfAborted, toWorkflowRunError } from "../normalize"
+import { statusForFailure, throwIfAborted } from "../normalize"
 import { noopWorkflowRunObserver, WorkflowRunRecorder } from "../recorder"
 import type {
   RunWorkflowJobInput,
@@ -553,12 +555,23 @@ export class WorkflowRunSession {
       return
     }
 
+    const at = new Date()
+    const activeNodeRunId = this.dependencies.recorder.activeNodeId
     await this.dependencies.recorder.finishActiveNodeAfterError({
       status,
-      error: toWorkflowRunError(error),
+      error: toSixbFailure(error, {
+        allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
+        fallbackCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+        at,
+        fallbackDetails: {
+          workflowId: this.dependencies.workflow.id,
+          workflowRunId: this.dependencies.job.id,
+          ...(activeNodeRunId ? { nodeRunId: activeNodeRunId } : {}),
+        },
+      }),
     })
 
-    await this.finishWorkflowRunAfterError({ error, status })
+    await this.finishWorkflowRunAfterError({ error, status, at })
   }
 
   flushLogs(): Promise<void> {
@@ -589,11 +602,20 @@ export class WorkflowRunSession {
   private async finishWorkflowRunAfterError(input: {
     readonly error: unknown
     readonly status: "failed" | "cancelled"
+    readonly at: Date
   }): Promise<void> {
     const finishError = await this.dependencies.recorder
       .finishRunAfterError({
         status: input.status,
-        error: toWorkflowRunError(input.error),
+        error: toSixbFailure(input.error, {
+          allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
+          fallbackCode: input.status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+          at: input.at,
+          fallbackDetails: {
+            workflowId: this.dependencies.workflow.id,
+            runId: this.dependencies.job.id,
+          },
+        }),
         onTransition:
           input.status === "failed"
             ? (run) => this.dependencies.onRunFailed?.(input.error, run)

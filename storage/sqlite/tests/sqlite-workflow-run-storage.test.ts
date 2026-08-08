@@ -1,7 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { WorkflowRunError } from "@sixb/core/storage"
+import { type SixbFailure, WorkflowRunError, type WorkflowRunFailureCode } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import { SqliteWorkflowRunStorage } from "../src/workflow-run-storage"
+
+function failure(
+  message: string,
+  code: WorkflowRunFailureCode = "internal.unexpected"
+): SixbFailure<WorkflowRunFailureCode> {
+  return {
+    code,
+    message,
+    retryable: false,
+    at: "2026-05-08T10:00:01.000Z",
+    details: { workflowId: "reconcile-transaction" },
+    causeChain: [{ name: "Error", message: "root cause" }],
+  }
+}
 
 describe("SqliteWorkflowRunStorage", () => {
   let storage: SqliteWorkflowRunStorage
@@ -208,7 +222,7 @@ describe("SqliteWorkflowRunStorage", () => {
       id: "run-1",
       projectId: "my-app",
       status: "failed",
-      error: "No invoice candidate",
+      error: failure("No invoice candidate"),
     })
 
     await storage.start({
@@ -260,7 +274,7 @@ describe("SqliteWorkflowRunStorage", () => {
       projectId: "my-app",
       id: "run-1",
     })
-    expect(failed?.error).toBe("No invoice candidate")
+    expect(failed?.error).toEqual(failure("No invoice candidate"))
   })
 
   test("lists the latest run for multiple workflow ids", async () => {
@@ -376,7 +390,7 @@ describe("SqliteWorkflowRunStorage", () => {
       id: "node-1",
       projectId: "my-app",
       status: "failed",
-      error: "No match",
+      error: failure("No match"),
     })
 
     await storage.nodes.start({
@@ -429,7 +443,7 @@ describe("SqliteWorkflowRunStorage", () => {
       statuses: ["failed"],
     })
     expect(failedNodes.nodes[0]?.output).toBeUndefined()
-    expect(failedNodes.nodes[0]?.error).toBe("No match")
+    expect(failedNodes.nodes[0]?.error).toEqual(failure("No match"))
   })
 
   test("rejects invalid workflow and node run lifecycle transitions", async () => {
@@ -454,7 +468,7 @@ describe("SqliteWorkflowRunStorage", () => {
         id: "missing",
         projectId: "my-app",
         status: "failed",
-        error: "boom",
+        error: failure("boom"),
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -516,7 +530,7 @@ describe("SqliteWorkflowRunStorage", () => {
       id: "node-1",
       projectId: "my-app",
       status: "cancelled",
-      error: "Stopped",
+      error: failure("Stopped", "runtime.cancelled"),
     })
 
     await expect(
@@ -524,7 +538,7 @@ describe("SqliteWorkflowRunStorage", () => {
         id: "node-1",
         projectId: "my-app",
         status: "failed",
-        error: "Too late",
+        error: failure("Too late"),
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -532,7 +546,7 @@ describe("SqliteWorkflowRunStorage", () => {
       id: "wf-run-1",
       projectId: "my-app",
       status: "cancelled",
-      error: "Stopped",
+      error: failure("Stopped", "runtime.cancelled"),
     })
 
     await expect(
@@ -554,7 +568,7 @@ describe("SqliteWorkflowRunStorage", () => {
         id: "wf-run-1",
         projectId: "my-app",
         status: "failed",
-        error: "Too late",
+        error: failure("Too late"),
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
   })

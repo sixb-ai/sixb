@@ -1110,7 +1110,7 @@ describe("runWorkflowJob", () => {
           onNodeStarted: async () => undefined,
           onNodeFinished: async () => undefined,
           onRunFinished: async (run) => {
-            observerCalls.push(`${run.status}:${run.error}`)
+            observerCalls.push(`${run.status}:${run.error?.message}`)
           },
         },
       })
@@ -1158,7 +1158,7 @@ describe("runWorkflowJob", () => {
     expect(run?.status).toBe("failed")
     expect(nodes.nodes).toHaveLength(1)
     expect(nodes.nodes[0]?.status).toBe("failed")
-    expect(nodes.nodes[0]?.error).toContain(
+    expect(nodes.nodes[0]?.error?.message).toContain(
       'Workflow "invalid-output-workflow" step "invalid-output" output.invoice'
     )
   })
@@ -1198,7 +1198,21 @@ describe("runWorkflowJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(nodes.nodes.map((node) => node.status)).toEqual(["succeeded", "failed"])
-    expect(nodes.nodes[1]?.error).toBe("step exploded")
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      details: { workflowId: workflow.id, runId: "wfrun_step_failed" },
+    })
+    expect(nodes.nodes[1]?.error).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_step_failed",
+        nodeRunId: "wfrun_step_failed:node:1",
+      },
+    })
+    expect(nodes.nodes[1]?.error?.message).toBe("step exploded")
   })
 
   test("uses the workflow input as output when every node is an action", async () => {
@@ -1646,7 +1660,7 @@ describe("runWorkflowJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(nodes.nodes.map((node) => node.status)).toEqual(["succeeded", "failed"])
-    expect(nodes.nodes[1]?.error).toBe("attach failed")
+    expect(nodes.nodes[1]?.error?.message).toBe("attach failed")
   })
 
   test("marks action node and workflow failed when the action run fails after request", async () => {
