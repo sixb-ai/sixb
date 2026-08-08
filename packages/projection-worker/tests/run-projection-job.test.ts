@@ -2125,7 +2125,15 @@ describe("runProjectionJob", () => {
     expect(run?.status).toBe("failed")
     expect(run?.progress.sourceRowsRead).toBe(1)
     expect(run?.progress.sourceRowsSkipped).toBe(0)
-    expect(run?.errorMessage).toContain("must be one of")
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      message: expect.stringContaining("must be one of"),
+      details: {
+        projectionId: "device-proj",
+        runId: canonicalRunId("projrun-invalid-property"),
+      },
+    })
+    expect(run?.error?.at).toBe(run?.finishedAt?.toISOString())
   })
 
   test("normalizes int64 strings mapped to integer-like object properties", async () => {
@@ -2245,7 +2253,10 @@ describe("runProjectionJob", () => {
     expect(run?.status).toBe("failed")
     expect(run?.progress.sourceRowsRead).toBe(1)
     expect(run?.progress.sourceRowsSkipped).toBe(0)
-    expect(run?.errorMessage).toContain("cannot safely coerce")
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      message: expect.stringContaining("cannot safely coerce"),
+    })
   })
 
   test("materializes fileRef object properties from fileRef dataset columns", async () => {
@@ -2504,12 +2515,24 @@ describe("runProjectionJob", () => {
     ).rejects.toBe(cancellation)
 
     expect(failuresReported).toBe(0)
-    expect(
-      await deps.storage.projectionRuns.getById({
-        projectId: sixb.id,
-        id: canonicalRunId("projrun-explicit-cancellation"),
-      })
-    ).toMatchObject({ status: "cancelled", progress: { sourceRowsRead: 0 } })
+    const cancelledRun = await deps.storage.projectionRuns.getById({
+      projectId: sixb.id,
+      id: canonicalRunId("projrun-explicit-cancellation"),
+    })
+    expect(cancelledRun).toMatchObject({
+      status: "cancelled",
+      progress: { sourceRowsRead: 0 },
+      error: {
+        code: "runtime.cancelled",
+        message: expect.stringContaining("Cancelled by test."),
+        retryable: false,
+        details: {
+          projectionId: "room-proj",
+          runId: canonicalRunId("projrun-explicit-cancellation"),
+        },
+      },
+    })
+    expect(cancelledRun?.error?.at).toBe(cancelledRun?.finishedAt?.toISOString())
     expect(
       await deps.storage.ontology.commits.getByOrigin({
         projectId: sixb.id,
@@ -2674,7 +2697,10 @@ describe("runProjectionJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(run?.progress.sourceRowsRead).toBe(0)
-    expect(run?.errorMessage).toContain("Invalid unit")
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      message: expect.stringContaining("Invalid unit"),
+    })
 
     // The fixed physical batch is atomic: no prefix of it is committed.
     const history = await deps.storage.timeseries.getHistory({

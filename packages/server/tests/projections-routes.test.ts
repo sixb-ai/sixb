@@ -34,6 +34,14 @@ const sensorsProjection: ObjectProjectionDefinition = {
   links: {},
 }
 
+const projectionFailure = {
+  code: "internal.unexpected",
+  message: "Projection failed",
+  retryable: false,
+  at: "2026-05-04T09:01:00.000Z",
+  details: { projectionId: "rooms", runId: "run-1" },
+} as const
+
 function makeRun(
   input: {
     readonly run?: Partial<ObjectProjectionRunRecord>
@@ -128,7 +136,11 @@ describe("projection routes", () => {
     const sixb = createSixbStub({
       async list(input: ListProjectionRunsInput) {
         captured = input
-        return { runs: [makeRun()], hasMore: false, total: 1 }
+        return {
+          runs: [makeRun({ run: { status: "failed", error: projectionFailure } })],
+          hasMore: false,
+          total: 1,
+        }
       },
     })
 
@@ -140,9 +152,13 @@ describe("projection routes", () => {
     expect(captured?.objectTypeIds).toEqual(["room"])
     expect(captured?.projectionId).toBe("rooms")
 
-    const body = (await response.json()) as { runs: { id: string }[]; total: number }
+    const body = (await response.json()) as {
+      runs: { id: string; error?: typeof projectionFailure }[]
+      total: number
+    }
     expect(body.total).toBe(1)
     expect(body.runs[0]?.id).toBe("run-1")
+    expect(body.runs[0]?.error).toEqual(projectionFailure)
   })
 
   test("serializes only the public run schema even if a provider returns internal fields", async () => {

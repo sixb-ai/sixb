@@ -162,7 +162,7 @@ export default function HomePage() {
   const epoch = satellite ? new Date(satellite.properties.elementEpoch) : null
   const stale = epoch ? now.getTime() - epoch.getTime() > 48 * 60 * 60 * 1_000 : false
   const error = failed
-    ? (projection?.errorMessage ??
+    ? (projection?.error?.message ??
       run?.error?.message ??
       (timedOut
         ? "The refresh did not finish within 30 seconds."

@@ -358,6 +358,7 @@ export type {
   ProjectionKind,
   ProjectionMissingTarget,
   ProjectionRunClaim,
+  ProjectionRunFailureCode,
   ProjectionRunProgress,
   ProjectionRunRecord,
   ProjectionRunStatus,
@@ -371,6 +372,7 @@ export type {
 } from "./projection-runs"
 export {
   InMemoryProjectionRunStorage,
+  PROJECTION_RUN_FAILURE_CODES,
   PROJECTION_RUN_PROGRESS_KEYS,
   ProjectionRunError,
   projectionRunObjectTypesVisible,
