@@ -701,7 +701,10 @@ describe("SixbServer HTTP contract", () => {
 
       const missingDatasetResponse = await fetch(`${baseUrl}/api/datasets/missing`)
       expect(missingDatasetResponse.status).toBe(404)
-      expect(await missingDatasetResponse.json()).toEqual({ error: "Dataset not found" })
+      expect(await missingDatasetResponse.json()).toEqual({
+        error: "Dataset not found",
+        code: "dataset.not_found",
+      })
 
       const versionsResponse = await fetch(
         `${baseUrl}/api/datasets/raw.github.events/versions?limit=5`
@@ -750,6 +753,7 @@ describe("SixbServer HTTP contract", () => {
       expect(uncommittedRowsResponse.status).toBe(404)
       expect(await uncommittedRowsResponse.json()).toEqual({
         error: "Dataset version not found",
+        code: "dataset.version_not_found",
       })
 
       const invalidRowsResponse = await fetch(

@@ -12,6 +12,9 @@ export const SIXB_ERROR_DEFINITIONS = {
   "dataset.not_found": {
     retryable: false,
   },
+  "dataset.version_not_found": {
+    retryable: false,
+  },
   "internal.unexpected": {
     retryable: false,
   },
