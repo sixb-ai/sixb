@@ -24,6 +24,11 @@ export const metadata: Metadata = {
     title: "Sixb Docs",
     description: siteDescription,
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "Sixb Docs",
+    description: siteDescription,
+  },
 }
 
 export const viewport: Viewport = {
