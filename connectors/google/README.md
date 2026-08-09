@@ -33,12 +33,18 @@ const client = await googleConnector.adapter.connect(ctx)
 await client.drive.files.list({ q: "'FOLDER_ID' in parents and trashed = false" })
 for await (const file of client.drive.files.listAll({ q })) { /* ... */ }
 await client.drive.files.get(fileId, { fields: "id, name, modifiedTime" })
-const bytes = await client.drive.files.export(fileId, "text/plain")
+const storedBytes = await client.drive.files.download(fileId, { supportsAllDrives: true })
+const nativeBytes = await client.drive.files.export(fileId, "text/plain")
 
 // Incremental change feed — the caller persists the page token as its checkpoint.
 const { startPageToken } = await client.drive.changes.getStartPageToken()
 for await (const change of client.drive.changes.listAll({ pageToken: startPageToken })) { /* ... */ }
 ```
+
+Use `files.download()` for stored files such as CSV, XLSX, PDF, and images. It returns the file's
+raw bytes and supports Shared Drive files with `{ supportsAllDrives: true }` (plus
+`acknowledgeAbuse` when needed). Use `files.export()` instead for native Google Docs, Sheets, and
+Slides, choosing the desired export MIME type.
 
 ### Writing files
 

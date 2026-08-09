@@ -8,6 +8,7 @@ import type {
   DriveFileCopyInput,
   DriveFileCreateInput,
   DriveFileDeleteOptions,
+  DriveFileDownloadOptions,
   DriveFileGetOptions,
   DriveFileList,
   DriveFilesListOptions,
@@ -21,6 +22,11 @@ export interface DriveFilesResource {
   listAll(options?: DriveFilesListOptions): AsyncIterable<DriveFile>
   /** `GET /files/{fileId}` — metadata only. */
   get(fileId: string, options?: DriveFileGetOptions): Promise<DriveFile>
+  /**
+   * `GET /files/{fileId}?alt=media` — download the raw bytes of a stored file
+   * such as a CSV, XLSX, PDF, or image. Use `export` for Google-native files.
+   */
+  download(fileId: string, options?: DriveFileDownloadOptions): Promise<Uint8Array>
   /**
    * `GET /files/{fileId}/export` — export a Google-native doc (e.g. a Meet
    * transcript Doc) to `text/plain`, `text/markdown`, `application/pdf`, …
@@ -61,6 +67,15 @@ export function driveFilesResource(http: GoogleHttp): DriveFilesResource {
     get(fileId, options) {
       return http.json<DriveFile>("drive", "GET", `files/${pathSegment(fileId, "fileId")}`, {
         query: options,
+      })
+    },
+    download(fileId, options) {
+      return http.media("drive", `files/${pathSegment(fileId, "fileId")}`, {
+        query: {
+          alt: "media",
+          supportsAllDrives: options?.supportsAllDrives,
+          acknowledgeAbuse: options?.acknowledgeAbuse,
+        },
       })
     },
     export(fileId, mimeType) {
