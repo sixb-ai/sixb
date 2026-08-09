@@ -72,6 +72,41 @@ describe("drive.files", () => {
     expect(requests[0]?.url).toBe("https://www.googleapis.com/drive/v3/files/abc?fields=id%2C+name")
   })
 
+  test("download requests alt=media and returns raw file bytes", async () => {
+    mockFetch(async (input, init) => {
+      record(input, init)
+      return new Response(Uint8Array.from([0, 127, 255]), {
+        headers: { "content-type": "application/octet-stream" },
+      })
+    })
+
+    const client = await connect()
+    const bytes = await client.drive.files.download("stored/file")
+
+    expect(Array.from(bytes)).toEqual([0, 127, 255])
+    expect(requests[0]?.url).toBe(
+      "https://www.googleapis.com/drive/v3/files/stored%2Ffile?alt=media"
+    )
+  })
+
+  test("download supports Shared Drive files and abuse acknowledgement", async () => {
+    mockFetch(async (input, init) => {
+      record(input, init)
+      return new Response("file contents")
+    })
+
+    const client = await connect()
+    await client.drive.files.download("shared-file", {
+      supportsAllDrives: true,
+      acknowledgeAbuse: true,
+    })
+
+    expect(requests[0]?.url).toBe(
+      "https://www.googleapis.com/drive/v3/files/shared-file" +
+        "?alt=media&supportsAllDrives=true&acknowledgeAbuse=true"
+    )
+  })
+
   test("export returns raw bytes from the export endpoint", async () => {
     mockFetch(async (input, init) => {
       record(input, init)
@@ -89,7 +124,7 @@ describe("drive.files", () => {
     )
   })
 
-  test("maps a Google error envelope to GoogleApiError", async () => {
+  test("download maps a Google error envelope to GoogleApiError", async () => {
     mockFetch(async () =>
       json(
         { error: { code: 403, message: "Insufficient Permission", status: "PERMISSION_DENIED" } },
@@ -98,7 +133,7 @@ describe("drive.files", () => {
     )
 
     const client = await connect()
-    const error = (await client.drive.files.list().catch((e) => e)) as GoogleApiError
+    const error = (await client.drive.files.download("blocked").catch((e) => e)) as GoogleApiError
     expect(error).toBeInstanceOf(GoogleApiError)
     expect(error.status).toBe(403)
     expect(error.message).toContain("Insufficient Permission")

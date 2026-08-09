@@ -57,6 +57,13 @@ export type DriveFileGetOptions = QueryParams & {
   readonly acknowledgeAbuse?: boolean
 }
 
+export type DriveFileDownloadOptions = QueryParams & {
+  /** Required for files in Shared Drives. */
+  readonly supportsAllDrives?: boolean
+  /** Acknowledge the risk of downloading a file flagged as abusive. */
+  readonly acknowledgeAbuse?: boolean
+}
+
 export interface DriveChange {
   readonly fileId?: string
   readonly file?: DriveFile

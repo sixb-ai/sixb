@@ -53,7 +53,10 @@ export interface GoogleHttp {
     path: string,
     options?: GoogleRequestOptions
   ): Promise<T>
-  /** Raw bytes (e.g. Drive `files.export`); throws `GoogleApiError` on non-2xx. */
+  /**
+   * Raw bytes (e.g. Drive `files.download`/`files.export`); throws
+   * `GoogleApiError` on non-2xx.
+   */
   media(
     surface: GoogleSurface,
     path: string,
