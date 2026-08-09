@@ -91,12 +91,15 @@
       "name": "@sixb/connector-ace-iot",
       "version": "0.1.0",
       "dependencies": {
-        "@sixb/connector-rest": "workspace:*",
-        "@sixb/core": "workspace:*",
+        "@sixb/connector-rest": "workspace:^",
       },
       "devDependencies": {
+        "@sixb/core": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
       },
     },
     "connectors/companycam": {

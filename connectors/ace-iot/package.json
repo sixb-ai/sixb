@@ -39,10 +39,13 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/connector-rest": "workspace:*",
-    "@sixb/core": "workspace:*"
+    "@sixb/connector-rest": "workspace:^"
+  },
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
   },
   "devDependencies": {
+    "@sixb/core": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },
