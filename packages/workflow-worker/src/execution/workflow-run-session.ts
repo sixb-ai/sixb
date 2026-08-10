@@ -1,5 +1,5 @@
 import type { ValueType, WorkflowDefinition } from "@sixb/core"
-import { captureSixbFailure } from "@sixb/core/internal/errors"
+import { captureSixbFailure, createSixbError } from "@sixb/core/internal/errors"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type {
   WorkflowAgentNodeDefinition,
@@ -25,7 +25,6 @@ import type {
   WorkflowRunStorage,
 } from "@sixb/core/storage"
 import { WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
-import { WorkflowWorkerError } from "../errors"
 import { statusForFailure, throwIfAborted } from "../normalize"
 import { noopWorkflowRunObserver, WorkflowRunRecorder } from "../recorder"
 import type {
@@ -122,8 +121,10 @@ export class WorkflowRunSession {
   ): Promise<WorkflowRunSession> {
     const { runtime, job } = input
     if (!job.execution) {
-      throw new WorkflowWorkerError(
-        `[SixbWorkflowWorker] Running workflow '${job.id}' can only be recovered by a queue-owned execution.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Running workflow '${job.id}' can only be recovered by a queue-owned execution.`,
+        { details: { workflowId: job.workflowId, runId: job.id } }
       )
     }
 
@@ -135,11 +136,14 @@ export class WorkflowRunSession {
     const run = await requireWorkflowRun({
       workflowRuns: runtime.workflowRuns,
       projectId: runtime.projectId,
+      workflowId: workflow.id,
       id: job.id,
     })
     if (run.workflowId !== workflow.id || run.status !== "running") {
-      throw new WorkflowWorkerError(
-        `[SixbWorkflowWorker] Workflow run '${job.id}' is not a running '${workflow.id}' execution.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Workflow run '${job.id}' is not a running '${workflow.id}' execution.`,
+        { details: { workflowId: workflow.id, runId: job.id } }
       )
     }
 
@@ -148,7 +152,11 @@ export class WorkflowRunSession {
       workflowRunId: run.id,
       order: "asc",
     })
-    const recovery = analyzeRunningWorkflowHistory({ workflow, nodeRuns: listed.nodes })
+    const recovery = analyzeRunningWorkflowHistory({
+      workflow,
+      workflowRunId: run.id,
+      nodeRuns: listed.nodes,
+    })
     const state = reconstructWorkflowState({
       workflow,
       run,
@@ -209,11 +217,14 @@ export class WorkflowRunSession {
       const run = await requireWorkflowRun({
         workflowRuns: runtime.workflowRuns,
         projectId: runtime.projectId,
+        workflowId: workflow.id,
         id: job.id,
       })
       const completedNode = await requireWorkflowNodeRun({
         workflowRuns: runtime.workflowRuns,
         projectId: runtime.projectId,
+        workflowId: workflow.id,
+        workflowRunId: job.id,
         id: job.resume.nodeRunId,
       })
       const execution = await runtime.workflowRuns.agentNodes.getByNodeRunId({
@@ -227,8 +238,18 @@ export class WorkflowRunSession {
         !execution ||
         execution.nodeRunId !== completedNode.id
       ) {
-        throw new WorkflowWorkerError(
-          `[SixbWorkflowWorker] Agent node '${completedNode.id}' does not belong to workflow run '${run.id}'.`
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbWorkflowWorker] Agent node '${completedNode.id}' does not belong to workflow run '${run.id}'.`,
+          {
+            details: {
+              workflowId: workflow.id,
+              workflowRunId: run.id,
+              nodeId: completedNode.nodeId,
+              nodeRunId: completedNode.id,
+              ...(execution ? { agentId: execution.agentId } : {}),
+            },
+          }
         )
       }
       if (run.status === "running") {
@@ -256,13 +277,33 @@ export class WorkflowRunSession {
         }
       }
       if (run.status !== "waiting" || completedNode.status !== "succeeded") {
-        throw new WorkflowWorkerError(
-          `[SixbWorkflowWorker] Workflow run '${job.id}' and agent node '${completedNode.id}' must be waiting/succeeded to resume.`
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbWorkflowWorker] Workflow run '${job.id}' and agent node '${completedNode.id}' must be waiting/succeeded to resume.`,
+          {
+            details: {
+              agentId: execution.agentId,
+              workflowId: workflow.id,
+              workflowRunId: run.id,
+              nodeId: completedNode.nodeId,
+              nodeRunId: completedNode.id,
+            },
+          }
         )
       }
       if (execution.status !== "succeeded" || !completedNode.output) {
-        throw new WorkflowWorkerError(
-          `[SixbWorkflowWorker] Agent execution '${completedNode.id}' must have a validated output to resume.`
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbWorkflowWorker] Agent execution '${completedNode.id}' must have a validated output to resume.`,
+          {
+            details: {
+              agentId: execution.agentId,
+              workflowId: workflow.id,
+              workflowRunId: run.id,
+              nodeId: completedNode.nodeId,
+              nodeRunId: completedNode.id,
+            },
+          }
         )
       }
       const agentNode = requireAgentNode(workflow, completedNode)
@@ -325,8 +366,16 @@ export class WorkflowRunSession {
     const workflowInterventions = runtime.storage.workflowInterventions
 
     if (!workflowInterventions) {
-      throw new WorkflowWorkerError(
-        `[SixbWorkflowWorker] Workflow '${job.workflowId}' resume requires storage.workflowInterventions.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Workflow '${job.workflowId}' resume requires storage.workflowInterventions.`,
+        {
+          details: {
+            workflowId: job.workflowId,
+            workflowRunId: job.id,
+            interventionRecordId: job.resume.interventionId,
+          },
+        }
       )
     }
 
@@ -335,16 +384,21 @@ export class WorkflowRunSession {
     const intervention = await requireInterventionRecord({
       storage: workflowInterventions,
       projectId: runtime.projectId,
+      workflowId: workflow.id,
+      workflowRunId: job.id,
       id: job.resume.interventionId,
     })
     const run = await requireWorkflowRun({
       workflowRuns: runtime.workflowRuns,
       projectId: runtime.projectId,
+      workflowId: workflow.id,
       id: job.id,
     })
     const waitingNode = await requireWorkflowNodeRun({
       workflowRuns: runtime.workflowRuns,
       projectId: runtime.projectId,
+      workflowId: workflow.id,
+      workflowRunId: job.id,
       id: intervention.nodeRunId,
     })
 
@@ -378,20 +432,52 @@ export class WorkflowRunSession {
     }
 
     if (run.status !== "waiting") {
-      throw new WorkflowWorkerError(
-        `[SixbWorkflowWorker] Workflow run '${job.id}' must be waiting to resume.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Workflow run '${job.id}' must be waiting to resume.`,
+        {
+          details: {
+            workflowId: workflow.id,
+            workflowRunId: run.id,
+            nodeRunId: waitingNode.id,
+            interventionId: intervention.interventionId,
+            interventionRecordId: intervention.id,
+          },
+        }
       )
     }
 
     if (waitingNode.status !== "waiting") {
-      throw new WorkflowWorkerError(
-        `[SixbWorkflowWorker] Workflow node run '${waitingNode.id}' must be waiting to resume.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Workflow node run '${waitingNode.id}' must be waiting to resume.`,
+        {
+          details: {
+            workflowId: workflow.id,
+            workflowRunId: run.id,
+            nodeId: waitingNode.nodeId,
+            nodeRunId: waitingNode.id,
+            interventionId: intervention.interventionId,
+            interventionRecordId: intervention.id,
+          },
+        }
       )
     }
 
     if (intervention.status !== "submitted" || !intervention.response) {
-      throw new WorkflowWorkerError(
-        `[SixbWorkflowWorker] Workflow intervention '${intervention.id}' must be submitted to resume.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Workflow intervention '${intervention.id}' must be submitted to resume.`,
+        {
+          details: {
+            workflowId: workflow.id,
+            workflowRunId: run.id,
+            nodeId: waitingNode.nodeId,
+            nodeRunId: waitingNode.id,
+            interventionId: intervention.interventionId,
+            interventionRecordId: intervention.id,
+          },
+        }
       )
     }
 
@@ -628,10 +714,14 @@ export class WorkflowRunSession {
 
 function requireWorkflow(
   workflow: WorkflowDefinition | null,
-  job: { readonly workflowId: string }
+  job: { readonly id: string; readonly workflowId: string }
 ): WorkflowDefinition {
   if (!workflow) {
-    throw new WorkflowWorkerError(`[SixbWorkflowWorker] Unknown workflow '${job.workflowId}'.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Unknown workflow '${job.workflowId}'.`,
+      { details: { workflowId: job.workflowId, runId: job.id } }
+    )
   }
 
   return workflow
@@ -640,6 +730,8 @@ function requireWorkflow(
 async function requireInterventionRecord(input: {
   readonly storage: WorkflowInterventionStorage
   readonly projectId: string
+  readonly workflowId: string
+  readonly workflowRunId: string
   readonly id: string
 }): Promise<WorkflowInterventionRecord> {
   const intervention = await input.storage.getById({
@@ -648,8 +740,16 @@ async function requireInterventionRecord(input: {
   })
 
   if (!intervention) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow intervention '${input.id}' not found.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow intervention '${input.id}' not found.`,
+      {
+        details: {
+          workflowId: input.workflowId,
+          workflowRunId: input.workflowRunId,
+          interventionRecordId: input.id,
+        },
+      }
     )
   }
 
@@ -659,6 +759,7 @@ async function requireInterventionRecord(input: {
 async function requireWorkflowRun(input: {
   readonly workflowRuns: WorkflowRunStorage
   readonly projectId: string
+  readonly workflowId: string
   readonly id: string
 }): Promise<WorkflowRunRecord> {
   const run = await input.workflowRuns.getById({
@@ -667,7 +768,11 @@ async function requireWorkflowRun(input: {
   })
 
   if (!run) {
-    throw new WorkflowWorkerError(`[SixbWorkflowWorker] Workflow run '${input.id}' not found.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow run '${input.id}' not found.`,
+      { details: { workflowId: input.workflowId, runId: input.id } }
+    )
   }
 
   return run
@@ -676,6 +781,8 @@ async function requireWorkflowRun(input: {
 async function requireWorkflowNodeRun(input: {
   readonly workflowRuns: WorkflowRunStorage
   readonly projectId: string
+  readonly workflowId: string
+  readonly workflowRunId: string
   readonly id: string
 }): Promise<WorkflowNodeRunRecord> {
   const node = await input.workflowRuns.nodes.getById({
@@ -684,7 +791,17 @@ async function requireWorkflowNodeRun(input: {
   })
 
   if (!node) {
-    throw new WorkflowWorkerError(`[SixbWorkflowWorker] Workflow node run '${input.id}' not found.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow node run '${input.id}' not found.`,
+      {
+        details: {
+          workflowId: input.workflowId,
+          workflowRunId: input.workflowRunId,
+          nodeRunId: input.id,
+        },
+      }
+    )
   }
 
   return node
@@ -698,8 +815,10 @@ function assertResumeMatchesRun(input: {
   readonly waitingNode: WorkflowNodeRunRecord
 }): void {
   if (input.run.workflowId !== input.workflow.id || input.job.workflowId !== input.workflow.id) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow resume job for '${input.job.workflowId}' does not match run '${input.run.workflowId}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow resume job for '${input.job.workflowId}' does not match run '${input.run.workflowId}'.`,
+      { details: { workflowId: input.job.workflowId, runId: input.job.id } }
     )
   }
 
@@ -707,8 +826,18 @@ function assertResumeMatchesRun(input: {
     input.intervention.workflowId !== input.workflow.id ||
     input.intervention.workflowRunId !== input.job.id
   ) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow intervention '${input.intervention.id}' does not match run '${input.job.id}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow intervention '${input.intervention.id}' does not match run '${input.job.id}'.`,
+      {
+        details: {
+          workflowId: input.workflow.id,
+          workflowRunId: input.job.id,
+          nodeRunId: input.intervention.nodeRunId,
+          interventionId: input.intervention.interventionId,
+          interventionRecordId: input.intervention.id,
+        },
+      }
     )
   }
 
@@ -717,8 +846,19 @@ function assertResumeMatchesRun(input: {
     input.waitingNode.workflowRunId !== input.job.id ||
     input.waitingNode.id !== input.intervention.nodeRunId
   ) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow node run '${input.waitingNode.id}' does not match intervention '${input.intervention.id}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow node run '${input.waitingNode.id}' does not match intervention '${input.intervention.id}'.`,
+      {
+        details: {
+          workflowId: input.workflow.id,
+          workflowRunId: input.job.id,
+          nodeId: input.waitingNode.nodeId,
+          nodeRunId: input.waitingNode.id,
+          interventionId: input.intervention.interventionId,
+          interventionRecordId: input.intervention.id,
+        },
+      }
     )
   }
 }
@@ -735,8 +875,19 @@ function requireInterventionNode(
     node.id !== intervention.nodeId ||
     node.key !== intervention.nodeKey
   ) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow '${workflow.id}' does not contain intervention node '${intervention.nodeId}' at index ${intervention.nodeIndex}.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow '${workflow.id}' does not contain intervention node '${intervention.nodeId}' at index ${intervention.nodeIndex}.`,
+      {
+        details: {
+          workflowId: workflow.id,
+          workflowRunId: intervention.workflowRunId,
+          nodeId: intervention.nodeId,
+          nodeRunId: intervention.nodeRunId,
+          interventionId: intervention.interventionId,
+          interventionRecordId: intervention.id,
+        },
+      }
     )
   }
 
@@ -754,8 +905,17 @@ function requireAgentNode(
     node.id !== nodeRun.nodeId ||
     node.key !== nodeRun.nodeKey
   ) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow '${workflow.id}' does not contain agent node '${nodeRun.nodeId}' at index ${nodeRun.nodeIndex}.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow '${workflow.id}' does not contain agent node '${nodeRun.nodeId}' at index ${nodeRun.nodeIndex}.`,
+      {
+        details: {
+          workflowId: workflow.id,
+          workflowRunId: nodeRun.workflowRunId,
+          nodeId: nodeRun.nodeId,
+          nodeRunId: nodeRun.id,
+        },
+      }
     )
   }
   return node
@@ -785,8 +945,16 @@ function reconstructWorkflowState(input: {
     const node = input.workflow.nodes[nodeIndex]
     const nodeRun = nodeRunsByIndex.get(nodeIndex)
     if (!node || !nodeRun) {
-      throw new WorkflowWorkerError(
-        `[SixbWorkflowWorker] Workflow run '${input.run.id}' is missing node run at index ${nodeIndex}.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Workflow run '${input.run.id}' is missing node run at index ${nodeIndex}.`,
+        {
+          details: {
+            workflowId: input.workflow.id,
+            workflowRunId: input.run.id,
+            ...(node ? { nodeId: node.id } : {}),
+          },
+        }
       )
     }
 
@@ -810,8 +978,17 @@ function applyCompletedNodeToState(input: {
   readonly valueTypesById: ReadonlyMap<string, ValueType>
 }): void {
   if (input.nodeRun.status !== "succeeded") {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow node run '${input.nodeRun.id}' must be succeeded to reconstruct workflow state.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow node run '${input.nodeRun.id}' must be succeeded to reconstruct workflow state.`,
+      {
+        details: {
+          workflowId: input.workflowId,
+          workflowRunId: input.nodeRun.workflowRunId,
+          nodeId: input.nodeRun.nodeId,
+          nodeRunId: input.nodeRun.id,
+        },
+      }
     )
   }
 
@@ -866,6 +1043,7 @@ function restoreCompletedNodeOutput(input: {
 
 function analyzeRunningWorkflowHistory(input: {
   readonly workflow: WorkflowDefinition
+  readonly workflowRunId: string
   readonly nodeRuns: readonly WorkflowNodeRunRecord[]
 }): {
   readonly completed: readonly WorkflowNodeRunRecord[]
@@ -878,6 +1056,7 @@ function analyzeRunningWorkflowHistory(input: {
   for (let index = 0; index < input.nodeRuns.length; index++) {
     const { nodeRun } = requireWorkflowHistoryEntry({
       workflow: input.workflow,
+      workflowRunId: input.workflowRunId,
       node: input.workflow.nodes[index],
       nodeRun: input.nodeRuns[index],
       expectedIndex: index,
@@ -894,8 +1073,17 @@ function analyzeRunningWorkflowHistory(input: {
       continue
     }
 
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Running workflow '${input.workflow.id}' has an unrecoverable node '${nodeRun.id}' in status '${nodeRun.status}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Running workflow '${input.workflow.id}' has an unrecoverable node '${nodeRun.id}' in status '${nodeRun.status}'.`,
+      {
+        details: {
+          workflowId: input.workflow.id,
+          workflowRunId: input.workflowRunId,
+          nodeId: nodeRun.nodeId,
+          nodeRunId: nodeRun.id,
+        },
+      }
     )
   }
 
@@ -909,6 +1097,7 @@ function analyzeRunningWorkflowHistory(input: {
 
 function requireWorkflowHistoryEntry(input: {
   readonly workflow: WorkflowDefinition
+  readonly workflowRunId: string
   readonly node: WorkflowNodeDefinition | undefined
   readonly nodeRun: WorkflowNodeRunRecord | undefined
   readonly expectedIndex: number
@@ -916,10 +1105,19 @@ function requireWorkflowHistoryEntry(input: {
   readonly node: WorkflowNodeDefinition
   readonly nodeRun: WorkflowNodeRunRecord
 } {
-  const { workflow, node, nodeRun, expectedIndex } = input
+  const { workflow, workflowRunId, node, nodeRun, expectedIndex } = input
   if (!node || !nodeRun) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow '${workflow.id}' has an incomplete node history at index ${expectedIndex}.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow '${workflow.id}' has an incomplete node history at index ${expectedIndex}.`,
+      {
+        details: {
+          workflowId: workflow.id,
+          workflowRunId,
+          ...(node ? { nodeId: node.id } : {}),
+          ...(nodeRun ? { nodeRunId: nodeRun.id } : {}),
+        },
+      }
     )
   }
 
@@ -932,8 +1130,17 @@ function requireWorkflowHistoryEntry(input: {
   ].find(({ actual, expected }) => actual !== expected)
 
   if (mismatch) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow '${workflow.id}' node history has ${mismatch.field} '${mismatch.actual}' at index ${expectedIndex}; expected '${mismatch.expected}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow '${workflow.id}' node history has ${mismatch.field} '${mismatch.actual}' at index ${expectedIndex}; expected '${mismatch.expected}'.`,
+      {
+        details: {
+          workflowId: workflow.id,
+          workflowRunId,
+          nodeId: node.id,
+          nodeRunId: nodeRun.id,
+        },
+      }
     )
   }
 
@@ -945,8 +1152,12 @@ function createWorkflowBookkeepingError(input: {
   readonly runId: string
   readonly cause: unknown
 }): Error {
-  return new WorkflowWorkerError(
+  return createSixbError(
+    "internal.unexpected",
     `[SixbWorkflowWorker] Workflow '${input.workflowId}' executed side effects, but failed to finalize workflow run '${input.runId}'. The workflow state may need repair.`,
-    { cause: input.cause }
+    {
+      cause: input.cause,
+      details: { workflowId: input.workflowId, runId: input.runId },
+    }
   )
 }

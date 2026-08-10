@@ -1,10 +1,10 @@
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { WorkflowInterventionNodeDefinition } from "@sixb/core/internal/workflows"
 import {
   snapshotWorkflowInterventionDefaultResponse,
   snapshotWorkflowInterventionInput,
   validateWorkflowInterventionInput,
 } from "@sixb/core/internal/workflows"
-import { WorkflowWorkerError } from "../errors"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { throwIfAborted } from "../normalize"
 import { callWorkflowMapper, requireRecordInput } from "./mapper"
@@ -19,6 +19,7 @@ export const interventionNodeExecutor: WorkflowNodeExecutor<WorkflowIntervention
         : callWorkflowMapper({
             mapper: node.mapper,
             workflowId: context.workflow.id,
+            workflowRunId: context.job.id,
             nodeId: node.id,
             workflowInput: context.state.workflowInput,
             steps: context.state.steps,
@@ -26,6 +27,7 @@ export const interventionNodeExecutor: WorkflowNodeExecutor<WorkflowIntervention
     const nodeInput = requireRecordInput({
       value: rawInput,
       workflowId: context.workflow.id,
+      workflowRunId: context.job.id,
       nodeId: node.id,
     })
     const interventionInput = validateWorkflowInterventionInput({
@@ -51,7 +53,9 @@ export const interventionNodeExecutor: WorkflowNodeExecutor<WorkflowIntervention
     const interventionInput = requireRecordInput({
       value: prepared.input,
       workflowId: context.workflow.id,
+      workflowRunId: context.job.id,
       nodeId: node.id,
+      nodeRunId: nodeRun.id,
     })
     const defaultResponse = node.intervention.defaults
       ? await node.intervention.defaults({
@@ -69,16 +73,28 @@ export const interventionNodeExecutor: WorkflowNodeExecutor<WorkflowIntervention
       valueTypesById: context.valueTypesById,
     })
     const requestedAt = new Date()
+    const interventionRecordId = `${context.job.id}:intervention:${nodeIndex}`
     const workflowInterventions = context.runtime.storage.workflowInterventions
     if (!workflowInterventions) {
-      throw new WorkflowWorkerError(
-        `[SixbWorkflowWorker] Workflow '${context.workflow.id}' intervention node '${node.id}' requires storage.workflowInterventions.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Workflow '${context.workflow.id}' intervention node '${node.id}' requires storage.workflowInterventions.`,
+        {
+          details: {
+            workflowId: context.workflow.id,
+            workflowRunId: context.job.id,
+            nodeId: node.id,
+            nodeRunId: nodeRun.id,
+            interventionId: node.intervention.id,
+            interventionRecordId,
+          },
+        }
       )
     }
 
     context.markSideEffectBoundaryPassed()
     const intervention = await workflowInterventions.create({
-      id: `${context.job.id}:intervention:${nodeIndex}`,
+      id: interventionRecordId,
       projectId: context.runtime.projectId,
       workflowId: context.workflow.id,
       workflowRunId: context.job.id,
