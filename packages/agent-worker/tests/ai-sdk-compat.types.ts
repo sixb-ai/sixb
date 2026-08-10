@@ -7,7 +7,14 @@ import type { LanguageModelV4 } from "@ai-sdk/provider"
 import type { AgentInboundUiMessage, AgentMessage } from "@sixb/core"
 import { toModelMessages } from "@sixb/core/internal/agents"
 import type { AgentRunUsage, AiModelCallUsageInput } from "@sixb/core/storage"
-import type { LanguageModelUsage, ModelMessage, StepResult, streamText, UIMessage } from "ai"
+import type {
+  generateText,
+  LanguageModelUsage,
+  ModelMessage,
+  StepResult,
+  streamText,
+  UIMessage,
+} from "ai"
 import {
   agentRunUsageFromAiSdk,
   agentTraceFromAiSdkSteps,
@@ -50,6 +57,27 @@ const _streamTextOptions: Parameters<typeof streamText>[0] = {
   },
 }
 
+// Workflow generateText calls use the same lifecycle contract as conversation streams.
+const _generateTextOptions: Parameters<typeof generateText>[0] = {
+  model: sdkModel,
+  prompt: "hello",
+  prepareStep: () => undefined,
+  onLanguageModelCallEnd(event) {
+    const callId: string = event.callId
+    const providerId: string = event.provider
+    const requestedModelId: string = event.modelId
+    const responseId: string = event.responseId
+    const usage: AiModelCallUsageInput = aiModelCallUsageFromAiSdk(event.usage)
+    const rawUsage = event.usage.raw
+    void callId
+    void providerId
+    void requestedModelId
+    void responseId
+    void usage
+    void rawUsage
+  },
+}
+
 // A real final StepResult and LanguageModelUsage must cross the worker adapter without a cast.
 declare const sdkSteps: readonly StepResult<Record<string, never>>[]
 declare const sdkUsage: LanguageModelUsage
@@ -59,5 +87,6 @@ const _usage: AgentRunUsage | undefined = agentRunUsageFromAiSdk(sdkUsage)
 void _inbound
 void _model
 void _streamTextOptions
+void _generateTextOptions
 void _trace
 void _usage

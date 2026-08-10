@@ -37,7 +37,12 @@ await worker.start()
 
 ## Usage accounting
 
-Every completed conversation provider call observed by the AI SDK lifecycle is appended to `storage.aiUsage`, including individual calls in tool loops and calls completed before later cancellation, tool failure, or execution ownership loss. Usage writes are intentionally not fenced: a stale worker cannot finalize the run, but a provider call it completed remains billable.
+Every completed conversation and workflow-agent provider call observed by the AI SDK lifecycle is
+appended to `storage.aiUsage`, including individual calls in tool loops and calls completed before
+later cancellation, tool failure, output validation, or execution ownership loss. Workflow nodes
+use their own durable execution and inherit the parent workflow's admission-time group snapshot.
+Usage writes are intentionally not fenced: a stale worker cannot finalize the execution, but a
+provider call it completed remains billable.
 
 The AI SDK swallows lifecycle callback errors, so the worker retries the idempotent append and hands any persistent infrastructure failure to a durable job in `queues.agents`. Recovery retries with bounded backoff and cannot trigger another provider call. Once an append is deferred, `prepareStep`
 blocks the next model step and the run fails closed while accounting recovery continues independently. If the durable handoff also fails, the same stop prevents silent usage loss. This local path cannot close a process-crash window before lifecycle delivery; provider-side reconciliation is the appropriate later layer for that guarantee.

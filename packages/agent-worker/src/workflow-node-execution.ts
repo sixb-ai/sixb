@@ -1,4 +1,9 @@
-import type { AgentDefinition, ValueType, WorkflowDefinition } from "@sixb/core"
+import {
+  type AgentDefinition,
+  SYSTEM_PRINCIPAL,
+  type ValueType,
+  type WorkflowDefinition,
+} from "@sixb/core"
 import {
   createAgentRunExecutionToken,
   resolveAgentExecutionAuthorization,
@@ -16,8 +21,9 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { AgentWorkerError } from "./errors"
+import { AgentFinalizationError, AgentUsageRecordingError, AgentWorkerError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
+import { AiModelCallRecorder } from "./model-call-recorder"
 import {
   type AgentExecutionEnvironment,
   createWorkflowAgentNodeEnvironment,
@@ -42,6 +48,7 @@ interface WorkflowAgentNodeExecutionContext {
   readonly runs: WorkflowRunStorage
   readonly executionRecord: WorkflowAgentNodeRunRecord
   readonly nodeRun: WorkflowNodeRunRecord
+  readonly workflowRun: WorkflowRunRecord
   readonly workflow: WorkflowDefinition
   readonly node: WorkflowAgentNodeDefinition
   readonly agent: AgentDefinition
@@ -60,6 +67,7 @@ export async function executeWorkflowAgentNode(
     runs,
     executionRecord,
     nodeRun,
+    workflowRun,
     workflow,
     node,
     agent,
@@ -93,6 +101,21 @@ export async function executeWorkflowAgentNode(
   if (!executionToken) {
     throw new AgentWorkerError(`Agent workflow node '${nodeRun.id}' has no execution token.`)
   }
+  const usageExecution = {
+    kind: "workflowAgentNode" as const,
+    workflowRunId: workflowRun.id,
+    nodeRunId: nodeRun.id,
+  }
+  const usageRecorder = new AiModelCallRecorder({
+    storage: context.storage.aiUsage,
+    projectId: context.id,
+    execution: usageExecution,
+    attempt: reserved.attempt,
+    requesterPrincipal: durableExecution.requestedBy ?? SYSTEM_PRINCIPAL,
+    requesterGroupIds: workflowRun.requesterGroupIds,
+    errorRunId: nodeRun.id,
+  })
+
   let environment: AgentExecutionEnvironment | null = null
   const cancel = await input.watchForCancel(nodeRun.id)
   const stopOwnershipProjection = projectQueueOwnership({
@@ -125,6 +148,7 @@ export async function executeWorkflowAgentNode(
       workflowId: workflow.id,
       prompt: reserved.prompt,
       valueTypesById,
+      usageRecorder,
       signal: AbortSignal.any([signal, cancel.signal]),
     })
     const completedNode = await finishWorkflowAgentNodeSucceeded({
@@ -142,20 +166,39 @@ export async function executeWorkflowAgentNode(
     })
   } catch (error) {
     if (lostQueueDelivery(error, signal)) return
-    if (signal.aborted) throw error
-    if (cancel.signal.aborted && (await isAlreadyCancelled(runs, context.id, nodeRun.id))) return
 
-    const status = cancel.signal.aborted ? "cancelled" : "failed"
+    // Output parsing and tool handling can fail after the final provider callback. Accounting
+    // failure takes precedence because AI SDK otherwise swallows the callback error.
+    let executionError = error
+    try {
+      usageRecorder.assertHealthy()
+    } catch (recordingError) {
+      executionError = recordingError
+    }
+
+    if (executionError instanceof AgentFinalizationError) throw executionError
+    if (signal.aborted) throw executionError
+    if (cancel.signal.aborted && (await isAlreadyCancelled(runs, context.id, nodeRun.id))) {
+      // The cancellation endpoint has already made the execution terminal, so it cannot be fenced
+      // again. Still surface a lost accounting append to the queue instead of acknowledging it.
+      if (executionError instanceof AgentUsageRecordingError) throw executionError
+      return
+    }
+
+    const status =
+      cancel.signal.aborted && !(executionError instanceof AgentUsageRecordingError)
+        ? "cancelled"
+        : "failed"
     const failed = await finishWorkflowAgentNodeFailed({
       context,
       nodeRun,
       agent,
       executionToken,
       status,
-      error,
+      error: executionError,
     })
     if (status === "failed") {
-      reportRunFailure(input.host, error, {
+      reportRunFailure(input.host, executionError, {
         projectId: context.id,
         occurredAt: failed.run.finishedAt,
         attempt: job.attempt,
@@ -236,6 +279,7 @@ async function loadWorkflowAgentNodeExecution(
     runs,
     executionRecord,
     nodeRun,
+    workflowRun,
     workflow,
     node,
     agent,
