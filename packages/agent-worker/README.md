@@ -18,8 +18,8 @@ const worker = new AgentWorker(sixb, {
 await worker.start()
 ```
 
-`sixb` must provide `storage.agents`, `storage.auth`, `queues.agents`, `agents`, `broker`, and
-`sandboxes`.
+`sixb` must provide `storage.agents`, `storage.aiUsage`, `storage.auth`, `queues.agents`, `agents`,
+`broker`, and `sandboxes`.
 
 ## Execution Model
 
@@ -34,6 +34,18 @@ await worker.start()
   a projection of the queue lease—not a separate run lease, timer, or heartbeat—and is extended only
   from successful queue renewals.
 - The assistant message append and successful run finish happen in one storage transaction.
+
+## Usage accounting
+
+Every completed conversation provider call is appended to `storage.aiUsage`, including individual
+calls in tool loops and calls completed before later cancellation, tool failure, or execution
+ownership loss. Usage writes are intentionally not fenced: a stale worker cannot finalize the run,
+but a provider call it completed remains billable.
+
+The AI SDK swallows lifecycle callback errors, so the worker retains accounting failures, retries the
+idempotent append, blocks another model step through `prepareStep`, and fails the run rather than
+silently losing usage. During the staged rollout, the existing run aggregate remains for display;
+the model-call ledger is the accounting authority and a later stack PR removes the projection.
 
 ## Live Stream
 

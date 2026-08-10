@@ -15,7 +15,12 @@ import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
 import { AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
-import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } from "./errors"
+import {
+  AgentExecutionLostError,
+  AgentFinalizationError,
+  AgentUsageRecordingError,
+  AgentWorkerError,
+} from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { finishRunOrThrow } from "./finalize"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
@@ -276,7 +281,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       // record the fate at all it raises `AgentFinalizationError`, which propagates here so the job
       // is redelivered rather than acked with the thread left silently locked. A user cancel is
       // detected off its own signal so it records `cancelled` however the aborted stream surfaced.
-      const aborted = signal.aborted || cancel.signal.aborted || isAbortError(error)
+      const aborted =
+        !(error instanceof AgentUsageRecordingError) &&
+        (signal.aborted || cancel.signal.aborted || isAbortError(error))
       const finalized = await this.recordFate(
         context,
         run.id,
@@ -611,6 +618,9 @@ function assertAgentWorkerStorage(
   }
   if (!storage.auth) {
     throw new AgentWorkerError("Agent workers require storage.auth support.")
+  }
+  if (!storage.aiUsage) {
+    throw new AgentWorkerError("Agent workers require storage.aiUsage support.")
   }
 }
 

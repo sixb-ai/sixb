@@ -15,7 +15,7 @@ import {
   validateAndNormalizeAgentToolInput,
 } from "@sixb/core/internal/agents"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
-import type { AgentRunUsage } from "@sixb/core/storage"
+import type { AgentRunUsage, AiModelCallUsageInput } from "@sixb/core/storage"
 import { jsonSchema, type LanguageModelUsage, type Tool, type ToolSet, tool } from "ai"
 import { AgentToolExecutionError, AgentToolOutputError, AgentWorkerError } from "./errors"
 
@@ -252,4 +252,27 @@ export function agentRunUsageFromAiSdk(usage: LanguageModelUsage): AgentRunUsage
       : { cachedInputTokens: usage.inputTokenDetails.cacheReadTokens }),
   }
   return Object.keys(mapped).length > 0 ? mapped : undefined
+}
+
+/** Preserve every provider-neutral count from one AI SDK model call without inventing zeroes. */
+export function aiModelCallUsageFromAiSdk(usage: LanguageModelUsage): AiModelCallUsageInput {
+  return {
+    ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
+    ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
+    ...(usage.inputTokenDetails.noCacheTokens === undefined
+      ? {}
+      : { uncachedInputTokens: usage.inputTokenDetails.noCacheTokens }),
+    ...(usage.inputTokenDetails.cacheReadTokens === undefined
+      ? {}
+      : { cacheReadInputTokens: usage.inputTokenDetails.cacheReadTokens }),
+    ...(usage.inputTokenDetails.cacheWriteTokens === undefined
+      ? {}
+      : { cacheWriteInputTokens: usage.inputTokenDetails.cacheWriteTokens }),
+    ...(usage.outputTokenDetails.textTokens === undefined
+      ? {}
+      : { textOutputTokens: usage.outputTokenDetails.textTokens }),
+    ...(usage.outputTokenDetails.reasoningTokens === undefined
+      ? {}
+      : { reasoningOutputTokens: usage.outputTokenDetails.reasoningTokens }),
+  }
 }

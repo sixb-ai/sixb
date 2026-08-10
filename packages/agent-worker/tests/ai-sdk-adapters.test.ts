@@ -14,6 +14,7 @@ import {
   agentRunUsageFromAiSdk,
   agentToolErrorText,
   agentTraceFromAiSdkSteps,
+  aiModelCallUsageFromAiSdk,
   aiSdkToolsFromAgentDefinitions,
 } from "../src/ai-sdk-adapters"
 
@@ -429,6 +430,35 @@ describe("AI SDK agent adapters", () => {
     })
 
     expect(agentRunUsageFromAiSdk(usage({}))).toBeUndefined()
+  })
+
+  test("preserves every provider-neutral model-call usage field", () => {
+    expect(
+      aiModelCallUsageFromAiSdk({
+        inputTokens: 12,
+        inputTokenDetails: {
+          noCacheTokens: 9,
+          cacheReadTokens: 3,
+          cacheWriteTokens: 1,
+        },
+        outputTokens: 8,
+        outputTokenDetails: {
+          textTokens: 6,
+          reasoningTokens: 2,
+        },
+        totalTokens: 20,
+        raw: { provider_meter: 4 },
+      })
+    ).toEqual({
+      inputTokens: 12,
+      outputTokens: 8,
+      uncachedInputTokens: 9,
+      cacheReadInputTokens: 3,
+      cacheWriteInputTokens: 1,
+      textOutputTokens: 6,
+      reasoningOutputTokens: 2,
+    })
+    expect(aiModelCallUsageFromAiSdk(usage({}))).toEqual({})
   })
 })
 

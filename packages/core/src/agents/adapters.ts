@@ -210,7 +210,11 @@ function optionalJson(value: unknown, label: string): JsonValue | undefined {
  * and every other non-JSON shape are left for `requireJson` to accept or reject. This helper only
  * turns `{ key: undefined }` into `{}` for metadata compatibility with SDK output.
  */
-function omitUndefinedObjectProperties(value: unknown, seen = new Set<object>()): unknown {
+export function omitUndefinedObjectProperties(value: unknown): unknown {
+  return omitUndefinedObjectPropertiesInternal(value, new Set())
+}
+
+function omitUndefinedObjectPropertiesInternal(value: unknown, seen: Set<object>): unknown {
   if (typeof value !== "object" || value === null) return value
 
   // Avoid recursing forever on a malformed/cyclic metadata object. Leaving the cycle in place lets
@@ -220,7 +224,7 @@ function omitUndefinedObjectProperties(value: unknown, seen = new Set<object>())
   seen.add(value)
   try {
     if (Array.isArray(value)) {
-      return value.map((entry) => omitUndefinedObjectProperties(entry, seen))
+      return value.map((entry) => omitUndefinedObjectPropertiesInternal(entry, seen))
     }
 
     if (!isPlainRecord(value)) return value
@@ -228,7 +232,7 @@ function omitUndefinedObjectProperties(value: unknown, seen = new Set<object>())
     return Object.fromEntries(
       Object.entries(value)
         .filter(([, entry]) => entry !== undefined)
-        .map(([key, entry]) => [key, omitUndefinedObjectProperties(entry, seen)])
+        .map(([key, entry]) => [key, omitUndefinedObjectPropertiesInternal(entry, seen)])
     )
   } finally {
     seen.delete(value)

@@ -12,7 +12,7 @@ import type {
 } from "@sixb/core"
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
 import type { LoggingService } from "@sixb/core/internal/logging"
-import type { AgentStorage, AuthStorage } from "@sixb/core/storage"
+import type { AgentStorage, AiUsageStorage, AuthStorage } from "@sixb/core/storage"
 import type { ToolSet } from "ai"
 import type { AgentSkill } from "./agent-skills"
 import type { PreparedAgentAttachmentContext } from "./attachments"
@@ -22,6 +22,7 @@ import type { StreamSink } from "./stream-sink"
 // Keep root storage for transactions while making worker-required stores non-optional after setup.
 export type AgentWorkerStorage = Storage & {
   readonly agents: AgentStorage
+  readonly aiUsage: AiUsageStorage
   readonly auth: AuthStorage
 }
 

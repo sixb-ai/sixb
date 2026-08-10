@@ -6,9 +6,13 @@
 import type { LanguageModelV4 } from "@ai-sdk/provider"
 import type { AgentInboundUiMessage, AgentMessage } from "@sixb/core"
 import { toModelMessages } from "@sixb/core/internal/agents"
-import type { AgentRunUsage } from "@sixb/core/storage"
+import type { AgentRunUsage, AiModelCallUsageInput } from "@sixb/core/storage"
 import type { LanguageModelUsage, ModelMessage, StepResult, streamText, UIMessage } from "ai"
-import { agentRunUsageFromAiSdk, agentTraceFromAiSdkSteps } from "../src/ai-sdk-adapters"
+import {
+  agentRunUsageFromAiSdk,
+  agentTraceFromAiSdkSteps,
+  aiModelCallUsageFromAiSdk,
+} from "../src/ai-sdk-adapters"
 
 // A real `UIMessage` must assign to `fromAiSdk`'s inbound shape *without a cast* — this is the
 // safety net at the SDK boundary and the reason the worker can pass `responseMessage` straight in.
@@ -29,6 +33,21 @@ const _streamTextOptions: Parameters<typeof streamText>[0] = {
   prompt: "hello",
   reasoning: "medium",
   providerOptions: { openai: { reasoningSummary: "detailed" } },
+  prepareStep: () => undefined,
+  onLanguageModelCallEnd(event) {
+    const callId: string = event.callId
+    const providerId: string = event.provider
+    const requestedModelId: string = event.modelId
+    const responseId: string = event.responseId
+    const usage: AiModelCallUsageInput = aiModelCallUsageFromAiSdk(event.usage)
+    const rawUsage = event.usage.raw
+    void callId
+    void providerId
+    void requestedModelId
+    void responseId
+    void usage
+    void rawUsage
+  },
 }
 
 // A real final StepResult and LanguageModelUsage must cross the worker adapter without a cast.
