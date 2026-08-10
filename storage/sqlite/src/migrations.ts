@@ -47,6 +47,9 @@ import webhookRunFailureRecordSql from "./migrations/016-webhook-run-failure-rec
 import actionFailureRecordSql from "./migrations/017-action-failure-record.sql" with {
   type: "text",
 }
+import ontologyOutboxFailureRecordSql from "./migrations/018-ontology-outbox-failure-record.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -84,6 +87,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("015-projection-failure-record", projectionFailureRecordSql),
     sqliteSql("016-webhook-run-failure-record", webhookRunFailureRecordSql),
     sqliteSql("017-action-failure-record", actionFailureRecordSql),
+    sqliteSql("018-ontology-outbox-failure-record", ontologyOutboxFailureRecordSql),
   ],
 })
 

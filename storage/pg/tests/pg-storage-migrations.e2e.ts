@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, migrateStorage, OntologyRegistry, prop } from "@sixb/core"
-import { defineMigrations } from "@sixb/core/storage"
+import { parseSixbFailure } from "@sixb/core/internal/errors"
+import { defineMigrations, ONTOLOGY_OUTBOX_FAILURE_CODES } from "@sixb/core/storage"
 import { createMaterializerTestFixture, createTestWorkflowExecution } from "@sixb/core/testing"
 import { SQL } from "bun"
 import { PostgresStorage, type PostgresStorage as PostgresStorageType } from "../src"
@@ -53,6 +54,7 @@ describe("Postgres storage migrations", () => {
             "015-projection-failure-record",
             "016-webhook-run-failure-record",
             "017-action-failure-record",
+            "018-ontology-outbox-failure-record",
           ],
         },
       ])
@@ -175,6 +177,13 @@ describe("Postgres storage migrations", () => {
           id: "017-action-failure-record",
           status: "applied",
           version: 17,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "018-ontology-outbox-failure-record",
+          status: "applied",
+          version: 18,
         },
       ])
     })
@@ -341,6 +350,73 @@ describe("Postgres storage migrations", () => {
             },
           },
         ])
+      } finally {
+        await sql.end()
+      }
+    })
+  })
+
+  test("ontology outbox failure migration replaces legacy diagnostics with a safe failure", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      const failureMigrationIndex = postgresStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "018-ontology-outbox-failure-record"
+      )
+      if (failureMigrationIndex !== 17) {
+        throw new Error("PostgreSQL ontology outbox failure migration is missing.")
+      }
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        const beforeFailureRecord = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, failureMigrationIndex),
+        })
+        await createPostgresMigrator({
+          sql,
+          schemaName,
+          migrations: beforeFailureRecord,
+        }).migrate()
+        await sql.unsafe(`
+          INSERT INTO ${quoteIdent(schemaName)}.ontology_outbox (
+            project_id, id, commit_id, commit_ordinal, envelope, available_at,
+            attempts, published_at, last_error, created_at
+          ) VALUES
+            (
+              'project-a', 'event-failed', 'commit-failed', 0,
+              '{"type":"object.created"}'::jsonb, '2026-08-10T12:01:00.000Z',
+              2, NULL, 'Error: broker unavailable', '2026-08-10T12:00:00.000Z'
+            ),
+            (
+              'project-a', 'event-stopped', 'commit-stopped', 0,
+              '{"type":"object.updated"}'::jsonb, '2026-08-10T12:02:00.000Z',
+              1, NULL, 'Outbox dispatcher stopped before publication completed.',
+              '2026-08-10T12:00:00.000Z'
+            )
+        `)
+
+        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+
+        const rows = await sql.unsafe<
+          Array<{ readonly id: string; readonly last_failure: unknown | null }>
+        >(`SELECT id, last_failure FROM ${quoteIdent(schemaName)}.ontology_outbox ORDER BY id`)
+        expect(parseSixbFailure(rows[0]?.last_failure, ONTOLOGY_OUTBOX_FAILURE_CODES)).toEqual({
+          code: "event.delivery_failed",
+          message: "Event delivery failed.",
+          retryable: true,
+          at: "2026-08-10T12:01:00.000Z",
+          details: {
+            attempts: 2,
+            eventIds: ["event-failed"],
+            eventTypes: ["object.created"],
+            migratedFromLegacyLastError: true,
+            timestampSource: "availableAt",
+          },
+        })
+        expect(rows[1]).toEqual({ id: "event-stopped", last_failure: null })
+        expect(await readTableColumns(schemaName, "ontology_outbox")).toContain("last_failure")
+        expect(await readTableColumns(schemaName, "ontology_outbox")).not.toContain("last_error")
       } finally {
         await sql.end()
       }
@@ -880,6 +956,13 @@ describe("Postgres storage migrations", () => {
           id: "017-action-failure-record",
           status: "applied",
           version: 17,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "018-ontology-outbox-failure-record",
+          status: "applied",
+          version: 18,
         },
       ])
     } finally {

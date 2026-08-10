@@ -493,7 +493,7 @@ export class PgMaterializationWriter {
       INSERT INTO ontology_outbox (
         project_id, id, commit_id, commit_ordinal, envelope,
         available_at, attempts, lease_id, lease_expires_at,
-        published_at, last_error, created_at
+        published_at, last_failure, created_at
       )
       SELECT ${projectId}, value->>'id', ${commitId},
         (value->>'commitOrdinal')::bigint, value->'envelope',

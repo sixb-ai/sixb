@@ -9,6 +9,7 @@ import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
   AGENT_RUN_FAILURE_CODES,
+  ONTOLOGY_OUTBOX_FAILURE_CODES,
   PIPELINE_RUN_FAILURE_CODES,
   PROJECTION_RUN_FAILURE_CODES,
   SYNC_RUN_FAILURE_CODES,
@@ -144,6 +145,13 @@ const expectedStorageMigrationRows = [
     id: "017-action-failure-record",
     status: "applied",
     version: 17,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "018-ontology-outbox-failure-record",
+    status: "applied",
+    version: 18,
   },
 ]
 
@@ -778,6 +786,79 @@ describe("SQLite storage migrations", () => {
           })
         )
       ).toThrow()
+    } finally {
+      db.close()
+    }
+  })
+
+  test("ontology outbox failure migration replaces legacy diagnostics with a safe failure", () => {
+    const db = new Database(":memory:")
+    try {
+      const failureMigrationIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "018-ontology-outbox-failure-record"
+      )
+      const failureMigration = sqliteStorageMigrations.steps[failureMigrationIndex]
+      if (failureMigrationIndex !== 17 || !failureMigration) {
+        throw new Error("SQLite ontology outbox failure migration is missing.")
+      }
+      for (const migration of sqliteStorageMigrations.steps.slice(0, failureMigrationIndex)) {
+        migration.up(db)
+      }
+      db.query(`
+        INSERT INTO ontology_outbox (
+          project_id, id, commit_id, commit_ordinal, envelope, available_at,
+          attempts, published_at, last_error, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+      `).run(
+        "project-a",
+        "event-failed",
+        "commit-failed",
+        0,
+        JSON.stringify({ type: "object.created" }),
+        "2026-08-10T12:01:00.000Z",
+        2,
+        "Error: broker unavailable",
+        "2026-08-10T12:00:00.000Z"
+      )
+      db.query(`
+        INSERT INTO ontology_outbox (
+          project_id, id, commit_id, commit_ordinal, envelope, available_at,
+          attempts, published_at, last_error, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+      `).run(
+        "project-a",
+        "event-stopped",
+        "commit-stopped",
+        0,
+        JSON.stringify({ type: "object.updated" }),
+        "2026-08-10T12:02:00.000Z",
+        1,
+        "Outbox dispatcher stopped before publication completed.",
+        "2026-08-10T12:00:00.000Z"
+      )
+
+      failureMigration.up(db)
+
+      expect(readMemoryTableColumns(db, "ontology_outbox")).toContain("last_failure")
+      expect(readMemoryTableColumns(db, "ontology_outbox")).not.toContain("last_error")
+      const rows = db
+        .query("SELECT id, last_failure FROM ontology_outbox ORDER BY id")
+        .all() as Array<{ readonly id: string; readonly last_failure: string | null }>
+      expect(rows[0]?.id).toBe("event-failed")
+      expect(parseSixbFailure(rows[0]?.last_failure, ONTOLOGY_OUTBOX_FAILURE_CODES)).toEqual({
+        code: "event.delivery_failed",
+        message: "Event delivery failed.",
+        retryable: true,
+        at: "2026-08-10T12:01:00.000Z",
+        details: {
+          attempts: 2,
+          eventIds: ["event-failed"],
+          eventTypes: ["object.created"],
+          migratedFromLegacyLastError: true,
+          timestampSource: "availableAt",
+        },
+      })
+      expect(rows[1]).toEqual({ id: "event-stopped", last_failure: null })
     } finally {
       db.close()
     }

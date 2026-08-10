@@ -1,3 +1,4 @@
+import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
   MaterializationConflictError,
   MaterializationValidationError,
@@ -12,6 +13,7 @@ import type {
   RescheduleOntologyOutboxLeaseInput,
   SummarizeOntologyOutboxInput,
 } from "@sixb/core/storage"
+import { ONTOLOGY_OUTBOX_FAILURE_CODES } from "@sixb/core/storage"
 import {
   assertNonblank,
   assertPositiveInteger,
@@ -57,7 +59,7 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
           WHERE outbox.project_id = candidates.project_id AND outbox.id = candidates.id
           RETURNING outbox.id AS row_id, outbox.envelope, outbox.available_at,
             outbox.attempts, outbox.lease_id, outbox.lease_expires_at,
-            outbox.published_at, outbox.last_error, outbox.created_at,
+            outbox.published_at, outbox.last_failure, outbox.created_at,
             outbox.commit_id, outbox.commit_ordinal
         )
         SELECT * FROM claimed ORDER BY created_at, commit_id, commit_ordinal
@@ -109,6 +111,10 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
       assertTimestamp(input.availableAt, "Ontology outbox availableAt")
       const ids = validateLeaseIds(input.ids)
       if (ids.length === 0) return
+      const failure =
+        input.failure === undefined
+          ? null
+          : serializeSixbFailure(input.failure, ONTOLOGY_OUTBOX_FAILURE_CODES)
       const rows = await sql<{ readonly id: string }[]>`
         WITH leased AS MATERIALIZED (
           SELECT id FROM ontology_outbox
@@ -122,7 +128,8 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
           WHERE (SELECT COUNT(*) FROM leased) = ${ids.length}
         )
         UPDATE ontology_outbox AS outbox
-        SET available_at = ${input.availableAt}, last_error = ${input.error},
+        SET available_at = ${input.availableAt},
+          last_failure = COALESCE(${failure}::text::jsonb, outbox.last_failure),
           lease_id = NULL, lease_expires_at = NULL
         FROM eligible
         WHERE outbox.project_id = ${input.projectId} AND outbox.id = eligible.id

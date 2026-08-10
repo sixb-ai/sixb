@@ -725,7 +725,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           leaseId: null,
           leaseExpiresAt: null,
           publishedAt: null,
-          lastError: null,
+          lastFailure: null,
           createdAt: item.createdAt,
         })
         session.outboxEnvelopes.set(envelope.commitOrdinal, structuredClone(envelope))
