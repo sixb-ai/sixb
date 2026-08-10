@@ -7,10 +7,10 @@ import {
   type Schema,
   type TelemetryProjectionDefinition,
 } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { TelemetryPointWrite } from "@sixb/core/internal/materialization"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import { ProjectionWorkerError } from "./errors"
 import { resolveProjectionSchema } from "./projection-schema"
 import { normalizeProjectedValue } from "./projection-value-coercion"
 import type { ClaimedProjectionExecution, ProjectionWorkerContext } from "./types"
@@ -46,15 +46,23 @@ export async function runTelemetryProjection(input: {
   readonly signal: AbortSignal
 }): Promise<{ readonly protocol: "telemetry"; readonly inputExhausted: true }> {
   const { runtime, projection, dataset, version, execution, signal } = input
+  const errorDetails = {
+    projectionId: projection.id,
+    runId: execution.run.id,
+    datasetId: execution.run.identity.datasetVersion.datasetId,
+    versionId: execution.run.identity.datasetVersion.versionId,
+  }
   const checkpoint = execution.run.telemetryCheckpoint
   if (!checkpoint) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Telemetry projection run '${execution.run.id}' has no checkpoint.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbProjectionWorker] Telemetry projection run '${execution.run.id}' has no checkpoint.`,
+      { details: errorDetails }
     )
   }
   if (checkpoint.inputExhausted) return telemetryInputExhausted()
 
-  const plan = buildTelemetryProjectionPlan({ runtime, projection, dataset })
+  const plan = buildTelemetryProjectionPlan({ runtime, projection, dataset, errorDetails })
   const batch: unknown[] = []
   let batchOrdinal = checkpoint.nextBatchOrdinal
   let attemptRowsRead = 0
@@ -68,7 +76,7 @@ export async function runTelemetryProjection(input: {
     throwIfAborted(signal)
     attemptRowsRead += 1
     assertWithinPinnedInput({
-      projectionRunId: execution.run.id,
+      ...errorDetails,
       expectedRows: version.rowCount,
       rowsRead: checkpoint.nextRowOffset + attemptRowsRead,
     })
@@ -89,7 +97,7 @@ export async function runTelemetryProjection(input: {
 
   throwIfAborted(signal)
   assertCompletePinnedInput({
-    projectionRunId: execution.run.id,
+    ...errorDetails,
     expectedRows: version.rowCount,
     rowsRead: checkpoint.nextRowOffset + attemptRowsRead,
   })
@@ -112,24 +120,52 @@ function telemetryInputExhausted() {
 }
 
 function assertWithinPinnedInput(input: {
-  readonly projectionRunId: string
+  readonly projectionId: string
+  readonly runId: string
+  readonly datasetId: string
+  readonly versionId: string
   readonly expectedRows: number | undefined
   readonly rowsRead: number
 }): void {
   if (input.expectedRows === undefined || input.rowsRead <= input.expectedRows) return
-  throw new ProjectionWorkerError(
-    `[SixbProjectionWorker] Telemetry projection run '${input.projectionRunId}' read more than its ${input.expectedRows} pinned rows.`
+  throw createSixbError(
+    "dataset.version_read_inconsistent",
+    `[SixbProjectionWorker] Telemetry projection run '${input.runId}' read more than its ${input.expectedRows} pinned rows.`,
+    {
+      details: {
+        projectionId: input.projectionId,
+        runId: input.runId,
+        datasetId: input.datasetId,
+        versionId: input.versionId,
+        expectedRows: input.expectedRows,
+        rowsRead: input.rowsRead,
+      },
+    }
   )
 }
 
 function assertCompletePinnedInput(input: {
-  readonly projectionRunId: string
+  readonly projectionId: string
+  readonly runId: string
+  readonly datasetId: string
+  readonly versionId: string
   readonly expectedRows: number | undefined
   readonly rowsRead: number
 }): void {
   if (input.expectedRows === undefined || input.rowsRead === input.expectedRows) return
-  throw new ProjectionWorkerError(
-    `[SixbProjectionWorker] Telemetry projection run '${input.projectionRunId}' reached EOF after ${input.rowsRead} of ${input.expectedRows} pinned rows.`
+  throw createSixbError(
+    "dataset.version_read_inconsistent",
+    `[SixbProjectionWorker] Telemetry projection run '${input.runId}' reached EOF after ${input.rowsRead} of ${input.expectedRows} pinned rows.`,
+    {
+      details: {
+        projectionId: input.projectionId,
+        runId: input.runId,
+        datasetId: input.datasetId,
+        versionId: input.versionId,
+        expectedRows: input.expectedRows,
+        rowsRead: input.rowsRead,
+      },
+    }
   )
 }
 
@@ -183,16 +219,26 @@ function buildTelemetryProjectionPlan(input: {
   readonly runtime: ProjectionWorkerContext
   readonly projection: TelemetryProjectionDefinition
   readonly dataset: DatasetDefinition
+  readonly errorDetails: Readonly<Record<string, string>>
 }): TelemetryProjectionPlan {
-  const { runtime, projection, dataset } = input
+  const { runtime, projection, dataset, errorDetails } = input
   const objectType = runtime.ontology.getObjectTypeById(projection.objectTypeId)
   const property = objectType?.properties.find(
     (candidate) => candidate.id === projection.propertyId
   )
   const valueColumn = dataset.schema.columns.find((column) => column.name === projection.valueField)
   if (!objectType || !property || !valueColumn) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Telemetry projection '${projection.id}' was not validated before execution.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbProjectionWorker] Telemetry projection '${projection.id}' was not validated before execution.`,
+      {
+        details: {
+          ...errorDetails,
+          objectTypeId: projection.objectTypeId,
+          propertyId: projection.propertyId,
+          columnName: projection.valueField,
+        },
+      }
     )
   }
 
@@ -200,7 +246,12 @@ function buildTelemetryProjectionPlan(input: {
     projection,
     dataset,
     valueColumnType: valueColumn.type,
-    valueSchema: resolveProjectionSchema(property.schema, runtime.ontology.getValueTypesById()),
+    valueSchema: resolveProjectionSchema(property.schema, runtime.ontology.getValueTypesById(), {
+      ...errorDetails,
+      objectTypeId: objectType.id,
+      propertyId: property.id,
+      columnName: valueColumn.name,
+    }),
     readColumns: telemetryProjectionReadColumns(projection),
   }
 }

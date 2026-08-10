@@ -28,6 +28,10 @@ export function mapObjectProjectionEntries(input: {
     projection,
     dataset,
     primaryPropertyId: runtime.ontology.getPrimaryPropertyId(projection.objectTypeId),
+    correlation: {
+      runId: execution.run.id,
+      versionId: execution.run.identity.datasetVersion.versionId,
+    },
   })
   const progress = createProgress(runtime, execution, expectedRows)
 

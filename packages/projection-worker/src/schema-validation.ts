@@ -107,7 +107,15 @@ export function assertProjectionCompatibleWithDataset(input: {
         !isDatasetColumnCompatibleWithSchema(
           column.type,
           property.schema,
-          ontology.getValueTypesById()
+          ontology.getValueTypesById(),
+          {
+            projectionId: projection.id,
+            datasetId: dataset.id,
+            versionId: version.versionId,
+            objectTypeId: objectType.id,
+            propertyId,
+            columnName,
+          }
         )
       ) {
         throw new ProjectionWorkerPermanentError(
@@ -224,7 +232,15 @@ export function assertProjectionCompatibleWithDataset(input: {
       !isDatasetColumnCompatibleWithSchema(
         valueColumn.type,
         property.schema,
-        ontology.getValueTypesById()
+        ontology.getValueTypesById(),
+        {
+          projectionId: projection.id,
+          datasetId: dataset.id,
+          versionId: version.versionId,
+          objectTypeId: objectType.id,
+          propertyId: property.id,
+          columnName: valueColumn.name,
+        }
       )
     ) {
       throw new ProjectionWorkerPermanentError(
@@ -370,9 +386,10 @@ function isDateLikeColumnType(type: DatasetColumnDefinition["type"]): boolean {
 function isDatasetColumnCompatibleWithSchema(
   columnType: DatasetColumnDefinition["type"],
   schema: Schema,
-  valueTypesById: ReadonlyMap<string, ValueType>
+  valueTypesById: ReadonlyMap<string, ValueType>,
+  errorContext: Readonly<Record<string, string>>
 ): boolean {
-  const resolved = resolveProjectionSchema(schema, valueTypesById)
+  const resolved = resolveProjectionSchema(schema, valueTypesById, errorContext)
 
   switch (columnType) {
     case "string":

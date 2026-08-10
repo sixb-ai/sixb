@@ -74,4 +74,44 @@ describe("object projection plan", () => {
         "Dataset 'canonical.meter-readings' column 'reading' must match type 'float64'.",
     })
   })
+
+  test("codes an execution plan invariant with its projection correlation", () => {
+    const Account = defineObjectType({
+      id: "Account",
+      name: "Account",
+      properties: [prop("id", "string", { required: true, primary: true })],
+    })
+    const accounts = defineDataset("canonical.accounts", {
+      schema: [col("account_id", "string")],
+    })
+    const projection = defineProjection("account-projection", Account)
+      .fromDataset(accounts)
+      .properties({ id: "account_id" })
+
+    let caught: unknown
+    try {
+      buildObjectProjectionPlan({
+        ontology: new OntologyRegistry({ sources: [] }),
+        projection,
+        dataset: accounts,
+        primaryPropertyId: "id",
+        correlation: { runId: "projection-run-1", versionId: "version-1" },
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message: expect.stringContaining("references unknown object type 'Account'"),
+      details: {
+        projectionId: projection.id,
+        runId: "projection-run-1",
+        datasetId: accounts.id,
+        versionId: "version-1",
+        objectTypeId: Account.id,
+      },
+    })
+  })
 })

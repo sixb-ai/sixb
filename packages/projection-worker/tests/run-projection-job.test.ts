@@ -27,6 +27,7 @@ import {
   stringEnum,
   valueTypeRef,
 } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { DomainEventService } from "@sixb/core/internal/events"
 import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import {
@@ -439,7 +440,17 @@ async function commitDatasetMerge(
 }
 
 describe("runProjectionJob", () => {
-  test("classifies only terminal materialization conflicts as permanent", () => {
+  test("classifies catalog policy and only terminal materialization conflicts as permanent", () => {
+    expect(
+      isPermanentProjectionFailure(
+        createSixbError("internal.unexpected", "Projection invariant failed.")
+      )
+    ).toBe(true)
+    expect(
+      isPermanentProjectionFailure(
+        createSixbError("dataset.version_read_inconsistent", "Dataset read was incomplete.")
+      )
+    ).toBe(false)
     expect(
       isPermanentProjectionFailure(
         new MaterializationConflictError("projection-fence", "A newer version is active.")
@@ -993,7 +1004,20 @@ describe("runProjectionJob", () => {
     }
 
     lakeStorage.stopAfterRows = 2
-    await expect(runProjectionJob(input)).rejects.toThrow("reached EOF after 2 of 3 pinned rows")
+    const readError = await runProjectionJob(input).catch((error: unknown) => error)
+    expect(readError).toMatchObject({
+      code: "dataset.version_read_inconsistent",
+      retryable: true,
+      message: expect.stringContaining("reached EOF after 2 of 3 pinned rows"),
+      details: {
+        projectionId: roomTemperatureProjection.id,
+        runId: canonicalRunId(input.job.id),
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+        expectedRows: 3,
+        rowsRead: 2,
+      },
+    })
     expect(
       await deps.storage.projectionRuns.getById({
         projectId: sixb.id,
@@ -1770,7 +1794,22 @@ describe("runProjectionJob", () => {
 
     lakeStorage.failAfterRows = undefined
     lakeStorage.stopAfterRows = 1
-    await expect(runProjectionJob(input)).rejects.toThrow("persisted progress floor")
+    const readError = await runProjectionJob(input).catch((error: unknown) => error)
+    expect(readError).toMatchObject({
+      code: "dataset.version_read_inconsistent",
+      retryable: true,
+      message: expect.stringContaining("persisted progress floor"),
+      details: {
+        projectionId: roomProjection.id,
+        runId: canonicalRunId(input.job.id),
+        datasetId: roomsDataset.id,
+        versionId: nextVersion.versionId,
+        persistedRowsRead: 2,
+        persistedRowsSkipped: 0,
+        rowsRead: 1,
+        rowsSkipped: 0,
+      },
+    })
     expect(
       await deps.storage.projectionRuns.getById({
         projectId: sixb.id,
