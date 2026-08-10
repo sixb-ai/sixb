@@ -1,8 +1,8 @@
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { ProjectionRunRequestedQueueJob, Queue } from "@sixb/core/queues"
 import type { ProjectionRunRecord } from "@sixb/core/storage"
-import { OrchestratorError } from "./errors"
 import { buildProjectionJob } from "./projection-job"
 import type { ProjectionDispatchPorts } from "./types"
 
@@ -43,7 +43,12 @@ async function reconcileProjection(
   input: ProjectionDispatchReconcilerInput,
   descriptor: ProjectionDispatchDescriptor
 ): Promise<void> {
-  const version = await findLatestDataVersion(input.lakeStorage, descriptor.datasetId)
+  const version = await findLatestDataVersion({
+    lakeStorage: input.lakeStorage,
+    projectId: input.projectId,
+    projectionId: descriptor.projectionId,
+    datasetId: descriptor.datasetId,
+  })
   if (!version) return
 
   const job = buildProjectionJob({
@@ -55,8 +60,18 @@ async function reconcileProjection(
   const run = await input.projectionRuns.getById({ projectId: input.projectId, id: job.id })
   if (run) {
     if (!runMatchesJob(run, job.payload)) {
-      throw new OrchestratorError(
-        `Projection run '${run.id}' does not match its deterministic dispatch identity.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbOrchestrator] Projection run '${run.id}' does not match its deterministic dispatch identity.`,
+        {
+          details: {
+            projectId: input.projectId,
+            projectionId: descriptor.projectionId,
+            runId: run.id,
+            datasetId: descriptor.datasetId,
+            versionId: version.versionId,
+          },
+        }
       )
     }
     return
@@ -82,29 +97,51 @@ function runMatchesJob(
   )
 }
 
-async function findLatestDataVersion(
-  lakeStorage: ProjectionDispatchPorts["lakeStorage"],
-  datasetId: string
-): Promise<DatasetVersion | null> {
-  let version = await lakeStorage.getLatestVersion(datasetId)
+async function findLatestDataVersion(input: {
+  readonly lakeStorage: ProjectionDispatchPorts["lakeStorage"]
+  readonly projectId: string
+  readonly projectionId: string
+  readonly datasetId: string
+}): Promise<DatasetVersion | null> {
+  let version = await input.lakeStorage.getLatestVersion(input.datasetId)
   const visited = new Set<string>()
 
   while (version?.mode === "schema") {
     if (!version.parentVersionId) {
-      const versions = await lakeStorage.listVersions(datasetId)
+      const versions = await input.lakeStorage.listVersions(input.datasetId)
       return versions.find((candidate) => candidate.mode !== "schema") ?? null
     }
     if (visited.has(version.versionId)) {
-      throw new OrchestratorError(
-        `Dataset '${datasetId}' version ancestry contains a cycle at '${version.versionId}'.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbOrchestrator] Dataset '${input.datasetId}' version ancestry contains a cycle at '${version.versionId}'.`,
+        {
+          details: {
+            projectId: input.projectId,
+            projectionId: input.projectionId,
+            datasetId: input.datasetId,
+            versionId: version.versionId,
+          },
+        }
       )
     }
     visited.add(version.versionId)
+    const schemaVersionId = version.versionId
     const parentVersionId = version.parentVersionId
-    version = await lakeStorage.getVersion(datasetId, parentVersionId)
+    version = await input.lakeStorage.getVersion(input.datasetId, parentVersionId)
     if (!version) {
-      throw new OrchestratorError(
-        `Dataset '${datasetId}' schema version references missing parent '${parentVersionId}'.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbOrchestrator] Dataset '${input.datasetId}' schema version references missing parent '${parentVersionId}'.`,
+        {
+          details: {
+            projectId: input.projectId,
+            projectionId: input.projectionId,
+            datasetId: input.datasetId,
+            versionId: schemaVersionId,
+            parentVersionId,
+          },
+        }
       )
     }
   }

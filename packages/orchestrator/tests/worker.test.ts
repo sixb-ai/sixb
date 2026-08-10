@@ -153,6 +153,15 @@ async function waitFor(fn: () => Promise<boolean> | boolean, timeoutMs = 2_000):
   throw new Error("Timed out waiting for condition.")
 }
 
+function thrownBy(run: () => unknown): unknown {
+  try {
+    run()
+  } catch (error) {
+    return error
+  }
+  throw new Error("Expected function to throw.")
+}
+
 const workers: OrchestratorWorker[] = []
 
 afterEach(async () => {
@@ -657,6 +666,59 @@ describe("OrchestratorWorker", () => {
     expect(claimed?.job.payload.datasetVersion.versionId).toBe(dataVersion.versionId)
   })
 
+  test("reports malformed projection version ancestry structurally", async () => {
+    const descriptor = invoiceProjectionDescriptor()
+    const schemaVersion: DatasetVersion = {
+      datasetId: rawInvoices.id,
+      versionId: "schema-cycle",
+      parentVersionId: "schema-cycle",
+      mode: "schema",
+      createdAt: new Date("2026-04-19T02:00:00.000Z"),
+      schema: rawInvoices.schema,
+    }
+    const errors: unknown[] = []
+    const originalError = console.error
+    console.error = (_message, error) => {
+      errors.push(error)
+    }
+
+    try {
+      await reconcileProjectionDispatch({
+        projectId: PROJECT_ID,
+        queue: new InMemoryQueues().projections,
+        descriptors: [descriptor],
+        lakeStorage: {
+          async listVersions() {
+            return [schemaVersion]
+          },
+          async getLatestVersion() {
+            return schemaVersion
+          },
+          async getVersion() {
+            return schemaVersion
+          },
+        },
+        projectionRuns: new InMemoryProjectionRunStorage(),
+      })
+    } finally {
+      console.error = originalError
+    }
+
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message:
+        "[SixbOrchestrator] Dataset 'raw.invoices' version ancestry contains a cycle at 'schema-cycle'.",
+      details: {
+        projectId: PROJECT_ID,
+        projectionId: descriptor.projectionId,
+        datasetId: rawInvoices.id,
+        versionId: schemaVersion.versionId,
+      },
+    })
+  })
+
   test("skips an existing run and redispatches after a semantic revision change", async () => {
     const descriptor = invoiceProjectionDescriptor()
     const lakeStorage = new InMemoryLakeStorage()
@@ -791,15 +853,84 @@ describe("OrchestratorWorker", () => {
 
   test("rejects an empty project id", () => {
     expect(
-      () =>
-        new OrchestratorWorker({
-          projectId: "",
-          events: createEvents(),
-          queues: new InMemoryQueues(),
-          routes: new Map(),
-          dispatchers: {},
-        })
-    ).toThrow("[SixbOrchestrator] projectId is required.")
+      thrownBy(
+        () =>
+          new OrchestratorWorker({
+            projectId: "",
+            events: createEvents(),
+            queues: new InMemoryQueues(),
+            routes: new Map(),
+            dispatchers: {},
+          })
+      )
+    ).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message: "[SixbOrchestrator] projectId is required.",
+    })
+  })
+
+  test("reports projection dispatch configuration errors structurally", () => {
+    const descriptor = invoiceProjectionDescriptor()
+    const routes = compileRoutes({
+      schedules: [],
+      syncs: [],
+      pipelines: [],
+      projections: [descriptor],
+    })
+
+    expect(
+      thrownBy(
+        () =>
+          new OrchestratorWorker({
+            projectId: PROJECT_ID,
+            events: createEvents(),
+            queues: new InMemoryQueues(),
+            routes,
+            dispatchers: {},
+          })
+      )
+    ).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message:
+        "[SixbOrchestrator] Projection routes require lake and projection-run storage for durable dispatch.",
+      details: {
+        projectId: PROJECT_ID,
+        projectionIds: [descriptor.projectionId],
+      },
+    })
+  })
+
+  test("reports conflicting projection routes with their correlation details", () => {
+    const descriptor = invoiceProjectionDescriptor()
+    const routes = compileRoutes({
+      schedules: [],
+      syncs: [],
+      pipelines: [],
+      projections: [
+        descriptor,
+        invoiceProjectionDescriptor({ projectionRevision: "projection-2" }),
+      ],
+    })
+
+    expect(
+      thrownBy(
+        () =>
+          new OrchestratorWorker({
+            projectId: PROJECT_ID,
+            events: createEvents(),
+            queues: new InMemoryQueues(),
+            routes,
+            dispatchers: {},
+          })
+      )
+    ).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message: `[SixbOrchestrator] Projection '${descriptor.projectionId}' has conflicting dispatch routes.`,
+      details: { projectId: PROJECT_ID, projectionId: descriptor.projectionId },
+    })
   })
 
   test("requires durable Core dispatch for workflow routes", () => {
