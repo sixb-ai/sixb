@@ -44,11 +44,17 @@ export async function runStep(input: {
   }
 
   throwIfAborted(signal)
-  const resolvedInputs = await resolveStepInputs({ runtime, pipeline, step })
+  const resolvedInputs = await resolveStepInputs({
+    runtime,
+    pipeline,
+    step,
+    pipelineRunId: job.id,
+  })
   const inputRefs = resolvedInputs.map((resolved) => resolved.ref)
   const outputDataset = requireRegisteredDataset({
     dataset: runtime.datasets.getById(step.output.id),
     pipelineId: pipeline.id,
+    pipelineRunId: job.id,
     stepId: step.id,
     role: "output",
     datasetId: step.output.id,
@@ -101,8 +107,9 @@ export async function runStep(input: {
     } catch (error) {
       throw createStepBookkeepingError({
         pipelineId: pipeline.id,
+        pipelineRunId: job.id,
         stepId: step.id,
-        runId: stepRunId,
+        stepRunId,
         version: committedVersion,
         cause: error,
       })

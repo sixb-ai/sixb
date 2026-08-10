@@ -102,7 +102,11 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
     return {
       run: {
         ...run,
-        finishedAt: requireFinishedAt(job.id, run.finishedAt),
+        finishedAt: requireFinishedAt({
+          pipelineId: pipeline.id,
+          runId: job.id,
+          finishedAt: run.finishedAt,
+        }),
       },
       steps,
       version: finalVersion,

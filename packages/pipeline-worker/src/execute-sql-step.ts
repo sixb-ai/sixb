@@ -5,12 +5,13 @@ import type {
   PipelineDefinition,
   PipelineStepDefinition,
 } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type {
   DatasetVersion,
   DatasetWriteMode,
   LakeSqlTransformCapabilities,
 } from "@sixb/core/lake-storage"
-import { PipelineWorkerError, throwIfAborted } from "./errors"
+import { throwIfAborted } from "./errors"
 import type { ResolvedStepInput } from "./step-inputs"
 import type { PipelineJob, PipelineWorkerContext } from "./types"
 
@@ -27,7 +28,9 @@ function assertSqlModeSupported(input: {
   readonly dialect: string
   readonly mode: DatasetWriteMode
   readonly pipelineId: string
+  readonly pipelineRunId: string
   readonly stepId: string
+  readonly datasetId: string
 }): void {
   const supported =
     input.mode === "append"
@@ -35,9 +38,18 @@ function assertSqlModeSupported(input: {
       : input.capabilities.supportsSnapshot
   if (supported) return
 
-  throw new PipelineWorkerError(
+  throw createSixbError(
+    "internal.unexpected",
     `[SixbPipelineWorker] Pipeline '${input.pipelineId}' step '${input.stepId}' writes in ` +
-      `'${input.mode}' mode, which the ${input.dialect} SQL executor does not support.`
+      `'${input.mode}' mode, which the ${input.dialect} SQL executor does not support.`,
+    {
+      details: {
+        pipelineId: input.pipelineId,
+        pipelineRunId: input.pipelineRunId,
+        stepId: input.stepId,
+        datasetId: input.datasetId,
+      },
+    }
   )
 }
 
@@ -57,14 +69,32 @@ export async function executeSqlStep(input: {
   const { runtime, pipeline, step, job, signal, outputDataset, resolvedInputs } = input
 
   if (step.executor.kind !== "sql") {
-    throw new PipelineWorkerError(
-      `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' uses run execution, which is not supported by the SQL step executor.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' uses run execution, which is not supported by the SQL step executor.`,
+      {
+        details: {
+          pipelineId: pipeline.id,
+          pipelineRunId: job.id,
+          stepId: step.id,
+          datasetId: outputDataset.id,
+        },
+      }
     )
   }
 
   if (!hasSqlExecutor(runtime.lakeStorage)) {
-    throw new PipelineWorkerError(
-      `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' requires SQL transform support, but lake storage does not provide lakeStorage.sql.execute(...).`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' requires SQL transform support, but lake storage does not provide lakeStorage.sql.execute(...).`,
+      {
+        details: {
+          pipelineId: pipeline.id,
+          pipelineRunId: job.id,
+          stepId: step.id,
+          datasetId: outputDataset.id,
+        },
+      }
     )
   }
 
@@ -77,7 +107,9 @@ export async function executeSqlStep(input: {
     dialect: runtime.lakeStorage.sql.dialect,
     mode: step.mode,
     pipelineId: pipeline.id,
+    pipelineRunId: job.id,
     stepId: step.id,
+    datasetId: outputDataset.id,
   })
 
   throwIfAborted(signal)
