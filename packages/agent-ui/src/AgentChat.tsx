@@ -4,6 +4,7 @@ import { MessagesSquare } from "lucide-react"
 import { useEffect } from "react"
 import { AgentsHome } from "./components/AgentsHome"
 import { ConversationPanel } from "./components/ConversationPanel"
+import { DocumentPreviewRoot } from "./document-preview/DocumentPreviewRoot"
 import { useAgentConversation } from "./hooks/useAgentConversation"
 import { installAgentResizeObserverGuard } from "./resizeObserver"
 import type { AgentContextInput } from "./types"
@@ -78,66 +79,70 @@ export function AgentChat({
   const presentation = conversation.presentation
 
   return (
-    <div
-      data-agent-panel={compact ? "" : undefined}
-      className={cn("relative flex h-full min-h-0 flex-col", className)}
-    >
-      {conversation.home ? (
-        <AgentsHome
-          agents={conversation.agents}
-          threads={conversation.threads}
-          agentsById={conversation.agentsById}
-          threadsError={conversation.threadsError ? "Could not load chats." : null}
-          onPickAgent={startNewChatWith}
-          onSelectThread={onNavigateThread}
-        />
-      ) : (
-        <ConversationPanel
-          agent={conversation.currentAgent}
-          threadId={threadId}
-          messages={conversation.messages}
-          live={conversation.live}
-          messagesLoading={conversation.messagesLoading}
-          messagesError={conversation.messagesError}
-          pendingUserText={pendingUser?.text ?? null}
-          pendingUserAttachments={pendingUser?.attachments ?? []}
-          pendingUserContext={pendingUser?.context ?? []}
-          anchorCurrentTurn={conversation.anchorCurrentTurn}
-          awaitingResponse={conversation.isRunning}
-          waitingLonger={conversation.waitingLonger}
-          failedBeforeResponse={presentation.kind === "failed"}
-          cancelledBeforeResponse={presentation.kind === "cancelled"}
-          onRetry={
-            presentation.kind === "failed" ? () => conversation.retry(presentation.run) : undefined
-          }
-          retrying={conversation.retrying}
-          reconnecting={conversation.reconnecting}
-          sendError={conversation.sendError}
-          agents={conversation.agents}
-          agentThreads={conversation.agentThreads}
-          canGoHome={conversation.canGoHome}
-          onSend={conversation.send}
-          onBackHome={onNavigateHome}
-          onNewChat={() => {
-            if (conversation.currentAgent) startNewChatWith(conversation.currentAgent.id)
-          }}
-          onPickAgent={startNewChatWith}
-          onSelectThread={onNavigateThread}
-          composerDisabled={conversation.isRunning}
-          composerPending={conversation.composerPending}
-          composerRunning={conversation.isRunning}
-          composerStopping={conversation.stopping}
-          onStop={conversation.stop}
-          composerPlaceholder="Ask anything"
-          composerDraft={conversation.draftReseed.text}
-          composerDraftAttachments={conversation.draftReseed.attachments}
-          composerDraftContext={conversation.draftReseed.context}
-          composerDraftNonce={conversation.draftReseed.nonce}
-          ambientContext={ambientContext}
-          compact={compact}
-        />
-      )}
-    </div>
+    <DocumentPreviewRoot compact={compact}>
+      <div
+        data-agent-panel={compact ? "" : undefined}
+        className={cn("relative flex h-full min-h-0 flex-col", className)}
+      >
+        {conversation.home ? (
+          <AgentsHome
+            agents={conversation.agents}
+            threads={conversation.threads}
+            agentsById={conversation.agentsById}
+            threadsError={conversation.threadsError ? "Could not load chats." : null}
+            onPickAgent={startNewChatWith}
+            onSelectThread={onNavigateThread}
+          />
+        ) : (
+          <ConversationPanel
+            agent={conversation.currentAgent}
+            threadId={threadId}
+            messages={conversation.messages}
+            live={conversation.live}
+            messagesLoading={conversation.messagesLoading}
+            messagesError={conversation.messagesError}
+            pendingUserText={pendingUser?.text ?? null}
+            pendingUserAttachments={pendingUser?.attachments ?? []}
+            pendingUserContext={pendingUser?.context ?? []}
+            anchorCurrentTurn={conversation.anchorCurrentTurn}
+            awaitingResponse={conversation.isRunning}
+            waitingLonger={conversation.waitingLonger}
+            failedBeforeResponse={presentation.kind === "failed"}
+            cancelledBeforeResponse={presentation.kind === "cancelled"}
+            onRetry={
+              presentation.kind === "failed"
+                ? () => conversation.retry(presentation.run)
+                : undefined
+            }
+            retrying={conversation.retrying}
+            reconnecting={conversation.reconnecting}
+            sendError={conversation.sendError}
+            agents={conversation.agents}
+            agentThreads={conversation.agentThreads}
+            canGoHome={conversation.canGoHome}
+            onSend={conversation.send}
+            onBackHome={onNavigateHome}
+            onNewChat={() => {
+              if (conversation.currentAgent) startNewChatWith(conversation.currentAgent.id)
+            }}
+            onPickAgent={startNewChatWith}
+            onSelectThread={onNavigateThread}
+            composerDisabled={conversation.isRunning}
+            composerPending={conversation.composerPending}
+            composerRunning={conversation.isRunning}
+            composerStopping={conversation.stopping}
+            onStop={conversation.stop}
+            composerPlaceholder="Ask anything"
+            composerDraft={conversation.draftReseed.text}
+            composerDraftAttachments={conversation.draftReseed.attachments}
+            composerDraftContext={conversation.draftReseed.context}
+            composerDraftNonce={conversation.draftReseed.nonce}
+            ambientContext={ambientContext}
+            compact={compact}
+          />
+        )}
+      </div>
+    </DocumentPreviewRoot>
   )
 }
 
