@@ -18,10 +18,11 @@ import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import type { EventsRuntime } from "@sixb/core/internal/events"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
-import type { ActionRunParams, ObjectRow } from "@sixb/core/storage"
+import type { ActionRunParams } from "@sixb/core/storage"
 import { ActionWorkerError } from "../src/errors"
 import { runActionJob } from "../src/run-action-job"
 import type { ActionWorkerContext } from "../src/types"
+import type { ActionWorkerSixb } from "../src/worker"
 
 const Device = defineObjectType({
   id: "Device",
@@ -48,21 +49,16 @@ interface DeviceObjectSet {
   get(id: string): Promise<{ properties: Record<string, unknown> } | null>
 }
 
-interface TestSixb {
-  readonly id: string
-  readonly blobStorage: InMemoryBlobStorage
+interface TestSixb extends ActionWorkerSixb {
   readonly events: EventsRuntime
   readonly storage: InMemoryStorage
-  upsertObject(objectTypeId: string, properties: Record<string, unknown>): Promise<ObjectRow>
-  getActionById(actionId: string): ActionDefinition | null
+  readonly objects: ActionWorkerContext["sixb"]["objects"]
 }
 
 const SixbConstructor = Sixb as unknown as new (options: Record<string, unknown>) => TestSixb
 
 function deviceObjects(sixb: TestSixb): DeviceObjectSet {
-  return (sixb as unknown as { objects(objectType: typeof Device): DeviceObjectSet }).objects(
-    Device
-  )
+  return sixb.objects(Device)
 }
 
 function createSixb(
@@ -84,14 +80,18 @@ function createSixb(
 function createContext(sixb: TestSixb): ActionWorkerContext {
   return {
     id: sixb.id,
+    errorReporterHost: sixb,
     events: sixb.events,
     storage: sixb.storage,
     actionRunsStorage: sixb.storage.actionRuns!,
     ontologyMutations: getOntologyMutationRuntime(sixb),
-    sixb: sixb as unknown as ActionWorkerContext["sixb"],
-    getActionById(actionId) {
-      return sixb.getActionById(actionId)
+    sixb: {
+      objects: sixb.objects,
+      actions: sixb.actions,
+      connectors: sixb.connectors,
+      blobs: sixb.blobs,
     },
+    actions: sixb.actions,
   }
 }
 
@@ -166,7 +166,7 @@ describe("runActionJob", () => {
       })
 
     const sixb = createSixb([setStatus])
-    await sixb.upsertObject("Device", {
+    await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
     })
@@ -215,7 +215,7 @@ describe("runActionJob", () => {
       })
 
     const sixb = createSixb([failWriteback])
-    await sixb.upsertObject("Device", {
+    await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
       status: "old",
@@ -314,7 +314,7 @@ describe("runActionJob", () => {
       })
 
     const sixb = createSixb([count])
-    await sixb.upsertObject("Device", {
+    await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
     })
@@ -476,9 +476,9 @@ describe("runActionJob", () => {
       [assignSensor as ActionDefinition, clearSensor as ActionDefinition],
       [Device, Sensor]
     )
-    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
-    await sixb.upsertObject("Sensor", { id: "sensor-1", name: "Sensor 1" })
-    await sixb.upsertObject("Sensor", { id: "sensor-2", name: "Sensor 2" })
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    await sixb.objects.upsert("Sensor", { id: "sensor-1", name: "Sensor 1" })
+    await sixb.objects.upsert("Sensor", { id: "sensor-2", name: "Sensor 2" })
     await (
       sixb as unknown as {
         objects(objectType: typeof Device): {
@@ -570,11 +570,11 @@ describe("runActionJob", () => {
       })
 
     const sixb = createSixb([detachSensor], [Device, Sensor])
-    await sixb.upsertObject("Device", {
+    await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
     })
-    await sixb.upsertObject("Sensor", {
+    await sixb.objects.upsert("Sensor", {
       id: "sensor-1",
       name: "Sensor 1",
     })
@@ -636,11 +636,11 @@ describe("runActionJob", () => {
       })
 
     const sixb = createSixb([captureSensorName], [Device, Sensor])
-    await sixb.upsertObject("Device", {
+    await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
     })
-    await sixb.upsertObject("Sensor", {
+    await sixb.objects.upsert("Sensor", {
       id: "sensor-1",
       name: "Sensor 1",
     })
@@ -698,8 +698,8 @@ describe("runActionJob", () => {
       })
 
     const sixb = createSixb([captureSensorName], [Device, Sensor])
-    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
-    await sixb.upsertObject("Sensor", { id: "sensor-1", name: "Sensor 1" })
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    await sixb.objects.upsert("Sensor", { id: "sensor-1", name: "Sensor 1" })
     await (
       sixb as unknown as {
         objects(objectType: typeof Device): {
@@ -717,7 +717,7 @@ describe("runActionJob", () => {
       .link(Device.l.sensor, { objectTypeId: "Sensor", primaryId: "sensor-1" })
 
     duringExternalCall = async () => {
-      await sixb.upsertObject("Sensor", { id: "sensor-1", name: "Renamed mid-run" })
+      await sixb.objects.upsert("Sensor", { id: "sensor-1", name: "Renamed mid-run" })
     }
 
     await queueActionRun(sixb, {
@@ -832,7 +832,7 @@ describe("runActionJob", () => {
       })
 
     const sixb = createSixb([setStatus])
-    await sixb.upsertObject("Device", {
+    await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
     })
@@ -872,7 +872,7 @@ describe("runActionJob", () => {
         objects(Device).byId(subject.primaryId).delete()
       })
     const sixb = createSixb([deleteDevice])
-    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
     await queueActionRun(sixb, {
       id: "act_delete",
       actionId: "deleteDevice",
@@ -921,7 +921,7 @@ describe("runActionJob", () => {
     const reporter = attachSixbErrorReporter(sixb, () => {
       reportCount += 1
     })
-    await sixb.upsertObject("Device", {
+    await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
     })
@@ -1011,7 +1011,7 @@ describe("runActionJob", () => {
       })
 
     const sixb = createSixb([setStatus], [Device, Sensor])
-    await sixb.upsertObject("Sensor", {
+    await sixb.objects.upsert("Sensor", {
       id: "sensor-1",
       name: "Sensor 1",
     })

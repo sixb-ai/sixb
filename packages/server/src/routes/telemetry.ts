@@ -37,7 +37,7 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         const { scoped } = requestAuthState(context)
         try {
           const parsedBody = AppendTelemetryBodySchema.parse(body)
-          await (scoped ?? sixb).appendTelemetry(params.objectTypeId, [
+          await (scoped ?? sixb).objects.appendTelemetry(params.objectTypeId, [
             {
               id: params.objectId,
               properties: {

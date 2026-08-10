@@ -18,6 +18,8 @@ export { requireLinkDefinition, resolveLinkContext, resolveObjectContext } from 
 export { ObjectError } from "./errors"
 export { removeLink, upsertLink, upsertLinkBatch } from "./link"
 export { deleteObject, restoreObject, upsertObject, upsertObjectBatch } from "./object"
+export type { DynamicObjectsRuntime, ObjectsRuntime, ObjectsRuntimeOperations } from "./runtime"
+export { createDynamicObjectsRuntime, createObjectsRuntime } from "./runtime"
 // SDK adapters (typed ObjectSet / ObjectByIdHandle)
 export { createObjectSet } from "./sdk"
 // Service layer (resolve objectTypeId → delegate to leaf)

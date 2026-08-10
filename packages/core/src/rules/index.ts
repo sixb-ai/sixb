@@ -1,6 +1,8 @@
 export { defineRule } from "./builders"
 export { deriveRuleEventDependencies } from "./dependencies"
 export { RuleError, RuleValidationError } from "./errors"
+export type { RulesRuntime } from "./runtime"
+export { createRulesRuntime } from "./runtime"
 export type {
   RuleAllPredicate,
   RuleAnyPredicate,

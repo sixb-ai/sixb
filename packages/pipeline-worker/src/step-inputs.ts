@@ -30,7 +30,7 @@ export async function resolveStepInputs(input: {
 
   for (const [name, declaredDataset] of Object.entries(step.inputs)) {
     const dataset = requireRegisteredDataset({
-      dataset: runtime.getDatasetById(declaredDataset.id),
+      dataset: runtime.datasets.getById(declaredDataset.id),
       pipelineId: pipeline.id,
       stepId: step.id,
       role: "input",

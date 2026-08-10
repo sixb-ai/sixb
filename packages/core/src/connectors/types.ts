@@ -29,7 +29,7 @@ export interface ConnectorAdapter<TType extends string = string, TClient = unkno
  * Inert connector definition registered with Sixb.
  *
  * Definitions are safe to export from `connectors/` modules. The runtime turns them into
- * live clients when `sixb.connector(...)` is called.
+ * live clients when `sixb.connectors.connect(...)` is called.
  */
 export interface ConnectorDefinition<
   TId extends string = string,

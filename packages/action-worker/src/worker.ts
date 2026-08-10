@@ -1,26 +1,27 @@
-import type { ActionDefinition, DomainEventLog, Queues, Storage } from "@sixb/core"
+import type {
+  ActionsRuntime,
+  BlobsRuntime,
+  ConnectorsRuntime,
+  RulesRuntime,
+  SixbRuntimeContext,
+} from "@sixb/core"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
+import { createDynamicObjectsRuntime } from "@sixb/core/internal/objects"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ActionRunRequestedQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import { ActionWorkerError } from "./errors"
 import { runActionJob } from "./run-action-job"
-import type {
-  ActionJob,
-  ActionRunResult,
-  ActionWorkerContext,
-  ActionWorkerSixbFacade,
-} from "./types"
+import type { ActionJob, ActionRunResult, ActionWorkerContext } from "./types"
 
-export interface ActionWorkerSixb {
+export interface ActionWorkerSixb extends Omit<SixbRuntimeContext, "blobStorage" | "rules"> {
   readonly id: string
-  readonly events: DomainEventLog
   readonly logs?: LogsRuntime
-  readonly storage: Storage
-  readonly queues: Queues
-  listActions(): readonly ActionDefinition[]
-  getActionById(actionId: string): ActionDefinition | null
+  readonly actions: Pick<ActionsRuntime, "list" | "getById" | "listForType">
+  readonly blobs: Pick<BlobsRuntime, "put" | "open" | "stat">
+  readonly connectors: Pick<ConnectorsRuntime, "connect">
+  readonly rules: Pick<RulesRuntime, "list">
 }
 
 export interface ActionWorkerOptions {
@@ -43,7 +44,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       idlePollMs: options.idlePollMs,
     })
 
-    const actions = sixb.listActions()
+    const actions = sixb.actions.list()
     if (actions.length === 0) {
       console.log("[SixbActionWorker] No action definitions registered; worker will idle.")
     }
@@ -161,49 +162,33 @@ function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
   if (!actionRunsStorage) {
     throw new ActionWorkerError("Action workers require storage.actionRuns support.")
   }
-  assertActionWorkerSixbFacade(sixb)
+  const runtime = {
+    projectId: sixb.projectId,
+    ontology: sixb.ontology,
+    actionRegistry: sixb.actionRegistry,
+    events: sixb.events,
+    storage: sixb.storage,
+    lakeStorage: sixb.lakeStorage,
+    blobStorage: sixb.blobs,
+    queues: sixb.queues,
+    sandboxes: sixb.sandboxes,
+    rules: sixb.rules.list(),
+  }
 
   return {
     id: sixb.id,
+    errorReporterHost: sixb,
     events: sixb.events,
     logs: sixb.logs,
     storage: sixb.storage,
     actionRunsStorage,
     ontologyMutations: getOntologyMutationRuntime(sixb),
-    sixb,
-    getActionById(actionId) {
-      return sixb.getActionById(actionId)
+    sixb: {
+      objects: createDynamicObjectsRuntime(runtime),
+      actions: sixb.actions,
+      connectors: sixb.connectors,
+      blobs: sixb.blobs,
     },
-  }
-}
-
-const requiredFacadeMethods = [
-  "connector",
-  "listActionsForType",
-  "getPrimaryPropertyId",
-  "getValueTypesById",
-  "isValidLinkTarget",
-  "objects",
-  "resolveObjectType",
-] as const satisfies readonly (keyof ActionWorkerSixbFacade)[]
-
-function assertActionWorkerSixbFacade(
-  sixb: ActionWorkerSixb
-): asserts sixb is ActionWorkerSixb & ActionWorkerSixbFacade {
-  const candidate = sixb as Partial<Record<(typeof requiredFacadeMethods)[number], unknown>>
-  for (const method of requiredFacadeMethods) {
-    if (typeof candidate[method] !== "function") {
-      throw new ActionWorkerError(`Action worker runtime is missing sixb.${method}(...).`)
-    }
-  }
-
-  const blobStorage = (sixb as { readonly blobStorage?: Record<string, unknown> }).blobStorage
-  if (
-    !blobStorage ||
-    typeof blobStorage.put !== "function" ||
-    typeof blobStorage.open !== "function" ||
-    typeof blobStorage.stat !== "function"
-  ) {
-    throw new ActionWorkerError("Action worker runtime is missing sixb.blobStorage support.")
+    actions: sixb.actions,
   }
 }

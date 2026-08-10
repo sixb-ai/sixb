@@ -21,7 +21,7 @@ export function registerEventRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           afterCursor: parsed.afterCursor,
           limit: parseOptionalInt(parsed.limit),
         }
-        const events = scoped ? await scoped.readEvents(input) : await sixb.events.read(input)
+        const events = scoped ? await scoped.events.read(input) : await sixb.events.read(input)
 
         return {
           count: events.length,

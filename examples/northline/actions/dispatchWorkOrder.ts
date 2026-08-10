@@ -27,7 +27,7 @@ export const dispatchWorkOrder = defineAction("dispatch-work-order", {
     }
   })
   .writeback(async ({ params, run, sixb, target }) => {
-    const fieldService = await sixb.connector(fieldServiceConnector)
+    const fieldService = await sixb.connectors.connect(fieldServiceConnector)
     const technician = (await fieldService.listTechnicians()).rows.find(
       (item) => item.technician_id === params.technician.primaryId
     )

@@ -46,7 +46,6 @@ import {
   type RequestPipelineRunInput,
   requestPipelineRun,
 } from "../pipelines/request"
-import type { ObjectRow } from "../storage"
 import type { ActionRunRecord } from "../storage/action-runs"
 import type { AgentThreadRecord, ListAgentThreadsResult } from "../storage/agents"
 import type { SyncDefinition } from "../syncs"
@@ -63,7 +62,6 @@ import type {
   WorkflowsRuntime,
 } from "../workflows"
 import type {
-  ListResult,
   ObjectByIdHandle,
   ObjectSet,
   OntologySource,
@@ -128,6 +126,59 @@ export interface ScopedObjectSet<
   byId(id: string): ScopedObjectByIdHandle<TObjectType, TValueTypes>
 }
 
+export interface ScopedObjectsRuntime<TOntologySources extends readonly OntologySource[]> {
+  <TObjectType extends RegisteredObjectType<TOntologySources>>(
+    objectType: TObjectType
+  ): ScopedObjectSet<
+    TObjectType,
+    RegisteredValueTypes<TOntologySources>,
+    RegisteredObjectType<TOntologySources>
+  >
+  list: SixbInstance<TOntologySources>["objects"]["list"]
+  get: SixbInstance<TOntologySources>["objects"]["get"]
+  getPrimaryPropertyId: SixbInstance<TOntologySources>["objects"]["getPrimaryPropertyId"]
+  upsert: SixbInstance<TOntologySources>["objects"]["upsert"]
+  upsertBatch: SixbInstance<TOntologySources>["objects"]["upsertBatch"]
+  upsertLink: SixbInstance<TOntologySources>["objects"]["upsertLink"]
+  upsertLinkBatch: SixbInstance<TOntologySources>["objects"]["upsertLinkBatch"]
+  removeLink: SixbInstance<TOntologySources>["objects"]["removeLink"]
+  appendTelemetry: SixbInstance<TOntologySources>["objects"]["appendTelemetry"]
+}
+
+export interface ScopedActionsRuntime {
+  list(): readonly ActionDefinition[]
+  getById(actionId: string): ActionDefinition | null
+  request(input: RequestActionInput): Promise<RequestActionResult>
+  requestAndWait(input: RequestActionAndWaitInput): Promise<ActionRunRecord>
+}
+
+export interface ScopedDefinitionsRuntime<TDefinition> {
+  list(): readonly TDefinition[]
+  getById(id: string): TDefinition | null
+}
+
+export interface ScopedWorkflowsRuntime extends ScopedDefinitionsRuntime<WorkflowDefinition> {
+  requestById(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult>
+}
+
+export interface ScopedSyncsRuntime extends ScopedDefinitionsRuntime<SyncDefinition> {
+  request(input: RequestSyncRunInput): Promise<SyncRunRequestResult>
+}
+
+export interface ScopedPipelinesRuntime extends ScopedDefinitionsRuntime<PipelineDefinition> {
+  request(input: RequestPipelineRunInput): Promise<PipelineRunRequestResult>
+}
+
+export interface ScopedAgentsRuntime extends ScopedDefinitionsRuntime<AgentDefinition> {
+  request(input: RequestAgentRunInput): Promise<RequestAgentRunResult>
+  listThreads(input?: ScopedListAgentThreadsInput): Promise<ListAgentThreadsResult>
+  getThread(threadId: string): Promise<AgentThreadRecord | null>
+}
+
+export interface ScopedEventsRuntime {
+  read(input?: EventsReadInput): Promise<readonly StoredDomainEvent[]>
+}
+
 /**
  * Principal-scoped runtime surface.
  *
@@ -139,109 +190,14 @@ export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> 
   /** The authorization context this SDK instance enforces. */
   readonly authorization: AuthorizationContext
 
-  /** Type-safe ObjectSet narrowed to grant-enforceable operations. */
-  objects<TObjectType extends RegisteredObjectType<TOntologySources>>(
-    objectType: TObjectType
-  ): ScopedObjectSet<
-    TObjectType,
-    RegisteredValueTypes<TOntologySources>,
-    RegisteredObjectType<TOntologySources>
-  >
-
-  /** Cross-type listing narrowed to the principal's viewable object types. */
-  list(params: ListObjectsParams): Promise<ListResult<ObjectRow>>
-
-  /** Get an object by type id and primary id (server / dynamic contexts). */
-  getObject(objectTypeId: string, primaryId: string): Promise<ObjectRow | null>
-
-  /**
-   * The primary property of a type the principal may view.
-   *
-   * Asserts before it looks the type up, which is the whole point of having it here: the privileged
-   * lookup answers "unknown type" for an unregistered id and a primary property for a registered
-   * one, so a caller that reaches it before any grant check can tell the two apart. Every other
-   * ontology read is grant-filtered — `listObjectTypes` returns only viewable types — and this
-   * matches them.
-   */
-  getPrimaryPropertyId: SixbInstance<TOntologySources>["getPrimaryPropertyId"]
-
-  // The string-based write entry points, indexed off the full runtime rather than restated, so the
-  // surface that now carries authorization cannot drift from the one it delegates to.
-  /** Upsert an object by type id. Requires `view:object` and `edit:object`. */
-  upsertObject: SixbInstance<TOntologySources>["upsertObject"]
-  /** Batch upsert objects of one type. Requires `view:object` and `edit:object`. */
-  upsertObjectBatch: SixbInstance<TOntologySources>["upsertObjectBatch"]
-  /** Create or update a link. Requires `edit:object` on the source, `view:object` on the target. */
-  upsertLink: SixbInstance<TOntologySources>["upsertLink"]
-  /** Batch upsert links. Asserted for every item before anything commits. */
-  upsertLinkBatch: SixbInstance<TOntologySources>["upsertLinkBatch"]
-  /** Remove a link. Requires `edit:object` on the source, `view:object` on the target. */
-  removeLink: SixbInstance<TOntologySources>["removeLink"]
-  /** Append telemetry. Requires `append:telemetry` — and notably not `view:object`. */
-  appendTelemetry: SixbInstance<TOntologySources>["appendTelemetry"]
-
-  /** Dataset definitions the principal may view. */
-  listDatasets(): readonly DatasetDefinition[]
-
-  /** Look up a viewable dataset definition; null hides ungranted datasets. */
-  getDatasetById(datasetId: string): DatasetDefinition | null
-
-  /** Action definitions the principal may apply. */
-  listActions(): readonly ActionDefinition[]
-
-  /** Look up an applicable action definition; null hides ungranted actions. */
-  getActionById(actionId: string): ActionDefinition | null
-
-  /** Request an action by id (server / dynamic contexts). Requires `can.apply`. */
-  requestAction(input: RequestActionInput): Promise<RequestActionResult>
-
-  /** Request an action by id and wait for the run to settle. Requires `can.apply`. */
-  requestActionAndWait(input: RequestActionAndWaitInput): Promise<ActionRunRecord>
-
-  /** Workflow definitions the principal may run. */
-  listWorkflows(): readonly WorkflowDefinition[]
-
-  /** Look up a runnable workflow definition; null hides workflows the principal cannot run. */
-  getWorkflowById(workflowId: string): WorkflowDefinition | null
-
-  /** Queue a workflow run. Requires `can.run`. */
-  requestWorkflowRun(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult>
-
-  /** Sync definitions the principal may run. */
-  listSyncs(): readonly SyncDefinition[]
-
-  /** Look up a runnable sync definition; null hides syncs the principal cannot run. */
-  getSyncById(syncId: string): SyncDefinition | null
-
-  /** Queue a sync run. Requires `can.run`. */
-  requestSyncRun(input: RequestSyncRunInput): Promise<SyncRunRequestResult>
-
-  /** Pipeline definitions the principal may run. */
-  listPipelines(): readonly PipelineDefinition[]
-
-  /** Look up a runnable pipeline definition; null hides pipelines the principal cannot run. */
-  getPipelineById(pipelineId: string): PipelineDefinition | null
-
-  /** Queue a pipeline run. Requires `can.run`. */
-  requestPipelineRun(input: RequestPipelineRunInput): Promise<PipelineRunRequestResult>
-
-  /** Agent definitions the principal may run. */
-  listAgents(): readonly AgentDefinition[]
-
-  /** Look up a runnable agent definition; null hides agents the principal cannot run. */
-  getAgentById(agentId: string): AgentDefinition | null
-
-  /** Request an agent turn. Requires `can.run`. */
-  requestAgentRun(input: RequestAgentRunInput): Promise<RequestAgentRunResult>
-
-  /** List agent threads the principal owns and may run (owner + `run:agent` filtered). */
-  listThreads(input?: ScopedListAgentThreadsInput): Promise<ListAgentThreadsResult>
-
-  /** Read one agent thread the principal owns and may run; null hides inaccessible threads. */
-  getThread(threadId: string): Promise<AgentThreadRecord | null>
-
-  /** Read the domain events the principal is allowed to see (derived from grants). */
-  readEvents(input?: EventsReadInput): Promise<readonly StoredDomainEvent[]>
+  readonly objects: ScopedObjectsRuntime<TOntologySources>
+  readonly actions: ScopedActionsRuntime
+  readonly datasets: ScopedDefinitionsRuntime<DatasetDefinition>
+  readonly workflows: ScopedWorkflowsRuntime
+  readonly syncs: ScopedSyncsRuntime
+  readonly pipelines: ScopedPipelinesRuntime
+  readonly agents: ScopedAgentsRuntime
+  readonly events: ScopedEventsRuntime
 }
 
 export function createScopedSixb<TOntologySources extends readonly OntologySource[]>(
@@ -304,128 +260,113 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
   }))
   const agents = scopedCatalog(deps.agents, (agentId) => ({ kind: "agent.run", agentId }))
 
-  const scoped = {
-    authorization: runtime.authorization,
-
-    objects<TObjectType extends RegisteredObjectType<TOntologySources>>(objectType: TObjectType) {
+  const objects = Object.assign(
+    <TObjectType extends RegisteredObjectType<TOntologySources>>(objectType: TObjectType) => {
       assertObjectTypeRegistered(runtime.ontology.getObjectTypesById(), objectType)
 
       return createObjectSet<
         TObjectType,
         RegisteredObjectType<TOntologySources>,
         RegisteredValueTypes<TOntologySources>
-      >({ ...runtime, objectType })
+      >({ ...runtime, objectType }) as ScopedObjectSet<
+        TObjectType,
+        RegisteredValueTypes<TOntologySources>,
+        RegisteredObjectType<TOntologySources>
+      >
     },
-
-    list: (params: ListObjectsParams) => objectService.listObjects(runtime, params),
-
-    getObject: async (objectTypeId: string, primaryId: string) => {
-      assertAuthorized(runtime, { kind: "object.view", objectTypeId })
-      return runtime.storage.objects.getByPrimaryId({
-        projectId: runtime.projectId,
-        objectTypeId,
-        primaryId,
-      })
-    },
-
-    getPrimaryPropertyId: (objectTypeId: string) => {
-      assertAuthorized(runtime, { kind: "object.view", objectTypeId })
-      return runtime.ontology.getPrimaryPropertyId(objectTypeId)
-    },
-
-    // Same delegation as the privileged runtime's own methods; the leaves assert the grants off
-    // `runtime.authorization`, which is present here by construction.
-    upsertObject: (objectTypeId: string, properties: Record<string, unknown>) =>
-      objectService.upsertObject(runtime, objectTypeId, properties),
-
-    upsertObjectBatch: (
-      objectTypeId: string,
-      items: readonly { properties: Record<string, unknown> }[]
-    ) => objectService.upsertObjectBatch(runtime, objectTypeId, items),
-
-    upsertLink: (
-      objectTypeId: string,
-      sourceId: string,
-      linkId: string,
-      target: { targetTypeId: string; targetId: string; properties?: Record<string, unknown> }
-    ) => objectService.upsertLink(runtime, objectTypeId, sourceId, linkId, target),
-
-    upsertLinkBatch: (
-      items: readonly {
-        objectTypeId: string
-        sourceId: string
-        linkId: string
+    {
+      list: (params: ListObjectsParams) => objectService.listObjects(runtime, params),
+      get: async (objectTypeId: string, primaryId: string) => {
+        assertAuthorized(runtime, { kind: "object.view", objectTypeId })
+        return runtime.storage.objects.getByPrimaryId({
+          projectId: runtime.projectId,
+          objectTypeId,
+          primaryId,
+        })
+      },
+      getPrimaryPropertyId: (objectTypeId: string) => {
+        assertAuthorized(runtime, { kind: "object.view", objectTypeId })
+        return runtime.ontology.getPrimaryPropertyId(objectTypeId)
+      },
+      upsert: (objectTypeId: string, properties: Record<string, unknown>) =>
+        objectService.upsertObject(runtime, objectTypeId, properties),
+      upsertBatch: (
+        objectTypeId: string,
+        items: readonly { properties: Record<string, unknown> }[]
+      ) => objectService.upsertObjectBatch(runtime, objectTypeId, items),
+      upsertLink: (
+        objectTypeId: string,
+        sourceId: string,
+        linkId: string,
         target: { targetTypeId: string; targetId: string; properties?: Record<string, unknown> }
-      }[]
-    ) => objectService.upsertLinkBatch(runtime, items),
+      ) => objectService.upsertLink(runtime, objectTypeId, sourceId, linkId, target),
+      upsertLinkBatch: (
+        items: readonly {
+          objectTypeId: string
+          sourceId: string
+          linkId: string
+          target: { targetTypeId: string; targetId: string; properties?: Record<string, unknown> }
+        }[]
+      ) => objectService.upsertLinkBatch(runtime, items),
+      removeLink: (
+        objectTypeId: string,
+        sourceId: string,
+        linkId: string,
+        target: { targetTypeId: string; targetId: string }
+      ) => objectService.removeLink(runtime, objectTypeId, sourceId, linkId, target),
+      appendTelemetry: (
+        objectTypeId: string,
+        items: readonly { id: string; properties: Record<string, unknown>; at?: Date }[]
+      ) => objectService.appendTelemetry(runtime, objectTypeId, items),
+    }
+  )
 
-    removeLink: (
-      objectTypeId: string,
-      sourceId: string,
-      linkId: string,
-      target: { targetTypeId: string; targetId: string }
-    ) => objectService.removeLink(runtime, objectTypeId, sourceId, linkId, target),
-
-    appendTelemetry: (
-      objectTypeId: string,
-      items: readonly { id: string; properties: Record<string, unknown>; at?: Date }[]
-    ) => objectService.appendTelemetry(runtime, objectTypeId, items),
-
-    listDatasets: datasets.list,
-    getDatasetById: datasets.getById,
-
-    listActions: () => runtime.actionRegistry.list().filter((action) => canListAction(action)),
-
-    getActionById: (actionId: string) => {
-      const action = runtime.actionRegistry.getById(actionId)
-      return action && canListAction(action) ? action : null
+  const scoped = {
+    authorization: runtime.authorization,
+    objects,
+    datasets,
+    actions: {
+      list: () => runtime.actionRegistry.list().filter((action) => canListAction(action)),
+      getById: (actionId: string) => {
+        const action = runtime.actionRegistry.getById(actionId)
+        return action && canListAction(action) ? action : null
+      },
+      request: (input: RequestActionInput) => requestRuntimeAction(runtime, input),
+      requestAndWait: (input: RequestActionAndWaitInput) =>
+        requestRuntimeActionAndWait(runtime, input),
     },
-
-    requestAction: (input: RequestActionInput) => requestRuntimeAction(runtime, input),
-
-    // Gated by the same `can.apply` assertion: `requestActionAndWait` requests through
-    // `requestAction` and then only reads the run it just created.
-    requestActionAndWait: (input: RequestActionAndWaitInput) =>
-      requestRuntimeActionAndWait(runtime, input),
-
-    listWorkflows: workflows.list,
-    getWorkflowById: workflows.getById,
-
-    requestWorkflowRun: (input: RequestWorkflowRunInput) =>
-      deps.workflows.requestByIdAs(runtime, input),
-
-    listSyncs: syncs.list,
-    getSyncById: syncs.getById,
-    requestSyncRun: async (input: RequestSyncRunInput) => {
-      // Resolve against the full registry, not the grant-filtered one: an existing sync the caller
-      // may not run has to report "forbidden", the same as `requestAction`. Only a genuinely unknown
-      // id is "unknown". `requestSyncRun` asserts the grant.
-      const sync = deps.syncs.getById(input.syncId)
-      if (!sync) throw new SyncValidationError(`[Sixb] Unknown sync '${input.syncId}'`)
-      return requestSyncRun(runtime, sync, input)
+    workflows: {
+      ...workflows,
+      requestById: (input: RequestWorkflowRunInput) => deps.workflows.requestByIdAs(runtime, input),
     },
-
-    listPipelines: pipelines.list,
-    getPipelineById: pipelines.getById,
-    requestPipelineRun: async (input: RequestPipelineRunInput) => {
-      const pipeline = deps.pipelines.getById(input.pipelineId)
-      if (!pipeline) throw new PipelineError(`[Sixb] Unknown pipeline '${input.pipelineId}'`)
-      return requestPipelineRun(runtime, pipeline, input)
+    syncs: {
+      ...syncs,
+      request: async (input: RequestSyncRunInput) => {
+        const sync = deps.syncs.getById(input.syncId)
+        if (!sync) throw new SyncValidationError(`[Sixb] Unknown sync '${input.syncId}'`)
+        return requestSyncRun(runtime, sync, input)
+      },
     },
-
-    listAgents: agents.list,
-    getAgentById: agents.getById,
-    requestAgentRun: (input: RequestAgentRunInput) => deps.agents.requestAs(runtime, input),
-    listThreads: (input?: ScopedListAgentThreadsInput) => deps.agents.listThreadsAs(runtime, input),
-    getThread: (threadId: string) => deps.agents.getThreadAs(runtime, threadId),
-
-    // No standalone events grant: the stream is filtered to events whose
-    // subject the principal may view/apply/run. `limit` applies before this
-    // filter, so a page may return fewer events than requested — acceptable for
-    // a best-effort recent log (storage-level filtering is the planned fix).
-    readEvents: async (input?: EventsReadInput) => {
-      const events = await runtime.events.read(input)
-      return events.filter((event) => canViewEvent(runtime.authorization, event))
+    pipelines: {
+      ...pipelines,
+      request: async (input: RequestPipelineRunInput) => {
+        const pipeline = deps.pipelines.getById(input.pipelineId)
+        if (!pipeline) throw new PipelineError(`[Sixb] Unknown pipeline '${input.pipelineId}'`)
+        return requestPipelineRun(runtime, pipeline, input)
+      },
+    },
+    agents: {
+      ...agents,
+      request: (input: RequestAgentRunInput) => deps.agents.requestAs(runtime, input),
+      listThreads: (input?: ScopedListAgentThreadsInput) =>
+        deps.agents.listThreadsAs(runtime, input),
+      getThread: (threadId: string) => deps.agents.getThreadAs(runtime, threadId),
+    },
+    events: {
+      read: async (input?: EventsReadInput) => {
+        const events = await runtime.events.read(input)
+        return events.filter((event) => canViewEvent(runtime.authorization, event))
+      },
     },
   }
 

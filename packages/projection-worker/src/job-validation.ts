@@ -172,13 +172,13 @@ function assertDescriptorMatchesJob(
 }
 
 function requireProjection(runtime: ProjectionWorkerContext, projectionId: string) {
-  const projection = runtime.getProjectionById(projectionId)
+  const projection = runtime.projections.getById(projectionId)
   if (projection) return projection
   throw permanent(`Projection '${projectionId}' is not registered.`)
 }
 
 function requireDataset(runtime: ProjectionWorkerContext, datasetId: string) {
-  const dataset = runtime.getDatasetById(datasetId)
+  const dataset = runtime.datasets.getById(datasetId)
   if (dataset) return dataset
   throw permanent(`Projection references unknown dataset '${datasetId}'.`)
 }

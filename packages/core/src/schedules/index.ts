@@ -7,9 +7,11 @@ export type {
   EventScheduleEvaluationResult,
   RuntimeEventScheduleContext,
   RuntimeEventScheduleDefinition,
+  SchedulesRuntime,
 } from "./runtime"
 export {
   buildEventScheduleContext,
+  createSchedulesRuntime,
   evaluateEventSchedule,
   eventScheduleSubscribedEventTypes,
 } from "./runtime"

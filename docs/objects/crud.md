@@ -63,11 +63,11 @@ an action stages lands in one atomic write when the handler returns. See
 
 ### Batch writes
 
-`upsertObjectBatch` and `upsertLinkBatch` apply many items in one transaction and return one result
+`objects.upsertBatch` and `objects.upsertLinkBatch` apply many items in one transaction and return one result
 per input position, so a bad item fails on its own without aborting the rest.
 
 ```ts
-const results = await sixb.upsertObjectBatch("invoice", [
+const results = await sixb.objects.upsertBatch("invoice", [
   { properties: { id: "inv-001", status: "paid" } },
   { properties: { id: "inv-002", status: "sent" } },
 ])

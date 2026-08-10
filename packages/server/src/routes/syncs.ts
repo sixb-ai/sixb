@@ -102,7 +102,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/syncs",
       async (context) => {
         const { scoped } = requestAuthState(context)
-        const syncs = scoped ? scoped.listSyncs() : sixb.listSyncs()
+        const syncs = scoped ? scoped.syncs.list() : sixb.syncs.list()
         const latestRuns = await getLatestSyncRuns(
           sixb,
           syncs.map((sync) => sync.id)
@@ -124,7 +124,9 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       async (context) => {
         const { params, set } = context
         const { scoped } = requestAuthState(context)
-        const sync = scoped ? scoped.getSyncById(params.syncId) : sixb.getSyncById(params.syncId)
+        const sync = scoped
+          ? scoped.syncs.getById(params.syncId)
+          : sixb.syncs.getById(params.syncId)
         if (!sync) {
           set.status = 404
           return { error: "Sync not found" }
@@ -201,7 +203,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         const { params, body, set } = context
         const { scoped } = requestAuthState(context)
         try {
-          const sync = sixb.getSyncById(params.syncId)
+          const sync = sixb.syncs.getById(params.syncId)
           if (!sync) {
             set.status = 404
             return { error: "Sync not found" }
@@ -209,8 +211,8 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
 
           const parsedBody = RequestSyncRunBodySchema.parse(body)
           const result = scoped
-            ? await scoped.requestSyncRun({ syncId: sync.id, ...parsedBody })
-            : await sixb.requestSyncRun({ syncId: sync.id, ...parsedBody })
+            ? await scoped.syncs.request({ syncId: sync.id, ...parsedBody })
+            : await sixb.syncs.request({ syncId: sync.id, ...parsedBody })
 
           set.status = 202
           return {

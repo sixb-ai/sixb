@@ -241,7 +241,7 @@ describe("sixb.workflows.request", () => {
       events: sixb.events,
       storage: { ...sixb.storage, workflowRuns: undefined } as Storage,
       lakeStorage: sixb.lakeStorage,
-      blobStorage: sixb.blobStorage,
+      blobStorage: sixb.blobs,
       queues: sixb.queues,
     }
 
@@ -259,7 +259,7 @@ describe("sixb.workflows.request", () => {
       events: sixb.events,
       storage: sixb.storage,
       lakeStorage: sixb.lakeStorage,
-      blobStorage: sixb.blobStorage,
+      blobStorage: sixb.blobs,
       queues: { ...sixb.queues, workflows: undefined } as unknown as Queues,
     }
 

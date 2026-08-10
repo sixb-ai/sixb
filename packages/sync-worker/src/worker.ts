@@ -1,14 +1,12 @@
 import type {
-  BlobStorage,
-  ConnectorAdapter,
-  ConnectorClient,
-  ConnectorDefinition,
-  DatasetDefinition,
+  BlobsRuntime,
+  ConnectorsRuntime,
+  DatasetsRuntime,
   DomainEventLog,
   LakeStorage,
   Queues,
   Storage,
-  SyncDefinition,
+  SyncsRuntime,
 } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
@@ -26,15 +24,12 @@ export interface SyncWorkerSixb {
   readonly events?: DomainEventLog
   readonly logs?: LogsRuntime
   readonly lakeStorage: LakeStorage
-  readonly blobStorage: BlobStorage
+  readonly blobs: Pick<BlobsRuntime, "put" | "open" | "stat">
   readonly queues: Queues
   readonly storage: Storage
-  listSyncs(): readonly SyncDefinition[]
-  getSyncById(syncId: string): SyncDefinition | null
-  getDatasetById(datasetId: string): DatasetDefinition | null
-  connector<TAdapter extends ConnectorAdapter>(
-    definition: ConnectorDefinition<string, TAdapter>
-  ): Promise<ConnectorClient<TAdapter>>
+  readonly syncs: Pick<SyncsRuntime, "list" | "getById">
+  readonly datasets: Pick<DatasetsRuntime, "getById">
+  readonly connectors: Pick<ConnectorsRuntime, "connect">
 }
 
 export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
@@ -42,7 +37,7 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
   private readonly sixb: SyncWorkerSixb
 
   constructor(sixb: SyncWorkerSixb) {
-    if (sixb.listSyncs().length === 0) {
+    if (sixb.syncs.list().length === 0) {
       throw new Error("[SixbSyncWorker] No sync definitions are registered.")
     }
 
@@ -203,16 +198,10 @@ function buildSyncContext(sixb: SyncWorkerSixb): SyncWorkerContext {
     id: sixb.id,
     syncRunsStorage,
     lakeStorage: sixb.lakeStorage,
-    blobStorage: sixb.blobStorage,
+    blobs: sixb.blobs,
     logs: sixb.logs,
-    getSyncById(syncId) {
-      return sixb.getSyncById(syncId)
-    },
-    getDatasetById(datasetId) {
-      return sixb.getDatasetById(datasetId)
-    },
-    connector(definition) {
-      return sixb.connector(definition)
-    },
+    syncs: sixb.syncs,
+    datasets: sixb.datasets,
+    connectors: sixb.connectors,
   }
 }

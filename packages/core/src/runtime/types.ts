@@ -6,22 +6,19 @@
  */
 
 import type {
-  ActionDefinition,
   ActionParamsConfig,
   ActionRegistry,
   ActionsRuntime,
   InferActionParams,
-  RequestActionAndWaitInput,
-  RequestActionInput,
   RequestActionResult,
 } from "../actions"
-import type { AgentsRuntime, RequestAgentRunInput, RequestAgentRunResult } from "../agents"
+import type { AgentsRuntime } from "../agents"
 import type { AuthRuntime } from "../auth"
 import type { AuthorizationContext } from "../authorization"
-import type { BlobStorage } from "../blob-storage"
+import type { BlobStorage, BlobsRuntime } from "../blob-storage"
 import type { Broker } from "../broker"
-import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../connectors"
-import type { DatasetDefinition } from "../datasets"
+import type { ConnectorsRuntime } from "../connectors"
+import type { DatasetsRuntime } from "../datasets"
 import type { DomainEventLog } from "../events"
 import type { LakeStorage } from "../lake-storage"
 import type { LogsRuntime } from "../logging"
@@ -30,6 +27,7 @@ import type {
   OntologyOperationalStatus,
   SixbReadiness,
 } from "../maintenance"
+import type { ObjectsRuntime } from "../objects"
 import type {
   ObjectQuery,
   ObjectQueryExplanation,
@@ -52,27 +50,17 @@ import type {
 } from "../ontology/inference"
 import type { OntologyDocumentInput, OntologyRegistry, OntologySource } from "../ontology/registry"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../ontology/tokens"
-import type { PipelineRunRequestResult, RequestPipelineRunInput } from "../pipelines/request"
-import type { PipelineDefinition } from "../pipelines/types"
-import type {
-  LinkProjectionDefinition,
-  ObjectProjectionDefinition,
-  ProjectionDefinition,
-  TelemetryProjectionDefinition,
-} from "../projections/types"
+import type { PipelinesRuntime } from "../pipelines"
+import type { ProjectionsRuntime } from "../projections"
 import type { Queues } from "../queues"
-import type { RuleDefinition } from "../rules"
+import type { RuleDefinition, RulesRuntime } from "../rules"
 import type { SandboxFactory } from "../sandboxes"
-import type { ScheduleDefinition } from "../schedules"
+import type { SchedulesRuntime } from "../schedules"
 import type { SecurityRegistry } from "../security"
-import type { ActionRunRecord, ObjectLinkRow, ObjectRow, Storage } from "../storage"
-import type { RequestSyncRunInput, SyncDefinition, SyncRunRequestResult } from "../syncs"
+import type { ActionRunRecord, ObjectLinkRow, Storage } from "../storage"
+import type { SyncsRuntime } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
-import type {
-  RequestWorkflowRunInput,
-  WorkflowRunRequestResult,
-  WorkflowsRuntime,
-} from "../workflows"
+import type { WorkflowsRuntime } from "../workflows"
 import type { ScopedSixb } from "./scoped"
 
 // ── Shared runtime context ──────────────────────────────────
@@ -83,8 +71,7 @@ import type { ScopedSixb } from "./scoped"
  * Built once by `Sixb` at construction time and threaded to `objects/`
  * service and leaf functions.
  *
- * `Sixb` satisfies this structurally — callers can pass `sixb` directly
- * wherever a `SixbRuntimeContext` is expected.
+ * This is an internal execution context, not the public facade-composed `Sixb` surface.
  */
 export interface SixbRuntimeContext {
   readonly projectId: string
@@ -1093,122 +1080,31 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   readonly logs: LogsRuntime
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
-  readonly blobStorage: BlobStorage
+  readonly blobs: BlobsRuntime
   readonly queues: Queues
   readonly sandboxes?: SandboxFactory
-  readonly rules?: readonly RuleDefinition[]
+  readonly schedules: SchedulesRuntime
+  readonly rules: RulesRuntime
+  readonly projections: ProjectionsRuntime
   readonly security: SecurityRegistry
   readonly auth: AuthRuntime
   readonly actions: ActionsRuntime
   readonly workflows: WorkflowsRuntime
   readonly agents: AgentsRuntime
+  readonly objects: ObjectsRuntime<_>
+  readonly datasets: DatasetsRuntime
+  readonly syncs: SyncsRuntime
+  readonly pipelines: PipelinesRuntime
+  readonly connectors: ConnectorsRuntime
 
   /** Create a principal-scoped runtime surface that enforces authorization grants. */
   as(context: AuthorizationContext): ScopedSixb<_>
-
-  /** All registered object types. */
-  listObjectTypes(): readonly ObjectTypeWithPropertyTokens[]
-
-  /** Lookup an object type by id. */
-  getObjectTypeById(objectTypeId: string): ObjectTypeWithPropertyTokens | null
-
-  /** Resolve an object type by id, or throw if it is unknown. */
-  resolveObjectType(objectTypeId: string): ObjectTypeWithPropertyTokens
-
-  /** Value types registered in the runtime ontology, keyed by id. */
-  getValueTypesById(): ReadonlyMap<string, ValueType>
-
-  /** All registered action definitions. */
-  listActions(): readonly ActionDefinition[]
-
-  /** Lookup an action definition by id. */
-  getActionById(actionId: string): ActionDefinition | null
-
-  /** All registered global actions. */
-  listGlobalActions(): readonly ActionDefinition[]
-
-  /** All actions valid for an object type, including inherited actions. */
-  listActionsForType(objectType: ObjectType): readonly ActionDefinition[]
-
-  /** All registered dataset definitions. */
-  listDatasets(): readonly DatasetDefinition[]
-
-  /** Lookup a dataset definition by id. */
-  getDatasetById(datasetId: string): DatasetDefinition | null
-
-  /** All registered sync definitions. */
-  listSyncs(): readonly SyncDefinition[]
-
-  /** Lookup a sync definition by id. */
-  getSyncById(syncId: string): SyncDefinition | null
-
-  /** All registered pipeline definitions. */
-  listPipelines(): readonly PipelineDefinition[]
-
-  /** Lookup a pipeline definition by id. */
-  getPipelineById(pipelineId: string): PipelineDefinition | null
-
-  /**
-   * Request an action run by id. Queued, not run inline — see `requestActionAndWait`.
-   *
-   * Every start verb on this runtime is `request*` for that reason: `run*` implied inline execution
-   * that never happened.
-   */
-  requestAction(input: RequestActionInput): Promise<RequestActionResult>
-
-  /** Request an action run and wait for it to reach a terminal state. */
-  requestActionAndWait(input: RequestActionAndWaitInput): Promise<ActionRunRecord>
-
-  /** Queue a workflow run by id. */
-  requestWorkflowRun(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult>
-
-  /** Queue a sync run by id. */
-  requestSyncRun(input: RequestSyncRunInput): Promise<SyncRunRequestResult>
-
-  /** Queue a pipeline run by id. */
-  requestPipelineRun(input: RequestPipelineRunInput): Promise<PipelineRunRequestResult>
-
-  /** Queue an agent turn by id. */
-  requestAgentRun(input: RequestAgentRunInput): Promise<RequestAgentRunResult>
-
-  /** All registered schedule definitions. */
-  listSchedules(): readonly ScheduleDefinition[]
-
-  /** Lookup a schedule definition by id. */
-  getScheduleById(scheduleId: string): ScheduleDefinition | null
-
-  /** All registered rule definitions. */
-  listRules(): readonly RuleDefinition[]
-
-  /** Lookup a rule definition by id. */
-  getRuleById(ruleId: string): RuleDefinition | null
-
-  /** All registered connector definitions. */
-  listConnectors(): readonly ConnectorDefinition[]
-
-  /** Lookup a connector definition by id. */
-  getConnectorById(connectorId: string): ConnectorDefinition | null
 
   /** All webhook endpoints registered through connector adapters. */
   listWebhooks(): readonly RegisteredWebhook[]
 
   /** Lookup a registered connector webhook by connector id and webhook id. */
   getWebhookById(connectorId: string, webhookId: string): RegisteredWebhook | null
-
-  /**
-   * Resolve a connector definition to its connected client.
-   *
-   * The first call connects lazily and caches the result for reuse within the runtime.
-   */
-  connector<TAdapter extends ConnectorAdapter>(
-    definition: ConnectorDefinition<string, TAdapter>
-  ): Promise<ConnectorClient<TAdapter>>
-
-  /** Start the scheduler runtime for all registered schedules. */
-  startScheduler(): Promise<void>
-
-  /** Stop the scheduler runtime. */
-  stopScheduler(): Promise<void>
 
   /** Start durable outbox recovery and bounded ontology retention. */
   startOntologyMaintenance(): Promise<OntologyMaintenanceHandle>
@@ -1218,9 +1114,6 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
 
   /** Verify required storage reachability and migration state. */
   checkReadiness(): Promise<SixbReadiness>
-
-  /** Disconnect all currently connected connector clients. */
-  disconnectConnectors(): Promise<void>
 
   /** Close the runtime broker provider if it owns external resources. */
   closeBroker(): Promise<void>
@@ -1238,80 +1131,6 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
    *
    * Signature: `objects<T>(objectType: T): ObjectSet<T, RegisteredValueTypes>`
    */
-
-  /** Get the primary property id for a given object type. */
-  getPrimaryPropertyId(objectTypeId: string): string
-
-  /** Upsert an object by type id (for server / dynamic contexts). */
-  upsertObject(objectTypeId: string, properties: Record<string, unknown>): Promise<ObjectRow>
-
-  /** Append telemetry for multiple objects of a given type. */
-  appendTelemetry(
-    objectTypeId: string,
-    items: readonly { id: string; properties: Record<string, unknown>; at?: Date }[]
-  ): Promise<void>
-
-  /** Create or update a link from source to target. */
-  upsertLink(
-    objectTypeId: string,
-    sourceId: string,
-    linkId: string,
-    target: { targetTypeId: string; targetId: string; properties?: Record<string, unknown> }
-  ): Promise<void>
-
-  /** Remove a link from source to target. */
-  removeLink(
-    objectTypeId: string,
-    sourceId: string,
-    linkId: string,
-    target: { targetTypeId: string; targetId: string }
-  ): Promise<void>
-
-  /** Batch upsert objects of a single type. Returns per-item results. */
-  upsertObjectBatch(
-    objectTypeId: string,
-    items: readonly { properties: Record<string, unknown> }[]
-  ): Promise<readonly BatchItemResult<ObjectRow>[]>
-
-  /** Batch upsert links. Returns per-item results. */
-  upsertLinkBatch(
-    items: readonly {
-      objectTypeId: string
-      sourceId: string
-      linkId: string
-      target: { targetTypeId: string; targetId: string; properties?: Record<string, unknown> }
-    }[]
-  ): Promise<readonly BatchItemResult<void>[]>
-
-  /** Cross-type object listing for dashboards and search. */
-  list(params: {
-    objectTypeIds?: readonly string[]
-    idPrefix?: string
-    idSuffix?: string
-    updatedAfter?: Date
-    updatedBefore?: Date
-    createdAfter?: Date
-    createdBefore?: Date
-    limit?: number
-    offset?: number
-    orderBy?: "createdAt" | "updatedAt" | "primaryId"
-    order?: "asc" | "desc"
-  }): Promise<ListResult<ObjectRow>>
-
-  /** Collect all transitive sub-types of the given object type id. */
-  listSubTypes(objectTypeId: string): string[]
-
-  /** All registered object projection definitions. */
-  listObjectProjections(): readonly ObjectProjectionDefinition[]
-
-  /** All registered link projection definitions. */
-  listLinkProjections(): readonly LinkProjectionDefinition[]
-
-  /** All registered telemetry projection definitions. */
-  listTelemetryProjections(): readonly TelemetryProjectionDefinition[]
-
-  /** Lookup a registered projection by id. */
-  getProjectionById(projectionId: string): ProjectionDefinition | null
 }
 
 export interface ObjectSet<

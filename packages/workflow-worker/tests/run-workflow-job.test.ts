@@ -15,7 +15,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type OntologySource,
   param,
   prop,
   ref,
@@ -24,11 +23,12 @@ import {
   type WorkflowDefinition,
   WorkflowValidationError,
 } from "@sixb/core"
+import { createDynamicObjectsRuntime } from "@sixb/core/internal/objects"
 import type { ActionRunStorage, WorkflowRunStorage } from "@sixb/core/storage"
 import { WorkflowWorkerError } from "../src/errors"
 import { EventsRuntimeWorkflowRunObserver } from "../src/events"
 import { runWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"
-import type { WorkflowRunObserver, WorkflowWorkerContext } from "../src/types"
+import type { WorkflowRunObserver, WorkflowWorkerContext, WorkflowWorkerSixb } from "../src/types"
 
 const Transaction = defineObjectType({
   id: "Transaction",
@@ -231,32 +231,36 @@ function requireWorkflowRunsStorage(input: {
   return workflowRuns
 }
 
-function createRuntime(sixb: {
-  readonly projectId: string
-  readonly ontology: WorkflowWorkerContext["ontology"]
-  readonly actionRegistry: WorkflowWorkerContext["actionRegistry"]
-  readonly events: WorkflowWorkerContext["events"]
-  readonly storage: WorkflowWorkerContext["storage"]
-  readonly lakeStorage: WorkflowWorkerContext["lakeStorage"]
-  readonly blobStorage: WorkflowWorkerContext["blobStorage"]
-  readonly queues: WorkflowWorkerContext["queues"]
-  readonly rules?: WorkflowWorkerContext["rules"]
-  readonly workflows: { getById(workflowId: string): WorkflowDefinition | null }
-}) {
-  return {
+function createRuntime(sixb: WorkflowWorkerSixb) {
+  const runtime = {
     projectId: sixb.projectId,
     ontology: sixb.ontology,
     actionRegistry: sixb.actionRegistry,
     events: sixb.events,
     storage: sixb.storage,
     lakeStorage: sixb.lakeStorage,
-    blobStorage: sixb.blobStorage,
+    blobStorage: sixb.blobs,
     queues: sixb.queues,
-    rules: sixb.rules,
+    rules: sixb.rules.list(),
+  }
+
+  return {
+    ...runtime,
     workflowRuns: requireWorkflowRunsStorage(sixb),
-    sixb: sixb as unknown as Sixb<readonly OntologySource[]>,
-    getWorkflowById(workflowId: string) {
-      return sixb.workflows.getById(workflowId)
+    sixb: {
+      objects: createDynamicObjectsRuntime(runtime),
+      actions: sixb.actions,
+      workflows: sixb.workflows,
+      agents: sixb.agents,
+      datasets: sixb.datasets,
+      syncs: sixb.syncs,
+      pipelines: sixb.pipelines,
+      projections: sixb.projections,
+      rules: sixb.rules,
+      schedules: sixb.schedules,
+      events: sixb.events,
+      connectors: sixb.connectors,
+      blobs: sixb.blobs,
     },
   } satisfies WorkflowWorkerContext
 }
@@ -1244,7 +1248,7 @@ describe("runWorkflowJob", () => {
         },
       }))
     const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
-    await sixb.upsertObject("Transaction", { id: "txn_1" })
+    await sixb.objects.upsert("Transaction", { id: "txn_1" })
     const unsubscribe = await completeRequestedActions(sixb, "succeeded")
 
     try {
@@ -1439,7 +1443,7 @@ describe("runWorkflowJob", () => {
       .then(prepareAttachInvoiceAction)
       .then(attachInvoice)
     const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
-    await sixb.upsertObject("Transaction", { id: "txn_1" })
+    await sixb.objects.upsert("Transaction", { id: "txn_1" })
     const unsubscribe = await completeRequestedActions(sixb, "succeeded")
 
     try {
@@ -1615,7 +1619,7 @@ describe("runWorkflowJob", () => {
         },
       }))
     const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
-    await sixb.upsertObject("Transaction", { id: "txn_1" })
+    await sixb.objects.upsert("Transaction", { id: "txn_1" })
     const unsubscribe = await completeRequestedActions(sixb, "failed", "attach failed")
 
     try {

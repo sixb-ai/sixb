@@ -40,7 +40,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     }
   }
 
-  const action = runtime.getActionById(job.actionId)
+  const action = runtime.actions.getById(job.actionId)
   if (!action) {
     const error = new ActionWorkerError(`Unknown action '${job.actionId}'.`)
     const failure = toActionRunFailure(error, "validation")
@@ -139,7 +139,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
 }
 
 function reportActionFailure(input: RunActionJobInput, error: unknown, run: ActionRunRecord): void {
-  reportRunFailure(input.runtime.sixb, error, {
+  reportRunFailure(input.runtime.errorReporterHost, error, {
     projectId: input.runtime.id,
     occurredAt: run.finishedAt,
     attempt: input.attempt,

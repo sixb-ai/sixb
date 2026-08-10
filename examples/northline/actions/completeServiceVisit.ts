@@ -27,14 +27,14 @@ export const completeServiceVisit = defineAction("complete-service-visit", {
     }
   })
   .writeback(async ({ params, run, sixb, target }) => {
-    const fieldService = await sixb.connector(fieldServiceConnector)
+    const fieldService = await sixb.connectors.connect(fieldServiceConnector)
     const visit = await fieldService.completeVisit(
       target.primaryId,
       { workPerformed: params.workPerformed, disposition: params.disposition },
       run.idempotencyKey ?? run.id
     )
     if (params.disposition === "resolved") {
-      const controls = await sixb.connector(buildingControlsConnector)
+      const controls = await sixb.connectors.connect(buildingControlsConnector)
       await controls.recordRecovery(params.equipment.primaryId, run.idempotencyKey ?? run.id)
     }
     const serviceReport = await sixb.blobs.put({

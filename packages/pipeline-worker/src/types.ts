@@ -1,8 +1,8 @@
 import type {
-  DatasetDefinition,
+  DatasetsRuntime,
   DomainEventLog,
   LakeStorage,
-  PipelineDefinition,
+  PipelinesRuntime,
   Queues,
   Storage,
 } from "@sixb/core"
@@ -21,8 +21,8 @@ export interface PipelineWorkerContext {
   readonly pipelineRunsStorage: PipelineRunStorage
   readonly lakeStorage: LakeStorage
   readonly logs?: LogsRuntime
-  getDatasetById(datasetId: string): DatasetDefinition | null
-  getPipelineById(pipelineId: string): PipelineDefinition | null
+  readonly datasets: Pick<DatasetsRuntime, "getById">
+  readonly pipelines: Pick<PipelinesRuntime, "getById">
 }
 
 export interface PipelineWorkerSixb {
@@ -32,9 +32,8 @@ export interface PipelineWorkerSixb {
   readonly lakeStorage: LakeStorage
   readonly queues: Queues
   readonly storage: Storage
-  listPipelines(): readonly PipelineDefinition[]
-  getPipelineById(pipelineId: string): PipelineDefinition | null
-  getDatasetById(datasetId: string): DatasetDefinition | null
+  readonly pipelines: Pick<PipelinesRuntime, "list" | "getById">
+  readonly datasets: Pick<DatasetsRuntime, "getById">
 }
 
 export interface PipelineJob {

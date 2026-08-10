@@ -30,7 +30,7 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
     .get(
       "/api/rules",
       () => {
-        return sixb.listRules().map(serializeRule)
+        return sixb.rules.list().map(serializeRule)
       },
       {
         response: { 200: RuleSchema.array() },
@@ -44,7 +44,7 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
     .get(
       "/api/rules/:ruleId",
       ({ params, set }) => {
-        const rule = sixb.getRuleById(params.ruleId)
+        const rule = sixb.rules.getById(params.ruleId)
         if (!rule) {
           set.status = 404
           return { error: "Rule not found" }

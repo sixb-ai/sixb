@@ -94,7 +94,7 @@ function commit(
 }
 
 async function seedInvoice(sixb: EditsRuntime, overrides: Record<string, unknown> = {}) {
-  return sixb.upsertObject("Invoice", {
+  return sixb.objects.upsert("Invoice", {
     id: "inv_1",
     amount: 100,
     status: "draft",
@@ -401,7 +401,7 @@ describe("Action edit commits", () => {
   test("fails the commit when an observed link scope changed", async () => {
     const { sixb } = createRuntime()
     await seedInvoice(sixb)
-    await sixb.upsertObject("Customer", { id: "cus_1", name: "Ada" })
+    await sixb.objects.upsert("Customer", { id: "cus_1", name: "Ada" })
     await startActionRun(sixb, "act_scope")
 
     const batch = await recordEdits({ runId: "act_scope" }, ({ objects }) => {
@@ -431,7 +431,7 @@ describe("Action edit commits", () => {
   test("accepts a commit whose observed empty scope still matches", async () => {
     const { sixb } = createRuntime()
     await seedInvoice(sixb)
-    await sixb.upsertObject("Customer", { id: "cus_1", name: "Ada" })
+    await sixb.objects.upsert("Customer", { id: "cus_1", name: "Ada" })
     await startActionRun(sixb, "act_empty_scope")
 
     const batch = await recordEdits({ runId: "act_empty_scope" }, ({ objects }) => {
@@ -479,7 +479,7 @@ describe("Action commit retries", () => {
     }) as unknown as Storage
     const sixb = new Sixb({ id: "edits-tests", ontology: ONTOLOGY, ...deps, storage })
 
-    await sixb.upsertObject("Invoice", { id: "inv_1", amount: 100, status: "draft" })
+    await sixb.objects.upsert("Invoice", { id: "inv_1", amount: 100, status: "draft" })
     await startActionRun(sixb, "act_retry")
 
     let handlerRuns = 0
@@ -529,7 +529,7 @@ describe("Action read dependency capture", () => {
 
     await facade.objects(Invoice).byId("inv_1").get()
     await facade.objects(Invoice).get("inv_missing")
-    await sixb.upsertObject("Invoice", { id: "inv_1", amount: 100, status: "paid" })
+    await sixb.objects.upsert("Invoice", { id: "inv_1", amount: 100, status: "paid" })
     await facade.objects(Invoice).byId("inv_1").get()
 
     expect(reads.dependencies().objects).toMatchObject([
@@ -546,8 +546,8 @@ describe("Action read dependency capture", () => {
   test("records complete link scopes, including the ones a listing found empty", async () => {
     const { sixb, deps } = createRuntime()
     await seedInvoice(sixb)
-    await sixb.upsertObject("Customer", { id: "cus_1", name: "Ada" })
-    await sixb.upsertLink("Invoice", "inv_1", "customer", {
+    await sixb.objects.upsert("Customer", { id: "cus_1", name: "Ada" })
+    await sixb.objects.upsertLink("Invoice", "inv_1", "customer", {
       targetTypeId: "Customer",
       targetId: "cus_1",
     })
@@ -600,7 +600,7 @@ describe("Action read dependency capture", () => {
 
   test("records inherited link scopes an untargeted listing covered", async () => {
     const { sixb } = createRuntime()
-    await sixb.upsertObject("RecurringInvoice", {
+    await sixb.objects.upsert("RecurringInvoice", {
       id: "inv_r1",
       amount: 100,
       status: "draft",
@@ -639,7 +639,7 @@ describe("Action read dependency capture", () => {
     expect(observed?.properties.status).toBe("draft")
 
     // A concurrent runtime write moves the object past the revision the handler observed.
-    await sixb.upsertObject("Invoice", { id: "inv_1", amount: 100, status: "void" })
+    await sixb.objects.upsert("Invoice", { id: "inv_1", amount: 100, status: "void" })
 
     const batch = await recordEdits({ runId: "act_capture" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })

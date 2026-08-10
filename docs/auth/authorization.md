@@ -313,9 +313,9 @@ const scoped = sixb.as(authorizationContext)
 
 await scoped.objects(Invoice).list()      // only if view:object covers Invoice
 await scoped.objects(Invoice).upsert(...)  // only if view:object AND edit:object cover Invoice
-await scoped.requestAction(input)        // only if apply:action covers it
-await scoped.requestWorkflowRun(input)   // only if run:workflow covers it
-await scoped.readEvents()                // events whose subject is visible
+await scoped.actions.request(input)       // only if apply:action covers it
+await scoped.workflows.requestById(input) // only if run:workflow covers it
+await scoped.events.read()                // events whose subject is visible
 ```
 
 The scoped runtime is **default-deny**: any request without a covering grant throws, and listing
@@ -329,21 +329,21 @@ handles, and `listLinks` stay on the privileged runtime.
 
 | Method | Gated by |
 | --- | --- |
-| `objects(Type)`, `list`, `getObject`, `getPrimaryPropertyId` | `view:object` |
-| `upsertObject`, `upsertObjectBatch`, `byId().delete()`, `byId().restore()` | `view:object` + `edit:object` |
-| `upsertLink`, `upsertLinkBatch`, `removeLink`, `byId().link()`, `byId().unlink()` | `edit:object` on the source, `view:object` on the target |
-| `appendTelemetry`, `appendTelemetryBatch`, `byId().telemetry().append()` | `append:telemetry` |
-| `requestAction`, `requestActionAndWait` | `apply:action` |
-| `requestWorkflowRun` | `run:workflow` |
-| `requestSyncRun` | `run:sync` |
-| `requestPipelineRun` | `run:pipeline` |
-| `listDatasets`, `getDatasetById` | `view:dataset` |
-| `listActions`, `getActionById` | `apply:action` |
-| `listWorkflows`, `getWorkflowById` | `run:workflow` |
-| `listSyncs`, `getSyncById` | `run:sync` |
-| `listPipelines`, `getPipelineById` | `run:pipeline` |
-| `requestAgentRun`, `listAgents`, `getAgentById`, `listThreads`, `getThread` | `run:agent` |
-| `readEvents` | subject visibility (see below) |
+| `objects(Type)`, `objects.list`, `objects.get`, `objects.getPrimaryPropertyId` | `view:object` |
+| `objects.upsert`, `objects.upsertBatch`, `byId().delete()`, `byId().restore()` | `view:object` + `edit:object` |
+| `objects.upsertLink`, `objects.upsertLinkBatch`, `objects.removeLink`, `byId().link()`, `byId().unlink()` | `edit:object` on the source, `view:object` on the target |
+| `objects.appendTelemetry`, `appendTelemetryBatch`, `byId().telemetry().append()` | `append:telemetry` |
+| `actions.request`, `actions.requestAndWait` | `apply:action` |
+| `workflows.requestById` | `run:workflow` |
+| `syncs.request` | `run:sync` |
+| `pipelines.request` | `run:pipeline` |
+| `datasets.list`, `datasets.getById` | `view:dataset` |
+| `actions.list`, `actions.getById` | `apply:action` |
+| `workflows.list`, `workflows.getById` | `run:workflow` |
+| `syncs.list`, `syncs.getById` | `run:sync` |
+| `pipelines.list`, `pipelines.getById` | `run:pipeline` |
+| `agents.request`, `agents.list`, `agents.getById`, `agents.listThreads`, `agents.getThread` | `run:agent` |
+| `events.read` | subject visibility (see below) |
 
 ### Why writing needs the read grant too
 

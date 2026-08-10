@@ -18,24 +18,22 @@ export function toActionRuntimeFacade(runtime: RunActionJobInput["runtime"]): Ac
   return {
     blobs: {
       put(input) {
-        return runtime.sixb.blobStorage.put(input)
+        return runtime.sixb.blobs.put(input)
       },
       open(blobId) {
-        return runtime.sixb.blobStorage.open(blobId)
+        return runtime.sixb.blobs.open(blobId)
       },
       stat(blobId) {
-        return runtime.sixb.blobStorage.stat(blobId)
+        return runtime.sixb.blobs.stat(blobId)
       },
     },
+    connectors: runtime.sixb.connectors,
     objects(objectType) {
       return {
         appendTelemetryBatch(items) {
-          return runtime.sixb.appendTelemetry(objectType.id, items)
+          return runtime.sixb.objects.appendTelemetry(objectType.id, items)
         },
       }
-    },
-    connector(definition) {
-      return runtime.sixb.connector(definition)
     },
   }
 }
@@ -78,7 +76,7 @@ export function createBasePhaseContext(input: {
     params: coerceActionParamsToTyped(
       input.action.params,
       input.run.params,
-      input.runtime.sixb.getValueTypesById()
+      input.runtime.sixb.objects.getValueTypesById()
     ),
     subject: input.run.subject,
     signal: input.signal,
@@ -100,9 +98,9 @@ export async function loadObjectTarget(input: {
   }
 
   const subject = requireObjectSubject(input.run.subject, input.action.id)
-  const subjectObjectType = input.runtime.sixb.resolveObjectType(subject.objectTypeId)
-  const actionAppliesToSubject = input.runtime.sixb
-    .listActionsForType(subjectObjectType)
+  const subjectObjectType = input.runtime.sixb.objects.resolveType(subject.objectTypeId)
+  const actionAppliesToSubject = input.runtime.sixb.actions
+    .listForType(subjectObjectType)
     .some((candidate) => candidate.id === input.action.id)
   if (!actionAppliesToSubject) {
     throw new ActionWorkerError(

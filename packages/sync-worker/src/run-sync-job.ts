@@ -139,7 +139,7 @@ async function readSyncValues(options: {
   previousCheckpoint: JsonValue | undefined
   setCheckpoint(next: unknown): void
 }): Promise<AsyncIterable<unknown>> {
-  const client = await options.runtime.connector(options.sync.connector)
+  const client = await options.runtime.connectors.connect(options.sync.connector)
   const readResult = await options.sync.read(client, {
     projectId: options.runtime.id,
     syncId: options.sync.id,
@@ -234,14 +234,14 @@ interface SyncCommitResult {
 export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult> {
   const { runtime, job } = input
   const signal = input.signal ?? new AbortController().signal
-  const { syncRunsStorage, lakeStorage, blobStorage } = runtime
+  const { syncRunsStorage, lakeStorage, blobs: blobStorage } = runtime
 
-  const sync = runtime.getSyncById(job.syncId)
+  const sync = runtime.syncs.getById(job.syncId)
   if (!sync) {
     throw new Error(`[SixbSyncWorker] Unknown sync '${job.syncId}'.`)
   }
 
-  const dataset = runtime.getDatasetById(sync.target.dataset.id)
+  const dataset = runtime.datasets.getById(sync.target.dataset.id)
   if (!dataset) {
     throw new Error(
       `[SixbSyncWorker] Sync '${sync.id}' targets unknown dataset '${sync.target.dataset.id}'.`

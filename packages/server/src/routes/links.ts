@@ -79,11 +79,16 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         const { scoped } = requestAuthState(context)
         try {
           const parsedBody = UpsertLinkBodySchema.parse(body)
-          await (scoped ?? sixb).upsertLink(params.objectTypeId, params.objectId, params.linkId, {
-            targetTypeId: parsedBody.targetTypeId,
-            targetId: parsedBody.targetId,
-            properties: parsedBody.properties,
-          })
+          await (scoped ?? sixb).objects.upsertLink(
+            params.objectTypeId,
+            params.objectId,
+            params.linkId,
+            {
+              targetTypeId: parsedBody.targetTypeId,
+              targetId: parsedBody.targetId,
+              properties: parsedBody.properties,
+            }
+          )
 
           return { success: true }
         } catch (error) {
@@ -114,10 +119,15 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         const { scoped } = requestAuthState(context)
         try {
           const parsedQuery = RemoveLinkQuerySchema.parse(query)
-          await (scoped ?? sixb).removeLink(params.objectTypeId, params.objectId, params.linkId, {
-            targetTypeId: parsedQuery.targetTypeId,
-            targetId: parsedQuery.targetId,
-          })
+          await (scoped ?? sixb).objects.removeLink(
+            params.objectTypeId,
+            params.objectId,
+            params.linkId,
+            {
+              targetTypeId: parsedQuery.targetTypeId,
+              targetId: parsedQuery.targetId,
+            }
+          )
 
           return { success: true }
         } catch (error) {

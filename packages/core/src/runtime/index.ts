@@ -6,6 +6,7 @@ export type {
 } from "../connectors"
 export { ConnectorError, ConnectorNotFoundError } from "../connectors"
 export { EventsError } from "../events"
+export type { DynamicObjectsRuntime, ObjectsRuntime, ObjectsRuntimeOperations } from "../objects"
 export { ObjectError } from "../objects"
 export type { ObjectRef } from "../ontology"
 export { OntologyNotFoundError, OntologyValidationError } from "../ontology"
@@ -31,7 +32,12 @@ export { WebhookValidationError } from "../webhooks"
 export type { CreateSixbOptions } from "./create"
 export { createSixb } from "./create"
 export { RuntimeError } from "./errors"
-export type { ScopedObjectByIdHandle, ScopedObjectSet, ScopedSixb } from "./scoped"
+export type {
+  ScopedObjectByIdHandle,
+  ScopedObjectSet,
+  ScopedObjectsRuntime,
+  ScopedSixb,
+} from "./scoped"
 export type { SixbOptions } from "./sixb"
 export { Sixb } from "./sixb"
 export type {

@@ -50,11 +50,15 @@ function createRuntime(options: {
     id: "project-1",
     pipelineRunsStorage: options.pipelineRunsStorage ?? new InMemoryPipelineRunStorage(),
     lakeStorage: options.lakeStorage ?? new InMemoryLakeStorage(),
-    getPipelineById(pipelineId) {
-      return pipelinesById.get(pipelineId) ?? null
+    pipelines: {
+      getById(pipelineId) {
+        return pipelinesById.get(pipelineId) ?? null
+      },
     },
-    getDatasetById(datasetId) {
-      return datasetsById.get(datasetId) ?? null
+    datasets: {
+      getById(datasetId) {
+        return datasetsById.get(datasetId) ?? null
+      },
     },
   }
 }

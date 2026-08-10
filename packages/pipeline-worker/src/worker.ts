@@ -23,7 +23,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
   private readonly sixb: PipelineWorkerSixb
 
   constructor(sixb: PipelineWorkerSixb) {
-    if (sixb.listPipelines().length === 0) {
+    if (sixb.pipelines.list().length === 0) {
       throw new Error("[SixbPipelineWorker] No pipeline definitions are registered.")
     }
 
@@ -141,12 +141,8 @@ function buildPipelineContext(
     pipelineRunsStorage,
     lakeStorage: sixb.lakeStorage,
     logs: sixb.logs,
-    getPipelineById(pipelineId) {
-      return sixb.getPipelineById(pipelineId)
-    },
-    getDatasetById(datasetId) {
-      return sixb.getDatasetById(datasetId)
-    },
+    pipelines: sixb.pipelines,
+    datasets: sixb.datasets,
   }
 }
 

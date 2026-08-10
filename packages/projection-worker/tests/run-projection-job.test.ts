@@ -283,10 +283,10 @@ interface ProjectionRuntimeSource {
   readonly events: ProjectionWorkerContext["events"]
   readonly storage: ProjectionWorkerContext["storage"]
   readonly lakeStorage: ProjectionWorkerContext["lakeStorage"]
-  readonly blobStorage: ProjectionWorkerContext["blobStorage"]
+  readonly blobs: ProjectionWorkerContext["blobStorage"]
   readonly queues: ProjectionWorkerContext["queues"]
-  getDatasetById: ProjectionWorkerContext["getDatasetById"]
-  getProjectionById: ProjectionWorkerContext["getProjectionById"]
+  readonly datasets: ProjectionWorkerContext["datasets"]
+  readonly projections: ProjectionWorkerContext["projections"]
 }
 
 function requireProjectionRunsStorage(input: {
@@ -307,15 +307,11 @@ function createRuntime(sixb: ProjectionRuntimeSource) {
     events: sixb.events,
     storage: sixb.storage,
     lakeStorage: sixb.lakeStorage,
-    blobStorage: sixb.blobStorage,
+    blobStorage: sixb.blobs,
     queues: sixb.queues,
     projectionRunsStorage: requireProjectionRunsStorage(sixb),
-    getDatasetById(datasetId: string) {
-      return sixb.getDatasetById(datasetId)
-    },
-    getProjectionById(projectionId: string) {
-      return sixb.getProjectionById(projectionId)
-    },
+    datasets: sixb.datasets,
+    projections: sixb.projections,
   } satisfies ProjectionWorkerContext
   shareOntologyMutationRuntime(sixb, runtime)
   shareProjectionRegistry(sixb, runtime)
@@ -865,8 +861,8 @@ describe("runProjectionJob", () => {
     const replayRuntime: ProjectionWorkerContext = {
       ...runtime,
       lakeStorage: new Proxy(runtime.lakeStorage, { get: unavailable }),
-      getDatasetById: unavailable,
-      getProjectionById: unavailable,
+      datasets: { getById: unavailable },
+      projections: { getById: unavailable },
     }
 
     await expect(runCanonicalProjectionJob({ runtime: replayRuntime, job })).resolves.toMatchObject(
@@ -1556,7 +1552,7 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.upsertObject("Building", { id: "b1", name: "HQ" })
+    await sixb.objects.upsert("Building", { id: "b1", name: "HQ" })
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
     ])
@@ -1591,8 +1587,8 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.upsertObject("Building", { id: "b1", name: "Old HQ" })
-    await sixb.upsertObject("Building", { id: "b2", name: "New HQ" })
+    await sixb.objects.upsert("Building", { id: "b1", name: "Old HQ" })
+    await sixb.objects.upsert("Building", { id: "b2", name: "New HQ" })
     const firstVersion = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
     ])
@@ -1664,7 +1660,7 @@ describe("runProjectionJob", () => {
       deps
     )
     for (const sensorId of ["s1", "s2"]) {
-      await sixb.upsertObject("Sensor", { id: sensorId, name: sensorId })
+      await sixb.objects.upsert("Sensor", { id: sensorId, name: sensorId })
     }
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: "s1" },
@@ -1831,7 +1827,7 @@ describe("runProjectionJob", () => {
       deps
     )
     for (const buildingId of ["b1", "b2"]) {
-      await sixb.upsertObject("Building", { id: buildingId, name: buildingId })
+      await sixb.objects.upsert("Building", { id: buildingId, name: buildingId })
     }
 
     const events = sixb.events as EventsRuntime
@@ -1883,10 +1879,10 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.upsertObject("Building", { id: "b1", name: "HQ" })
+    await sixb.objects.upsert("Building", { id: "b1", name: "HQ" })
     for (const roomId of ["r1", "r2"]) {
-      await sixb.upsertObject("Room", { id: roomId, name: roomId, buildingRef: "b1" })
-      await sixb.upsertLink("Room", roomId, "inBuilding", {
+      await sixb.objects.upsert("Room", { id: roomId, name: roomId, buildingRef: "b1" })
+      await sixb.objects.upsertLink("Room", roomId, "inBuilding", {
         targetTypeId: "Building",
         targetId: "b1",
       })
@@ -1929,7 +1925,7 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.upsertObject("Building", { id: "b1", name: "HQ" })
+    await sixb.objects.upsert("Building", { id: "b1", name: "HQ" })
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
     ])
@@ -1998,8 +1994,8 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
-    await sixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    await sixb.objects.upsert("Room", { id: "r1", name: "Kitchen" })
+    await sixb.objects.upsert("Sensor", { id: "s1", name: "Motion" })
     const version = await commitDatasetVersion(deps.lakeStorage, roomSensorsDataset, [
       { room_id: "r1", sensor_id: "s1" },
     ])
@@ -2038,10 +2034,10 @@ describe("runProjectionJob", () => {
       deps
     )
     for (const roomId of ["r1", "r2"]) {
-      await sixb.upsertObject("Room", { id: roomId, name: roomId })
+      await sixb.objects.upsert("Room", { id: roomId, name: roomId })
     }
     for (const sensorId of ["s1", "s2", "s3"]) {
-      await sixb.upsertObject("Sensor", { id: sensorId, name: sensorId })
+      await sixb.objects.upsert("Sensor", { id: sensorId, name: sensorId })
     }
 
     const first = await commitDatasetMerge(deps.lakeStorage, keyedRoomSensorsDataset, [
@@ -2113,8 +2109,8 @@ describe("runProjectionJob", () => {
       },
       { ...deps, lakeStorage }
     )
-    await sixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
-    await sixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    await sixb.objects.upsert("Room", { id: "r1", name: "Kitchen" })
+    await sixb.objects.upsert("Sensor", { id: "s1", name: "Motion" })
     const version = await commitDatasetVersion(lakeStorage, wideRoomSensorsDataset, [
       { room_id: "r1", sensor_id: "s1", unused_weight: 0.75 },
     ])
@@ -2158,8 +2154,8 @@ describe("runProjectionJob", () => {
       },
       { ...deps, lakeStorage }
     )
-    await sixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
-    await sixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    await sixb.objects.upsert("Room", { id: "r1", name: "Kitchen" })
+    await sixb.objects.upsert("Sensor", { id: "s1", name: "Motion" })
     const version = await commitDatasetVersion(lakeStorage, requiredExtraRoomSensorsDataset, [
       { room_id: "r1", sensor_id: "s1", relationship_weight: 0.75 },
     ])
@@ -2208,8 +2204,8 @@ describe("runProjectionJob", () => {
     expect(objectResult.run.progress.sourceRowsRead).toBe(2)
     expect(objectResult.run.progress.sourceRowsSkipped).toBe(1)
 
-    await objectSixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
-    await objectSixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    await objectSixb.objects.upsert("Room", { id: "r1", name: "Kitchen" })
+    await objectSixb.objects.upsert("Sensor", { id: "s1", name: "Motion" })
     const linkSixb = createSixb(
       {
         datasets: [roomSensorsDataset],

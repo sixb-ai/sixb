@@ -19,7 +19,7 @@ export type ScopedListAgentThreadsInput = Omit<
 /**
  * Whether a runtime may read a thread: privileged runtimes (no authorization) always may; a scoped
  * runtime may only read threads it owns AND holds `run:agent` on. This is the single owner+grant
- * rule for agent thread reads — the server routes it through {@link ScopedSixb.getThread}.
+ * rule for agent thread reads — the server routes it through {@link ScopedSixb.agents.getThread}.
  */
 function canAccessThread(
   authorization: SixbRuntimeContext["authorization"],
@@ -121,4 +121,11 @@ export class AgentsRuntime {
     const thread = await storage.threads.getById({ projectId: runtime.projectId, id: threadId })
     return thread && canAccessThread(runtime.authorization, thread) ? thread : null
   }
+}
+
+export function createAgentsRuntime(
+  runtime: SixbRuntimeContext,
+  agents: readonly AgentDefinition[]
+): AgentsRuntime {
+  return new AgentsRuntime(runtime, agents)
 }

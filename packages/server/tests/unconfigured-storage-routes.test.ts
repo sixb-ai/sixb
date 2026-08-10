@@ -15,14 +15,15 @@ function sixbWithoutRunHistory(): Sixb<readonly OntologySource[]> {
   return {
     id: "my-app",
     storage: {},
-    listRules: () => [],
-    getRuleById: () => null,
+    rules: { list: () => [], getById: () => null },
     listPipelines: () => [],
     getPipelineById: () => null,
-    listObjectProjections: () => [],
-    listLinkProjections: () => [],
-    listTelemetryProjections: () => [],
-    getProjectionById: () => null,
+    projections: {
+      listObjects: () => [],
+      listLinks: () => [],
+      listTelemetry: () => [],
+      getById: () => null,
+    },
     workflows: { list: () => [], getById: () => null },
     agents: { list: () => [], getById: () => null },
   } as unknown as Sixb<readonly OntologySource[]>

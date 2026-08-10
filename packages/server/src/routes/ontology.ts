@@ -8,7 +8,7 @@ import { ObjectTypeParamsSchema, ObjectTypeSchema } from "../schemas/ontology"
 
 function serializeProperty(
   property: ReturnType<
-    Sixb<readonly OntologySource[]>["listObjectTypes"]
+    Sixb<readonly OntologySource[]>["objects"]["listTypes"]
   >[number]["properties"][number]
 ) {
   return {
@@ -26,7 +26,7 @@ function serializeProperty(
 }
 
 function serializeSearch(
-  search: ReturnType<Sixb<readonly OntologySource[]>["listObjectTypes"]>[number]["search"]
+  search: ReturnType<Sixb<readonly OntologySource[]>["objects"]["listTypes"]>[number]["search"]
 ) {
   if (!search) return undefined
   return {
@@ -44,7 +44,7 @@ function serializeSearch(
 
 function serializeObjectType(
   sixb: Sixb<readonly OntologySource[]>,
-  objectType: ReturnType<Sixb<readonly OntologySource[]>["listObjectTypes"]>[number],
+  objectType: ReturnType<Sixb<readonly OntologySource[]>["objects"]["listTypes"]>[number],
   authorization: AuthorizationContext | null
 ) {
   return {
@@ -65,8 +65,8 @@ function serializeObjectType(
       cardinality: link.cardinality,
       properties: link.properties?.map(serializeProperty),
     })),
-    actions: sixb
-      .listActionsForType(objectType)
+    actions: sixb.actions
+      .listForType(objectType)
       .filter((action) => isAllowed(authorization, { kind: "action.apply", actionId: action.id }))
       .map((action) => ({
         id: action.id,
@@ -91,8 +91,8 @@ export function registerOntologyRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/object-types",
       async (context) => {
         const { authz } = requestAuthState(context)
-        return sixb
-          .listObjectTypes()
+        return sixb.objects
+          .listTypes()
           .filter((objectType) =>
             isAllowed(authz, { kind: "object.view", objectTypeId: objectType.id })
           )
@@ -113,7 +113,7 @@ export function registerOntologyRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       async (context) => {
         const { params, set } = context
         const { authz } = requestAuthState(context)
-        const objectType = sixb.getObjectTypeById(params.objectTypeId)
+        const objectType = sixb.objects.getTypeById(params.objectTypeId)
         if (
           !objectType ||
           !isAllowed(authz, { kind: "object.view", objectTypeId: objectType.id })

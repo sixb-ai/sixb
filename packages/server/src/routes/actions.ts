@@ -44,7 +44,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       "/api/actions",
       async (context) => {
         const { scoped } = requestAuthState(context)
-        const actions = scoped ? scoped.listActions() : sixb.listActions()
+        const actions = scoped ? scoped.actions.list() : sixb.actions.list()
         return actions.map(serializeAction)
       },
       {
@@ -63,8 +63,8 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         const { params, set } = context
         const { scoped } = requestAuthState(context)
         const action = scoped
-          ? scoped.getActionById(params.actionId)
-          : sixb.getActionById(params.actionId)
+          ? scoped.actions.getById(params.actionId)
+          : sixb.actions.getById(params.actionId)
         if (!action) {
           set.status = 404
           return { error: "Action not found" }
@@ -97,7 +97,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             runId: parsedBody.runId,
           }
           const result = scoped
-            ? await scoped.requestAction(input)
+            ? await scoped.actions.request(input)
             : await sixb.actions.request(input)
 
           set.status = 202

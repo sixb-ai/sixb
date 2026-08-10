@@ -16,11 +16,13 @@ import {
   type Storage,
 } from "@sixb/core"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
-import { EventsRuntime } from "@sixb/core/internal/events"
+import type { EventsRuntime } from "@sixb/core/internal/events"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
-import type { ActionRunRecord, ObjectRow } from "@sixb/core/storage"
+import type { ActionRunRecord } from "@sixb/core/storage"
 import { ActionWorker } from "../src"
 import { ActionWorkerError } from "../src/errors"
+import type { ActionWorkerContext } from "../src/types"
+import type { ActionWorkerSixb } from "../src/worker"
 import { waitFor } from "./helpers"
 
 const Device = defineObjectType({
@@ -47,32 +49,29 @@ interface DeviceObjectSet {
   }): Promise<ActionRunRecord>
 }
 
-interface TestSixb {
-  readonly id: string
-  readonly blobStorage: InMemoryBlobStorage
+interface TestSixb extends ActionWorkerSixb {
   readonly events: EventsRuntime
-  readonly storage: InMemoryStorage
+  readonly storage: Storage
   readonly queues: InMemoryQueues
-  upsertObject(objectTypeId: string, properties: Record<string, unknown>): Promise<ObjectRow>
-  listActions(): readonly ActionDefinition[]
-  getActionById(actionId: string): ActionDefinition | null
+  readonly objects: ActionWorkerContext["sixb"]["objects"]
 }
 
 const SixbConstructor = Sixb as unknown as new (options: Record<string, unknown>) => TestSixb
 
 function deviceObjects(sixb: TestSixb): DeviceObjectSet {
-  return (sixb as unknown as { objects(objectType: typeof Device): DeviceObjectSet }).objects(
-    Device
-  )
+  return sixb.objects(Device)
 }
 
-function createSixb(actions: readonly ActionDefinition[]): TestSixb {
+function createSixb(
+  actions: readonly ActionDefinition[],
+  storage: Storage = new InMemoryStorage()
+): TestSixb {
   return new SixbConstructor({
     id: "action-worker-tests",
     ontology: [Device],
     actions,
     broker: new InMemoryBroker(),
-    storage: new InMemoryStorage(),
+    storage,
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
@@ -82,18 +81,7 @@ function createSixb(actions: readonly ActionDefinition[]): TestSixb {
 describe("ActionWorker", () => {
   test("idles without action definitions or action-run storage", async () => {
     const storage = createStorageWithoutActionRuns()
-    const worker = new ActionWorker({
-      id: "idle-project",
-      events: new EventsRuntime({ projectId: "idle-project", broker: new InMemoryBroker() }),
-      storage,
-      queues: new InMemoryQueues(),
-      listActions() {
-        return []
-      },
-      getActionById() {
-        return null
-      },
-    })
+    const worker = new ActionWorker(createSixb([], storage))
 
     await worker.start()
     await worker.stop()
@@ -106,38 +94,7 @@ describe("ActionWorker", () => {
       .writeback(() => {})
     const storage = createStorageWithoutActionRuns()
 
-    expect(
-      () =>
-        new ActionWorker({
-          id: "missing-action-runs",
-          events: new EventsRuntime({
-            projectId: "missing-action-runs",
-            broker: new InMemoryBroker(),
-          }),
-          storage,
-          queues: new InMemoryQueues(),
-          listActions() {
-            return [noop]
-          },
-          getActionById(actionId) {
-            return actionId === "noop" ? noop : null
-          },
-        })
-    ).toThrow(ActionWorkerError)
-  })
-
-  test("throws ActionWorkerError when blob storage is missing", () => {
-    const noop = defineAction("noop")
-      .on(Device)
-      .params({})
-      .writeback(() => {})
-    const sixb = createSixb([noop])
-    const runtimeWithoutBlobStorage = Object.create(sixb) as TestSixb
-    Object.defineProperty(runtimeWithoutBlobStorage, "blobStorage", { value: undefined })
-
-    expect(() => new ActionWorker(runtimeWithoutBlobStorage)).toThrow(
-      "Action worker runtime is missing sixb.blobStorage support."
-    )
+    expect(() => new ActionWorker(createSixb([noop], storage))).toThrow(ActionWorkerError)
   })
 
   test("streams a run-scoped log line to the broker", async () => {
@@ -150,7 +107,7 @@ describe("ActionWorker", () => {
 
     const sixb = createSixb([noteStatus])
     const worker = new ActionWorker(sixb)
-    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
 
     await worker.start()
     const { runId } = await deviceObjects(sixb).requestAction({
@@ -199,7 +156,7 @@ describe("ActionWorker", () => {
 
     const sixb = createSixb([setDue])
     const worker = new ActionWorker(sixb)
-    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
 
     await worker.start()
     const { runId } = await deviceObjects(sixb).requestAction({
@@ -234,7 +191,7 @@ describe("ActionWorker", () => {
 
     const sixb = createSixb([setStatus])
     const worker = new ActionWorker(sixb)
-    await sixb.upsertObject("Device", {
+    await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
     })
@@ -287,7 +244,7 @@ describe("ActionWorker", () => {
       reports.push({ error, context })
     })
     const worker = new ActionWorker(sixb)
-    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
 
     await worker.start()
     const failed = await deviceObjects(sixb).requestActionAndWait({
@@ -330,7 +287,7 @@ describe("ActionWorker", () => {
 
     const sixb = createSixb([setStatus, fail])
     const worker = new ActionWorker(sixb)
-    await sixb.upsertObject("Device", {
+    await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
     })

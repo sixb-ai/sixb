@@ -88,11 +88,11 @@ function buildDatasetReferenceIndex(
     return references
   }
 
-  for (const sync of scoped ? scoped.listSyncs() : sixb.listSyncs()) {
+  for (const sync of scoped ? scoped.syncs.list() : sixb.syncs.list()) {
     referencesFor(sync.target.dataset.id).syncIds.push(sync.id)
   }
 
-  for (const pipeline of scoped ? scoped.listPipelines() : sixb.listPipelines()) {
+  for (const pipeline of scoped ? scoped.pipelines.list() : sixb.pipelines.list()) {
     const sourceDatasetIds = new Set<string>()
     const targetDatasetIds = new Set<string>()
     for (const node of pipeline.graph.nodes) {
@@ -112,12 +112,8 @@ function buildDatasetReferenceIndex(
   // Projections inherit dataset visibility: a scoped caller sees a
   // projection's lineage only when it can view the projection's source
   // dataset. Privileged callers (no scoped runtime) see them all.
-  for (const projection of [
-    ...sixb.listObjectProjections(),
-    ...sixb.listLinkProjections(),
-    ...sixb.listTelemetryProjections(),
-  ]) {
-    if (!scoped || scoped.getDatasetById(projection.datasetId)) {
+  for (const projection of sixb.projections.list()) {
+    if (!scoped || scoped.datasets.getById(projection.datasetId)) {
       referencesFor(projection.datasetId).projectionIds.push(projection.id)
     }
   }
@@ -174,7 +170,7 @@ function requireDataset(
   scoped: ReturnType<typeof requestAuthState>["scoped"],
   datasetId: string
 ) {
-  const dataset = scoped ? scoped.getDatasetById(datasetId) : sixb.getDatasetById(datasetId)
+  const dataset = scoped ? scoped.datasets.getById(datasetId) : sixb.datasets.getById(datasetId)
   if (!dataset) {
     throw new Error("Dataset not found")
   }
@@ -223,7 +219,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
         const { set } = context
         const { scoped } = requestAuthState(context)
         try {
-          const definitions = scoped ? scoped.listDatasets() : sixb.listDatasets()
+          const definitions = scoped ? scoped.datasets.list() : sixb.datasets.list()
           return await serializeDatasetCatalogItems(sixb, definitions, scoped)
         } catch (error) {
           set.status = 400

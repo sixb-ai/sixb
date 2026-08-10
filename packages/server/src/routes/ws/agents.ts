@@ -84,7 +84,7 @@ export async function canAccessAgentRunStream(
 
   // Reuse the one owner + `run:agent` rule instead of re-implementing it here: the scoped surface
   // returns null for a thread the caller may not read (absent, not owner, or ungranted).
-  const thread = await sixb.as(input.authz).getThread(run.threadId)
+  const thread = await sixb.as(input.authz).agents.getThread(run.threadId)
   if (!thread) {
     return { ok: false, message: "Agent run not found." }
   }

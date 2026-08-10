@@ -46,8 +46,10 @@ function createSixbStub(syncRuns: Partial<SyncRunStorage>): Sixb<readonly Ontolo
     storage: {
       syncRuns,
     },
-    listSyncs: () => syncs,
-    getSyncById: (id: string) => syncs.find((sync) => sync.id === id) ?? null,
+    syncs: {
+      list: () => syncs,
+      getById: (id: string) => syncs.find((sync) => sync.id === id) ?? null,
+    },
   } as unknown as Sixb<readonly OntologySource[]>
 }
 

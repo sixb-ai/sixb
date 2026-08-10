@@ -114,7 +114,7 @@ function reportRedeliveryFailure(input: RunActionJobInput, run: ActionRunRecord)
   const error = new ActionWorkerError(
     run.error?.message ?? `Action run '${run.id}' lost its lease.`
   )
-  reportRunFailure(input.runtime.sixb, error, {
+  reportRunFailure(input.runtime.errorReporterHost, error, {
     projectId: input.runtime.id,
     occurredAt: run.finishedAt,
     attempt: input.attempt,

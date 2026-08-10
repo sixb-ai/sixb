@@ -411,13 +411,10 @@ describe("ProjectionWorker", () => {
         projectionRuns: undefined,
       },
       lakeStorage: sixb.lakeStorage,
-      blobStorage: sixb.blobStorage,
+      blobs: sixb.blobs,
       queues: sixb.queues,
-      listObjectProjections: () => sixb.listObjectProjections(),
-      listLinkProjections: () => sixb.listLinkProjections(),
-      listTelemetryProjections: () => sixb.listTelemetryProjections(),
-      getDatasetById: (datasetId: string) => sixb.getDatasetById(datasetId),
-      getProjectionById: (projectionId: string) => sixb.getProjectionById(projectionId),
+      projections: sixb.projections,
+      datasets: sixb.datasets,
     }
 
     expect(() => new ProjectionWorker(withoutProjectionRuns)).toThrow("storage.projectionRuns")

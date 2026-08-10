@@ -165,7 +165,7 @@ Registered workflows are reachable through `sixb.workflows`.
 | `sixb.workflows.list()` | All registered workflow definitions |
 | `sixb.workflows.getById(id)` | One definition, or `null` |
 | `sixb.workflows.request(workflow, options?)` | Queues a run with typed input |
-| `sixb.requestWorkflowRun(input)` | Queues a run by workflow id |
+| `sixb.workflows.requestById(input)` | Queues a run by workflow id |
 
 ```ts
 const result = await sixb.workflows.request(invoiceReminder, {
@@ -180,12 +180,12 @@ console.log(result.runId, result.created)
 `request(...)` returns `{ workflowId, runId, queuedAt, jobId?, created }`. `created` is `false` when
 a run with the same `runId` already existed, so no duplicate job was enqueued.
 
-Use `sixb.requestWorkflowRun(...)` from server routes and dynamic cases where you only have the id.
-It sits next to `requestSyncRun`, `requestPipelineRun`, `requestAgentRun`, and `requestAction` — every
-start verb is `request*` because everything is queued, never run inline:
+Use `sixb.workflows.requestById(...)` from server routes and dynamic cases where you only have the
+id. The other primitives expose the same grouped shape through `actions.request`, `syncs.request`,
+`pipelines.request`, and `agents.request`: everything is queued, never run inline.
 
 ```ts
-await sixb.requestWorkflowRun({
+await sixb.workflows.requestById({
   workflowId: "invoice-reminder",
   input: {
     invoice: { objectTypeId: "Invoice", primaryId: "inv-001" },
@@ -194,7 +194,7 @@ await sixb.requestWorkflowRun({
 ```
 
 The name is uniform; the guarantee is not, and the return type says so. A workflow run row exists as
-soon as `requestWorkflowRun` resolves, which is what lets it report `created`. Sync and pipeline runs
+soon as `workflows.requestById` resolves, which is what lets it report `created`. Sync and pipeline runs
 are created by the worker that claims the job, so those two verbs report only that the request was
 accepted — passing the same `runId` twice still produces one run, but the second call cannot tell you
 it was a duplicate.

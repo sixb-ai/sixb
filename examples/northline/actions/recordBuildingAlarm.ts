@@ -23,7 +23,7 @@ export const recordBuildingAlarm = defineAction("record-building-alarm", {
     observedAt: param("timestamp"),
   })
   .writeback(async ({ params, sixb }) => {
-    const business = await sixb.connector(businessSystemConnector)
+    const business = await sixb.connectors.connect(businessSystemConnector)
     const facility = (await business.listFacilities()).rows.find(
       (row) => row.facility_id === params.facilityId
     )

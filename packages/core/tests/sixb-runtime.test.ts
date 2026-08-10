@@ -129,6 +129,42 @@ function disableObjectQueryPushdown(deps: ReturnType<typeof createTestRuntimeDep
 }
 
 describe("Sixb runtime", () => {
+  test("groups primitive operations under domain-owned facades", () => {
+    const sixb = new Sixb({ ontology: [Room], ...createTestRuntimeDeps() })
+
+    expect(typeof sixb.objects).toBe("function")
+    expect(sixb.objects.listTypes().map((objectType) => objectType.id)).toContain("Room")
+    expect(sixb.actions.list()).toEqual([])
+    expect(sixb.datasets.list()).toEqual([])
+    expect(sixb.syncs.list()).toEqual([])
+    expect(sixb.pipelines.list()).toEqual([])
+    expect(sixb.schedules.list()).toEqual([])
+    expect(sixb.rules.list()).toEqual([])
+    expect(sixb.projections.list()).toEqual([])
+    expect(sixb.workflows.list()).toEqual([])
+    expect(sixb.agents.list()).toEqual([])
+    expect(sixb.connectors.list()).toEqual([])
+
+    for (const removedRootMember of [
+      "listObjects",
+      "listActions",
+      "requestAction",
+      "listDatasets",
+      "listSyncs",
+      "listPipelines",
+      "listWorkflows",
+      "listAgents",
+      "listSchedules",
+      "startScheduler",
+      "listRules",
+      "listObjectProjections",
+      "connector",
+      "blobStorage",
+    ]) {
+      expect(removedRootMember in sixb).toBe(false)
+    }
+  })
+
   test("upserts an object using object-type tokens", async () => {
     const sixb = new Sixb({ ontology: [Room], ...createTestRuntimeDeps() })
 
@@ -364,7 +400,7 @@ describe("Sixb runtime", () => {
     expect(sixb.lakeStorage).toBe(lakeStorage)
   })
 
-  test("exposes the configured blobStorage on the runtime", () => {
+  test("exposes the configured blobStorage through the blobs facade", async () => {
     const blobStorage = new InMemoryBlobStorage()
     const lakeStorage = new InMemoryLakeStorage()
     const sixb = new Sixb({
@@ -374,12 +410,14 @@ describe("Sixb runtime", () => {
       blobStorage,
     })
 
-    expect(sixb.blobStorage).toBe(blobStorage)
+    expect(sixb.blobs).not.toBe(blobStorage)
+    const file = await sixb.blobs.put({ body: new TextEncoder().encode("facade") })
+    expect(await blobStorage.stat(file.blobId)).not.toBeNull()
   })
 
   test("upserts objects with fileRef properties", async () => {
     const sixb = new Sixb({ ontology: [Document], ...createTestRuntimeDeps() })
-    const file = await sixb.blobStorage.put({
+    const file = await sixb.blobs.put({
       body: new TextEncoder().encode("document bytes"),
       fileName: "document.pdf",
       mediaType: "application/pdf",
@@ -708,14 +746,14 @@ describe("Sixb runtime", () => {
     expect(nonEqualityRooms.objects).toHaveLength(2)
 
     // Test global list
-    const allObjects = await sixb.list({ limit: 10 })
+    const allObjects = await sixb.objects.list({ limit: 10 })
     expect(allObjects.objects).toHaveLength(4)
 
     // Test global list with type filter
-    const roomObjects = await sixb.list({ objectTypeIds: ["Room"], limit: 10 })
+    const roomObjects = await sixb.objects.list({ objectTypeIds: ["Room"], limit: 10 })
     expect(roomObjects.objects).toHaveLength(3)
 
-    await expect(sixb.list({ objectTypeIds: ["room"] })).rejects.toThrow(
+    await expect(sixb.objects.list({ objectTypeIds: ["room"] })).rejects.toThrow(
       "Unknown object type 'room'. Object type IDs are case-sensitive."
     )
 
@@ -1072,8 +1110,8 @@ describe("Sixb runtime", () => {
 
     expect(sixb.id).toBe("server-api-test")
     expect(
-      sixb
-        .listObjectTypes()
+      sixb.objects
+        .listTypes()
         .map((objectType) => objectType.id)
         .sort()
     ).toEqual(["Room", "Thermostat"])
@@ -1150,7 +1188,7 @@ describe("Sixb runtime", () => {
       // Pass only the ObjectType — no explicit OntologyDocumentInput
       const sixb = new Sixb({ ontology: [Sensor], ...createTestRuntimeDeps() })
 
-      const sensor = await sixb.upsertObject("Sensor", {
+      const sensor = await sixb.objects.upsert("Sensor", {
         id: "sensor:1",
         name: "Temp-1",
         reading: { value: 22.5, unit: "C" },
@@ -1163,14 +1201,14 @@ describe("Sixb runtime", () => {
       const sixb = new Sixb({ ontology: [Sensor], ...createTestRuntimeDeps() })
 
       await expect(
-        sixb.upsertObject("Sensor", {
+        sixb.objects.upsert("Sensor", {
           id: "sensor:bad",
           name: "Temp-bad",
           reading: { value: "hot", unit: "C" },
         })
       ).rejects.toBeInstanceOf(OntologyValidationError)
       await expect(
-        sixb.upsertObject("Sensor", {
+        sixb.objects.upsert("Sensor", {
           id: "sensor:bad",
           name: "Temp-bad",
           reading: { value: "hot", unit: "C" },
@@ -1182,14 +1220,14 @@ describe("Sixb runtime", () => {
       const sixb = new Sixb({ ontology: [Sensor], ...createTestRuntimeDeps() })
 
       await expect(
-        sixb.upsertObject("Sensor", {
+        sixb.objects.upsert("Sensor", {
           id: "sensor:bad",
           name: "Temp-bad",
           reading: { value: 22.5, unit: "Rankine" },
         })
       ).rejects.toBeInstanceOf(OntologyValidationError)
       await expect(
-        sixb.upsertObject("Sensor", {
+        sixb.objects.upsert("Sensor", {
           id: "sensor:bad",
           name: "Temp-bad",
           reading: { value: 22.5, unit: "Rankine" },
@@ -1214,7 +1252,7 @@ describe("Sixb runtime", () => {
 
       // Should not throw "Duplicate value type id"
       const sixb = new Sixb({ ontology: [ontologyDoc], ...createTestRuntimeDeps() })
-      expect(sixb.listObjectTypes()).toHaveLength(1)
+      expect(sixb.objects.listTypes()).toHaveLength(1)
     })
 
     test("throws for valueTypeRef without _resolved and no explicit registration", () => {
@@ -1231,14 +1269,14 @@ describe("Sixb runtime", () => {
       const sixb = new Sixb({ ontology: [Orphan], ...createTestRuntimeDeps() })
 
       expect(
-        sixb.upsertObject("Orphan", {
+        sixb.objects.upsert("Orphan", {
           id: "orphan:1",
           name: "test",
           data: { foo: "bar" },
         })
       ).rejects.toBeInstanceOf(OntologyValidationError)
       expect(
-        sixb.upsertObject("Orphan", {
+        sixb.objects.upsert("Orphan", {
           id: "orphan:1",
           name: "test",
           data: { foo: "bar" },
@@ -1257,8 +1295,8 @@ describe("Sixb runtime", () => {
 
     expect(sixb.id).toBe("server-api-test")
     expect(
-      sixb
-        .listObjectTypes()
+      sixb.objects
+        .listTypes()
         .map((objectType) => objectType.id)
         .sort()
     ).toEqual(["Room", "Thermostat"])

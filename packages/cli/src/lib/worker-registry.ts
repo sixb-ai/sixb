@@ -142,24 +142,19 @@ export function assertWorkerInputs(input: WorkerGroupInputs): void {
 export function resolveRegisteredWorkerTypes(sixb: LoadedSixb): readonly string[] {
   const workerTypes: string[] = []
 
-  if (sixb.listSyncs().length > 0) {
+  if (sixb.syncs.list().length > 0) {
     workerTypes.push("sync")
   }
 
-  if (sixb.listPipelines().length > 0) {
+  if (sixb.pipelines.list().length > 0) {
     workerTypes.push("pipeline")
   }
 
-  if (
-    sixb.listObjectProjections().length +
-      sixb.listLinkProjections().length +
-      sixb.listTelemetryProjections().length >
-    0
-  ) {
+  if (sixb.projections.list().length > 0) {
     workerTypes.push("projection")
   }
 
-  if (sixb.listActions().length > 0) {
+  if (sixb.actions.list().length > 0) {
     workerTypes.push("action")
   }
 

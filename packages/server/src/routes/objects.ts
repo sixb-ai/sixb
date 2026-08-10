@@ -176,7 +176,7 @@ async function getObjectRow(
   params: { objectTypeId: string; objectId: string }
 ) {
   if (scoped) {
-    return scoped.getObject(params.objectTypeId, params.objectId)
+    return scoped.objects.get(params.objectTypeId, params.objectId)
   }
 
   return sixb.storage.objects.getByPrimaryId({
@@ -200,8 +200,8 @@ async function searchObjects(
   // Primary ids are available on every object store and form the reliable fallback. Scoped.list()
   // narrows broad searches to viewable types before storage, rather than filtering rows afterwards.
   const primaryMatches = await (authState.scoped
-    ? authState.scoped.list({ idPrefix: query, limit })
-    : sixb.list({ idPrefix: query, limit }))
+    ? authState.scoped.objects.list({ idPrefix: query, limit })
+    : sixb.objects.list({ idPrefix: query, limit }))
 
   const capabilities = sixb.storage.objects.queryCapabilities()
   const supportsTextSearch =
@@ -212,7 +212,7 @@ async function searchObjects(
     typeof sixb.storage.objects.queryObjects === "function"
 
   const searchableTypes = supportsTextSearch
-    ? sixb.listObjectTypes().filter(
+    ? sixb.objects.listTypes().filter(
         (objectType) =>
           Boolean(objectType.search?.defaultText?.length) &&
           isAllowed(authState.authz, {
@@ -257,7 +257,7 @@ async function searchObjects(
 }
 
 function objectSearchLabel(sixb: Sixb<readonly OntologySource[]>, row: ObjectRow): string {
-  const objectType = sixb.resolveObjectType(row.objectTypeId)
+  const objectType = sixb.objects.resolveType(row.objectTypeId)
   const titlePropertyId = objectType.search?.title
   const title = titlePropertyId ? row.properties[titlePropertyId] : undefined
   const displayTitle =
@@ -284,7 +284,7 @@ async function objectFileContentResponse(
   const { scoped } = requestAuthState(context)
 
   return createContextualFileContentResponse({
-    blobStorage: sixb.blobStorage,
+    blobStorage: sixb.blobs,
     query: context.query,
     querySchema: ObjectFileContentQuerySchema,
     request: context.request,
@@ -356,7 +356,9 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             orderBy: query.orderBy,
             order: query.order,
           }
-          const result = scoped ? await scoped.list(params) : await sixb.list(params)
+          const result = scoped
+            ? await scoped.objects.list(params)
+            : await sixb.objects.list(params)
 
           return {
             objects: result.objects.map(serializeObject),
@@ -807,9 +809,9 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           // is checked, which told an ungranted principal apart from a registered type (403) and so
           // handed back the type universe that `listObjectTypes` filters out.
           const runtime = scoped ?? sixb
-          const primaryPropertyId = runtime.getPrimaryPropertyId(params.objectTypeId)
+          const primaryPropertyId = runtime.objects.getPrimaryPropertyId(params.objectTypeId)
           const properties = { ...parsedBody.properties, [primaryPropertyId]: params.objectId }
-          const object = await runtime.upsertObject(params.objectTypeId, properties)
+          const object = await runtime.objects.upsert(params.objectTypeId, properties)
           return serializeObject(object)
         } catch (error) {
           // Was a local catch mapping every error to 404/400, which turned a missing grant into

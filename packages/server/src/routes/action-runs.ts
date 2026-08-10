@@ -98,7 +98,7 @@ async function actionRunFileContentResponse(
   }
 
   return createContextualFileContentResponse({
-    blobStorage: sixb.blobStorage,
+    blobStorage: sixb.blobs,
     query: context.query,
     querySchema: ActionRunFileContentQuerySchema,
     request: context.request,
