@@ -53,6 +53,7 @@ import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import {
   type AgentStorage,
   AgentStorageError,
+  type AiUsageStorage,
   type AppendAgentMessageInput,
 } from "@sixb/core/storage"
 import {
@@ -88,6 +89,7 @@ const AGENT_RUNTIME_GROUP = defineGroup("agent-runtime", { label: "Agent runtime
 const USAGE: LanguageModelV4Usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 7, text: 7, reasoning: 0 },
+  raw: { input_tokens: 10, output_tokens: 7, provider_meter: 1 },
 }
 
 function stream(chunks: LanguageModelV4StreamPart[]) {
@@ -851,12 +853,23 @@ function withStorage(sixb: TestSixb, storage: Storage): TestSixb {
   })
 }
 
+function aiUsageStorageOf(sixb: TestSixb): AiUsageStorage {
+  const storage = sixb.storage.aiUsage
+  if (!storage) {
+    throw new Error("expected AI usage storage")
+  }
+  return storage
+}
+
 function workerStorageOf(storage: Storage): AgentWorkerStorage {
   if (!storage.agents) {
     throw new Error("expected agent storage")
   }
   if (!storage.auth) {
     throw new Error("expected auth storage")
+  }
+  if (!storage.aiUsage) {
+    throw new Error("expected AI usage storage")
   }
   return storage as AgentWorkerStorage
 }
@@ -2386,6 +2399,8 @@ describe("AgentWorker", () => {
       expect(run.attempt).toBe(1)
       expect(run.finishReason).toBe("stop")
       expect(run.modelId).toBe("mock-model")
+      // The legacy run aggregate remains during the staged rollout, while accounting authority is
+      // already the per-call ledger. The two tool-loop provider calls must both be present there.
       expect(run.usage?.outputTokens).toBeGreaterThan(0)
       expect(run.usage?.inputTokens).toBeGreaterThan(0)
       const durableExecution = await sixb.storage.executions.getById({
@@ -2395,6 +2410,25 @@ describe("AgentWorker", () => {
       expect(durableExecution?.authorizationRef).toEqual({
         type: "principal",
         principal: { type: "serviceAccount", id: "svc_agent_assistant" },
+      })
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          execution: { kind: "agentRun", runId },
+        })
+      ).resolves.toEqual({
+        modelCallCount: 2,
+        usage: {
+          inputTokens: 20,
+          outputTokens: 14,
+          totalTokens: 34,
+          uncachedInputTokens: 20,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          textOutputTokens: 14,
+          reasoningOutputTokens: 0,
+          reportingStatus: "complete",
+        },
       })
 
       // Thread released after finalization (single-flight pointer cleared).
@@ -2473,6 +2507,66 @@ describe("AgentWorker", () => {
         runId,
         attempt: 1,
       })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("fails the run and blocks another provider call when usage recording stays unavailable", async () => {
+    let modelCalls = 0
+    const model = new MockLanguageModelV4({
+      modelId: "mock-model",
+      doStream: async () => {
+        modelCalls += 1
+        if (modelCalls === 1) {
+          return stream([
+            { type: "stream-start", warnings: [] },
+            {
+              type: "tool-call",
+              toolCallId: "c1",
+              toolName: "echo",
+              input: JSON.stringify({ value: "hi" }),
+            },
+            finish("tool-calls"),
+          ])
+        }
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "should not run" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixbWithEchoTool(model)
+    const storage = agentStorageOf(sixb)
+    const aiUsage = aiUsageStorageOf(sixb)
+    let appendAttempts = 0
+    aiUsage.recordModelCall = async () => {
+      appendAttempts += 1
+      throw new Error("usage storage unavailable")
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "usage recording failure" }
+      )
+
+      expect(run.status).toBe("failed")
+      expect(run.error).toContain("Could not record AI usage")
+      expect(modelCalls).toBe(1)
+      expect(appendAttempts).toBe(4)
     } finally {
       await worker.stop()
     }
@@ -2803,6 +2897,15 @@ describe("AgentWorker", () => {
         { label: "cancel during output collection" }
       )
       expect(run.status).toBe("cancelled")
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          execution: { kind: "agentRun", runId: run.id },
+        })
+      ).resolves.toMatchObject({
+        modelCallCount: 2,
+        usage: { inputTokens: 20, outputTokens: 14, totalTokens: 34 },
+      })
       const messages = await listMessages(storage, request.run.threadId)
       const persistedAssistant = messages.find((message) => message.role === "assistant")
       expect(persistedAssistant?.parts.some((part) => part.type === "file")).toBe(false)
@@ -3593,6 +3696,15 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       execution: freshTestExecution(),
     })
+    // Regression guard: hard-code the recorder attempt to 1 instead of using the reclaimed durable
+    // run and this captures [1, 1], even though the terminal run correctly reports attempt 2.
+    const recordedAttempts: number[] = []
+    const aiUsage = aiUsageStorageOf(sixb)
+    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
+    aiUsage.recordModelCall = async (input) => {
+      recordedAttempts.push(input.attempt)
+      return recordModelCall(input)
+    }
 
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
@@ -3606,6 +3718,7 @@ describe("AgentWorker", () => {
       )
       expect(reclaimed.status).toBe("succeeded")
       expect(reclaimed.attempt).toBe(2)
+      expect(recordedAttempts).toEqual([2, 2])
 
       const streamRecords = await listRunStreamRecords(sixb.broker, crashedRunId)
       expect(
@@ -3628,7 +3741,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("a worker whose execution token was rotated writes nothing (fencing)", async () => {
+  test("a stale worker records billable calls but cannot write the fenced run or message", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
 
@@ -3668,11 +3781,21 @@ describe("AgentWorker", () => {
     })
     await expect(promise).rejects.toBeInstanceOf(AgentExecutionLostError)
 
-    // No assistant message was written; the run is still owned by the reclaiming worker.
+    // No assistant message was written; the run is still owned by the reclaiming worker. Usage is
+    // intentionally not fenced because the completed provider calls remain billable.
     const messages = await listMessages(storage, threadId)
     expect(messages.every((message) => message.role !== "assistant")).toBe(true)
     const run = await storage.runs.getById({ projectId: PROJECT_ID, id: runId })
     expect(run?.status).toBe("running")
+    await expect(
+      aiUsageStorageOf(sixb).summarizeExecution({
+        projectId: PROJECT_ID,
+        execution: { kind: "agentRun", runId },
+      })
+    ).resolves.toMatchObject({
+      modelCallCount: 2,
+      usage: { inputTokens: 20, outputTokens: 14, totalTokens: 34 },
+    })
   })
 
   test("adds concise Sixb context to every model system prompt", async () => {

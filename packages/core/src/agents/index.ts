@@ -16,7 +16,12 @@ export type {
   AgentUiToolPart,
   ToModelMessagesOptions,
 } from "./adapters"
-export { fromAiSdk, toModelMessages, toUiMessage } from "./adapters"
+export {
+  fromAiSdk,
+  omitUndefinedObjectProperties,
+  toModelMessages,
+  toUiMessage,
+} from "./adapters"
 export type { AgentApiGatewayCapabilityInput, AgentApiRoute } from "./api-gateway"
 export {
   AGENT_API_GATEWAY_PREFIX,

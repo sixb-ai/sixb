@@ -2,13 +2,26 @@ import { AgentToolPublicError } from "@sixb/core"
 
 /** Infra-level failure in the agent worker (unknown agent, missing storage, malformed job). */
 export class AgentWorkerError extends Error {
-  readonly name = "AgentWorkerError"
+  readonly name: string = "AgentWorkerError"
   constructor(message: string, options?: ErrorOptions) {
     super(`[SixbAgentWorker] ${message}`, options)
   }
 }
 
-/** This delivery's execution token is stale, so it must make no further durable writes. */
+/** A completed provider call could not be written to the durable accounting ledger. */
+export class AgentUsageRecordingError extends AgentWorkerError {
+  override readonly name = "AgentUsageRecordingError"
+
+  constructor(
+    readonly runId: string,
+    readonly callId: string,
+    options?: ErrorOptions
+  ) {
+    super(`Could not record AI usage for call '${callId}' in agent execution '${runId}'.`, options)
+  }
+}
+
+/** This delivery's execution token is stale, so it must make no further run or message writes. */
 export class AgentExecutionLostError extends Error {
   readonly name = "AgentExecutionLostError"
   constructor(readonly runId: string) {
@@ -17,10 +30,10 @@ export class AgentExecutionLostError extends Error {
 }
 
 /**
- * Recording a run's terminal state failed on a non-terminal (infra) error that persisted across
- * in-place retries. The run is still `running` and its thread is still locked, so the worker must
- * **not** acknowledge the job: it lets the queue redeliver it, so a later delivery can finalize the
- * run once storage recovers. Distinct from {@link AgentExecutionLostError} (run no longer ours → ack).
+ * Recording an agent execution's terminal state failed on a non-terminal infrastructure error that
+ * persisted across in-place retries. The execution is still running, so the worker must **not**
+ * acknowledge the job: it lets the queue redeliver it, so a later delivery can finalize once
+ * storage recovers. Distinct from {@link AgentExecutionLostError} (run no longer ours → ack).
  */
 export class AgentFinalizationError extends Error {
   readonly name = "AgentFinalizationError"
@@ -29,7 +42,7 @@ export class AgentFinalizationError extends Error {
     options?: ErrorOptions
   ) {
     super(
-      `[SixbAgentWorker] Could not finalize agent run '${runId}'; storage is unavailable.`,
+      `[SixbAgentWorker] Could not finalize agent execution '${runId}'; storage is unavailable.`,
       options
     )
   }

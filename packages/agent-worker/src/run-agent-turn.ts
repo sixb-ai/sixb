@@ -1,9 +1,10 @@
-import type {
-  AgentDefinition,
-  AgentInboundUiMessagePart,
-  AgentMessage,
-  AgentMessagePart,
-  Storage,
+import {
+  type AgentDefinition,
+  type AgentInboundUiMessagePart,
+  type AgentMessage,
+  type AgentMessagePart,
+  type Storage,
+  SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import {
   buildAgentSystemPrompt,
@@ -18,6 +19,7 @@ import { agentRunUsageFromAiSdk, agentToolErrorText } from "./ai-sdk-adapters"
 import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
 import { AgentTurnTimeoutError, AgentWorkerError } from "./errors"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
+import { AiModelCallRecorder } from "./model-call-recorder"
 import {
   type AgentOutputAttachmentResult,
   collectAgentOutputAttachments,
@@ -40,8 +42,9 @@ export interface RunAgentTurnInput {
  * Drive one agent turn to completion and persist it.
  *
  * Loads thread history, streams the model with the configured stop condition, then persists the
- * assistant message and finalizes the run with usage and finish reason. Every durable write is
- * fenced by the delivery's execution token; if queue ownership is lost, the turn writes nothing.
+ * assistant message and finalizes the run with usage and finish reason. Message and run writes are
+ * fenced by the delivery's execution token; completed provider-call usage remains billable and is
+ * recorded even when queue ownership is later lost.
  *
  * On success it returns the finalized (`succeeded`) run record. Model/tool failures and shutdown
  * aborts propagate to the caller (the worker), which records the run's terminal fate.
@@ -55,6 +58,13 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     throw new AgentWorkerError(`Agent run '${runId}' has no execution token.`)
   }
   const agents = storage.agents
+  const durableExecution = await storage.executions.getById({
+    projectId,
+    id: run.executionId,
+  })
+  if (!durableExecution) {
+    throw new AgentWorkerError(`Agent run '${runId}' has no durable execution.`)
+  }
 
   const history = await agents.messages.list({ projectId, threadId: run.threadId, order: "asc" })
   const attachmentContext =
@@ -81,6 +91,15 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   }) as ModelMessage[]
 
   const maxSteps = agent.loop?.stopWhen?.maxSteps ?? defaultMaxSteps
+  const usageRecorder = new AiModelCallRecorder({
+    storage: storage.aiUsage,
+    projectId,
+    execution: { kind: "agentRun", runId },
+    attempt: run.attempt,
+    requesterPrincipal: durableExecution.requestedBy ?? SYSTEM_PRINCIPAL,
+    requesterGroupIds: run.requesterGroupIds,
+    errorRunId: runId,
+  })
 
   // The model call is aborted by worker shutdown, queue delivery loss, or the turn exceeding its
   // wall-clock budget (a slow-but-alive model must not hold the thread forever).
@@ -117,6 +136,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     messages: modelMessages,
     tools,
     stopWhen: stepCountIs(maxSteps),
+    prepareStep: usageRecorder.prepareStep,
+    onLanguageModelCallEnd: usageRecorder.onLanguageModelCallEnd,
     abortSignal,
   })
 
@@ -162,6 +183,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     if (signal.reason instanceof QueueDeliveryLeaseLostError) {
       throw signal.reason
     }
+    // AI SDK swallows lifecycle callback errors, so surface a retained ledger append failure before
+    // interpreting the stream as a success or cancellation.
+    usageRecorder.assertHealthy()
     // A sandbox failure and a timeout take precedence over the abort-shaped error they cause.
     if (provisionError !== undefined) {
       throw provisionError
@@ -229,7 +253,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       return interruptedAfterCollection
     }
     const assistantParts = assistantPartsWithOutputAttachments(assistant.parts, outputAttachments)
-
     const usage = agentRunUsageFromAiSdk(await result.usage)
     const assistantMessageId = createAgentMessageId()
 
@@ -347,6 +370,7 @@ async function finalizeCancelledTurn(input: {
       id: run.id,
       executionToken,
       status: "cancelled",
+      ...(modelId === undefined ? {} : { modelId }),
     })
     await context.streamSink.publishRunFinished(finalizedRun)
     return finalizedRun
