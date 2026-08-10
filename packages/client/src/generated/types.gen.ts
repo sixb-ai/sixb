@@ -3894,7 +3894,15 @@ export type GetWorkflowRunResponses = {
         modelId?: string
         finishReason?: string
         usage?: {
-          [key: string]: unknown
+          inputTokens?: number
+          outputTokens?: number
+          totalTokens?: number
+          uncachedInputTokens?: number
+          cacheReadInputTokens?: number
+          cacheWriteInputTokens?: number
+          textOutputTokens?: number
+          reasoningOutputTokens?: number
+          reportingStatus: "complete" | "partial" | "unavailable"
         }
         startedAt?: string
         completedAt?: string
@@ -3950,7 +3958,15 @@ export type GetWorkflowAgentNodeExecutionResponses = {
     modelId?: string
     finishReason?: string
     usage?: {
-      [key: string]: unknown
+      inputTokens?: number
+      outputTokens?: number
+      totalTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      reportingStatus: "complete" | "partial" | "unavailable"
     }
     startedAt?: string
     completedAt?: string
@@ -4137,7 +4153,15 @@ export type CancelWorkflowRunResponses = {
         modelId?: string
         finishReason?: string
         usage?: {
-          [key: string]: unknown
+          inputTokens?: number
+          outputTokens?: number
+          totalTokens?: number
+          uncachedInputTokens?: number
+          cacheReadInputTokens?: number
+          cacheWriteInputTokens?: number
+          textOutputTokens?: number
+          reasoningOutputTokens?: number
+          reportingStatus: "complete" | "partial" | "unavailable"
         }
         startedAt?: string
         completedAt?: string
@@ -6765,8 +6789,12 @@ export type PostAgentThreadMessageResponses = {
         inputTokens?: number
         outputTokens?: number
         totalTokens?: number
-        reasoningTokens?: number
-        cachedInputTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
       }
       diagnostics?: Array<{
         code:
@@ -6976,8 +7004,12 @@ export type CancelAgentRunResponses = {
         inputTokens?: number
         outputTokens?: number
         totalTokens?: number
-        reasoningTokens?: number
-        cachedInputTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
       }
       diagnostics?: Array<{
         code:
@@ -7090,8 +7122,12 @@ export type RetryAgentRunResponses = {
         inputTokens?: number
         outputTokens?: number
         totalTokens?: number
-        reasoningTokens?: number
-        cachedInputTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
       }
       diagnostics?: Array<{
         code:
@@ -7202,8 +7238,12 @@ export type ListAgentThreadRunsResponses = {
         inputTokens?: number
         outputTokens?: number
         totalTokens?: number
-        reasoningTokens?: number
-        cachedInputTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
       }
       diagnostics?: Array<{
         code:
@@ -7311,8 +7351,12 @@ export type GetAgentRunResponses = {
       inputTokens?: number
       outputTokens?: number
       totalTokens?: number
-      reasoningTokens?: number
-      cachedInputTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      reportingStatus: "complete" | "partial" | "unavailable"
     }
     diagnostics?: Array<{
       code:

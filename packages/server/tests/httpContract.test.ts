@@ -1981,6 +1981,22 @@ describe("SixbServer HTTP contract", () => {
           queueLeaseExpiresAt: new Date(Date.now() + 60_000),
         },
       })
+      const aiUsage = sixb.storage.aiUsage
+      if (!aiUsage) throw new Error("expected AI usage storage")
+      await aiUsage.recordModelCall({
+        id: "workflow-agent-usage",
+        projectId: sixb.id,
+        execution: { kind: "workflowAgentNode", workflowRunId: runId, nodeRunId },
+        attempt: 1,
+        callId: "workflow-agent-call",
+        requesterPrincipal: { type: "system", id: "system" },
+        requesterGroupIds: [],
+        providerId: "test",
+        requestedModelId: "test-model",
+        responseId: "workflow-agent-response",
+        usage: { inputTokens: 15, outputTokens: 5, cacheWriteInputTokens: 2 },
+        occurredAt: new Date("2026-07-02T12:00:00.000Z"),
+      })
 
       const detailResponse = await fetch(
         `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
@@ -1993,6 +2009,13 @@ describe("SixbServer HTTP contract", () => {
         status: "running",
         prompt: "Resolve fan-1.",
         modelId: "test-model",
+        usage: {
+          inputTokens: 15,
+          outputTokens: 5,
+          totalTokens: 20,
+          cacheWriteInputTokens: 2,
+          reportingStatus: "complete",
+        },
       })
       expect(JSON.stringify(detail)).not.toContain("secret-execution-token")
 
@@ -2008,7 +2031,11 @@ describe("SixbServer HTTP contract", () => {
           {
             id: nodeRunId,
             status: "cancelled",
-            agentExecution: { status: "cancelled", agentId: "device-resolver" },
+            agentExecution: {
+              status: "cancelled",
+              agentId: "device-resolver",
+              usage: { inputTokens: 15, outputTokens: 5 },
+            },
           },
         ],
       })
