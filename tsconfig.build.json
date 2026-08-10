@@ -59,6 +59,9 @@
       "path": "connectors/teamleader/tsconfig.build.json"
     },
     {
+      "path": "connectors/unipile/tsconfig.build.json"
+    },
+    {
       "path": "loggers/pino/tsconfig.build.json"
     },
     {

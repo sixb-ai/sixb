@@ -39,6 +39,7 @@
       "@sixb/connector-sftp": ["./connectors/sftp/src/index.ts"],
       "@sixb/connector-sql": ["./connectors/sql/src/index.ts"],
       "@sixb/connector-teamleader": ["./connectors/teamleader/src/index.ts"],
+      "@sixb/connector-unipile": ["./connectors/unipile/src/index.ts"],
       "@sixb/core": ["./packages/core/src/index.ts"],
       "@sixb/core/actions/worker": ["./packages/core/src/actions/worker.ts"],
       "@sixb/core/agents/context": ["./packages/core/src/agents/context.ts"],

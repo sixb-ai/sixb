@@ -204,6 +204,7 @@ to `defineConnector`, and most ship a matching webhook helper for the [Webhooks]
 | `@sixb/connector-pennylane` | `pennylane(...)` | Pennylane quotes, products, customers | — |
 | `@sixb/connector-mercury` | `mercury(...)` | Mercury banking, transactions, invoicing | `mercuryEventsWebhook` |
 | `@sixb/connector-ace-iot` | `aceIot(...)` | ACE IoT sites, BACnet points, gateways, timeseries | — |
+| `@sixb/connector-unipile` | `unipile(...)` | Unipile messaging and LinkedIn outreach | `unipileEventsWebhook` |
 
 The pattern is the same as any adapter — `defineConnector(id, factory(options))`, then resolve it by
 name in syncs and app code:
