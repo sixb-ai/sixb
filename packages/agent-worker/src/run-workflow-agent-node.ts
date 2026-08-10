@@ -11,6 +11,7 @@ import type { AgentRunUsage } from "@sixb/core/storage"
 import { coerceAgentRunFinishReason } from "@sixb/core/storage"
 import { generateText, jsonSchema, Output, stepCountIs } from "ai"
 import { agentRunUsageFromAiSdk, agentTraceFromAiSdkSteps } from "./ai-sdk-adapters"
+import type { AiModelCallRecorder } from "./model-call-recorder"
 import type { AgentTurnContext } from "./types"
 
 export interface RunWorkflowAgentNodeInput {
@@ -20,6 +21,7 @@ export interface RunWorkflowAgentNodeInput {
   readonly workflowId: string
   readonly prompt: string
   readonly valueTypesById: ReadonlyMap<string, ValueType>
+  readonly usageRecorder: AiModelCallRecorder
   readonly signal: AbortSignal
 }
 
@@ -79,9 +81,13 @@ export async function runWorkflowAgentNode(
       tools: input.context.tools,
       stopWhen: stepCountIs(maxSteps),
       output: Output.object({ schema, name: input.agentStep.id }),
+      prepareStep: input.usageRecorder.prepareStep,
+      onLanguageModelCallEnd: input.usageRecorder.onLanguageModelCallEnd,
       abortSignal: AbortSignal.any([input.signal, timeout.signal]),
     })
 
+    // A final-step callback failure has no later `prepareStep` invocation to surface it.
+    input.usageRecorder.assertHealthy()
     const output = snapshotWorkflowAgentStepOutput({
       workflowId: input.workflowId,
       agentStep: input.agentStep,

@@ -1,4 +1,4 @@
-import type { TrustedPrimitiveRef } from "../execution"
+import type { AuthorizablePrincipal, TrustedPrimitiveRef } from "../execution"
 import type { ExecutionStorage } from "../storage/executions"
 
 /** Create the durable execution chain required by a workflow-run storage fixture. */
@@ -9,6 +9,7 @@ export async function createTestWorkflowExecution(
     readonly workflowId: string
     readonly runId: string
     readonly executionId?: string
+    readonly requestedBy?: AuthorizablePrincipal
   }
 ): Promise<string> {
   const parentExecutionId = `test_request_execution:${input.runId}`
@@ -24,14 +25,19 @@ export async function createTestWorkflowExecution(
     projectId: input.projectId,
     executor: { type: "request", requestId: `test_request:${input.runId}` },
     source: { type: "http", requestId: `test_request:${input.runId}` },
+    ...(input.requestedBy === undefined ? {} : { requestedBy: structuredClone(input.requestedBy) }),
     correlationId: `test_correlation:${input.runId}`,
-    authorizationRef: { type: "disabled" },
+    authorizationRef:
+      input.requestedBy === undefined
+        ? { type: "disabled" }
+        : { type: "principal", principal: structuredClone(input.requestedBy) },
   })
   await executions.create({
     id: executionId,
     projectId: input.projectId,
     executor: { type: "primitive", kind: primitive.kind, runId: primitive.runId },
     source: { type: "execution", executionId: parentExecutionId },
+    ...(input.requestedBy === undefined ? {} : { requestedBy: structuredClone(input.requestedBy) }),
     correlationId: `test_correlation:${input.runId}`,
     parentExecutionId,
     authorizationRef: { type: "trustedPrimitive", primitive },

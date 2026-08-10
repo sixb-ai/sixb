@@ -55,6 +55,8 @@ import {
   AgentStorageError,
   type AiUsageStorage,
   type AppendAgentMessageInput,
+  type RecordAiModelCallInput,
+  type WorkflowRunStorage,
 } from "@sixb/core/storage"
 import {
   createTestAgentExecution,
@@ -137,6 +139,21 @@ function toolThenAnswerModel(captureReplay?: (prompt: string) => void): MockLang
         finish("stop"),
       ])
     },
+  })
+}
+
+function invalidMetadataAnswerModel(): MockLanguageModelV4 {
+  const invalidProviderMetadata = { mock: { generatedAt: new Date() } } as never
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doStream: async () =>
+      stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "answer", providerMetadata: invalidProviderMetadata },
+        { type: "text-delta", id: "answer", delta: "Done" },
+        { type: "text-end", id: "answer" },
+        finish("stop"),
+      ]),
   })
 }
 
@@ -283,6 +300,61 @@ function toolOnlyModel(): MockLanguageModelV4 {
         },
         finish("tool-calls"),
       ])
+    },
+  })
+}
+
+function structuredAnswerModel(): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doGenerate: async () => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ answer: "Project Alpha", confidence: 0.96 }),
+        },
+      ],
+      finishReason: { unified: "stop", raw: "stop" },
+      usage: USAGE,
+      warnings: [],
+    }),
+  })
+}
+
+function invalidStructuredAnswerModel(): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doGenerate: async () => ({
+      content: [{ type: "text", text: JSON.stringify({ answer: 42, confidence: "high" }) }],
+      finishReason: { unified: "stop", raw: "stop" },
+      usage: USAGE,
+      warnings: [],
+    }),
+  })
+}
+
+function structuredToolThenProviderFailureModel(): MockLanguageModelV4 {
+  let call = 0
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doGenerate: async () => {
+      call += 1
+      if (call === 1) {
+        return {
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "workflow-failure",
+              toolName: "fail_lookup",
+              input: JSON.stringify({ query: "alpha" }),
+            },
+          ],
+          finishReason: { unified: "tool-calls", raw: "tool-calls" },
+          usage: USAGE,
+          warnings: [],
+        }
+      }
+      throw new Error("provider unavailable after tool failure")
     },
   })
 }
@@ -819,6 +891,156 @@ function buildSixbWithEchoTool(
   return buildSixb(model, broker, sandboxes, { agentTools: [echoAgentTool] })
 }
 
+function withOneFailingWorkflowAgentFinalization(storage: Storage): Storage {
+  const rootRuns = storage.workflowRuns
+  if (!rootRuns) throw new Error("expected workflow run storage")
+  let failed = false
+  const wrapRuns = (runs: WorkflowRunStorage): WorkflowRunStorage => {
+    const agentNodes = new Proxy(runs.agentNodes, {
+      get(target, property, receiver) {
+        if (property === "finish") {
+          return (input: Parameters<typeof target.finish>[0]) => {
+            if (!failed) {
+              failed = true
+              return Promise.reject(new Error("workflow node finalization unavailable"))
+            }
+            return target.finish(input)
+          }
+        }
+        const value = Reflect.get(target, property, receiver)
+        return typeof value === "function" ? value.bind(target) : value
+      },
+    })
+    return new Proxy(runs, {
+      get(target, property, receiver) {
+        if (property === "agentNodes") return agentNodes
+        const value = Reflect.get(target, property, receiver)
+        return typeof value === "function" ? value.bind(target) : value
+      },
+    })
+  }
+
+  return {
+    ...storage,
+    workflowRuns: rootRuns,
+    transaction: (run, options) =>
+      storage.transaction((tx) => {
+        const runs = tx.workflowRuns
+        return run({
+          ...tx,
+          ...(runs ? { workflowRuns: wrapRuns(runs) } : {}),
+        })
+      }, options),
+  }
+}
+
+async function seedRequesterUser(storage: Storage, principal = REQUESTER): Promise<void> {
+  const auth = storage.auth
+  if (!auth) throw new Error("expected auth storage")
+  const existing = await auth.users.getById({ projectId: PROJECT_ID, id: principal.id })
+  if (!existing) {
+    await auth.users.create({
+      id: principal.id,
+      projectId: PROJECT_ID,
+      email: `${principal.id}@example.com`,
+    })
+  }
+}
+
+async function queueWorkflowAgentNode(input: {
+  readonly model: LanguageModelV4
+  readonly tools?: readonly AgentToolDefinition[]
+  readonly storage?: Storage
+  readonly runId: string
+  readonly requestedByPrincipal?: typeof REQUESTER
+  readonly requesterGroupIds?: readonly string[]
+}) {
+  const agent = defineAgent("workflow-usage-agent", {
+    name: "Workflow usage agent",
+    model: input.model,
+    instructions: "Resolve the best project.",
+    groups: [AGENT_RUNTIME_GROUP],
+    ...(input.tools === undefined ? {} : { tools: input.tools }),
+  })
+  const agentStep = defineAgentStep("workflow-usage-step", agent)
+    .input({ query: "string" })
+    .output({ answer: "string", confidence: "double" })
+    .prompt(({ input: stepInput }) => `Resolve '${stepInput.query}'.`)
+  const workflow = defineWorkflow("workflow-usage-test").input({ query: "string" }).then(agentStep)
+  const sixb = new SixbHost({
+    id: PROJECT_ID,
+    ontology: [],
+    agents: [agent],
+    workflows: [workflow],
+    groups: [AGENT_RUNTIME_GROUP],
+    broker: new InMemoryBroker(),
+    storage: input.storage ?? new InMemoryStorage(),
+    lakeStorage: new InMemoryLakeStorage(),
+    blobStorage: new InMemoryBlobStorage(),
+    queues: new InMemoryQueues(),
+    sandboxes: new RecordingSandboxFactory(),
+  })
+  const runs = sixb.storage.workflowRuns
+  if (!runs) throw new Error("expected workflow run storage")
+  const requestedBy = input.requestedByPrincipal ?? REQUESTER
+  await seedRequesterUser(sixb.storage, requestedBy)
+
+  const nodeRunId = `${input.runId}:node:0`
+  const executionId = await createTestWorkflowExecution(sixb.storage.executions, {
+    projectId: PROJECT_ID,
+    workflowId: workflow.id,
+    runId: input.runId,
+    requestedBy,
+  })
+  await runs.queue({
+    id: input.runId,
+    projectId: PROJECT_ID,
+    executionId,
+    workflowId: workflow.id,
+    input: { query: "alpha" },
+    requesterGroupIds: input.requesterGroupIds ?? ["workflow-users"],
+  })
+  await runs.start({ id: input.runId, projectId: PROJECT_ID })
+  await runs.nodes.start({
+    id: nodeRunId,
+    projectId: PROJECT_ID,
+    workflowRunId: input.runId,
+    workflowId: workflow.id,
+    nodeIndex: 0,
+    nodeType: "agent",
+    nodeId: agentStep.id,
+    nodeKey: "workflowUsageStep",
+    input: { query: "alpha" },
+  })
+  const agentExecutionId = await createTestAgentExecution(sixb.storage, {
+    projectId: PROJECT_ID,
+    agentId: agent.id,
+    runId: nodeRunId,
+    parentExecutionId: executionId,
+  })
+  await runs.agentNodes.create({
+    projectId: PROJECT_ID,
+    nodeRunId,
+    executionId: agentExecutionId,
+    agentId: agent.id,
+    prompt: "Resolve 'alpha'.",
+  })
+  await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
+  await runs.wait({ projectId: PROJECT_ID, id: input.runId })
+  await sixb.queues.agents.enqueue({
+    projectId: PROJECT_ID,
+    jobs: [
+      {
+        id: `wfa_job_${nodeRunId}`,
+        type: "agent.workflow-node.requested",
+        payload: { nodeRunId },
+      },
+    ],
+  })
+
+  return { sixb, runs, workflow, agent, nodeRunId }
+}
+
 class FailingRunStreamBroker extends InMemoryBroker {
   override append(
     params: Parameters<InMemoryBroker["append"]>[0]
@@ -1232,10 +1454,12 @@ describe("AgentWorker", () => {
     const runs = sixb.storage.workflowRuns!
     const runId = "workflow-agent-run"
     const nodeRunId = `${runId}:node:0`
+    await seedRequesterUser(sixb.storage)
     const executionId = await createTestWorkflowExecution(sixb.storage.executions, {
       projectId: PROJECT_ID,
       workflowId: workflow.id,
       runId,
+      requestedBy: REQUESTER,
     })
     await runs.queue({
       id: runId,
@@ -1243,7 +1467,7 @@ describe("AgentWorker", () => {
       executionId,
       workflowId: workflow.id,
       input: { query: "alpha" },
-      requesterGroupIds: [],
+      requesterGroupIds: ["operations", "project-alpha"],
     })
     await runs.start({
       id: runId,
@@ -1285,6 +1509,13 @@ describe("AgentWorker", () => {
         },
       ],
     })
+    const recordedUsage: RecordAiModelCallInput[] = []
+    const aiUsage = aiUsageStorageOf(sixb)
+    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
+    aiUsage.recordModelCall = async (usage) => {
+      recordedUsage.push(structuredClone(usage))
+      return recordModelCall(usage)
+    }
 
     const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
     await worker.start()
@@ -1309,6 +1540,61 @@ describe("AgentWorker", () => {
       expect(execution.execution).toBeUndefined()
       expect(execution.trace).toBeArray()
       expect(lookupCalls).toBe(1)
+      expect(recordedUsage).toHaveLength(2)
+      expect(recordedUsage.map((usage) => usage.execution)).toEqual([
+        { kind: "workflowAgentNode", workflowRunId: runId, nodeRunId },
+        { kind: "workflowAgentNode", workflowRunId: runId, nodeRunId },
+      ])
+      expect(recordedUsage.map((usage) => usage.attempt)).toEqual([1, 1])
+      expect(recordedUsage.map((usage) => usage.requesterPrincipal)).toEqual([REQUESTER, REQUESTER])
+      expect(recordedUsage.map((usage) => usage.requesterGroupIds)).toEqual([
+        ["operations", "project-alpha"],
+        ["operations", "project-alpha"],
+      ])
+      expect(recordedUsage.map((usage) => usage.usage)).toEqual([
+        {
+          inputTokens: 10,
+          outputTokens: 7,
+          uncachedInputTokens: 10,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          textOutputTokens: 7,
+          reasoningOutputTokens: 0,
+        },
+        {
+          inputTokens: 10,
+          outputTokens: 7,
+          uncachedInputTokens: 10,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          textOutputTokens: 7,
+          reasoningOutputTokens: 0,
+        },
+      ])
+      expect(recordedUsage.map((usage) => usage.requestedModelId)).toEqual([
+        "mock-model",
+        "mock-model",
+      ])
+      expect(recordedUsage.map((usage) => usage.rawUsage)).toEqual([
+        { input_tokens: 10, output_tokens: 7, provider_meter: 1 },
+        { input_tokens: 10, output_tokens: 7, provider_meter: 1 },
+      ])
+      expect(recordedUsage.every((usage) => usage.occurredAt instanceof Date)).toBe(true)
+      expect(new Set(recordedUsage.map((usage) => usage.responseId)).size).toBe(2)
+      await expect(
+        aiUsage.summarizeExecution({
+          projectId: PROJECT_ID,
+          execution: { kind: "workflowAgentNode", workflowRunId: runId, nodeRunId },
+        })
+      ).resolves.toMatchObject({
+        modelCallCount: 2,
+        usage: {
+          inputTokens: 20,
+          outputTokens: 14,
+          totalTokens: 34,
+          reportingStatus: "complete",
+        },
+      })
       expect(execution.trace).toContainEqual(
         expect.objectContaining({
           type: "tool-call",
@@ -1339,6 +1625,319 @@ describe("AgentWorker", () => {
           resume: { kind: "agentNode", nodeRunId },
         },
       })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("keeps workflow usage when structured output validation fails", async () => {
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: invalidStructuredAnswerModel(),
+      runId: "workflow-invalid-output",
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow output validation failure" }
+      )
+
+      expect(execution.status).toBe("failed")
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          execution: {
+            kind: "workflowAgentNode",
+            workflowRunId: "workflow-invalid-output",
+            nodeRunId,
+          },
+        })
+      ).resolves.toMatchObject({
+        modelCallCount: 1,
+        usage: {
+          inputTokens: 10,
+          outputTokens: 7,
+          totalTokens: 17,
+          reportingStatus: "complete",
+        },
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("keeps completed workflow usage when a tool path later fails", async () => {
+    let toolCalls = 0
+    const failingTool = defineAgentTool("fail_lookup")
+      .description("Fail a project lookup.")
+      .input({ query: "string" })
+      .run(() => {
+        toolCalls += 1
+        throw new Error("project lookup unavailable")
+      })
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredToolThenProviderFailureModel(),
+      tools: [failingTool],
+      runId: "workflow-tool-failure",
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow tool path failure" }
+      )
+
+      expect(toolCalls).toBe(1)
+      expect(execution.status).toBe("failed")
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          execution: {
+            kind: "workflowAgentNode",
+            workflowRunId: "workflow-tool-failure",
+            nodeRunId,
+          },
+        })
+      ).resolves.toMatchObject({
+        modelCallCount: 1,
+        usage: { inputTokens: 10, outputTokens: 7, totalTokens: 17 },
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("blocks another workflow model call and fails when accounting stays unavailable", async () => {
+    let modelCalls = 0
+    const model = structuredToolThenAnswerModel(() => {
+      modelCalls += 1
+    })
+    const lookup = defineAgentTool("lookup_project")
+      .description("Look up a project.")
+      .input({ query: "string" })
+      .run(() => ({ project: "Project Alpha" }))
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      tools: [lookup],
+      runId: "workflow-accounting-failure",
+    })
+    const aiUsage = aiUsageStorageOf(sixb)
+    let appendAttempts = 0
+    aiUsage.recordModelCall = async () => {
+      appendAttempts += 1
+      throw new Error("usage storage unavailable")
+    }
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow accounting failure" }
+      )
+
+      expect(execution.status).toBe("failed")
+      expect(execution.error).toContain("Could not record AI usage")
+      expect(modelCalls).toBe(1)
+      expect(appendAttempts).toBe(4)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("surfaces a final workflow callback accounting failure without another step", async () => {
+    let modelCalls = 0
+    const model = new MockLanguageModelV4({
+      modelId: "mock-model",
+      doGenerate: async () => {
+        modelCalls += 1
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ answer: "Project Alpha", confidence: 0.96 }),
+            },
+          ],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: USAGE,
+          warnings: [],
+        }
+      },
+    })
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      runId: "workflow-final-callback-failure",
+    })
+    const aiUsage = aiUsageStorageOf(sixb)
+    let appendAttempts = 0
+    aiUsage.recordModelCall = async () => {
+      appendAttempts += 1
+      throw new Error("usage storage unavailable")
+    }
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "final workflow callback accounting failure" }
+      )
+
+      expect(execution.status).toBe("failed")
+      expect(execution.error).toContain("Could not record AI usage")
+      expect(modelCalls).toBe(1)
+      expect(appendAttempts).toBe(4)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("keeps workflow usage outside a failed node-finalization transaction", async () => {
+    const storage = withOneFailingWorkflowAgentFinalization(new InMemoryStorage())
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredAnswerModel(),
+      storage,
+      runId: "workflow-finalization-failure",
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow node finalization failure" }
+      )
+
+      expect(execution.status).toBe("failed")
+      expect(execution.error).toContain("workflow node finalization unavailable")
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          execution: {
+            kind: "workflowAgentNode",
+            workflowRunId: "workflow-finalization-failure",
+            nodeRunId,
+          },
+        })
+      ).resolves.toMatchObject({
+        modelCallCount: 1,
+        usage: { inputTokens: 10, outputTokens: 7, totalTokens: 17 },
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("keeps completed workflow usage when the parent run is cancelled during a tool", async () => {
+    let markToolStarted!: () => void
+    let markToolAborted!: () => void
+    const toolStarted = new Promise<void>((resolve) => {
+      markToolStarted = resolve
+    })
+    const toolAborted = new Promise<void>((resolve) => {
+      markToolAborted = resolve
+    })
+    const blockingTool = defineAgentTool("lookup_project")
+      .description("Wait for a project lookup.")
+      .input({ query: "string" })
+      .run(async ({ signal }) => {
+        markToolStarted()
+        await new Promise<void>((_resolve, reject) => {
+          const abort = () => {
+            markToolAborted()
+            reject(new DOMException("Aborted", "AbortError"))
+          }
+          if (signal.aborted) abort()
+          else signal.addEventListener("abort", abort, { once: true })
+        })
+        return { project: "unreachable" }
+      })
+    const runId = "workflow-cancelled-during-tool"
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredToolThenAnswerModel(),
+      tools: [blockingTool],
+      runId,
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      await toolStarted
+      await sixb.storage.transaction(async (tx) => {
+        const transactionalRuns = tx.workflowRuns
+        if (!transactionalRuns) throw new Error("expected transactional workflow storage")
+        await transactionalRuns.agentNodes.cancel({
+          projectId: PROJECT_ID,
+          nodeRunId,
+          error: "Workflow run cancelled.",
+        })
+        await transactionalRuns.nodes.finish({
+          projectId: PROJECT_ID,
+          id: nodeRunId,
+          status: "cancelled",
+          error: "Workflow run cancelled.",
+        })
+        await transactionalRuns.finish({
+          projectId: PROJECT_ID,
+          id: runId,
+          status: "cancelled",
+          error: "Workflow run cancelled.",
+        })
+      })
+      await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: nodeRunId })
+      await toolAborted
+
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          execution: { kind: "workflowAgentNode", workflowRunId: runId, nodeRunId },
+        })
+      ).resolves.toMatchObject({
+        modelCallCount: 1,
+        usage: {
+          inputTokens: 10,
+          outputTokens: 7,
+          totalTokens: 17,
+          reportingStatus: "complete",
+        },
+      })
+      await expect(
+        runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+      ).resolves.toMatchObject({ status: "cancelled" })
     } finally {
       await worker.stop()
     }
@@ -2513,6 +3112,44 @@ describe("AgentWorker", () => {
         status: "succeeded",
         runId,
         attempt: 1,
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("keeps completed-call usage when durable response projection fails", async () => {
+    const sixb = buildSixb(invalidMetadataAnswerModel())
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "durable response projection failure" }
+      )
+
+      expect(run.status).toBe("failed")
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          executionId: run.executionId,
+        })
+      ).resolves.toMatchObject({
+        modelCallCount: 1,
+        usage: {
+          inputTokens: 10,
+          outputTokens: 7,
+          totalTokens: 17,
+          reportingStatus: "complete",
+        },
       })
     } finally {
       await worker.stop()
@@ -4435,7 +5072,7 @@ describe("AgentWorker", () => {
       threadId,
       agentId: "removed-agent",
       triggerMessageId,
-      requesterGroupIds: [],
+      requesterGroupIds: ["engineering"],
     })
     await sixb.queues.agents.enqueue({
       projectId: PROJECT_ID,
