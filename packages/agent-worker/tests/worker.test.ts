@@ -1223,6 +1223,7 @@ describe("AgentWorker", () => {
       executionId,
       workflowId: workflow.id,
       input: { query: "alpha" },
+      requesterGroupIds: [],
     })
     await runs.start({
       id: runId,
@@ -4144,6 +4145,7 @@ describe("AgentWorker", () => {
       threadId,
       agentId: "removed-agent",
       triggerMessageId,
+      requesterGroupIds: [],
     })
     await sixb.queues.agents.enqueue({
       projectId: PROJECT_ID,

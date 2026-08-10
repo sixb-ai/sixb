@@ -45,6 +45,7 @@ describe("Postgres storage migrations", () => {
             "007-split-overrides",
             "008-action-executions",
             "009-agent-executions",
+            "010-ai-usage-accounting-foundation",
           ],
         },
       ])
@@ -111,6 +112,13 @@ describe("Postgres storage migrations", () => {
           id: "009-agent-executions",
           status: "applied",
           version: 9,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "010-ai-usage-accounting-foundation",
+          status: "applied",
+          version: 10,
         },
       ])
     })
@@ -585,7 +593,7 @@ describe("Postgres storage migrations", () => {
     })
   })
 
-  test("migrations install agent storage tables", async () => {
+  test("migrations install agent attribution and AI usage storage tables", async () => {
     await withStorage(false, async (storage, schemaName) => {
       await migrateStorage(storage)
 
@@ -602,8 +610,19 @@ describe("Postgres storage migrations", () => {
 
       expect(thread).toMatchObject({ id: "thr_1", agentId: "sales", messageCount: 0 })
       expect(tableNames).toEqual(
-        expect.arrayContaining(["agent_threads", "agent_runs", "agent_messages"])
+        expect.arrayContaining([
+          "agent_threads",
+          "agent_runs",
+          "agent_messages",
+          "ai_model_call_usage",
+          "ai_model_call_usage_groups",
+        ])
       )
+      expect(await readTableColumns(schemaName, "agent_runs")).toEqual(
+        expect.arrayContaining(["requester_group_ids", "usage_input_tokens"])
+      )
+      expect(await readTableColumns(schemaName, "workflow_runs")).toContain("requester_group_ids")
+      expect(await readTableColumns(schemaName, "workflow_agent_node_runs")).toContain("usage")
     })
   })
 
@@ -736,6 +755,13 @@ describe("Postgres storage migrations", () => {
           status: "applied",
           version: 9,
         },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "010-ai-usage-accounting-foundation",
+          status: "applied",
+          version: 10,
+        },
       ])
     } finally {
       await storages[0]?.dropSchema()
@@ -839,6 +865,7 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     input: {
       transactionId: "txn-1",
     },
+    requesterGroupIds: [],
     queuedAt: new Date("2026-04-19T11:59:59.000Z"),
   })
   await storage.workflowRuns.start({

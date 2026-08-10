@@ -29,6 +29,7 @@ import { PgAuthStorage } from "./auth-storage"
 import { createPostgresStorageMigrators, dropSchema } from "./migrations"
 import { PgOntologyStorage, type PgOntologyTransactionContext } from "./ontology-storage"
 import { PgActionRunStorage } from "./pg-action-run-storage"
+import { PgAiUsageStorage } from "./pg-ai-usage-storage"
 import { createPgClient, type SQL, type SQLClient } from "./pg-client"
 import { PgExecutionStorage } from "./pg-execution-storage"
 import { PgObjectStorage } from "./pg-object-storage"
@@ -107,8 +108,8 @@ export interface PostgresStorageOptions {
 /**
  * PostgreSQL storage provider for Sixb.
  *
- * Bundles Sixb storage adapters backed by a shared PostgreSQL connection pool (porsager
- * `postgres`), which reliably reclaims connections under load.
+ * Bundles Sixb storage adapters, including the AI usage ledger, behind a shared PostgreSQL
+ * connection pool (porsager `postgres`), which reliably reclaims connections under load.
  *
  * The storage exposes a core `StorageMigrator`. Sixb CLI startup and
  * `sixb db migrate` run it automatically through `migrateStorage(storage)`.
@@ -131,6 +132,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly auth: PgAuthStorage
   readonly executions: PgExecutionStorage
   readonly agents: PgAgentStorage
+  readonly aiUsage: PgAiUsageStorage
   readonly actionRuns: PgActionRunStorage
   readonly pipelineRuns: PgPipelineRunStorage
   readonly workflowRuns: PgWorkflowRunStorage
@@ -203,6 +205,7 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.auth = createAuthOperationScope(stores.auth, scope)
     this.executions = createOperationScopedFacade(stores.executions, scope)
     this.agents = createAgentOperationScope(stores.agents, scope)
+    this.aiUsage = createOperationScopedFacade(stores.aiUsage, scope)
     this.actionRuns = createOperationScopedFacade(stores.actionRuns, scope)
     this.pipelineRuns = createOperationScopedFacade(stores.pipelineRuns, scope)
     this.workflowRuns = createWorkflowRunOperationScope(stores.workflowRuns, scope)
@@ -328,6 +331,7 @@ function createPostgresStores(
     auth,
     executions,
     agents: new PgAgentStorage({ sql, executions }),
+    aiUsage: new PgAiUsageStorage(sql),
     actionRuns: new PgActionRunStorage(sql, executions),
     pipelineRuns: new PgPipelineRunStorage(sql),
     workflowRuns: new PgWorkflowRunStorage(sql, executions),
@@ -347,6 +351,7 @@ interface PostgresStoreSet {
   readonly auth: PgAuthStorage
   readonly executions: PgExecutionStorage
   readonly agents: PgAgentStorage
+  readonly aiUsage: PgAiUsageStorage
   readonly actionRuns: PgActionRunStorage
   readonly pipelineRuns: PgPipelineRunStorage
   readonly workflowRuns: PgWorkflowRunStorage

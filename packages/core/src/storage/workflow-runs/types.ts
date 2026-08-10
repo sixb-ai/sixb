@@ -126,6 +126,8 @@ export interface WorkflowRunRecord {
   readonly startedAt: Date
   readonly finishedAt?: Date
   readonly error?: string
+  /** Durable group memberships snapshotted when the workflow run was admitted. */
+  readonly requesterGroupIds: readonly string[]
   readonly attempt: number
   readonly execution?: WorkflowRunExecution
 }
@@ -161,6 +163,7 @@ export interface QueueWorkflowRunInput {
   readonly workflowId: string
   readonly input: WorkflowIOSnapshot
   readonly queuedAt?: Date
+  readonly requesterGroupIds: readonly string[]
 }
 
 export interface ReclaimWorkflowRunInput {

@@ -67,6 +67,7 @@ export class PgAgentRunStore implements AgentRunStore {
             thread_id,
             agent_id,
             trigger_message_id,
+            requester_group_ids,
             status,
             attempt,
             created_at
@@ -77,6 +78,7 @@ export class PgAgentRunStore implements AgentRunStore {
             ${input.threadId},
             ${input.agentId},
             ${input.triggerMessageId},
+            ${JSON.stringify(input.requesterGroupIds)}::text::jsonb,
             ${"queued"},
             ${0},
             ${createdAt}

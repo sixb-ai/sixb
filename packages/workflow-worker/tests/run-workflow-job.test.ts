@@ -304,6 +304,7 @@ async function runWorkflowJob(input: RunWorkflowJobInput) {
       projectId: input.runtime.projectId,
       workflowId: input.job.workflowId,
       input: snapshot,
+      requesterGroupIds: [],
     })
     existing = await input.runtime.workflowRuns.getById({
       projectId: input.runtime.projectId,
@@ -469,6 +470,7 @@ describe("runWorkflowJob", () => {
       projectId: sixb.id,
       workflowId: workflow.id,
       input: workflowInput,
+      requesterGroupIds: [],
       queuedAt: new Date("2026-05-08T09:59:00.000Z"),
     })
 
@@ -551,6 +553,7 @@ describe("runWorkflowJob", () => {
       projectId: sixb.id,
       workflowId: workflow.id,
       input,
+      requesterGroupIds: [],
     })
     await runs.start({
       id: "wfrun_recovered",
@@ -1130,6 +1133,7 @@ describe("runWorkflowJob", () => {
       projectId: sixb.id,
       workflowId: workflow.id,
       input: {},
+      requesterGroupIds: [],
     })
 
     await expect(

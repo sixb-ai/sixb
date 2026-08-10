@@ -25,6 +25,7 @@ import {
 } from "@sixb/core/storage"
 import { SqliteActionRunStorage } from "./action-run-storage"
 import { SqliteAgentStorage } from "./agents"
+import { SqliteAiUsageStorage } from "./ai-usage-storage"
 import { SqliteAuthStorage } from "./auth-storage"
 import { SqliteExecutionStorage } from "./execution-storage"
 import {
@@ -58,8 +59,8 @@ export interface SqliteStorageOptions {
 /**
  * SQLite storage provider for Sixb.
  *
- * Bundles object, timeseries, auth, execution, sync run, pipeline run, projection run, workflow
- * run, webhook run, and webhook delivery storage backed by SQLite.
+ * Bundles object, timeseries, auth, execution, AI usage, sync run, pipeline run, projection run,
+ * workflow run, webhook run, and webhook delivery storage backed by SQLite.
  *
  * Usage:
  * ```ts
@@ -77,6 +78,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly auth: SqliteAuthStorage
   readonly executions: SqliteExecutionStorage
   readonly agents: SqliteAgentStorage
+  readonly aiUsage: SqliteAiUsageStorage
   readonly actionRuns: SqliteActionRunStorage
   readonly pipelineRuns: SqlitePipelineRunStorage
   readonly syncRuns: SqliteSyncRunStorage
@@ -138,6 +140,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.auth = createAuthOperationScope(stores.auth, scope)
     this.executions = createOperationScopedFacade(stores.executions, scope)
     this.agents = createAgentOperationScope(stores.agents, scope)
+    this.aiUsage = createOperationScopedFacade(stores.aiUsage, scope)
     this.actionRuns = createOperationScopedFacade(stores.actionRuns, scope)
     this.pipelineRuns = createOperationScopedFacade(stores.pipelineRuns, scope)
     this.timeseries = createOperationScopedFacade(readTimeseries, readScope)
@@ -289,6 +292,7 @@ function createSqliteStores(
     auth,
     executions,
     agents: new SqliteAgentStorage({ connection, executions }),
+    aiUsage: new SqliteAiUsageStorage({ connection }),
     actionRuns: new SqliteActionRunStorage({ connection, executions }),
     pipelineRuns: new SqlitePipelineRunStorage({ connection }),
     timeseries: new SqliteTimeseriesStorage({ connection }),
@@ -308,6 +312,7 @@ interface SqliteStoreSet {
   readonly auth: SqliteAuthStorage
   readonly executions: SqliteExecutionStorage
   readonly agents: SqliteAgentStorage
+  readonly aiUsage: SqliteAiUsageStorage
   readonly actionRuns: SqliteActionRunStorage
   readonly pipelineRuns: SqlitePipelineRunStorage
   readonly syncRuns: SqliteSyncRunStorage

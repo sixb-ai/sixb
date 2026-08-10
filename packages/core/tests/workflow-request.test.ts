@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type AuthorizationContext,
   defineObjectType,
   defineWorkflow,
   defineWorkflowStep,
+  emptyGrantIndex,
   prop,
   type Queues,
   ref,
@@ -272,6 +274,50 @@ describe("sixb.workflows.request", () => {
 
     const events = await sixb.events.read({ types: ["workflow.run.queued"] })
     expect(events[0]?.payload).toMatchObject({ source })
+  })
+
+  test("snapshots durable service-account groups from request authority", async () => {
+    const { host } = createSixb()
+    const auth = host.storage.auth
+    if (!auth) throw new Error("Test requires auth storage")
+    const principal = { type: "serviceAccount", id: "svc_scheduler" } as const
+    await auth.serviceAccounts.create({
+      id: principal.id,
+      projectId: host.id,
+      name: "Workflow scheduler",
+    })
+    for (const groupId of ["operations", "finance"]) {
+      await auth.serviceAccountGroupMemberships.upsert({
+        projectId: host.id,
+        serviceAccountId: principal.id,
+        groupId,
+        source: "manual",
+      })
+    }
+    const authorization: AuthorizationContext = {
+      principal,
+      groupIds: ["operations"],
+      roleIds: [],
+      grants: {
+        ...emptyGrantIndex(),
+        "run:workflow": new Set([draftInvoice.id]),
+      },
+    }
+    const sixb = createTestSixb(host, { authorization })
+
+    const result = await sixb.workflows.request(draftInvoice, {
+      input: validInput(),
+    })
+
+    const run = await host.storage.workflowRuns?.getById({
+      projectId: host.id,
+      id: result.runId,
+    })
+    expect(run).toBeDefined()
+    await expect(
+      host.storage.executions.getById({ projectId: host.id, id: run?.executionId ?? "" })
+    ).resolves.toMatchObject({ requestedBy: principal })
+    expect(run?.requesterGroupIds).toEqual(["finance", "operations"])
   })
 
   test("retried webhook delivery with a deterministic runId enqueues a single run", async () => {

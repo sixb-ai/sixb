@@ -207,6 +207,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
       threadId: input.threadId,
       agentId: input.agentId,
       triggerMessageId: input.triggerMessageId,
+      requesterGroupIds: clone(input.requesterGroupIds),
       status: "queued",
       attempt: 0,
       createdAt,

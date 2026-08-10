@@ -78,6 +78,7 @@ describe("PgWorkflowRunStorage", () => {
         executionId,
         workflowId: "reconcile-transaction",
         input: {},
+        requesterGroupIds: [],
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -94,6 +95,7 @@ describe("PgWorkflowRunStorage", () => {
         executionId: automaticExecutionId,
         workflowId: "reconcile-transaction",
         input: {},
+        requesterGroupIds: [],
       })
     ).resolves.toMatchObject({ id: "wf-run-automatic", executionId: automaticExecutionId })
   })
@@ -104,6 +106,7 @@ describe("PgWorkflowRunStorage", () => {
       projectId: "my-app",
       workflowId: "reconcile-transaction",
       input: {},
+      requesterGroupIds: [],
     })
 
     const results = await Promise.allSettled([
@@ -721,6 +724,7 @@ function createWorkflowRunStorage(root: PostgresStorage) {
           projectId: input.projectId,
           workflowId: input.workflowId,
           input: input.input,
+          requesterGroupIds: [],
         })
       }
       return start({

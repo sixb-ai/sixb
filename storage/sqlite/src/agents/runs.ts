@@ -71,10 +71,11 @@ export class SqliteAgentRunStore implements AgentRunStore {
               thread_id,
               agent_id,
               trigger_message_id,
+              requester_group_ids,
               status,
               attempt,
               created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 'queued', 0, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
           `
           )
           .run(
@@ -84,6 +85,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
             input.threadId,
             input.agentId,
             input.triggerMessageId,
+            JSON.stringify(input.requesterGroupIds),
             createdAt.toISOString()
           )
       } catch (error) {

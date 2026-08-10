@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import { InMemoryActionRunStorage } from "../action-runs"
 import { type AgentStorage, InMemoryAgentStorage } from "../agents"
+import { type AiUsageStorage, InMemoryAiUsageStorage } from "../ai-usage"
 import { type AuthStorage, InMemoryAuthStorage } from "../auth"
 import { StorageTransactionError } from "../errors"
 import { InMemoryExecutionStorage } from "../executions/in-memory"
@@ -55,6 +56,7 @@ export class InMemoryStorage implements Storage {
   private readonly authStorage = new InMemoryAuthStorage()
   private readonly executionStorage = new InMemoryExecutionStorage(this.authStorage)
   private readonly agentStorage = new InMemoryAgentStorage(this.executionStorage)
+  private readonly aiUsageStorage = new InMemoryAiUsageStorage()
   private readonly actionRunStorage = new InMemoryActionRunStorage(this.executionStorage)
   private readonly syncRunStorage = new InMemorySyncRunStorage()
   private readonly pipelineRunStorage = new InMemoryPipelineRunStorage()
@@ -68,6 +70,7 @@ export class InMemoryStorage implements Storage {
   readonly auth: AuthStorage
   readonly executions: ExecutionStorage
   readonly agents: AgentStorage
+  readonly aiUsage: AiUsageStorage
   readonly actionRuns: InMemoryActionRunStorage
   readonly syncRuns: SyncRunStorage
   readonly pipelineRuns: PipelineRunStorage
@@ -89,6 +92,7 @@ export class InMemoryStorage implements Storage {
     this.auth = createAuthOperationScope(this.authStorage, scope)
     this.executions = createOperationScopedFacade(this.executionStorage, scope)
     this.agents = createAgentOperationScope(this.agentStorage, scope)
+    this.aiUsage = createOperationScopedFacade(this.aiUsageStorage, scope)
     this.actionRuns = createOperationScopedFacade(this.actionRunStorage, scope)
     this.syncRuns = createOperationScopedFacade(this.syncRunStorage, scope)
     this.pipelineRuns = createOperationScopedFacade(this.pipelineRunStorage, scope)
@@ -228,6 +232,7 @@ export class InMemoryStorage implements Storage {
       auth: this.authStorage,
       executions: this.executionStorage,
       agents: this.agentStorage,
+      aiUsage: this.aiUsageStorage,
       actionRuns: this.actionRunStorage,
       syncRuns: this.syncRunStorage,
       pipelineRuns: this.pipelineRunStorage,
@@ -253,6 +258,7 @@ export class InMemoryStorage implements Storage {
       auth: this.authStorage.snapshot(),
       executions: this.executionStorage.snapshot(),
       agents: this.agentStorage.snapshot(),
+      aiUsage: this.aiUsageStorage.snapshot(),
       actionRuns: this.actionRunStorage.snapshot(),
       syncRuns: this.syncRunStorage.snapshot(),
       pipelineRuns: this.pipelineRunStorage.snapshot(),
@@ -273,6 +279,7 @@ export class InMemoryStorage implements Storage {
     this.authStorage.restore(snapshot.auth)
     this.executionStorage.restore(snapshot.executions)
     this.agentStorage.restore(snapshot.agents)
+    this.aiUsageStorage.restore(snapshot.aiUsage)
     this.actionRunStorage.restore(snapshot.actionRuns)
     this.syncRunStorage.restore(snapshot.syncRuns)
     this.pipelineRunStorage.restore(snapshot.pipelineRuns)
@@ -293,6 +300,7 @@ export interface InMemoryStorageSnapshot {
   readonly auth: ReturnType<InMemoryAuthStorage["snapshot"]>
   readonly executions: ReturnType<InMemoryExecutionStorage["snapshot"]>
   readonly agents: ReturnType<InMemoryAgentStorage["snapshot"]>
+  readonly aiUsage: ReturnType<InMemoryAiUsageStorage["snapshot"]>
   readonly actionRuns: ReturnType<InMemoryActionRunStorage["snapshot"]>
   readonly syncRuns: ReturnType<InMemorySyncRunStorage["snapshot"]>
   readonly pipelineRuns: ReturnType<InMemoryPipelineRunStorage["snapshot"]>

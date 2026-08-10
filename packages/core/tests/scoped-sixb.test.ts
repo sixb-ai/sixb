@@ -31,6 +31,7 @@ import {
 } from "../src"
 import { agentServiceAccountId, ensureAgentExecutionIdentity } from "../src/agents/authority"
 import { createAgentScope } from "../src/execution/scopes"
+import type { AuthStorage } from "../src/storage"
 import { createTestSixb, type TestExecutionHost } from "../src/testing"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
@@ -285,6 +286,22 @@ async function seedPrincipal(
   })
 }
 
+async function seedRequesterMemberships(
+  host: { readonly id: string; readonly storage: { readonly auth?: AuthStorage } },
+  groupIds: readonly string[]
+): Promise<void> {
+  const auth = host.storage.auth
+  if (!auth) throw new Error("Test requires auth storage")
+  for (const groupId of groupIds) {
+    await auth.groupMemberships.upsert({
+      projectId: host.id,
+      userId: principal.id,
+      groupId,
+      source: "manual",
+    })
+  }
+}
+
 describe("bound Sixb object reads", () => {
   test("granted types support get, list, byId.get, and query", async () => {
     const host = createRuntime()
@@ -427,10 +444,11 @@ describe("bound Sixb operational access", () => {
     expect(runner.datasets.list()).toEqual([])
   })
 
-  test("workflow runs require can.run", async () => {
+  test("workflow runs require can.run and snapshot all durable requester groups", async () => {
     const host = createRuntime()
     await seedPrincipal(host)
     const sixb = createTestSixb(host)
+    await seedRequesterMemberships(host, ["operations", "commercial"])
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     const input = {
       workflowId: "renew-contract",
@@ -440,6 +458,17 @@ describe("bound Sixb operational access", () => {
     const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     const result = await runner.workflows.requestById(input)
     expect(result.runId).toBeString()
+    const run = await host.storage.workflowRuns?.getById({
+      projectId: host.id,
+      id: result.runId,
+    })
+    expect(run).toBeDefined()
+    await expect(
+      host.storage.executions.getById({ projectId: host.id, id: run?.executionId ?? "" })
+    ).resolves.toMatchObject({ requestedBy: principal })
+    // The authorization context carries only "operations". Attribution resolves the complete
+    // durable membership set so a token-scoped caller cannot avoid the commercial group quota.
+    expect(run?.requesterGroupIds).toEqual(["commercial", "operations"])
 
     const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     expect(operator.workflows.requestById(input)).rejects.toThrow(AuthorizationError)
@@ -638,14 +667,11 @@ describe("bound Sixb operational access", () => {
     expect(operator.agents.getById("contract-agent")).toBeNull()
   })
 
-  test("agent run requests require can.run", async () => {
+  test("agent run requests require can.run and retain the admission snapshot", async () => {
     const host = createRuntime()
     const _sixb = createTestSixb(host)
-    await host.storage.auth?.users.create({
-      id: "adam",
-      projectId: host.id,
-      email: "adam@example.com",
-    })
+    await seedPrincipal(host)
+    await seedRequesterMemberships(host, ["operations", "commercial"])
 
     const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     const result = await runner.agents.runs.request({
@@ -653,6 +679,21 @@ describe("bound Sixb operational access", () => {
       text: "Summarize this account.",
     })
     expect(result.run.id).toBeString()
+    expect(result.run.requesterGroupIds).toEqual(["commercial", "operations"])
+    await expect(
+      host.storage.executions.getById({ projectId: host.id, id: result.run.executionId })
+    ).resolves.toMatchObject({ requestedBy: principal })
+
+    await host.storage.auth?.groupMemberships.remove({
+      projectId: host.id,
+      userId: principal.id,
+      groupId: "commercial",
+    })
+    const stored = await host.storage.agents?.runs.getById({
+      projectId: host.id,
+      id: result.run.id,
+    })
+    expect(stored?.requesterGroupIds).toEqual(["commercial", "operations"])
 
     const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     expect(

@@ -1404,6 +1404,7 @@ describe("authorized event and workflow routes", () => {
       executionId: hiddenExecutionId,
       workflowId: "hidden-workflow",
       input: {},
+      requesterGroupIds: [],
       queuedAt: new Date("2099-01-01T00:00:00.000Z"),
     })
     await storage.workflowInterventions.create({
