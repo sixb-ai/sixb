@@ -1,6 +1,6 @@
 import type {
   BlobsRuntime,
-  ConnectorsRuntime,
+  ConnectorRuntime,
   DatasetsRuntime,
   DomainEventLog,
   LakeStorage,
@@ -29,7 +29,7 @@ export interface SyncWorkerSixb {
   readonly storage: Storage
   readonly syncs: Pick<SyncsRuntime, "list" | "getById">
   readonly datasets: Pick<DatasetsRuntime, "getById">
-  readonly connectors: Pick<ConnectorsRuntime, "connect">
+  readonly connector: ConnectorRuntime
 }
 
 export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
@@ -202,6 +202,6 @@ function buildSyncContext(sixb: SyncWorkerSixb): SyncWorkerContext {
     logs: sixb.logs,
     syncs: sixb.syncs,
     datasets: sixb.datasets,
-    connectors: sixb.connectors,
+    connector: sixb.connector,
   }
 }

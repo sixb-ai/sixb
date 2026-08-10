@@ -17,7 +17,7 @@ import type { AuthRuntime } from "../auth"
 import type { AuthorizationContext } from "../authorization"
 import type { BlobStorage, BlobsRuntime } from "../blob-storage"
 import type { Broker } from "../broker"
-import type { ConnectorsRuntime } from "../connectors"
+import type { ConnectorRuntime, ConnectorsRuntime } from "../connectors"
 import type { DatasetsRuntime } from "../datasets"
 import type { DomainEventLog } from "../events"
 import type { LakeStorage } from "../lake-storage"
@@ -1095,6 +1095,7 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   readonly datasets: DatasetsRuntime
   readonly syncs: SyncsRuntime
   readonly pipelines: PipelinesRuntime
+  readonly connector: ConnectorRuntime
   readonly connectors: ConnectorsRuntime
 
   /** Create a principal-scoped runtime surface that enforces authorization grants. */

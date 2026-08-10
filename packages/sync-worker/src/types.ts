@@ -1,6 +1,6 @@
 import type {
   BlobStorage,
-  ConnectorsRuntime,
+  ConnectorRuntime,
   DatasetsRuntime,
   LakeStorage,
   SyncMode,
@@ -19,7 +19,7 @@ export interface SyncWorkerContext {
 
   readonly datasets: Pick<DatasetsRuntime, "getById">
   readonly syncs: Pick<SyncsRuntime, "getById">
-  readonly connectors: Pick<ConnectorsRuntime, "connect">
+  readonly connector: ConnectorRuntime
 }
 
 export interface SyncJob {

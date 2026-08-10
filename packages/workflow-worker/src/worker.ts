@@ -251,7 +251,7 @@ function buildWorkflowContext(
       rules: sixb.rules,
       schedules: sixb.schedules,
       events: sixb.events,
-      connectors: sixb.connectors,
+      connector: sixb.connector,
       blobs: sixb.blobs,
     },
   }

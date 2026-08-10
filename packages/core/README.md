@@ -24,7 +24,7 @@ bun add @sixb/core
 
 **Actions** -- Typed audited commands. Actions can run external writeback, declare local object/link edits, and run post-commit effects.
 
-**Connectors** -- Typed external system clients that you register with the runtime and resolve lazily with `sixb.connectors.connect(...)`.
+**Connectors** -- Typed external system clients that you register with the runtime and resolve lazily with `sixb.connector(...)`.
 
 **Syncs** -- Declarative batch sync definitions that read from one connector and write into one raw dataset. V1 supports `snapshot`, `append`, and keyed `merge` modes with optional triggers and typed source checkpoints.
 
@@ -164,7 +164,7 @@ await sixb.actions.request({
 
 ## Connectors
 
-Connectors are registered definitions. The runtime only creates the client when you resolve one with `sixb.connectors.connect(...)`.
+Connectors are registered definitions. The runtime only creates the client when you resolve one with `sixb.connector(...)`.
 
 ```ts
 import { defineConnector } from "@sixb/core"
@@ -188,7 +188,7 @@ const sixb = new Sixb({
   connectors: [erpDb],
 })
 
-const db = await sixb.connectors.connect(erpDb)
+const db = await sixb.connector(erpDb)
 await db.query("select 1")
 ```
 

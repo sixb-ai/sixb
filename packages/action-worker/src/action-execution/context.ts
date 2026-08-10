@@ -27,7 +27,7 @@ export function toActionRuntimeFacade(runtime: RunActionJobInput["runtime"]): Ac
         return runtime.sixb.blobs.stat(blobId)
       },
     },
-    connectors: runtime.sixb.connectors,
+    connector: runtime.sixb.connector,
     objects(objectType) {
       return {
         appendTelemetryBatch(items) {

@@ -139,7 +139,7 @@ async function readSyncValues(options: {
   previousCheckpoint: JsonValue | undefined
   setCheckpoint(next: unknown): void
 }): Promise<AsyncIterable<unknown>> {
-  const client = await options.runtime.connectors.connect(options.sync.connector)
+  const client = await options.runtime.connector(options.sync.connector)
   const readResult = await options.sync.read(client, {
     projectId: options.runtime.id,
     syncId: options.sync.id,

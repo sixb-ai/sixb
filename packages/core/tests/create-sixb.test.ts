@@ -130,7 +130,7 @@ export const syncOrders = defineSync("sync-orders")
 
     const { erpDb } = await import(pathToFileURL(join(projectRoot, "connectors", "erpDb.ts")).href)
     await import(pathToFileURL(join(projectRoot, "ontology", "room.ts")).href)
-    const client = await sixb.connectors.connect(erpDb)
+    const client = await sixb.connector(erpDb)
 
     expect(sixb.actions.list().map((action) => action.id)).toEqual(["setTemperature"])
     expect(

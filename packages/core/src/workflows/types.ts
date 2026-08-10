@@ -9,7 +9,7 @@ import type { AgentsRuntime } from "../agents/runtime"
 import type { AgentDefinition } from "../agents/types"
 import type { Principal } from "../auth"
 import type { BlobsRuntime } from "../blob-storage"
-import type { ConnectorsRuntime } from "../connectors"
+import type { ConnectorRuntime } from "../connectors"
 import type { DatasetsRuntime } from "../datasets"
 import type { DomainEventLog } from "../events"
 import type { JsonValue } from "../json"
@@ -64,7 +64,7 @@ export interface WorkflowRuntimeFacade {
   readonly rules: RulesRuntime
   readonly projections: ProjectionsRuntime
   readonly events: DomainEventLog
-  readonly connectors: Pick<ConnectorsRuntime, "connect">
+  readonly connector: ConnectorRuntime
   readonly blobs: Omit<BlobsRuntime, "close">
 }
 

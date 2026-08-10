@@ -13,6 +13,7 @@ void sixb.schedules.list()
 void sixb.rules.list()
 void sixb.projections.list()
 void sixb.events.read()
+void sixb.connector
 void sixb.connectors.list()
 void sixb.blobs.stat("blob-id")
 
@@ -23,8 +24,8 @@ void sixb.listObjects({})
 void sixb.listActions()
 // @ts-expect-error Use sixb.workflows.requestById(...).
 void sixb.requestWorkflowRun({ workflowId: "workflow-id" })
-// @ts-expect-error Use sixb.connectors.connect(...).
-void sixb.connector
+// @ts-expect-error Use sixb.connector(...).
+void sixb.connectors.connect
 // @ts-expect-error Use sixb.connectors.disconnectAll().
 void sixb.disconnectConnectors()
 // @ts-expect-error Use sixb.blobs.

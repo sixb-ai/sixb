@@ -600,7 +600,7 @@ function buildAgentContext(sixb: AgentWorkerSixb, options: AgentWorkerOptions): 
     storage: storage as AgentWorkerStorage,
     blobStorage: sixb.blobs,
     sandboxes: sixb.sandboxes,
-    connector: (definition) => sixb.connectors.connect(definition),
+    connector: sixb.connector,
     logs: sixb.logs,
     valueTypesById: sixb.ontology?.getValueTypesById() ?? new Map(),
     // Normalize the server base URL once here, at the boundary. Everything downstream (the gateway

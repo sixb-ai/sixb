@@ -17,7 +17,7 @@ export const startServiceVisit = defineAction("start-service-visit", {
     }
   })
   .writeback(async ({ run, sixb, target }) => {
-    const fieldService = await sixb.connectors.connect(fieldServiceConnector)
+    const fieldService = await sixb.connector(fieldServiceConnector)
     return fieldService.startVisit(target.primaryId, run.idempotencyKey ?? run.id)
   })
   .edits(({ objects, params, subject, writeback }) => {

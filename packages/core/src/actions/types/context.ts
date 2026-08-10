@@ -1,5 +1,5 @@
 import type { BlobStorage } from "../../blob-storage"
-import type { ConnectorsRuntime } from "../../connectors"
+import type { ConnectorRuntime } from "../../connectors"
 import type { RecordEditsContext } from "../../edits"
 import type { Logger } from "../../logging"
 import type {
@@ -129,7 +129,7 @@ export interface ActionRuntimeFacade<
   TValueTypes extends readonly ValueType[] = readonly ValueType[],
 > {
   readonly blobs: ActionBlobContext
-  readonly connectors: Pick<ConnectorsRuntime, "connect">
+  readonly connector: ConnectorRuntime
   objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
   ): ActionTelemetryObjectSet<TObjectType, TValueTypes>

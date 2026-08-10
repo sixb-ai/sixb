@@ -22,7 +22,11 @@ import type { AuthorizationContext } from "../authorization"
 import type { BlobStorage, BlobsRuntime } from "../blob-storage"
 import { createBlobsRuntime } from "../blob-storage/runtime"
 import type { Broker } from "../broker"
-import { type ConnectorsRuntime, createConnectorsRuntime } from "../connectors/runtime"
+import {
+  type ConnectorRuntime,
+  type ConnectorsRuntime,
+  createConnectorsRuntime,
+} from "../connectors/runtime"
 import type { ConnectorDefinition } from "../connectors/types"
 import { createDatasetsRuntime, type DatasetsRuntime } from "../datasets"
 import type { DatasetDefinition } from "../datasets/types"
@@ -140,6 +144,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   readonly datasets: DatasetsRuntime
   readonly syncs: SyncsRuntime
   readonly pipelines: PipelinesRuntime
+  readonly connector: ConnectorRuntime
   readonly connectors: ConnectorsRuntime
   readonly blobs: BlobsRuntime
   readonly broker: Broker
@@ -196,7 +201,9 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       config: options.auth,
     })
     validateAuthStrategySecurityReferences(this.auth.getStrategy(), this.security)
-    this.connectors = createConnectorsRuntime(this.projectId, options.connectors ?? [])
+    const connectorRuntimes = createConnectorsRuntime(this.projectId, options.connectors ?? [])
+    this.connector = connectorRuntimes.connector
+    this.connectors = connectorRuntimes.connectors
     const connectors = this.connectors.list()
     assertWebhookDeliveryStorage(connectors, this.storage)
     this.webhooks = registerWebhooks(connectors).webhooks

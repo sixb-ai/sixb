@@ -6,16 +6,18 @@ type ConnectorConnectionState = {
   clientPromise: Promise<unknown>
 }
 
+/** Resolve an inert connector definition to its lazily connected client. */
+export type ConnectorRuntime = <TAdapter extends ConnectorAdapter>(
+  definition: ConnectorDefinition<string, TAdapter>
+) => Promise<ConnectorClient<TAdapter>>
+
 export interface ConnectorsRuntime {
   list(): readonly ConnectorDefinition[]
   getById(id: string): ConnectorDefinition | null
-  connect<TAdapter extends ConnectorAdapter>(
-    definition: ConnectorDefinition<string, TAdapter>
-  ): Promise<ConnectorClient<TAdapter>>
   disconnectAll(): Promise<void>
 }
 
-class ConnectorRuntime implements ConnectorsRuntime {
+class ConnectorRegistry implements ConnectorsRuntime {
   private readonly definitionsById = new Map<string, ConnectorDefinition>()
   private readonly connectionStates = new Map<ConnectorDefinition, ConnectorConnectionState>()
 
@@ -111,6 +113,11 @@ class ConnectorRuntime implements ConnectorsRuntime {
 export function createConnectorsRuntime(
   projectId: string,
   definitions: readonly ConnectorDefinition[]
-): ConnectorsRuntime {
-  return new ConnectorRuntime(projectId, definitions)
+): { readonly connector: ConnectorRuntime; readonly connectors: ConnectorsRuntime } {
+  const registry = new ConnectorRegistry(projectId, definitions)
+
+  return {
+    connector: (definition) => registry.connect(definition),
+    connectors: registry,
+  }
 }
