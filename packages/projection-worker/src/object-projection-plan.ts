@@ -165,10 +165,12 @@ function buildProjectedPropertyPlans(input: {
       columnName,
       columnType: column.type,
       schema: resolveProjectionSchema(property.schema, valueTypesById, {
-        ...errorDetails,
-        objectTypeId: objectType.id,
-        propertyId,
-        columnName,
+        details: {
+          ...errorDetails,
+          objectTypeId: objectType.id,
+          propertyId,
+          columnName,
+        },
       }),
     })
   }

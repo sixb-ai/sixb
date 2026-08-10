@@ -6,15 +6,24 @@ import type {
   OntologyDefinitionCatalog,
   ProjectionDefinition,
   Property,
+  ReadonlyJsonValue,
   Schema,
   ValueType,
 } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import { validateTelemetryProjectionFieldMapping } from "@sixb/core/internal/projections"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import { ProjectionWorkerPermanentError } from "./errors"
 import { isIntegerEnumSchema, resolveProjectionSchema } from "./projection-schema"
 
 type DatasetColumnsByName = Map<string, DatasetColumnDefinition>
+type ProjectionErrorDetails = Readonly<Record<string, ReadonlyJsonValue>>
+
+interface ProjectionValidationContext {
+  readonly projectionId: string
+  readonly datasetId: string
+  readonly versionId: string
+  readonly runId?: string
+}
 
 function columnsByName(columns: readonly DatasetColumnDefinition[]): DatasetColumnsByName {
   return new Map(columns.map((column) => [column.name, column]))
@@ -53,12 +62,15 @@ export function assertDatasetVersionMatchesDefinition(input: {
   readonly dataset: DatasetDefinition
   readonly version: DatasetVersion
   readonly projection: ProjectionDefinition
+  readonly runId?: string
 }): void {
-  const { dataset, version, projection } = input
+  const { dataset, version, projection, runId } = input
+  const context = projectionValidationContext({ projection, dataset, version, runId })
 
   if (version.datasetId !== dataset.id) {
-    throw new ProjectionWorkerPermanentError(
-      `[SixbProjectionWorker] Dataset version '${version.versionId}' belongs to dataset '${version.datasetId}', expected '${dataset.id}'.`
+    throw incompatibleDatasetVersion(
+      `[SixbProjectionWorker] Dataset version '${version.versionId}' belongs to dataset '${version.datasetId}', expected '${dataset.id}'.`,
+      { ...context, actualDatasetId: version.datasetId }
     )
   }
 
@@ -68,8 +80,14 @@ export function assertDatasetVersionMatchesDefinition(input: {
     const expected = expectedColumns.get(columnName)
     const actual = actualColumns.get(columnName)
     if (expected && actual && columnsEqual(expected, actual)) continue
-    throw new ProjectionWorkerPermanentError(
-      `[SixbProjectionWorker] Dataset '${dataset.id}' version '${version.versionId}' schema mismatch for referenced column '${columnName}'. Expected ${formatColumn(expected)}, got ${formatColumn(actual)}.`
+    throw incompatibleDatasetVersion(
+      `[SixbProjectionWorker] Dataset '${dataset.id}' version '${version.versionId}' schema mismatch for referenced column '${columnName}'. Expected ${formatColumn(expected)}, got ${formatColumn(actual)}.`,
+      {
+        ...context,
+        columnName,
+        expectedColumn: formatColumn(expected),
+        actualColumn: formatColumn(actual),
+      }
     )
   }
 }
@@ -79,17 +97,14 @@ export function assertProjectionCompatibleWithDataset(input: {
   readonly dataset: DatasetDefinition
   readonly version: DatasetVersion
   readonly ontology: OntologyDefinitionCatalog
+  readonly runId?: string
 }): void {
-  const { projection, dataset, version, ontology } = input
+  const { projection, dataset, version, ontology, runId } = input
+  const context = projectionValidationContext({ projection, dataset, version, runId })
   const columnsByName = new Map(version.schema.columns.map((column) => [column.name, column]))
 
   if (projection._tag === "ObjectProjectionDefinition") {
-    const objectType = requireObjectType(
-      ontology,
-      projection.objectTypeId,
-      projection.id,
-      "object type"
-    )
+    const objectType = requireObjectType(ontology, projection.objectTypeId, "object type", context)
 
     const propertiesById = new Map(
       objectType.properties.map((property) => [property.id, property] as const)
@@ -97,51 +112,65 @@ export function assertProjectionCompatibleWithDataset(input: {
     for (const [propertyId, columnName] of Object.entries(projection.properties)) {
       const property = propertiesById.get(propertyId)
       if (!property) {
-        throw new ProjectionWorkerPermanentError(
-          `[SixbProjectionWorker] Projection '${projection.id}' references unknown property '${propertyId}' on object type '${objectType.id}'.`
+        throw invalidProjectionDefinition(
+          `[SixbProjectionWorker] Projection '${projection.id}' references unknown property '${propertyId}' on object type '${objectType.id}'.`,
+          { ...context, objectTypeId: objectType.id, propertyId, columnName }
         )
       }
 
-      const column = requireColumn(columnsByName, dataset.id, columnName, projection.id)
+      const column = requireColumn(columnsByName, columnName, context)
       if (
         !isDatasetColumnCompatibleWithSchema(
           column.type,
           property.schema,
           ontology.getValueTypesById(),
           {
-            projectionId: projection.id,
-            datasetId: dataset.id,
-            versionId: version.versionId,
+            ...context,
             objectTypeId: objectType.id,
             propertyId,
             columnName,
           }
         )
       ) {
-        throw new ProjectionWorkerPermanentError(
-          `[SixbProjectionWorker] Projection '${projection.id}' maps dataset column '${column.name}' (${column.type}) to incompatible property '${propertyId}'.`
+        throw invalidProjectionDefinition(
+          `[SixbProjectionWorker] Projection '${projection.id}' maps dataset column '${column.name}' (${column.type}) to incompatible property '${propertyId}'.`,
+          {
+            ...context,
+            objectTypeId: objectType.id,
+            propertyId,
+            columnName: column.name,
+            columnType: column.type,
+          }
         )
       }
     }
 
     for (const [linkKey, descriptor] of Object.entries(projection.links)) {
       if (linkKey !== descriptor.linkId) {
-        throw new ProjectionWorkerPermanentError(
-          `[SixbProjectionWorker] Projection '${projection.id}' FK link key '${linkKey}' does not match descriptor link '${descriptor.linkId}'.`
+        throw invalidProjectionDefinition(
+          `[SixbProjectionWorker] Projection '${projection.id}' FK link key '${linkKey}' does not match descriptor link '${descriptor.linkId}'.`,
+          { ...context, linkKey, linkId: descriptor.linkId }
         )
       }
 
-      const linkDefinition = requireLink(objectType, descriptor.linkId, projection.id)
+      const linkDefinition = requireLink(objectType, descriptor.linkId, context)
       const sourcePropertyId = descriptor.sourcePropertyId
       const sourceField = descriptor.sourceField
       if (sourcePropertyId && sourceField) {
-        throw new ProjectionWorkerPermanentError(
-          `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' must use either sourcePropertyId or sourceField, not both.`
+        throw invalidProjectionDefinition(
+          `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' must use either sourcePropertyId or sourceField, not both.`,
+          {
+            ...context,
+            linkId: descriptor.linkId,
+            propertyId: sourcePropertyId,
+            columnName: sourceField,
+          }
         )
       }
       if (!sourcePropertyId && !sourceField) {
-        throw new ProjectionWorkerPermanentError(
-          `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' must declare sourcePropertyId or sourceField.`
+        throw invalidProjectionDefinition(
+          `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' must declare sourcePropertyId or sourceField.`,
+          { ...context, linkId: descriptor.linkId }
         )
       }
 
@@ -149,22 +178,29 @@ export function assertProjectionCompatibleWithDataset(input: {
         requireProperty(
           objectType,
           sourcePropertyId,
-          projection.id,
-          `FK link '${descriptor.linkId}' source property`
+          `FK link '${descriptor.linkId}' source property`,
+          context
         )
 
         if (!(sourcePropertyId in projection.properties)) {
-          throw new ProjectionWorkerPermanentError(
-            `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' source property '${sourcePropertyId}' must be mapped as an object property.`
+          throw invalidProjectionDefinition(
+            `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' source property '${sourcePropertyId}' must be mapped as an object property.`,
+            { ...context, linkId: descriptor.linkId, propertyId: sourcePropertyId }
           )
         }
       }
 
       if (sourceField) {
-        const sourceColumn = requireColumn(columnsByName, dataset.id, sourceField, projection.id)
+        const sourceColumn = requireColumn(columnsByName, sourceField, context)
         if (sourceColumn.type !== "string") {
-          throw new ProjectionWorkerPermanentError(
-            `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' source field '${sourceField}' must be a string dataset column.`
+          throw invalidProjectionDefinition(
+            `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' source field '${sourceField}' must be a string dataset column.`,
+            {
+              ...context,
+              linkId: descriptor.linkId,
+              columnName: sourceField,
+              columnType: sourceColumn.type,
+            }
           )
         }
       }
@@ -172,12 +208,12 @@ export function assertProjectionCompatibleWithDataset(input: {
       requireObjectType(
         ontology,
         descriptor.targetObjectTypeId,
-        projection.id,
-        `FK link '${descriptor.linkId}' target type`
+        `FK link '${descriptor.linkId}' target type`,
+        context
       )
       assertLinkTargetCompatible({
         ontology,
-        projectionId: projection.id,
+        context,
         link: linkDefinition,
         actualTargetObjectTypeId: descriptor.targetObjectTypeId,
       })
@@ -186,12 +222,7 @@ export function assertProjectionCompatibleWithDataset(input: {
   }
 
   if (projection._tag === "TelemetryProjectionDefinition") {
-    const objectType = requireObjectType(
-      ontology,
-      projection.objectTypeId,
-      projection.id,
-      "object type"
-    )
+    const objectType = requireObjectType(ontology, projection.objectTypeId, "object type", context)
     // Existence + telemetry-mode + field-mapping rules are owned by core so the
     // startup and worker checks share one implementation and cannot drift. The
     // worker then layers dataset-version column type compatibility on top.
@@ -203,61 +234,69 @@ export function assertProjectionCompatibleWithDataset(input: {
       `[SixbProjectionWorker] Projection "${projection.id}"`
     )
 
-    const objectIdColumn = requireColumn(
-      columnsByName,
-      dataset.id,
-      projection.objectIdField,
-      projection.id
-    )
+    const objectIdColumn = requireColumn(columnsByName, projection.objectIdField, context)
     if (objectIdColumn.type !== "string") {
-      throw new ProjectionWorkerPermanentError(
-        `[SixbProjectionWorker] Telemetry projection '${projection.id}' objectId field '${projection.objectIdField}' must be a string dataset column.`
+      throw invalidProjectionDefinition(
+        `[SixbProjectionWorker] Telemetry projection '${projection.id}' objectId field '${projection.objectIdField}' must be a string dataset column.`,
+        {
+          ...context,
+          objectTypeId: objectType.id,
+          columnName: projection.objectIdField,
+          columnType: objectIdColumn.type,
+        }
       )
     }
 
-    const atColumn = requireColumn(columnsByName, dataset.id, projection.atField, projection.id)
+    const atColumn = requireColumn(columnsByName, projection.atField, context)
     if (!isDateLikeColumnType(atColumn.type)) {
-      throw new ProjectionWorkerPermanentError(
-        `[SixbProjectionWorker] Telemetry projection '${projection.id}' at field '${projection.atField}' must be a string, date, or timestamp dataset column.`
+      throw invalidProjectionDefinition(
+        `[SixbProjectionWorker] Telemetry projection '${projection.id}' at field '${projection.atField}' must be a string, date, or timestamp dataset column.`,
+        {
+          ...context,
+          objectTypeId: objectType.id,
+          columnName: projection.atField,
+          columnType: atColumn.type,
+        }
       )
     }
 
-    const valueColumn = requireColumn(
-      columnsByName,
-      dataset.id,
-      projection.valueField,
-      projection.id
-    )
+    const valueColumn = requireColumn(columnsByName, projection.valueField, context)
     if (
       !isDatasetColumnCompatibleWithSchema(
         valueColumn.type,
         property.schema,
         ontology.getValueTypesById(),
         {
-          projectionId: projection.id,
-          datasetId: dataset.id,
-          versionId: version.versionId,
+          ...context,
           objectTypeId: objectType.id,
           propertyId: property.id,
           columnName: valueColumn.name,
         }
       )
     ) {
-      throw new ProjectionWorkerPermanentError(
-        `[SixbProjectionWorker] Telemetry projection '${projection.id}' maps dataset column '${valueColumn.name}' (${valueColumn.type}) to incompatible property '${projection.propertyId}'.`
+      throw invalidProjectionDefinition(
+        `[SixbProjectionWorker] Telemetry projection '${projection.id}' maps dataset column '${valueColumn.name}' (${valueColumn.type}) to incompatible property '${projection.propertyId}'.`,
+        {
+          ...context,
+          objectTypeId: objectType.id,
+          propertyId: projection.propertyId,
+          columnName: valueColumn.name,
+          columnType: valueColumn.type,
+        }
       )
     }
 
     if (projection.unitField !== undefined) {
-      const unitColumn = requireColumn(
-        columnsByName,
-        dataset.id,
-        projection.unitField,
-        projection.id
-      )
+      const unitColumn = requireColumn(columnsByName, projection.unitField, context)
       if (unitColumn.type !== "string") {
-        throw new ProjectionWorkerPermanentError(
-          `[SixbProjectionWorker] Telemetry projection '${projection.id}' unit field '${projection.unitField}' must be a string dataset column.`
+        throw invalidProjectionDefinition(
+          `[SixbProjectionWorker] Telemetry projection '${projection.id}' unit field '${projection.unitField}' must be a string dataset column.`,
+          {
+            ...context,
+            objectTypeId: objectType.id,
+            columnName: projection.unitField,
+            columnType: unitColumn.type,
+          }
         )
       }
     }
@@ -268,34 +307,32 @@ export function assertProjectionCompatibleWithDataset(input: {
   const sourceObjectType = requireObjectType(
     ontology,
     projection.sourceObjectTypeId,
-    projection.id,
-    "source object type"
+    "source object type",
+    context
   )
-  requireObjectType(ontology, projection.targetObjectTypeId, projection.id, "target object type")
-  const linkDefinition = requireLink(sourceObjectType, projection.linkId, projection.id)
+  requireObjectType(ontology, projection.targetObjectTypeId, "target object type", context)
+  const linkDefinition = requireLink(sourceObjectType, projection.linkId, context)
   assertLinkTargetCompatible({
     ontology,
-    projectionId: projection.id,
+    context,
     link: linkDefinition,
     actualTargetObjectTypeId: projection.targetObjectTypeId,
   })
 
-  const sourceColumn = requireColumn(
-    columnsByName,
-    dataset.id,
-    projection.sourceField,
-    projection.id
-  )
-  const targetColumn = requireColumn(
-    columnsByName,
-    dataset.id,
-    projection.targetField,
-    projection.id
-  )
+  const sourceColumn = requireColumn(columnsByName, projection.sourceField, context)
+  const targetColumn = requireColumn(columnsByName, projection.targetField, context)
 
   if (sourceColumn.type !== "string" || targetColumn.type !== "string") {
-    throw new ProjectionWorkerPermanentError(
-      `[SixbProjectionWorker] Link projection '${projection.id}' source and target fields must be string dataset columns.`
+    throw invalidProjectionDefinition(
+      `[SixbProjectionWorker] Link projection '${projection.id}' source and target fields must be string dataset columns.`,
+      {
+        ...context,
+        linkId: projection.linkId,
+        sourceColumnName: sourceColumn.name,
+        sourceColumnType: sourceColumn.type,
+        targetColumnName: targetColumn.name,
+        targetColumnType: targetColumn.type,
+      }
     )
   }
 }
@@ -303,13 +340,14 @@ export function assertProjectionCompatibleWithDataset(input: {
 function requireObjectType(
   ontology: OntologyDefinitionCatalog,
   objectTypeId: string,
-  projectionId: string,
-  role: string
+  role: string,
+  context: ProjectionValidationContext
 ): ObjectTypeWithPropertyTokens {
   const objectType = ontology.getObjectTypeById(objectTypeId)
   if (!objectType) {
-    throw new ProjectionWorkerPermanentError(
-      `[SixbProjectionWorker] Projection '${projectionId}' references unknown ${role} '${objectTypeId}'.`
+    throw invalidProjectionDefinition(
+      `[SixbProjectionWorker] Projection '${context.projectionId}' references unknown ${role} '${objectTypeId}'.`,
+      { ...context, objectTypeId, role }
     )
   }
   return objectType
@@ -318,13 +356,14 @@ function requireObjectType(
 function requireProperty(
   objectType: ObjectTypeWithPropertyTokens,
   propertyId: string,
-  projectionId: string,
-  role: string
+  role: string,
+  context: ProjectionValidationContext
 ): Property {
   const property = objectType.properties.find((candidate) => candidate.id === propertyId)
   if (!property) {
-    throw new ProjectionWorkerPermanentError(
-      `[SixbProjectionWorker] Projection '${projectionId}' references unknown ${role} '${propertyId}' on object type '${objectType.id}'.`
+    throw invalidProjectionDefinition(
+      `[SixbProjectionWorker] Projection '${context.projectionId}' references unknown ${role} '${propertyId}' on object type '${objectType.id}'.`,
+      { ...context, objectTypeId: objectType.id, propertyId, role }
     )
   }
   return property
@@ -333,12 +372,13 @@ function requireProperty(
 function requireLink(
   objectType: ObjectTypeWithPropertyTokens,
   linkId: string,
-  projectionId: string
+  context: ProjectionValidationContext
 ): ObjectLink {
   const link = objectType.links.find((candidate) => candidate.id === linkId)
   if (!link) {
-    throw new ProjectionWorkerPermanentError(
-      `[SixbProjectionWorker] Projection '${projectionId}' references unknown link '${linkId}' on object type '${objectType.id}'.`
+    throw invalidProjectionDefinition(
+      `[SixbProjectionWorker] Projection '${context.projectionId}' references unknown link '${linkId}' on object type '${objectType.id}'.`,
+      { ...context, objectTypeId: objectType.id, linkId }
     )
   }
   return link
@@ -346,17 +386,23 @@ function requireLink(
 
 function assertLinkTargetCompatible(input: {
   readonly ontology: OntologyDefinitionCatalog
-  readonly projectionId: string
+  readonly context: ProjectionValidationContext
   readonly link: ObjectLink
   readonly actualTargetObjectTypeId: string
 }): void {
-  const { ontology, projectionId, link, actualTargetObjectTypeId } = input
+  const { ontology, context, link, actualTargetObjectTypeId } = input
   if (ontology.isValidLinkTarget(link.targetObjectTypeId, actualTargetObjectTypeId)) {
     return
   }
 
-  throw new ProjectionWorkerPermanentError(
-    `[SixbProjectionWorker] Projection '${projectionId}' link '${link.id}' target type '${actualTargetObjectTypeId}' is not compatible with declared target '${formatTarget(link.targetObjectTypeId)}'.`
+  throw invalidProjectionDefinition(
+    `[SixbProjectionWorker] Projection '${context.projectionId}' link '${link.id}' target type '${actualTargetObjectTypeId}' is not compatible with declared target '${formatTarget(link.targetObjectTypeId)}'.`,
+    {
+      ...context,
+      linkId: link.id,
+      actualTargetObjectTypeId,
+      expectedTargetObjectTypeId: formatTarget(link.targetObjectTypeId),
+    }
   )
 }
 
@@ -366,17 +412,39 @@ function formatTarget(target: string | readonly string[]): string {
 
 function requireColumn(
   columnsByName: DatasetColumnsByName,
-  datasetId: string,
   columnName: string,
-  projectionId: string
+  context: ProjectionValidationContext
 ): DatasetColumnDefinition {
   const column = columnsByName.get(columnName)
   if (!column) {
-    throw new ProjectionWorkerPermanentError(
-      `[SixbProjectionWorker] Projection '${projectionId}' references unknown dataset column '${columnName}' on dataset '${datasetId}'.`
+    throw invalidProjectionDefinition(
+      `[SixbProjectionWorker] Projection '${context.projectionId}' references unknown dataset column '${columnName}' on dataset '${context.datasetId}'.`,
+      { ...context, columnName }
     )
   }
   return column
+}
+
+function projectionValidationContext(input: {
+  readonly projection: ProjectionDefinition
+  readonly dataset: DatasetDefinition
+  readonly version: DatasetVersion
+  readonly runId?: string
+}): ProjectionValidationContext {
+  return {
+    projectionId: input.projection.id,
+    datasetId: input.dataset.id,
+    versionId: input.version.versionId,
+    ...(input.runId === undefined ? {} : { runId: input.runId }),
+  }
+}
+
+function invalidProjectionDefinition(message: string, details: ProjectionErrorDetails) {
+  return createSixbError("projection.definition_invalid", message, { details })
+}
+
+function incompatibleDatasetVersion(message: string, details: ProjectionErrorDetails) {
+  return createSixbError("dataset.version_incompatible", message, { details })
 }
 
 function isDateLikeColumnType(type: DatasetColumnDefinition["type"]): boolean {
@@ -387,9 +455,12 @@ function isDatasetColumnCompatibleWithSchema(
   columnType: DatasetColumnDefinition["type"],
   schema: Schema,
   valueTypesById: ReadonlyMap<string, ValueType>,
-  errorContext: Readonly<Record<string, string>>
+  errorContext: ProjectionErrorDetails
 ): boolean {
-  const resolved = resolveProjectionSchema(schema, valueTypesById, errorContext)
+  const resolved = resolveProjectionSchema(schema, valueTypesById, {
+    code: "projection.definition_invalid",
+    details: errorContext,
+  })
 
   switch (columnType) {
     case "string":

@@ -247,10 +247,12 @@ function buildTelemetryProjectionPlan(input: {
     dataset,
     valueColumnType: valueColumn.type,
     valueSchema: resolveProjectionSchema(property.schema, runtime.ontology.getValueTypesById(), {
-      ...errorDetails,
-      objectTypeId: objectType.id,
-      propertyId: property.id,
-      columnName: valueColumn.name,
+      details: {
+        ...errorDetails,
+        objectTypeId: objectType.id,
+        propertyId: property.id,
+        columnName: valueColumn.name,
+      },
     }),
     readColumns: telemetryProjectionReadColumns(projection),
   }

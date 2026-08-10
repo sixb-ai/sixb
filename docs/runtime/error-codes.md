@@ -40,8 +40,13 @@ Each storage and wire change remains independently reviewable even though every 
 | Code | Retryable | What happened | What to do |
 | --- | --- | --- | --- |
 | `dataset.not_found` | No | The requested dataset is not registered or is not visible to the caller. | Check the dataset ID and the caller's access. |
+| `dataset.version_incompatible` | No | The immutable dataset version does not match the dataset or schema required by the operation. | Materialize a compatible version and dispatch a new run. |
 | `dataset.version_not_found` | No | The requested dataset version does not exist, or the dataset has no committed version yet. | Check the version ID or materialize the dataset before reading rows. |
 | `dataset.version_read_inconsistent` | Yes | Read results conflict with immutable version metadata. | Retry, then inspect lake storage integrity. |
 | `internal.unexpected` | No | Sixb caught an exception that has not yet been assigned a more specific code. | Inspect internal logs. Do not retry automatically. |
 | `queue.enqueue_failed` | Yes | A job could not be handed to its queue. | Retry the unchanged request while the durable run remains in its enqueue phase. |
+| `projection.definition_invalid` | No | A projection definition is incompatible with its ontology or dataset mapping. | Fix the projection definition and dispatch a new run. |
+| `projection.not_found` | No | The requested projection is not registered in the current runtime. | Check the projection ID and ensure its definition is deployed. |
+| `projection.run_already_terminal` | No | A delivery targeted a projection run that had already failed or been cancelled. | Do not reuse the terminal run ID; dispatch a new semantic run if needed. |
+| `projection.run_identity_mismatch` | No | A projection run or delivery does not match its pinned semantic identity. | Discard the stale delivery and dispatch from the current projection definition. |
 | `runtime.cancelled` | No | An in-flight operation was cancelled before completion. | Confirm the cancellation was intentional before requesting another run. |
