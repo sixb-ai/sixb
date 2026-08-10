@@ -306,6 +306,21 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "connectors/unipile": {
+      "name": "@sixb/connector-unipile",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:^",
+      },
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "examples/auth": {
       "name": "@sixb/example-auth",
       "dependencies": {
@@ -1388,6 +1403,8 @@
     "@sixb/connector-sql": ["@sixb/connector-sql@workspace:connectors/sql"],
 
     "@sixb/connector-teamleader": ["@sixb/connector-teamleader@workspace:connectors/teamleader"],
+
+    "@sixb/connector-unipile": ["@sixb/connector-unipile@workspace:connectors/unipile"],
 
     "@sixb/core": ["@sixb/core@workspace:packages/core"],
 
