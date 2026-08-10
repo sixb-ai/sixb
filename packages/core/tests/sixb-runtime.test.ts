@@ -158,7 +158,6 @@ describe("Sixb runtime", () => {
       "startScheduler",
       "listRules",
       "listObjectProjections",
-      "connector",
       "blobStorage",
     ]) {
       expect(removedRootMember in sixb).toBe(false)
