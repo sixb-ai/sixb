@@ -1,6 +1,6 @@
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { WorkflowIOSnapshot, WorkflowNodeDefinition } from "@sixb/core/internal/workflows"
 import type { WorkflowRunRecord } from "@sixb/core/storage"
-import { WorkflowWorkerError } from "../errors"
 import { throwIfAborted } from "../normalize"
 import type { WorkflowRunRecorder } from "../recorder"
 import type {
@@ -49,8 +49,18 @@ export class WorkflowNodeRunner {
     if (outcome.status === "waiting") {
       if ("agentExecution" in outcome) {
         if (outcome.agentExecution.nodeRunId !== nodeRun.id || outcome.nodeRun.id !== nodeRun.id) {
-          throw new WorkflowWorkerError(
-            `[SixbWorkflowWorker] Workflow '${input.context.workflow.id}' agent node '${input.node.id}' parked a different node run.`
+          throw createSixbError(
+            "internal.unexpected",
+            `[SixbWorkflowWorker] Workflow '${input.context.workflow.id}' agent node '${input.node.id}' parked a different node run.`,
+            {
+              details: {
+                agentId: outcome.agentExecution.agentId,
+                workflowId: input.context.workflow.id,
+                workflowRunId: input.context.job.id,
+                nodeId: input.node.id,
+                nodeRunId: nodeRun.id,
+              },
+            }
           )
         }
         await this.dependencies.recorder.recordParkedNode({
@@ -62,8 +72,19 @@ export class WorkflowNodeRunner {
       }
 
       if (outcome.intervention.nodeRunId !== nodeRun.id) {
-        throw new WorkflowWorkerError(
-          `[SixbWorkflowWorker] Workflow '${input.context.workflow.id}' intervention node '${input.node.id}' returned an intervention for a different node run.`
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbWorkflowWorker] Workflow '${input.context.workflow.id}' intervention node '${input.node.id}' returned an intervention for a different node run.`,
+          {
+            details: {
+              workflowId: input.context.workflow.id,
+              workflowRunId: input.context.job.id,
+              nodeId: input.node.id,
+              nodeRunId: nodeRun.id,
+              interventionId: outcome.intervention.interventionId,
+              interventionRecordId: outcome.intervention.id,
+            },
+          }
         )
       }
 
@@ -82,14 +103,20 @@ export class WorkflowNodeRunner {
       }
     }
 
-    assertStatePatchIsPersistable(outcome.statePatch, outcome.outputSnapshot)
+    const details = {
+      workflowId: input.context.workflow.id,
+      workflowRunId: input.context.job.id,
+      nodeId: input.node.id,
+      nodeRunId: nodeRun.id,
+    }
+    assertStatePatchIsPersistable(outcome.statePatch, outcome.outputSnapshot, details)
 
     await this.dependencies.recorder.finishNodeSucceeded({
       nodeRunId: nodeRun.id,
       output: outcome.outputSnapshot,
     })
 
-    applyStatePatch(input.context.state, outcome.statePatch, outcome.outputSnapshot)
+    applyStatePatch(input.context.state, outcome.statePatch, outcome.outputSnapshot, details)
 
     return {
       status: "succeeded",
@@ -109,17 +136,19 @@ export type WorkflowNodeRunResult =
 
 function assertStatePatchIsPersistable(
   patch: WorkflowNodeStatePatch | undefined,
-  outputSnapshot: WorkflowIOSnapshot | undefined
+  outputSnapshot: WorkflowIOSnapshot | undefined,
+  details: Readonly<Record<string, string>>
 ): void {
   if (patch?.current !== undefined) {
-    requireOutputSnapshot(outputSnapshot)
+    requireOutputSnapshot(outputSnapshot, details)
   }
 }
 
 function applyStatePatch(
   state: WorkflowNodeExecutionContext["state"],
   patch: WorkflowNodeStatePatch | undefined,
-  outputSnapshot: WorkflowIOSnapshot | undefined
+  outputSnapshot: WorkflowIOSnapshot | undefined,
+  details: Readonly<Record<string, string>>
 ): void {
   if (!patch) {
     return
@@ -127,7 +156,7 @@ function applyStatePatch(
 
   if (patch.current !== undefined) {
     state.current = patch.current
-    state.currentSnapshot = requireOutputSnapshot(outputSnapshot)
+    state.currentSnapshot = requireOutputSnapshot(outputSnapshot, details)
   }
 
   if (patch.steps) {
@@ -135,10 +164,15 @@ function applyStatePatch(
   }
 }
 
-function requireOutputSnapshot(outputSnapshot: WorkflowIOSnapshot | undefined): WorkflowIOSnapshot {
+function requireOutputSnapshot(
+  outputSnapshot: WorkflowIOSnapshot | undefined,
+  details: Readonly<Record<string, string>>
+): WorkflowIOSnapshot {
   if (outputSnapshot === undefined) {
-    throw new WorkflowWorkerError(
-      "[SixbWorkflowWorker] A workflow node that advances the dataflow must persist its output snapshot."
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbWorkflowWorker] A workflow node that advances the dataflow must persist its output snapshot.",
+      { details }
     )
   }
   return outputSnapshot

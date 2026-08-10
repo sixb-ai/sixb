@@ -19,6 +19,7 @@ export const stepNodeExecutor: WorkflowNodeExecutor<WorkflowStepNodeDefinition> 
         : callWorkflowMapper({
             mapper: node.mapper,
             workflowId: context.workflow.id,
+            workflowRunId: context.job.id,
             nodeId: node.id,
             workflowInput: context.state.workflowInput,
             steps: context.state.steps,
@@ -26,6 +27,7 @@ export const stepNodeExecutor: WorkflowNodeExecutor<WorkflowStepNodeDefinition> 
     const nodeInput = requireRecordInput({
       value: rawInput,
       workflowId: context.workflow.id,
+      workflowRunId: context.job.id,
       nodeId: node.id,
     })
     const stepInput = validateWorkflowStepInput({
@@ -47,11 +49,13 @@ export const stepNodeExecutor: WorkflowNodeExecutor<WorkflowStepNodeDefinition> 
     }
   },
 
-  async execute({ node, prepared, context }) {
+  async execute({ node, nodeRun, prepared, context }) {
     const stepInput = requireRecordInput({
       value: prepared.input,
       workflowId: context.workflow.id,
+      workflowRunId: context.job.id,
       nodeId: node.id,
+      nodeRunId: nodeRun.id,
     })
 
     context.markSideEffectBoundaryPassed()

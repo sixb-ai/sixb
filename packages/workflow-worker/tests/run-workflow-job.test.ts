@@ -32,7 +32,6 @@ import type {
   WorkflowRunStorage,
 } from "@sixb/core/storage"
 import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
-import { WorkflowWorkerError } from "../src/errors"
 import { EventsRuntimeWorkflowRunObserver } from "../src/events"
 import { runWorkflowJob as executeWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"
 import type { RunWorkflowJobInput, WorkflowRunObserver, WorkflowWorkerContext } from "../src/types"
@@ -1263,6 +1262,60 @@ describe("runWorkflowJob", () => {
     expect(nodes.nodes[1]?.error?.message).toBe("An unexpected internal error occurred.")
   })
 
+  test("preserves the cause and run details when workflow finalization fails after side effects", async () => {
+    const workflow = defineWorkflow("bookkeeping-failure-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+    const sixb = createSixb({ workflows: [workflow] })
+    const runtime = createRuntime(sixb)
+    const finish = runtime.workflowRuns.finish.bind(runtime.workflowRuns)
+    const finishCause = new Error("workflow finish unavailable")
+    runtime.workflowRuns.finish = async (input) => {
+      if (input.status === "succeeded") {
+        throw finishCause
+      }
+      return finish(input)
+    }
+
+    await expect(
+      runWorkflowJob({
+        runtime,
+        job: {
+          id: "wfrun_bookkeeping_failed",
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      cause: finishCause,
+      message:
+        "[SixbWorkflowWorker] Workflow 'bookkeeping-failure-workflow' executed side effects, but failed to finalize workflow run 'wfrun_bookkeeping_failed'. The workflow state may need repair.",
+      details: {
+        workflowId: workflow.id,
+        runId: "wfrun_bookkeeping_failed",
+      },
+    })
+
+    const run = await runtime.workflowRuns.getById({
+      projectId: sixb.id,
+      id: "wfrun_bookkeeping_failed",
+    })
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        runId: "wfrun_bookkeeping_failed",
+      },
+    })
+  })
+
   test("uses the workflow input as output when every node is an action", async () => {
     actionHandlerCalls = 0
     const workflow = defineWorkflow("create-invoice-only-workflow")
@@ -1468,6 +1521,62 @@ describe("runWorkflowJob", () => {
     } finally {
       unsubscribe()
     }
+  })
+
+  test("preserves action-node details without inventing a node run before preparation", async () => {
+    const workflow = defineWorkflow("invalid-global-action-input-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(prepareAttachInvoiceAction)
+      .then(createInvoice)
+    const sixb = createSixb({ actions: [createInvoice], workflows: [workflow] })
+
+    const details = {
+      actionId: createInvoice.id,
+      workflowId: workflow.id,
+      workflowRunId: "wfrun_invalid_global_action_input",
+      nodeId: "create-invoice",
+    }
+    await expect(
+      runWorkflowJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "wfrun_invalid_global_action_input",
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message:
+        "[SixbWorkflowWorker] Workflow 'invalid-global-action-input-workflow' action node 'create-invoice' direct input must not include subject for a global action.",
+      details,
+    })
+
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
+      id: "wfrun_invalid_global_action_input",
+    })
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
+      workflowRunId: "wfrun_invalid_global_action_input",
+      order: "asc",
+    })
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message: "An unexpected internal error occurred.",
+      details,
+    })
+    expect(nodes.nodes.map((node) => node.nodeId)).toEqual([
+      "find-best-invoice",
+      "prepare-attach-invoice-action",
+    ])
   })
 
   test("picks declared params from direct global action dataflow", async () => {
@@ -1807,7 +1916,12 @@ describe("runWorkflowJob", () => {
           input: {},
         },
       })
-    ).rejects.toThrow("[SixbWorkflowWorker] Unknown workflow 'missing-workflow'.")
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message: "[SixbWorkflowWorker] Unknown workflow 'missing-workflow'.",
+      details: { workflowId: "missing-workflow", runId: "wfrun_missing" },
+    })
   })
 
   test("does not invent a node row when a mapper throws before producing input", async () => {
@@ -1817,7 +1931,7 @@ describe("runWorkflowJob", () => {
       })
       .then(findBestInvoice)
       .then(reviewInvoiceMatch, () => {
-        throw new WorkflowWorkerError("mapper exploded")
+        throw new Error("mapper exploded")
       })
     const sixb = createSixb({ workflows: [workflow] })
 

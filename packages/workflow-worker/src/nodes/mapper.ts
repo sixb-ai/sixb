@@ -1,5 +1,5 @@
 import type { WorkflowStepOutputs } from "@sixb/core"
-import { WorkflowWorkerError } from "../errors"
+import { createSixbError } from "@sixb/core/internal/errors"
 import { isRecord } from "../normalize"
 
 type RuntimeWorkflowMapper = (context: {
@@ -10,13 +10,16 @@ type RuntimeWorkflowMapper = (context: {
 export function callWorkflowMapper(input: {
   readonly mapper: unknown
   readonly workflowId: string
+  readonly workflowRunId: string
   readonly nodeId: string
   readonly workflowInput: Readonly<Record<string, unknown>>
   readonly steps: WorkflowStepOutputs
 }): unknown {
   if (typeof input.mapper !== "function") {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow '${input.workflowId}' node '${input.nodeId}' mapper must be a function.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow '${input.workflowId}' node '${input.nodeId}' mapper must be a function.`,
+      { details: workflowNodeErrorDetails(input) }
     )
   }
 
@@ -29,13 +32,31 @@ export function callWorkflowMapper(input: {
 export function requireRecordInput(input: {
   readonly value: unknown
   readonly workflowId: string
+  readonly workflowRunId: string
   readonly nodeId: string
+  readonly nodeRunId?: string
 }): Readonly<Record<string, unknown>> {
   if (!isRecord(input.value)) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow '${input.workflowId}' node '${input.nodeId}' input must be an object.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow '${input.workflowId}' node '${input.nodeId}' input must be an object.`,
+      { details: workflowNodeErrorDetails(input) }
     )
   }
 
   return input.value
+}
+
+function workflowNodeErrorDetails(input: {
+  readonly workflowId: string
+  readonly workflowRunId: string
+  readonly nodeId: string
+  readonly nodeRunId?: string
+}): Readonly<Record<string, string>> {
+  return {
+    workflowId: input.workflowId,
+    workflowRunId: input.workflowRunId,
+    nodeId: input.nodeId,
+    ...(input.nodeRunId ? { nodeRunId: input.nodeRunId } : {}),
+  }
 }
