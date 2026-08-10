@@ -1544,7 +1544,17 @@ function AgentExecutionPanel({
             <RunStat label="Model" value={data.modelId ?? "—"} />
           </div>
           {data.usage ? (
-            <StructuredValue value={data.usage} emptyLabel="No token usage reported" />
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Token usage
+                </p>
+                <Badge variant="secondary" className="rounded px-1.5 py-0 text-[10px] font-normal">
+                  Usage ledger
+                </Badge>
+              </div>
+              <StructuredValue value={data.usage} emptyLabel="No token usage reported" />
+            </div>
           ) : null}
           {execution?.prompt ? (
             <div>

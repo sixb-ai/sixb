@@ -14,9 +14,12 @@ import {
   type AgentStorage,
   AgentStorageError,
   type AgentThreadRecord,
+  type AiModelCallUsage,
+  type AiUsageStorage,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
+import { resolveAiUsageSummaries, resolveAiUsageSummary } from "../ai-usage"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { type RequestAuthState, requestAuthState, requireRequestSixb } from "../auth/scope"
 import {
@@ -115,7 +118,22 @@ function serializeMessage(
   })
 }
 
-export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRunSchema.parse> {
+export async function serializeAgentRun(
+  run: AgentRunView,
+  aiUsage: AiUsageStorage | undefined
+): Promise<ReturnType<typeof AgentRunSchema.parse>> {
+  const usage = await resolveAiUsageSummary({
+    storage: aiUsage,
+    projectId: run.projectId,
+    execution: { kind: "agentRun", runId: run.id },
+  })
+  return serializeAgentRunWithUsage(run, usage)
+}
+
+function serializeAgentRunWithUsage(
+  run: AgentRunView,
+  usage: AiModelCallUsage | undefined
+): ReturnType<typeof AgentRunSchema.parse> {
   return AgentRunSchema.parse({
     id: run.id,
     projectId: run.projectId,
@@ -126,7 +144,7 @@ export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRun
     status: run.status,
     modelId: run.modelId,
     finishReason: run.finishReason,
-    usage: run.usage,
+    usage,
     diagnostics: run.diagnostics,
     error: run.error,
     attempt: run.attempt,
@@ -569,7 +587,9 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           const result = await sixb.agents.runs.request(requestInput)
 
           set.status = 202
-          return PostAgentMessageResponseSchema.parse({ run: serializeAgentRun(result.run) })
+          return PostAgentMessageResponseSchema.parse({
+            run: await serializeAgentRun(result.run, host.storage.aiUsage),
+          })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -663,7 +683,9 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             set.status = 404
             return { error: "Agent run not found" }
           }
-          return CancelAgentRunResponseSchema.parse({ run: serializeAgentRun(currentView) })
+          return CancelAgentRunResponseSchema.parse({
+            run: await serializeAgentRun(currentView, host.storage.aiUsage),
+          })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -716,7 +738,9 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           const { run } = await sixb.agents.runs.retry(failedRun.id)
 
           set.status = 202
-          return RetryAgentRunResponseSchema.parse({ run: serializeAgentRun(run) })
+          return RetryAgentRunResponseSchema.parse({
+            run: await serializeAgentRun(run, host.storage.aiUsage),
+          })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -761,8 +785,13 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return { error: "Agent thread not found" }
           }
 
+          const usages = await resolveAiUsageSummaries({
+            storage: host.storage.aiUsage,
+            projectId: host.id,
+            executions: result.runs.map((run) => ({ kind: "agentRun", runId: run.id })),
+          })
           return AgentRunListResponseSchema.parse({
-            runs: result.runs.map(serializeAgentRun),
+            runs: result.runs.map((run, index) => serializeAgentRunWithUsage(run, usages[index])),
             hasMore: result.hasMore,
             total: result.total,
           })
@@ -803,7 +832,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return { error: "Agent run not found" }
           }
 
-          return serializeAgentRun(run)
+          return serializeAgentRun(run, host.storage.aiUsage)
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
