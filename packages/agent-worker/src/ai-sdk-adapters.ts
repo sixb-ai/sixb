@@ -16,7 +16,7 @@ import {
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
-import type { AgentRunUsage, AiModelCallUsageInput } from "@sixb/core/storage"
+import type { AiModelCallUsageInput } from "@sixb/core/storage"
 import { jsonSchema, type LanguageModelUsage, type Tool, type ToolSet, tool } from "ai"
 import { AgentToolExecutionError, AgentToolOutputError } from "./errors"
 
@@ -292,22 +292,6 @@ function requireNonEmptyString(
 /** Expose only failures that the tool author explicitly marked as safe for the model and storage. */
 export function agentToolErrorText(error: unknown): string {
   return error instanceof AgentToolPublicError ? error.message : "An error occurred."
-}
-
-/** Map AI SDK accounting onto Sixb's provider-independent durable usage vocabulary. */
-export function agentRunUsageFromAiSdk(usage: LanguageModelUsage): AgentRunUsage | undefined {
-  const mapped: AgentRunUsage = {
-    ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
-    ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
-    ...(usage.totalTokens === undefined ? {} : { totalTokens: usage.totalTokens }),
-    ...(usage.outputTokenDetails.reasoningTokens === undefined
-      ? {}
-      : { reasoningTokens: usage.outputTokenDetails.reasoningTokens }),
-    ...(usage.inputTokenDetails.cacheReadTokens === undefined
-      ? {}
-      : { cachedInputTokens: usage.inputTokenDetails.cacheReadTokens }),
-  }
-  return Object.keys(mapped).length > 0 ? mapped : undefined
 }
 
 /** Preserve every provider-neutral count from one AI SDK model call without inventing zeroes. */

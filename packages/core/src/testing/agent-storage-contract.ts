@@ -554,7 +554,6 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           status: "succeeded",
           modelId: "claude-haiku-4-5",
           finishReason: "stop",
-          usage: { inputTokens: 120, outputTokens: 80, totalTokens: 200 },
           diagnostics: [
             {
               code: "output_file_too_large",
@@ -571,7 +570,6 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           modelId: "claude-haiku-4-5",
           finishReason: "stop",
         })
-        expect(finished.usage).toEqual({ inputTokens: 120, outputTokens: 80, totalTokens: 200 })
         expect(finished.diagnostics).toEqual([
           {
             code: "output_file_too_large",

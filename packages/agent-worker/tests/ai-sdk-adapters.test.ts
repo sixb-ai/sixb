@@ -11,7 +11,6 @@ import {
 } from "@sixb/core"
 import type { LanguageModelUsage, ToolSet } from "ai"
 import {
-  agentRunUsageFromAiSdk,
   agentToolErrorText,
   agentTraceFromAiSdkSteps,
   aiModelCallUsageFromAiSdk,
@@ -434,28 +433,6 @@ describe("AI SDK agent adapters", () => {
         },
       ])
     ).toThrow("tool output must be a JSON value")
-  })
-
-  test("maps AI SDK usage once into the provider-independent storage contract", () => {
-    expect(
-      agentRunUsageFromAiSdk(
-        usage({
-          inputTokens: 12,
-          outputTokens: 8,
-          totalTokens: 20,
-          cachedInputTokens: 3,
-          reasoningTokens: 2,
-        })
-      )
-    ).toEqual({
-      inputTokens: 12,
-      outputTokens: 8,
-      totalTokens: 20,
-      cachedInputTokens: 3,
-      reasoningTokens: 2,
-    })
-
-    expect(agentRunUsageFromAiSdk(usage({}))).toBeUndefined()
   })
 
   test("preserves every provider-neutral model-call usage field", () => {

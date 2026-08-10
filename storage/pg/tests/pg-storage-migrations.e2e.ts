@@ -63,6 +63,7 @@ describe("Postgres storage migrations", () => {
             "017-action-failure-record",
             "018-ontology-outbox-failure-record",
             "019-webhook-delivery-failure-record",
+            "020-drop-run-usage-projections",
           ],
         },
       ])
@@ -199,6 +200,13 @@ describe("Postgres storage migrations", () => {
           id: "019-webhook-delivery-failure-record",
           status: "applied",
           version: 19,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "020-drop-run-usage-projections",
+          status: "applied",
+          version: 20,
         },
       ])
     })
@@ -933,11 +941,19 @@ describe("Postgres storage migrations", () => {
         foreign_column_name: "id",
         foreign_table_name: "executions",
       })
-      expect(await readTableColumns(schemaName, "agent_runs")).toEqual(
-        expect.arrayContaining(["requester_group_ids", "usage_input_tokens"])
+      const agentRunColumns = await readTableColumns(schemaName, "agent_runs")
+      const workflowAgentNodeColumns = await readTableColumns(
+        schemaName,
+        "workflow_agent_node_runs"
       )
+      expect(agentRunColumns).toContain("requester_group_ids")
+      expect(agentRunColumns).not.toContain("usage_input_tokens")
+      expect(agentRunColumns).not.toContain("usage_output_tokens")
+      expect(agentRunColumns).not.toContain("usage_total_tokens")
+      expect(agentRunColumns).not.toContain("usage_reasoning_tokens")
+      expect(agentRunColumns).not.toContain("usage_cached_input_tokens")
+      expect(workflowAgentNodeColumns).not.toContain("usage")
       expect(await readTableColumns(schemaName, "workflow_runs")).toContain("requester_group_ids")
-      expect(await readTableColumns(schemaName, "workflow_agent_node_runs")).toContain("usage")
     })
   })
 
@@ -1139,6 +1155,13 @@ describe("Postgres storage migrations", () => {
           id: "019-webhook-delivery-failure-record",
           status: "applied",
           version: 19,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "020-drop-run-usage-projections",
+          status: "applied",
+          version: 20,
         },
       ])
     } finally {

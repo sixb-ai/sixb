@@ -3296,10 +3296,6 @@ describe("AgentWorker", () => {
       expect(run.attempt).toBe(1)
       expect(run.finishReason).toBe("stop")
       expect(run.modelId).toBe("mock-model")
-      // The legacy run aggregate remains during the staged rollout, while accounting authority is
-      // already the per-call ledger. The two tool-loop provider calls must both be present there.
-      expect(run.usage?.outputTokens).toBeGreaterThan(0)
-      expect(run.usage?.inputTokens).toBeGreaterThan(0)
       const durableExecution = await sixb.storage.executions.getById({
         projectId: PROJECT_ID,
         id: run.executionId,

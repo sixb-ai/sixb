@@ -100,14 +100,6 @@ export function coerceAgentRunFinishReason(
     : "unknown"
 }
 
-export interface AgentRunUsage {
-  readonly inputTokens?: number
-  readonly outputTokens?: number
-  readonly totalTokens?: number
-  readonly reasoningTokens?: number
-  readonly cachedInputTokens?: number
-}
-
 /** Stable, user-facing diagnostics emitted by the platform while executing a run. */
 export const AGENT_RUN_DIAGNOSTIC_CODES = [
   "output_file_limit_exceeded",
@@ -163,7 +155,6 @@ export interface AgentRunRecord {
   readonly modelId?: string
   /** Why the run ended (our own SDK-independent enum). */
   readonly finishReason?: AgentRunFinishReason
-  readonly usage?: AgentRunUsage
   /** Platform diagnostics are transcript annotations, never agent-authored message content. */
   readonly diagnostics?: readonly AgentRunDiagnostic[]
   /** Portable failure snapshot when the run did not succeed. */
@@ -225,7 +216,6 @@ export type FinishAgentRunInput =
       readonly status: "succeeded"
       readonly modelId?: string
       readonly finishReason?: AgentRunFinishReason
-      readonly usage?: AgentRunUsage
       readonly diagnostics?: readonly AgentRunDiagnostic[]
       readonly completedAt?: Date
     }
@@ -236,7 +226,6 @@ export type FinishAgentRunInput =
       readonly status: "failed" | "cancelled"
       readonly modelId?: string
       readonly finishReason?: AgentRunFinishReason
-      readonly usage?: AgentRunUsage
       readonly diagnostics?: readonly AgentRunDiagnostic[]
       readonly error?: SixbFailure<AgentRunFailureCode>
       readonly completedAt?: Date

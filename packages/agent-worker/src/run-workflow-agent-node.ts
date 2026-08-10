@@ -7,10 +7,9 @@ import {
   validateWorkflowAgentStepOutput,
   type WorkflowIOSnapshot,
 } from "@sixb/core/internal/workflows"
-import type { AgentRunUsage } from "@sixb/core/storage"
 import { coerceAgentRunFinishReason } from "@sixb/core/storage"
 import { generateText, jsonSchema, Output, stepCountIs } from "ai"
-import { agentRunUsageFromAiSdk, agentTraceFromAiSdkSteps } from "./ai-sdk-adapters"
+import { agentTraceFromAiSdkSteps } from "./ai-sdk-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
 import type { AgentTurnContext } from "./types"
 
@@ -31,7 +30,6 @@ export interface WorkflowAgentNodeResult {
   readonly output: WorkflowIOSnapshot
   readonly modelId: string
   readonly finishReason: NonNullable<ReturnType<typeof coerceAgentRunFinishReason>>
-  readonly usage?: AgentRunUsage
   readonly trace: readonly AgentMessagePart[]
 }
 
@@ -96,12 +94,10 @@ export async function runWorkflowAgentNode(
       value: result.output,
       valueTypesById: input.valueTypesById,
     })
-    const usage = agentRunUsageFromAiSdk(result.usage)
     return {
       output,
       modelId: input.agent.model.modelId,
       finishReason: coerceAgentRunFinishReason(result.finishReason) ?? "unknown",
-      ...(usage ? { usage } : {}),
       trace: agentTraceFromAiSdkSteps(result.steps, {
         agentId: input.agent.id,
         workflowId: input.workflowId,

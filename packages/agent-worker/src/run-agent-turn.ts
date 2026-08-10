@@ -15,7 +15,7 @@ import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { AgentRunRecord, AgentStorage } from "@sixb/core/storage"
 import { type ModelMessage, stepCountIs, streamText, toUIMessageStream } from "ai"
-import { agentRunUsageFromAiSdk, agentToolErrorText } from "./ai-sdk-adapters"
+import { agentToolErrorText } from "./ai-sdk-adapters"
 import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
 import { AgentTurnTimeoutError } from "./errors"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
@@ -254,11 +254,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       return interruptedAfterCollection
     }
     const assistantParts = assistantPartsWithOutputAttachments(assistant.parts, outputAttachments)
-    const usage = agentRunUsageFromAiSdk(await result.usage)
     const assistantMessageId = createAgentMessageId()
 
-    // Keep the final signal check adjacent to the transaction. Collection, queue renewal, or usage
-    // resolution can each yield long enough for a cancellation to arrive.
+    // Keep the final signal check adjacent to the transaction. Collection or queue renewal can yield
+    // long enough for a cancellation to arrive.
     const interruptedBeforeCommit = await finalizeIfInterrupted()
     if (interruptedBeforeCommit) {
       return interruptedBeforeCommit
@@ -285,7 +284,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         status: "succeeded",
         modelId: agent.model.modelId,
         finishReason,
-        ...(usage === undefined ? {} : { usage }),
         ...(outputAttachments.diagnostics.length === 0
           ? {}
           : { diagnostics: outputAttachments.diagnostics }),
