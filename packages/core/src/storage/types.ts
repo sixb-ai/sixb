@@ -1,5 +1,6 @@
 import type { ActionRunStorage } from "./action-runs"
 import type { AgentStorage } from "./agents"
+import type { AiUsageStorage } from "./ai-usage"
 import type { AuthStorage } from "./auth"
 import type { ExecutionStorage } from "./executions"
 import type { FileUploadSessionStore } from "./file-upload-sessions"
@@ -57,6 +58,26 @@ export type {
   StartAgentRunInput,
 } from "./agents"
 export { AgentStorageError } from "./agents"
+export type {
+  AiModelCallUsage,
+  AiModelCallUsageInput,
+  AiModelCallUsageRecord,
+  AiUsageExecutionIdentity,
+  AiUsageReportingStatus,
+  AiUsageStorage,
+  AiUsageStorageErrorCode,
+  RecordAiModelCallInput,
+  RecordAiModelCallResult,
+  SummarizeAiUsageExecutionInput,
+  SummarizeAiUsageExecutionsInput,
+} from "./ai-usage"
+export {
+  AiUsageStorageError,
+  aggregateAiModelCallUsage,
+  assertAiUsageExecution,
+  normalizeAiModelCallRecord,
+  normalizeAiModelCallUsage,
+} from "./ai-usage"
 export type {
   AuthGroupMembershipStore,
   AuthInvitationStore,
@@ -268,6 +289,7 @@ export interface Storage {
   executions: ExecutionStorage
   auth?: AuthStorage
   agents?: AgentStorage
+  aiUsage?: AiUsageStorage
   actionRuns?: ActionRunStorage
   syncRuns?: SyncRunStorage
   pipelineRuns?: PipelineRunStorage

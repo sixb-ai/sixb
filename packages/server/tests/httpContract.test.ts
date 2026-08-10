@@ -240,6 +240,7 @@ async function seedPendingReviewIntervention(
     executionId: workflowExecutionId,
     workflowId: "review-device-health-workflow",
     input: { deviceId: "fan-1" },
+    requesterGroupIds: [],
     queuedAt: new Date("2026-02-18T09:19:59.000Z"),
   })
   await workflowRuns.start({
@@ -465,6 +466,7 @@ describe("SixbServer HTTP contract", () => {
       executionId: previousWorkflowExecutionId,
       workflowId: "inspect-device-workflow",
       input: { deviceId: "fan-1" },
+      requesterGroupIds: [],
       queuedAt: new Date("2026-02-18T09:06:59.000Z"),
     })
     await sixb.storage.workflowRuns!.start({
@@ -1908,6 +1910,7 @@ describe("SixbServer HTTP contract", () => {
         executionId: workflowExecutionId,
         workflowId: "review-device-health-workflow",
         input: { deviceId: "fan-1" },
+        requesterGroupIds: [],
       })
       await runs.start({ id: runId, projectId: sixb.id })
       await runs.nodes.start({

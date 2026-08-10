@@ -43,6 +43,7 @@ describe("PostgresStorage agents", () => {
             threadId: "thr_1",
             agentId: "sales",
             triggerMessageId: "msg_1",
+            requesterGroupIds: ["engineering"],
             createdAt: new Date("2026-06-23T10:00:10.000Z"),
           })
           await tx.agents?.messages.append({

@@ -124,6 +124,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       queuedAt,
       startedAt: queuedAt,
       attempt: 0,
+      requesterGroupIds: cloneRecord(input.requesterGroupIds),
     }
 
     this.runs.set(key, cloneRecord(record))

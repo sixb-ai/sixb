@@ -409,6 +409,7 @@ async function createGatewayRuntime(
     executionId: completedWorkflowExecutionId,
     workflowId: inspectDevices.id,
     input: { document: fileRefJson(completedWorkflowOutput) },
+    requesterGroupIds: [],
     queuedAt: NOW,
   })
   await storage.workflowRuns.start({
@@ -478,6 +479,7 @@ async function createGatewayRuntime(
       executionId: parentWorkflowExecutionId,
       workflowId: inspectDevices.id,
       input: {},
+      requesterGroupIds: [],
       queuedAt: NOW,
     })
     await storage.workflowRuns.start({
@@ -538,6 +540,7 @@ async function createGatewayRuntime(
       threadId,
       agentId: "assistant",
       triggerMessageId: "msg-1",
+      requesterGroupIds: ["engineering"],
       createdAt: NOW,
     })
     await storage.agents.runs.start({

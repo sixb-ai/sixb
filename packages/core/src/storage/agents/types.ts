@@ -147,6 +147,8 @@ export interface AgentRunRecord {
   readonly threadId: string
   readonly agentId: string
   readonly triggerMessageId: string
+  /** Durable group memberships snapshotted when the run was admitted. */
+  readonly requesterGroupIds: readonly string[]
   readonly status: AgentRunStatus
   readonly modelId?: string
   /** Why the run ended (our own SDK-independent enum). */
@@ -171,6 +173,7 @@ export interface CreateAgentRunInput {
   readonly threadId: string
   readonly agentId: string
   readonly triggerMessageId: string
+  readonly requesterGroupIds: readonly string[]
   readonly createdAt?: Date
 }
 

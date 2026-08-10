@@ -128,6 +128,7 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
       document: fileRefJson(workflowInput),
       title: "not a file",
     },
+    requesterGroupIds: [],
     queuedAt: new Date("2026-06-30T12:00:59.000Z"),
   })
   await storage.workflowRuns.start({

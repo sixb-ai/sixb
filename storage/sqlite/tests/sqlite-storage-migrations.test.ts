@@ -79,6 +79,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 9,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "010-ai-usage-accounting-foundation",
+    status: "applied",
+    version: 10,
+  },
 ]
 
 afterEach(async () => {
@@ -744,7 +751,7 @@ describe("SQLite storage migrations", () => {
     expect(sessionColumns).toContain("ip_address")
   })
 
-  test("migrations install agent storage tables", async () => {
+  test("migrations install agent attribution and AI usage storage tables", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-agent-migrations-"))
     tempDirs.push(tempDir)
 
@@ -764,10 +771,17 @@ describe("SQLite storage migrations", () => {
 
     closeStorage(storage)
 
-    const tables = readTableNames(sqliteStoragePath(tempDir))
+    const path = sqliteStoragePath(tempDir)
+    const tables = readTableNames(path)
     expect(tables).toContain("agent_threads")
     expect(tables).toContain("agent_runs")
     expect(tables).toContain("agent_messages")
+    expect(tables).toContain("ai_model_call_usage")
+    expect(tables).toContain("ai_model_call_usage_groups")
+    expect(readTableColumns(path, "agent_runs")).toContain("requester_group_ids")
+    expect(readTableColumns(path, "workflow_runs")).toContain("requester_group_ids")
+    expect(readTableColumns(path, "agent_runs")).toContain("usage_input_tokens")
+    expect(readTableColumns(path, "workflow_agent_node_runs")).toContain("usage")
   })
 
   test("untracked existing schema collides and rolls back without conversion", async () => {

@@ -76,6 +76,7 @@ describe("SqliteWorkflowRunStorage", () => {
         executionId,
         workflowId: "reconcile-transaction",
         input: {},
+        requesterGroupIds: [],
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -92,6 +93,7 @@ describe("SqliteWorkflowRunStorage", () => {
         executionId: automaticExecutionId,
         workflowId: "reconcile-transaction",
         input: {},
+        requesterGroupIds: [],
       })
     ).resolves.toMatchObject({ id: "wf-run-automatic", executionId: automaticExecutionId })
   })
@@ -102,6 +104,7 @@ describe("SqliteWorkflowRunStorage", () => {
       projectId: "my-app",
       workflowId: "reconcile-transaction",
       input: {},
+      requesterGroupIds: [],
     })
 
     const results = await Promise.allSettled([
@@ -675,6 +678,7 @@ function createWorkflowRunStorage(root: SqliteStorage) {
           projectId: input.projectId,
           workflowId: input.workflowId,
           input: input.input,
+          requesterGroupIds: [],
         })
       }
       return start({

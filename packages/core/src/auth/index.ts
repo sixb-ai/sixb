@@ -9,6 +9,7 @@ export {
   parseAccessTokenValue,
   SERVICE_ACCOUNT_ACCESS_TOKEN_PREFIX,
 } from "./access-tokens"
+export { snapshotRequesterGroupIds } from "./attribution"
 export type { AuthSessionAudience, AuthSessionAudienceOptions } from "./audience"
 export {
   DEFAULT_AUTH_SESSION_AUDIENCE,

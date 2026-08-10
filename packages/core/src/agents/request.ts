@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { Principal } from "../auth"
 import { SYSTEM_PRINCIPAL } from "../auth"
+import { snapshotRequesterGroupIds } from "../auth/attribution"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
 import { createAgentExecutionRecord } from "../execution/agent"
@@ -38,7 +39,7 @@ export interface RequestAgentRunInput {
   readonly title?: string
   /** Explicit id for the trigger (user) message. Defaults to a generated id. */
   readonly messageId?: string
-  /** Owner principal for a new thread. Defaults to system for an auth-disabled execution. */
+  /** Caller principal for privileged integrations; scoped runtimes use their authorization principal. */
   readonly principal?: Principal
 }
 
@@ -74,8 +75,9 @@ export async function requestAgentRun(
 
   const agents = requireAgentStorage(runtime)
   const projectId = runtime.projectId
-  const principal = input.principal ?? SYSTEM_PRINCIPAL
-
+  // A scoped runtime is authoritative for caller identity. `input.principal` remains available to
+  // privileged server integrations that have already authenticated their request.
+  const principal = runtime.authorization?.principal ?? input.principal ?? SYSTEM_PRINCIPAL
   const { thread, createdThread } = await resolveThread(agents, {
     projectId,
     agentId: agent.id,
@@ -100,6 +102,13 @@ export async function requestAgentRun(
     agent,
     runId
   )
+  const requesterGroupIds = durableExecution.requestedBy
+    ? await snapshotRequesterGroupIds({
+        auth: runtime.storage.auth,
+        projectId,
+        principal: durableExecution.requestedBy,
+      })
+    : []
   const triggerMessageId = input.messageId ?? createAgentMessageId()
   let run: AgentRunRecord
   try {
@@ -132,6 +141,7 @@ export async function requestAgentRun(
         threadId: thread.id,
         agentId: agent.id,
         triggerMessageId,
+        requesterGroupIds,
       })
     })
   } catch (error) {
@@ -181,6 +191,13 @@ export async function retryAgentRun(
     agent,
     runId
   )
+  const requesterGroupIds = durableExecution.requestedBy
+    ? await snapshotRequesterGroupIds({
+        auth: runtime.storage.auth,
+        projectId: runtime.projectId,
+        principal: durableExecution.requestedBy,
+      })
+    : []
   const run = await runtime.storage.transaction(async (tx) => {
     const agents = tx.agents
     if (!agents) {
@@ -194,6 +211,7 @@ export async function retryAgentRun(
       threadId: failedRun.threadId,
       agentId: agent.id,
       triggerMessageId: failedRun.triggerMessageId,
+      requesterGroupIds,
     })
   })
   const jobId = await dispatchAgentRun(runtime, agents, runId)

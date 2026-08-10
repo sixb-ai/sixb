@@ -560,6 +560,7 @@ describe("agent routes", () => {
       threadId: thread.id,
       agentId: "assistant",
       triggerMessageId: "trigger-diagnostics",
+      requesterGroupIds: [],
       execution: testExecution(executionToken),
     })
     await storage.agents.messages.append({
@@ -620,6 +621,7 @@ describe("agent routes", () => {
       threadId: thread.id,
       agentId: "assistant",
       triggerMessageId: "msg-existing",
+      requesterGroupIds: [],
       execution: testExecution(),
     })
 
@@ -725,11 +727,31 @@ describe("agent routes", () => {
     })
   })
 
-  test("retries a failed run without duplicating its trigger message", async () => {
-    const { app, storage, sixb } = createApp()
-    const request = await createTestSixb(sixb).agents.runs.request({
-      agentId: "assistant",
-      text: "try this",
+  test("retries a failed run with a fresh attribution snapshot and the same trigger", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const session = await seedSession(storage, "usr_retry", ["support-users", "admins"])
+    const createThreadResponse = await app.fetch(
+      jsonRequest("/api/agent-threads", "POST", { agentId: "assistant" }, session.csrfHeaders)
+    )
+    expect(createThreadResponse.status).toBe(201)
+    const thread = (await createThreadResponse.json()) as { thread: { id: string } }
+    const messageResponse = await app.fetch(
+      jsonRequest(
+        `/api/agent-threads/${thread.thread.id}/messages`,
+        "POST",
+        { text: "try this" },
+        session.csrfHeaders
+      )
+    )
+    expect(messageResponse.status).toBe(202)
+    const request = (await messageResponse.json()) as {
+      run: { id: string; threadId: string; triggerMessageId: string }
+    }
+    await expect(
+      storage.agents.runs.getById({ projectId: sixb.id, id: request.run.id })
+    ).resolves.toMatchObject({
+      requestedByPrincipal: { type: "user", id: "usr_retry" },
+      requesterGroupIds: ["admins", "support-users"],
     })
     await storage.agents.runs.finishQueued({
       id: request.run.id,
@@ -738,11 +760,24 @@ describe("agent routes", () => {
       error: "dispatch failed",
     })
 
+    await storage.auth.groupMemberships.remove({
+      projectId: sixb.id,
+      userId: "usr_retry",
+      groupId: "admins",
+    })
+    await storage.auth.groupMemberships.upsert({
+      projectId: sixb.id,
+      userId: "usr_retry",
+      groupId: "ops-users",
+      source: "manual",
+    })
+
     const response = await app.fetch(
       jsonRequest(
         `/api/agent-threads/${request.run.threadId}/runs/${request.run.id}/retry`,
         "POST",
-        {}
+        {},
+        session.csrfHeaders
       )
     )
     expect(response.status).toBe(202)
@@ -754,6 +789,12 @@ describe("agent routes", () => {
       triggerMessageId: request.run.triggerMessageId,
     })
     expect(body.run.id).not.toBe(request.run.id)
+    await expect(
+      storage.agents.runs.getById({ projectId: sixb.id, id: body.run.id })
+    ).resolves.toMatchObject({
+      requestedByPrincipal: { type: "user", id: "usr_retry" },
+      requesterGroupIds: ["ops-users", "support-users"],
+    })
 
     await expect(
       storage.agents.messages.list({ projectId: sixb.id, threadId: request.run.threadId })
@@ -780,6 +821,7 @@ describe("agent routes", () => {
       threadId: thread.id,
       agentId: "assistant",
       triggerMessageId: "msg-user",
+      requesterGroupIds: [],
       modelId: "test-model",
       execution: testExecution(),
       createdAt: new Date("2026-06-27T10:00:00.000Z"),
@@ -817,6 +859,7 @@ describe("agent routes", () => {
       threadId: thread.id,
       agentId: "assistant",
       triggerMessageId: "msg-user",
+      requesterGroupIds: [],
       execution: testExecution(),
     })
 
@@ -857,6 +900,7 @@ describe("agent routes", () => {
       threadId: otherThread.id,
       agentId: "assistant",
       triggerMessageId: "msg-other",
+      requesterGroupIds: [],
       execution: testExecution(),
     })
     const crossThread = await app.fetch(

@@ -24,6 +24,9 @@ import narrowOntologySourceRootIndexSql from "./migrations/006-narrow-ontology-s
 import splitOverridesSql from "./migrations/007-split-overrides.sql" with { type: "text" }
 import actionExecutionsSql from "./migrations/008-action-executions.sql" with { type: "text" }
 import agentExecutionsSql from "./migrations/009-agent-executions.sql" with { type: "text" }
+import aiUsageAccountingFoundationSql from "./migrations/010-ai-usage-accounting-foundation.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -286,6 +289,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("007-split-overrides", splitOverridesSql),
     pgSql("008-action-executions", actionExecutionsSql),
     pgSql("009-agent-executions", agentExecutionsSql),
+    pgSql("010-ai-usage-accounting-foundation", aiUsageAccountingFoundationSql),
   ],
 })
 

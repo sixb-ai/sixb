@@ -54,6 +54,7 @@ interface DispatchWorkflowRunInput {
   readonly runId?: string
   readonly input?: Readonly<Record<string, unknown>>
   readonly source?: WorkflowRunSource
+  readonly requesterGroupIds: readonly string[]
   readonly metadata?: Readonly<Record<string, string>>
   readonly queueJobId?: string
   readonly createExecution: (executionId: string, runId: string) => Promise<CreateExecutionInput>
@@ -103,6 +104,7 @@ export class WorkflowRunDispatcher implements WorkflowRunDispatchPort {
         eventId: input.source.eventId,
         principal: SYSTEM_PRINCIPAL,
       },
+      requesterGroupIds: [],
       metadata: input.metadata,
       queueJobId: input.runId,
       createExecution: async (executionId, runId) =>
@@ -189,6 +191,7 @@ async function persistWorkflowRun(
           workflowId: input.workflow.id,
           input: request.snapshot,
           queuedAt,
+          requesterGroupIds: input.requesterGroupIds,
         })
         return { run, execution, queuedAt, created: true }
       },

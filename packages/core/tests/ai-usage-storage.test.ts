@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryAiUsageStorage, type RecordAiModelCallInput } from "../src/storage"
+import { InMemoryStorage, type Storage } from "../src"
+import {
+  type AiUsageStorage,
+  InMemoryAiUsageStorage,
+  type RecordAiModelCallInput,
+} from "../src/storage"
 import { runAiUsageStorageContractSuite } from "../src/testing"
 
 runAiUsageStorageContractSuite("InMemoryAiUsageStorage", {
@@ -41,6 +46,52 @@ describe("InMemoryAiUsageStorage", () => {
   })
 })
 
+describe("InMemoryStorage AI usage", () => {
+  test("is wired into the composite storage", () => {
+    const storage = new InMemoryStorage()
+    expect(storage.aiUsage).toBeDefined()
+  })
+
+  test("rolls back ledger records, idempotency keys, and group rows", async () => {
+    const storage = new InMemoryStorage()
+
+    await expect(
+      storage.transaction(async (tx) => {
+        await requireAiUsage(tx).recordModelCall(modelCallInput())
+        throw new Error("boom")
+      })
+    ).rejects.toThrow("boom")
+
+    await expect(storage.aiUsage.summarizeExecution(executionSummaryInput())).resolves.toEqual({
+      modelCallCount: 0,
+      usage: { reportingStatus: "unavailable" },
+    })
+    await expect(storage.aiUsage.recordModelCall(modelCallInput())).resolves.toMatchObject({
+      created: true,
+    })
+  })
+
+  test("commits ledger records through the transaction facade", async () => {
+    const storage = new InMemoryStorage()
+
+    await storage.transaction(async (tx) => {
+      await requireAiUsage(tx).recordModelCall(modelCallInput())
+    })
+
+    await expect(
+      storage.aiUsage.summarizeExecution(executionSummaryInput())
+    ).resolves.toMatchObject({
+      modelCallCount: 1,
+      usage: {
+        inputTokens: 12,
+        outputTokens: 8,
+        totalTokens: 20,
+        reportingStatus: "complete",
+      },
+    })
+  })
+})
+
 function modelCallInput(): RecordAiModelCallInput {
   return {
     id: "usage_1",
@@ -65,4 +116,9 @@ function executionSummaryInput() {
     projectId: "project_1",
     execution: { kind: "agentRun", runId: "run_1" },
   } as const
+}
+
+function requireAiUsage(storage: Storage): AiUsageStorage {
+  if (!storage.aiUsage) throw new Error("Expected AI usage storage")
+  return storage.aiUsage
 }
