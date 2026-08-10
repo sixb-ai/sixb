@@ -1,4 +1,3 @@
-import { client } from "@sixb/client"
 import {
   Bubble,
   BubbleContent,
@@ -8,6 +7,8 @@ import {
   MarkerIcon,
 } from "@sixb/ui/components"
 import { AlertTriangle, RotateCcw } from "lucide-react"
+import { createAgentDocumentSource } from "../document-preview/source"
+import type { AgentDocumentSource } from "../document-preview/types"
 import { isAwaitingFirstToken, type LiveRunState } from "../liveRun"
 import { normalizeDurableParts } from "../parts"
 import type {
@@ -41,7 +42,7 @@ function UserMessage({ message }: { message: AgentMessage }) {
             <UserFileAttachment
               key={index}
               fileRef={part.fileRef}
-              href={agentMessageFileContentHref(message, index, "inline")}
+              document={agentMessageDocumentSource(message, index)}
             />
           ))}
         </div>
@@ -60,7 +61,7 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
     <div className="flex flex-col gap-2">
       <AssistantBody
         parts={normalizeDurableParts(message.parts, {
-          fileHref: (partIndex) => agentMessageFileContentHref(message, partIndex, "inline"),
+          fileSource: (partIndex) => agentMessageDocumentSource(message, partIndex),
         })}
       />
       {message.annotations.map((annotation, index) => (
@@ -173,8 +174,14 @@ export function ReconnectingMarker() {
   )
 }
 
-export function UserFileAttachment({ fileRef, href }: { fileRef: AgentFileRef; href?: string }) {
-  return <FileAttachmentCard fileRef={fileRef} href={href} />
+export function UserFileAttachment({
+  fileRef,
+  document,
+}: {
+  fileRef: AgentFileRef
+  document?: AgentDocumentSource
+}) {
+  return <FileAttachmentCard fileRef={fileRef} document={document} />
 }
 
 export function RunErrorMarker({ message }: { message: string }) {
@@ -210,24 +217,16 @@ function contextPartsOf(message: AgentMessage): AgentContextEntryInput[] {
   )
 }
 
-function agentMessageFileContentHref(
+function agentMessageDocumentSource(
   message: AgentMessage,
-  partIndex: number,
-  disposition: "inline" | "attachment"
-): string {
-  const params = new URLSearchParams({
-    path: `/parts/${partIndex}/fileRef`,
-    disposition,
+  partIndex: number
+): AgentDocumentSource | undefined {
+  const part = message.parts[partIndex]
+  if (part?.type !== "file") return
+  return createAgentDocumentSource({
+    threadId: message.threadId,
+    messageId: message.id,
+    partIndex,
+    fileRef: part.fileRef,
   })
-  const routePath = `/api/agent-threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(
-    message.id
-  )}/files/content`
-  const baseUrl = client.getConfig().baseUrl
-  if (!baseUrl && typeof window === "undefined") {
-    return `${routePath}?${params}`
-  }
-
-  const url = new URL(routePath, baseUrl ?? window.location.origin)
-  url.search = params.toString()
-  return url.toString()
 }
