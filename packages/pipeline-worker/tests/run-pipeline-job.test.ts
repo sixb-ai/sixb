@@ -20,6 +20,7 @@ import type {
 } from "@sixb/core/lake-storage"
 import type { PipelineRunStorage } from "@sixb/core/storage"
 import { InMemoryPipelineRunStorage } from "@sixb/core/storage"
+import { createPipelineBookkeepingError, createStepBookkeepingError } from "../src/errors"
 import { runPipelineJob } from "../src/run-pipeline-job"
 import type { PipelineWorkerContext } from "../src/types"
 
@@ -139,7 +140,63 @@ describe("runPipelineJob", () => {
           pipelineId: "missing",
         },
       })
-    ).rejects.toThrow("[SixbPipelineWorker] Unknown pipeline 'missing'.")
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message: "[SixbPipelineWorker] Unknown pipeline 'missing'.",
+      details: { pipelineId: "missing", runId: "run_1" },
+    })
+  })
+
+  test("preserves causes and correlation details for post-commit bookkeeping failures", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    const { outcome: _outcome, ...version } = await seedDatasetVersion(
+      lakeStorage,
+      customersDataset,
+      [{ id: "cust_1", name: "Ada" }]
+    )
+    const stepCause = new Error("step finish unavailable")
+    const stepError = createStepBookkeepingError({
+      pipelineId: "customers",
+      pipelineRunId: "run_1",
+      stepId: "clean-customers",
+      stepRunId: "run_1:step:1:clean-customers",
+      version,
+      cause: stepCause,
+    })
+
+    expect(stepError).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      cause: stepCause,
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_1",
+        stepId: "clean-customers",
+        stepRunId: "run_1:step:1:clean-customers",
+        datasetId: "customers",
+        versionId: version.versionId,
+      },
+    })
+
+    const runCause = new Error("pipeline finish unavailable")
+    const runError = createPipelineBookkeepingError({
+      pipelineId: "customers",
+      runId: "run_1",
+      version,
+      cause: runCause,
+    })
+    expect(runError).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      cause: runCause,
+      details: {
+        pipelineId: "customers",
+        runId: "run_1",
+        datasetId: "customers",
+        versionId: version.versionId,
+      },
+    })
   })
 
   test("fails clearly when an input has no committed version", async () => {
@@ -163,9 +220,18 @@ describe("runPipelineJob", () => {
           pipelineId: "customers",
         },
       })
-    ).rejects.toThrow(
-      "[SixbPipelineWorker] Pipeline 'customers' step 'clean-customers' input 'rawCustomers' dataset 'raw.customers' has no committed version."
-    )
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message:
+        "[SixbPipelineWorker] Pipeline 'customers' step 'clean-customers' input 'rawCustomers' dataset 'raw.customers' has no committed version.",
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_missing_input",
+        stepId: "clean-customers",
+        datasetId: "raw.customers",
+      },
+    })
 
     const run = await pipelineRunsStorage.getById({
       projectId: runtime.id,
@@ -175,7 +241,12 @@ describe("runPipelineJob", () => {
     expect(run?.error).toMatchObject({
       code: "internal.unexpected",
       retryable: false,
-      details: { pipelineId: "customers", runId: "run_missing_input" },
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_missing_input",
+        stepId: "clean-customers",
+        datasetId: "raw.customers",
+      },
     })
     expect(run?.error?.message).toBe("An unexpected internal error occurred.")
 
@@ -429,7 +500,18 @@ describe("runPipelineJob", () => {
 
     await expect(
       runPipelineJob({ runtime, job: { id: "run_sql", pipelineId: "customers" } })
-    ).rejects.toThrow("writes in 'append' mode, which the duckdb SQL executor does not support")
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message:
+        "[SixbPipelineWorker] Pipeline 'customers' step 'customer-stats' writes in 'append' mode, which the duckdb SQL executor does not support.",
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_sql",
+        stepId: "customer-stats",
+        datasetId: "customer_stats",
+      },
+    })
     // Refused before the provider was asked to do it, so nothing was written or committed.
     expect(lakeStorage.executeCalls).toHaveLength(0)
   })
@@ -532,9 +614,18 @@ describe("runPipelineJob", () => {
           pipelineId: "customers",
         },
       })
-    ).rejects.toThrow(
-      "[SixbPipelineWorker] Pipeline 'customers' step 'customer-stats' requires SQL transform support, but lake storage does not provide lakeStorage.sql.execute(...)."
-    )
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message:
+        "[SixbPipelineWorker] Pipeline 'customers' step 'customer-stats' requires SQL transform support, but lake storage does not provide lakeStorage.sql.execute(...).",
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_sql_no_support",
+        stepId: "customer-stats",
+        datasetId: "customer_stats",
+      },
+    })
 
     const run = await pipelineRunsStorage.getById({
       projectId: runtime.id,
@@ -552,6 +643,12 @@ describe("runPipelineJob", () => {
       error: {
         code: "internal.unexpected",
         retryable: false,
+        details: {
+          pipelineId: "customers",
+          pipelineRunId: "run_sql_no_support",
+          stepId: "customer-stats",
+          datasetId: "customer_stats",
+        },
       },
     })
     expect(stepRuns.steps[0]?.error?.message).toBe("An unexpected internal error occurred.")
