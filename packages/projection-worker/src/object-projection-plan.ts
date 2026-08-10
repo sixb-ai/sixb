@@ -7,7 +7,7 @@ import {
   type OntologyDefinitionCatalog,
   type Schema,
 } from "@sixb/core"
-import { ProjectionWorkerError } from "./errors"
+import { createSixbError } from "@sixb/core/internal/errors"
 import { resolveProjectionSchema } from "./projection-schema"
 import { normalizeProjectedValue } from "./projection-value-coercion"
 import { isPlainObject } from "./utils"
@@ -57,14 +57,23 @@ export function buildObjectProjectionPlan(input: {
   readonly projection: ObjectProjectionDefinition
   readonly dataset: DatasetDefinition
   readonly primaryPropertyId: string
+  readonly correlation?: {
+    readonly runId: string
+    readonly versionId: string
+  }
 }): ObjectProjectionPlan {
-  const { ontology, projection, dataset, primaryPropertyId } = input
+  const { ontology, projection, dataset, primaryPropertyId, correlation } = input
 
   return {
     projection,
     dataset,
     primaryPropertyId,
-    propertyPlans: buildProjectedPropertyPlans({ ontology, projection, dataset }),
+    propertyPlans: buildProjectedPropertyPlans({
+      ontology,
+      projection,
+      dataset,
+      correlation,
+    }),
   }
 }
 
@@ -104,12 +113,19 @@ function buildProjectedPropertyPlans(input: {
   readonly ontology: OntologyDefinitionCatalog
   readonly projection: ObjectProjectionDefinition
   readonly dataset: DatasetDefinition
+  readonly correlation?: {
+    readonly runId: string
+    readonly versionId: string
+  }
 }): ReadonlyMap<string, ProjectedPropertyPlan> {
-  const { ontology, projection, dataset } = input
+  const { ontology, projection, dataset, correlation } = input
+  const errorDetails = projectionPlanErrorDetails({ projection, dataset, correlation })
   const objectType = ontology.getObjectTypeById(projection.objectTypeId)
   if (!objectType) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Projection '${projection.id}' references unknown object type '${projection.objectTypeId}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbProjectionWorker] Projection '${projection.id}' references unknown object type '${projection.objectTypeId}'.`,
+      { details: { ...errorDetails, objectTypeId: projection.objectTypeId } }
     )
   }
 
@@ -121,15 +137,26 @@ function buildProjectedPropertyPlans(input: {
   for (const [propertyId, columnName] of Object.entries(projection.properties)) {
     const property = propertiesById.get(propertyId)
     if (!property) {
-      throw new ProjectionWorkerError(
-        `[SixbProjectionWorker] Projection '${projection.id}' references unknown property '${propertyId}' on object type '${objectType.id}'.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbProjectionWorker] Projection '${projection.id}' references unknown property '${propertyId}' on object type '${objectType.id}'.`,
+        { details: { ...errorDetails, objectTypeId: objectType.id, propertyId } }
       )
     }
 
     const column = columnsByName.get(columnName)
     if (!column) {
-      throw new ProjectionWorkerError(
-        `[SixbProjectionWorker] Projection '${projection.id}' references unknown dataset column '${columnName}' on dataset '${dataset.id}'.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbProjectionWorker] Projection '${projection.id}' references unknown dataset column '${columnName}' on dataset '${dataset.id}'.`,
+        {
+          details: {
+            ...errorDetails,
+            objectTypeId: objectType.id,
+            propertyId,
+            columnName,
+          },
+        }
       )
     }
 
@@ -137,11 +164,31 @@ function buildProjectedPropertyPlans(input: {
       propertyId,
       columnName,
       columnType: column.type,
-      schema: resolveProjectionSchema(property.schema, valueTypesById),
+      schema: resolveProjectionSchema(property.schema, valueTypesById, {
+        ...errorDetails,
+        objectTypeId: objectType.id,
+        propertyId,
+        columnName,
+      }),
     })
   }
 
   return propertyPlans
+}
+
+function projectionPlanErrorDetails(input: {
+  readonly projection: ObjectProjectionDefinition
+  readonly dataset: DatasetDefinition
+  readonly correlation?: {
+    readonly runId: string
+    readonly versionId: string
+  }
+}) {
+  return {
+    projectionId: input.projection.id,
+    datasetId: input.dataset.id,
+    ...(input.correlation ?? {}),
+  }
 }
 
 function collectProperties(

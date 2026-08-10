@@ -5,7 +5,7 @@ import {
   type ProjectionDefinition,
   type SixbFailure,
 } from "@sixb/core"
-import { captureSixbFailure } from "@sixb/core/internal/errors"
+import { captureSixbFailure, isSixbError } from "@sixb/core/internal/errors"
 import {
   MaterializationObjectNotFoundError,
   type ProjectionRunTerminalDecision,
@@ -282,10 +282,11 @@ async function isPermanentFailure(
   if (error instanceof MaterializationObjectNotFoundError) {
     return missingTargetWaitedLongEnough(input, execution, error)
   }
-  return isPermanentSyncFailure(error)
+  return isPermanentProjectionError(error)
 }
 
-function isPermanentSyncFailure(error: unknown): boolean {
+function isPermanentProjectionError(error: unknown): boolean {
+  if (isSixbError(error)) return !error.retryable
   if (
     error instanceof ProjectionWorkerPermanentError ||
     error instanceof MaterializationValidationError
@@ -311,7 +312,7 @@ function isExplicitCancellation(error: unknown): error is MaterializationCancell
  */
 export function isPermanentProjectionFailure(error: unknown): boolean {
   return (
-    (!(error instanceof MaterializationObjectNotFoundError) && isPermanentSyncFailure(error)) ||
+    (!(error instanceof MaterializationObjectNotFoundError) && isPermanentProjectionError(error)) ||
     isExplicitCancellation(error)
   )
 }

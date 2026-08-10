@@ -1,9 +1,12 @@
 import type { Schema, ValueType } from "@sixb/core"
-import { ProjectionWorkerError } from "./errors"
+import { createSixbError } from "@sixb/core/internal/errors"
+
+type ProjectionSchemaErrorContext = Readonly<Record<string, string>>
 
 export function resolveProjectionSchema(
   schema: Schema,
   valueTypesById: ReadonlyMap<string, ValueType>,
+  errorContext: ProjectionSchemaErrorContext = {},
   seen = new Set<string>()
 ): Schema {
   if (typeof schema === "string") {
@@ -15,8 +18,10 @@ export function resolveProjectionSchema(
   }
 
   if (seen.has(schema.valueTypeId)) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Circular valueTypeRef '${schema.valueTypeId}' in projection schema.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbProjectionWorker] Circular valueTypeRef '${schema.valueTypeId}' in projection schema.`,
+      { details: { ...errorContext, valueTypeId: schema.valueTypeId } }
     )
   }
 
@@ -24,17 +29,19 @@ export function resolveProjectionSchema(
   nextSeen.add(schema.valueTypeId)
 
   if (schema._resolved) {
-    return resolveProjectionSchema(schema._resolved, valueTypesById, nextSeen)
+    return resolveProjectionSchema(schema._resolved, valueTypesById, errorContext, nextSeen)
   }
 
   const valueType = valueTypesById.get(schema.valueTypeId)
   if (!valueType) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Unknown valueTypeRef '${schema.valueTypeId}' in projection schema.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbProjectionWorker] Unknown valueTypeRef '${schema.valueTypeId}' in projection schema.`,
+      { details: { ...errorContext, valueTypeId: schema.valueTypeId } }
     )
   }
 
-  return resolveProjectionSchema(valueType.schema, valueTypesById, nextSeen)
+  return resolveProjectionSchema(valueType.schema, valueTypesById, errorContext, nextSeen)
 }
 
 export function isIntegerEnumSchema(schema: Schema): boolean {

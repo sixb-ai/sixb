@@ -18,6 +18,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Dataset version not found.",
     retryable: false,
   },
+  "dataset.version_read_inconsistent": {
+    publicMessage: "Dataset version could not be read consistently.",
+    retryable: true,
+  },
   "internal.unexpected": {
     publicMessage: "An unexpected internal error occurred.",
     retryable: false,
