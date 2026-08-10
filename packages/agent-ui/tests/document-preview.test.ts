@@ -5,7 +5,7 @@ import {
   documentLoadError,
   MAX_MARKDOWN_PREVIEW_BYTES,
   markdownPreviewTooLarge,
-} from "../src/document-preview/content"
+} from "../src/document-preview/content-policy"
 import {
   DelimitedTextParseError,
   MAX_DELIMITED_PREVIEW_COLUMNS,
