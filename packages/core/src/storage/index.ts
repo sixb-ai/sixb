@@ -4,7 +4,9 @@
  * A type in a public interface signature must be exported from the same subpath as the interface, or
  * the interface cannot be implemented from outside the package.
  */
+export type { Principal } from "../auth"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
+export type { ReadonlyJsonObject } from "../json"
 export { stableJsonStringify } from "../json"
 export type {
   PinnedDatasetVersion,
@@ -83,6 +85,29 @@ export {
   coerceAgentRunFinishReason,
   InMemoryAgentStorage,
 } from "./agents"
+export type {
+  AiModelCallUsage,
+  AiModelCallUsageInput,
+  AiModelCallUsageRecord,
+  AiUsageExecutionIdentity,
+  AiUsageReportingStatus,
+  AiUsageStorage,
+  AiUsageStorageErrorCode,
+  InMemoryAiUsageGroupRow,
+  InMemoryAiUsageStorageSnapshot,
+  RecordAiModelCallInput,
+  RecordAiModelCallResult,
+  SummarizeAiUsageExecutionInput,
+  SummarizeAiUsageExecutionsInput,
+} from "./ai-usage"
+export {
+  AiUsageStorageError,
+  aggregateAiModelCallUsage,
+  assertAiUsageExecution,
+  InMemoryAiUsageStorage,
+  normalizeAiModelCallRecord,
+  normalizeAiModelCallUsage,
+} from "./ai-usage"
 export type {
   AccessTokenRecord,
   AccessTokenSubjectType,

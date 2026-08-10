@@ -3,6 +3,10 @@ export {
   runAgentStorageContractSuite,
 } from "./agent-storage-contract"
 export {
+  type AiUsageStorageContractSuiteOptions,
+  runAiUsageStorageContractSuite,
+} from "./ai-usage-storage-contract"
+export {
   type AuthStorageContractSuiteOptions,
   runAuthStorageContractSuite,
 } from "./auth-storage-contract"
