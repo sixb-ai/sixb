@@ -26,6 +26,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Dataset version could not be read consistently.",
     retryable: true,
   },
+  "event.delivery_failed": {
+    publicMessage: "Event delivery failed.",
+    retryable: true,
+  },
   "internal.unexpected": {
     publicMessage: "An unexpected internal error occurred.",
     retryable: false,

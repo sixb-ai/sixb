@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+import { parseSixbFailure } from "@sixb/core/internal/errors"
 import type { ProjectionEntityRef } from "@sixb/core/internal/materialization"
 import { MaterializationConflictError } from "@sixb/core/internal/materialization"
 import type {
@@ -9,6 +10,7 @@ import type {
   OntologySourceRecord,
   StageSourceAssertion,
 } from "@sixb/core/storage"
+import { ONTOLOGY_OUTBOX_FAILURE_CODES } from "@sixb/core/storage"
 
 export {
   assertNonblank,
@@ -96,7 +98,7 @@ export interface SqliteOntologyOutboxRow {
   readonly lease_id: string | null
   readonly lease_expires_at: string | null
   readonly published_at: string | null
-  readonly last_error: string | null
+  readonly last_failure: string | null
   readonly created_at: string
 }
 
@@ -169,7 +171,10 @@ export function outboxRecord(row: SqliteOntologyOutboxRow): OntologyOutboxRecord
     leaseId: row.lease_id,
     leaseExpiresAt: row.lease_expires_at,
     publishedAt: row.published_at,
-    lastError: row.last_error,
+    lastFailure:
+      row.last_failure === null
+        ? null
+        : parseSixbFailure(row.last_failure, ONTOLOGY_OUTBOX_FAILURE_CODES),
     createdAt: row.created_at,
   }
 }

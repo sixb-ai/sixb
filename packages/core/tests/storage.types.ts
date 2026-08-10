@@ -1,9 +1,20 @@
 import type {
   ObjectQueryCapabilities,
   ObjectStorage,
+  OntologyOutboxFailureCode,
+  OntologyOutboxRecord,
   QueryObjectsInput,
   QueryObjectsResult,
 } from "../src/storage"
+
+const outboxFailureCode: OntologyOutboxFailureCode = "event.delivery_failed"
+const storedOutboxFailureCode: NonNullable<OntologyOutboxRecord["lastFailure"]>["code"] =
+  outboxFailureCode
+// @ts-expect-error The outbox exposes only its declared delivery-failure code.
+const unrelatedOutboxFailureCode: OntologyOutboxFailureCode = "internal.unexpected"
+
+void storedOutboxFailureCode
+void unrelatedOutboxFailureCode
 
 const capabilities: ObjectQueryCapabilities = {
   queryObjects: true,

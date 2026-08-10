@@ -7,6 +7,7 @@ import type {
   MaterializationPlanFinalization,
   MaterializationPlanHeader,
   MaterializationSession,
+  OntologyOutboxFailure,
   OntologySourceRecord,
 } from "../storage/ontology"
 import type { ProjectionRunStorage } from "../storage/projection-runs"
@@ -69,6 +70,15 @@ interface ReadyCandidate {
   readonly execution: ProjectionExecution
   readonly materializationId: string
   readonly source: { readonly projectionId: string }
+}
+
+function ontologyOutboxFailure(message: string): OntologyOutboxFailure {
+  return {
+    code: "event.delivery_failed",
+    message,
+    retryable: true,
+    at: "2026-01-03T02:00:00.000Z",
+  }
 }
 
 /**
@@ -583,7 +593,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           ids: [reclaimed[0].envelope.id],
           leaseId: "lease-two",
           availableAt: "2026-01-04T00:00:00.000Z",
-          error: "broker unavailable",
+          failure: ontologyOutboxFailure("broker unavailable"),
         })
         const retried = await storage.ontology.outbox.claim({
           projectId: "contract-project",
@@ -592,14 +602,34 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           leaseId: "lease-three",
           leaseExpiresAt: "2026-01-04T01:00:00.000Z",
         })
-        expect(retried[0]).toMatchObject({ attempts: 3, lastError: "broker unavailable" })
-        expect(
-          await storage.ontology.outbox.summarize({ projectId: "contract-project" })
-        ).toMatchObject({ pendingCount: 2, retryingCount: 2, maxAttempts: 3 })
-        await storage.ontology.outbox.markPublished({
+        expect(retried[0]).toMatchObject({
+          attempts: 3,
+          lastFailure: ontologyOutboxFailure("broker unavailable"),
+        })
+        await storage.ontology.outbox.reschedule({
           projectId: "contract-project",
           ids: [retried[0].envelope.id],
           leaseId: "lease-three",
+          availableAt: "2026-01-04T00:15:00.000Z",
+        })
+        const lifecycleRescheduled = await storage.ontology.outbox.claim({
+          projectId: "contract-project",
+          now: "2026-01-04T00:15:00.000Z",
+          limit: 1,
+          leaseId: "lease-four",
+          leaseExpiresAt: "2026-01-04T01:15:00.000Z",
+        })
+        expect(lifecycleRescheduled[0]).toMatchObject({
+          attempts: 4,
+          lastFailure: ontologyOutboxFailure("broker unavailable"),
+        })
+        expect(
+          await storage.ontology.outbox.summarize({ projectId: "contract-project" })
+        ).toMatchObject({ pendingCount: 2, retryingCount: 2, maxAttempts: 4 })
+        await storage.ontology.outbox.markPublished({
+          projectId: "contract-project",
+          ids: [lifecycleRescheduled[0].envelope.id],
+          leaseId: "lease-four",
           publishedAt: "2026-01-04T00:30:00.000Z",
         })
         expect(

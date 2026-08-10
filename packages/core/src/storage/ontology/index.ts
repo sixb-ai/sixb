@@ -82,6 +82,8 @@ export type {
   CompleteOntologyOutboxLeaseInput,
   OntologyMaterializationEvent,
   OntologyMaterializationEventDraft,
+  OntologyOutboxFailure,
+  OntologyOutboxFailureCode,
   OntologyOutboxRecord,
   OntologyOutboxStorage,
   OntologyOutboxSummary,
@@ -90,6 +92,7 @@ export type {
   RescheduleOntologyOutboxLeaseInput,
   SummarizeOntologyOutboxInput,
 } from "./outbox"
+export { ONTOLOGY_OUTBOX_FAILURE_CODES } from "./outbox"
 export type {
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,

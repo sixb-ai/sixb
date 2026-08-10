@@ -1,3 +1,4 @@
+import { parseSixbFailure } from "@sixb/core/internal/errors"
 import type { ProjectionEntityRef } from "@sixb/core/internal/materialization"
 import { MaterializationConflictError } from "@sixb/core/internal/materialization"
 import type {
@@ -8,6 +9,7 @@ import type {
   OntologySourceRecord,
   StageSourceAssertion,
 } from "@sixb/core/storage"
+import { ONTOLOGY_OUTBOX_FAILURE_CODES } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 
 export {
@@ -98,7 +100,7 @@ export interface PgOntologyOutboxRow {
   readonly lease_id: string | null
   readonly lease_expires_at: Date | string | null
   readonly published_at: Date | string | null
-  readonly last_error: string | null
+  readonly last_failure: unknown | null
   readonly created_at: Date | string
 }
 
@@ -196,7 +198,10 @@ export function outboxRecord(row: PgOntologyOutboxRow): OntologyOutboxRecord {
     leaseId: row.lease_id,
     leaseExpiresAt: optionalIsoString(row.lease_expires_at),
     publishedAt: optionalIsoString(row.published_at),
-    lastError: row.last_error,
+    lastFailure:
+      row.last_failure === null
+        ? null
+        : parseSixbFailure(row.last_failure, ONTOLOGY_OUTBOX_FAILURE_CODES),
     createdAt: toIsoString(row.created_at),
   }
 }

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto"
+import { createSixbError, toSixbFailure } from "../errors/internal"
 import type { ClaimedOntologyOutboxRow, OntologyOutboxStorage, Storage } from "../storage"
+import { ONTOLOGY_OUTBOX_FAILURE_CODES } from "../storage/ontology/outbox"
 import type { StableEventPublisher } from "./service"
 
 const DEFAULT_BATCH_SIZE = 1_000
@@ -13,7 +15,6 @@ const DEFAULT_RETRY_JITTER_RATIO = 0.2
 const DEFAULT_MAX_ISOLATION_ATTEMPTS = 32
 const DEFAULT_MAX_CLAIMS_PER_DRAIN = 10
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000
-const SHUTDOWN_RESCHEDULE_ERROR = "Outbox dispatcher stopped before publication completed."
 
 export interface OntologyOutboxDeliveryFailure {
   readonly occurredAt: string
@@ -320,7 +321,12 @@ export class OntologyOutboxDispatcher {
     const failedAt = this.now()
 
     for (const [attempts, attemptRows] of rowsByAttempts(settling)) {
-      failures.add(error, failedAt.toISOString(), attempts, attemptRows)
+      const deliveryError = createEventDeliveryError(error, attempts, attemptRows)
+      const failure = toSixbFailure(deliveryError, {
+        allowedCodes: ONTOLOGY_OUTBOX_FAILURE_CODES,
+        at: failedAt,
+      })
+      failures.add(deliveryError, failedAt.toISOString(), attempts, attemptRows)
       try {
         await this.withOutbox((outbox) =>
           outbox.reschedule({
@@ -328,7 +334,7 @@ export class OntologyOutboxDispatcher {
             ids: eventIds(attemptRows),
             leaseId: sharedLeaseId(attemptRows),
             availableAt: new Date(failedAt.getTime() + this.retryDelayMs(attempts)).toISOString(),
-            error: errorMessage(error),
+            failure,
           })
         )
       } catch (rescheduleError) {
@@ -358,7 +364,6 @@ export class OntologyOutboxDispatcher {
           ids: eventIds(rows),
           leaseId: sharedLeaseId(rows),
           availableAt: this.now().toISOString(),
-          error: SHUTDOWN_RESCHEDULE_ERROR,
         })
       )
     } catch (error) {
@@ -487,9 +492,23 @@ function sharedLeaseId(rows: readonly ClaimedOntologyOutboxRow[]): string {
   return leaseId
 }
 
-function errorMessage(error: unknown): string {
-  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
-  return message.slice(0, 2_000)
+function createEventDeliveryError(
+  cause: unknown,
+  attempts: number,
+  rows: readonly ClaimedOntologyOutboxRow[]
+) {
+  return createSixbError(
+    "event.delivery_failed",
+    "[Sixb] Could not deliver persisted ontology events.",
+    {
+      cause,
+      details: {
+        attempts,
+        eventIds: eventIds(rows).sort(),
+        eventTypes: [...new Set(rows.map((row) => row.envelope.type))].sort(),
+      },
+    }
+  )
 }
 
 async function publishUntilStopped(
