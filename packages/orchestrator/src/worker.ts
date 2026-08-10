@@ -1,9 +1,9 @@
 import type { DomainEvent } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import { evaluateEventSchedule } from "@sixb/core/internal/schedules"
 import { Worker } from "@sixb/core/internal/workers"
-import { OrchestratorError } from "./errors"
 import { runProjectionDispatchReconciler } from "./projection-dispatch-reconciler"
 import { buildProjectionJob } from "./projection-job"
 import { routeKeysForEvent } from "./route-key"
@@ -25,17 +25,24 @@ export class OrchestratorWorker extends Worker {
 
   constructor(options: OrchestratorRuntimeOptions) {
     if (!options.projectId) {
-      throw new OrchestratorError("projectId is required.")
+      throw createSixbError("internal.unexpected", "[SixbOrchestrator] projectId is required.")
     }
     super()
     this.options = options
-    this.projectionDescriptors = projectionDescriptors(options.routes)
+    this.projectionDescriptors = projectionDescriptors(options.projectId, options.routes)
     if (this.projectionDescriptors.length > 0 && !options.projectionDispatch) {
-      throw new OrchestratorError(
-        "Projection routes require lake and projection-run storage for durable dispatch."
+      throw createSixbError(
+        "internal.unexpected",
+        "[SixbOrchestrator] Projection routes require lake and projection-run storage for durable dispatch.",
+        {
+          details: {
+            projectId: options.projectId,
+            projectionIds: this.projectionDescriptors.map((descriptor) => descriptor.projectionId),
+          },
+        }
       )
     }
-    if (hasWorkflowRoutes(options.routes)) requireDispatcher(options.dispatchers, "workflows")
+    if (hasWorkflowRoutes(options.routes)) requireDispatcher(options, "workflows")
   }
 
   protected async run(signal: AbortSignal): Promise<void> {
@@ -258,13 +265,33 @@ async function enqueueDirectJob(
       return
     case "projections": {
       if (sourceEvent.type !== "dataset.version.committed") {
-        throw new OrchestratorError(
-          `Projection jobs can only be dispatched from dataset.version.committed events, got '${sourceEvent.type}'.`
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbOrchestrator] Projection jobs can only be dispatched from dataset.version.committed events, got '${sourceEvent.type}'.`,
+          {
+            details: {
+              projectId: options.projectId,
+              projectionId: item.job.payload.projectionId,
+              sourceEventId: sourceEvent.id,
+              sourceEventType: sourceEvent.type,
+            },
+          }
         )
       }
       if (item.job.payload.datasetId !== sourceEvent.payload.datasetId) {
-        throw new OrchestratorError(
-          `Projection route for dataset '${item.job.payload.datasetId}' received dataset '${sourceEvent.payload.datasetId}'.`
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbOrchestrator] Projection route for dataset '${item.job.payload.datasetId}' received dataset '${sourceEvent.payload.datasetId}'.`,
+          {
+            details: {
+              projectId: options.projectId,
+              projectionId: item.job.payload.projectionId,
+              sourceEventId: sourceEvent.id,
+              sourceEventType: sourceEvent.type,
+              expectedDatasetId: item.job.payload.datasetId,
+              actualDatasetId: sourceEvent.payload.datasetId,
+            },
+          }
         )
       }
       const job = buildProjectionJob({
@@ -285,12 +312,21 @@ async function enqueueDirectJob(
     }
     case "workflows": {
       if (sourceEvent.type !== "schedule.triggered") {
-        throw new OrchestratorError(
-          `Direct workflow route received unsupported event '${sourceEvent.type}'.`
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbOrchestrator] Direct workflow route received unsupported event '${sourceEvent.type}'.`,
+          {
+            details: {
+              projectId: options.projectId,
+              workflowId: item.job.payload.workflowId,
+              sourceEventId: sourceEvent.id,
+              sourceEventType: sourceEvent.type,
+            },
+          }
         )
       }
       const scheduleId = sourceEvent.payload.scheduleId
-      await requireDispatcher(options.dispatchers, "workflows").dispatch({
+      await requireDispatcher(options, "workflows").dispatch({
         workflowId: item.job.payload.workflowId,
         runId: scheduleConsumerRunId(
           "workflow",
@@ -356,11 +392,21 @@ async function enqueueEventScheduleTarget(
     case "workflows": {
       const input = target.mapper ? target.mapper({ event } as never) : {}
       if (!isRecord(input)) {
-        throw new OrchestratorError(
-          `Workflow '${target.workflowId}' schedule mapper must return an input object.`
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbOrchestrator] Workflow '${target.workflowId}' schedule mapper must return an input object.`,
+          {
+            details: {
+              projectId: options.projectId,
+              workflowId: target.workflowId,
+              scheduleId,
+              sourceEventId: sourceEvent.id,
+              sourceEventType: sourceEvent.type,
+            },
+          }
         )
       }
-      await requireDispatcher(options.dispatchers, "workflows").dispatch({
+      await requireDispatcher(options, "workflows").dispatch({
         workflowId: target.workflowId,
         runId: scheduleConsumerRunId("workflow", target.workflowId, scheduleId, sourceEvent.id),
         input,
@@ -473,6 +519,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function projectionDescriptors(
+  projectId: string,
   routes: OrchestratorRoutes
 ): readonly ProjectionDispatchDescriptor[] {
   const descriptors = new Map<string, ProjectionDispatchDescriptor>()
@@ -481,8 +528,10 @@ function projectionDescriptors(
       if (item.queue !== "projections") continue
       const existing = descriptors.get(item.job.payload.projectionId)
       if (existing && !projectionDescriptorsEqual(existing, item.job.payload)) {
-        throw new OrchestratorError(
-          `Projection '${item.job.payload.projectionId}' has conflicting dispatch routes.`
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbOrchestrator] Projection '${item.job.payload.projectionId}' has conflicting dispatch routes.`,
+          { details: { projectId, projectionId: item.job.payload.projectionId } }
         )
       }
       descriptors.set(item.job.payload.projectionId, item.job.payload)
@@ -508,12 +557,16 @@ function hasWorkflowRoutes(routes: OrchestratorRoutes): boolean {
 }
 
 function requireDispatcher<TKey extends keyof OrchestratorDispatchers>(
-  dispatchers: OrchestratorDispatchers,
+  options: Pick<OrchestratorRuntimeOptions, "projectId" | "dispatchers">,
   key: TKey
 ): NonNullable<OrchestratorDispatchers[TKey]> {
-  const dispatcher = dispatchers[key]
+  const dispatcher = options.dispatchers[key]
   if (!dispatcher) {
-    throw new OrchestratorError(`Routes require the '${key}' dispatcher.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbOrchestrator] Routes require the '${key}' dispatcher.`,
+      { details: { projectId: options.projectId, dispatcher: key } }
+    )
   }
   return dispatcher
 }
