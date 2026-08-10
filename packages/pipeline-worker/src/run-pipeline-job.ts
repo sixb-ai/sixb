@@ -23,7 +23,7 @@ export class PipelineRunAlreadyStartedError extends Error {
 export async function runPipelineJob(input: RunPipelineJobInput): Promise<PipelineRunResult> {
   const { runtime, job } = input
   const signal = input.signal ?? new AbortController().signal
-  const pipeline = requirePipeline(runtime.getPipelineById(job.pipelineId), job)
+  const pipeline = requirePipeline(runtime.pipelines.getById(job.pipelineId), job)
   const logSession = resolveLogsRuntime(runtime.id, runtime.logs).startExecution({
     kind: "pipeline",
     id: job.id,

@@ -1,12 +1,10 @@
 import type {
   BlobStorage,
-  ConnectorAdapter,
-  ConnectorClient,
-  ConnectorDefinition,
-  DatasetDefinition,
+  ConnectorsRuntime,
+  DatasetsRuntime,
   LakeStorage,
-  SyncDefinition,
   SyncMode,
+  SyncsRuntime,
 } from "@sixb/core"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
@@ -16,15 +14,12 @@ export interface SyncWorkerContext {
   readonly id: string
   readonly syncRunsStorage: SyncRunStorage
   readonly lakeStorage: LakeStorage
-  readonly blobStorage: BlobStorage
+  readonly blobs: BlobStorage
   readonly logs?: LogsRuntime
 
-  getDatasetById(datasetId: string): DatasetDefinition | null
-  getSyncById(syncId: string): SyncDefinition | null
-
-  connector<TAdapter extends ConnectorAdapter>(
-    definition: ConnectorDefinition<string, TAdapter>
-  ): Promise<ConnectorClient<TAdapter>>
+  readonly datasets: Pick<DatasetsRuntime, "getById">
+  readonly syncs: Pick<SyncsRuntime, "getById">
+  readonly connectors: Pick<ConnectorsRuntime, "connect">
 }
 
 export interface SyncJob {

@@ -65,7 +65,7 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
     auth: options.auth ? { id: "test", kind: "dev" } : undefined,
   })
 
-  await sixb.upsertObject("document", { id: "doc-1" })
+  await sixb.objects.upsert("document", { id: "doc-1" })
 
   const actionPdf = await blobStorage.put({
     body: new TextEncoder().encode("action pdf"),

@@ -761,8 +761,8 @@ describe("Sixb workflow registration", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.listSchedules()).toEqual([highValueTransaction])
-    expect(sixb.getScheduleById("transaction.high-value")).toBe(highValueTransaction)
+    expect(sixb.schedules.list()).toEqual([highValueTransaction])
+    expect(sixb.schedules.getById("transaction.high-value")).toBe(highValueTransaction)
     expect(sixb.workflows.getById("registered-event-schedule")).toBe(workflow)
   })
 

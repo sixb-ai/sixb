@@ -66,3 +66,10 @@ export class WorkflowsRuntime {
     return requestWorkflowRun(runtime, workflow, input)
   }
 }
+
+export function createWorkflowsRuntime(
+  runtime: SixbRuntimeContext,
+  workflows: readonly WorkflowDefinition[]
+): WorkflowsRuntime {
+  return new WorkflowsRuntime(runtime, workflows)
+}

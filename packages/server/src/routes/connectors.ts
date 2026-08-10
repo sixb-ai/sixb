@@ -5,14 +5,14 @@ import { ErrorResponseSchema } from "../schemas/common"
 import { ConnectorParamsSchema, ConnectorSchema } from "../schemas/connectors"
 
 function serializeConnector(
-  connector: ReturnType<Sixb<readonly OntologySource[]>["listConnectors"]>[number],
+  connector: ReturnType<Sixb<readonly OntologySource[]>["connectors"]["list"]>[number],
   sixb: Sixb<readonly OntologySource[]>
 ) {
   return {
     id: connector.id,
     type: connector.adapter.type,
-    syncIds: sixb
-      .listSyncs()
+    syncIds: sixb.syncs
+      .list()
       .filter((sync) => sync.connector.id === connector.id)
       .map((sync) => sync.id),
     webhooks: sixb
@@ -34,7 +34,7 @@ export function registerConnectorRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
     .get(
       "/api/connectors",
       () => {
-        return sixb.listConnectors().map((connector) => serializeConnector(connector, sixb))
+        return sixb.connectors.list().map((connector) => serializeConnector(connector, sixb))
       },
       {
         response: { 200: ConnectorSchema.array() },
@@ -48,7 +48,7 @@ export function registerConnectorRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
     .get(
       "/api/connectors/:connectorId",
       ({ params, set }) => {
-        const connector = sixb.getConnectorById(params.connectorId)
+        const connector = sixb.connectors.getById(params.connectorId)
         if (!connector) {
           set.status = 404
           return { error: "Connector not found" }

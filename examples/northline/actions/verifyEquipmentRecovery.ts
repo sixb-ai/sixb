@@ -9,7 +9,7 @@ export const verifyEquipmentRecovery = defineAction("verify-equipment-recovery",
   .on(ServiceCase)
   .params({ equipment: param(ref(Equipment)) })
   .writeback(async ({ params, sixb }) => {
-    const controls = await sixb.connector(buildingControlsConnector)
+    const controls = await sixb.connectors.connect(buildingControlsConnector)
     const readings = (await controls.listReadings({ limit: 500 })).rows
       .filter((reading) => reading.equipment_id === params.equipment.primaryId)
       .sort((left, right) => right.recorded_at.localeCompare(left.recorded_at))

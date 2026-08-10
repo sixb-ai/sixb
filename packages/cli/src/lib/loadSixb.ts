@@ -1,68 +1,56 @@
 import { pathToFileURL } from "node:url"
 import type {
-  ActionDefinition,
+  ActionsRuntime,
+  BlobsRuntime,
   Broker,
-  ConnectorAdapter,
-  ConnectorClient,
-  ConnectorDefinition,
-  DatasetDefinition,
-  LinkProjectionDefinition,
-  ObjectProjectionDefinition,
+  ConnectorsRuntime,
+  DatasetsRuntime,
   OntologyMaintenanceHandle,
   OntologyOperationalStatus,
-  PipelineDefinition,
-  ProjectionDefinition,
-  RuleDefinition,
-  ScheduleDefinition,
+  PipelinesRuntime,
+  ProjectionsRuntime,
+  RulesRuntime,
+  SchedulesRuntime,
   SixbReadiness,
   SixbRuntimeContext,
-  SyncDefinition,
-  TelemetryProjectionDefinition,
+  SyncsRuntime,
 } from "@sixb/core"
 import type { AgentsRuntime } from "@sixb/core/internal/agents"
 import type { AuthRuntime } from "@sixb/core/internal/auth"
 import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
 import type { ObjectRow } from "@sixb/core/storage"
 
-export interface LoadedSixb extends SixbRuntimeContext {
-  readonly id: string
-  readonly broker: Broker
-  readonly auth: AuthRuntime
-  listObjectTypes(): readonly unknown[]
-  listActions(): readonly ActionDefinition[]
-  getActionById(actionId: string): ActionDefinition | null
-  listSyncs(): readonly SyncDefinition[]
-  listPipelines(): readonly PipelineDefinition[]
-  getPipelineById(pipelineId: string): PipelineDefinition | null
-  listSchedules(): readonly ScheduleDefinition[]
-  readonly workflows: WorkflowsRuntime
-  readonly agents: AgentsRuntime
-  listObjectProjections(): readonly ObjectProjectionDefinition[]
-  listLinkProjections(): readonly LinkProjectionDefinition[]
-  listTelemetryProjections(): readonly TelemetryProjectionDefinition[]
-  listDatasets(): readonly DatasetDefinition[]
-  listRules(): readonly RuleDefinition[]
-  getDatasetById(datasetId: string): DatasetDefinition | null
-  getProjectionById(projectionId: string): ProjectionDefinition | null
-  getSyncById(syncId: string): SyncDefinition | null
-  getRuleById(ruleId: string): RuleDefinition | null
+interface LoadedObjectsRuntime {
+  listTypes(): readonly unknown[]
   listSubTypes(objectTypeId: string): string[]
-  connector<TAdapter extends ConnectorAdapter>(
-    definition: ConnectorDefinition<string, TAdapter>
-  ): Promise<ConnectorClient<TAdapter>>
-  startScheduler(): Promise<void>
-  stopScheduler(): Promise<void>
-  startOntologyMaintenance(): Promise<OntologyMaintenanceHandle>
-  getOntologyOperationalStatus(): OntologyOperationalStatus
-  checkReadiness(): Promise<SixbReadiness>
-  disconnectConnectors(): Promise<void>
-  closeLogger(): Promise<void>
-  closeBroker(): Promise<void>
   list(params: {
     objectTypeIds?: readonly string[]
     limit?: number
     offset?: number
   }): Promise<{ total: number; hasMore: boolean; objects: ObjectRow[] }>
+}
+
+export interface LoadedSixb extends Omit<SixbRuntimeContext, "blobStorage" | "rules"> {
+  readonly id: string
+  readonly broker: Broker
+  readonly auth: AuthRuntime
+  readonly objects: LoadedObjectsRuntime
+  readonly actions: ActionsRuntime
+  readonly datasets: DatasetsRuntime
+  readonly syncs: SyncsRuntime
+  readonly pipelines: PipelinesRuntime
+  readonly schedules: SchedulesRuntime
+  readonly rules: RulesRuntime
+  readonly projections: ProjectionsRuntime
+  readonly connectors: ConnectorsRuntime
+  readonly blobs: BlobsRuntime
+  readonly workflows: WorkflowsRuntime
+  readonly agents: AgentsRuntime
+  startOntologyMaintenance(): Promise<OntologyMaintenanceHandle>
+  getOntologyOperationalStatus(): OntologyOperationalStatus
+  checkReadiness(): Promise<SixbReadiness>
+  closeLogger(): Promise<void>
+  closeBroker(): Promise<void>
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
@@ -76,39 +64,16 @@ const REQUIRED_RUNTIME_PROPERTIES = [
   "broker",
   "storage",
   "lakeStorage",
-  "blobStorage",
+  "blobs",
   "queues",
   "auth",
   "agents",
 ] as const
 
-const REQUIRED_DEFINITION_METHODS = [
-  "listObjectTypes",
-  "listSubTypes",
-  "listActions",
-  "getActionById",
-  "listSyncs",
-  "listPipelines",
-  "getPipelineById",
-  "listSchedules",
-  "listObjectProjections",
-  "listLinkProjections",
-  "listTelemetryProjections",
-  "listDatasets",
-  "listRules",
-  "getDatasetById",
-  "getProjectionById",
-  "getSyncById",
-  "getRuleById",
-] as const
-
 const REQUIRED_LIFECYCLE_METHODS = [
-  "startScheduler",
-  "stopScheduler",
   "startOntologyMaintenance",
   "getOntologyOperationalStatus",
   "checkReadiness",
-  "disconnectConnectors",
   "closeLogger",
   "closeBroker",
 ] as const
@@ -124,12 +89,45 @@ function hasProperties(
   return properties.every((property) => property in value)
 }
 
-function hasMethods(value: Record<PropertyKey, unknown>, methods: readonly PropertyKey[]): boolean {
-  return methods.every((method) => typeof value[method] === "function")
+function hasMethods(value: unknown, methods: readonly PropertyKey[]): boolean {
+  if (!isRecord(value) && typeof value !== "function") return false
+  const candidate = value as Record<PropertyKey, unknown>
+  return methods.every((method) => typeof candidate[method] === "function")
 }
 
 function hasWorkflows(value: Record<PropertyKey, unknown>): boolean {
   return isRecord(value.workflows) && hasMethods(value.workflows, ["list", "getById"])
+}
+
+function hasPrimitiveFacades(value: Record<PropertyKey, unknown>): boolean {
+  return (
+    typeof value.objects === "function" &&
+    hasMethods(value.objects, ["listTypes", "listSubTypes", "list"]) &&
+    isRecord(value.actions) &&
+    hasMethods(value.actions, ["list", "getById"]) &&
+    isRecord(value.datasets) &&
+    hasMethods(value.datasets, ["list", "getById"]) &&
+    isRecord(value.syncs) &&
+    hasMethods(value.syncs, ["list", "getById"]) &&
+    isRecord(value.pipelines) &&
+    hasMethods(value.pipelines, ["list", "getById"]) &&
+    isRecord(value.schedules) &&
+    hasMethods(value.schedules, ["list", "getById", "start", "stop"]) &&
+    isRecord(value.rules) &&
+    hasMethods(value.rules, ["list", "getById"]) &&
+    isRecord(value.projections) &&
+    hasMethods(value.projections, [
+      "list",
+      "listObjects",
+      "listLinks",
+      "listTelemetry",
+      "getById",
+    ]) &&
+    isRecord(value.connectors) &&
+    hasMethods(value.connectors, ["list", "getById", "connect", "disconnectAll"]) &&
+    isRecord(value.blobs) &&
+    hasMethods(value.blobs, ["put", "open", "stat"])
+  )
 }
 
 function isSixbInstance(value: unknown): value is LoadedSixb {
@@ -139,9 +137,8 @@ function isSixbInstance(value: unknown): value is LoadedSixb {
     typeof value.id === "string" &&
     typeof value.projectId === "string" &&
     hasProperties(value, REQUIRED_RUNTIME_PROPERTIES) &&
-    hasMethods(value, REQUIRED_DEFINITION_METHODS) &&
     hasMethods(value, REQUIRED_LIFECYCLE_METHODS) &&
-    hasMethods(value, ["connector", "list"]) &&
+    hasPrimitiveFacades(value) &&
     hasWorkflows(value)
   )
 }

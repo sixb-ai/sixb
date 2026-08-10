@@ -61,7 +61,7 @@ export async function runEditsAndCommitPhase(
   const batch = await recordEdits(
     {
       runId: run.id,
-      valueTypesById: input.runtime.sixb.getValueTypesById(),
+      valueTypesById: input.runtime.sixb.objects.getValueTypesById(),
     },
     async ({ objects }) => {
       const baseContext = {
@@ -72,8 +72,8 @@ export async function runEditsAndCommitPhase(
           {
             recorder: reads,
             resolveLinkIds: (objectTypeId) =>
-              input.runtime.sixb
-                .resolveObjectType(objectTypeId)
+              input.runtime.sixb.objects
+                .resolveType(objectTypeId)
                 .links.map((definition) => definition.id),
           }
         ),

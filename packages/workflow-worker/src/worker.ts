@@ -1,4 +1,5 @@
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { createDynamicObjectsRuntime } from "@sixb/core/internal/objects"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, WorkflowQueueJob } from "@sixb/core/queues"
@@ -222,21 +223,36 @@ function buildWorkflowContext(
   sixb: WorkflowWorkerSixb,
   workflowRuns: WorkflowRunStorage
 ): WorkflowWorkerContext {
-  return {
+  const runtime = {
     projectId: sixb.projectId,
     ontology: sixb.ontology,
     actionRegistry: sixb.actionRegistry,
     events: sixb.events,
     storage: sixb.storage,
     lakeStorage: sixb.lakeStorage,
-    blobStorage: sixb.blobStorage,
+    blobStorage: sixb.blobs,
     queues: sixb.queues,
-    rules: sixb.rules,
+    rules: sixb.rules.list(),
+  }
+
+  return {
+    ...runtime,
     workflowRuns,
     logs: sixb.logs,
-    sixb: sixb as unknown as WorkflowWorkerContext["sixb"],
-    getWorkflowById(workflowId) {
-      return sixb.workflows.getById(workflowId)
+    sixb: {
+      objects: createDynamicObjectsRuntime(runtime),
+      actions: sixb.actions,
+      workflows: sixb.workflows,
+      agents: sixb.agents,
+      datasets: sixb.datasets,
+      syncs: sixb.syncs,
+      pipelines: sixb.pipelines,
+      projections: sixb.projections,
+      rules: sixb.rules,
+      schedules: sixb.schedules,
+      events: sixb.events,
+      connectors: sixb.connectors,
+      blobs: sixb.blobs,
     },
   }
 }

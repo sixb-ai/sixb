@@ -71,14 +71,14 @@ function listViewableProjections(
   authz: RequestAuthorization
 ): ViewableProjectionCatalog {
   return {
-    objectProjections: sixb
-      .listObjectProjections()
+    objectProjections: sixb.projections
+      .listObjects()
       .filter((projection) => canViewProjection(authz, projection)),
-    linkProjections: sixb
-      .listLinkProjections()
+    linkProjections: sixb.projections
+      .listLinks()
       .filter((projection) => canViewProjection(authz, projection)),
-    telemetryProjections: sixb
-      .listTelemetryProjections()
+    telemetryProjections: sixb.projections
+      .listTelemetry()
       .filter((projection) => canViewProjection(authz, projection)),
   }
 }
@@ -142,7 +142,7 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
       async (context) => {
         const { params, set } = context
         const { authz } = requestAuthState(context)
-        const found = sixb.getProjectionById(params.projectionId)
+        const found = sixb.projections.getById(params.projectionId)
         if (!found || !canViewProjection(authz, found)) {
           set.status = 404
           return { error: `Projection '${params.projectionId}' not found` }

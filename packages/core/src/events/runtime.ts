@@ -306,6 +306,10 @@ export class EventsRuntime implements DomainEventLog, StableEventPublisher {
   }
 }
 
+export function createEventsRuntime(options: EventsRuntimeOptions): EventsRuntime {
+  return new EventsRuntime(options)
+}
+
 type StoredEventPayload = Omit<StoredAuthorableEvent, "cursor">
 
 function toStoredEventPayload(params: {

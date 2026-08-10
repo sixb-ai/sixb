@@ -187,7 +187,7 @@ function canAccessWorkflowRun(
   run: WorkflowRunRecord
 ): boolean {
   return (
-    canViewWorkflowRun(authz, run) && (!scoped || scoped.getWorkflowById(run.workflowId) !== null)
+    canViewWorkflowRun(authz, run) && (!scoped || scoped.workflows.getById(run.workflowId) !== null)
   )
 }
 
@@ -234,7 +234,7 @@ async function workflowRunFileContentResponse(
   }
 
   return createContextualFileContentResponse({
-    blobStorage: sixb.blobStorage,
+    blobStorage: sixb.blobs,
     query: context.query,
     querySchema: WorkflowRunFileContentQuerySchema,
     request: context.request,
@@ -269,7 +269,7 @@ async function workflowNodeFileContentResponse(
   }
 
   return createContextualFileContentResponse({
-    blobStorage: sixb.blobStorage,
+    blobStorage: sixb.blobs,
     query: context.query,
     querySchema: WorkflowNodeFileContentQuerySchema,
     request: context.request,
@@ -551,7 +551,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflows",
       async (context) => {
         const { scoped } = requestAuthState(context)
-        const workflows = scoped ? scoped.listWorkflows() : sixb.workflows.list()
+        const workflows = scoped ? scoped.workflows.list() : sixb.workflows.list()
         const latestRuns = await getLatestWorkflowRuns(
           sixb,
           workflows.map((workflow) => workflow.id)
@@ -579,7 +579,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         // Non-runnable workflows are hidden as 404 (existence-hiding), matching
         // the object/action read routes.
         const workflow = scoped
-          ? scoped.getWorkflowById(params.workflowId)
+          ? scoped.workflows.getById(params.workflowId)
           : sixb.workflows.getById(params.workflowId)
         if (!workflow) {
           set.status = 404
@@ -614,7 +614,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           }
 
           const workflowIds = scoped
-            ? scoped.listWorkflows().map((workflow) => workflow.id)
+            ? scoped.workflows.list().map((workflow) => workflow.id)
             : authz
               ? [...authz.grants["run:workflow"]]
               : undefined
@@ -676,7 +676,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           if (
             !intervention ||
             !canViewWorkflowIntervention(authz, intervention) ||
-            (scoped && !scoped.getWorkflowById(intervention.workflowId))
+            (scoped && !scoped.workflows.getById(intervention.workflowId))
           ) {
             set.status = 404
             return { error: "Workflow intervention not found" }
@@ -720,7 +720,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           if (
             !intervention ||
             !canViewWorkflowIntervention(authz, intervention) ||
-            (scoped && !scoped.getWorkflowById(intervention.workflowId))
+            (scoped && !scoped.workflows.getById(intervention.workflowId))
           ) {
             set.status = 404
             return { error: "Workflow intervention not found" }
@@ -814,7 +814,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           if (
             !intervention ||
             !canViewWorkflowIntervention(authz, intervention) ||
-            (scoped && !scoped.getWorkflowById(intervention.workflowId))
+            (scoped && !scoped.workflows.getById(intervention.workflowId))
           ) {
             set.status = 404
             return { error: "Workflow intervention not found" }
@@ -932,7 +932,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           }
 
           const workflowIds = scoped
-            ? scoped.listWorkflows().map((workflow) => workflow.id)
+            ? scoped.workflows.list().map((workflow) => workflow.id)
             : authz
               ? [...authz.grants["run:workflow"]]
               : undefined
@@ -1321,8 +1321,8 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             source: { type: "manual" } as const,
           }
           const result = scoped
-            ? await scoped.requestWorkflowRun(input)
-            : await sixb.requestWorkflowRun(input)
+            ? await scoped.workflows.requestById(input)
+            : await sixb.workflows.requestById(input)
 
           set.status = 202
           return RequestWorkflowRunResponseSchema.parse({

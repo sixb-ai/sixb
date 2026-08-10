@@ -20,7 +20,7 @@ export const recordQuoteDecision = defineAction("record-quote-decision", {
     }
   })
   .writeback(async ({ params, run, sixb, target }) => {
-    const business = await sixb.connector(businessSystemConnector)
+    const business = await sixb.connectors.connect(businessSystemConnector)
     return business.recordQuoteDecision(
       target.primaryId,
       params.decision,

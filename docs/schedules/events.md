@@ -225,7 +225,7 @@ const sixb = await createSixb({
 })
 ```
 
-Inspect registered schedules with `sixb.listSchedules()` and `sixb.getScheduleById(id)`.
+Inspect registered schedules with `sixb.schedules.list()` and `sixb.schedules.getById(id)`.
 
 ## Event schedule vs rule
 

@@ -120,15 +120,15 @@ embedded runtimes without a server acquire it explicitly.
 
 | Method | Effect |
 | --- | --- |
-| `sixb.startScheduler()` | Start the scheduler for discovered `schedules/` |
-| `sixb.stopScheduler()` | Stop the scheduler |
+| `sixb.schedules.start()` | Start the scheduler for discovered `schedules/` |
+| `sixb.schedules.stop()` | Stop the scheduler |
 | `sixb.startOntologyMaintenance()` | Start outbox recovery and bounded retention; returns a stop handle |
 
 ```ts
-await sixb.startScheduler()
+await sixb.schedules.start()
 const maintenance = await sixb.startOntologyMaintenance()
 // ... on shutdown
-await sixb.stopScheduler()
+await sixb.schedules.stop()
 await maintenance.stop()
 ```
 
@@ -137,7 +137,7 @@ await maintenance.stop()
 marked `superseded` or `abandoned`. It never age-deletes pending outbox rows, active candidates, or
 the durable `ontology_commits` ledger.
 
-Release connector, broker, and logger resources with `sixb.disconnectConnectors()`,
+Release connector, broker, and logger resources with `sixb.connectors.disconnectAll()`,
 `sixb.closeBroker()`, and `sixb.closeLogger()`.
 
 ### Scoped views

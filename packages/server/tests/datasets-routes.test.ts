@@ -49,13 +49,13 @@ function createSixbStub(
 ): Sixb<readonly OntologySource[]> {
   return {
     lakeStorage,
-    listDatasets: () => definitions,
-    getDatasetById: (id: string) => definitions.find((definition) => definition.id === id) ?? null,
-    listSyncs: () => [],
-    listPipelines: () => [],
-    listObjectProjections: () => [],
-    listLinkProjections: () => [],
-    listTelemetryProjections: () => [],
+    datasets: {
+      list: () => definitions,
+      getById: (id: string) => definitions.find((definition) => definition.id === id) ?? null,
+    },
+    syncs: { list: () => [] },
+    pipelines: { list: () => [] },
+    projections: { list: () => [] },
   } as unknown as Sixb<readonly OntologySource[]>
 }
 

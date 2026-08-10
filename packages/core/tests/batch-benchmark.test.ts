@@ -25,7 +25,7 @@ describe("batch-benchmark (informative)", () => {
 
     const startIndividual = performance.now()
     for (const item of items) {
-      await sixbIndividual.upsertObject("item", item.properties)
+      await sixbIndividual.objects.upsert("item", item.properties)
     }
     const durationIndividual = performance.now() - startIndividual
 
@@ -34,7 +34,7 @@ describe("batch-benchmark (informative)", () => {
     const sixbBatch = new Sixb({ ontology: [Item], ...depsBatch })
 
     const startBatch = performance.now()
-    await sixbBatch.upsertObjectBatch("item", items)
+    await sixbBatch.objects.upsertBatch("item", items)
     const durationBatch = performance.now() - startBatch
 
     const ratio = durationIndividual / durationBatch

@@ -1,20 +1,19 @@
 import type {
+  AgentsRuntime,
   AgentToolRunContext,
   BlobStorage,
+  BlobsRuntime,
   Broker,
-  ConnectorAdapter,
-  ConnectorClient,
-  ConnectorDefinition,
+  ConnectorsRuntime,
   DomainEventLog,
   Queues,
   SandboxFactory,
   SixbRuntimeContext,
   Storage,
   ValueType,
+  WorkflowsRuntime,
 } from "@sixb/core"
-import type { AgentsRuntime } from "@sixb/core/internal/agents"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
-import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
 import type { AgentStorage, AuthStorage } from "@sixb/core/storage"
 import type { ToolSet } from "ai"
 import type { AgentSkill } from "./agent-skills"
@@ -39,16 +38,14 @@ export interface AgentWorkerSixb {
   readonly events: DomainEventLog
   readonly storage: Storage
   readonly queues: Queues
-  readonly agents: AgentsRuntime
-  readonly workflows?: WorkflowsRuntime
+  readonly agents: Pick<AgentsRuntime, "list" | "getById">
+  readonly workflows?: Pick<WorkflowsRuntime, "list" | "getById">
   readonly ontology?: SixbRuntimeContext["ontology"]
-  readonly blobStorage: BlobStorage
+  readonly blobs: Pick<BlobsRuntime, "put" | "open" | "stat">
   readonly sandboxes?: SandboxFactory
   readonly projectRoot?: string
   readonly logs?: LogsRuntime
-  connector<TAdapter extends ConnectorAdapter>(
-    definition: ConnectorDefinition<string, TAdapter>
-  ): Promise<ConnectorClient<TAdapter>>
+  readonly connectors: Pick<ConnectorsRuntime, "connect">
 }
 
 /**

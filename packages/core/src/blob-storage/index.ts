@@ -9,6 +9,7 @@ export {
 } from "./browser"
 export { BlobStorageError } from "./errors"
 export { InMemoryBlobStorage } from "./in-memory"
+export type { BlobsRuntime } from "./runtime"
 export type {
   AbortBlobUploadInput,
   BlobBody,

@@ -12,7 +12,7 @@ export type {
   WorkflowRunRequestResult,
 } from "./request"
 export { requestWorkflowRun } from "./request"
-export { WorkflowsRuntime } from "./runtime"
+export { createWorkflowsRuntime, WorkflowsRuntime } from "./runtime"
 export {
   snapshotWorkflowActionInput,
   snapshotWorkflowAgentStepInput,
@@ -69,6 +69,7 @@ export type {
   WorkflowMapperContext,
   WorkflowNodeDefinition,
   WorkflowRunSource,
+  WorkflowRuntimeFacade,
   WorkflowScheduleMapper,
   WorkflowScheduleTriggerDefinition,
   WorkflowStepMapper,

@@ -269,12 +269,12 @@ describe("Sixb dataset registration", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.listDatasets().map((dataset) => dataset.id)).toEqual([
+    expect(sixb.datasets.list().map((dataset) => dataset.id)).toEqual([
       "raw.erp.orders",
       "canonical.orders",
     ])
-    expect(sixb.getDatasetById("raw.erp.orders")).toBe(rawOrdersDataset)
-    expect(sixb.getDatasetById("missing-dataset")).toBeNull()
+    expect(sixb.datasets.getById("raw.erp.orders")).toBe(rawOrdersDataset)
+    expect(sixb.datasets.getById("missing-dataset")).toBeNull()
   })
 
   test("rejects duplicate dataset ids", () => {

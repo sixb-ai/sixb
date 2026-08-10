@@ -54,7 +54,7 @@ describe("date/timestamp normalization on upsert", () => {
     const sixb = new Sixb({ ontology: [Task], ...deps })
 
     const at = new Date("2026-06-20T12:34:56.000Z")
-    const results = await sixb.upsertObjectBatch("task", [
+    const results = await sixb.objects.upsertBatch("task", [
       { properties: { id: "b1", createdAt: at } },
       { properties: { id: "b2", createdAt: at } },
     ])

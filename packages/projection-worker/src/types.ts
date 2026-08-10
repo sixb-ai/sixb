@@ -1,10 +1,8 @@
 import type {
-  DatasetDefinition,
-  LinkProjectionDefinition,
-  ObjectProjectionDefinition,
-  ProjectionDefinition,
+  BlobsRuntime,
+  DatasetsRuntime,
+  ProjectionsRuntime,
   SixbRuntimeContext,
-  TelemetryProjectionDefinition,
 } from "@sixb/core"
 import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
 import type {
@@ -15,17 +13,15 @@ import type {
 
 export interface ProjectionWorkerContext extends SixbRuntimeContext {
   readonly projectionRunsStorage: ProjectionRunStorage
-  getDatasetById(datasetId: string): DatasetDefinition | null
-  getProjectionById(projectionId: string): ProjectionDefinition | null
+  readonly datasets: Pick<DatasetsRuntime, "getById">
+  readonly projections: Pick<ProjectionsRuntime, "getById">
 }
 
-export interface ProjectionWorkerSixb extends SixbRuntimeContext {
+export interface ProjectionWorkerSixb extends Omit<SixbRuntimeContext, "blobStorage" | "rules"> {
   readonly id: string
-  listObjectProjections(): readonly ObjectProjectionDefinition[]
-  listLinkProjections(): readonly LinkProjectionDefinition[]
-  listTelemetryProjections(): readonly TelemetryProjectionDefinition[]
-  getDatasetById(datasetId: string): DatasetDefinition | null
-  getProjectionById(projectionId: string): ProjectionDefinition | null
+  readonly blobs: Pick<BlobsRuntime, "put" | "open" | "stat">
+  readonly datasets: Pick<DatasetsRuntime, "getById">
+  readonly projections: Pick<ProjectionsRuntime, "list" | "getById">
 }
 
 export type ProjectionJob = ProjectionMaterializationIdentity & {

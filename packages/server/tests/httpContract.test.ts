@@ -322,14 +322,14 @@ describe("SixbServer HTTP contract", () => {
       rules: [highRpmRule],
     })
 
-    await sixb.upsertObject("space", { id: "system", name: "System" })
-    await sixb.upsertObject("device", { id: "fan-1", label: "Fan 1" })
-    await sixb.upsertLink("space", "system", "contains", {
+    await sixb.objects.upsert("space", { id: "system", name: "System" })
+    await sixb.objects.upsert("device", { id: "fan-1", label: "Fan 1" })
+    await sixb.objects.upsertLink("space", "system", "contains", {
       targetTypeId: "device",
       targetId: "fan-1",
     })
 
-    await sixb.appendTelemetry("device", [
+    await sixb.objects.appendTelemetry("device", [
       {
         id: "fan-1",
         properties: { rpm: 1100 },

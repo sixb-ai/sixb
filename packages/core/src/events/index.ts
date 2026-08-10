@@ -24,6 +24,7 @@ export {
   type OntologyOutboxDispatcherOptions,
 } from "./outbox-dispatcher"
 export {
+  createEventsRuntime,
   DEFAULT_EVENTS_RETENTION_MS,
   type DomainEventLog,
   EVENTS_STREAM,

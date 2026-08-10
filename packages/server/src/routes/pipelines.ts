@@ -139,7 +139,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/pipelines",
       async (context) => {
         const { scoped } = requestAuthState(context)
-        const pipelines = scoped ? scoped.listPipelines() : sixb.listPipelines()
+        const pipelines = scoped ? scoped.pipelines.list() : sixb.pipelines.list()
         const latestRuns = await getLatestPipelineRuns(
           sixb,
           pipelines.map((pipeline) => pipeline.id)
@@ -164,8 +164,8 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         const { params, set } = context
         const { scoped } = requestAuthState(context)
         const pipeline = scoped
-          ? scoped.getPipelineById(params.pipelineId)
-          : sixb.getPipelineById(params.pipelineId)
+          ? scoped.pipelines.getById(params.pipelineId)
+          : sixb.pipelines.getById(params.pipelineId)
         if (!pipeline) {
           set.status = 404
           return { error: "Pipeline not found" }
@@ -292,15 +292,15 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         const { params, set } = context
         const { scoped } = requestAuthState(context)
         try {
-          const pipeline = sixb.getPipelineById(params.pipelineId)
+          const pipeline = sixb.pipelines.getById(params.pipelineId)
           if (!pipeline) {
             set.status = 404
             return { error: "Pipeline not found" }
           }
 
           const result = scoped
-            ? await scoped.requestPipelineRun({ pipelineId: pipeline.id })
-            : await sixb.requestPipelineRun({ pipelineId: pipeline.id })
+            ? await scoped.pipelines.request({ pipelineId: pipeline.id })
+            : await sixb.pipelines.request({ pipelineId: pipeline.id })
 
           set.status = 202
           return {

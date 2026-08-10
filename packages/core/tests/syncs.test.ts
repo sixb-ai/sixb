@@ -261,9 +261,9 @@ describe("Sixb sync registration", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.listSyncs().map((definition) => definition.id)).toEqual(["sync-orders"])
-    expect(sixb.getSyncById("sync-orders")).toBe(sync)
-    expect(sixb.getSyncById("missing-sync")).toBeNull()
+    expect(sixb.syncs.list().map((definition) => definition.id)).toEqual(["sync-orders"])
+    expect(sixb.syncs.getById("sync-orders")).toBe(sync)
+    expect(sixb.syncs.getById("missing-sync")).toBeNull()
   })
 
   test("rejects duplicate sync ids", () => {

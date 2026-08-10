@@ -1,17 +1,27 @@
 import type {
   ActionDefinition,
+  ActionsRuntime,
   GlobalActionDefinition,
   InferActionParams,
   ObjectActionDefinition,
 } from "../actions"
+import type { AgentsRuntime } from "../agents/runtime"
 import type { AgentDefinition } from "../agents/types"
 import type { Principal } from "../auth"
+import type { BlobsRuntime } from "../blob-storage"
+import type { ConnectorsRuntime } from "../connectors"
+import type { DatasetsRuntime } from "../datasets"
+import type { DomainEventLog } from "../events"
 import type { JsonValue } from "../json"
 import type { Logger } from "../logging"
+import type { DynamicObjectsRuntime } from "../objects"
 import type { InferSchemaOrRef, ObjectRef, SchemaOrRef } from "../ontology"
-import type { Sixb } from "../runtime/sixb"
-import type { OntologySource } from "../runtime/types"
-import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
+import type { PipelinesRuntime } from "../pipelines"
+import type { ProjectionsRuntime } from "../projections"
+import type { RulesRuntime } from "../rules"
+import type { ScheduleDefinition, ScheduleDefinitionForEvent, SchedulesRuntime } from "../schedules"
+import type { SyncsRuntime } from "../syncs"
+import type { WorkflowsRuntime } from "./runtime"
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
 type Append<TValues extends readonly unknown[], TValue> = [...TValues, TValue]
@@ -37,8 +47,25 @@ export type DerivedWorkflowNodeKey<TId extends string> = string extends TId
 
 export interface StepRunContext<TInput extends Record<string, unknown>> {
   readonly input: TInput
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly sixb: WorkflowRuntimeFacade
   readonly logger: Logger
+}
+
+/** Domain-only SDK available to workflow step handlers and their worker. */
+export interface WorkflowRuntimeFacade {
+  readonly objects: DynamicObjectsRuntime
+  readonly actions: ActionsRuntime
+  readonly workflows: WorkflowsRuntime
+  readonly agents: AgentsRuntime
+  readonly datasets: DatasetsRuntime
+  readonly syncs: SyncsRuntime
+  readonly pipelines: PipelinesRuntime
+  readonly schedules: Pick<SchedulesRuntime, "list" | "getById">
+  readonly rules: RulesRuntime
+  readonly projections: ProjectionsRuntime
+  readonly events: DomainEventLog
+  readonly connectors: Pick<ConnectorsRuntime, "connect">
+  readonly blobs: Omit<BlobsRuntime, "close">
 }
 
 export type StepHandler<

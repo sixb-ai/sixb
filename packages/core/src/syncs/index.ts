@@ -6,6 +6,8 @@ export type {
   SyncRunRequestResult,
 } from "./request"
 export { requestSyncRun } from "./request"
+export type { SyncsRuntime } from "./runtime"
+export { createSyncsRuntime } from "./runtime"
 export type {
   BatchSyncConfig,
   BatchSyncDefinitionConfig,

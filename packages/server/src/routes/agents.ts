@@ -157,7 +157,7 @@ async function getAccessibleThread(params: {
   // A scoped principal reads through the core scoped surface, which applies the owner + run:agent
   // filter. When scoped is null the request is privileged (auth disabled), so nothing is filtered.
   if (params.scoped) {
-    return params.scoped.getThread(params.threadId)
+    return params.scoped.agents.getThread(params.threadId)
   }
   return params.storage.threads.getById({ projectId: params.projectId, id: params.threadId })
 }
@@ -286,7 +286,7 @@ async function agentMessageFileContentResponse(
     }
 
     const response = await createFileContentResponse({
-      blobStorage: sixb.blobStorage,
+      blobStorage: sixb.blobs,
       fileRef,
       disposition: parsed.disposition,
       head: options.head,
@@ -314,7 +314,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       "/api/agents",
       (context) => {
         const { scoped } = requestAuthState(context)
-        const agents = scoped ? scoped.listAgents() : sixb.agents.list()
+        const agents = scoped ? scoped.agents.list() : sixb.agents.list()
         return agents.map(serializeAgent)
       },
       {
@@ -332,7 +332,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         const { params, set } = context
         const { scoped } = requestAuthState(context)
         const agent = scoped
-          ? scoped.getAgentById(params.agentId)
+          ? scoped.agents.getById(params.agentId)
           : sixb.agents.getById(params.agentId)
         if (!agent) {
           set.status = 404
@@ -373,7 +373,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           // Scoped principals list through the core scoped surface (owner + run:agent filtered);
           // a null scope is privileged (auth disabled), so it lists unfiltered.
           const result = scoped
-            ? await scoped.listThreads(listInput)
+            ? await scoped.agents.listThreads(listInput)
             : await storage.threads.list({ projectId: sixb.id, ...listInput })
 
           return AgentThreadListResponseSchema.parse({
@@ -406,10 +406,10 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         const { authz, scoped } = requestAuthState(context)
         try {
           const parsed = CreateAgentThreadBodySchema.parse(body)
-          // scoped.getAgentById returns null for agents the principal cannot run, so an ungranted
+          // scoped.agents.getById returns null for agents the principal cannot run, so an ungranted
           // agent 404s (not found) instead of 403 — the latter would disclose that the id exists.
           const agent = scoped
-            ? scoped.getAgentById(parsed.agentId)
+            ? scoped.agents.getById(parsed.agentId)
             : sixb.agents.getById(parsed.agentId)
           if (!agent) {
             set.status = 404
@@ -631,7 +631,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             principal: principalForRequest(authz),
           }
           const result = await (scoped
-            ? scoped.requestAgentRun(requestInput)
+            ? scoped.agents.request(requestInput)
             : sixb.agents.request(requestInput))
 
           set.status = 202

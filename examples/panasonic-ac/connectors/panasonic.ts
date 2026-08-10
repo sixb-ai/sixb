@@ -23,7 +23,7 @@ function getCredentials(): { email: string; password: string } {
  * Panasonic Comfort Cloud REST connector.
  *
  * Auto-discovered by `createSixb()` from the `connectors/` directory.
- * On first use (`sixb.connector(panasonicConnector)`), the adapter:
+ * On first use (`sixb.connectors.connect(panasonicConnector)`), the adapter:
  * 1. Authenticates via OAuth2 PKCE using credentials from environment variables
  * 2. Creates a `rest()` client configured with Panasonic-specific headers,
  *    rate-limiting, retry, and automatic token refresh on 401

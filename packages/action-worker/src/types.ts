@@ -1,9 +1,10 @@
 import type {
-  ActionDefinition,
   ActionSubject,
+  ActionsRuntime,
+  BlobsRuntime,
+  ConnectorsRuntime,
   DomainEventLog,
-  OntologySource,
-  Sixb,
+  DynamicObjectsRuntime,
   Storage,
 } from "@sixb/core"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
@@ -15,29 +16,23 @@ import type {
   ObjectRow,
 } from "@sixb/core/storage"
 
-export interface ActionWorkerSixbFacade
-  extends Pick<
-    Sixb<readonly OntologySource[]>,
-    | "blobStorage"
-    | "connector"
-    | "appendTelemetry"
-    | "listActionsForType"
-    | "getPrimaryPropertyId"
-    | "getValueTypesById"
-    | "isValidLinkTarget"
-    | "objects"
-    | "resolveObjectType"
-  > {}
+export interface ActionWorkerSixbFacade {
+  readonly blobs: Pick<BlobsRuntime, "put" | "open" | "stat">
+  readonly connectors: Pick<ConnectorsRuntime, "connect">
+  readonly objects: DynamicObjectsRuntime
+  readonly actions: Pick<ActionsRuntime, "listForType">
+}
 
 export interface ActionWorkerContext {
   readonly id: string
+  readonly errorReporterHost: object
   readonly events: DomainEventLog
   readonly logs?: LogsRuntime
   readonly storage: Storage
   readonly actionRunsStorage: ActionRunStorage
   readonly ontologyMutations: OntologyMutationRuntime
   readonly sixb: ActionWorkerSixbFacade
-  getActionById(actionId: string): ActionDefinition | null
+  readonly actions: Pick<ActionsRuntime, "getById">
 }
 
 export interface ActionJob {

@@ -315,7 +315,7 @@ describe("listSubTypes", () => {
       ...createTestRuntimeDeps(),
     })
 
-    const subTypes = sixb.listSubTypes("Equipment")
+    const subTypes = sixb.objects.listSubTypes("Equipment")
     expect(subTypes).toContain("HVACEquipment")
     expect(subTypes).toContain("AHU")
     expect(subTypes).not.toContain("Location")
@@ -327,8 +327,8 @@ describe("listSubTypes", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.listSubTypes("AHU")).toEqual([])
-    expect(sixb.listSubTypes("Location")).toEqual([])
+    expect(sixb.objects.listSubTypes("AHU")).toEqual([])
+    expect(sixb.objects.listSubTypes("Location")).toEqual([])
   })
 })
 
@@ -346,7 +346,7 @@ describe("subclass-aware list", () => {
     await sixb.objects(HVACEquipment).upsert({ properties: { id: "hvac-1", name: "HVAC Unit" } })
     await sixb.objects(AHU).upsert({ properties: { id: "ahu-1", name: "AHU Unit" } })
 
-    const result = await sixb.list({ objectTypeIds: ["Equipment"] })
+    const result = await sixb.objects.list({ objectTypeIds: ["Equipment"] })
 
     const ids = result.objects.map((o) => o.primaryId)
     expect(ids).toContain("eq-1")
@@ -365,7 +365,7 @@ describe("subclass-aware list", () => {
     await sixb.objects(Equipment).upsert({ properties: { id: "eq-1", name: "Generic" } })
     await sixb.objects(AHU).upsert({ properties: { id: "ahu-1", name: "AHU" } })
 
-    const result = await sixb.list({ objectTypeIds: ["AHU"] })
+    const result = await sixb.objects.list({ objectTypeIds: ["AHU"] })
     expect(result.objects).toHaveLength(1)
     expect(result.objects[0].primaryId).toBe("ahu-1")
   })
@@ -380,11 +380,11 @@ describe("multi-parent subtype queries", () => {
       ...createTestRuntimeDeps(),
     })
 
-    const waterHeaterSubs = sixb.listSubTypes("WaterHeater")
+    const waterHeaterSubs = sixb.objects.listSubTypes("WaterHeater")
     expect(waterHeaterSubs).toContain("Boiler")
 
     // Also a sub-type of HVACEquipment via extends
-    const hvacSubs = sixb.listSubTypes("HVACEquipment")
+    const hvacSubs = sixb.objects.listSubTypes("HVACEquipment")
     expect(hvacSubs).toContain("Boiler")
   })
 
@@ -400,7 +400,7 @@ describe("multi-parent subtype queries", () => {
       properties: { id: "wh-1", name: "Basic Heater" },
     })
 
-    const result = await sixb.list({ objectTypeIds: ["WaterHeater"] })
+    const result = await sixb.objects.list({ objectTypeIds: ["WaterHeater"] })
     const ids = result.objects.map((o) => o.primaryId)
     expect(ids).toContain("wh-1")
     expect(ids).toContain("boiler-1")
@@ -511,12 +511,12 @@ describe("link target validation", () => {
       ...createTestRuntimeDeps(),
     })
 
-    await sixb.upsertObject("Equipment", { id: "eq-1", name: "E" })
-    await sixb.upsertObject("Location", { id: "loc-1", address: "A" })
+    await sixb.objects.upsert("Equipment", { id: "eq-1", name: "E" })
+    await sixb.objects.upsert("Location", { id: "loc-1", address: "A" })
 
     // Equipment has link "locatedIn" targeting "Location" — exact match
     await expect(
-      sixb.upsertLink("Equipment", "eq-1", "locatedIn", {
+      sixb.objects.upsertLink("Equipment", "eq-1", "locatedIn", {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
@@ -529,12 +529,12 @@ describe("link target validation", () => {
       ...createTestRuntimeDeps(),
     })
 
-    await sixb.upsertObject("HVACEquipment", { id: "hvac-1", name: "H" })
-    await sixb.upsertObject("AHU", { id: "ahu-1", name: "A" })
+    await sixb.objects.upsert("HVACEquipment", { id: "hvac-1", name: "H" })
+    await sixb.objects.upsert("AHU", { id: "ahu-1", name: "A" })
 
     // HVACEquipment has link "feeds" targeting "Equipment" — AHU is sub-type of Equipment
     await expect(
-      sixb.upsertLink("HVACEquipment", "hvac-1", "feeds", {
+      sixb.objects.upsertLink("HVACEquipment", "hvac-1", "feeds", {
         targetTypeId: "AHU",
         targetId: "ahu-1",
       })
@@ -547,18 +547,18 @@ describe("link target validation", () => {
       ...createTestRuntimeDeps(),
     })
 
-    await sixb.upsertObject("HVACEquipment", { id: "hvac-1", name: "H" })
-    await sixb.upsertObject("Location", { id: "loc-1", address: "A" })
+    await sixb.objects.upsert("HVACEquipment", { id: "hvac-1", name: "H" })
+    await sixb.objects.upsert("Location", { id: "loc-1", address: "A" })
 
     // HVACEquipment.feeds targets Equipment — Location is not a sub-type
     await expect(
-      sixb.upsertLink("HVACEquipment", "hvac-1", "feeds", {
+      sixb.objects.upsertLink("HVACEquipment", "hvac-1", "feeds", {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      sixb.upsertLink("HVACEquipment", "hvac-1", "feeds", {
+      sixb.objects.upsertLink("HVACEquipment", "hvac-1", "feeds", {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
@@ -588,19 +588,19 @@ describe("link target validation", () => {
       ...createTestRuntimeDeps(),
     })
 
-    await sixb.upsertObject("Source", { id: "s-1" })
-    await sixb.upsertObject("TypeA", { id: "a-1" })
-    await sixb.upsertObject("TypeB", { id: "b-1" })
+    await sixb.objects.upsert("Source", { id: "s-1" })
+    await sixb.objects.upsert("TypeA", { id: "a-1" })
+    await sixb.objects.upsert("TypeB", { id: "b-1" })
 
     await expect(
-      sixb.upsertLink("Source", "s-1", "rel", {
+      sixb.objects.upsertLink("Source", "s-1", "rel", {
         targetTypeId: "TypeA",
         targetId: "a-1",
       })
     ).resolves.toBeUndefined()
 
     await expect(
-      sixb.upsertLink("Source", "s-1", "rel", {
+      sixb.objects.upsertLink("Source", "s-1", "rel", {
         targetTypeId: "TypeB",
         targetId: "b-1",
       })
@@ -620,12 +620,12 @@ describe("link target validation", () => {
       ...createTestRuntimeDeps(),
     })
 
-    await sixb.upsertObject("Src", { id: "s-1" })
-    await sixb.upsertObject("AHU", { id: "ahu-1", name: "A" })
+    await sixb.objects.upsert("Src", { id: "s-1" })
+    await sixb.objects.upsert("AHU", { id: "ahu-1", name: "A" })
 
     // AHU is sub-type of Equipment
     await expect(
-      sixb.upsertLink("Src", "s-1", "rel", {
+      sixb.objects.upsertLink("Src", "s-1", "rel", {
         targetTypeId: "AHU",
         targetId: "ahu-1",
       })
@@ -645,11 +645,11 @@ describe("link target validation", () => {
       ...createTestRuntimeDeps(),
     })
 
-    await sixb.upsertObject("WildSrc", { id: "s-1" })
-    await sixb.upsertObject("Location", { id: "loc-1", address: "A" })
+    await sixb.objects.upsert("WildSrc", { id: "s-1" })
+    await sixb.objects.upsert("Location", { id: "loc-1", address: "A" })
 
     await expect(
-      sixb.upsertLink("WildSrc", "s-1", "anything", {
+      sixb.objects.upsertLink("WildSrc", "s-1", "anything", {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
@@ -663,13 +663,13 @@ describe("link target validation", () => {
     })
 
     await expect(
-      sixb.removeLink("HVACEquipment", "hvac-1", "feeds", {
+      sixb.objects.removeLink("HVACEquipment", "hvac-1", "feeds", {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      sixb.removeLink("HVACEquipment", "hvac-1", "feeds", {
+      sixb.objects.removeLink("HVACEquipment", "hvac-1", "feeds", {
         targetTypeId: "Location",
         targetId: "loc-1",
       })

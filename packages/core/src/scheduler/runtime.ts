@@ -1,6 +1,6 @@
 import type { DomainEventLog } from "../events"
-import type { CronScheduleDefinition, ScheduleDefinition } from "../schedules"
-import { nextCronOccurrence } from "../schedules"
+import { nextCronOccurrence } from "../schedules/next-occurrence"
+import type { CronScheduleDefinition, ScheduleDefinition } from "../schedules/types"
 import { SchedulerValidationError } from "./errors"
 
 /** Matches the `onError` flush budget: long enough for a healthy broker, short enough to shut down. */

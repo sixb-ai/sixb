@@ -73,13 +73,13 @@ async function createObjectFileApi(options: { readonly auth?: boolean } = {}) {
     mediaType: "application/pdf",
   })
 
-  await sixb.upsertObject("document", {
+  await sixb.objects.upsert("document", {
     id: "doc-1",
     title: "Q3 Report",
     pdf: pdfRef,
     html: htmlRef,
   })
-  await sixb.upsertObject("invoice", {
+  await sixb.objects.upsert("invoice", {
     id: "inv-1",
     pdf: invoiceRef,
   })

@@ -103,18 +103,24 @@ function createRuntime(options: {
     id: "project-1",
     syncRunsStorage,
     lakeStorage,
-    blobStorage,
-    getDatasetById(datasetId: string) {
-      return datasetId === options.sync.target.dataset.id ? options.sync.target.dataset : null
+    blobs: blobStorage,
+    datasets: {
+      getById(datasetId: string) {
+        return datasetId === options.sync.target.dataset.id ? options.sync.target.dataset : null
+      },
     },
-    getSyncById(syncId: string) {
-      return syncId === options.sync.id ? options.sync : null
+    syncs: {
+      getById(syncId: string) {
+        return syncId === options.sync.id ? options.sync : null
+      },
     },
-    async connector<TAdapter extends ConnectorAdapter>(
-      _definition: ConnectorDefinition<string, TAdapter>
-    ): Promise<ConnectorClient<TAdapter>> {
-      await options.onConnect?.()
-      return client as ConnectorClient<TAdapter>
+    connectors: {
+      async connect<TAdapter extends ConnectorAdapter>(
+        _definition: ConnectorDefinition<string, TAdapter>
+      ): Promise<ConnectorClient<TAdapter>> {
+        await options.onConnect?.()
+        return client as ConnectorClient<TAdapter>
+      },
     },
   }
 }

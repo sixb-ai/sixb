@@ -27,7 +27,7 @@ export const recordDiagnosis = defineAction("record-diagnosis", {
     if (!params.finding.trim()) throw new Error("[Northline] A diagnostic finding is required.")
   })
   .writeback(async ({ params, run, sixb, target }) => {
-    const fieldService = await sixb.connector(fieldServiceConnector)
+    const fieldService = await sixb.connectors.connect(fieldServiceConnector)
     return fieldService.recordDiagnosis(
       {
         visitId: target.primaryId,

@@ -81,7 +81,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             }
           }
 
-          const fileRef = await sixb.blobStorage.put({
+          const fileRef = await sixb.blobs.put({
             body: file,
             fileName: file.name || undefined,
             mediaType: file.type || undefined,
@@ -139,10 +139,10 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           const expiresAt = createUploadExpiresAt()
           const expectedDigest = parsed.digest as BlobDigest | undefined
           const providerUpload =
-            supportsDirectUpload(sixb.blobStorage) &&
+            supportsDirectUpload(sixb.blobs) &&
             expectedDigest !== undefined &&
             parsed.sizeBytes !== undefined
-              ? await sixb.blobStorage.createUpload({
+              ? await sixb.blobs.createUpload({
                   uploadId,
                   expiresAt,
                   ...(parsed.fileName === undefined ? {} : { fileName: parsed.fileName }),
@@ -229,7 +229,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             return { error: digestError }
           }
 
-          const fileRef = await sixb.blobStorage.put({
+          const fileRef = await sixb.blobs.put({
             body: uploadBytes,
             ...(session.fileName === undefined ? {} : { fileName: session.fileName }),
             ...(session.mediaType === undefined ? {} : { mediaType: session.mediaType }),
@@ -296,12 +296,12 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             return { error: "Upload session does not use multipart strategy." }
           }
 
-          if (!supportsDirectUpload(sixb.blobStorage)) {
+          if (!supportsDirectUpload(sixb.blobs)) {
             set.status = 400
             return { error: "Blob storage does not support direct uploads." }
           }
 
-          const signedPart = await sixb.blobStorage.signUploadPart({
+          const signedPart = await sixb.blobs.signUploadPart({
             uploadId: session.id,
             stagingKey: session.providerUpload.stagingKey,
             providerUploadId: session.providerUpload.providerUploadId,
@@ -373,7 +373,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
                   expectedDigest: expected.digest,
                   expectedSizeBytes: expected.sizeBytes,
                   parts: parsed.parts,
-                  blobStorage: sixb.blobStorage,
+                  blobStorage: sixb.blobs,
                 })
 
           const identityError = expectedFileRefError(expected, fileRef)
@@ -422,12 +422,12 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           }
 
           if (session.status === "pending" && session.providerUpload) {
-            if (!supportsDirectUpload(sixb.blobStorage)) {
+            if (!supportsDirectUpload(sixb.blobs)) {
               set.status = 400
               return { error: "Blob storage does not support direct uploads." }
             }
 
-            await sixb.blobStorage.abortUpload({
+            await sixb.blobs.abortUpload({
               uploadId: session.id,
               stagingKey: session.providerUpload.stagingKey,
               providerUploadId: session.providerUpload.providerUploadId,
@@ -547,7 +547,7 @@ async function completeProviderUpload(input: {
   readonly expectedDigest?: BlobDigest
   readonly expectedSizeBytes?: number
   readonly parts: readonly { readonly partNumber: number; readonly etag: string }[] | undefined
-  readonly blobStorage: Sixb<readonly OntologySource[]>["blobStorage"]
+  readonly blobStorage: Sixb<readonly OntologySource[]>["blobs"]
 }): Promise<FileRef> {
   const { blobStorage, session } = input
   if (!session.providerUpload) {

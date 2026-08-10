@@ -313,7 +313,7 @@ describe("sixb.as() cross-type list", () => {
     const sixb = await createSeededRuntime()
     const scoped = sixb.as(contextFor(sixb, ["commercial"]))
 
-    const result = await scoped.list({})
+    const result = await scoped.objects.list({})
 
     expect(result.objects.map((row) => row.objectTypeId)).toEqual(["contract"])
   })
@@ -322,9 +322,11 @@ describe("sixb.as() cross-type list", () => {
     const sixb = await createSeededRuntime()
     const scoped = sixb.as(contextFor(sixb, ["commercial"]))
 
-    expect(scoped.list({ objectTypeIds: ["invoice"] })).rejects.toThrow(AuthorizationError)
+    expect(scoped.objects.list({ objectTypeIds: ["invoice"] })).rejects.toThrow(AuthorizationError)
     expect(
-      (await scoped.list({ objectTypeIds: ["contract"] })).objects.map((row) => row.primaryId)
+      (await scoped.objects.list({ objectTypeIds: ["contract"] })).objects.map(
+        (row) => row.primaryId
+      )
     ).toEqual(["c1"])
   })
 
@@ -332,7 +334,7 @@ describe("sixb.as() cross-type list", () => {
     const sixb = await createSeededRuntime()
     const scoped = sixb.as(contextFor(sixb, []))
 
-    expect(await scoped.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
+    expect(await scoped.objects.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
   })
 })
 
@@ -356,8 +358,8 @@ describe("sixb.as() actions", () => {
 
     // apply without view
     const senderOnly = sixb.as(contextFor(sixb, ["ops"]))
-    expect(senderOnly.listActions()).toEqual([])
-    expect(senderOnly.getActionById("send-contract")).toBeNull()
+    expect(senderOnly.actions.list()).toEqual([])
+    expect(senderOnly.actions.getById("send-contract")).toBeNull()
     expect(
       senderOnly.objects(Contract).requestAction({ id: "c1", actionId: "send-contract" })
     ).rejects.toThrow(AuthorizationError)
@@ -369,12 +371,12 @@ describe("sixb.as() operational access", () => {
     const sixb = createRuntime()
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
 
-    expect(operator.listDatasets().map((dataset) => dataset.id)).toEqual(["raw.contracts"])
-    expect(operator.getDatasetById("raw.contracts")?.id).toBe("raw.contracts")
-    expect(operator.getDatasetById("raw.invoices")).toBeNull()
+    expect(operator.datasets.list().map((dataset) => dataset.id)).toEqual(["raw.contracts"])
+    expect(operator.datasets.getById("raw.contracts")?.id).toBe("raw.contracts")
+    expect(operator.datasets.getById("raw.invoices")).toBeNull()
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    expect(runner.listDatasets()).toEqual([])
+    expect(runner.datasets.list()).toEqual([])
   })
 
   test("workflow runs require can.run", async () => {
@@ -386,11 +388,11 @@ describe("sixb.as() operational access", () => {
     }
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    const result = await runner.requestWorkflowRun(input)
+    const result = await runner.workflows.requestById(input)
     expect(result.runId).toBeString()
 
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
-    expect(operator.requestWorkflowRun(input)).rejects.toThrow(AuthorizationError)
+    expect(operator.workflows.requestById(input)).rejects.toThrow(AuthorizationError)
   })
 
   test("event visibility is derived from grants", async () => {
@@ -400,7 +402,7 @@ describe("sixb.as() operational access", () => {
     // The operator can view Contract, so it sees the object's event.
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
     const visibleEvents = await waitFor(
-      () => operator.readEvents(),
+      () => operator.events.read(),
       (published) => published.some((event) => event.type === "object.created")
     )
     expect(visibleEvents.map((event) => event.type)).toContain("object.created")
@@ -408,7 +410,7 @@ describe("sixb.as() operational access", () => {
     // The runner can run workflows but cannot view Contract, so the contract
     // event is filtered out (no workflow has run, so it sees nothing here).
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    expect((await runner.readEvents()).filter((event) => event.type === "object.created")).toEqual(
+    expect((await runner.events.read()).filter((event) => event.type === "object.created")).toEqual(
       []
     )
   })
@@ -417,12 +419,12 @@ describe("sixb.as() operational access", () => {
     const sixb = createRuntime()
 
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
-    expect(operator.listActions().map((action) => action.id)).toEqual(["send-contract"])
-    expect(operator.getActionById("send-contract")?.id).toBe("send-contract")
-    expect(operator.getActionById("archive-invoice")).toBeNull()
+    expect(operator.actions.list().map((action) => action.id)).toEqual(["send-contract"])
+    expect(operator.actions.getById("send-contract")?.id).toBe("send-contract")
+    expect(operator.actions.getById("archive-invoice")).toBeNull()
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    expect(runner.listActions()).toEqual([])
+    expect(runner.actions.list()).toEqual([])
   })
 
   test("dynamic action requests enforce apply and view", async () => {
@@ -430,7 +432,7 @@ describe("sixb.as() operational access", () => {
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
-    const { runId } = await operator.requestAction({
+    const { runId } = await operator.actions.request({
       actionId: "send-contract",
       subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
     })
@@ -438,7 +440,7 @@ describe("sixb.as() operational access", () => {
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
     expect(
-      runner.requestAction({
+      runner.actions.request({
         actionId: "send-contract",
         subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
       })
@@ -453,7 +455,7 @@ describe("sixb.as() operational access", () => {
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
     await expect(
-      runner.requestActionAndWait({
+      runner.actions.requestAndWait({
         actionId: "send-contract",
         subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
       })
@@ -464,30 +466,30 @@ describe("sixb.as() operational access", () => {
     const sixb = createRuntime()
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    expect(runner.listWorkflows().map((workflow) => workflow.id)).toEqual([
+    expect(runner.workflows.list().map((workflow) => workflow.id)).toEqual([
       "renew-contract",
       "agent-review-contract",
     ])
-    expect(runner.getWorkflowById("renew-contract")?.id).toBe("renew-contract")
+    expect(runner.workflows.getById("renew-contract")?.id).toBe("renew-contract")
 
     // No run grant: the workflow is hidden from both listing and lookup.
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
-    expect(operator.listWorkflows()).toEqual([])
-    expect(operator.getWorkflowById("renew-contract")).toBeNull()
+    expect(operator.workflows.list()).toEqual([])
+    expect(operator.workflows.getById("renew-contract")).toBeNull()
   })
 
   test("workflow permission encapsulates agent nodes", async () => {
     const sixb = createRuntime()
     const workflowOnlyPrincipal = sixb.as(contextFor(sixb, ["workflow-only"]))
 
-    expect(workflowOnlyPrincipal.listWorkflows().map((workflow) => workflow.id)).toEqual([
+    expect(workflowOnlyPrincipal.workflows.list().map((workflow) => workflow.id)).toEqual([
       "agent-review-contract",
     ])
-    expect(workflowOnlyPrincipal.getWorkflowById("agent-review-contract")?.id).toBe(
+    expect(workflowOnlyPrincipal.workflows.getById("agent-review-contract")?.id).toBe(
       "agent-review-contract"
     )
 
-    const { runId } = await workflowOnlyPrincipal.requestWorkflowRun({
+    const { runId } = await workflowOnlyPrincipal.workflows.requestById({
       workflowId: "agent-review-contract",
       input: { contract: { objectTypeId: "contract", primaryId: "c1" } },
     })
@@ -495,10 +497,10 @@ describe("sixb.as() operational access", () => {
 
     // A workflow grant authorizes the composite workflow, not direct access
     // to the agents used by its implementation.
-    expect(workflowOnlyPrincipal.listAgents()).toEqual([])
-    expect(workflowOnlyPrincipal.getAgentById("contract-agent")).toBeNull()
+    expect(workflowOnlyPrincipal.agents.list()).toEqual([])
+    expect(workflowOnlyPrincipal.agents.getById("contract-agent")).toBeNull()
     expect(
-      workflowOnlyPrincipal.requestAgentRun({
+      workflowOnlyPrincipal.agents.request({
         agentId: "contract-agent",
         text: "Review this contract.",
       })
@@ -509,13 +511,13 @@ describe("sixb.as() operational access", () => {
     const sixb = createRuntime()
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    expect(runner.listSyncs().map((sync) => sync.id)).toEqual(["sync-contracts"])
-    expect(runner.getSyncById("sync-contracts")?.id).toBe("sync-contracts")
-    expect(runner.getSyncById("sync-invoices")).toBeNull()
+    expect(runner.syncs.list().map((sync) => sync.id)).toEqual(["sync-contracts"])
+    expect(runner.syncs.getById("sync-contracts")?.id).toBe("sync-contracts")
+    expect(runner.syncs.getById("sync-invoices")).toBeNull()
 
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
-    expect(operator.listSyncs()).toEqual([])
-    expect(operator.getSyncById("sync-contracts")).toBeNull()
+    expect(operator.syncs.list()).toEqual([])
+    expect(operator.syncs.getById("sync-contracts")).toBeNull()
   })
 
   test("a listable sync or pipeline can actually be started, and only with can.run", async () => {
@@ -523,17 +525,17 @@ describe("sixb.as() operational access", () => {
     const runner = sixb.as(contextFor(sixb, ["operations"]))
 
     // Before `request*`, `listSyncs()` advertised runnable syncs the caller had no way to start.
-    const sync = await runner.requestSyncRun({ syncId: "sync-contracts" })
+    const sync = await runner.syncs.request({ syncId: "sync-contracts" })
     expect(sync.syncId).toBe("sync-contracts")
     expect(sync.runId).toStartWith("run_")
 
-    const pipeline = await runner.requestPipelineRun({ pipelineId: "contract-pipeline" })
+    const pipeline = await runner.pipelines.request({ pipelineId: "contract-pipeline" })
     expect(pipeline.pipelineId).toBe("contract-pipeline")
     expect(pipeline.runId).toStartWith("run_")
 
     // An existing definition the principal may not run is forbidden, not missing.
-    expect(runner.requestSyncRun({ syncId: "sync-invoices" })).rejects.toThrow(AuthorizationError)
-    expect(runner.requestPipelineRun({ pipelineId: "invoice-pipeline" })).rejects.toThrow(
+    expect(runner.syncs.request({ syncId: "sync-invoices" })).rejects.toThrow(AuthorizationError)
+    expect(runner.pipelines.request({ pipelineId: "invoice-pipeline" })).rejects.toThrow(
       AuthorizationError
     )
   })
@@ -542,33 +544,33 @@ describe("sixb.as() operational access", () => {
     const sixb = createRuntime()
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    expect(runner.listPipelines().map((pipeline) => pipeline.id)).toEqual(["contract-pipeline"])
-    expect(runner.getPipelineById("contract-pipeline")?.id).toBe("contract-pipeline")
-    expect(runner.getPipelineById("invoice-pipeline")).toBeNull()
+    expect(runner.pipelines.list().map((pipeline) => pipeline.id)).toEqual(["contract-pipeline"])
+    expect(runner.pipelines.getById("contract-pipeline")?.id).toBe("contract-pipeline")
+    expect(runner.pipelines.getById("invoice-pipeline")).toBeNull()
 
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
-    expect(operator.listPipelines()).toEqual([])
-    expect(operator.getPipelineById("contract-pipeline")).toBeNull()
+    expect(operator.pipelines.list()).toEqual([])
+    expect(operator.pipelines.getById("contract-pipeline")).toBeNull()
   })
 
   test("agent catalog narrows to runnable agents", () => {
     const sixb = createRuntime()
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    expect(runner.listAgents().map((agent) => agent.id)).toEqual(["contract-agent"])
-    expect(runner.getAgentById("contract-agent")?.id).toBe("contract-agent")
-    expect(runner.getAgentById("invoice-agent")).toBeNull()
+    expect(runner.agents.list().map((agent) => agent.id)).toEqual(["contract-agent"])
+    expect(runner.agents.getById("contract-agent")?.id).toBe("contract-agent")
+    expect(runner.agents.getById("invoice-agent")).toBeNull()
 
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
-    expect(operator.listAgents()).toEqual([])
-    expect(operator.getAgentById("contract-agent")).toBeNull()
+    expect(operator.agents.list()).toEqual([])
+    expect(operator.agents.getById("contract-agent")).toBeNull()
   })
 
   test("agent run requests require can.run", async () => {
     const sixb = createRuntime()
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    const result = await runner.requestAgentRun({
+    const result = await runner.agents.request({
       agentId: "contract-agent",
       text: "Summarize this account.",
     })
@@ -576,7 +578,7 @@ describe("sixb.as() operational access", () => {
 
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
     expect(
-      operator.requestAgentRun({
+      operator.agents.request({
         agentId: "contract-agent",
         text: "Summarize this account.",
       })
@@ -592,7 +594,7 @@ describe("sixb.as() object writes", () => {
     expect(scoped.objects(Contract).upsert({ properties: { id: "c2" } })).rejects.toThrow(
       AuthorizationError
     )
-    expect(scoped.upsertObject("contract", { id: "c2" })).rejects.toThrow(AuthorizationError)
+    expect(scoped.objects.upsert("contract", { id: "c2" })).rejects.toThrow(AuthorizationError)
   })
 
   test("view plus edit writes, and the write is readable back", async () => {
@@ -629,7 +631,7 @@ describe("sixb.as() object writes", () => {
     const sixb = createRuntime()
     const scoped = sixb.as(contextFor(sixb, ["editors"]))
 
-    expect(scoped.upsertObject("invoice", { id: "i1" })).rejects.toThrow(AuthorizationError)
+    expect(scoped.objects.upsert("invoice", { id: "i1" })).rejects.toThrow(AuthorizationError)
   })
 
   test("edit does not expand to subtypes", async () => {
@@ -638,7 +640,9 @@ describe("sixb.as() object writes", () => {
 
     // `can.view(Contract)` covers `signed-contract` (view expands); `can.edit(Contract)` must not.
     expect(await scoped.objects(SignedContract).byId("s1").get()).toBeNull()
-    expect(scoped.upsertObject("signed-contract", { id: "s1" })).rejects.toThrow(AuthorizationError)
+    expect(scoped.objects.upsert("signed-contract", { id: "s1" })).rejects.toThrow(
+      AuthorizationError
+    )
   })
 })
 
@@ -686,7 +690,7 @@ describe("sixb.as() link writes", () => {
     const scoped = sixb.as(contextFor(sixb, ["blind-linkers"]))
 
     expect(
-      scoped.upsertLinkBatch([
+      scoped.objects.upsertLinkBatch([
         {
           objectTypeId: "invoice",
           sourceId: "i1",
@@ -707,7 +711,7 @@ describe("sixb.as() telemetry appends", () => {
     const scoped = sixb.as(contextFor(sixb, ["editors"]))
 
     expect(
-      scoped.appendTelemetry("contract", [
+      scoped.objects.appendTelemetry("contract", [
         {
           id: "c1",
           properties: { temperature: { value: 21, unit: "degreeCelsius" } },
@@ -722,7 +726,7 @@ describe("sixb.as() telemetry appends", () => {
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     const scoped = sixb.as(contextFor(sixb, ["ingest"]))
 
-    await scoped.appendTelemetry("contract", [
+    await scoped.objects.appendTelemetry("contract", [
       {
         id: "c1",
         properties: { temperature: { value: 21, unit: "degreeCelsius" } },
@@ -834,7 +838,7 @@ describe("sixb.as() fails closed on ungranted surfaces", () => {
     const sixb = createRuntime()
 
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
-    expect((await sixb.list({})).objects).toHaveLength(1)
+    expect((await sixb.objects.list({})).objects).toHaveLength(1)
   })
 })
 
@@ -848,39 +852,40 @@ describe("ScopedSixb surface", () => {
 
     expect(Object.keys(scoped).sort()).toEqual(
       [
+        "actions",
+        "agents",
         "authorization",
-        "getDatasetById",
-        "getActionById",
-        "getAgentById",
-        "getObject",
-        "getPipelineById",
-        "getPrimaryPropertyId",
-        "getSyncById",
-        "getThread",
-        "getWorkflowById",
-        "list",
-        "listActions",
-        "listAgents",
-        "listDatasets",
-        "listPipelines",
-        "listSyncs",
-        "listThreads",
-        "listWorkflows",
+        "datasets",
+        "events",
         "objects",
-        "readEvents",
-        "requestAction",
-        "requestActionAndWait",
-        "requestAgentRun",
-        "requestPipelineRun",
-        "requestSyncRun",
-        "requestWorkflowRun",
-        "appendTelemetry",
-        "removeLink",
-        "upsertLink",
-        "upsertLinkBatch",
-        "upsertObject",
-        "upsertObjectBatch",
+        "pipelines",
+        "syncs",
+        "workflows",
       ].sort()
     )
+    expect(Object.keys(scoped.objects).sort()).toEqual(
+      [
+        "appendTelemetry",
+        "get",
+        "getPrimaryPropertyId",
+        "list",
+        "removeLink",
+        "upsert",
+        "upsertBatch",
+        "upsertLink",
+        "upsertLinkBatch",
+      ].sort()
+    )
+    expect(Object.keys(scoped.actions).sort()).toEqual(
+      ["getById", "list", "request", "requestAndWait"].sort()
+    )
+    expect(Object.keys(scoped.datasets).sort()).toEqual(["getById", "list"])
+    expect(Object.keys(scoped.workflows).sort()).toEqual(["getById", "list", "requestById"])
+    expect(Object.keys(scoped.syncs).sort()).toEqual(["getById", "list", "request"])
+    expect(Object.keys(scoped.pipelines).sort()).toEqual(["getById", "list", "request"])
+    expect(Object.keys(scoped.agents).sort()).toEqual(
+      ["getById", "getThread", "list", "listThreads", "request"].sort()
+    )
+    expect(Object.keys(scoped.events)).toEqual(["read"])
   })
 })

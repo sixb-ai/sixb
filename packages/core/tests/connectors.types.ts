@@ -23,7 +23,7 @@ const sixb = new Sixb({
   ...createTestRuntimeDeps(),
 })
 
-const db = await sixb.connector(erpDb)
+const db = await sixb.connectors.connect(erpDb)
 const _queryResult: string = db.query("select 1")
 
 // @ts-expect-error connector clients are typed from the registered connector definition

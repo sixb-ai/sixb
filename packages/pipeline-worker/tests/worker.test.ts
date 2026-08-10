@@ -145,9 +145,8 @@ describe("PipelineWorker", () => {
         ...sixb.storage,
         pipelineRuns: undefined,
       },
-      listPipelines: () => sixb.listPipelines(),
-      getPipelineById: (pipelineId: string) => sixb.getPipelineById(pipelineId),
-      getDatasetById: (datasetId: string) => sixb.getDatasetById(datasetId),
+      pipelines: sixb.pipelines,
+      datasets: sixb.datasets,
     }
 
     expect(() => new PipelineWorker(withoutPipelineRuns)).toThrow("storage.pipelineRuns")

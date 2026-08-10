@@ -19,7 +19,8 @@ export type {
   WaitForActionRunInput,
 } from "./request"
 export { requestAction, requestActionAndWait, waitForActionRun } from "./request"
-export { ActionsRuntime } from "./runtime"
+export type { ActionsRuntime } from "./runtime"
+export { createActionsRuntime } from "./runtime"
 export type {
   ActionBinding,
   ActionBlobContext,

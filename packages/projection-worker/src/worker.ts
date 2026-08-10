@@ -15,10 +15,7 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
   private readonly sixb: ProjectionWorkerSixb
 
   constructor(sixb: ProjectionWorkerSixb) {
-    const projectionCount =
-      sixb.listObjectProjections().length +
-      sixb.listLinkProjections().length +
-      sixb.listTelemetryProjections().length
+    const projectionCount = sixb.projections.list().length
     if (projectionCount === 0) {
       throw new Error("[SixbProjectionWorker] No projection definitions are registered.")
     }
@@ -116,11 +113,11 @@ function buildProjectionContext(
     events: sixb.events,
     storage: sixb.storage,
     lakeStorage: sixb.lakeStorage,
-    blobStorage: sixb.blobStorage,
+    blobStorage: sixb.blobs,
     queues: sixb.queues,
     projectionRunsStorage,
-    getDatasetById: (datasetId) => sixb.getDatasetById(datasetId),
-    getProjectionById: (projectionId) => sixb.getProjectionById(projectionId),
+    datasets: sixb.datasets,
+    projections: sixb.projections,
   }
   shareOntologyMutationRuntime(sixb, context)
   shareProjectionRegistry(sixb, context)

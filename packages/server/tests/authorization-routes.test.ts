@@ -188,20 +188,20 @@ async function createRuntime(options: { readonly auth?: boolean } = {}) {
     auth: options.auth === false ? undefined : { id: "test", kind: "dev" as const },
   })
 
-  await sixb.upsertObject("contract", { id: "c1" })
-  await sixb.upsertObject("invoice", { id: "i1" })
-  await sixb.upsertLink("contract", "c1", "invoice", {
+  await sixb.objects.upsert("contract", { id: "c1" })
+  await sixb.objects.upsert("invoice", { id: "i1" })
+  await sixb.objects.upsertLink("contract", "c1", "invoice", {
     targetTypeId: "invoice",
     targetId: "i1",
   })
-  await sixb.appendTelemetry("contract", [
+  await sixb.objects.appendTelemetry("contract", [
     {
       id: "c1",
       properties: { temperature: 72.5 },
       at: new Date("2026-05-16T10:30:00.000Z"),
     },
   ])
-  await sixb.appendTelemetry("invoice", [
+  await sixb.objects.appendTelemetry("invoice", [
     {
       id: "i1",
       properties: { score: 20 },

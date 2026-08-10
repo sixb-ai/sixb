@@ -53,7 +53,7 @@ describe("upsertObjectBatch", () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
-    const results = await sixb.upsertObjectBatch("room", [
+    const results = await sixb.objects.upsertBatch("room", [
       { properties: { id: "r1", name: "Kitchen" } },
       { properties: { id: "r2", name: "Bedroom" } },
       { properties: { id: "r3", name: "Bathroom" } },
@@ -79,7 +79,7 @@ describe("upsertObjectBatch", () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
-    const results = await sixb.upsertObjectBatch("room", [
+    const results = await sixb.objects.upsertBatch("room", [
       { properties: { id: "r1", name: "Kitchen" } },
       { properties: { id: "r2", name: 12345 } }, // invalid type for "name"
       { properties: { id: "r3", name: "Bathroom" } },
@@ -99,7 +99,7 @@ describe("upsertObjectBatch", () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
-    const results = await sixb.upsertObjectBatch("room", [
+    const results = await sixb.objects.upsertBatch("room", [
       { properties: { id: "r1" } }, // missing required "name"
       { properties: { id: "r2" } }, // missing required "name"
     ])
@@ -116,7 +116,7 @@ describe("upsertObjectBatch", () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
-    const results = await sixb.upsertObjectBatch("room", [])
+    const results = await sixb.objects.upsertBatch("room", [])
     expect(results).toEqual([])
   })
 
@@ -125,9 +125,9 @@ describe("upsertObjectBatch", () => {
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
     // Pre-create
-    await sixb.upsertObject("room", { id: "r1", name: "Old Name" })
+    await sixb.objects.upsert("room", { id: "r1", name: "Old Name" })
 
-    const results = await sixb.upsertObjectBatch("room", [
+    const results = await sixb.objects.upsertBatch("room", [
       { properties: { id: "r1", name: "New Name" } },
     ])
 
@@ -147,7 +147,7 @@ describe("upsertObjectBatch", () => {
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
     const publishSpy = spyPublishedFacts(sixb.events as EventsRuntime)
 
-    await sixb.upsertObjectBatch("room", [
+    await sixb.objects.upsertBatch("room", [
       { properties: { id: "r1", name: "A" } },
       { properties: { id: "r2", name: "B" } },
       { properties: { id: "r3", name: "C" } },
@@ -174,12 +174,12 @@ describe("upsertLinkBatch", () => {
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
     // Pre-create objects
-    await sixb.upsertObject("room", { id: "r1", name: "Room 1" })
-    await sixb.upsertObject("room", { id: "r2", name: "Room 2" })
-    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
-    await sixb.upsertObject("sensor", { id: "s2", name: "Humidity" })
+    await sixb.objects.upsert("room", { id: "r1", name: "Room 1" })
+    await sixb.objects.upsert("room", { id: "r2", name: "Room 2" })
+    await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
+    await sixb.objects.upsert("sensor", { id: "s2", name: "Humidity" })
 
-    const results = await sixb.upsertLinkBatch([
+    const results = await sixb.objects.upsertLinkBatch([
       {
         objectTypeId: "room",
         sourceId: "r1",
@@ -217,10 +217,10 @@ describe("upsertLinkBatch", () => {
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
     // Only create the sensor, not the room
-    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
-    await sixb.upsertObject("room", { id: "r1", name: "Room 1" })
+    await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
+    await sixb.objects.upsert("room", { id: "r1", name: "Room 1" })
 
-    const results = await sixb.upsertLinkBatch([
+    const results = await sixb.objects.upsertLinkBatch([
       {
         objectTypeId: "room",
         sourceId: "missing-room",
@@ -254,17 +254,17 @@ describe("upsertLinkBatch", () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
-    await sixb.upsertObject("building", { id: "b1", name: "HQ" })
-    await sixb.upsertObject("building", { id: "b2", name: "Branch" })
-    await sixb.upsertObject("room", { id: "r1", name: "Room 1" })
+    await sixb.objects.upsert("building", { id: "b1", name: "HQ" })
+    await sixb.objects.upsert("building", { id: "b2", name: "Branch" })
+    await sixb.objects.upsert("room", { id: "r1", name: "Room 1" })
 
     // Create existing cardinality:one link
-    await sixb.upsertLink("room", "r1", "inBuilding", {
+    await sixb.objects.upsertLink("room", "r1", "inBuilding", {
       targetTypeId: "building",
       targetId: "b1",
     })
 
-    const results = await sixb.upsertLinkBatch([
+    const results = await sixb.objects.upsertLinkBatch([
       {
         objectTypeId: "room",
         sourceId: "r1",
@@ -284,7 +284,7 @@ describe("upsertLinkBatch", () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
-    const results = await sixb.upsertLinkBatch([])
+    const results = await sixb.objects.upsertLinkBatch([])
     expect(results).toEqual([])
   })
 
@@ -293,9 +293,9 @@ describe("upsertLinkBatch", () => {
     const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
     const publishSpy = spyPublishedFacts(sixb.events as EventsRuntime)
 
-    await sixb.upsertObject("room", { id: "r1", name: "Room 1" })
-    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
-    await sixb.upsertObject("sensor", { id: "s2", name: "Humidity" })
+    await sixb.objects.upsert("room", { id: "r1", name: "Room 1" })
+    await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
+    await sixb.objects.upsert("sensor", { id: "s2", name: "Humidity" })
 
     await waitFor(
       () => sixb.events.read(),
@@ -303,7 +303,7 @@ describe("upsertLinkBatch", () => {
     )
     publishSpy.mockClear()
 
-    await sixb.upsertLinkBatch([
+    await sixb.objects.upsertLinkBatch([
       {
         objectTypeId: "room",
         sourceId: "r1",

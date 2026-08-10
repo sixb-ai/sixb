@@ -24,7 +24,7 @@ void events.publishEnvelopes([])
  *
  * This caught real holes. `EventsEmitOptions` was exported nowhere at all, so `emit`'s second
  * parameter had no name, and `StoredDomainEvent` never reached the root even though `append` returns
- * it and the public `ScopedSixb.readEvents()` has always returned it.
+ * it and the public `ScopedSixb.events.read()` has always returned it.
  */
 declare const handWritten: {
   append(input: EventsAppendInput): Promise<readonly StoredDomainEvent[]>

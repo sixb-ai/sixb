@@ -6,7 +6,16 @@ type ConnectorConnectionState = {
   clientPromise: Promise<unknown>
 }
 
-export class ConnectorRuntime {
+export interface ConnectorsRuntime {
+  list(): readonly ConnectorDefinition[]
+  getById(id: string): ConnectorDefinition | null
+  connect<TAdapter extends ConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>
+  ): Promise<ConnectorClient<TAdapter>>
+  disconnectAll(): Promise<void>
+}
+
+class ConnectorRuntime implements ConnectorsRuntime {
   private readonly definitionsById = new Map<string, ConnectorDefinition>()
   private readonly connectionStates = new Map<ConnectorDefinition, ConnectorConnectionState>()
 
@@ -97,4 +106,11 @@ export class ConnectorRuntime {
       await definition.adapter.disconnect(client as never)
     }
   }
+}
+
+export function createConnectorsRuntime(
+  projectId: string,
+  definitions: readonly ConnectorDefinition[]
+): ConnectorsRuntime {
+  return new ConnectorRuntime(projectId, definitions)
 }

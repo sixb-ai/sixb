@@ -74,7 +74,7 @@ describe("runtime object writes", () => {
     const { sixb } = createRuntime()
 
     await sixb.objects(Sensor).upsert({ properties: { id: "s1", name: "Temp" } })
-    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     await sixb.objects(Room).byId("r1").link(Room.l.primarySensor, {
       objectTypeId: "sensor",
       primaryId: "s1",
@@ -83,12 +83,15 @@ describe("runtime object writes", () => {
       objectTypeId: "sensor",
       primaryId: "s1",
     })
-    await sixb.upsertLink("room", "r1", "sensors", {
+    await sixb.objects.upsertLink("room", "r1", "sensors", {
       targetTypeId: "sensor",
       targetId: "s1",
       properties: { role: "primary" },
     })
-    await sixb.removeLink("room", "r1", "sensors", { targetTypeId: "sensor", targetId: "s1" })
+    await sixb.objects.removeLink("room", "r1", "sensors", {
+      targetTypeId: "sensor",
+      targetId: "s1",
+    })
 
     expect(await commitOrigins(sixb)).toEqual(new Array(6).fill("runtime"))
   })
@@ -96,11 +99,11 @@ describe("runtime object writes", () => {
   test("upserts an absent identity as a create and an existing one as a patch", async () => {
     const { sixb } = createRuntime()
 
-    const created = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    const created = await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     expect(created.version).toBe(1)
     expect(created.properties).toEqual({ id: "r1", name: "Kitchen" })
 
-    const patched = await sixb.upsertObject("room", { id: "r1", note: "Warm" })
+    const patched = await sixb.objects.upsert("room", { id: "r1", note: "Warm" })
     expect(patched.version).toBe(2)
     expect(patched.properties).toEqual({ id: "r1", name: "Kitchen", note: "Warm" })
     expect(patched.createdAt).toEqual(created.createdAt)
@@ -108,7 +111,7 @@ describe("runtime object writes", () => {
 
   test("restores a tombstoned identity through a later upsert", async () => {
     const { sixb } = createRuntime()
-    const created = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    const created = await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
 
     // The runtime verb, not a hand-built commit: proving that the gap `delete()` closes was real.
     await sixb.objects(Room).byId("r1").delete()
@@ -116,7 +119,7 @@ describe("runtime object writes", () => {
 
     // Restoring replaces the tombstone with independent create authority, so the effective object is
     // materialized fresh rather than resuming the deleted row's revision.
-    const restored = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    const restored = await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     expect(restored.properties).toEqual({ id: "r1", name: "Kitchen" })
     expect(restored.version).toBe(1)
     expect(restored.lastCommitId).not.toBe(created.lastCommitId)
@@ -124,8 +127,8 @@ describe("runtime object writes", () => {
 
   test("delete cascades over links and restore is a no-op for code-owned objects", async () => {
     const { sixb } = createRuntime()
-    await sixb.upsertObject("sensor", { id: "s1", name: "Thermostat" })
-    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    await sixb.objects.upsert("sensor", { id: "s1", name: "Thermostat" })
+    await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     await sixb.objects(Room).byId("r1").link(Room.l.primarySensor, {
       objectTypeId: "sensor",
       primaryId: "s1",
@@ -149,11 +152,11 @@ describe("runtime object writes", () => {
 
   test("keeps a same-value upsert an effective no-op", async () => {
     const { sixb } = createRuntime()
-    const created = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    const created = await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     await waitForDeliveredEvents(sixb, 1)
     const publishSpy = spyPublishedFacts(sixb.events as EventsRuntime)
 
-    const replayed = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    const replayed = await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
 
     expect(replayed).toEqual(created)
     expect(publishSpy).not.toHaveBeenCalled()
@@ -163,12 +166,15 @@ describe("runtime object writes", () => {
 
   test("treats removing a missing link as a no-op", async () => {
     const { sixb } = createRuntime()
-    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
-    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
+    await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
+    await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
     await waitForDeliveredEvents(sixb, 2)
     const publishSpy = spyPublishedFacts(sixb.events as EventsRuntime)
 
-    await sixb.removeLink("room", "r1", "sensors", { targetTypeId: "sensor", targetId: "s1" })
+    await sixb.objects.removeLink("room", "r1", "sensors", {
+      targetTypeId: "sensor",
+      targetId: "s1",
+    })
 
     expect(publishSpy).not.toHaveBeenCalled()
     expect(await listSensorLinks(sixb, "sensors")).toEqual([])
@@ -176,10 +182,13 @@ describe("runtime object writes", () => {
 
   test("reports a missing link endpoint as an object-not-found failure", async () => {
     const { sixb } = createRuntime()
-    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
 
     await expect(
-      sixb.upsertLink("room", "r1", "sensors", { targetTypeId: "sensor", targetId: "missing" })
+      sixb.objects.upsertLink("room", "r1", "sensors", {
+        targetTypeId: "sensor",
+        targetId: "missing",
+      })
     ).rejects.toBeInstanceOf(ObjectNotFoundError)
   })
 
@@ -187,10 +196,10 @@ describe("runtime object writes", () => {
     // Managed link authority carries the complete property set, so a link upsert is a replace, not
     // a merge: properties left out are cleared. Documented in docs/ontology/links.md.
     const { sixb } = createRuntime()
-    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
-    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
+    await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
+    await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
 
-    await sixb.upsertLink("room", "r1", "sensors", {
+    await sixb.objects.upsertLink("room", "r1", "sensors", {
       targetTypeId: "sensor",
       targetId: "s1",
       properties: { role: "primary", note: "installed 2026" },
@@ -200,7 +209,7 @@ describe("runtime object writes", () => {
       note: "installed 2026",
     })
 
-    await sixb.upsertLink("room", "r1", "sensors", {
+    await sixb.objects.upsertLink("room", "r1", "sensors", {
       targetTypeId: "sensor",
       targetId: "s1",
       properties: { note: "recalibrated" },
@@ -214,16 +223,16 @@ describe("runtime object writes", () => {
     // The same replace rule means a required link property must be present on every write; it is
     // not carried over from the edge already stored.
     const { sixb } = createRuntime()
-    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
-    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
-    await sixb.upsertLink("room", "r1", "certifiedSensors", {
+    await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
+    await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
+    await sixb.objects.upsertLink("room", "r1", "certifiedSensors", {
       targetTypeId: "sensor",
       targetId: "s1",
       properties: { role: "primary" },
     })
 
     await expect(
-      sixb.upsertLink("room", "r1", "certifiedSensors", {
+      sixb.objects.upsertLink("room", "r1", "certifiedSensors", {
         targetTypeId: "sensor",
         targetId: "s1",
         properties: {},
@@ -237,7 +246,7 @@ describe("runtime object writes", () => {
   test("surfaces effective validation from the materializer", async () => {
     const { sixb } = createRuntime()
 
-    await expect(sixb.upsertObject("room", { id: "r1" })).rejects.toBeInstanceOf(
+    await expect(sixb.objects.upsert("room", { id: "r1" })).rejects.toBeInstanceOf(
       MaterializationValidationError
     )
   })
@@ -248,8 +257,8 @@ describe("runtime object writes", () => {
     // the same invalid input is skippable through one API and fatal through the other.
     const { sixb } = createRuntime()
 
-    const single = await sixb.upsertObject("room", { id: "r1" }).catch((error: unknown) => error)
-    const [batch] = await sixb.upsertObjectBatch("room", [{ properties: { id: "r1" } }])
+    const single = await sixb.objects.upsert("room", { id: "r1" }).catch((error: unknown) => error)
+    const [batch] = await sixb.objects.upsertBatch("room", [{ properties: { id: "r1" } }])
 
     expect(single).toBeInstanceOf(OntologyValidationError)
     expect(batch?.ok === false && batch.error).toBeInstanceOf(OntologyValidationError)
@@ -262,9 +271,9 @@ describe("runtime object writes", () => {
 describe("runtime object batches", () => {
   test("keeps local errors, item errors, and successes at their input positions", async () => {
     const { sixb } = createRuntime()
-    await sixb.upsertObject("room", { id: "r2", name: "Bedroom" })
+    await sixb.objects.upsert("room", { id: "r2", name: "Bedroom" })
 
-    const results = await sixb.upsertObjectBatch("room", [
+    const results = await sixb.objects.upsertBatch("room", [
       { properties: { id: "r1", name: "Kitchen" } },
       { properties: { name: "No identity" } },
       { properties: { id: "r3" } },
@@ -287,7 +296,7 @@ describe("runtime object batches", () => {
   test("collapses an identical repeat and rejects a conflicting one", async () => {
     const { sixb } = createRuntime()
 
-    const results = await sixb.upsertObjectBatch("room", [
+    const results = await sixb.objects.upsertBatch("room", [
       { properties: { id: "r1", name: "Kitchen" } },
       { properties: { id: "r1", name: "Kitchen" } },
       { properties: { id: "r1", name: "Renamed" } },
@@ -315,7 +324,7 @@ describe("runtime object batches", () => {
       Promise.reject(new Error("provider exploded"))
 
     await expect(
-      sixb.upsertObjectBatch("room", [
+      sixb.objects.upsertBatch("room", [
         { properties: { id: "r1", name: "Kitchen" } },
         { properties: { id: "r2", name: "Bedroom" } },
       ])
@@ -329,12 +338,12 @@ describe("runtime object batches", () => {
 describe("runtime link batches", () => {
   test("applies ordered items against one evolving cardinality", async () => {
     const { sixb } = createRuntime()
-    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     for (const sensorId of ["s1", "s2"]) {
-      await sixb.upsertObject("sensor", { id: sensorId, name: sensorId })
+      await sixb.objects.upsert("sensor", { id: sensorId, name: sensorId })
     }
 
-    const results = await sixb.upsertLinkBatch([
+    const results = await sixb.objects.upsertLinkBatch([
       {
         objectTypeId: "room",
         sourceId: "r1",
@@ -358,8 +367,8 @@ describe("runtime link batches", () => {
 
   test("collapses identical duplicates and rejects conflicting ones", async () => {
     const { sixb } = createRuntime()
-    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
-    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
+    await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
+    await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
 
     const item = {
       objectTypeId: "room",
@@ -367,7 +376,7 @@ describe("runtime link batches", () => {
       linkId: "sensors",
       target: { targetTypeId: "sensor", targetId: "s1", properties: { role: "primary" } },
     }
-    const results = await sixb.upsertLinkBatch([
+    const results = await sixb.objects.upsertLinkBatch([
       item,
       item,
       { ...item, target: { ...item.target, properties: { role: "backup" } } },
@@ -395,7 +404,7 @@ describe("committed fact delivery", () => {
     })
 
     const created = await Promise.race([
-      sixb.upsertObject("room", { id: "r1", name: "Kitchen" }),
+      sixb.objects.upsert("room", { id: "r1", name: "Kitchen" }),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("mutation waited for broker publication")), 100)
       ),
@@ -422,7 +431,7 @@ describe("committed fact delivery", () => {
       return publish(envelopes)
     }
 
-    const created = await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
+    const created = await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     expect(created.properties.name).toBe("Kitchen")
     expect(await sixb.events.read({ types: ["object.created"] })).toHaveLength(0)
     await waitForOutboxRetry(deps.storage)
@@ -447,14 +456,17 @@ describe("committed fact delivery", () => {
     const appendSpy = mock(sixb.events.append.bind(sixb.events))
     sixb.events.append = appendSpy
 
-    await sixb.upsertObject("room", { id: "r1", name: "Kitchen" })
-    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
-    await sixb.upsertLink("room", "r1", "sensors", {
+    await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
+    await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
+    await sixb.objects.upsertLink("room", "r1", "sensors", {
       targetTypeId: "sensor",
       targetId: "s1",
     })
-    await sixb.removeLink("room", "r1", "sensors", { targetTypeId: "sensor", targetId: "s1" })
-    await sixb.upsertObjectBatch("room", [{ properties: { id: "r2", name: "Bedroom" } }])
+    await sixb.objects.removeLink("room", "r1", "sensors", {
+      targetTypeId: "sensor",
+      targetId: "s1",
+    })
+    await sixb.objects.upsertBatch("room", [{ properties: { id: "r2", name: "Bedroom" } }])
 
     expect(appendSpy).not.toHaveBeenCalled()
   })

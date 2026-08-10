@@ -93,7 +93,7 @@ export {
   requestAgentRun,
 } from "./request"
 export type { ScopedListAgentThreadsInput } from "./runtime"
-export { AgentsRuntime } from "./runtime"
+export { AgentsRuntime, createAgentsRuntime } from "./runtime"
 export type {
   AgentRunControlStreamId,
   AgentRunFinishedEvent,

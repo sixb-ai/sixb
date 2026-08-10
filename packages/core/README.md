@@ -24,7 +24,7 @@ bun add @sixb/core
 
 **Actions** -- Typed audited commands. Actions can run external writeback, declare local object/link edits, and run post-commit effects.
 
-**Connectors** -- Typed external system clients that you register with the runtime and resolve lazily with `sixb.connector(...)`.
+**Connectors** -- Typed external system clients that you register with the runtime and resolve lazily with `sixb.connectors.connect(...)`.
 
 **Syncs** -- Declarative batch sync definitions that read from one connector and write into one raw dataset. V1 supports `snapshot`, `append`, and keyed `merge` modes with optional triggers and typed source checkpoints.
 
@@ -164,7 +164,7 @@ await sixb.actions.request({
 
 ## Connectors
 
-Connectors are registered definitions. The runtime only creates the client when you resolve one with `sixb.connector(...)`.
+Connectors are registered definitions. The runtime only creates the client when you resolve one with `sixb.connectors.connect(...)`.
 
 ```ts
 import { defineConnector } from "@sixb/core"
@@ -188,7 +188,7 @@ const sixb = new Sixb({
   connectors: [erpDb],
 })
 
-const db = await sixb.connector(erpDb)
+const db = await sixb.connectors.connect(erpDb)
 await db.query("select 1")
 ```
 
@@ -228,7 +228,7 @@ const edgeGateway = defineConnector(
         .idempotencyKey(({ request }) => request.headers.get("x-delivery-id"))
         .handle(async ({ body, sixb, logger }) => {
           logger.info("Received device telemetry", { deviceId: body.deviceId })
-          await sixb.upsertObject("Device", {
+          await sixb.objects.upsert("Device", {
             id: body.deviceId,
             temperature: body.temperature,
           })
@@ -303,8 +303,8 @@ const sixb = new Sixb({
   syncs: [syncOrders, syncOrderEvents, syncInvoices],
 })
 
-sixb.listSyncs()
-sixb.getSyncById("sync-orders")
+sixb.syncs.list()
+sixb.syncs.getById("sync-orders")
 ```
 
 Call `.checkpoint<T>()` before `.from(...)` to type `context.checkpoint` and

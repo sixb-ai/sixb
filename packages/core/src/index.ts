@@ -74,6 +74,7 @@ export type {
   ActionRunPhaseInfo,
   ActionRuntimeFacade,
   ActionSubject,
+  ActionsRuntime,
   ActionTargetObject,
   ActionTelemetryObjectSet,
   ActionValidationContext,
@@ -142,6 +143,7 @@ export type {
   DatasetDefinition,
   DatasetPrimaryKey,
   DatasetSchema,
+  DatasetsRuntime,
   MergeChange,
 } from "./datasets"
 export {
@@ -377,6 +379,7 @@ export type {
   RuleEventDependency,
   RulePredicate,
   RuleSubject,
+  RulesRuntime,
 } from "./rules"
 export {
   defineRule,
@@ -494,6 +497,7 @@ export type {
   BlobDigest,
   BlobInfo,
   BlobStorage,
+  BlobsRuntime,
   FileRef,
 } from "./blob-storage"
 export {
@@ -592,6 +596,7 @@ export type {
   ConnectorClient,
   ConnectorContext,
   ConnectorDefinition,
+  ConnectorsRuntime,
 } from "./connectors"
 export { defineConnector } from "./connectors"
 
@@ -639,6 +644,7 @@ export type {
   SyncReadResult,
   SyncRunRequestOptions,
   SyncRunRequestResult,
+  SyncsRuntime,
   SyncTargetBuilder,
 } from "./syncs"
 export { defineSync, requestSyncRun } from "./syncs"
@@ -665,6 +671,7 @@ export type {
   ScheduleDefinition,
   ScheduleDefinitionForEvent,
   ScheduleReference,
+  SchedulesRuntime,
   ScheduleTriggerDefinition,
 } from "./schedules"
 export {
@@ -693,6 +700,7 @@ export type {
   PipelineStepOutputOptions,
   PipelineStepRunContext,
   PipelineStepRunHandler,
+  PipelinesRuntime,
   RequestPipelineRunInput,
 } from "./pipelines"
 export {
@@ -749,10 +757,12 @@ export type {
   WorkflowRunRequestOptions,
   WorkflowRunRequestResult,
   WorkflowRunSource,
+  WorkflowRuntimeFacade,
   WorkflowScheduleMapper,
   WorkflowScheduleTriggerDefinition,
   WorkflowStepMapper,
   WorkflowStepOutputs,
+  WorkflowsRuntime,
   WorkflowTriggerDefinition,
 } from "./workflows"
 export {
@@ -788,6 +798,7 @@ export type {
   OntologyOperationalStatus,
   SixbReadiness,
 } from "./maintenance"
+export type { DynamicObjectsRuntime, ObjectsRuntimeOperations } from "./objects"
 export type {
   BatchItemResult,
   CreateSixbOptions,
@@ -806,6 +817,7 @@ export type {
   ObjectSet,
   ObjectSetListInput,
   ObjectSetQueryPropertyToken,
+  ObjectsRuntime,
   ObjectWhereBuilder,
   ObjectWhereClause,
   OntologyDocumentInput,
@@ -814,6 +826,7 @@ export type {
   RegisteredValueTypes,
   ScopedObjectByIdHandle,
   ScopedObjectSet,
+  ScopedObjectsRuntime,
   ScopedSixb,
   SixbInstance,
   SixbOptions,
@@ -868,6 +881,7 @@ export type {
   AgentReasoningPart,
   AgentRequestErrorCode,
   AgentStepStartPart,
+  AgentsRuntime,
   AgentTextPart,
   AgentToolCallPart,
   AgentToolCallState,
@@ -918,6 +932,7 @@ export type {
   ObjectProjectionDefinition,
   ObjectProjectionTarget,
   ProjectionDefinition,
+  ProjectionsRuntime,
   ProjectionTarget,
   ProjectionTargetByKind,
   TelemetryProjectionDefinition,
