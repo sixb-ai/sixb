@@ -314,7 +314,6 @@ class InMemoryAgentRunStore implements AgentRunStore {
       status: input.status,
       ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       ...(input.finishReason === undefined ? {} : { finishReason: input.finishReason }),
-      ...(input.usage === undefined ? {} : { usage: clone(input.usage) }),
       ...(input.diagnostics === undefined ? {} : { diagnostics: clone(input.diagnostics) }),
       ...(input.status === "succeeded" || input.error === undefined
         ? {}

@@ -494,7 +494,6 @@ export class PgWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorag
           status = ${input.status},
           model_id = COALESCE(${input.modelId ?? null}, model_id),
           finish_reason = ${input.finishReason ?? null},
-          usage = ${input.usage ? JSON.stringify(input.usage) : null}::text::jsonb,
           trace = ${input.trace ? JSON.stringify(input.trace) : null}::text::jsonb,
           diagnostics = ${input.diagnostics ? JSON.stringify(input.diagnostics) : null}::text::jsonb,
           error = ${input.status === "succeeded" || input.error === undefined ? null : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES)}::text::jsonb,
@@ -916,7 +915,6 @@ interface WorkflowAgentNodeRunDatabaseRow {
   prompt: string
   model_id: string | null
   finish_reason: WorkflowAgentNodeRunRecord["finishReason"] | null
-  usage: WorkflowAgentNodeRunRecord["usage"] | string | null
   trace: WorkflowAgentNodeRunRecord["trace"] | string | null
   diagnostics: WorkflowAgentNodeRunRecord["diagnostics"] | string | null
   error: JsonValue | null
@@ -975,7 +973,6 @@ function rowToWorkflowAgentNodeRunRecord(
     prompt: row.prompt,
     ...(row.model_id ? { modelId: row.model_id } : {}),
     ...(row.finish_reason ? { finishReason: row.finish_reason } : {}),
-    ...(row.usage ? { usage: parseJson(row.usage) } : {}),
     ...(row.trace ? { trace: parseJson(row.trace) } : {}),
     ...(row.diagnostics ? { diagnostics: parseJson(row.diagnostics) } : {}),
     ...(row.error ? { error: parseSixbFailure(row.error, AGENT_RUN_FAILURE_CODES) } : {}),

@@ -1,10 +1,10 @@
 # @sixb/agent-worker
 
-Runs `agent.run.requested` queue jobs for a Sixb project.
+Runs conversation and headless workflow-agent queue jobs for a Sixb project.
 
-The worker claims durable queued runs created by `sixb.agents.request(...)`, starts or reclaims the
-run record, renews queue ownership while the model is streaming, writes the final assistant message,
-and finalizes the run.
+The worker claims durable conversation runs created by `sixb.agents.request(...)` and agent workflow
+nodes parked by the workflow worker. It starts or reclaims the execution, renews queue ownership,
+records each completed provider call, and finalizes the conversation or workflow node.
 
 ## Usage
 
@@ -29,10 +29,14 @@ await worker.start()
 - The worker transitions the durable run from `queued` to `running` when it claims the job.
 - The queue lease is the sole authority for liveness and redelivery; the worker renews it during
   turns.
+- Every completed `streamText` and `generateText` provider call is appended to `storage.aiUsage`;
+  API conversation and workflow-agent summaries are derived from that ledger. Run rows do not store
+  a second usage aggregate.
 - Every delivery rotates a durable execution token that fences stale finalization after redelivery.
-  The run also persists the queue-returned lease expiration for gateway authorization. That value is
-  a projection of the queue lease—not a separate run lease, timer, or heartbeat—and is extended only
-  from successful queue renewals.
+  Usage remains unfenced because a completed provider call is billable even when execution ownership
+  changes afterward. The run also persists the queue-returned lease expiration for gateway
+  authorization. That value is a projection of the queue lease—not a separate run lease, timer, or
+  heartbeat—and is extended only from successful queue renewals.
 - The assistant message append and successful run finish happen in one storage transaction.
 
 ## Usage accounting
@@ -44,10 +48,13 @@ use their own durable execution and inherit the parent workflow's admission-time
 Usage writes are intentionally not fenced: a stale worker cannot finalize the execution, but a
 provider call it completed remains billable.
 
-The AI SDK swallows lifecycle callback errors, so the worker retries the idempotent append and hands any persistent infrastructure failure to a durable job in `queues.agents`. Recovery retries with bounded backoff and cannot trigger another provider call. Once an append is deferred, `prepareStep`
-blocks the next model step and the owning Agent run or workflow fails closed while accounting recovery continues independently. If the durable handoff also fails, the same stop prevents silent usage loss. This local path cannot close a process-crash window before lifecycle delivery; provider-side reconciliation is the appropriate later layer for that guarantee.
-
-During the staged rollout, the existing run aggregate remains for display; the model-call ledger is the accounting authority and a later stack PR removes the projection.
+The AI SDK swallows lifecycle callback errors, so the worker retries the idempotent append and hands
+any persistent infrastructure failure to a durable job in `queues.agents`. Recovery retries with
+bounded backoff and cannot trigger another provider call. Once an append is deferred, `prepareStep`
+blocks the next model step and the owning Agent run or workflow fails closed while accounting
+recovery continues independently. If the durable handoff also fails, the same stop prevents silent
+usage loss. This local path cannot close a process-crash window before lifecycle delivery;
+provider-side reconciliation is the appropriate later layer for that guarantee.
 
 ## Live Stream
 

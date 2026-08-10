@@ -6,7 +6,6 @@ import {
   type AgentMessageRecord,
   type AgentRunDiagnostic,
   type AgentRunRecord,
-  type AgentRunUsage,
   type AgentThreadRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
@@ -40,11 +39,6 @@ export interface AgentRunRow {
   status: AgentRunRecord["status"]
   model_id: string | null
   finish_reason: string | null
-  usage_input_tokens: number | null
-  usage_output_tokens: number | null
-  usage_total_tokens: number | null
-  usage_reasoning_tokens: number | null
-  usage_cached_input_tokens: number | null
   error: string | null
   diagnostics: string | null
   attempt: number
@@ -101,7 +95,6 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     status: row.status,
     modelId: row.model_id ?? undefined,
     finishReason: coerceAgentRunFinishReason(row.finish_reason),
-    usage: rowToUsage(row),
     error: row.error === null ? undefined : parseSixbFailure(row.error, AGENT_RUN_FAILURE_CODES),
     diagnostics:
       row.diagnostics === null ? undefined : (JSON.parse(row.diagnostics) as AgentRunDiagnostic[]),
@@ -143,19 +136,6 @@ function principalFromColumns(
   id: string | null | undefined
 ): Principal | undefined {
   return type && id ? { type, id } : undefined
-}
-
-function rowToUsage(row: AgentRunRow): AgentRunUsage | undefined {
-  const usage: AgentRunUsage = {
-    ...(row.usage_input_tokens === null ? {} : { inputTokens: row.usage_input_tokens }),
-    ...(row.usage_output_tokens === null ? {} : { outputTokens: row.usage_output_tokens }),
-    ...(row.usage_total_tokens === null ? {} : { totalTokens: row.usage_total_tokens }),
-    ...(row.usage_reasoning_tokens === null ? {} : { reasoningTokens: row.usage_reasoning_tokens }),
-    ...(row.usage_cached_input_tokens === null
-      ? {}
-      : { cachedInputTokens: row.usage_cached_input_tokens }),
-  }
-  return Object.keys(usage).length === 0 ? undefined : usage
 }
 
 // ── offset pagination (threads / messages order by their own column, not started_at) ─────────────

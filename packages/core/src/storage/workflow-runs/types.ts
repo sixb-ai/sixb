@@ -2,12 +2,7 @@ import type { AgentMessagePart } from "../../agents/message"
 import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonValue } from "../../json"
 import type { WorkflowIOSnapshot } from "../../workflows/types"
-import type {
-  AgentExecutionStatus,
-  AgentRunFailureCode,
-  AgentRunFinishReason,
-  AgentRunUsage,
-} from "../agents"
+import type { AgentExecutionStatus, AgentRunFailureCode, AgentRunFinishReason } from "../agents"
 
 export type { WorkflowIOSnapshot } from "../../workflows/types"
 
@@ -52,7 +47,6 @@ export interface WorkflowAgentNodeRunRecord {
   readonly prompt: string
   readonly modelId?: string
   readonly finishReason?: AgentRunFinishReason
-  readonly usage?: AgentRunUsage
   readonly trace?: readonly AgentMessagePart[]
   readonly diagnostics?: readonly JsonValue[]
   readonly error?: SixbFailure<AgentRunFailureCode>
@@ -99,7 +93,6 @@ interface FinishWorkflowAgentNodeRunBaseInput {
   readonly executionToken: string
   readonly modelId?: string
   readonly finishReason?: AgentRunFinishReason
-  readonly usage?: AgentRunUsage
   readonly trace?: readonly AgentMessagePart[]
   readonly diagnostics?: readonly JsonValue[]
   readonly completedAt?: Date

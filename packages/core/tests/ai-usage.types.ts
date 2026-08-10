@@ -1,10 +1,12 @@
 import type {
+  AgentRunRecord,
   AiModelCallUsageRecord,
   AiUsageExecutionSummary,
   AiUsageStorage,
   ReadonlyJsonObject,
   RecordAiModelCallInput,
   RecordAiModelCallResult,
+  WorkflowAgentNodeRunRecord,
 } from "@sixb/core/storage"
 
 const rawUsage: ReadonlyJsonObject = { provider_counter: 1 }
@@ -48,6 +50,15 @@ const provider = {
     return executionIds.map(() => emptySummary)
   },
 } satisfies AiUsageStorage
+
+declare const agentRun: AgentRunRecord
+declare const workflowAgentNode: WorkflowAgentNodeRunRecord
+
+// Run rows must never grow a second accounting authority beside the model-call ledger.
+// @ts-expect-error usage exists only through AiUsageStorage
+agentRun.usage
+// @ts-expect-error usage exists only through AiUsageStorage
+workflowAgentNode.usage
 
 void input
 void provider

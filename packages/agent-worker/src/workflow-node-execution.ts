@@ -414,7 +414,6 @@ async function finishWorkflowAgentNodeSucceeded(input: {
       status: "succeeded",
       modelId: input.result.modelId,
       finishReason: input.result.finishReason,
-      usage: input.result.usage,
       trace: input.result.trace,
     })
     return runs.nodes.finish({
