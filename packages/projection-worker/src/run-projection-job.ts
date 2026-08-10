@@ -5,7 +5,7 @@ import {
   type ProjectionDefinition,
   type SixbFailure,
 } from "@sixb/core"
-import { captureSixbFailure, isSixbError } from "@sixb/core/internal/errors"
+import { captureSixbFailure, createSixbError, isSixbError } from "@sixb/core/internal/errors"
 import {
   MaterializationObjectNotFoundError,
   type ProjectionRunTerminalDecision,
@@ -16,7 +16,7 @@ import {
   type ProjectionRunFailureCode,
   type ProjectionRunRecord,
 } from "@sixb/core/storage"
-import { ProjectionWorkerPermanentError } from "./errors"
+import { collectIdentityMismatches } from "./identity-mismatch"
 import {
   assertProjectionJobId,
   type ValidatedProjectionJob,
@@ -90,8 +90,18 @@ async function findMatchingTerminalRun(
   assertRunMatchesJob(run, input.job)
   if (run.status === "running") return null
   if (run.status === "succeeded") return run
-  throw new ProjectionWorkerPermanentError(
-    `[SixbProjectionWorker] Projection run '${run.id}' is already '${run.status}'.`
+  throw createSixbError(
+    "projection.run_already_terminal",
+    `[SixbProjectionWorker] Projection run '${run.id}' is already '${run.status}'.`,
+    {
+      details: {
+        projectionId: run.identity.projectionId,
+        runId: run.id,
+        datasetId: run.identity.datasetVersion.datasetId,
+        versionId: run.identity.datasetVersion.versionId,
+        status: run.status,
+      },
+    }
   )
 }
 
@@ -254,19 +264,60 @@ async function requireRun(input: RunProjectionJobInput): Promise<ProjectionRunRe
 }
 
 function assertRunMatchesJob(run: ProjectionRunRecord, job: ProjectionJob): void {
-  const matches =
-    run.identity.projectionId === job.projectionId &&
-    run.identity.projectionKind === job.projectionKind &&
-    run.identity.protocol === job.protocol &&
-    run.identity.datasetVersion.datasetId === job.datasetVersion.datasetId &&
-    run.identity.datasetVersion.versionId === job.datasetVersion.versionId &&
-    run.identity.datasetVersion.createdAt === job.datasetVersion.createdAt &&
-    run.identity.ontologyRevision === job.ontologyRevision &&
-    run.identity.projectionRevision === job.projectionRevision &&
-    run.identity.ownershipHash === job.ownershipHash
-  if (matches) return
-  throw new ProjectionWorkerPermanentError(
-    `[SixbProjectionWorker] Projection run '${run.id}' has a different durable identity.`
+  const identityMismatches = collectIdentityMismatches([
+    {
+      field: "projectionId",
+      expected: job.projectionId,
+      actual: run.identity.projectionId,
+    },
+    {
+      field: "projectionKind",
+      expected: job.projectionKind,
+      actual: run.identity.projectionKind,
+    },
+    { field: "protocol", expected: job.protocol, actual: run.identity.protocol },
+    {
+      field: "datasetId",
+      expected: job.datasetVersion.datasetId,
+      actual: run.identity.datasetVersion.datasetId,
+    },
+    {
+      field: "versionId",
+      expected: job.datasetVersion.versionId,
+      actual: run.identity.datasetVersion.versionId,
+    },
+    {
+      field: "versionCreatedAt",
+      expected: job.datasetVersion.createdAt,
+      actual: run.identity.datasetVersion.createdAt,
+    },
+    {
+      field: "ontologyRevision",
+      expected: job.ontologyRevision,
+      actual: run.identity.ontologyRevision,
+    },
+    {
+      field: "projectionRevision",
+      expected: job.projectionRevision,
+      actual: run.identity.projectionRevision,
+    },
+    {
+      field: "ownershipHash",
+      expected: job.ownershipHash,
+      actual: run.identity.ownershipHash,
+    },
+  ])
+  if (identityMismatches.length === 0) return
+  throw createSixbError(
+    "projection.run_identity_mismatch",
+    `[SixbProjectionWorker] Projection run '${run.id}' has a different durable identity.`,
+    {
+      details: {
+        projectionId: job.projectionId,
+        runId: run.id,
+        identityMismatches,
+      },
+    }
   )
 }
 
@@ -287,10 +338,7 @@ async function isPermanentFailure(
 
 function isPermanentProjectionError(error: unknown): boolean {
   if (isSixbError(error)) return !error.retryable
-  if (
-    error instanceof ProjectionWorkerPermanentError ||
-    error instanceof MaterializationValidationError
-  ) {
+  if (error instanceof MaterializationValidationError) {
     return true
   }
   if (!isMaterializationConflictError(error)) return false

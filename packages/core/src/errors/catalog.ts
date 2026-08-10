@@ -14,6 +14,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Dataset not found.",
     retryable: false,
   },
+  "dataset.version_incompatible": {
+    publicMessage: "Dataset version is incompatible.",
+    retryable: false,
+  },
   "dataset.version_not_found": {
     publicMessage: "Dataset version not found.",
     retryable: false,
@@ -29,6 +33,22 @@ export const SIXB_ERROR_DEFINITIONS = {
   "queue.enqueue_failed": {
     publicMessage: "The job could not be enqueued.",
     retryable: true,
+  },
+  "projection.definition_invalid": {
+    publicMessage: "Projection definition is invalid.",
+    retryable: false,
+  },
+  "projection.not_found": {
+    publicMessage: "Projection not found.",
+    retryable: false,
+  },
+  "projection.run_already_terminal": {
+    publicMessage: "Projection run is already terminal.",
+    retryable: false,
+  },
+  "projection.run_identity_mismatch": {
+    publicMessage: "Projection run identity does not match the queued job.",
+    retryable: false,
   },
   "runtime.cancelled": {
     publicMessage: "Execution was cancelled.",

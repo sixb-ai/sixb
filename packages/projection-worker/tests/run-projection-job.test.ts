@@ -299,7 +299,8 @@ function createRuntime(
   primitive: { readonly id: string; readonly runId: string } = {
     id: host.definitions.projections.list()[0]?.id ?? "direct-projection-test",
     runId: "direct-projection-job-test",
-  }
+  },
+  catalogs: Partial<Pick<ProjectionWorkerContext, "datasets" | "projections">> = {}
 ): TestProjectionWorkerContext {
   const runtime = {
     host,
@@ -307,8 +308,8 @@ function createRuntime(
     ontology: host.definitions.ontology,
     lakeStorage: host.lakeStorage,
     projectionRunsStorage: requireProjectionRunsStorage(host),
-    datasets: host.definitions.datasets,
-    projections: host.definitions.projections,
+    datasets: catalogs.datasets ?? host.definitions.datasets,
+    projections: catalogs.projections ?? host.definitions.projections,
   } satisfies TestProjectionWorkerContext
   const execution = bindPrimitiveExecution(host, {
     primitive: { kind: "projection", ...primitive },
@@ -336,10 +337,17 @@ async function runProjectionJob(
     readonly batchSize?: number
   }
 ): Promise<ProjectionJobResult> {
-  const runtime = createRuntime(input.runtime.host, {
-    id: input.job.projectionId,
-    runId: input.job.id,
-  })
+  const runtime = createRuntime(
+    input.runtime.host,
+    {
+      id: input.job.projectionId,
+      runId: input.job.id,
+    },
+    {
+      datasets: input.runtime.datasets,
+      projections: input.runtime.projections,
+    }
+  )
   const registry = getProjectionRegistry(runtime)
   const version = await runtime.lakeStorage.getVersion(input.job.datasetId, input.job.versionId)
   let descriptor: ProjectionDispatchDescriptor
@@ -451,6 +459,11 @@ describe("runProjectionJob", () => {
         createSixbError("dataset.version_read_inconsistent", "Dataset read was incomplete.")
       )
     ).toBe(false)
+    expect(
+      isPermanentProjectionFailure(
+        createSixbError("projection.definition_invalid", "Projection definition is invalid.")
+      )
+    ).toBe(true)
     expect(
       isPermanentProjectionFailure(
         new MaterializationConflictError("projection-fence", "A newer version is active.")
@@ -893,6 +906,101 @@ describe("runProjectionJob", () => {
         replayedTerminal: true,
       }
     )
+  })
+
+  test("rejects a noncanonical run id with a coded identity error", async () => {
+    const deps = createDeps()
+    const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] }, deps)
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+    ])
+    const descriptor = getProjectionRegistry(sixb).resolveDispatch(roomProjection.id)
+    if (descriptor.projectionKind !== "object") throw new Error("Expected object projection.")
+    const identity = {
+      projectionId: descriptor.projectionId,
+      projectionKind: "object" as const,
+      protocol: "replacement" as const,
+      datasetVersion: {
+        datasetId: version.datasetId,
+        versionId: version.versionId,
+        createdAt: version.createdAt.toISOString(),
+      },
+      ontologyRevision: descriptor.ontologyRevision,
+      projectionRevision: descriptor.projectionRevision,
+      ownershipHash: descriptor.ownershipHash,
+    }
+    const expectedRunId = createProjectionRunId(sixb.id, identity)
+    const error = await runCanonicalProjectionJob({
+      runtime: createRuntime(sixb),
+      job: { id: "not-the-canonical-run-id", ...identity },
+    }).catch((caught: unknown) => caught)
+
+    expect(error).toMatchObject({
+      code: "projection.run_identity_mismatch",
+      retryable: false,
+      message: expect.stringContaining("does not match its pinned semantic identity"),
+      details: {
+        projectionId: roomProjection.id,
+        runId: "not-the-canonical-run-id",
+        identityMismatches: [
+          {
+            field: "runId",
+            expected: expectedRunId,
+            actual: "not-the-canonical-run-id",
+          },
+        ],
+      },
+    })
+    expect(
+      await deps.storage.projectionRuns.getById({
+        projectId: sixb.id,
+        id: expectedRunId,
+      })
+    ).toBeNull()
+  })
+
+  test("reports only projection identity fields that differ from the registry", async () => {
+    const deps = createDeps()
+    const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] }, deps)
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+    ])
+    const descriptor = getProjectionRegistry(sixb).resolveDispatch(roomProjection.id)
+    if (descriptor.projectionKind !== "object") throw new Error("Expected object projection.")
+    const identity = {
+      projectionId: descriptor.projectionId,
+      projectionKind: "object" as const,
+      protocol: "replacement" as const,
+      datasetVersion: {
+        datasetId: version.datasetId,
+        versionId: version.versionId,
+        createdAt: version.createdAt.toISOString(),
+      },
+      ontologyRevision: descriptor.ontologyRevision,
+      projectionRevision: "stale-projection-revision",
+      ownershipHash: descriptor.ownershipHash,
+    }
+    const runId = createProjectionRunId(sixb.id, identity)
+    const error = await runCanonicalProjectionJob({
+      runtime: createRuntime(sixb),
+      job: { id: runId, ...identity },
+    }).catch((caught: unknown) => caught)
+
+    expect(error).toMatchObject({
+      code: "projection.run_identity_mismatch",
+      retryable: false,
+      details: {
+        projectionId: roomProjection.id,
+        runId,
+        identityMismatches: [
+          {
+            field: "projectionRevision",
+            expected: "stale-projection-revision",
+            actual: descriptor.projectionRevision,
+          },
+        ],
+      },
+    })
   })
 
   test("resumes telemetry from the durable offset without an exact-multiple empty commit", async () => {
@@ -2333,18 +2441,16 @@ describe("runProjectionJob", () => {
       { device_id: "d1", device_status: "offline" },
     ])
 
-    await expect(
-      runProjectionJob({
-        runtime: createRuntime(sixb),
-        job: {
-          id: "projrun-invalid-property",
-          projectionId: "device-proj",
-          projectionKind: "object",
-          datasetId: "canonical.devices",
-          versionId: version.versionId,
-        },
-      })
-    ).rejects.toBeInstanceOf(MaterializationValidationError)
+    const job = {
+      id: "projrun-invalid-property",
+      projectionId: "device-proj",
+      projectionKind: "object" as const,
+      datasetId: "canonical.devices",
+      versionId: version.versionId,
+    }
+    await expect(runProjectionJob({ runtime: createRuntime(sixb), job })).rejects.toBeInstanceOf(
+      MaterializationValidationError
+    )
 
     const run = await deps.storage.projectionRuns.getById({
       projectId: sixb.id,
@@ -2362,6 +2468,23 @@ describe("runProjectionJob", () => {
       },
     })
     expect(run?.error?.at).toBe(run?.finishedAt?.toISOString())
+
+    const terminalError = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job,
+    }).catch((caught: unknown) => caught)
+    expect(terminalError).toMatchObject({
+      code: "projection.run_already_terminal",
+      retryable: false,
+      message: expect.stringContaining("is already 'failed'"),
+      details: {
+        projectionId: deviceProjection.id,
+        runId: canonicalRunId(job.id),
+        datasetId: devicesDataset.id,
+        versionId: version.versionId,
+        status: "failed",
+      },
+    })
   })
 
   test("normalizes int64 strings mapped to integer-like object properties", async () => {
@@ -2556,18 +2679,30 @@ describe("runProjectionJob", () => {
       deps
     )
 
-    await expect(
-      runProjectionJob({
-        runtime: createRuntime(sixb),
-        job: {
-          id: "projrun-schema-mismatch",
-          projectionId: "room-proj",
-          projectionKind: "object",
-          datasetId: "canonical.rooms",
-          versionId: version.versionId,
-        },
-      })
-    ).rejects.toThrow("schema mismatch")
+    const error = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-schema-mismatch",
+        projectionId: "room-proj",
+        projectionKind: "object",
+        datasetId: "canonical.rooms",
+        versionId: version.versionId,
+      },
+    }).catch((caught: unknown) => caught)
+    expect(error).toMatchObject({
+      code: "dataset.version_incompatible",
+      retryable: false,
+      message: expect.stringContaining("schema mismatch"),
+      details: {
+        projectionId: roomProjection.id,
+        runId: canonicalRunId("projrun-schema-mismatch"),
+        datasetId: roomsDataset.id,
+        versionId: version.versionId,
+        columnName: "room_name",
+        expectedColumn: "'room_name:string'",
+        actualColumn: "a missing column",
+      },
+    })
 
     const run = await deps.storage.projectionRuns.getById({
       projectId: sixb.id,
@@ -2589,24 +2724,121 @@ describe("runProjectionJob", () => {
       { room_id: "r1", room_name: "Kitchen", building_ref: null },
     ])
 
-    await expect(
-      runProjectionJob({
-        runtime: createRuntime(sixb),
-        job: {
-          id: "projrun-unknown",
-          projectionId: "missing-proj",
-          projectionKind: "object",
-          datasetId: "canonical.rooms",
-          versionId: version.versionId,
-        },
-      })
-    ).rejects.toThrow("not registered")
+    const error = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-unknown",
+        projectionId: "missing-proj",
+        projectionKind: "object",
+        datasetId: "canonical.rooms",
+        versionId: version.versionId,
+      },
+    }).catch((caught: unknown) => caught)
+    expect(error).toMatchObject({
+      code: "projection.not_found",
+      retryable: false,
+      message: expect.stringContaining("not registered"),
+      details: {
+        projectionId: "missing-proj",
+        runId: canonicalRunId("projrun-unknown"),
+        datasetId: roomsDataset.id,
+        versionId: version.versionId,
+      },
+    })
 
     const run = await deps.storage.projectionRuns.getById({
       projectId: sixb.id,
       id: canonicalRunId("projrun-unknown"),
     })
     expect(run).toBeNull()
+  })
+
+  test("rejects a runtime-missing dataset with the shared dataset code", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomsDataset],
+        projections: [roomProjection],
+      },
+      deps
+    )
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+    ])
+    const runtime = createRuntime(sixb, undefined, {
+      datasets: {
+        getById: () => null,
+      },
+    })
+
+    const error = await runProjectionJob({
+      runtime,
+      job: {
+        id: "projrun-unknown-dataset",
+        projectionId: roomProjection.id,
+        projectionKind: "object",
+        datasetId: roomsDataset.id,
+        versionId: version.versionId,
+      },
+    }).catch((caught: unknown) => caught)
+    expect(error).toMatchObject({
+      code: "dataset.not_found",
+      retryable: false,
+      message: expect.stringContaining("references unknown dataset"),
+      details: {
+        projectionId: roomProjection.id,
+        runId: canonicalRunId("projrun-unknown-dataset"),
+        datasetId: roomsDataset.id,
+        versionId: version.versionId,
+        source: "runtime",
+      },
+    })
+    expect(
+      await deps.storage.projectionRuns.getById({
+        projectId: sixb.id,
+        id: canonicalRunId("projrun-unknown-dataset"),
+      })
+    ).toBeNull()
+  })
+
+  test("rejects a missing pinned version with the shared version code", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomsDataset],
+        projections: [roomProjection],
+      },
+      deps
+    )
+    await deps.lakeStorage.createDataset(roomsDataset)
+
+    const error = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-unknown-version",
+        projectionId: roomProjection.id,
+        projectionKind: "object",
+        datasetId: roomsDataset.id,
+        versionId: "missing-version",
+      },
+    }).catch((caught: unknown) => caught)
+    expect(error).toMatchObject({
+      code: "dataset.version_not_found",
+      retryable: false,
+      message: expect.stringContaining("version 'missing-version' was not found"),
+      details: {
+        projectionId: roomProjection.id,
+        runId: canonicalRunId("projrun-unknown-version"),
+        datasetId: roomsDataset.id,
+        versionId: "missing-version",
+      },
+    })
+    expect(
+      await deps.storage.projectionRuns.getById({
+        projectId: sixb.id,
+        id: canonicalRunId("projrun-unknown-version"),
+      })
+    ).toBeNull()
   })
 
   test("rejects an incompatible object FK target at startup before reading rows", () => {
@@ -2973,18 +3205,30 @@ describe("runProjectionJob", () => {
       },
     ])
 
-    await expect(
-      runProjectionJob({
-        runtime: createRuntime(sixb),
-        job: {
-          id: "projrun-invalid-at",
-          projectionId: "room-invalid-at-proj",
-          projectionKind: "telemetry",
-          datasetId: roomReadingsDataset.id,
-          versionId: version.versionId,
-        },
-      })
-    ).rejects.toThrow("must be a string, date, or timestamp")
+    const error = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-invalid-at",
+        projectionId: "room-invalid-at-proj",
+        projectionKind: "telemetry",
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    }).catch((caught: unknown) => caught)
+    expect(error).toMatchObject({
+      code: "projection.definition_invalid",
+      retryable: false,
+      message: expect.stringContaining("must be a string, date, or timestamp"),
+      details: {
+        projectionId: "room-invalid-at-proj",
+        runId: canonicalRunId("projrun-invalid-at"),
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+        objectTypeId: Room.id,
+        columnName: "temperature",
+        columnType: "float64",
+      },
+    })
 
     const run = await deps.storage.projectionRuns.getById({
       projectId: sixb.id,
