@@ -32,7 +32,7 @@ export const addFieldNote = defineAction("add-field-note", {
     if (!params.body.trim()) throw new Error("[Northline] Field note text is required.")
   })
   .writeback(async ({ params, run, sixb, target }) => {
-    const fieldService = await sixb.connectors.connect(fieldServiceConnector)
+    const fieldService = await sixb.connector(fieldServiceConnector)
     return fieldService.addFieldNote(
       {
         visitId: target.primaryId,

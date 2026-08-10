@@ -31,8 +31,8 @@ describe("connectors", () => {
 
     expect(connectCount).toBe(0)
 
-    const first = await sixb.connectors.connect(erpDb)
-    const second = await sixb.connectors.connect(erpDb)
+    const first = await sixb.connector(erpDb)
+    const second = await sixb.connector(erpDb)
 
     expect(connectCount).toBe(1)
     expect(first).toBe(second)
@@ -61,9 +61,9 @@ describe("connectors", () => {
       ...createTestRuntimeDeps(),
     })
 
-    const first = await sixb.connectors.connect(erpDb)
+    const first = await sixb.connector(erpDb)
     await sixb.connectors.disconnectAll()
-    const second = await sixb.connectors.connect(erpDb)
+    const second = await sixb.connector(erpDb)
 
     expect(disconnectCount).toBe(1)
     expect(connectCount).toBe(2)
@@ -110,8 +110,8 @@ describe("connectors", () => {
       ...createTestRuntimeDeps(),
     })
 
-    await expect(sixb.connectors.connect(unknown)).rejects.toBeInstanceOf(ConnectorNotFoundError)
-    await expect(sixb.connectors.connect(unknown)).rejects.toThrow("Unknown connector 'unknown'")
+    await expect(sixb.connector(unknown)).rejects.toBeInstanceOf(ConnectorNotFoundError)
+    await expect(sixb.connector(unknown)).rejects.toThrow("Unknown connector 'unknown'")
   })
 
   test("rejects an unregistered connector definition instance", async () => {
@@ -135,8 +135,6 @@ describe("connectors", () => {
       ...createTestRuntimeDeps(),
     })
 
-    await expect(sixb.connectors.connect(imposter)).rejects.toThrow(
-      "not the registered definition instance"
-    )
+    await expect(sixb.connector(imposter)).rejects.toThrow("not the registered definition instance")
   })
 })

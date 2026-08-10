@@ -596,6 +596,7 @@ export type {
   ConnectorClient,
   ConnectorContext,
   ConnectorDefinition,
+  ConnectorRuntime,
   ConnectorsRuntime,
 } from "./connectors"
 export { defineConnector } from "./connectors"

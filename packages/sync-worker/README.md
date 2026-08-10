@@ -27,7 +27,7 @@ const runtime: SyncWorkerContext = {
   blobs: sixb.blobs,
   datasets: sixb.datasets,
   syncs: sixb.syncs,
-  connectors: sixb.connectors,
+  connector: sixb.connector,
 }
 
 const result = await runSyncJob({

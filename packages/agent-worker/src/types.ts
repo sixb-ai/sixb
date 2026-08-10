@@ -4,7 +4,7 @@ import type {
   BlobStorage,
   BlobsRuntime,
   Broker,
-  ConnectorsRuntime,
+  ConnectorRuntime,
   DomainEventLog,
   Queues,
   SandboxFactory,
@@ -45,7 +45,7 @@ export interface AgentWorkerSixb {
   readonly sandboxes?: SandboxFactory
   readonly projectRoot?: string
   readonly logs?: LogsRuntime
-  readonly connectors: Pick<ConnectorsRuntime, "connect">
+  readonly connector: ConnectorRuntime
 }
 
 /**

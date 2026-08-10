@@ -1,7 +1,7 @@
 import type {
   ActionsRuntime,
   BlobsRuntime,
-  ConnectorsRuntime,
+  ConnectorRuntime,
   RulesRuntime,
   SixbRuntimeContext,
 } from "@sixb/core"
@@ -20,7 +20,7 @@ export interface ActionWorkerSixb extends Omit<SixbRuntimeContext, "blobStorage"
   readonly logs?: LogsRuntime
   readonly actions: Pick<ActionsRuntime, "list" | "getById" | "listForType">
   readonly blobs: Pick<BlobsRuntime, "put" | "open" | "stat">
-  readonly connectors: Pick<ConnectorsRuntime, "connect">
+  readonly connector: ConnectorRuntime
   readonly rules: Pick<RulesRuntime, "list">
 }
 
@@ -186,7 +186,7 @@ function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
     sixb: {
       objects: createDynamicObjectsRuntime(runtime),
       actions: sixb.actions,
-      connectors: sixb.connectors,
+      connector: sixb.connector,
       blobs: sixb.blobs,
     },
     actions: sixb.actions,

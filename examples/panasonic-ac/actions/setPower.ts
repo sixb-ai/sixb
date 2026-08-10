@@ -8,7 +8,7 @@ export const setPower = defineAction("setPower", {
   .on(PanasonicAcUnit)
   .params({ on: param("boolean") })
   .writeback(async ({ params, target, sixb }) => {
-    const api = await sixb.connectors.connect(panasonicConnector)
+    const api = await sixb.connector(panasonicConnector)
     if (params.on) {
       await api.powerOn(target.properties.guid)
     } else {

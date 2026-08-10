@@ -88,7 +88,7 @@ function createContext(sixb: TestSixb): ActionWorkerContext {
     sixb: {
       objects: sixb.objects,
       actions: sixb.actions,
-      connectors: sixb.connectors,
+      connector: sixb.connector,
       blobs: sixb.blobs,
     },
     actions: sixb.actions,

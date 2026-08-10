@@ -2,7 +2,7 @@ import type {
   ActionSubject,
   ActionsRuntime,
   BlobsRuntime,
-  ConnectorsRuntime,
+  ConnectorRuntime,
   DomainEventLog,
   DynamicObjectsRuntime,
   Storage,
@@ -18,7 +18,7 @@ import type {
 
 export interface ActionWorkerSixbFacade {
   readonly blobs: Pick<BlobsRuntime, "put" | "open" | "stat">
-  readonly connectors: Pick<ConnectorsRuntime, "connect">
+  readonly connector: ConnectorRuntime
   readonly objects: DynamicObjectsRuntime
   readonly actions: Pick<ActionsRuntime, "listForType">
 }

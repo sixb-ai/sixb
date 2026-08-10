@@ -114,13 +114,11 @@ function createRuntime(options: {
         return syncId === options.sync.id ? options.sync : null
       },
     },
-    connectors: {
-      async connect<TAdapter extends ConnectorAdapter>(
-        _definition: ConnectorDefinition<string, TAdapter>
-      ): Promise<ConnectorClient<TAdapter>> {
-        await options.onConnect?.()
-        return client as ConnectorClient<TAdapter>
-      },
+    async connector<TAdapter extends ConnectorAdapter>(
+      _definition: ConnectorDefinition<string, TAdapter>
+    ): Promise<ConnectorClient<TAdapter>> {
+      await options.onConnect?.()
+      return client as ConnectorClient<TAdapter>
     },
   }
 }

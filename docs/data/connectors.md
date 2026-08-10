@@ -77,7 +77,7 @@ import { sixb } from "../sixb.config"
 
 export async function loadInvoices() {
   const runtime = await sixb
-  const client = await runtime.connectors.connect(acmeErpConnector)
+  const client = await runtime.connector(acmeErpConnector)
 
   return client.listInvoices()
 }
@@ -85,7 +85,7 @@ export async function loadInvoices() {
 
 The first call opens the connection. Later calls reuse the same client for that runtime.
 
-> **Footgun: pass the registered instance.** `runtime.connectors.connect(...)` rejects a definition that is
+> **Footgun: pass the registered instance.** `runtime.connector(...)` rejects a definition that is
 > not the exact instance registered with the runtime. A freshly constructed `defineConnector(...)`
 > with the same id throws `Connector '<id>' is not the registered definition instance.` Always
 > import and pass the exported connector, not a local copy.

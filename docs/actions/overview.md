@@ -27,7 +27,7 @@ export const markPaid = defineAction("markPaid", {
   })
   // writeback: update the external system. Runs before the commit; no graph edits here.
   .writeback(async ({ target, params, sixb }) => {
-    const erp = await sixb.connectors.connect(acmeErpConnector)
+    const erp = await sixb.connector(acmeErpConnector)
     const receipt = await erp.recordPayment({
       invoiceNumber: target.properties.number,
       amount: target.properties.amount,

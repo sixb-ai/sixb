@@ -8,7 +8,7 @@ export const setNanoe = defineAction("setNanoe", {
   .on(PanasonicAcUnit)
   .params({ enabled: param("boolean") })
   .writeback(async ({ params, target, sixb }) => {
-    const api = await sixb.connectors.connect(panasonicConnector)
+    const api = await sixb.connector(panasonicConnector)
     await api.setNanoe(target.properties.guid, params.enabled)
 
     // TODO(actions-v2): move local telemetry writes out of writeback once EditBatch supports them.

@@ -458,7 +458,7 @@ function createClientResolver(
   return () => {
     // Avoid connecting inbound-only handlers or handlers that never need the
     // outbound client, while still reusing one connection within the request.
-    clientPromise ??= sixb.connectors.connect(connector)
+    clientPromise ??= sixb.connector(connector)
     return clientPromise
   }
 }

@@ -1,6 +1,6 @@
 export { defineConnector } from "./builders"
 export { ConnectorError, ConnectorNotFoundError } from "./errors"
-export type { ConnectorsRuntime } from "./runtime"
+export type { ConnectorRuntime, ConnectorsRuntime } from "./runtime"
 export { createConnectorsRuntime } from "./runtime"
 export type {
   ConnectorAdapter,

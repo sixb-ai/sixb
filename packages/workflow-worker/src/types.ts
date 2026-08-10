@@ -2,7 +2,7 @@ import type {
   ActionsRuntime,
   AgentsRuntime,
   BlobsRuntime,
-  ConnectorsRuntime,
+  ConnectorRuntime,
   DatasetsRuntime,
   DomainEventLog,
   PipelinesRuntime,
@@ -39,7 +39,7 @@ export interface WorkflowWorkerSixb extends Omit<SixbRuntimeContext, "blobStorag
   readonly actions: ActionsRuntime
   readonly agents: AgentsRuntime
   readonly blobs: BlobsRuntime
-  readonly connectors: ConnectorsRuntime
+  readonly connector: ConnectorRuntime
   readonly datasets: DatasetsRuntime
   readonly events: DomainEventLog
   readonly pipelines: PipelinesRuntime

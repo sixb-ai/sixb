@@ -28,7 +28,7 @@ export const prepareRepairQuote = defineAction("prepare-repair-quote", {
     if (params.amount <= 0) throw new Error("[Northline] Quote amount must be greater than zero.")
   })
   .writeback(async ({ params, run, sixb, target }) => {
-    const business = await sixb.connectors.connect(businessSystemConnector)
+    const business = await sixb.connector(businessSystemConnector)
     return business.createQuote(
       {
         customerId: params.customer.primaryId,

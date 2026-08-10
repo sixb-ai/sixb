@@ -547,7 +547,7 @@ interface TestSixb {
   readonly sandboxes?: SandboxFactory
   readonly logs: NonNullable<AgentWorkerSixb["logs"]>
   readonly ontology: NonNullable<AgentWorkerSixb["ontology"]>
-  readonly connectors: AgentWorkerSixb["connectors"]
+  readonly connector: AgentWorkerSixb["connector"]
 }
 
 const SixbCtor = Sixb as unknown as new (options: Record<string, unknown>) => TestSixb
@@ -870,7 +870,7 @@ function buildAgentWorkerContext(
     storage: workerStorageOf(sixb.storage),
     blobStorage: sixb.blobs,
     sandboxes: sixb.sandboxes,
-    connector: (definition) => sixb.connectors.connect(definition),
+    connector: sixb.connector,
     logs: sixb.logs,
     valueTypesById: sixb.ontology.getValueTypesById(),
     // Mirror the production boundary (worker.ts buildAgentContext): normalize the server base once.
@@ -3312,7 +3312,7 @@ describe("AgentWorker", () => {
       sandboxes: sixb.sandboxes,
       logs: sixb.logs,
       ontology: sixb.ontology,
-      connectors: sixb.connectors,
+      connector: sixb.connector,
     }
 
     const worker = new AgentWorker(workerSixb, workerOptions())
@@ -3856,7 +3856,7 @@ describe("AgentWorker", () => {
       sandboxes: sixb.sandboxes,
       logs: sixb.logs,
       ontology: sixb.ontology,
-      connectors: sixb.connectors,
+      connector: sixb.connector,
     }
 
     const worker = new AgentWorker(workerSixb, workerOptions())

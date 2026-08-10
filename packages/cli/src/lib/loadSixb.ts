@@ -3,6 +3,7 @@ import type {
   ActionsRuntime,
   BlobsRuntime,
   Broker,
+  ConnectorRuntime,
   ConnectorsRuntime,
   DatasetsRuntime,
   OntologyMaintenanceHandle,
@@ -42,6 +43,7 @@ export interface LoadedSixb extends Omit<SixbRuntimeContext, "blobStorage" | "ru
   readonly schedules: SchedulesRuntime
   readonly rules: RulesRuntime
   readonly projections: ProjectionsRuntime
+  readonly connector: ConnectorRuntime
   readonly connectors: ConnectorsRuntime
   readonly blobs: BlobsRuntime
   readonly workflows: WorkflowsRuntime
@@ -123,8 +125,9 @@ function hasPrimitiveFacades(value: Record<PropertyKey, unknown>): boolean {
       "listTelemetry",
       "getById",
     ]) &&
+    typeof value.connector === "function" &&
     isRecord(value.connectors) &&
-    hasMethods(value.connectors, ["list", "getById", "connect", "disconnectAll"]) &&
+    hasMethods(value.connectors, ["list", "getById", "disconnectAll"]) &&
     isRecord(value.blobs) &&
     hasMethods(value.blobs, ["put", "open", "stat"])
   )
