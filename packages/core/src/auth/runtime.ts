@@ -566,8 +566,8 @@ export class AuthRuntime {
   /**
    * Resolve the authenticated principal's authorization context for a request.
    *
-   * Grants resolve eagerly (`groups -> roles -> grants`, subtype-expanded), so
-   * the returned context supports synchronous set-lookup checks and `sixb.as()`.
+   * Grants resolve eagerly (`groups -> roles -> grants`, subtype-expanded), so the returned
+   * context supports synchronous checks when Core binds a request execution SDK.
    */
   async createAuthorizationContext(
     request: Request,

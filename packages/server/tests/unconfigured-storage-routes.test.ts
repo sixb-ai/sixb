@@ -29,13 +29,16 @@ function sixbWithoutRunHistory(): Sixb<readonly OntologySource[]> {
   } as unknown as Sixb<readonly OntologySource[]>
 }
 
-type Register = (app: Elysia, sixb: Sixb<readonly OntologySource[]>) => unknown
+interface TestApp {
+  handle(request: Request): Promise<Response>
+}
 
-function appFor(register: Register): Elysia {
-  return register(
-    new Elysia().derive(() => ({ authz: null, scoped: null })) as unknown as Elysia,
-    sixbWithoutRunHistory()
-  ) as Elysia
+type Register = (app: Elysia, sixb: Sixb<readonly OntologySource[]>) => TestApp
+
+function appFor(register: Register): TestApp {
+  const app = new Elysia()
+  app.derive(() => ({ sdk: {} }))
+  return register(app, sixbWithoutRunHistory())
 }
 
 // Each entry is one route family: the storage role it needs, and a request that
@@ -48,49 +51,49 @@ const ROUTES: ReadonlyArray<{
 }> = [
   {
     name: "action runs",
-    register: registerActionRunRoutes as Register,
+    register: registerActionRunRoutes,
     request: "http://localhost/api/action-runs",
     role: "Action run storage",
   },
   {
     name: "projection runs",
-    register: registerProjectionRoutes as Register,
+    register: registerProjectionRoutes,
     request: "http://localhost/api/projection-runs",
     role: "Projection run storage",
   },
   {
     name: "pipeline runs",
-    register: registerPipelineRoutes as Register,
+    register: registerPipelineRoutes,
     request: "http://localhost/api/pipeline-runs/run-1",
     role: "Pipeline run storage",
   },
   {
     name: "workflow runs",
-    register: registerWorkflowRoutes as Register,
+    register: registerWorkflowRoutes,
     request: "http://localhost/api/workflow-runs",
     role: "Workflow run storage",
   },
   {
     name: "workflow interventions",
-    register: registerWorkflowRoutes as Register,
+    register: registerWorkflowRoutes,
     request: "http://localhost/api/workflow-interventions",
     role: "Workflow intervention storage",
   },
   {
     name: "agent threads",
-    register: registerAgentRoutes as Register,
+    register: registerAgentRoutes,
     request: "http://localhost/api/agent-threads",
     role: "Agent storage",
   },
   {
     name: "rule states",
-    register: registerRuleRoutes as Register,
+    register: registerRuleRoutes,
     request: "http://localhost/api/rule-states",
     role: "Rule state storage",
   },
   {
     name: "webhook runs",
-    register: registerWebhookRunRoutes as Register,
+    register: registerWebhookRunRoutes,
     request: "http://localhost/api/webhook-runs",
     role: "Webhook run storage",
   },

@@ -1,8 +1,8 @@
-import { isAllowed, type OntologySource, type RuleDefinition, type Sixb } from "@sixb/core"
+import type { OntologySource, RuleDefinition, Sixb } from "@sixb/core"
 import { deriveRuleEventDependencies } from "@sixb/core/internal/rules"
 import type { RuleStateRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
-import { requestAuthState } from "../auth/scope"
+import { requireRequestSdk } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -29,8 +29,8 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
   return app
     .get(
       "/api/rules",
-      () => {
-        return sixb.rules.list().map(serializeRule)
+      (context) => {
+        return requireRequestSdk(context).rules.list().map(serializeRule)
       },
       {
         response: { 200: RuleSchema.array() },
@@ -43,8 +43,9 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
     )
     .get(
       "/api/rules/:ruleId",
-      ({ params, set }) => {
-        const rule = sixb.rules.getById(params.ruleId)
+      (context) => {
+        const { params, set } = context
+        const rule = requireRequestSdk(context).rules.getById(params.ruleId)
         if (!rule) {
           set.status = 404
           return { error: "Rule not found" }
@@ -66,7 +67,7 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/rule-states",
       async (context) => {
         const { query, set } = context
-        const { authz } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         try {
           const parsed = RuleStatesQuerySchema.parse(query)
           const storage = sixb.storage.rules
@@ -74,24 +75,9 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             return unconfiguredStorageResponse(set, "Rule state storage")
           }
 
-          const objectTypeIds = authz ? [...authz.grants["view:object"]] : undefined
-          if (
-            authz &&
-            parsed.objectTypeId &&
-            !isAllowed(authz, { kind: "object.view", objectTypeId: parsed.objectTypeId })
-          ) {
-            return {
-              states: [],
-              hasMore: false,
-              total: 0,
-            }
-          }
-
-          const result = await storage.listActive({
-            projectId: sixb.id,
+          const result = await sdk.rules.states.list({
             ruleId: parsed.ruleId,
             objectTypeId: parsed.objectTypeId,
-            objectTypeIds,
             primaryId: parsed.primaryId,
             limit: parseOptionalInt(parsed.limit),
             offset: parseOptionalInt(parsed.offset),

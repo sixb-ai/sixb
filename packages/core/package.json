@@ -185,6 +185,12 @@
       "import": "./dist/projections/internal.js",
       "default": "./dist/projections/internal.js"
     },
+    "./internal/request-execution": {
+      "types": "./dist/execution/request.d.ts",
+      "bun": "./src/execution/request.ts",
+      "import": "./dist/execution/request.js",
+      "default": "./dist/execution/request.js"
+    },
     "./internal/query": {
       "types": "./dist/objects/query/index.d.ts",
       "bun": "./src/objects/query/index.ts",

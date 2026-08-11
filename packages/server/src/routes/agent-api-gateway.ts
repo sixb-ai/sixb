@@ -160,8 +160,7 @@ async function resolveAgentRunAuthState(
 
   if (!sixb.auth.isEnabled()) {
     return {
-      authz: null,
-      scoped: null,
+      authorization: { type: "disabled" as const },
       agentExecution,
       ...(conversationalRun ? { agentRun: conversationalRun } : {}),
     }
@@ -197,8 +196,7 @@ async function resolveAgentRunAuthState(
   })
 
   return {
-    authz,
-    scoped: sixb.as(authz),
+    authorization: { type: "principal" as const, context: authz },
     agentExecution,
     ...(conversationalRun ? { agentRun: conversationalRun } : {}),
   }

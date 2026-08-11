@@ -5,7 +5,16 @@ import type {
   OntologySource,
   Sixb,
 } from "@sixb/core"
-import { emptyGrantIndex } from "@sixb/core"
+import {
+  emptyGrantIndex,
+  InMemoryBlobStorage,
+  InMemoryBroker,
+  InMemoryLakeStorage,
+  InMemoryQueues,
+  InMemoryStorage,
+  Sixb as SixbRuntime,
+} from "@sixb/core"
+import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type {
   ListLatestProjectionRunsInput,
   ListProjectionRunsInput,
@@ -78,24 +87,41 @@ function authzViewing(...objectTypeIds: string[]): AuthorizationContext {
 function createSixbStub(
   projectionRuns: Partial<ProjectionRunStorage>
 ): Sixb<readonly OntologySource[]> {
-  return {
+  const storage = new InMemoryStorage()
+  if (!storage.projectionRuns) throw new Error("Expected projection run storage")
+  Object.assign(storage.projectionRuns, projectionRuns)
+
+  const sixb = new SixbRuntime<readonly OntologySource[]>({
     id: "my-app",
-    storage: { projectionRuns },
-    projections: {
-      listObjects: () => [roomsProjection, sensorsProjection],
+    ontology: [],
+    broker: new InMemoryBroker(),
+    storage,
+    lakeStorage: new InMemoryLakeStorage(),
+    blobStorage: new InMemoryBlobStorage(),
+    queues: new InMemoryQueues(),
+  })
+  const definitions = [roomsProjection, sensorsProjection]
+  Object.defineProperty(sixb, "projections", {
+    value: {
+      list: () => definitions,
+      listObjects: () => definitions,
       listLinks: () => [],
       listTelemetry: () => [],
-      getById: (id: string) =>
-        [roomsProjection, sensorsProjection].find((projection) => projection.id === id) ?? null,
+      getById: (id: string) => definitions.find((projection) => projection.id === id) ?? null,
     },
-  } as unknown as Sixb<readonly OntologySource[]>
+  })
+  return sixb
 }
 
 function appWithAuthz(sixb: Sixb<readonly OntologySource[]>, authz: AuthorizationContext | null) {
-  return registerProjectionRoutes(
-    new Elysia().derive(() => ({ authz, scoped: null })) as unknown as Elysia,
-    sixb
-  )
+  const app = new Elysia()
+  app.derive(({ request }) => ({
+    sdk: bindRequestExecution(sixb, {
+      request,
+      authorization: authz ? { type: "principal", context: authz } : { type: "disabled" },
+    }),
+  }))
+  return registerProjectionRoutes(app, sixb)
 }
 
 describe("projection routes", () => {

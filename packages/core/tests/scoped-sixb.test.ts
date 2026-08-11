@@ -500,7 +500,7 @@ describe("sixb.as() operational access", () => {
     expect(workflowOnlyPrincipal.agents.list()).toEqual([])
     expect(workflowOnlyPrincipal.agents.getById("contract-agent")).toBeNull()
     expect(
-      workflowOnlyPrincipal.agents.request({
+      workflowOnlyPrincipal.agents.runs.request({
         agentId: "contract-agent",
         text: "Review this contract.",
       })
@@ -570,7 +570,7 @@ describe("sixb.as() operational access", () => {
     const sixb = createRuntime()
 
     const runner = sixb.as(contextFor(sixb, ["operations"]))
-    const result = await runner.agents.request({
+    const result = await runner.agents.runs.request({
       agentId: "contract-agent",
       text: "Summarize this account.",
     })
@@ -578,11 +578,35 @@ describe("sixb.as() operational access", () => {
 
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
     expect(
-      operator.agents.request({
+      operator.agents.runs.request({
         agentId: "contract-agent",
         text: "Summarize this account.",
       })
     ).rejects.toThrow(AuthorizationError)
+  })
+
+  test("agent threads require both the run grant and ownership", async () => {
+    const sixb = createRuntime()
+    const ownerContext = contextFor(sixb, ["operations"])
+    const owner = sixb.as(ownerContext)
+    const thread = await owner.agents.threads.create({ agentId: "contract-agent" })
+
+    expect(await owner.agents.threads.getById(thread.id)).toEqual(thread)
+    expect((await owner.agents.threads.list()).threads).toEqual([thread])
+
+    const other = sixb.as({
+      ...ownerContext,
+      principal: { type: "user", id: "other-user" },
+    })
+    expect(await other.agents.threads.getById(thread.id)).toBeNull()
+    expect((await other.agents.threads.list()).threads).toEqual([])
+    await expect(
+      other.agents.runs.request({
+        agentId: "contract-agent",
+        threadId: thread.id,
+        text: "Read another user's thread.",
+      })
+    ).rejects.toMatchObject({ code: "thread_not_found" })
   })
 })
 
@@ -843,9 +867,7 @@ describe("sixb.as() fails closed on ungranted surfaces", () => {
 })
 
 describe("ScopedSixb surface", () => {
-  // The scoped value is built then `as unknown as ScopedSixb`-cast, so neither
-  // the compiler nor the mask catches a member added to one side but not the
-  // other. Pin the exposed members so any drift fails loudly here.
+  // Pin the composed surface so a domain facade cannot drift silently from the SDK contract.
   test("exposes exactly the allowlisted members", () => {
     const sixb = createRuntime()
     const scoped = sixb.as(contextFor(sixb, ["commercial"]))
@@ -857,8 +879,11 @@ describe("ScopedSixb surface", () => {
         "authorization",
         "datasets",
         "events",
+        "logs",
         "objects",
         "pipelines",
+        "projections",
+        "rules",
         "syncs",
         "workflows",
       ].sort()
@@ -866,10 +891,21 @@ describe("ScopedSixb surface", () => {
     expect(Object.keys(scoped.objects).sort()).toEqual(
       [
         "appendTelemetry",
+        "count",
+        "executeQuery",
+        "exists",
+        "facet",
         "get",
+        "getLatestTelemetry",
         "getPrimaryPropertyId",
+        "getTelemetryHistory",
+        "getTelemetryHistoryBatch",
+        "getTypeById",
         "list",
+        "listLinks",
+        "listTypes",
         "removeLink",
+        "resolveType",
         "upsert",
         "upsertBatch",
         "upsertLink",
@@ -877,15 +913,22 @@ describe("ScopedSixb surface", () => {
       ].sort()
     )
     expect(Object.keys(scoped.actions).sort()).toEqual(
-      ["getById", "list", "request", "requestAndWait"].sort()
+      ["getById", "list", "listForType", "request", "requestAndWait", "runs"].sort()
     )
     expect(Object.keys(scoped.datasets).sort()).toEqual(["getById", "list"])
-    expect(Object.keys(scoped.workflows).sort()).toEqual(["getById", "list", "requestById"])
-    expect(Object.keys(scoped.syncs).sort()).toEqual(["getById", "list", "request"])
-    expect(Object.keys(scoped.pipelines).sort()).toEqual(["getById", "list", "request"])
-    expect(Object.keys(scoped.agents).sort()).toEqual(
-      ["getById", "getThread", "list", "listThreads", "request"].sort()
+    expect(Object.keys(scoped.workflows).sort()).toEqual(
+      ["getById", "interventions", "list", "requestById", "runs"].sort()
     )
-    expect(Object.keys(scoped.events)).toEqual(["read"])
+    expect(Object.keys(scoped.syncs).sort()).toEqual(["getById", "list", "request", "runs"])
+    expect(Object.keys(scoped.pipelines).sort()).toEqual(
+      ["getById", "list", "request", "runs"].sort()
+    )
+    expect(Object.keys(scoped.projections).sort()).toEqual(
+      ["getById", "list", "listLinks", "listObjects", "listTelemetry", "runs"].sort()
+    )
+    expect(Object.keys(scoped.rules).sort()).toEqual(["getById", "list", "states"])
+    expect(Object.keys(scoped.agents).sort()).toEqual(["getById", "list", "runs", "threads"])
+    expect(Object.keys(scoped.events).sort()).toEqual(["canRead", "read"])
+    expect(Object.keys(scoped.logs).sort()).toEqual(["assertObservable", "read", "tail"])
   })
 })

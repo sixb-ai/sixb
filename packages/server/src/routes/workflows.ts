@@ -1,13 +1,12 @@
 import {
   type OntologySource,
   type Principal,
-  type ScopedSixb,
   type Sixb,
   SYSTEM_PRINCIPAL,
   type WorkflowDefinition,
 } from "@sixb/core"
 import { publishAgentRunCancel } from "@sixb/core/internal/agents"
-import { canViewWorkflowIntervention, canViewWorkflowRun } from "@sixb/core/internal/authorization"
+import type { ExecutionSixb } from "@sixb/core/internal/request-execution"
 import {
   snapshotWorkflowInterventionResponse,
   type WorkflowInterventionNodeDefinition,
@@ -22,7 +21,7 @@ import type {
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requestAuthState } from "../auth/scope"
+import { requestAuthState, requireRequestSdk } from "../auth/scope"
 import {
   createContextualFileContentResponse,
   fileContentGetResponses,
@@ -181,14 +180,8 @@ async function serializeWorkflowNodeWithExecution(
   return serializeWorkflowNodeRun(node, execution)
 }
 
-function canAccessWorkflowRun(
-  authz: ReturnType<typeof requestAuthState>["authz"],
-  scoped: ScopedSixb<readonly OntologySource[]> | null,
-  run: WorkflowRunRecord
-): boolean {
-  return (
-    canViewWorkflowRun(authz, run) && (!scoped || scoped.workflows.getById(run.workflowId) !== null)
-  )
+function principalForExecution(sdk: ExecutionSixb<readonly OntologySource[]>): Principal {
+  return sdk.execution.requestedBy ?? SYSTEM_PRINCIPAL
 }
 
 function serializeWorkflowIntervention(intervention: WorkflowInterventionRecord) {
@@ -226,7 +219,7 @@ async function workflowRunFileContentResponse(
   },
   options: { readonly head?: boolean } = {}
 ) {
-  const { authz, scoped } = requestAuthState(context)
+  const sdk = requireRequestSdk(context)
 
   const storage = sixb.storage.workflowRuns
   if (!storage) {
@@ -241,12 +234,8 @@ async function workflowRunFileContentResponse(
     set: context.set,
     head: options.head,
     resolveRoot: async () => {
-      const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
-      if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
-        return null
-      }
-
-      return serializeWorkflowRunDetail(run)
+      const run = await sdk.workflows.runs.getById(context.params.runId)
+      return run ? serializeWorkflowRunDetail(run) : null
     },
   })
 }
@@ -261,7 +250,7 @@ async function workflowNodeFileContentResponse(
   },
   options: { readonly head?: boolean } = {}
 ) {
-  const { authz, scoped } = requestAuthState(context)
+  const sdk = requireRequestSdk(context)
 
   const storage = sixb.storage.workflowRuns
   if (!storage) {
@@ -276,8 +265,8 @@ async function workflowNodeFileContentResponse(
     set: context.set,
     head: options.head,
     resolveRoot: async () => {
-      const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
-      if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
+      const run = await sdk.workflows.runs.getById(context.params.runId)
+      if (!run) {
         return null
       }
 
@@ -299,36 +288,24 @@ async function workflowNodeFileContentResponse(
 }
 
 async function getLatestWorkflowRun(
-  sixb: Sixb<readonly OntologySource[]>,
+  sdk: ReturnType<typeof requireRequestSdk>,
   workflowId: string
 ): Promise<SerializedWorkflowRun | null> {
-  if (!sixb.storage.workflowRuns) {
-    return null
-  }
-
-  const storage = sixb.storage.workflowRuns
-  const result = await storage.listLatestByWorkflowIds({
-    projectId: sixb.id,
-    workflowIds: [workflowId],
-  })
+  const result = await sdk.workflows.runs.listLatest([workflowId])
 
   const [latest] = result.runs
   return latest ? serializeWorkflowRunSummary(latest) : null
 }
 
 async function getLatestWorkflowRuns(
-  sixb: Sixb<readonly OntologySource[]>,
+  sdk: ReturnType<typeof requireRequestSdk>,
   workflowIds: readonly string[]
 ): Promise<Map<string, SerializedWorkflowRun>> {
-  const storage = sixb.storage.workflowRuns
-  if (!storage || workflowIds.length === 0) {
+  if (workflowIds.length === 0) {
     return new Map()
   }
 
-  const result = await storage.listLatestByWorkflowIds({
-    projectId: sixb.id,
-    workflowIds,
-  })
+  const result = await sdk.workflows.runs.listLatest(workflowIds)
 
   return new Map(result.runs.map((run) => [run.workflowId, serializeWorkflowRunSummary(run)]))
 }
@@ -550,10 +527,10 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
     .get(
       "/api/workflows",
       async (context) => {
-        const { scoped } = requestAuthState(context)
-        const workflows = scoped ? scoped.workflows.list() : sixb.workflows.list()
+        const sdk = requireRequestSdk(context)
+        const workflows = sdk.workflows.list()
         const latestRuns = await getLatestWorkflowRuns(
-          sixb,
+          sdk,
           workflows.map((workflow) => workflow.id)
         )
 
@@ -575,18 +552,16 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflows/:workflowId",
       async (context) => {
         const { params, set } = context
-        const { scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         // Non-runnable workflows are hidden as 404 (existence-hiding), matching
         // the object/action read routes.
-        const workflow = scoped
-          ? scoped.workflows.getById(params.workflowId)
-          : sixb.workflows.getById(params.workflowId)
+        const workflow = sdk.workflows.getById(params.workflowId)
         if (!workflow) {
           set.status = 404
           return { error: "Workflow not found" }
         }
 
-        return serializeWorkflow(workflow, await getLatestWorkflowRun(sixb, workflow.id))
+        return serializeWorkflow(workflow, await getLatestWorkflowRun(sdk, workflow.id))
       },
       {
         params: WorkflowParamsSchema,
@@ -603,7 +578,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-interventions",
       async (context) => {
         const { query, set } = context
-        const { authz, scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         try {
           const parsed = WorkflowInterventionsQuerySchema.parse(query)
           const limit = parseOptionalInt(parsed.limit)
@@ -613,15 +588,8 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             return unconfiguredStorageResponse(set, "Workflow intervention storage")
           }
 
-          const workflowIds = scoped
-            ? scoped.workflows.list().map((workflow) => workflow.id)
-            : authz
-              ? [...authz.grants["run:workflow"]]
-              : undefined
-          const result = await storage.list({
-            projectId: sixb.id,
+          const result = await sdk.workflows.interventions.list({
             workflowId: parsed.workflowId,
-            workflowIds,
             workflowRunId: parsed.workflowRunId,
             nodeRunId: parsed.nodeRunId,
             nodeId: parsed.nodeId,
@@ -662,22 +630,15 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-interventions/:interventionId",
       async (context) => {
         const { params, set } = context
-        const { authz, scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         try {
           const storage = sixb.storage.workflowInterventions
           if (!storage) {
             return unconfiguredStorageResponse(set, "Workflow intervention storage")
           }
 
-          const intervention = await storage.getById({
-            projectId: sixb.id,
-            id: params.interventionId,
-          })
-          if (
-            !intervention ||
-            !canViewWorkflowIntervention(authz, intervention) ||
-            (scoped && !scoped.workflows.getById(intervention.workflowId))
-          ) {
+          const intervention = await sdk.workflows.interventions.getById(params.interventionId)
+          if (!intervention) {
             set.status = 404
             return { error: "Workflow intervention not found" }
           }
@@ -706,28 +667,21 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-interventions/:interventionId/submit",
       async (context) => {
         const { params, body, set } = context
-        const { authz, scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         try {
           const storage = sixb.storage.workflowInterventions
           if (!storage) {
             return unconfiguredStorageResponse(set, "Workflow intervention storage")
           }
 
-          const intervention = await storage.getById({
-            projectId: sixb.id,
-            id: params.interventionId,
-          })
-          if (
-            !intervention ||
-            !canViewWorkflowIntervention(authz, intervention) ||
-            (scoped && !scoped.workflows.getById(intervention.workflowId))
-          ) {
+          const intervention = await sdk.workflows.interventions.getById(params.interventionId)
+          if (!intervention) {
             set.status = 404
             return { error: "Workflow intervention not found" }
           }
           assertPendingIntervention(intervention)
 
-          const workflow = sixb.workflows.getById(intervention.workflowId)
+          const workflow = sdk.workflows.getById(intervention.workflowId)
           if (!workflow) {
             set.status = 404
             return { error: "Workflow not found" }
@@ -746,7 +700,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             projectId: sixb.id,
             id: intervention.id,
             response,
-            submittedBy: serializePrincipal(authz?.principal ?? SYSTEM_PRINCIPAL),
+            submittedBy: serializePrincipal(principalForExecution(sdk)),
           })
 
           const [job] = await sixb.queues.workflows.enqueue({
@@ -795,7 +749,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-interventions/:interventionId/cancel",
       async (context) => {
         const { params, body, set } = context
-        const { authz, scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         try {
           const interventionStorage = sixb.storage.workflowInterventions
           if (!interventionStorage) {
@@ -807,31 +761,21 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             return unconfiguredStorageResponse(set, "Workflow run storage")
           }
 
-          const intervention = await interventionStorage.getById({
-            projectId: sixb.id,
-            id: params.interventionId,
-          })
-          if (
-            !intervention ||
-            !canViewWorkflowIntervention(authz, intervention) ||
-            (scoped && !scoped.workflows.getById(intervention.workflowId))
-          ) {
+          const intervention = await sdk.workflows.interventions.getById(params.interventionId)
+          if (!intervention) {
             set.status = 404
             return { error: "Workflow intervention not found" }
           }
           assertPendingIntervention(intervention)
 
-          const workflow = sixb.workflows.getById(intervention.workflowId)
+          const workflow = sdk.workflows.getById(intervention.workflowId)
           if (!workflow) {
             set.status = 404
             return { error: "Workflow not found" }
           }
           requireRegisteredInterventionNode(workflow, intervention)
 
-          const run = await runStorage.getById({
-            projectId: sixb.id,
-            id: intervention.workflowRunId,
-          })
+          const run = await sdk.workflows.runs.getById(intervention.workflowRunId)
           if (!run) {
             set.status = 404
             return { error: "Workflow run not found" }
@@ -865,7 +809,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
                 projectId: sixb.id,
                 id: intervention.id,
                 cancelledAt,
-                cancelledBy: serializePrincipal(authz?.principal ?? SYSTEM_PRINCIPAL),
+                cancelledBy: serializePrincipal(principalForExecution(sdk)),
               })
               const cancelledNode = await tx.workflowRuns.nodes.finish({
                 projectId: sixb.id,
@@ -921,7 +865,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-runs",
       async (context) => {
         const { query, set } = context
-        const { authz, scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         try {
           const parsed = WorkflowRunsQuerySchema.parse(query)
           const limit = parseOptionalInt(parsed.limit)
@@ -931,15 +875,8 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             return unconfiguredStorageResponse(set, "Workflow run storage")
           }
 
-          const workflowIds = scoped
-            ? scoped.workflows.list().map((workflow) => workflow.id)
-            : authz
-              ? [...authz.grants["run:workflow"]]
-              : undefined
-          const result = await storage.list({
-            projectId: sixb.id,
+          const result = await sdk.workflows.runs.list({
             workflowId: parsed.workflowId,
-            workflowIds,
             statuses: parsed.status ? [parsed.status] : undefined,
             startedAfter: parseDate(parsed.startedAfter),
             startedBefore: parseDate(parsed.startedBefore),
@@ -976,15 +913,16 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-runs/:runId",
       async (context) => {
         const { params, set } = context
-        const { agentExecution, authz, scoped } = requestAuthState(context)
+        const { agentExecution } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         try {
           const storage = sixb.storage.workflowRuns
           if (!storage) {
             return unconfiguredStorageResponse(set, "Workflow run storage")
           }
 
-          const run = await storage.getById({ projectId: sixb.id, id: params.runId })
-          if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
+          const run = await sdk.workflows.runs.getById(params.runId)
+          if (!run) {
             set.status = 404
             return { error: "Workflow run not found" }
           }
@@ -1031,14 +969,14 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-runs/:runId/nodes/:nodeKey/agent-execution",
       async (context) => {
         const { params, set } = context
-        const { authz, scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         try {
           const storage = sixb.storage.workflowRuns
           if (!storage) {
             return unconfiguredStorageResponse(set, "Workflow run storage")
           }
-          const run = await storage.getById({ projectId: sixb.id, id: params.runId })
-          if (!run || !canAccessWorkflowRun(authz, scoped, run)) {
+          const run = await sdk.workflows.runs.getById(params.runId)
+          if (!run) {
             set.status = 404
             return { error: "Workflow agent execution not found" }
           }
@@ -1087,19 +1025,19 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflow-runs/:runId/cancel",
       async (context) => {
         const { params, body, set } = context
-        const { authz, scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         try {
           CancelWorkflowRunBodySchema.parse(body ?? {})
           const storage = sixb.storage.workflowRuns
           if (!storage) {
             return unconfiguredStorageResponse(set, "Workflow run storage")
           }
-          const existing = await storage.getById({ projectId: sixb.id, id: params.runId })
-          if (!existing || !canAccessWorkflowRun(authz, scoped, existing)) {
+          const existing = await sdk.workflows.runs.getById(params.runId)
+          if (!existing) {
             set.status = 404
             return { error: "Workflow run not found" }
           }
-          const workflow = sixb.workflows.getById(existing.workflowId)
+          const workflow = sdk.workflows.getById(existing.workflowId)
           if (!workflow) {
             set.status = 404
             return { error: "Workflow not found" }
@@ -1165,7 +1103,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
                   projectId: sixb.id,
                   id: intervention.id,
                   cancelledAt,
-                  cancelledBy: serializePrincipal(authz?.principal ?? SYSTEM_PRINCIPAL),
+                  cancelledBy: serializePrincipal(principalForExecution(sdk)),
                 })
               }
             }
@@ -1302,27 +1240,19 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/workflows/:workflowId/runs",
       async (context) => {
         const { params, body, set } = context
-        const { scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         try {
-          const workflow = sixb.workflows.getById(params.workflowId)
-          if (!workflow) {
-            set.status = 404
-            return { error: "Workflow not found" }
-          }
-
           if (!sixb.storage.workflowRuns) {
             return unconfiguredStorageResponse(set, "Workflow run storage")
           }
 
           const parsedBody = RequestWorkflowRunBodySchema.parse(body)
           const input = {
-            workflowId: workflow.id,
+            workflowId: params.workflowId,
             input: parsedBody.input ?? {},
             source: { type: "manual" } as const,
           }
-          const result = scoped
-            ? await scoped.workflows.requestById(input)
-            : await sixb.workflows.requestById(input)
+          const result = await sdk.workflows.requestById(input)
 
           set.status = 202
           return RequestWorkflowRunResponseSchema.parse({

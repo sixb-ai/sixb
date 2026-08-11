@@ -47,23 +47,12 @@ export class WorkflowsRuntime {
 
   /** Start a run by workflow id (server routes and dynamic use cases). */
   async requestById(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult> {
-    return this.requestByIdAs(this.runtime, input)
-  }
-
-  /**
-   * Start a run by id on behalf of an explicit runtime context, so the scoped
-   * SDK can enforce run grants while reusing the registered definitions.
-   */
-  async requestByIdAs(
-    runtime: SixbRuntimeContext,
-    input: RequestWorkflowRunInput
-  ): Promise<WorkflowRunRequestResult> {
     const workflow = this.getById(input.workflowId)
     if (!workflow) {
       throw new WorkflowValidationError(`[Sixb] Unknown workflow '${input.workflowId}'`)
     }
 
-    return requestWorkflowRun(runtime, workflow, input)
+    return requestWorkflowRun(this.runtime, workflow, input)
   }
 }
 

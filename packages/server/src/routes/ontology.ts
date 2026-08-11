@@ -1,7 +1,8 @@
-import { type AuthorizationContext, isAllowed, type OntologySource, type Sixb } from "@sixb/core"
+import type { OntologySource, Sixb } from "@sixb/core"
+import type { ExecutionSixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requestAuthState } from "../auth/scope"
+import { requireRequestSdk } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ObjectTypeParamsSchema, ObjectTypeSchema } from "../schemas/ontology"
@@ -43,9 +44,8 @@ function serializeSearch(
 }
 
 function serializeObjectType(
-  sixb: Sixb<readonly OntologySource[]>,
-  objectType: ReturnType<Sixb<readonly OntologySource[]>["objects"]["listTypes"]>[number],
-  authorization: AuthorizationContext | null
+  sdk: ExecutionSixb<readonly OntologySource[]>,
+  objectType: ReturnType<Sixb<readonly OntologySource[]>["objects"]["listTypes"]>[number]
 ) {
   return {
     id: objectType.id,
@@ -65,38 +65,30 @@ function serializeObjectType(
       cardinality: link.cardinality,
       properties: link.properties?.map(serializeProperty),
     })),
-    actions: sixb.actions
-      .listForType(objectType)
-      .filter((action) => isAllowed(authorization, { kind: "action.apply", actionId: action.id }))
-      .map((action) => ({
-        id: action.id,
-        name: action.id,
-        description: action.description,
-        params: Object.entries(action.params).map(([id, config]) => ({
-          id,
-          name: id,
-          schema: config.schema,
-          required: config.required ?? false,
-          nullable: config.nullable,
-          description: config.description,
-          semanticType: config.semanticType,
-        })),
+    actions: sdk.actions.listForType(objectType).map((action) => ({
+      id: action.id,
+      name: action.id,
+      description: action.description,
+      params: Object.entries(action.params).map(([id, config]) => ({
+        id,
+        name: id,
+        schema: config.schema,
+        required: config.required ?? false,
+        nullable: config.nullable,
+        description: config.description,
+        semanticType: config.semanticType,
       })),
+    })),
   }
 }
 
-export function registerOntologyRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerOntologyRoutes(app: Elysia, _sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/object-types",
       async (context) => {
-        const { authz } = requestAuthState(context)
-        return sixb.objects
-          .listTypes()
-          .filter((objectType) =>
-            isAllowed(authz, { kind: "object.view", objectTypeId: objectType.id })
-          )
-          .map((objectType) => serializeObjectType(sixb, objectType, authz))
+        const sdk = requireRequestSdk(context)
+        return sdk.objects.listTypes().map((objectType) => serializeObjectType(sdk, objectType))
       },
       {
         response: { 200: ObjectTypeSchema.array() },
@@ -112,17 +104,14 @@ export function registerOntologyRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/object-types/:objectTypeId",
       async (context) => {
         const { params, set } = context
-        const { authz } = requestAuthState(context)
-        const objectType = sixb.objects.getTypeById(params.objectTypeId)
-        if (
-          !objectType ||
-          !isAllowed(authz, { kind: "object.view", objectTypeId: objectType.id })
-        ) {
+        const sdk = requireRequestSdk(context)
+        const objectType = sdk.objects.getTypeById(params.objectTypeId)
+        if (!objectType) {
           set.status = 404
           return { error: "Object type not found" }
         }
 
-        return serializeObjectType(sixb, objectType, authz)
+        return serializeObjectType(sdk, objectType)
       },
       {
         params: ObjectTypeParamsSchema,

@@ -59,6 +59,20 @@ function createSixbStub(
   } as unknown as Sixb<readonly OntologySource[]>
 }
 
+function createTestApp(lakeStorage: LakeStorage, definitions: readonly DatasetDefinition[]) {
+  const sixb = createSixbStub(lakeStorage, definitions)
+  const sdk = {
+    datasets: sixb.datasets,
+    syncs: sixb.syncs,
+    pipelines: sixb.pipelines,
+    projections: sixb.projections,
+  }
+  const app = new Elysia()
+  app.derive(() => ({ sdk }))
+
+  return registerDatasetRoutes(app, sixb)
+}
+
 const definitions: DatasetDefinition[] = [
   defineDataset("raw.catalog.dataset_0", {
     schema: [col("source", "string"), col("id", "string")],
@@ -84,7 +98,7 @@ const states: DatasetCatalogState[] = definitions.map((definition, index) => ({
 describe("dataset catalog routes", () => {
   test("list route reads bulk catalog state once, never per-dataset reads", async () => {
     const { storage, calls } = createCatalogOnlyStorage(states)
-    const app = registerDatasetRoutes(new Elysia(), createSixbStub(storage, definitions))
+    const app = createTestApp(storage, definitions)
 
     const response = await app.handle(new Request("http://localhost/api/datasets"))
     expect(response.status).toBe(200)
@@ -110,7 +124,7 @@ describe("dataset catalog routes", () => {
 
   test("single route reads catalog state without per-dataset reads", async () => {
     const { storage, calls } = createCatalogOnlyStorage(states)
-    const app = registerDatasetRoutes(new Elysia(), createSixbStub(storage, definitions))
+    const app = createTestApp(storage, definitions)
 
     const response = await app.handle(
       new Request(`http://localhost/api/datasets/${definitions[0].id}`)

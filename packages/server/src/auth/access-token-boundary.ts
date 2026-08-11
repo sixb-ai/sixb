@@ -21,9 +21,9 @@ export interface AccessTokenRoute {
 // `agentApi` projection of the same table, which the table's load-time invariant keeps a strict
 // subset of this one.
 //
-// Bearer tokens should only reach routes that already enforce scoped authz. Raw storage, admin,
-// browser, webhook, and websocket routes stay session-only until each has an intentional scoped
-// API surface — i.e. they are simply absent from SIXB_API_ROUTES.
+// Bearer tokens should only reach routes that enforce execution-bound authority. Admin, browser,
+// webhook, and WebSocket routes stay session-only because bearer access is intentionally absent
+// from SIXB_API_ROUTES.
 export const ACCESS_TOKEN_ROUTES: readonly AccessTokenRoute[] = SIXB_API_ROUTES.filter(
   (route) => route.accessToken
 ).map((route) => ({ operationId: route.operationId, method: route.method, path: route.path }))
@@ -63,6 +63,6 @@ export function shouldVerifyCsrfForAuthSource(
   source: AuthCredentialSource
 ): boolean {
   // CSRF protects ambient browser cookies. Bearer tokens are explicit request
-  // credentials, so they skip CSRF while still requiring authz checks.
+  // credentials, so they skip CSRF while still requiring execution-bound authorization.
   return route.csrfProtected && source === "session"
 }

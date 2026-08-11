@@ -1,11 +1,10 @@
 import type { DomainEvent } from "@sixb/core"
 import { scopeKeysForEvent } from "@sixb/core/events/scope"
-import { canViewEvent } from "@sixb/core/internal/authorization"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { EVENT_TOPICS, EVENT_TYPES } from "../../schemas/events"
 import type { SixbServer } from "../../server"
-import { decodeWsMessage, safeSend, wsAuthz, wsStateKey } from "../../utils/ws"
+import { decodeWsMessage, safeSend, wsRequestSdk, wsStateKey } from "../../utils/ws"
 
 interface EventSubscriptionState {
   topics?: DomainEvent["topic"][]
@@ -126,7 +125,11 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
       return
     }
 
-    const authz = wsAuthz(ws)
+    const sdk = wsRequestSdk(ws)
+    if (!sdk) {
+      safeSend(ws, { type: "error", message: "Execution scope is not available." })
+      return
+    }
 
     const tick = async () => {
       if (state.polling) {
@@ -143,15 +146,13 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
           types: state.types,
         })
 
-        // Each event payload may carry object data, so visibility is derived
-        // per-event from the principal's grants (see `canViewEvent`), and the
-        // optional scope narrows the stream further. The cursor advances over
-        // every event read, not just the ones sent.
+        // The execution facade owns per-event visibility. The cursor still advances over every
+        // record read, not only the visible ones, so an invisible tail cannot stall polling.
         for (const event of events) {
           if (!eventMatchesScope(event, state)) {
             continue
           }
-          if (canViewEvent(authz, event)) {
+          if (sdk.events.canRead(event)) {
             safeSend(ws, { type: "event", event })
           }
         }

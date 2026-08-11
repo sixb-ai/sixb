@@ -85,9 +85,8 @@ export interface SixbRuntimeContext {
   readonly sandboxes?: SandboxFactory
   readonly rules?: readonly RuleDefinition[]
   /**
-   * Principal scope for this context. Absent on privileged runtimes (raw
-   * `sixb`, syncs, workers, tests); present on contexts created by
-   * `sixb.as(context)`, where data operations enforce default-deny grants.
+   * Principal authority for this context. Absent for explicit unrestricted execution; present
+   * on principal-bound execution SDKs and the transitional `sixb.as(context)` surface.
    */
   readonly authorization?: AuthorizationContext
 }
