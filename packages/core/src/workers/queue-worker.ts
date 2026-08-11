@@ -1,4 +1,6 @@
-import type { ClaimedQueueJob, Queue, QueueJob, QueueJobError } from "../queues"
+import { captureSixbFailure } from "../errors/internal"
+import type { SixbErrorCode } from "../errors/types"
+import type { ClaimedQueueJob, Queue, QueueJob } from "../queues"
 import { WorkerAbortError } from "./errors"
 import {
   createQueueDelivery,
@@ -7,9 +9,20 @@ import {
 } from "./queue-delivery"
 import { Worker } from "./worker"
 
-export interface QueueWorkerConfig<TJob extends QueueJob> {
+type QueueWorkerFailureCodes = readonly [
+  "internal.unexpected",
+  "runtime.cancelled",
+  ...SixbErrorCode[],
+]
+
+export interface QueueWorkerConfig<
+  TJob extends QueueJob,
+  TFailureCodes extends QueueWorkerFailureCodes,
+> {
   readonly projectId: string
-  readonly queue: Queue<TJob>
+  readonly queue: Queue<TJob, TFailureCodes[number]>
+  /** Runtime counterpart of this lane's precise terminal-failure union. */
+  readonly failureCodes: TFailureCodes
   readonly workerId: string
   readonly leaseMs?: number
   readonly claimLimit?: number
@@ -26,15 +39,19 @@ const DEFAULT_CLAIM_LIMIT = 1
 const DEFAULT_IDLE_POLL_MS = 1_000
 const MAX_CONSECUTIVE_CLAIM_FAILURES = 5
 
-export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
-  protected readonly config: Required<QueueWorkerConfig<TJob>>
+export abstract class QueueWorker<
+  TJob extends QueueJob,
+  TFailureCodes extends QueueWorkerFailureCodes,
+> extends Worker {
+  protected readonly config: Required<QueueWorkerConfig<TJob, TFailureCodes>>
   private consecutiveClaimFailures = 0
 
-  constructor(config: QueueWorkerConfig<TJob>) {
+  constructor(config: QueueWorkerConfig<TJob, TFailureCodes>) {
     super()
     this.config = {
       projectId: config.projectId,
       queue: config.queue,
+      failureCodes: config.failureCodes,
       workerId: config.workerId,
       leaseMs: config.leaseMs ?? DEFAULT_LEASE_MS,
       claimLimit: config.claimLimit ?? DEFAULT_CLAIM_LIMIT,
@@ -80,7 +97,7 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
   protected abstract execute(
     claimed: ClaimedQueueJob<TJob>,
     signal: AbortSignal,
-    delivery: QueueDelivery<TJob>
+    delivery: QueueDelivery<TJob, TFailureCodes[number]>
   ): Promise<void>
 
   protected onExecutionError(
@@ -171,7 +188,7 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
       if (signal.aborted || isAbortError(error)) {
         try {
           const decision = await this.onAbortError(claimed, error)
-          await this.applyFailureDecision(delivery, decision, error)
+          await this.applyFailureDecision(delivery, decision, error, "runtime.cancelled")
         } catch {
           // Shutdown is already in progress. The unacknowledged job becomes visible after its lease.
         }
@@ -180,7 +197,7 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
 
       try {
         const decision = await this.onExecutionError(claimed, error)
-        await this.applyFailureDecision(delivery, decision, error)
+        await this.applyFailureDecision(delivery, decision, error, "internal.unexpected")
       } catch (settlementError) {
         logQueueOperationError("apply failure decision to", claimed, settlementError)
       }
@@ -190,24 +207,27 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
   }
 
   private async applyFailureDecision(
-    delivery: QueueDelivery<TJob>,
+    delivery: QueueDelivery<TJob, TFailureCodes[number]>,
     decision: QueueWorkerFailureDecision,
-    error: unknown
+    error: unknown,
+    defaultCode: "internal.unexpected" | "runtime.cancelled"
   ): Promise<void> {
     if (decision.kind === "retry") {
-      await delivery.retry({
-        availableAt: decision.availableAt,
-        error: toQueueJobError(error),
-      })
+      await delivery.retry({ availableAt: decision.availableAt })
       return
     }
 
-    await delivery.fail(toQueueJobError(error))
+    await delivery.fail(
+      captureSixbFailure(error, {
+        allowedCodes: this.config.failureCodes,
+        defaultCode,
+      })
+    )
   }
 }
 
-async function settleOrLog<TJob extends QueueJob>(
-  delivery: QueueDelivery<TJob>,
+async function settleOrLog<TJob extends QueueJob, TFailureCode extends SixbErrorCode>(
+  delivery: QueueDelivery<TJob, TFailureCode>,
   operation: string,
   settle: () => Promise<QueueSettlementResult>
 ): Promise<void> {
@@ -224,13 +244,6 @@ function logQueueOperationError(operation: string, claimed: ClaimedQueueJob, err
     `[SixbQueueWorker] Could not ${operation} queue job '${claimed.job.id}'; it may be redelivered.`,
     error
   )
-}
-
-function toQueueJobError(error: unknown): QueueJobError {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message }
-  }
-  return { message: String(error) }
 }
 
 /** True for a standard abort (`AbortController`/`AbortSignal.timeout`) error. */

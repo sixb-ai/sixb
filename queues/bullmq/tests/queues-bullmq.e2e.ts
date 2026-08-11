@@ -1,7 +1,9 @@
 import { afterAll, describe, expect, mock, test } from "bun:test"
 import { runQueueContractSuite } from "@sixb/core/testing"
+import { Queue as BullQueue } from "bullmq"
 import IORedis from "ioredis"
 import { BullMqQueues } from "../src"
+import { toBullMqJobId } from "../src/adapter"
 import {
   closeSharedConnection,
   closeSharedProvider,
@@ -62,6 +64,35 @@ describe("BullMqQueues (Redis-specific)", () => {
       } finally {
         await providerA.close()
         await providerB.close()
+      }
+    })
+  })
+
+  describe("agent lane", () => {
+    test("accepts workflow-node jobs through the concrete provider type", async () => {
+      const provider = createTestQueues()
+
+      try {
+        await provider.agents.enqueue({
+          projectId: "project-a",
+          jobs: [
+            {
+              type: "agent.workflow-node.requested",
+              payload: { nodeRunId: "node-run-a" },
+            },
+          ],
+        })
+
+        const [claimed] = await provider.agents.claim({
+          projectId: "project-a",
+          workerId: "agent-worker-a",
+        })
+        expect(claimed?.job).toMatchObject({
+          type: "agent.workflow-node.requested",
+          payload: { nodeRunId: "node-run-a" },
+        })
+      } finally {
+        await provider.close()
       }
     })
   })
@@ -141,6 +172,50 @@ describe("BullMqQueues (Redis-specific)", () => {
       expect(firstClaim?.job.attempt).toBe(1)
       expect(secondClaim?.job.id).toBe(job?.id)
       expect(secondClaim!.job.attempt).toBeGreaterThanOrEqual(2)
+    })
+  })
+
+  describe("terminal failure diagnostics", () => {
+    test("projects the stable code and message onto BullMQ's native failed job", async () => {
+      const connection = createBorrowedConnection()
+      const prefix = "sixb-test-terminal-failure"
+      const projectId = "project-a"
+      const provider = new BullMqQueues({ connection, prefix, removeOnFail: { count: 10 } })
+      const nativeQueue = new BullQueue("pipeline.runs", {
+        connection,
+        prefix: `${prefix}:${projectId}`,
+      })
+
+      try {
+        const [job] = await provider.pipelines.enqueue({
+          projectId,
+          jobs: [{ type: "pipeline.run.requested", payload: { pipelineId: "pipeline-a" } }],
+        })
+        const [claimed] = await provider.pipelines.claim({ projectId, workerId: "worker-a" })
+
+        await provider.pipelines.fail({
+          projectId,
+          jobId: job!.id,
+          leaseId: claimed!.leaseId,
+          failure: {
+            code: "internal.unexpected",
+            retryable: false,
+            message: "Pipeline execution failed.",
+            at: "2026-01-01T00:00:00.000Z",
+            details: { pipelineId: "pipeline-a" },
+          },
+        })
+
+        const nativeJob = await nativeQueue.getJob(toBullMqJobId(job!.id))
+        expect(nativeJob?.failedReason).toBe("Pipeline execution failed.")
+        expect(nativeJob?.stacktrace?.[0]).toContain(
+          "internal.unexpected: Pipeline execution failed."
+        )
+      } finally {
+        await nativeQueue.close()
+        await provider.close()
+        await connection.quit()
+      }
     })
   })
 

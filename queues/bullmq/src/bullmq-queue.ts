@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto"
-import type { Queue } from "@sixb/core"
+import type { Queue, SixbErrorCode } from "@sixb/core"
 import {
   type ClaimedQueueJob,
   type NewQueueJob,
   QueueError,
   type QueueJob,
-  type QueueJobError,
+  type QueueJobFailure,
 } from "@sixb/core/queues"
 import {
   type Job as BullJob,
@@ -51,7 +51,11 @@ export interface BullMqLaneShared {
  * - BullMQ's built-in retry machinery is deliberately bypassed (`attempts: 1`): the Sixb
  *   contract places retry policy on the caller, not the broker.
  */
-export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob> {
+export class BullMqQueue<
+  TQueueJob extends QueueJob,
+  TFailureCode extends SixbErrorCode = SixbErrorCode,
+> implements Queue<TQueueJob, TFailureCode>
+{
   private readonly queuesByProject = new Map<string, BullQueue<QueueJobData<TQueueJob>>>()
   private readonly workersByProject = new Map<string, BullWorker<QueueJobData<TQueueJob>>>()
   private closed = false
@@ -154,7 +158,6 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     jobId: string
     leaseId: string
     availableAt?: string
-    error?: QueueJobError
   }): Promise<void> {
     assertNonEmpty(params.projectId, "projectId")
     assertNonEmpty(params.jobId, "jobId")
@@ -175,15 +178,18 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     projectId: string
     jobId: string
     leaseId: string
-    error: QueueJobError
+    failure: QueueJobFailure<TFailureCode>
   }): Promise<void> {
     assertNonEmpty(params.projectId, "projectId")
     assertNonEmpty(params.jobId, "jobId")
     assertNonEmpty(params.leaseId, "leaseId")
 
     const bullJob = await this.loadKnownJob(params.projectId, params.jobId)
-    const wrapped = new UnrecoverableError(params.error.message)
-    if (params.error.name) wrapped.name = params.error.name
+    // BullMQ exposes only `failedReason` and a stack trace on its native failed-job surface. Keep
+    // the human-readable message there and put the stable Sixb identity in the error name. A full,
+    // queryable structured dead-letter record belongs to a future queue read contract.
+    const wrapped = new UnrecoverableError(params.failure.message)
+    wrapped.name = params.failure.code
 
     try {
       await bullJob.moveToFailed(wrapped, params.leaseId, false)

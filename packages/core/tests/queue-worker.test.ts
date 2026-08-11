@@ -1,6 +1,13 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { InMemoryQueues } from "../src"
-import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "../src/queues"
+import { createSixbError } from "../src/errors/internal"
+import type {
+  ClaimedQueueJob,
+  QueueJobFailure,
+  SyncQueueJobFailureCode,
+  SyncRunRequestedQueueJob,
+} from "../src/queues"
+import { SYNC_RUN_FAILURE_CODES } from "../src/storage"
 import { QueueWorker, type QueueWorkerFailureDecision } from "../src/workers"
 
 const PROJECT_ID = "queue-worker-tests"
@@ -19,7 +26,7 @@ describe("QueueWorker", () => {
     const queues = new InMemoryQueues()
     const processed: string[] = []
 
-    class TestWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+    class TestWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
       protected async execute(claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>): Promise<void> {
         processed.push(claimed.job.id)
       }
@@ -28,6 +35,7 @@ describe("QueueWorker", () => {
     const worker = new TestWorker({
       projectId: PROJECT_ID,
       queue: queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
       idlePollMs: 10,
     })
@@ -57,7 +65,7 @@ describe("QueueWorker", () => {
     }
 
     let processed = false
-    class TestWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+    class TestWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
       protected async execute(): Promise<void> {
         processed = true
       }
@@ -66,6 +74,7 @@ describe("QueueWorker", () => {
     const worker = new TestWorker({
       projectId: PROJECT_ID,
       queue: queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
       idlePollMs: 1,
     })
@@ -83,16 +92,29 @@ describe("QueueWorker", () => {
 
   test("default policy fails jobs on execution errors", async () => {
     const queues = new InMemoryQueues()
+    let settledFailure: QueueJobFailure<SyncQueueJobFailureCode> | undefined
+    const originalFail = queues.syncRuns.fail.bind(queues.syncRuns)
+    queues.syncRuns.fail = async (params) => {
+      settledFailure = params.failure
+      await originalFail(params)
+    }
 
-    class FailingWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+    class FailingWorker extends QueueWorker<
+      SyncRunRequestedQueueJob,
+      typeof SYNC_RUN_FAILURE_CODES
+    > {
       protected async execute(): Promise<void> {
-        throw new Error("execute failed")
+        throw createSixbError("internal.unexpected", "execute failed", {
+          cause: new Error("storage unavailable"),
+          details: { syncId: "s" },
+        })
       }
     }
 
     const worker = new FailingWorker({
       projectId: PROJECT_ID,
       queue: queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
       idlePollMs: 10,
     })
@@ -110,13 +132,24 @@ describe("QueueWorker", () => {
     })
 
     await worker.stop()
+
+    expect(settledFailure).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message: "An unexpected internal error occurred.",
+      details: { syncId: "s" },
+    })
+    expect(Date.parse(settledFailure!.at)).not.toBeNaN()
   })
 
   test("custom onExecutionError can request retry with availableAt", async () => {
     const queues = new InMemoryQueues()
     let executeCalls = 0
 
-    class RetryingWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+    class RetryingWorker extends QueueWorker<
+      SyncRunRequestedQueueJob,
+      typeof SYNC_RUN_FAILURE_CODES
+    > {
       protected async execute(): Promise<void> {
         executeCalls += 1
         if (executeCalls === 1) {
@@ -137,6 +170,7 @@ describe("QueueWorker", () => {
     const worker = new RetryingWorker({
       projectId: PROJECT_ID,
       queue: queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
       idlePollMs: 10,
     })
@@ -155,8 +189,17 @@ describe("QueueWorker", () => {
 
   test("custom onAbortError can fail abort errors", async () => {
     const queues = new InMemoryQueues()
+    let settledFailure: QueueJobFailure<SyncQueueJobFailureCode> | undefined
+    const originalFail = queues.syncRuns.fail.bind(queues.syncRuns)
+    queues.syncRuns.fail = async (params) => {
+      settledFailure = params.failure
+      await originalFail(params)
+    }
 
-    class AbortFailingWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+    class AbortFailingWorker extends QueueWorker<
+      SyncRunRequestedQueueJob,
+      typeof SYNC_RUN_FAILURE_CODES
+    > {
       protected async execute(): Promise<void> {
         const error = new Error("aborted")
         error.name = "AbortError"
@@ -171,6 +214,7 @@ describe("QueueWorker", () => {
     const worker = new AbortFailingWorker({
       projectId: PROJECT_ID,
       queue: queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
       idlePollMs: 10,
     })
@@ -188,6 +232,11 @@ describe("QueueWorker", () => {
     })
 
     await worker.stop()
+    expect(settledFailure).toMatchObject({
+      code: "runtime.cancelled",
+      retryable: false,
+      message: "Execution was cancelled.",
+    })
   })
 
   test("renews leases while jobs remain in flight", async () => {
@@ -207,7 +256,7 @@ describe("QueueWorker", () => {
       completed = true
     }
 
-    class SlowWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+    class SlowWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
       protected async execute(): Promise<void> {
         await Bun.sleep(240)
       }
@@ -216,6 +265,7 @@ describe("QueueWorker", () => {
     const worker = new SlowWorker({
       projectId: PROJECT_ID,
       queue: queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
       leaseMs: 90,
       idlePollMs: 10,
@@ -248,7 +298,10 @@ describe("QueueWorker", () => {
     }
 
     const processed: string[] = []
-    class ResilientWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+    class ResilientWorker extends QueueWorker<
+      SyncRunRequestedQueueJob,
+      typeof SYNC_RUN_FAILURE_CODES
+    > {
       protected async execute(claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>): Promise<void> {
         processed.push(claimed.job.payload.syncId)
       }
@@ -257,6 +310,7 @@ describe("QueueWorker", () => {
     const worker = new ResilientWorker({
       projectId: PROJECT_ID,
       queue: queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
       idlePollMs: 10,
     })
@@ -299,7 +353,7 @@ describe("QueueWorker", () => {
       release = resolve
     })
 
-    class BatchWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+    class BatchWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
       protected async execute(claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>): Promise<void> {
         processed.push(claimed.job.id)
         await releasePromise
@@ -310,6 +364,7 @@ describe("QueueWorker", () => {
     const worker = new BatchWorker({
       projectId: PROJECT_ID,
       queue: queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
       claimLimit: 3,
       idlePollMs: 10,
