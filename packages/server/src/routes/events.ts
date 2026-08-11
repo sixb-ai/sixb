@@ -1,17 +1,17 @@
-import { AuthorizationError, type OntologySource, type Sixb } from "@sixb/core"
+import { AuthorizationError, type SixbHostRuntime } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requireRequestSdk } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { EventsQuerySchema, EventsResponseSchema } from "../schemas/events"
 import { parseOptionalInt } from "../utils/http"
-export function registerEventRoutes(app: Elysia, _sixb: Sixb<readonly OntologySource[]>) {
+export function registerEventRoutes(app: Elysia, _host: SixbHostRuntime) {
   return app.get(
     "/api/events",
     async (context) => {
       const { query, set } = context
-      const sdk = requireRequestSdk(context)
+      const sixb = requireRequestSixb(context)
 
       try {
         const parsed = EventsQuerySchema.parse(query)
@@ -21,7 +21,7 @@ export function registerEventRoutes(app: Elysia, _sixb: Sixb<readonly OntologySo
           afterCursor: parsed.afterCursor,
           limit: parseOptionalInt(parsed.limit),
         }
-        const events = await sdk.events.read(input)
+        const events = await sixb.events.read(input)
 
         return {
           count: events.length,

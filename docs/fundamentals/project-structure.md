@@ -110,9 +110,8 @@ export const Invoice = defineObjectType({
 
 ## The entry file
 
-`sixb.config.ts` is the entry. It exports a runtime as a named `sixb` export (preferred) or
-as the `default` export. `createSixb()` runs discovery and returns the runtime, so the common
-shape is a single export:
+`sixb.config.ts` is the project entry. Export the host as `sixb`; the CLI loads this value when it
+starts the project.
 
 ```ts
 import { LocalBlobStorage } from "@sixb/blob-local"
@@ -130,32 +129,7 @@ export const sixb = createSixb({
 })
 ```
 
-`createSixb()` is async, so the export is a promise here — the CLI awaits it. It accepts
-three shapes, which lets you run async setup such as migrations or seeding before the runtime
-is returned:
-
-| Export shape | Example |
-| --- | --- |
-| A runtime promise | `export const sixb = createSixb({ ... })` |
-| A function returning a runtime (sync or async) | `export const sixb = () => createSixb({ ... })` |
-| A resolved runtime instance | `export const sixb = await createSixb({ ... })` |
-
-```ts
-// async entry: seed before returning the runtime
-export const sixb = bootstrap()
-
-async function bootstrap() {
-  const runtime = await createSixb({ id: "my-sixb-app" /* ...providers */ })
-  await seedCustomers(runtime)
-  return runtime
-}
-```
-
-If the export is none of these shapes, the CLI throws:
-
-```txt
-Could not load Sixb runtime from entry. Export `sixb` (or default) as a Sixb instance or Promise<Sixb>.
-```
+`createSixb()` returns a promise; the CLI awaits the exported `sixb` value before starting the project.
 
 See [Runtime](../runtime/overview.md) for the full `createSixb()` options and provider list.
 

@@ -28,12 +28,15 @@ export type OntologyRuleEvent =
 export type RuleLinkMap = ReadonlyMap<string, readonly ObjectLinkRow[]>
 
 /**
- * Minimal Sixb runtime shape needed by the live rules worker.
+ * Minimal host shape needed by the live rules worker.
  *
  * The worker intentionally avoids depending on queues, orchestrator routes,
  * lake storage, connectors, or other host-only concerns.
+ *
+ * Rules remain a host-level exception until #206 models durable rule executions. Binding a trusted
+ * execution here would invent authority that the current event/reconciliation model cannot restore.
  */
-export interface RulesWorkerSixb {
+export interface RulesWorkerHost {
   readonly id: string
   readonly events: DomainEventLog
   readonly storage: Storage
@@ -107,7 +110,7 @@ export interface EvaluateRuleEventResult {
   /**
    * Candidates that threw. The evaluator returns them rather than reporting them: `runtime` here is
    * a reduced context with no error reporter attached, so the coordinator — whose `onError` reaches
-   * the `Sixb` instance — is what turns these into notifications.
+   * the host — is what turns these into notifications.
    */
   readonly failures: readonly RuleCandidateFailure[]
 }

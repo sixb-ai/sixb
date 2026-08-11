@@ -1,4 +1,4 @@
-import type { LoadedSixb } from "../lib/loadSixb"
+import type { LoadedSixbHost } from "../lib/loadSixb"
 import { loadProductionSixb } from "../lib/production"
 import {
   type RunningRulesRuntime,
@@ -24,7 +24,7 @@ export async function runRules(options: RulesOptions = {}) {
     <LoadingView title="Starting sixb rules" subtitle={loaded.entry} status="Starting rules" />
   )
 
-  let sixb: LoadedSixb | null = loaded.sixb
+  let sixb: LoadedSixbHost | null = loaded.sixb
   let runtime: RunningRulesRuntime | null = null
 
   try {

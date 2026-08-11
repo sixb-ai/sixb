@@ -57,9 +57,16 @@ export function createObjectSet<
     blobStorage,
     storage,
     queues,
+    runtimeAuthorization,
     authorization,
   } = params
-  const queryExecutor = createRuntimeQueryExecutor({ projectId, ontology, storage, authorization })
+  const queryExecutor = createRuntimeQueryExecutor({
+    projectId,
+    ontology,
+    storage,
+    runtimeAuthorization,
+    authorization,
+  })
 
   const resolvedCtx: ResolvedObjectContext = {
     projectId,
@@ -70,6 +77,7 @@ export function createObjectSet<
     blobStorage,
     storage,
     queues,
+    runtimeAuthorization,
     authorization,
     objectType,
     primaryPropertyId,

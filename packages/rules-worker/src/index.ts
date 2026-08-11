@@ -1,2 +1,2 @@
-export type { RulesWorkerOptions, RulesWorkerSixb } from "./types"
+export type { RulesWorkerHost, RulesWorkerOptions } from "./types"
 export { RulesWorker } from "./worker"

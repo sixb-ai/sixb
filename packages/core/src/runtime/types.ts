@@ -1,33 +1,21 @@
 /**
  * Core type definitions for the runtime layer.
  *
- * Hierarchy: Broker + Storage + Queues → Sixb → ObjectSet → ObjectByIdHandle
+ * Hierarchy: SixbHostContext → SixbRuntimeContext → ObjectSet → ObjectByIdHandle
  * Each level narrows generic parameters so downstream code stays type-safe.
  */
 
 import type {
   ActionParamsConfig,
   ActionRegistry,
-  ActionsRuntime,
   InferActionParams,
   RequestActionResult,
 } from "../actions"
-import type { AgentsRuntime } from "../agents"
-import type { AuthRuntime } from "../auth"
 import type { AuthorizationContext } from "../authorization"
-import type { BlobStorage, BlobsRuntime } from "../blob-storage"
-import type { Broker } from "../broker"
-import type { ConnectorRuntime, ConnectorsRuntime } from "../connectors"
-import type { DatasetsRuntime } from "../datasets"
+import type { BlobStorage } from "../blob-storage"
 import type { DomainEventLog } from "../events"
+import type { RuntimeAuthorization } from "../execution"
 import type { LakeStorage } from "../lake-storage"
-import type { LogsRuntime } from "../logging"
-import type {
-  OntologyMaintenanceHandle,
-  OntologyOperationalStatus,
-  SixbReadiness,
-} from "../maintenance"
-import type { ObjectsRuntime } from "../objects"
 import type {
   ObjectQuery,
   ObjectQueryExplanation,
@@ -50,30 +38,19 @@ import type {
 } from "../ontology/inference"
 import type { OntologyDocumentInput, OntologyRegistry, OntologySource } from "../ontology/registry"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../ontology/tokens"
-import type { PipelinesRuntime } from "../pipelines"
-import type { ProjectionsRuntime } from "../projections"
 import type { Queues } from "../queues"
-import type { RuleDefinition, RulesRuntime } from "../rules"
+import type { RuleDefinition } from "../rules"
 import type { SandboxFactory } from "../sandboxes"
-import type { SchedulesRuntime } from "../schedules"
-import type { SecurityRegistry } from "../security"
 import type { ActionRunRecord, ObjectLinkRow, Storage } from "../storage"
-import type { SyncsRuntime } from "../syncs"
-import type { RegisteredWebhook } from "../webhooks"
-import type { WorkflowsRuntime } from "../workflows"
-import type { ScopedSixb } from "./scoped"
-
 // ── Shared runtime context ──────────────────────────────────
 
 /**
- * Shared runtime context holding infrastructure + ontology registry.
+ * Infrastructure and registries owned by the configured host.
  *
- * Built once by `Sixb` at construction time and threaded to `objects/`
- * service and leaf functions.
- *
- * This is an internal execution context, not the public facade-composed `Sixb` surface.
+ * This context cannot call protected leaves: those require a {@link SixbRuntimeContext} carrying
+ * registered runtime authority.
  */
-export interface SixbRuntimeContext {
+export interface SixbHostContext {
   readonly projectId: string
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
@@ -84,9 +61,14 @@ export interface SixbRuntimeContext {
   readonly queues: Queues
   readonly sandboxes?: SandboxFactory
   readonly rules?: readonly RuleDefinition[]
+}
+
+/** Host dependencies paired with the process-local authority of one bound execution. */
+export interface SixbRuntimeContext extends SixbHostContext {
+  readonly runtimeAuthorization: RuntimeAuthorization
   /**
-   * Principal authority for this context. Absent for explicit unrestricted execution; present
-   * on principal-bound execution SDKs and the transitional `sixb.as(context)` surface.
+   * Resolved principal grants. Absent for trusted primitive and explicitly disabled executions.
+   * The opaque `runtimeAuthorization` remains the source of authority.
    */
   readonly authorization?: AuthorizationContext
 }
@@ -1063,74 +1045,6 @@ export interface ObjectByIdHandle<
   telemetry<TToken extends TelemetryPropertyToken<TObjectType>>(
     property: TToken
   ): TelemetryChannel<TToken, TValueTypes>
-}
-
-/**
- * Public API surface of a Sixb runtime instance.
- *
- * The class `Sixb<T>` implements this interface so the contract is
- * enforced at compile time and easy to scan in one place.
- */
-export interface SixbInstance<_ extends readonly OntologySource[]> {
-  readonly id: string
-  readonly ontology: OntologyRegistry
-  readonly broker: Broker
-  readonly events: DomainEventLog
-  readonly logs: LogsRuntime
-  readonly storage: Storage
-  readonly lakeStorage: LakeStorage
-  readonly blobs: BlobsRuntime
-  readonly queues: Queues
-  readonly sandboxes?: SandboxFactory
-  readonly schedules: SchedulesRuntime
-  readonly rules: RulesRuntime
-  readonly projections: ProjectionsRuntime
-  readonly security: SecurityRegistry
-  readonly auth: AuthRuntime
-  readonly actions: ActionsRuntime
-  readonly workflows: WorkflowsRuntime
-  readonly agents: AgentsRuntime
-  readonly objects: ObjectsRuntime<_>
-  readonly datasets: DatasetsRuntime
-  readonly syncs: SyncsRuntime
-  readonly pipelines: PipelinesRuntime
-  readonly connector: ConnectorRuntime
-  readonly connectors: ConnectorsRuntime
-
-  /** Create a principal-scoped runtime surface that enforces authorization grants. */
-  as(context: AuthorizationContext): ScopedSixb<_>
-
-  /** All webhook endpoints registered through connector adapters. */
-  listWebhooks(): readonly RegisteredWebhook[]
-
-  /** Lookup a registered connector webhook by connector id and webhook id. */
-  getWebhookById(connectorId: string, webhookId: string): RegisteredWebhook | null
-
-  /** Start durable outbox recovery and bounded ontology retention. */
-  startOntologyMaintenance(): Promise<OntologyMaintenanceHandle>
-
-  /** Latest cached asynchronous delivery and cleanup status. */
-  getOntologyOperationalStatus(): OntologyOperationalStatus
-
-  /** Verify required storage reachability and migration state. */
-  checkReadiness(): Promise<SixbReadiness>
-
-  /** Close the runtime broker provider if it owns external resources. */
-  closeBroker(): Promise<void>
-
-  /** Close the process logger provider, flushing buffered output. */
-  closeLogger(): Promise<void>
-
-  /**
-   * Type-safe ObjectSet for a registered object type.
-   *
-   * Not part of this interface because `ObjectSet` triggers deep type
-   * instantiation when the generic parameter is the widened base
-   * `ObjectTypeWithPropertyTokens`. Use `sixb.objects(MyConcreteType)`
-   * directly — TypeScript infers the narrow type from the literal.
-   *
-   * Signature: `objects<T>(objectType: T): ObjectSet<T, RegisteredValueTypes>`
-   */
 }
 
 export interface ObjectSet<

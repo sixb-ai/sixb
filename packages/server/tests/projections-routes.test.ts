@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type {
-  AuthorizationContext,
-  ObjectProjectionDefinition,
-  OntologySource,
-  Sixb,
-} from "@sixb/core"
+import type { AuthorizationContext, ObjectProjectionDefinition, OntologySource } from "@sixb/core"
 import {
   emptyGrantIndex,
   InMemoryBlobStorage,
@@ -12,7 +7,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  Sixb as SixbRuntime,
+  SixbHost,
 } from "@sixb/core"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type {
@@ -86,12 +81,12 @@ function authzViewing(...objectTypeIds: string[]): AuthorizationContext {
 
 function createSixbStub(
   projectionRuns: Partial<ProjectionRunStorage>
-): Sixb<readonly OntologySource[]> {
+): SixbHost<readonly OntologySource[]> {
   const storage = new InMemoryStorage()
   if (!storage.projectionRuns) throw new Error("Expected projection run storage")
   Object.assign(storage.projectionRuns, projectionRuns)
 
-  const sixb = new SixbRuntime<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: "my-app",
     ontology: [],
     broker: new InMemoryBroker(),
@@ -113,10 +108,13 @@ function createSixbStub(
   return sixb
 }
 
-function appWithAuthz(sixb: Sixb<readonly OntologySource[]>, authz: AuthorizationContext | null) {
+function appWithAuthz(
+  sixb: SixbHost<readonly OntologySource[]>,
+  authz: AuthorizationContext | null
+) {
   const app = new Elysia()
   app.derive(({ request }) => ({
-    sdk: bindRequestExecution(sixb, {
+    sixb: bindRequestExecution(sixb, {
       request,
       authorization: authz ? { type: "principal", context: authz } : { type: "disabled" },
     }),

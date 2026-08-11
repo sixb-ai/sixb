@@ -1,6 +1,6 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
-import type { OntologyMaintenanceHandle, OntologySource, Sixb } from "@sixb/core"
+import type { OntologyMaintenanceHandle, SixbHostRuntime } from "@sixb/core"
 import { CSRF_HEADER_NAME } from "@sixb/core/internal/auth"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { Elysia } from "elysia"
@@ -44,9 +44,9 @@ import { jsonValueOpenApiOverride } from "./schemas/common"
 import { ObjectQueryOpenApiSchemas } from "./schemas/objects"
 
 export interface SixbServerOptions {
-  sixb: Sixb<readonly OntologySource[]>
+  host: SixbHostRuntime
   port?: number
-  host?: string
+  hostname?: string
   quiet?: boolean
   browser: SixbApiBrowserPolicy
 }
@@ -56,9 +56,9 @@ export function createSixbServer(options: SixbServerOptions): SixbServer {
 }
 
 export class SixbServer {
-  private readonly sixb: Sixb<readonly OntologySource[]>
+  private readonly hostRuntime: SixbHostRuntime
   private readonly port: number
-  private readonly host: string
+  private readonly hostname: string
   private readonly quiet: boolean
   private readonly apiBrowserPolicy: ResolvedSixbApiBrowserPolicy
   private readonly authContextResolver: ResolveRequestAuthContext
@@ -68,9 +68,9 @@ export class SixbServer {
   private maintenance: OntologyMaintenanceHandle | null = null
 
   constructor(options: SixbServerOptions) {
-    this.sixb = options.sixb
+    this.hostRuntime = options.host
     this.port = options.port ?? 3000
-    this.host = options.host ?? "0.0.0.0"
+    this.hostname = options.hostname ?? "0.0.0.0"
     this.quiet = options.quiet ?? false
     this.apiBrowserPolicy = resolveApiBrowserPolicy(options.browser)
     this.authContextResolver = createApiBrowserAuthContextResolver(this.apiBrowserPolicy)
@@ -79,8 +79,8 @@ export class SixbServer {
     )
   }
 
-  getSixb(): Sixb<readonly OntologySource[]> {
-    return this.sixb
+  getHost(): SixbHostRuntime {
+    return this.hostRuntime
   }
 
   getPort(): number {
@@ -122,13 +122,13 @@ export class SixbServer {
       throw new Error("[SixbServer] Server is already running.")
     }
 
-    const maintenance = await this.sixb.startOntologyMaintenance()
+    const maintenance = await this.hostRuntime.startOntologyMaintenance()
     this.maintenance = maintenance
 
     try {
       this.app = createSixbApi(this)
       this.bunServer = startApiServer(this.app, {
-        host: this.host,
+        host: this.hostname,
         port: this.port,
       })
     } catch (error) {
@@ -137,11 +137,11 @@ export class SixbServer {
       this.maintenance = null
       await maintenance.stop()
       const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`[SixbServer] Failed to listen on ${this.host}:${this.port}: ${message}`)
+      throw new Error(`[SixbServer] Failed to listen on ${this.hostname}:${this.port}: ${message}`)
     }
 
     if (!this.quiet) {
-      const base = `http://${this.host}:${this.port}`
+      const base = `http://${this.hostname}:${this.port}`
       console.log(`Sixb server running at ${base}`)
       console.log(`OpenAPI docs at ${base}/docs`)
     }
@@ -165,9 +165,9 @@ export class SixbServer {
 }
 
 export function createSixbApi(server: SixbServer) {
-  const sixb = server.getSixb()
+  const host = server.getHost()
   const guard = new ServerAuthGuard({
-    sixb,
+    host,
     resolveAuthContext: (request) => server.resolveAuthContext(request),
   })
   guard.assertCanServeHttp({ production: process.env.NODE_ENV === "production" })
@@ -207,7 +207,7 @@ export function createSixbApi(server: SixbServer) {
         return {
           auth: { kind: "allow" as const, session: null },
           ...agentState,
-          sdk: bindRequestExecution(sixb, {
+          sixb: bindRequestExecution(host, {
             request,
             authorization,
           }),
@@ -218,9 +218,9 @@ export function createSixbApi(server: SixbServer) {
       if (auth.kind === "deny" || !auth.session?.authenticated) {
         return {
           auth,
-          sdk:
+          sixb:
             auth.kind === "allow" && !guard.isAuthEnabled()
-              ? bindRequestExecution(sixb, {
+              ? bindRequestExecution(host, {
                   request,
                   authorization: { type: "disabled" },
                 })
@@ -228,14 +228,14 @@ export function createSixbApi(server: SixbServer) {
         }
       }
 
-      const authz = sixb.auth.contextFromSession(auth.session)
+      const authz = host.auth.contextFromSession(auth.session)
       const credential =
         auth.session.credentialSource === "session"
           ? { type: "session" as const, id: auth.session.session.id }
           : { type: "accessToken" as const, id: auth.session.accessToken.id }
       return {
         auth,
-        sdk: bindRequestExecution(sixb, {
+        sixb: bindRequestExecution(host, {
           request,
           authorization: { type: "principal", context: authz, credential },
         }),
@@ -253,7 +253,7 @@ export function createSixbApi(server: SixbServer) {
       }
 
       const renewal = createSessionRenewalCookieHeaders({
-        sixb,
+        host: host,
         request,
         session: auth.session,
       })
@@ -298,7 +298,7 @@ export function createSixbApi(server: SixbServer) {
     })
   )
 
-  registerAuthRoutes(app, sixb, {
+  registerAuthRoutes(app, host, {
     resolveAuthContext: (request) => server.resolveAuthContext(request),
     resolveAuthRedirectContext: (request, input) =>
       server.resolveAuthRedirectContext(request, input),
@@ -307,8 +307,8 @@ export function createSixbApi(server: SixbServer) {
     resolveInvitationRedirectContext: (request, input) =>
       server.resolveInvitationRedirectContext(request, input),
   })
-  registerHttpRoutes(app, sixb)
-  registerWebhookRoutes(app, sixb)
+  registerHttpRoutes(app, host)
+  registerWebhookRoutes(app, host)
   registerWebSocketRoutes(app, server)
 
   return app

@@ -6,7 +6,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 
 const Room = defineObjectType({
@@ -30,7 +30,7 @@ const queues = Object.assign(new InMemoryQueues(), {
   },
 })
 
-export const sixb = new Sixb({
+export const sixb = new SixbHost({
   id: "cli-check-lingering",
   ontology: [Room],
   broker: new InMemoryBroker(),

@@ -14,7 +14,7 @@ may do. Sixb builds it from four small layers:
 | **Grants** | The capabilities a role gives — access, view, apply, run |
 | **Membership policies** | Who can administer membership for which groups |
 
-At request time these resolve into one set of grants per principal, and a scoped runtime enforces
+At request time these resolve into one set of grants per principal, and the `Sixb` SDK enforces
 them. You describe access next to the ontology, datasets, actions, workflows, syncs, and pipelines
 it protects, and the runtime applies it the same way everywhere.
 
@@ -302,30 +302,27 @@ membership policy above) can then invite and manage the rest of the team. See
 
 ## How grants are enforced
 
-Grants are enforced through a **scoped runtime**. The raw `sixb` instance is privileged — it has
-no authorization context and bypasses all grant checks. That is intended for trusted system code
-(startup, syncs, projections, workers, tests).
+Grants are enforced through the `Sixb` SDK. `SixbHost` owns providers, definitions, and lifecycle;
+it does not expose a privileged version of protected domain operations.
 
-To enforce a principal's grants, derive a scoped runtime with `sixb.as(context)`:
+The server and workers provide the appropriate SDK before application code runs:
 
 ```ts
-const scoped = sixb.as(authorizationContext)
-
-await scoped.objects(Invoice).list()      // only if view:object covers Invoice
-await scoped.objects(Invoice).upsert(...)  // only if view:object AND edit:object cover Invoice
-await scoped.actions.request(input)       // only if apply:action covers it
-await scoped.workflows.requestById(input) // only if run:workflow covers it
-await scoped.events.read()                // events whose subject is visible
+await sixb.objects(Invoice).list()      // only if view:object covers Invoice
+await sixb.objects(Invoice).upsert(...)  // only if view:object AND edit:object cover Invoice
+await sixb.actions.request(input)       // only if apply:action covers it
+await sixb.workflows.requestById(input) // only if run:workflow covers it
+await sixb.events.read()                // events whose subject is visible
 ```
 
-The scoped runtime is **default-deny**: any request without a covering grant throws, and listing
-APIs return only the definitions the principal can reach.
+The SDK is **default-deny** for signed-in principals: any request without a covering grant throws,
+and listing APIs return only the definitions the principal can reach.
 
-### Scoped runtime surface
+### Protected SDK surface
 
-The scoped runtime exposes only operations whose grants are enforceable end to end. Catalog and
+The SDK exposes only operations whose grants are enforceable end to end. Catalog and
 read methods are filtered to what the principal may reach. Auth administration, infrastructure
-handles, and `listLinks` stay on the privileged runtime.
+handles, and process lifecycle stay on `SixbHost`.
 
 | Method | Gated by |
 | --- | --- |
@@ -342,7 +339,7 @@ handles, and `listLinks` stay on the privileged runtime.
 | `workflows.list`, `workflows.getById` | `run:workflow` |
 | `syncs.list`, `syncs.getById` | `run:sync` |
 | `pipelines.list`, `pipelines.getById` | `run:pipeline` |
-| `agents.request`, `agents.list`, `agents.getById`, `agents.listThreads`, `agents.getThread` | `run:agent` |
+| `agents.request`, `agents.list`, `agents.getById`, `agents.threads.*`, `agents.runs.*` | `run:agent` |
 | `events.read` | subject visibility (see below) |
 
 ### Why writing needs the read grant too
@@ -395,16 +392,16 @@ for the event model.
 
 ## With the server
 
-The Sixb server does this for you. It resolves the session once per request and routes
-authenticated traffic through `sixb.as(context)` automatically, so read and run grants are enforced
-without extra wiring. You define groups, roles, and membership policies; the server applies them.
-See the [Server overview](../server/overview.md).
+The Sixb server does this for you. It resolves the session once per request and applies that
+principal's grants, so read and run grants are enforced without extra wiring. You define groups,
+roles, and membership policies; the server applies them. See the [Server
+overview](../server/overview.md).
 
-To build a context yourself in a custom integration, resolve it from the request:
+Tests bind explicit test executions with `createTestSixb`:
 
 ```ts
-const context = await sixb.auth.createAuthorizationContext(request)
-const scoped = sixb.as(context)
+const context = resolveAuthorizationContext({ principal, groupIds, roles })
+const sixb = createTestSixb(host, { authorization: context })
 ```
 
 ## Convention
@@ -440,7 +437,7 @@ import { teamMembers } from "./security/groups/team-members"
 import { memberAdministration } from "./security/policies/member-administration"
 import { financeAdminFullAccess, teamMemberBillingAccess } from "./security/roles/billing-access"
 
-export const sixb = await createSixb({
+export const sixb = createSixb({
   groups: [teamMembers, financeAdmins],
   roles: [teamMemberBillingAccess, financeAdminFullAccess],
   membershipPolicies: [memberAdministration],

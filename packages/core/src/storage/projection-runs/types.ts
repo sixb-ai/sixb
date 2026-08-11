@@ -187,8 +187,8 @@ export interface ListProjectionRunsInput {
   readonly datasetId?: string
   readonly datasetVersionId?: string
   /**
-   * Viewable object type ids. A run is included only if every target type is present. Omit for a
-   * privileged caller; an empty set matches no runs.
+   * Viewable object type ids. A run is included only if every target type is present. Omit for an
+   * unrestricted internal execution; an empty set matches no runs.
    */
   readonly objectTypeIds?: readonly string[]
   readonly statuses?: readonly ProjectionRunStatus[]

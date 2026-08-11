@@ -1,5 +1,6 @@
 import { describe, test } from "bun:test"
-import { defineObjectType, prop, Sixb } from "../src"
+import { defineObjectType, prop } from "../src"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Item = defineObjectType({
@@ -21,7 +22,7 @@ describe("batch-benchmark (informative)", () => {
 
     // Individual upserts
     const depsIndividual = createTestRuntimeDeps()
-    const sixbIndividual = new Sixb({ ontology: [Item], ...depsIndividual })
+    const sixbIndividual = createTestSixb({ ontology: [Item], ...depsIndividual })
 
     const startIndividual = performance.now()
     for (const item of items) {
@@ -31,7 +32,7 @@ describe("batch-benchmark (informative)", () => {
 
     // Batch upsert
     const depsBatch = createTestRuntimeDeps()
-    const sixbBatch = new Sixb({ ontology: [Item], ...depsBatch })
+    const sixbBatch = createTestSixb({ ontology: [Item], ...depsBatch })
 
     const startBatch = performance.now()
     await sixbBatch.objects.upsertBatch("item", items)

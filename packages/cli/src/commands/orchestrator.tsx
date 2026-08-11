@@ -1,4 +1,4 @@
-import type { LoadedSixb } from "../lib/loadSixb"
+import type { LoadedSixbHost } from "../lib/loadSixb"
 import { loadProductionSixb } from "../lib/production"
 import {
   type RunningOrchestratorRuntime,
@@ -28,7 +28,7 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
     />
   )
 
-  let sixb: LoadedSixb | null = loaded.sixb
+  let sixb: LoadedSixbHost | null = loaded.sixb
   let runtime: RunningOrchestratorRuntime | null = null
 
   try {

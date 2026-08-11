@@ -1,6 +1,4 @@
 import type {
-  BlobsRuntime,
-  ConnectorRuntime,
   DatasetsRuntime,
   DomainEventLog,
   LakeStorage,
@@ -10,6 +8,10 @@ import type {
 } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
+import {
+  bindPrimitiveExecution,
+  type PrimitiveExecutionHost,
+} from "@sixb/core/internal/primitive-execution"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "@sixb/core/queues"
@@ -19,36 +21,32 @@ import type { SyncJob, SyncRunResult, SyncWorkerContext } from "./types"
 
 const SOURCE = "SixbSyncWorker"
 
-export interface SyncWorkerSixb {
-  readonly id: string
+export interface SyncWorkerHost extends PrimitiveExecutionHost {
   readonly events?: DomainEventLog
   readonly logs?: LogsRuntime
   readonly lakeStorage: LakeStorage
-  readonly blobs: Pick<BlobsRuntime, "put" | "open" | "stat">
   readonly queues: Queues
   readonly storage: Storage
   readonly syncs: Pick<SyncsRuntime, "list" | "getById">
   readonly datasets: Pick<DatasetsRuntime, "getById">
-  readonly connector: ConnectorRuntime
 }
 
 export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
-  private readonly context: SyncWorkerContext
-  private readonly sixb: SyncWorkerSixb
+  private readonly host: SyncWorkerHost
 
-  constructor(sixb: SyncWorkerSixb) {
-    if (sixb.syncs.list().length === 0) {
+  constructor(host: SyncWorkerHost) {
+    if (host.syncs.list().length === 0) {
       throw new Error("[SixbSyncWorker] No sync definitions are registered.")
     }
 
     super({
-      projectId: sixb.id,
-      queue: sixb.queues.syncRuns,
-      workerId: `sync-worker-${sixb.id}`,
+      projectId: host.id,
+      queue: host.queues.syncRuns,
+      workerId: `sync-worker-${host.id}`,
     })
 
-    this.context = buildSyncContext(sixb)
-    this.sixb = sixb
+    assertSyncStorage(host)
+    this.host = host
   }
 
   protected async execute(
@@ -62,17 +60,22 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
       expectedLatestVersionId: job.payload.expectedLatestVersionId,
       commitMessage: job.payload.commitMessage,
     }
+    const execution = bindPrimitiveExecution(this.host, {
+      primitive: { kind: "sync", id: syncJob.syncId, runId: syncJob.id },
+      source: { type: "queue", queue: "syncRuns", jobId: job.id },
+    })
+    const context = buildSyncContext(this.host, execution.sixb)
 
     let result: SyncRunResult
     try {
       result = await runSyncJob({
-        runtime: this.context,
+        runtime: context,
         job: syncJob,
         signal,
-        onRunStarted: (run) => emitSyncRunStarted(this.sixb, run),
+        onRunStarted: (run) => emitSyncRunStarted(this.host, run),
         onRunFailed: (error, run) => {
-          reportRunFailure(this.sixb, error, {
-            projectId: this.sixb.id,
+          reportRunFailure(this.host, error, {
+            projectId: this.host.id,
             occurredAt: run.finishedAt,
             attempt: job.attempt,
             run: {
@@ -88,7 +91,7 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
       throw error
     }
 
-    await emitSyncSucceededEvents(this.sixb, syncJob, result)
+    await emitSyncSucceededEvents(this.host, syncJob, result)
   }
 
   protected override async onExecutionError(
@@ -96,7 +99,7 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
     _error: unknown
   ): Promise<QueueWorkerFailureDecision> {
     const { job } = claimed
-    await emitSyncRunFinished(this.sixb, {
+    await emitSyncRunFinished(this.host, {
       id: job.payload.runId ?? `${job.id}:attempt:${job.attempt}`,
       syncId: job.payload.syncId,
     })
@@ -106,10 +109,10 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
 }
 
 async function emitSyncRunStarted(
-  sixb: SyncWorkerSixb,
+  host: SyncWorkerHost,
   run: Pick<SyncRunRecord, "id" | "syncId" | "startedAt">
 ): Promise<void> {
-  await sixb.events?.emit(
+  await host.events?.emit(
     {
       events: [
         {
@@ -127,11 +130,11 @@ async function emitSyncRunStarted(
 }
 
 async function emitSyncSucceededEvents(
-  sixb: SyncWorkerSixb,
+  host: SyncWorkerHost,
   job: Pick<SyncJob, "id" | "syncId">,
   result: SyncRunResult
 ): Promise<void> {
-  await sixb.events?.emit(
+  await host.events?.emit(
     {
       events: [
         ...(result.versionCreated
@@ -168,10 +171,10 @@ async function emitSyncSucceededEvents(
 }
 
 async function emitSyncRunFinished(
-  sixb: SyncWorkerSixb,
+  host: SyncWorkerHost,
   job: Pick<SyncJob, "id" | "syncId">
 ): Promise<void> {
-  await sixb.events?.emit(
+  await host.events?.emit(
     {
       events: [
         {
@@ -188,20 +191,29 @@ async function emitSyncRunFinished(
   )
 }
 
-function buildSyncContext(sixb: SyncWorkerSixb): SyncWorkerContext {
-  const syncRunsStorage = sixb.storage.syncRuns
+function assertSyncStorage(host: SyncWorkerHost): void {
+  if (!host.storage.syncRuns) {
+    throw new Error("[SixbSyncWorker] Sync workers require storage.syncRuns support.")
+  }
+}
+
+function buildSyncContext(
+  host: SyncWorkerHost,
+  sixb: ReturnType<typeof bindPrimitiveExecution>["sixb"]
+): SyncWorkerContext {
+  const syncRunsStorage = host.storage.syncRuns
   if (!syncRunsStorage) {
     throw new Error("[SixbSyncWorker] Sync workers require storage.syncRuns support.")
   }
 
   return {
-    id: sixb.id,
+    id: host.id,
     syncRunsStorage,
-    lakeStorage: sixb.lakeStorage,
+    lakeStorage: host.lakeStorage,
     blobs: sixb.blobs,
-    logs: sixb.logs,
-    syncs: sixb.syncs,
-    datasets: sixb.datasets,
+    logs: host.logs,
+    syncs: host.syncs,
+    datasets: host.datasets,
     connector: sixb.connector,
   }
 }

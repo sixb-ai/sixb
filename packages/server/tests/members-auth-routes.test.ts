@@ -12,7 +12,7 @@ import {
   type MembershipPolicyDefinition,
   type OntologySource,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
@@ -36,7 +36,7 @@ function createRuntime(
   options: { readonly membershipPolicies?: readonly MembershipPolicyDefinition[] } = {}
 ) {
   const storage = new InMemoryStorage()
-  const sixb = new Sixb<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: projectId,
     ontology: [Device],
     broker: new InMemoryBroker(),
@@ -55,7 +55,7 @@ function createRuntime(
   return {
     app: createSixbApi(
       new SixbServer({
-        sixb,
+        host: sixb,
         quiet: true,
         browser: createTestBrowserPolicy(),
       })

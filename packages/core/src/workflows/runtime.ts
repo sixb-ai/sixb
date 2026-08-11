@@ -1,11 +1,4 @@
-import type { SixbRuntimeContext } from "../runtime/types"
-import { WorkflowValidationError } from "./errors"
-import {
-  type RequestWorkflowRunInput,
-  requestWorkflowRun,
-  type WorkflowRunRequestResult,
-} from "./request"
-import type { InferWorkflowInput, WorkflowDefinition, WorkflowRunSource } from "./types"
+import type { WorkflowDefinition } from "./types"
 
 /**
  * Typed entry point for workflow definitions and runs, exposed as
@@ -15,11 +8,9 @@ import type { InferWorkflowInput, WorkflowDefinition, WorkflowRunSource } from "
  * then delegates run requests to {@link requestWorkflowRun}.
  */
 export class WorkflowsRuntime {
-  private readonly runtime: SixbRuntimeContext
   private readonly workflowsById: ReadonlyMap<string, WorkflowDefinition>
 
-  constructor(runtime: SixbRuntimeContext, workflows: readonly WorkflowDefinition[]) {
-    this.runtime = runtime
+  constructor(workflows: readonly WorkflowDefinition[]) {
     this.workflowsById = new Map(workflows.map((workflow) => [workflow.id, workflow]))
   }
 
@@ -32,33 +23,8 @@ export class WorkflowsRuntime {
   getById(workflowId: string): WorkflowDefinition | null {
     return this.workflowsById.get(workflowId) ?? null
   }
-
-  /** Start a run for a known workflow definition with typed input. */
-  request<TWorkflow extends WorkflowDefinition>(
-    workflow: TWorkflow,
-    options: {
-      readonly input?: InferWorkflowInput<TWorkflow>
-      readonly runId?: string
-      readonly source?: WorkflowRunSource
-    } = {}
-  ): Promise<WorkflowRunRequestResult> {
-    return this.requestById({ workflowId: workflow.id, ...options })
-  }
-
-  /** Start a run by workflow id (server routes and dynamic use cases). */
-  async requestById(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult> {
-    const workflow = this.getById(input.workflowId)
-    if (!workflow) {
-      throw new WorkflowValidationError(`[Sixb] Unknown workflow '${input.workflowId}'`)
-    }
-
-    return requestWorkflowRun(this.runtime, workflow, input)
-  }
 }
 
-export function createWorkflowsRuntime(
-  runtime: SixbRuntimeContext,
-  workflows: readonly WorkflowDefinition[]
-): WorkflowsRuntime {
-  return new WorkflowsRuntime(runtime, workflows)
+export function createWorkflowsRuntime(workflows: readonly WorkflowDefinition[]): WorkflowsRuntime {
+  return new WorkflowsRuntime(workflows)
 }

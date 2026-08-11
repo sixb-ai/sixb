@@ -1,16 +1,11 @@
-import {
-  type AuthSessionAudience,
-  canAccessApplication,
-  type OntologySource,
-  type Sixb,
-} from "@sixb/core"
+import { type AuthSessionAudience, canAccessApplication, type SixbHostRuntime } from "@sixb/core"
 import type { AuthenticatedRequestAuthSession } from "@sixb/core/internal/auth"
 
 export function sessionCanAccessApplication(
-  sixb: Sixb<readonly OntologySource[]>,
+  host: SixbHostRuntime,
   session: AuthenticatedRequestAuthSession,
   audience: AuthSessionAudience
 ): boolean {
-  const authorization = sixb.auth.contextFromSession(session)
-  return canAccessApplication(authorization, sixb.security.listResolvedRoles(), audience)
+  const authorization = host.auth.contextFromSession(session)
+  return canAccessApplication(authorization, host.security.listResolvedRoles(), audience)
 }

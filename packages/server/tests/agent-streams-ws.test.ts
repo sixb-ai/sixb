@@ -11,8 +11,8 @@ import {
   type JsonValue,
   type OntologySource,
   type Principal,
-  Sixb,
-  type SixbOptions,
+  SixbHost,
+  type SixbHostOptions,
 } from "@sixb/core"
 import {
   AGENT_RUN_STREAM_SCHEMA_VERSION,
@@ -300,7 +300,10 @@ describe("canAccessAgentRunStream", () => {
   })
 })
 
-function requestSdk(sixb: Sixb<readonly OntologySource[]>, authorization: AuthorizationContext) {
+function requestSdk(
+  sixb: SixbHost<readonly OntologySource[]>,
+  authorization: AuthorizationContext
+) {
   return bindRequestExecution(sixb, {
     request: new Request("http://localhost/ws/agents", {
       headers: { "x-request-id": "req_agent_stream_test" },
@@ -310,27 +313,26 @@ function requestSdk(sixb: Sixb<readonly OntologySource[]>, authorization: Author
 }
 
 function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
-  options: SixbOptions<TOntologySources>
-): Sixb<TOntologySources> {
-  const SixbConstructor = Sixb as unknown as new (
-    options: SixbOptions<TOntologySources>
-  ) => Sixb<TOntologySources>
-
-  return new SixbConstructor(options)
+  options: SixbHostOptions<TOntologySources>
+): SixbHost<TOntologySources> {
+  return new SixbHost<TOntologySources>(options)
 }
 
 async function withAgentWsServer(
-  run: (context: { baseUrl: string; sixb: Sixb<readonly OntologySource[]> }) => Promise<void>
+  run: (context: { baseUrl: string; sixb: SixbHost<readonly OntologySource[]> }) => Promise<void>
 ): Promise<void>
 async function withAgentWsServer(
   options: { readonly auth?: boolean },
-  run: (context: { baseUrl: string; sixb: Sixb<readonly OntologySource[]> }) => Promise<void>
+  run: (context: { baseUrl: string; sixb: SixbHost<readonly OntologySource[]> }) => Promise<void>
 ): Promise<void>
 async function withAgentWsServer(
   optionsOrRun:
     | { readonly auth?: boolean }
-    | ((context: { baseUrl: string; sixb: Sixb<readonly OntologySource[]> }) => Promise<void>),
-  maybeRun?: (context: { baseUrl: string; sixb: Sixb<readonly OntologySource[]> }) => Promise<void>
+    | ((context: { baseUrl: string; sixb: SixbHost<readonly OntologySource[]> }) => Promise<void>),
+  maybeRun?: (context: {
+    baseUrl: string
+    sixb: SixbHost<readonly OntologySource[]>
+  }) => Promise<void>
 ): Promise<void> {
   const options = typeof optionsOrRun === "function" ? {} : optionsOrRun
   const run = typeof optionsOrRun === "function" ? optionsOrRun : maybeRun
@@ -351,8 +353,8 @@ async function withAgentWsServer(
     ...(options.auth ? { auth: { id: "test", kind: "dev" as const } } : {}),
   })
   const server = new SixbServer({
-    sixb,
-    host: "127.0.0.1",
+    host: sixb,
+    hostname: "127.0.0.1",
     port,
     quiet: true,
     browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
@@ -367,7 +369,7 @@ async function withAgentWsServer(
 }
 
 async function appendAgentStreamRecord(
-  sixb: Sixb<readonly OntologySource[]>,
+  sixb: SixbHost<readonly OntologySource[]>,
   input:
     | { readonly type: "agent.run.started"; readonly runId: string }
     | { readonly type: "agent.ui.chunk"; readonly runId: string; readonly chunkIndex: number }
@@ -394,7 +396,7 @@ async function appendAgentStreamRecord(
 }
 
 async function advanceDurableRun(
-  sixb: Sixb<readonly OntologySource[]>,
+  sixb: SixbHost<readonly OntologySource[]>,
   input:
     | { readonly type: "agent.run.started"; readonly runId: string }
     | { readonly type: "agent.ui.chunk"; readonly runId: string; readonly chunkIndex: number }
@@ -614,7 +616,7 @@ function authz(principal: Principal, agentIds: readonly string[] = []): Authoriz
   }
 }
 
-function agentStorage(sixb: Sixb<readonly OntologySource[]>): AgentStorage {
+function agentStorage(sixb: SixbHost<readonly OntologySource[]>): AgentStorage {
   if (!sixb.storage.agents) {
     throw new Error("Expected test Sixb instance to include agent storage")
   }

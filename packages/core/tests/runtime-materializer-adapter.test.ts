@@ -8,11 +8,12 @@ import {
   ObjectNotFoundError,
   OntologyValidationError,
   prop,
-  Sixb,
+  SixbHost,
 } from "../src"
-import { type EventsRuntime, OntologyOutboxDispatcher } from "../src/events"
+import { EventsRuntime, OntologyOutboxDispatcher } from "../src/events"
 import { getOntologyMutationRuntime } from "../src/runtime/internal"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Sensor = defineObjectType({
@@ -49,20 +50,21 @@ const ONTOLOGY = [Room, Sensor] as const
 
 function createRuntime() {
   const deps = createTestRuntimeDeps()
-  const sixb = new Sixb({ id: "runtime-adapter-tests", ontology: ONTOLOGY, ...deps })
-  return { deps, sixb }
+  const host = new SixbHost({ id: "runtime-adapter-tests", ontology: ONTOLOGY, ...deps })
+  return { deps, host, sixb: createTestSixb(host) }
 }
 
 type AdapterRuntime = ReturnType<typeof createRuntime>["sixb"]
+type AdapterHost = ReturnType<typeof createRuntime>["host"]
 
-async function commitOrigins(sixb: AdapterRuntime) {
-  const { commits } = await sixb.storage.ontology.commits.list({ projectId: sixb.id })
+async function commitOrigins(host: AdapterHost) {
+  const { commits } = await host.storage.ontology.commits.list({ projectId: host.id })
   return commits.map((commit) => commit.origin.kind)
 }
 
-async function listSensorLinks(sixb: AdapterRuntime, linkId: string) {
-  return sixb.storage.objects.listLinks({
-    projectId: sixb.id,
+async function listSensorLinks(host: AdapterHost, linkId: string) {
+  return host.storage.objects.listLinks({
+    projectId: host.id,
     objectTypeId: "room",
     objectId: "r1",
     linkId,
@@ -71,7 +73,7 @@ async function listSensorLinks(sixb: AdapterRuntime, linkId: string) {
 
 describe("runtime object writes", () => {
   test("typed and dynamic mutations all commit through the materializer as runtime origins", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
 
     await sixb.objects(Sensor).upsert({ properties: { id: "s1", name: "Temp" } })
     await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
@@ -93,7 +95,7 @@ describe("runtime object writes", () => {
       targetId: "s1",
     })
 
-    expect(await commitOrigins(sixb)).toEqual(new Array(6).fill("runtime"))
+    expect(await commitOrigins(host)).toEqual(new Array(6).fill("runtime"))
   })
 
   test("upserts an absent identity as a create and an existing one as a patch", async () => {
@@ -151,25 +153,25 @@ describe("runtime object writes", () => {
   })
 
   test("keeps a same-value upsert an effective no-op", async () => {
-    const { sixb } = createRuntime()
+    const { deps, host, sixb } = createRuntime()
     const created = await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     await waitForDeliveredEvents(sixb, 1)
-    const publishSpy = spyPublishedFacts(sixb.events as EventsRuntime)
+    const publishSpy = spyPublishedFacts(deps.broker)
 
     const replayed = await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
 
     expect(replayed).toEqual(created)
     expect(publishSpy).not.toHaveBeenCalled()
     // The commit is still recorded: the request was durable even though nothing changed.
-    expect(await commitOrigins(sixb)).toEqual(["runtime", "runtime"])
+    expect(await commitOrigins(host)).toEqual(["runtime", "runtime"])
   })
 
   test("treats removing a missing link as a no-op", async () => {
-    const { sixb } = createRuntime()
+    const { deps, host, sixb } = createRuntime()
     await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
     await waitForDeliveredEvents(sixb, 2)
-    const publishSpy = spyPublishedFacts(sixb.events as EventsRuntime)
+    const publishSpy = spyPublishedFacts(deps.broker)
 
     await sixb.objects.removeLink("room", "r1", "sensors", {
       targetTypeId: "sensor",
@@ -177,7 +179,7 @@ describe("runtime object writes", () => {
     })
 
     expect(publishSpy).not.toHaveBeenCalled()
-    expect(await listSensorLinks(sixb, "sensors")).toEqual([])
+    expect(await listSensorLinks(host, "sensors")).toEqual([])
   })
 
   test("reports a missing link endpoint as an object-not-found failure", async () => {
@@ -195,7 +197,7 @@ describe("runtime object writes", () => {
   test("replaces the whole link property set on upsert", async () => {
     // Managed link authority carries the complete property set, so a link upsert is a replace, not
     // a merge: properties left out are cleared. Documented in docs/ontology/links.md.
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
 
@@ -204,7 +206,7 @@ describe("runtime object writes", () => {
       targetId: "s1",
       properties: { role: "primary", note: "installed 2026" },
     })
-    expect((await listSensorLinks(sixb, "sensors"))[0]?.properties).toEqual({
+    expect((await listSensorLinks(host, "sensors"))[0]?.properties).toEqual({
       role: "primary",
       note: "installed 2026",
     })
@@ -214,7 +216,7 @@ describe("runtime object writes", () => {
       targetId: "s1",
       properties: { note: "recalibrated" },
     })
-    expect((await listSensorLinks(sixb, "sensors"))[0]?.properties).toEqual({
+    expect((await listSensorLinks(host, "sensors"))[0]?.properties).toEqual({
       note: "recalibrated",
     })
   })
@@ -222,7 +224,7 @@ describe("runtime object writes", () => {
   test("requires link properties in the request rather than inheriting the stored edge", async () => {
     // The same replace rule means a required link property must be present on every write; it is
     // not carried over from the edge already stored.
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
     await sixb.objects.upsertLink("room", "r1", "certifiedSensors", {
@@ -238,7 +240,7 @@ describe("runtime object writes", () => {
         properties: {},
       })
     ).rejects.toBeInstanceOf(OntologyValidationError)
-    expect((await listSensorLinks(sixb, "certifiedSensors"))[0]?.properties).toEqual({
+    expect((await listSensorLinks(host, "certifiedSensors"))[0]?.properties).toEqual({
       role: "primary",
     })
   })
@@ -294,7 +296,7 @@ describe("runtime object batches", () => {
   })
 
   test("collapses an identical repeat and rejects a conflicting one", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
 
     const results = await sixb.objects.upsertBatch("room", [
       { properties: { id: "r1", name: "Kitchen" } },
@@ -309,8 +311,8 @@ describe("runtime object batches", () => {
     )
     expect(
       (
-        await sixb.storage.objects.getByPrimaryId({
-          projectId: sixb.id,
+        await host.storage.objects.getByPrimaryId({
+          projectId: sixb.execution.projectId,
           objectTypeId: "room",
           primaryId: "r1",
         })
@@ -319,8 +321,8 @@ describe("runtime object batches", () => {
   })
 
   test("propagates a commit failure instead of turning it into item errors", async () => {
-    const { deps, sixb } = createRuntime()
-    getOntologyMutationRuntime(sixb).commitEdits = () =>
+    const { deps, host, sixb } = createRuntime()
+    getOntologyMutationRuntime(host).commitEdits = () =>
       Promise.reject(new Error("provider exploded"))
 
     await expect(
@@ -330,14 +332,17 @@ describe("runtime object batches", () => {
       ])
     ).rejects.toThrow("provider exploded")
 
-    const rows = await deps.storage.objects.list({ projectId: sixb.id, objectTypeId: "room" })
+    const rows = await deps.storage.objects.list({
+      projectId: sixb.execution.projectId,
+      objectTypeId: "room",
+    })
     expect(rows.objects).toEqual([])
   })
 })
 
 describe("runtime link batches", () => {
   test("applies ordered items against one evolving cardinality", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     for (const sensorId of ["s1", "s2"]) {
       await sixb.objects.upsert("sensor", { id: sensorId, name: sensorId })
@@ -360,13 +365,13 @@ describe("runtime link batches", () => {
 
     expect(results.map((result) => result.ok)).toEqual([true, false])
     expect(results[1].ok === false && results[1].error.message).toContain("cardinality one")
-    expect((await listSensorLinks(sixb, "primarySensor")).map((row) => row.targetId)).toEqual([
+    expect((await listSensorLinks(host, "primarySensor")).map((row) => row.targetId)).toEqual([
       "s1",
     ])
   })
 
   test("collapses identical duplicates and rejects conflicting ones", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
 
@@ -386,7 +391,7 @@ describe("runtime link batches", () => {
     expect(results[2].ok === false && results[2].error.message).toContain(
       "Conflicting duplicate link"
     )
-    expect((await listSensorLinks(sixb, "sensors")).map((row) => row.properties?.role)).toEqual([
+    expect((await listSensorLinks(host, "sensors")).map((row) => row.properties?.role)).toEqual([
       "primary",
     ])
   })
@@ -396,7 +401,7 @@ describe("committed fact delivery", () => {
   test("returns after the durable commit even when broker publication never settles", async () => {
     const deps = createTestRuntimeDeps()
     const broker = new NeverSettlingBroker()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "nonblocking-publication",
       ontology: ONTOLOGY,
       ...deps,
@@ -413,8 +418,8 @@ describe("committed fact delivery", () => {
     expect(created.properties.name).toBe("Kitchen")
     await broker.started
     expect(
-      await sixb.storage.objects.getByPrimaryId({
-        projectId: sixb.id,
+      await deps.storage.objects.getByPrimaryId({
+        projectId: sixb.execution.projectId,
         objectTypeId: "room",
         primaryId: "r1",
       })
@@ -422,13 +427,12 @@ describe("committed fact delivery", () => {
   })
 
   test("keeps committed facts durable through a broker outage and delivers them later", async () => {
-    const { deps, sixb } = createRuntime()
+    const { deps, host, sixb } = createRuntime()
     let outage = true
-    const eventRuntime = sixb.events as EventsRuntime
-    const publish = eventRuntime.publishEnvelopes.bind(eventRuntime)
-    eventRuntime.publishEnvelopes = async (envelopes) => {
+    const publish = deps.broker.append.bind(deps.broker)
+    deps.broker.append = async (input) => {
       if (outage) throw new Error("broker unavailable")
-      return publish(envelopes)
+      return publish(input)
     }
 
     const created = await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
@@ -439,9 +443,9 @@ describe("committed fact delivery", () => {
     outage = false
     // A failed publication backs the row off before retrying, so recovery runs past that window.
     await new OntologyOutboxDispatcher({
-      projectId: sixb.id,
+      projectId: sixb.execution.projectId,
       storage: deps.storage,
-      events: eventRuntime,
+      events: new EventsRuntime({ projectId: host.id, broker: deps.broker }),
       now: () => new Date(Date.now() + 60_000),
     }).drain()
 
@@ -452,9 +456,9 @@ describe("committed fact delivery", () => {
   })
 
   test("never appends events outside the materializer", async () => {
-    const { sixb } = createRuntime()
-    const appendSpy = mock(sixb.events.append.bind(sixb.events))
-    sixb.events.append = appendSpy
+    const { host, sixb } = createRuntime()
+    const appendSpy = mock(host.events.append.bind(host.events))
+    host.events.append = appendSpy
 
     await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
@@ -473,10 +477,10 @@ describe("committed fact delivery", () => {
 })
 
 /** Mutations write durable outbox facts, so publication is the observable delivery boundary. */
-function spyPublishedFacts(events: EventsRuntime) {
-  const publish = events.publishEnvelopes.bind(events)
+function spyPublishedFacts(broker: InMemoryBroker) {
+  const publish = broker.append.bind(broker)
   const spy = mock(publish)
-  events.publishEnvelopes = spy
+  broker.append = spy
   return spy
 }
 

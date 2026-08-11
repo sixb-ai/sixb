@@ -37,8 +37,8 @@ import type { ObjectRow } from "../storage"
 import { ObjectError } from "./errors"
 
 /** The runtime pieces one commit needs. */
-// `authorization` is here only so a commit can name its actor; it stays optional, so every existing
-// privileged caller still satisfies the type.
+// `authorization` is here only so a commit can name its actor. Trusted primitive and explicitly
+// auth-disabled executions have registered authority without a principal context.
 export type RuntimeMaterializerContext = Pick<
   SixbRuntimeContext,
   "projectId" | "storage" | "authorization"
@@ -61,8 +61,9 @@ export interface RuntimeBatchCommit {
  * The principal behind a runtime write, when there is one.
  *
  * `origin: { kind: "runtime" }` already says a write bypassed an Action; this says who made it.
- * Absent on a privileged caller (workers, syncs, tests), which is what makes the field's absence
- * meaningful rather than merely unset: an event with no actor was written by the system itself.
+ * Absent on a trusted primitive or explicitly auth-disabled execution, which makes the field's
+ * absence meaningful rather than merely unset: an event with no actor was written by the system
+ * itself.
  *
  * A `Principal` is an `EventActor` — same literals, no translation.
  */

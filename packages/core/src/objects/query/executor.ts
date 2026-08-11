@@ -1,4 +1,5 @@
 import { type AuthorizationContext, assertAuthorized } from "../../authorization"
+import type { RuntimeAuthorization } from "../../execution/types"
 import type { OntologyRegistry } from "../../ontology"
 import type {
   CountObjectsResult,
@@ -60,6 +61,8 @@ export interface QueryExecutorOptions
   maxExpansionFanout?: number
   /** When present, every object type the query touches must be viewable. */
   authorization?: AuthorizationContext
+  /** Registered execution capability for queries reached through a bound Sixb SDK. */
+  runtimeAuthorization?: RuntimeAuthorization
 }
 
 export interface ExecuteObjectQueryInput {
@@ -151,7 +154,7 @@ export async function executeObjectQuery(
     maxPageSize: options.maxPageSize,
     normalize: false,
   })
-  assertQueryViewable(validated, options.authorization)
+  assertQueryViewable(validated, options)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -218,7 +221,7 @@ export async function countObjects(
     maxPageSize: options.maxPageSize,
     normalize: false,
   })
-  assertQueryViewable(validated, options.authorization)
+  assertQueryViewable(validated, options)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -278,7 +281,7 @@ export async function existsObjects(
     maxPageSize: options.maxPageSize,
     normalize: false,
   })
-  assertQueryViewable(validated, options.authorization)
+  assertQueryViewable(validated, options)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -338,7 +341,7 @@ export async function facetObjects(
     maxPageSize: options.maxPageSize,
     normalize: false,
   })
-  assertQueryViewable(validated, options.authorization)
+  assertQueryViewable(validated, options)
   const facets = validateFacetRequests(input.facets, validated.result.objectTypeIds, options)
   const aggregateQuery = stripOuterRowShape(validated.query)
   const capabilities = options.storage.queryCapabilities()
@@ -399,12 +402,15 @@ export async function facetObjects(
 // grant for every object type it touches, before any storage call runs.
 function assertQueryViewable(
   validated: ValidatedObjectQuery,
-  authorization: AuthorizationContext | undefined
+  authorization: Pick<QueryExecutorOptions, "authorization" | "runtimeAuthorization">
 ): void {
-  assertAuthorized(
-    { authorization },
-    { kind: "object.query", touchedObjectTypeIds: validated.touchedObjectTypeIds }
-  )
+  // The query engine is also a storage-level utility. Authorization is activated by a runtime
+  // context; execution SDKs always provide a registered capability, including auth-disabled ones.
+  if (!authorization.runtimeAuthorization && !authorization.authorization) return
+  assertAuthorized(authorization, {
+    kind: "object.query",
+    touchedObjectTypeIds: validated.touchedObjectTypeIds,
+  })
 }
 
 interface ExpansionResolutionContext {

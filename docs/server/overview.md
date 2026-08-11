@@ -1,17 +1,22 @@
 # Server & API
 
-The Sixb server wraps a running Sixb runtime in an [Elysia](https://elysiajs.com) HTTP + WebSocket API. It exposes your ontology, objects, telemetry, actions, automation runs, agents, and domain events as JSON routes under `/api/*`, real-time WebSocket streams for events (`/ws/events`), logs (`/ws/logs`), and agent runs (`/ws/agents`), and interactive OpenAPI docs at `/docs`.
+The Sixb server exposes a configured `SixbHost` through an
+[Elysia](https://elysiajs.com) HTTP + WebSocket API. It authenticates callers and enforces their
+grants across objects, telemetry, actions, automation runs, agents, and domain events under
+`/api/*` and `/ws/*`.
 
 Reach for it whenever a browser front-end or another service needs to talk to your runtime over the network. The server serves the API only — the built-in admin UI (**atlas**) and any custom app run as separate servers that call it over HTTP.
 
 ## Mental model
 
-Sixb splits into three layers. The server is the middle one: it takes an already-built runtime and puts it on the network. It does **not** construct a runtime for you.
+Sixb splits into three layers. The server is the middle one: it takes an already-built host and
+exposes its domain operations with authentication and authorization. It does **not** construct the
+host.
 
 | Layer      | You call                                | What it is                                                       |
 | ---------- | --------------------------------------- | --------------------------------------------------------------- |
-| Runtime    | `createSixb()`                          | Your ontology, objects, automation, and storage, in-process.    |
-| API        | `createSixbServer({ sixb, browser })`   | An Elysia HTTP + WebSocket server over that runtime.            |
+| Host       | `createSixb()`                          | Providers, definitions, and process lifecycle, in-process.     |
+| API        | `createSixbServer({ host, browser })`   | Authorized HTTP + WebSocket access to domain operations.       |
 | Front-ends | atlas + your app                        | Separate browser clients that call `/api` over HTTP.            |
 
 Data flows one direction: **front-ends → `/api` (cookies + CSRF) → server → runtime → storage**, with domain events streaming back out over `/ws/events`.
@@ -24,12 +29,12 @@ The common path is `sixb dev` (runtime + atlas + custom app) or `sixb api` (API 
 import { createSixb } from "@sixb/core"
 import { createSixbServer } from "@sixb/server"
 
-const sixb = await createSixb()
+const host = await createSixb({ /* providers */ })
 
 const server = createSixbServer({
-  sixb,
+  host,
   port: 3000,
-  host: "0.0.0.0",
+  hostname: "0.0.0.0",
   browser: {
     publicOrigin: "https://api.acme.example",
     allowedOrigins: [
@@ -50,10 +55,10 @@ await server.stop()
 
 | Option    | Type                   | Default     | Description                                                     |
 | --------- | ---------------------- | ----------- | --------------------------------------------------------------- |
-| `sixb`    | `Sixb`                 | (required)  | A runtime from `createSixb()`. The server never builds one.     |
+| `host`    | `SixbHost`             | (required)  | A host from `createSixb()`. The server never builds one.        |
 | `browser` | `SixbApiBrowserPolicy` | (required)  | Origin policy: the API's `publicOrigin` and `allowedOrigins`.   |
 | `port`    | `number`               | `3000`      | TCP port to listen on.                                          |
-| `host`    | `string`               | `"0.0.0.0"` | Bind host.                                                      |
+| `hostname`| `string`               | `"0.0.0.0"` | Bind hostname.                                                  |
 | `quiet`   | `boolean`              | `false`     | Suppress startup logging.                                       |
 
 The `browser` policy is load-bearing for security: it drives CORS, rejects disallowed `Origin` headers up front, and resolves the public origin used to mint auth redirects. Each `allowedOrigins` entry maps one front-end origin to its auth `audience` (`atlas` or `app`), and each audience can have only one origin. Configured audiences become invitation destinations and application-access boundaries.
@@ -129,7 +134,7 @@ messages — `/api/action-runs/:runId/files/content`, `/api/workflow-runs/:runId
 > **Pre-0.1 limit — upload sessions are in-memory.** Neither `@sixb/pg` nor `@sixb/sqlite`
 > implements `fileUploadSessions`, so every session opened by `POST /api/files/uploads` lives in
 > the serving process: it does not survive a restart and is not shared across replicas. Route a
-> session's requests to one instance, supply your own store on `sixb.storage.fileUploadSessions`,
+> session's requests to one instance, supply your own store on `host.storage.fileUploadSessions`,
 > or use single-request `POST /api/files`, which is unaffected.
 
 ## Real-time events
@@ -152,7 +157,7 @@ The server mounts Swagger UI at `/docs` and serves an OpenAPI document for every
 
 ## Auth, CSRF, and cookies
 
-Auth is enforced centrally. On every request the server resolves the session once, attaches the principal's scoped SDK (`sixb.as(authz)`), and rejects denied requests before any route runs. When auth is disabled (privileged mode) the scoped context stays `null` and routes run unguarded.
+Auth is enforced centrally. On every request the server resolves the session once and applies the caller's grants to protected domain operations. When auth is disabled explicitly, protected routes use that project configuration rather than bypassing authorization through a privileged runtime.
 
 | Mechanism      | Detail                                                                                          |
 | -------------- | ----------------------------------------------------------------------------------------------- |

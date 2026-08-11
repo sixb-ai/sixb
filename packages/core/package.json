@@ -185,6 +185,18 @@
       "import": "./dist/projections/internal.js",
       "default": "./dist/projections/internal.js"
     },
+    "./internal/agent-execution": {
+      "types": "./dist/execution/agent.d.ts",
+      "bun": "./src/execution/agent.ts",
+      "import": "./dist/execution/agent.js",
+      "default": "./dist/execution/agent.js"
+    },
+    "./internal/primitive-execution": {
+      "types": "./dist/execution/primitive.d.ts",
+      "bun": "./src/execution/primitive.ts",
+      "import": "./dist/execution/primitive.js",
+      "default": "./dist/execution/primitive.js"
+    },
     "./internal/request-execution": {
       "types": "./dist/execution/request.d.ts",
       "bun": "./src/execution/request.ts",

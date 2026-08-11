@@ -6,7 +6,8 @@ import type {
   TrustedPrimitiveRef,
 } from "../src"
 import * as core from "../src"
-import { createTestExecutionScope } from "../src/testing"
+import { createTestSixb } from "../src/testing"
+import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 declare const authorization: RuntimeAuthorization
 
@@ -48,10 +49,10 @@ core.createTrustedPrimitiveScope
 // @ts-expect-error The raw capability allocator is private to Core.
 core.createRuntimeAuthorizationCapability
 
-// @ts-expect-error Test scope creation is available only from @sixb/core/testing.
-core.createTestExecutionScope
+// @ts-expect-error Test SDK creation is available only from @sixb/core/testing.
+core.createTestSixb
 
-void createTestExecutionScope("project-1")
+void createTestSixb({ ontology: [], ...createTestRuntimeDeps() })
 void scope
 void ref
 void forgedAuthorization

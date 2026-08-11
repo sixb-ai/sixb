@@ -8,7 +8,6 @@ import type {
   OntologySource,
   RegisteredObjectType,
   RegisteredValueTypes,
-  SixbInstance,
   SixbRuntimeContext,
 } from "../runtime/types"
 import type {
@@ -32,6 +31,7 @@ import {
   existsObjects,
   facetObjects,
 } from "./query"
+import type { ObjectsRuntimeOperations } from "./runtime"
 import { createObjectSet } from "./sdk"
 import type { ListObjectsParams } from "./service"
 import * as objectService from "./service"
@@ -42,6 +42,7 @@ export interface ExecutionObjectByIdHandle<
   TValueTypes extends readonly ValueType[],
 > {
   get: ObjectByIdHandle<TObjectType, TValueTypes>["get"]
+  listLinks: ObjectByIdHandle<TObjectType, TValueTypes>["listLinks"]
   requestAction: ObjectByIdHandle<TObjectType, TValueTypes>["requestAction"]
   requestActionAndWait: ObjectByIdHandle<TObjectType, TValueTypes>["requestActionAndWait"]
   link: ObjectByIdHandle<TObjectType, TValueTypes>["link"]
@@ -77,7 +78,8 @@ export interface ExecutionObjectSet<
   byId(id: string): ExecutionObjectByIdHandle<TObjectType, TValueTypes>
 }
 
-export interface ExecutionObjectsRuntime<TOntologySources extends readonly OntologySource[]> {
+export interface ExecutionObjectsRuntime<TOntologySources extends readonly OntologySource[]>
+  extends ObjectsRuntimeOperations {
   <TObjectType extends RegisteredObjectType<TOntologySources>>(
     objectType: TObjectType
   ): ExecutionObjectSet<
@@ -85,9 +87,6 @@ export interface ExecutionObjectsRuntime<TOntologySources extends readonly Ontol
     RegisteredValueTypes<TOntologySources>,
     RegisteredObjectType<TOntologySources>
   >
-  listTypes: SixbInstance<TOntologySources>["objects"]["listTypes"]
-  getTypeById: SixbInstance<TOntologySources>["objects"]["getTypeById"]
-  resolveType: SixbInstance<TOntologySources>["objects"]["resolveType"]
   executeQuery(input: Omit<ExecuteObjectQueryInput, "projectId">): Promise<ExecuteObjectQueryResult>
   count(input: Omit<ExecuteObjectCountInput, "projectId">): Promise<ExecuteObjectCountResult>
   exists(input: Omit<ExecuteObjectExistsInput, "projectId">): Promise<ExecuteObjectExistsResult>
@@ -115,15 +114,6 @@ export interface ExecutionObjectsRuntime<TOntologySources extends readonly Ontol
     readonly objectId: string
     readonly propertyId: string
   }): Promise<TimeseriesPoint | null>
-  list: SixbInstance<TOntologySources>["objects"]["list"]
-  get: SixbInstance<TOntologySources>["objects"]["get"]
-  getPrimaryPropertyId: SixbInstance<TOntologySources>["objects"]["getPrimaryPropertyId"]
-  upsert: SixbInstance<TOntologySources>["objects"]["upsert"]
-  upsertBatch: SixbInstance<TOntologySources>["objects"]["upsertBatch"]
-  upsertLink: SixbInstance<TOntologySources>["objects"]["upsertLink"]
-  upsertLinkBatch: SixbInstance<TOntologySources>["objects"]["upsertLinkBatch"]
-  removeLink: SixbInstance<TOntologySources>["objects"]["removeLink"]
-  appendTelemetry: SixbInstance<TOntologySources>["objects"]["appendTelemetry"]
 }
 
 export function createExecutionObjectsRuntime<TOntologySources extends readonly OntologySource[]>(
@@ -160,12 +150,17 @@ export function createExecutionObjectsRuntime<TOntologySources extends readonly 
         assertAuthorized(runtime, { kind: "object.view", objectTypeId })
         return runtime.ontology.resolveObjectType(objectTypeId)
       },
+      getValueTypesById: () => runtime.ontology.getValueTypesById(),
+      listSubTypes: (objectTypeId: string) => runtime.ontology.listSubTypes(objectTypeId),
+      isValidLinkTarget: (expected: string | string[], actual: string) =>
+        runtime.ontology.isValidLinkTarget(expected, actual),
       executeQuery: (input: Omit<ExecuteObjectQueryInput, "projectId">) =>
         executeObjectQuery(
           { projectId: runtime.projectId, ...input },
           {
             ontology: runtime.ontology,
             storage: runtime.storage.objects,
+            runtimeAuthorization: runtime.runtimeAuthorization,
             authorization: runtime.authorization,
           }
         ),
@@ -175,6 +170,7 @@ export function createExecutionObjectsRuntime<TOntologySources extends readonly 
           {
             ontology: runtime.ontology,
             storage: runtime.storage.objects,
+            runtimeAuthorization: runtime.runtimeAuthorization,
             authorization: runtime.authorization,
           }
         ),
@@ -184,6 +180,7 @@ export function createExecutionObjectsRuntime<TOntologySources extends readonly 
           {
             ontology: runtime.ontology,
             storage: runtime.storage.objects,
+            runtimeAuthorization: runtime.runtimeAuthorization,
             authorization: runtime.authorization,
           }
         ),
@@ -193,6 +190,7 @@ export function createExecutionObjectsRuntime<TOntologySources extends readonly 
           {
             ontology: runtime.ontology,
             storage: runtime.storage.objects,
+            runtimeAuthorization: runtime.runtimeAuthorization,
             authorization: runtime.authorization,
           }
         ),
@@ -222,7 +220,11 @@ export function createExecutionObjectsRuntime<TOntologySources extends readonly 
       getTelemetryHistoryBatch: (input: Omit<TimeseriesHistoryBatchInput, "projectId">) =>
         getTelemetryHistoryBatch(
           { projectId: runtime.projectId, ...input },
-          { storage: runtime.storage.timeseries, authorization: runtime.authorization }
+          {
+            storage: runtime.storage.timeseries,
+            runtimeAuthorization: runtime.runtimeAuthorization,
+            authorization: runtime.authorization,
+          }
         ),
       getTelemetryHistory: (input: {
         objectTypeId: string

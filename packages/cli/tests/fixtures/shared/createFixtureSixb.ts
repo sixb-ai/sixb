@@ -7,7 +7,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   prop,
-  Sixb,
+  SixbHost,
   type StorageMigrator,
 } from "@sixb/core"
 
@@ -64,7 +64,7 @@ function createFixtureStorage(logStorageMigrate: boolean) {
 }
 
 export function createFixtureSixb(options: FixtureSixbOptions) {
-  return new Sixb({
+  return new SixbHost({
     id: options.projectId,
     ontology: [Room],
     broker: new InMemoryBroker(),

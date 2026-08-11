@@ -4,7 +4,7 @@ import type { Elysia } from "elysia"
 import { z } from "zod"
 import { EVENT_TOPICS, EVENT_TYPES } from "../../schemas/events"
 import type { SixbServer } from "../../server"
-import { decodeWsMessage, safeSend, wsRequestSdk, wsStateKey } from "../../utils/ws"
+import { decodeWsMessage, safeSend, wsRequestSixb, wsStateKey } from "../../utils/ws"
 
 interface EventSubscriptionState {
   topics?: DomainEvent["topic"][]
@@ -64,7 +64,7 @@ export function parseSubscriptionMessage(payload: unknown):
 }
 
 async function resolveLatestCursor(server: SixbServer): Promise<string | undefined> {
-  return server.getSixb().events.latestCursor()
+  return server.getHost().events.latestCursor()
 }
 
 function createDefaultState(): EventSubscriptionState {
@@ -125,8 +125,8 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
       return
     }
 
-    const sdk = wsRequestSdk(ws)
-    if (!sdk) {
+    const sixb = wsRequestSixb(ws)
+    if (!sixb) {
       safeSend(ws, { type: "error", message: "Execution scope is not available." })
       return
     }
@@ -138,7 +138,7 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
 
       state.polling = true
       try {
-        const p = server.getSixb()
+        const p = server.getHost()
         const events = await p.events.read({
           afterCursor: state.afterCursor,
           limit: state.limit,
@@ -152,7 +152,7 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
           if (!eventMatchesScope(event, state)) {
             continue
           }
-          if (sdk.events.canRead(event)) {
+          if (sixb.events.canRead(event)) {
             safeSend(ws, { type: "event", event })
           }
         }

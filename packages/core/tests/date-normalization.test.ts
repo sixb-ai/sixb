@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { defineObjectType, prop, Sixb } from "../src"
+import { defineObjectType, prop } from "../src"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 // Regression: the typed surface accepts `Date | string` for date/timestamp
@@ -20,7 +21,7 @@ const Task = defineObjectType({
 describe("date/timestamp normalization on upsert", () => {
   test("single upsert serializes Date props to ISO strings", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({ ontology: [Task], ...deps })
+    const sixb = createTestSixb({ ontology: [Task], ...deps })
 
     const at = new Date("2026-06-20T12:34:56.000Z")
     const row = await sixb.objects(Task).upsert({
@@ -31,7 +32,7 @@ describe("date/timestamp normalization on upsert", () => {
     expect(row.properties.due).toBe("2026-06-20")
 
     const stored = await deps.storage.objects.getByPrimaryId({
-      projectId: sixb.id,
+      projectId: sixb.execution.projectId,
       objectTypeId: "task",
       primaryId: "t1",
     })
@@ -40,7 +41,7 @@ describe("date/timestamp normalization on upsert", () => {
   })
 
   test("ISO string input is preserved", async () => {
-    const sixb = new Sixb({ ontology: [Task], ...createTestRuntimeDeps() })
+    const sixb = createTestSixb({ ontology: [Task], ...createTestRuntimeDeps() })
 
     const row = await sixb.objects(Task).upsert({
       properties: { id: "t2", createdAt: "2026-01-02T03:04:05.000Z" },
@@ -51,7 +52,7 @@ describe("date/timestamp normalization on upsert", () => {
 
   test("batch upsert serializes Date props to ISO strings", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({ ontology: [Task], ...deps })
+    const sixb = createTestSixb({ ontology: [Task], ...deps })
 
     const at = new Date("2026-06-20T12:34:56.000Z")
     const results = await sixb.objects.upsertBatch("task", [
@@ -64,7 +65,7 @@ describe("date/timestamp normalization on upsert", () => {
       expect(results[0].value.properties.createdAt).toBe("2026-06-20T12:34:56.000Z")
 
     const stored = await deps.storage.objects.getByPrimaryId({
-      projectId: sixb.id,
+      projectId: sixb.execution.projectId,
       objectTypeId: "task",
       primaryId: "b2",
     })

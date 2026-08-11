@@ -1,4 +1,4 @@
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { SixbHostRuntime } from "@sixb/core"
 import {
   type AuthenticatedRequestAuthSession,
   verifyDoubleSubmitCsrf,
@@ -17,7 +17,7 @@ import {
 import { hasForegroundSessionActivity, isSessionTerminationRequest } from "./session-activity"
 
 export interface ServerAuthGuardOptions {
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly host: SixbHostRuntime
   readonly resolveAuthContext: ResolveRequestAuthContext
 }
 
@@ -33,20 +33,20 @@ export type ServerAuthGuardDecision =
   | { readonly kind: "allow"; readonly session: AuthenticatedRequestAuthSession | null }
 
 export class ServerAuthGuard {
-  private readonly sixb: Sixb<readonly OntologySource[]>
+  private readonly host: SixbHostRuntime
   private readonly resolveAuthContext: ResolveRequestAuthContext
 
   constructor(options: ServerAuthGuardOptions) {
-    this.sixb = options.sixb
+    this.host = options.host
     this.resolveAuthContext = options.resolveAuthContext
   }
 
   isAuthEnabled(): boolean {
-    return this.sixb.auth.isEnabled()
+    return this.host.auth.isEnabled()
   }
 
   assertCanServeHttp(params: { readonly production: boolean }): void {
-    this.sixb.auth.assertCanServeHttp(params)
+    this.host.auth.assertCanServeHttp(params)
   }
 
   async resolve(request: Request): Promise<ServerAuthGuardDecision> {
@@ -64,7 +64,7 @@ export class ServerAuthGuard {
       return { kind: "deny", response: authContext }
     }
 
-    let session = await this.sixb.auth.getSession(request, {
+    let session = await this.host.auth.getSession(request, {
       audience: authContext.audience,
       credentialSource: "any",
     })
@@ -86,7 +86,7 @@ export class ServerAuthGuard {
       return { kind: "deny", response: jsonAuthRequiredResponse() }
     }
 
-    if (!sessionCanAccessApplication(this.sixb, session, authContext.audience)) {
+    if (!sessionCanAccessApplication(this.host, session, authContext.audience)) {
       return {
         kind: "deny",
         response: jsonForbiddenResponse("Application access is not allowed"),
@@ -113,7 +113,7 @@ export class ServerAuthGuard {
       !isSessionTerminationRequest(request) &&
       hasForegroundSessionActivity(request)
     ) {
-      const activeSession = await this.sixb.auth.getSession(request, {
+      const activeSession = await this.host.auth.getSession(request, {
         audience: authContext.audience,
         credentialSource: "session",
         sessionActivity: "foreground",
@@ -130,7 +130,7 @@ export class ServerAuthGuard {
         }
         return { kind: "deny", response: jsonAuthRequiredResponse() }
       }
-      if (!sessionCanAccessApplication(this.sixb, activeSession, authContext.audience)) {
+      if (!sessionCanAccessApplication(this.host, activeSession, authContext.audience)) {
         return {
           kind: "deny",
           response: jsonForbiddenResponse("Application access is not allowed"),
@@ -144,7 +144,7 @@ export class ServerAuthGuard {
 
   getCsrfCookieName(request: Request): string {
     const audience = this.resolveAuthContext(request).audience
-    return this.sixb.auth.getCookieOptions({ audience }).csrfCookieName
+    return this.host.auth.getCookieOptions({ audience }).csrfCookieName
   }
 
   verifyCsrf(request: Request, _session: AuthenticatedRequestAuthSession): boolean {

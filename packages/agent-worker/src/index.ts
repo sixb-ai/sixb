@@ -1,3 +1,3 @@
 export type { StreamSink } from "./stream-sink"
-export type { AgentWorkerOptions, AgentWorkerSixb } from "./types"
+export type { AgentWorkerHost, AgentWorkerOptions } from "./types"
 export { AgentWorker } from "./worker"

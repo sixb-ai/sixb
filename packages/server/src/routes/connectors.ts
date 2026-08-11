@@ -1,24 +1,24 @@
-import type { OntologySource, Sixb } from "@sixb/core"
-import type { ExecutionSixb } from "@sixb/core/internal/request-execution"
+import type { OntologySource, SixbHostRuntime } from "@sixb/core"
+import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
-import { requireRequestSdk } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ConnectorParamsSchema, ConnectorSchema } from "../schemas/connectors"
 
 function serializeConnector(
-  connector: ReturnType<Sixb<readonly OntologySource[]>["connectors"]["list"]>[number],
-  sixb: Sixb<readonly OntologySource[]>,
-  sdk: ExecutionSixb<readonly OntologySource[]>
+  connector: ReturnType<SixbHostRuntime["connectors"]["list"]>[number],
+  host: SixbHostRuntime,
+  execution: Sixb<readonly OntologySource[]>
 ) {
   return {
     id: connector.id,
     type: connector.adapter.type,
-    syncIds: sdk.syncs
+    syncIds: execution.syncs
       .list()
       .filter((sync) => sync.connector.id === connector.id)
       .map((sync) => sync.id),
-    webhooks: sixb
+    webhooks: host
       .listWebhooks()
       .filter((registered) => registered.connector.id === connector.id)
       .map(({ webhook, route }) => ({
@@ -32,13 +32,13 @@ function serializeConnector(
   }
 }
 
-export function registerConnectorRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerConnectorRoutes(app: Elysia, host: SixbHostRuntime) {
   return app
     .get(
       "/api/connectors",
       (context) => {
-        const sdk = requireRequestSdk(context)
-        return sixb.connectors.list().map((connector) => serializeConnector(connector, sixb, sdk))
+        const sixb = requireRequestSixb(context)
+        return host.connectors.list().map((connector) => serializeConnector(connector, host, sixb))
       },
       {
         response: { 200: ConnectorSchema.array() },
@@ -53,14 +53,14 @@ export function registerConnectorRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
       "/api/connectors/:connectorId",
       (context) => {
         const { params, set } = context
-        const sdk = requireRequestSdk(context)
-        const connector = sixb.connectors.getById(params.connectorId)
+        const sixb = requireRequestSixb(context)
+        const connector = host.connectors.getById(params.connectorId)
         if (!connector) {
           set.status = 404
           return { error: "Connector not found" }
         }
 
-        return serializeConnector(connector, sixb, sdk)
+        return serializeConnector(connector, host, sixb)
       },
       {
         params: ConnectorParamsSchema,

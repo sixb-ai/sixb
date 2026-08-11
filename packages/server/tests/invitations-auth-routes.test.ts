@@ -18,8 +18,8 @@ import {
   type OntologySource,
   prop,
   type RoleDefinition,
-  Sixb,
   type SixbAuthConfig,
+  SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
@@ -69,7 +69,7 @@ function createRuntime(
     allowedDomains: ["acme.com"],
     sendMagicLink,
   })
-  const sixb = new Sixb<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: projectId,
     ontology: [Device],
     broker: new InMemoryBroker(),
@@ -92,7 +92,7 @@ function createRuntime(
   return {
     app: createSixbApi(
       new SixbServer({
-        sixb,
+        host: sixb,
         quiet: true,
         browser: createTestBrowserPolicy(),
       })
@@ -213,7 +213,7 @@ describe("auth invitation routes", () => {
   test("creates invitations on the browser origin audience", async () => {
     const { sixb, storage } = createRuntime()
     const app = createSixbApi(
-      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
     const admin = await seedAdminSession(storage, { audience: "app" })
 
@@ -288,7 +288,7 @@ describe("auth invitation routes", () => {
     const { sixb, storage } = createRuntime()
     const app = createSixbApi(
       new SixbServer({
-        sixb,
+        host: sixb,
         quiet: true,
         browser: createTestBrowserPolicy({ includeApp: false }),
       })

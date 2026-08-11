@@ -9,9 +9,7 @@ import {
   defineConnector,
   defineWebhook,
   InMemoryStorage,
-  type OntologySource,
-  Sixb,
-  type SixbOptions,
+  SixbHost,
   type Storage,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -212,13 +210,9 @@ export const edgeGateway = defineConnector(
 function createRuntime(
   connectors: readonly ConnectorDefinition[],
   storage: Storage = new InMemoryStorage()
-): Sixb<readonly OntologySource[]> {
-  const SixbConstructor = Sixb as unknown as new (
-    options: SixbOptions<readonly OntologySource[]>
-  ) => Sixb<readonly OntologySource[]>
-
+) {
   const runtimeDeps = createTestRuntimeDeps()
-  return new SixbConstructor({
+  return new SixbHost({
     ontology: [],
     connectors,
     ...runtimeDeps,

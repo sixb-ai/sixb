@@ -19,7 +19,7 @@ import {
   prop,
   type RoleDefinition,
   resolveAuthorizationContext,
-  Sixb,
+  SixbHost,
 } from "../src"
 import { createSessionCredential } from "../src/auth"
 import { resolveRoleGrants } from "../src/authorization"
@@ -368,7 +368,7 @@ describe("resolveAuthorizationContext", () => {
 describe("auth.createAuthorizationContext", () => {
   function createRuntime() {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [Contract, SignedContract, Invoice],
       datasets: [ContractsDataset, InvoicesDataset],
       syncs: [syncContracts, syncInvoices],

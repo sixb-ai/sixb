@@ -1,8 +1,8 @@
-import type { OntologySource, RuleDefinition, Sixb } from "@sixb/core"
+import type { RuleDefinition, SixbHostRuntime } from "@sixb/core"
 import { deriveRuleEventDependencies } from "@sixb/core/internal/rules"
 import type { RuleStateRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
-import { requireRequestSdk } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -25,12 +25,12 @@ function serializeRuleState(state: RuleStateRecord): ReturnType<typeof RuleState
   return RuleStateSchema.parse(state)
 }
 
-export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerRuleRoutes(app: Elysia, host: SixbHostRuntime) {
   return app
     .get(
       "/api/rules",
       (context) => {
-        return requireRequestSdk(context).rules.list().map(serializeRule)
+        return requireRequestSixb(context).rules.list().map(serializeRule)
       },
       {
         response: { 200: RuleSchema.array() },
@@ -45,7 +45,7 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/rules/:ruleId",
       (context) => {
         const { params, set } = context
-        const rule = requireRequestSdk(context).rules.getById(params.ruleId)
+        const rule = requireRequestSixb(context).rules.getById(params.ruleId)
         if (!rule) {
           set.status = 404
           return { error: "Rule not found" }
@@ -67,15 +67,15 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/rule-states",
       async (context) => {
         const { query, set } = context
-        const sdk = requireRequestSdk(context)
+        const sixb = requireRequestSixb(context)
         try {
           const parsed = RuleStatesQuerySchema.parse(query)
-          const storage = sixb.storage.rules
+          const storage = host.storage.rules
           if (!storage) {
             return unconfiguredStorageResponse(set, "Rule state storage")
           }
 
-          const result = await sdk.rules.states.list({
+          const result = await sixb.rules.states.list({
             ruleId: parsed.ruleId,
             objectTypeId: parsed.objectTypeId,
             primaryId: parsed.primaryId,

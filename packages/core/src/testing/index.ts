@@ -20,8 +20,8 @@ export {
 } from "./effective-storage-contract"
 export {
   type AuthorizationContext,
-  createTestExecutionScope,
-  type ExecutionScope,
+  createTestSixb,
+  type TestExecutionHost,
   type TestExecutionOptions,
 } from "./execution"
 export {

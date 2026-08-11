@@ -10,23 +10,19 @@ import {
   type LogEntry,
   type LoggerProvider,
   type OntologySource,
-  Sixb,
   type SixbErrorContext,
   type SixbErrorHandler,
-  type SixbOptions,
+  SixbHost,
+  type SixbHostOptions,
 } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
-  options: SixbOptions<TOntologySources>
-): Sixb<TOntologySources> {
-  const SixbConstructor = Sixb as unknown as new (
-    options: SixbOptions<TOntologySources>
-  ) => Sixb<TOntologySources>
-
-  return new SixbConstructor(options)
+  options: SixbHostOptions<TOntologySources>
+): SixbHost<TOntologySources> {
+  return new SixbHost<TOntologySources>(options)
 }
 
 describe("webhook routes", () => {
@@ -74,7 +70,7 @@ describe("webhook routes", () => {
               headers: { "x-webhook": webhook.route },
               body: {
                 name: body.name,
-                projectId: sixb.id,
+                projectId: sixb.execution.projectId,
                 requestHeader: request.headers.get("x-provider"),
               },
             }
@@ -600,7 +596,7 @@ describe("webhook routes", () => {
 })
 
 function createWebhookApp(
-  connectors: SixbOptions<readonly OntologySource[]>["connectors"],
+  connectors: SixbHostOptions<readonly OntologySource[]>["connectors"],
   storage = new InMemoryStorage(),
   logger?: LoggerProvider
 ) {
@@ -608,7 +604,7 @@ function createWebhookApp(
 }
 
 function createWebhookRuntime(
-  connectors: SixbOptions<readonly OntologySource[]>["connectors"],
+  connectors: SixbHostOptions<readonly OntologySource[]>["connectors"],
   storage = new InMemoryStorage(),
   logger?: LoggerProvider,
   onError?: SixbErrorHandler
@@ -625,7 +621,7 @@ function createWebhookRuntime(
     logger,
     onError,
   })
-  const server = new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+  const server = new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
   return { app: createSixbApi(server), sixb }
 }
 

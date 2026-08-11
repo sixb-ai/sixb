@@ -25,6 +25,7 @@ export interface ExecutionActionRunsRuntime {
 export interface ExecutionActionsRuntime {
   list(): readonly ActionDefinition[]
   getById(actionId: string): ActionDefinition | null
+  listGlobal(): readonly ActionDefinition[]
   listForType(objectType: ObjectType): readonly ActionDefinition[]
   request(input: RequestActionInput): Promise<RequestActionResult>
   requestAndWait(input: RequestActionAndWaitInput): Promise<ActionRunRecord>
@@ -48,6 +49,7 @@ export function createExecutionActionsRuntime(
       const action = runtime.actionRegistry.getById(actionId)
       return action && canList(action) ? action : null
     },
+    listGlobal: () => runtime.actionRegistry.getGlobalActions().filter(canList),
     listForType: (objectType) =>
       runtime.actionRegistry.getActionsForType(objectType).filter(canList),
     request: (input) => requestAction(runtime, input),

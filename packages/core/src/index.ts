@@ -798,6 +798,18 @@ export type {
 
 // ── Runtime ─────────────────────────────────────────────────
 
+export type { ExecutionActionRunsRuntime, ExecutionActionsRuntime } from "./actions/execution"
+export type {
+  ExecutionAgentRunsRuntime,
+  ExecutionAgentsRuntime,
+  ExecutionAgentThreadsRuntime,
+} from "./agents/execution"
+export type { ExecutionBlobsRuntime } from "./blob-storage/execution"
+export type {
+  ExecutionConnectorRuntime,
+  ExecutionConnectorsRuntime,
+} from "./connectors/execution"
+export type { ExecutionDatasetsRuntime } from "./datasets/execution"
 export type {
   SixbErrorContext,
   SixbErrorHandler,
@@ -806,6 +818,8 @@ export type {
   SixbRuleEvaluationFailedContext,
   SixbRunFailedContext,
 } from "./error-reporting/types"
+export type { ExecutionEventsRuntime } from "./events/execution"
+export type { ExecutionLogsRuntime } from "./logging/execution"
 export type {
   OntologyMaintenanceCleanupSnapshot,
   OntologyMaintenanceHandle,
@@ -814,7 +828,18 @@ export type {
   OntologyOperationalStatus,
   SixbReadiness,
 } from "./maintenance"
-export type { DynamicObjectsRuntime, ObjectsRuntimeOperations } from "./objects"
+export type { ObjectTypesRuntime } from "./objects"
+export type {
+  ExecutionObjectByIdHandle,
+  ExecutionObjectSet,
+  ExecutionObjectsRuntime,
+} from "./objects/execution"
+export type { ExecutionPipelineRunsRuntime, ExecutionPipelinesRuntime } from "./pipelines/execution"
+export type {
+  ExecutionProjectionRunsRuntime,
+  ExecutionProjectionsRuntime,
+} from "./projections/execution"
+export type { ExecutionRuleStatesRuntime, ExecutionRulesRuntime } from "./rules/execution"
 export type {
   BatchItemResult,
   CreateSixbOptions,
@@ -840,23 +865,9 @@ export type {
   OntologySource,
   RegisteredObjectType,
   RegisteredValueTypes,
-  ScopedActionsRuntime,
-  ScopedAgentsRuntime,
-  ScopedDatasetsRuntime,
-  ScopedEventsRuntime,
-  ScopedLogsRuntime,
-  ScopedObjectByIdHandle,
-  ScopedObjectSet,
-  ScopedObjectsRuntime,
-  ScopedPipelinesRuntime,
-  ScopedProjectionsRuntime,
-  ScopedRulesRuntime,
-  ScopedSixb,
-  ScopedSyncsRuntime,
-  ScopedWorkflowsRuntime,
-  SixbInstance,
-  SixbOptions,
-  SixbRuntimeContext,
+  Sixb,
+  SixbHostOptions,
+  SixbHostRuntime,
   TelemetryAppendInput,
   TelemetryChannel,
   TelemetryHistoryInput,
@@ -873,9 +884,16 @@ export {
   OntologyValidationError,
   ProjectionValidationError,
   RuntimeError,
-  Sixb,
+  SixbHost,
   SyncValidationError,
 } from "./runtime"
+export type { ExecutionSchedulesRuntime } from "./schedules/execution"
+export type { ExecutionSyncRunsRuntime, ExecutionSyncsRuntime } from "./syncs/execution"
+export type {
+  ExecutionWorkflowInterventionsRuntime,
+  ExecutionWorkflowRunsRuntime,
+  ExecutionWorkflowsRuntime,
+} from "./workflows/execution"
 
 // ── Agents ──────────────────────────────────────────────────
 

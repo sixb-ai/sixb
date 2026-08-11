@@ -1,7 +1,20 @@
+import type {
+  DomainEventLog,
+  OntologyRegistry,
+  OntologySource,
+  Queues,
+  Sixb,
+  Storage,
+} from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { createDynamicObjectsRuntime } from "@sixb/core/internal/objects"
+import type { LogsRuntime } from "@sixb/core/internal/logging"
+import {
+  bindPrimitiveExecution,
+  type PrimitiveExecutionHost,
+} from "@sixb/core/internal/primitive-execution"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
+import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
 import type { ClaimedQueueJob, WorkflowQueueJob } from "@sixb/core/queues"
 import type {
   WorkflowRunExecution,
@@ -15,42 +28,41 @@ import type {
   WorkflowResumeJob,
   WorkflowRunObserver,
   WorkflowWorkerContext,
-  WorkflowWorkerSixb,
 } from "./types"
 
 const MAX_WORKFLOW_DELIVERY_ATTEMPTS = 5
 const WORKFLOW_RETRY_BACKOFF_MS = 1_000
 
 export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
-  private readonly context: WorkflowWorkerContext
+  private readonly host: WorkflowWorkerHost
   private readonly observer: WorkflowRunObserver
-  private readonly sixb: WorkflowWorkerSixb
+  private readonly workflowRuns: WorkflowRunStorage
 
-  constructor(sixb: WorkflowWorkerSixb) {
-    if (sixb.workflows.list().length === 0) {
+  constructor(host: WorkflowWorkerHost) {
+    if (host.workflows.list().length === 0) {
       throw new Error("[SixbWorkflowWorker] No workflow definitions are registered.")
     }
 
-    const workflowRuns = sixb.storage.workflowRuns
+    const workflowRuns = host.storage.workflowRuns
     if (!workflowRuns) {
       throw new Error("[SixbWorkflowWorker] Workflow workers require storage.workflowRuns.")
     }
 
-    if (requiresWorkflowInterventionStorage(sixb) && !sixb.storage.workflowInterventions) {
+    if (requiresWorkflowInterventionStorage(host) && !host.storage.workflowInterventions) {
       throw new Error(
         "[SixbWorkflowWorker] Workflow workers with intervention nodes require storage.workflowInterventions."
       )
     }
 
     super({
-      projectId: sixb.projectId,
-      queue: sixb.queues.workflows,
-      workerId: `workflow-worker-${sixb.id}`,
+      projectId: host.id,
+      queue: host.queues.workflows,
+      workerId: `workflow-worker-${host.id}`,
     })
 
-    this.context = buildWorkflowContext(sixb, workflowRuns)
-    this.observer = new EventsRuntimeWorkflowRunObserver(sixb.events)
-    this.sixb = sixb
+    this.host = host
+    this.observer = new EventsRuntimeWorkflowRunObserver(host.events)
+    this.workflowRuns = workflowRuns
   }
 
   protected async execute(
@@ -60,6 +72,12 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
   ): Promise<void> {
     const execution = freshWorkflowExecution(delivery.leaseExpiresAt)
     const runId = workflowRunIdFromClaimed(claimed)
+    const workflowId = claimed.job.payload.workflowId
+    const executionScope = bindPrimitiveExecution(this.host, {
+      primitive: { kind: "workflow", id: workflowId, runId },
+      source: { type: "queue", queue: "workflows", jobId: claimed.job.id },
+    })
+    const context = buildWorkflowContext(this.host, this.workflowRuns, executionScope.sixb)
     const stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
       void this.projectExecutionOwnership(runId, execution.token, renewed.leaseExpiresAt)
     })
@@ -67,7 +85,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
     try {
       if (claimed.job.type === "workflow.run.resume.requested") {
         await runWorkflowResumeJob({
-          runtime: this.context,
+          runtime: context,
           job: workflowResumeJobFromClaimed(claimed, execution),
           signal,
           observer: this.observer,
@@ -79,7 +97,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
       const workflowJob = workflowJobFromClaimed(claimed, execution)
 
       await runWorkflowJob({
-        runtime: this.context,
+        runtime: context,
         job: workflowJob,
         signal,
         observer: this.observer,
@@ -96,15 +114,15 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
     queueLeaseExpiresAt: string
   ): Promise<void> {
     try {
-      await this.context.workflowRuns.confirmExecutionOwnership({
-        projectId: this.context.projectId,
+      await this.workflowRuns.confirmExecutionOwnership({
+        projectId: this.host.id,
         id: runId,
         executionToken,
         queueLeaseExpiresAt: new Date(queueLeaseExpiresAt),
       })
     } catch (error) {
-      const run = await this.context.workflowRuns
-        .getById({ projectId: this.context.projectId, id: runId })
+      const run = await this.workflowRuns
+        .getById({ projectId: this.host.id, id: runId })
         .catch(() => null)
       if (run?.status === "running" && run.execution?.token === executionToken) {
         console.error(
@@ -120,8 +138,8 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
     error: unknown,
     run: WorkflowRunRecord
   ): void {
-    reportRunFailure(this.sixb, error, {
-      projectId: this.sixb.projectId,
+    reportRunFailure(this.host, error, {
+      projectId: this.host.id,
       occurredAt: run.finishedAt,
       attempt: claimed.job.attempt,
       run: {
@@ -136,9 +154,9 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
     claimed: ClaimedQueueJob<WorkflowQueueJob>,
     _error: unknown
   ): Promise<QueueWorkerFailureDecision> {
-    const run = await this.context.workflowRuns
+    const run = await this.workflowRuns
       .getById({
-        projectId: this.context.projectId,
+        projectId: this.host.id,
         id: workflowRunIdFromClaimed(claimed),
       })
       .catch(() => null)
@@ -165,8 +183,8 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
   }
 }
 
-function requiresWorkflowInterventionStorage(sixb: WorkflowWorkerSixb): boolean {
-  return sixb.workflows
+function requiresWorkflowInterventionStorage(host: WorkflowWorkerHost): boolean {
+  return host.workflows
     .list()
     .some((workflow) => workflow.nodes.some((node) => node.type === "intervention"))
 }
@@ -220,39 +238,26 @@ function freshWorkflowExecution(queueLeaseExpiresAt: string): WorkflowRunExecuti
 }
 
 function buildWorkflowContext(
-  sixb: WorkflowWorkerSixb,
-  workflowRuns: WorkflowRunStorage
+  host: WorkflowWorkerHost,
+  workflowRuns: WorkflowRunStorage,
+  sixb: Sixb<readonly OntologySource[]>
 ): WorkflowWorkerContext {
-  const runtime = {
-    projectId: sixb.projectId,
-    ontology: sixb.ontology,
-    actionRegistry: sixb.actionRegistry,
-    events: sixb.events,
-    storage: sixb.storage,
-    lakeStorage: sixb.lakeStorage,
-    blobStorage: sixb.blobs,
-    queues: sixb.queues,
-    rules: sixb.rules.list(),
-  }
-
   return {
-    ...runtime,
+    projectId: host.id,
+    ontology: host.ontology,
+    storage: host.storage,
+    queues: host.queues,
     workflowRuns,
-    logs: sixb.logs,
-    sixb: {
-      objects: createDynamicObjectsRuntime(runtime),
-      actions: sixb.actions,
-      workflows: sixb.workflows,
-      agents: sixb.agents,
-      datasets: sixb.datasets,
-      syncs: sixb.syncs,
-      pipelines: sixb.pipelines,
-      projections: sixb.projections,
-      rules: sixb.rules,
-      schedules: sixb.schedules,
-      events: sixb.events,
-      connector: sixb.connector,
-      blobs: sixb.blobs,
-    },
+    logs: host.logs,
+    sixb,
   }
+}
+
+export interface WorkflowWorkerHost extends PrimitiveExecutionHost {
+  readonly ontology: OntologyRegistry
+  readonly storage: Storage
+  readonly queues: Queues
+  readonly events: DomainEventLog
+  readonly logs?: LogsRuntime
+  readonly workflows: Pick<WorkflowsRuntime, "list" | "getById">
 }

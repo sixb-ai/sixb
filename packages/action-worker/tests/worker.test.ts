@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
-  type Broker,
   defineAction,
   defineObjectType,
   InMemoryBlobStorage,
@@ -11,18 +10,17 @@ import {
   InMemoryStorage,
   param,
   prop,
-  Sixb,
   type SixbErrorContext,
+  SixbHost,
   type Storage,
 } from "@sixb/core"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
-import type { EventsRuntime } from "@sixb/core/internal/events"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import type { ActionRunRecord } from "@sixb/core/storage"
+import { createTestSixb } from "@sixb/core/testing"
 import { ActionWorker } from "../src"
 import { ActionWorkerError } from "../src/errors"
-import type { ActionWorkerContext } from "../src/types"
-import type { ActionWorkerSixb } from "../src/worker"
+import type { ActionExecutionFacade } from "../src/types"
 import { waitFor } from "./helpers"
 
 const Device = defineObjectType({
@@ -49,24 +47,15 @@ interface DeviceObjectSet {
   }): Promise<ActionRunRecord>
 }
 
-interface TestSixb extends ActionWorkerSixb {
-  readonly events: EventsRuntime
-  readonly storage: Storage
-  readonly queues: InMemoryQueues
-  readonly objects: ActionWorkerContext["sixb"]["objects"]
-}
-
-const SixbConstructor = Sixb as unknown as new (options: Record<string, unknown>) => TestSixb
-
-function deviceObjects(sixb: TestSixb): DeviceObjectSet {
+function deviceObjects(sixb: ActionExecutionFacade): DeviceObjectSet {
   return sixb.objects(Device)
 }
 
 function createSixb(
   actions: readonly ActionDefinition[],
   storage: Storage = new InMemoryStorage()
-): TestSixb {
-  return new SixbConstructor({
+) {
+  const host = new SixbHost({
     id: "action-worker-tests",
     ontology: [Device],
     actions,
@@ -76,12 +65,13 @@ function createSixb(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
   })
+  return { host, sixb: createTestSixb(host) }
 }
 
 describe("ActionWorker", () => {
   test("idles without action definitions or action-run storage", async () => {
     const storage = createStorageWithoutActionRuns()
-    const worker = new ActionWorker(createSixb([], storage))
+    const worker = new ActionWorker(createSixb([], storage).host)
 
     await worker.start()
     await worker.stop()
@@ -94,7 +84,7 @@ describe("ActionWorker", () => {
       .writeback(() => {})
     const storage = createStorageWithoutActionRuns()
 
-    expect(() => new ActionWorker(createSixb([noop], storage))).toThrow(ActionWorkerError)
+    expect(() => new ActionWorker(createSixb([noop], storage).host)).toThrow(ActionWorkerError)
   })
 
   test("streams a run-scoped log line to the broker", async () => {
@@ -105,8 +95,8 @@ describe("ActionWorker", () => {
         ctx.logger.info("Applying status", { status: ctx.params.status })
       })
 
-    const sixb = createSixb([noteStatus])
-    const worker = new ActionWorker(sixb)
+    const { host, sixb } = createSixb([noteStatus])
+    const worker = new ActionWorker(host)
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
 
     await worker.start()
@@ -117,14 +107,13 @@ describe("ActionWorker", () => {
     })
 
     await waitFor(
-      () => sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: runId }),
+      () => host.storage.actionRuns!.getById({ projectId: host.id, id: runId }),
       (value) => value?.status === "succeeded" || value?.status === "failed"
     )
     await worker.stop()
 
-    const broker = (sixb as unknown as { readonly broker: Broker }).broker
-    const { records } = await broker.read({
-      projectId: sixb.id,
+    const { records } = await host.broker.read({
+      projectId: host.id,
       streamId: LOGS_STREAM.id,
       names: ["action.info"],
     })
@@ -154,8 +143,8 @@ describe("ActionWorker", () => {
         return { iso: ctx.params.dueDate.toISOString() }
       })
 
-    const sixb = createSixb([setDue])
-    const worker = new ActionWorker(sixb)
+    const { host, sixb } = createSixb([setDue])
+    const worker = new ActionWorker(host)
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
 
     await worker.start()
@@ -169,7 +158,7 @@ describe("ActionWorker", () => {
     })
 
     const run = await waitFor(
-      () => sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: runId }),
+      () => host.storage.actionRuns!.getById({ projectId: host.id, id: runId }),
       (value) => value?.status === "succeeded" || value?.status === "failed"
     )
     expect(run?.status).toBe("succeeded")
@@ -189,8 +178,8 @@ describe("ActionWorker", () => {
         objects(Device).byId(subject.primaryId).update({ status: params.status })
       })
 
-    const sixb = createSixb([setStatus])
-    const worker = new ActionWorker(sixb)
+    const { host, sixb } = createSixb([setStatus])
+    const worker = new ActionWorker(host)
     await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
@@ -204,13 +193,13 @@ describe("ActionWorker", () => {
     })
 
     const run = await waitFor(
-      () => sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: runId }),
+      () => host.storage.actionRuns!.getById({ projectId: host.id, id: runId }),
       (value) => value?.status === "succeeded"
     )
     expect(run?.actionId).toBe("setStatus")
 
     const events = await waitFor(
-      () => sixb.events.read({ types: ["action.completed"] }),
+      () => host.events.read({ types: ["action.completed"] }),
       (value) => value.length === 1
     )
     expect(events[0]).toMatchObject({
@@ -238,12 +227,12 @@ describe("ActionWorker", () => {
       .writeback(() => {
         throw originalError
       })
-    const sixb = createSixb([fail])
+    const { host, sixb } = createSixb([fail])
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    const reporter = attachSixbErrorReporter(sixb, (error, context) => {
+    const reporter = attachSixbErrorReporter(host, (error, context) => {
       reports.push({ error, context })
     })
-    const worker = new ActionWorker(sixb)
+    const worker = new ActionWorker(host)
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
 
     await worker.start()
@@ -259,8 +248,8 @@ describe("ActionWorker", () => {
     expect(reports[0]?.error).toBe(originalError)
     expect(reports[0]?.context).toMatchObject({
       type: "run.failed",
-      notificationId: `project:${sixb.id}:run:action:${failed.id}:failed:${failed.finishedAt?.toISOString()}`,
-      projectId: sixb.id,
+      notificationId: `project:${host.id}:run:action:${failed.id}:failed:${failed.finishedAt?.toISOString()}`,
+      projectId: host.id,
       attempt: 1,
       run: {
         kind: "action",
@@ -285,8 +274,8 @@ describe("ActionWorker", () => {
         throw new Error("writeback failed")
       })
 
-    const sixb = createSixb([setStatus, fail])
-    const worker = new ActionWorker(sixb)
+    const { host, sixb } = createSixb([setStatus, fail])
+    const worker = new ActionWorker(host)
     await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",

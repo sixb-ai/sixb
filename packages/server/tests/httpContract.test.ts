@@ -29,23 +29,20 @@ import {
   type OntologySource,
   param,
   prop,
-  Sixb,
-  type SixbOptions,
+  SixbHost,
+  type SixbHostOptions,
   type Storage,
   type WorkflowDefinition,
 } from "@sixb/core"
+import { createTestSixb } from "@sixb/core/testing"
 import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
-  options: SixbOptions<TOntologySources>
-): Sixb<TOntologySources> {
-  const SixbConstructor = Sixb as unknown as new (
-    options: SixbOptions<TOntologySources>
-  ) => Sixb<TOntologySources>
-
-  return new SixbConstructor(options)
+  options: SixbHostOptions<TOntologySources>
+): SixbHost<TOntologySources> {
+  return new SixbHost<TOntologySources>(options)
 }
 
 const Space = defineObjectType({
@@ -212,7 +209,7 @@ async function getFreePort(): Promise<number> {
 }
 
 async function seedPendingReviewIntervention(
-  sixb: Sixb<readonly OntologySource[]>,
+  sixb: SixbHost<readonly OntologySource[]>,
   suffix: string
 ) {
   const workflowRuns = sixb.storage.workflowRuns
@@ -297,7 +294,7 @@ describe("SixbServer HTTP contract", () => {
     run: (context: {
       baseUrl: string
       events: DomainEventLog
-      sixb: Sixb<readonly OntologySource[]>
+      sixb: SixbHost<readonly OntologySource[]>
     }) => Promise<void>
   ): Promise<void> {
     const tempRoot = await mkdtemp(join(tmpdir(), "sixb-http-contract-"))
@@ -322,14 +319,15 @@ describe("SixbServer HTTP contract", () => {
       rules: [highRpmRule],
     })
 
-    await sixb.objects.upsert("space", { id: "system", name: "System" })
-    await sixb.objects.upsert("device", { id: "fan-1", label: "Fan 1" })
-    await sixb.objects.upsertLink("space", "system", "contains", {
+    const setup = createTestSixb(sixb)
+    await setup.objects.upsert("space", { id: "system", name: "System" })
+    await setup.objects.upsert("device", { id: "fan-1", label: "Fan 1" })
+    await setup.objects.upsertLink("space", "system", "contains", {
       targetTypeId: "device",
       targetId: "fan-1",
     })
 
-    await sixb.objects.appendTelemetry("device", [
+    await setup.objects.appendTelemetry("device", [
       {
         id: "fan-1",
         properties: { rpm: 1100 },
@@ -541,8 +539,8 @@ describe("SixbServer HTTP contract", () => {
     const baseUrl = `http://127.0.0.1:${port}`
 
     const server = new SixbServer({
-      sixb,
-      host: "127.0.0.1",
+      host: sixb,
+      hostname: "127.0.0.1",
       port,
       quiet: true,
       browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),

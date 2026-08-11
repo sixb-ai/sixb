@@ -15,6 +15,7 @@ import { AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
 import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } from "./errors"
+import { createAgentExecutionContext } from "./execution-context"
 import { finishRunOrThrow } from "./finalize"
 import { reconcileAgentExecutionIdentities, reconcileAgentExecutionIdentity } from "./identity"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
@@ -25,8 +26,8 @@ import {
 import { createBrokerStreamSink, isolateStreamSink } from "./stream-sink"
 import type {
   AgentWorkerContext,
+  AgentWorkerHost,
   AgentWorkerOptions,
-  AgentWorkerSixb,
   AgentWorkerStorage,
 } from "./types"
 import { enqueueWorkflowAgentNodeResume, executeWorkflowAgentNode } from "./workflow-node-execution"
@@ -67,7 +68,7 @@ type QueuedRun = {
  * the thread silently locked forever, since nothing else reclaims a run but a redelivered job.
  */
 export class AgentWorker extends QueueWorker<AgentQueueJob> {
-  private readonly sixb: AgentWorkerSixb
+  private readonly host: AgentWorkerHost
   private readonly context: AgentWorkerContext | null
   private readonly idleWithoutAgents: boolean
   /**
@@ -76,20 +77,20 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
    */
   private readonly pendingTeardowns = new Set<Promise<void>>()
 
-  constructor(sixb: AgentWorkerSixb, options: AgentWorkerOptions) {
+  constructor(host: AgentWorkerHost, options: AgentWorkerOptions) {
     const leaseMs = options.leaseMs ?? DEFAULT_AGENT_QUEUE_LEASE_MS
     super({
-      projectId: sixb.id,
-      queue: sixb.queues.agents,
-      workerId: `agent-worker-${sixb.id}`,
+      projectId: host.id,
+      queue: host.queues.agents,
+      workerId: `agent-worker-${host.id}`,
       claimLimit: normalizeConcurrency(options.concurrency),
       leaseMs,
       idlePollMs: options.idlePollMs,
     })
 
-    this.sixb = sixb
-    this.idleWithoutAgents = sixb.agents.list().length === 0
-    this.context = this.idleWithoutAgents ? null : buildAgentContext(sixb, options)
+    this.host = host
+    this.idleWithoutAgents = host.agents.list().length === 0
+    this.context = this.idleWithoutAgents ? null : buildAgentContext(host, options)
   }
 
   override async start(): Promise<void> {
@@ -104,8 +105,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       const context = this.requireContext()
       await reconcileAgentExecutionIdentities(
         context.storage,
-        this.sixb.id,
-        this.sixb.agents.list()
+        this.host.id,
+        this.host.agents.list()
       )
 
       const stopDispatch = new AbortController()
@@ -152,7 +153,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     if (job.type === "agent.workflow-node.requested") {
       await executeWorkflowAgentNode({
         context,
-        sixb: this.sixb,
+        host: this.host,
         job,
         signal,
         delivery,
@@ -162,7 +163,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       return
     }
     const { agentId, threadId, runId, triggerMessageId } = job.payload
-    const agent = this.sixb.agents.getById(agentId)
+    const agent = this.host.agents.getById(agentId)
     if (!agent) {
       const error = new AgentWorkerError(`Unknown agent '${agentId}'.`)
       const run = await context.storage.agents.runs.getById({ projectId: context.id, id: runId })
@@ -202,6 +203,15 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     if (!executionToken) {
       throw new AgentWorkerError(`Agent run '${run.id}' has no execution token.`)
     }
+    const executionContext = createAgentExecutionContext({
+      context,
+      host: this.host,
+      identity,
+      agentId: agent.id,
+      runId: run.id,
+      queueJobId: job.id,
+      requestedBy: run.requestedByPrincipal,
+    })
 
     let environment: AgentExecutionEnvironment | null = null
     let stopOwnershipProjection: (() => void) | undefined
@@ -233,7 +243,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
 
       await context.streamSink.publishStarted(run)
       environment = await createConversationAgentEnvironment({
-        context,
+        context: executionContext,
         agent,
         run,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
@@ -317,7 +327,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     }
     const { agentId, threadId, runId, triggerMessageId } = claimed.job.payload
     const run = await this.requireContext().storage.agents.runs.getById({
-      projectId: this.sixb.id,
+      projectId: this.host.id,
       id: runId,
     })
     if (
@@ -327,7 +337,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       run.triggerMessageId === triggerMessageId
     ) {
       const failed = await this.requireContext().storage.agents.runs.finishQueued({
-        projectId: this.sixb.id,
+        projectId: this.host.id,
         id: run.id,
         status: "failed",
         error: toErrorMessage(error),
@@ -363,7 +373,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
         const result = await dispatchQueuedAgentRuns({
           projectId: context.id,
           storage: context.storage.agents,
-          queue: this.sixb.queues.agents,
+          queue: this.host.queues.agents,
         })
         dispatched = result.dispatched.length
         dispatched += await this.dispatchWorkflowAgentNodes(context)
@@ -405,7 +415,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       limit: 100,
     })
     if (queued.runs.length === 0) return 0
-    await this.sixb.queues.agents.enqueue({
+    await this.host.queues.agents.enqueue({
       projectId: context.id,
       jobs: queued.runs.map((run) => ({
         id: workflowAgentNodeQueueJobId(run.nodeRunId),
@@ -434,7 +444,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       if (!node) continue
       const run = await workflowRuns.getById({ projectId: context.id, id: node.workflowRunId })
       if (run?.status !== "waiting") continue
-      await enqueueWorkflowAgentNodeResume(this.sixb, node)
+      await enqueueWorkflowAgentNodeResume(this.host, node)
       dispatched += 1
     }
     return dispatched
@@ -511,8 +521,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     let unsubscribe: (() => void) | undefined
     try {
       unsubscribe = await subscribeAgentRunCancel(
-        this.sixb.broker,
-        { projectId: this.sixb.id, runId },
+        this.host.broker,
+        { projectId: this.host.id, runId },
         () => controller.abort()
       )
     } catch (error) {
@@ -536,8 +546,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
   }
 
   private reportFailure(error: unknown, run: AgentRunRecord, attempt: number): void {
-    reportRunFailure(this.sixb, error, {
-      projectId: this.sixb.id,
+    reportRunFailure(this.host, error, {
+      projectId: this.host.id,
       occurredAt: run.completedAt,
       attempt,
       run: {
@@ -574,15 +584,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
   }
 }
 
-function buildAgentContext(sixb: AgentWorkerSixb, options: AgentWorkerOptions): AgentWorkerContext {
-  const storage = sixb.storage
-  if (!storage.agents) {
-    throw new AgentWorkerError("Agent workers require storage.agents support.")
-  }
-  if (!storage.auth) {
-    throw new AgentWorkerError("Agent workers require storage.auth support.")
-  }
-  if (!sixb.sandboxes) {
+function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): AgentWorkerContext {
+  const storage = host.storage
+  assertAgentWorkerStorage(storage)
+  if (!host.sandboxes) {
     throw new AgentWorkerError(
       "Agent workers require createSixb({ sandboxes }) for the built-in bash tool."
     )
@@ -590,28 +595,37 @@ function buildAgentContext(sixb: AgentWorkerSixb, options: AgentWorkerOptions): 
   const agentSkills = loadAgentSkills({
     projectSkillsDir:
       options.skillsDir === undefined
-        ? join(sixb.projectRoot ?? process.cwd(), "skills")
+        ? join(host.projectRoot ?? process.cwd(), "skills")
         : options.skillsDir,
   })
   agentSkills.catch(() => {})
 
   return {
-    id: sixb.id,
-    storage: storage as AgentWorkerStorage,
-    blobStorage: sixb.blobs,
-    sandboxes: sixb.sandboxes,
-    connector: sixb.connector,
-    logs: sixb.logs,
-    valueTypesById: sixb.ontology?.getValueTypesById() ?? new Map(),
+    id: host.id,
+    storage,
+    sandboxes: host.sandboxes,
+    logs: host.logs,
+    valueTypesById: host.ontology.getValueTypesById(),
     // Normalize the server base URL once here, at the boundary. Everything downstream (the gateway
     // URL builder, the sandbox run context) consumes it verbatim.
     apiBaseUrl: normalizeApiBaseUrl(normalizeRequiredString(options.apiBaseUrl)),
     streamSink: isolateStreamSink(
-      options.streamSink ?? createBrokerStreamSink({ broker: sixb.broker, projectId: sixb.id })
+      options.streamSink ?? createBrokerStreamSink({ broker: host.broker, projectId: host.id })
     ),
     agentSkills,
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
     turnTimeoutMs: options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
+  }
+}
+
+function assertAgentWorkerStorage(
+  storage: AgentWorkerHost["storage"]
+): asserts storage is AgentWorkerStorage {
+  if (!storage.agents) {
+    throw new AgentWorkerError("Agent workers require storage.agents support.")
+  }
+  if (!storage.auth) {
+    throw new AgentWorkerError("Agent workers require storage.auth support.")
   }
 }
 

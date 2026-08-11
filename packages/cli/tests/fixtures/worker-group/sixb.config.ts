@@ -17,7 +17,7 @@ import {
   prop,
   type Queues,
   type SandboxFactory,
-  Sixb,
+  SixbHost,
   type StorageMigrator,
 } from "@sixb/core"
 import { SharedBroker } from "../shared/sharedBroker"
@@ -166,7 +166,7 @@ function loggingStorage() {
   return Object.assign(new InMemoryStorage(), { migrators: [migrator] })
 }
 
-export const sixb = new Sixb({
+export const sixb = new SixbHost({
   id: "cli-worker-group",
   ontology: [Order],
   connectors: [erpDb],

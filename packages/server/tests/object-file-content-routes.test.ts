@@ -11,9 +11,10 @@ import {
   InMemoryStorage,
   type OntologySource,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -43,7 +44,7 @@ const documentViewerRole = defineRole("document.viewer", {
 async function createObjectFileApi(options: { readonly auth?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const blobStorage = new InMemoryBlobStorage()
-  const sixb = new Sixb<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: "test-project",
     ontology: [Document, Invoice],
     broker: new InMemoryBroker(),
@@ -73,19 +74,22 @@ async function createObjectFileApi(options: { readonly auth?: boolean } = {}) {
     mediaType: "application/pdf",
   })
 
-  await sixb.objects.upsert("document", {
+  const setup = createTestSixb(sixb)
+  await setup.objects.upsert("document", {
     id: "doc-1",
     title: "Q3 Report",
     pdf: pdfRef,
     html: htmlRef,
   })
-  await sixb.objects.upsert("invoice", {
+  await setup.objects.upsert("invoice", {
     id: "inv-1",
     pdf: invoiceRef,
   })
 
   return {
-    app: createSixbApi(new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })),
+    app: createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    ),
     storage,
   }
 }

@@ -1,7 +1,7 @@
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { SixbHostRuntime } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requireRequestSdk } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
@@ -14,20 +14,20 @@ import {
 } from "../schemas/links"
 import { handleRouteError, toIsoString } from "../utils/http"
 
-export function registerLinkRoutes(app: Elysia, _sixb: Sixb<readonly OntologySource[]>) {
+export function registerLinkRoutes(app: Elysia, _host: SixbHostRuntime) {
   return app
     .get(
       "/api/objects/:objectTypeId/:objectId/links",
       async (context) => {
         const { params, query, set } = context
         try {
-          const sdk = requireRequestSdk(context)
-          if (!sdk.objects.getTypeById(params.objectTypeId)) {
+          const sixb = requireRequestSixb(context)
+          if (!sixb.objects.getTypeById(params.objectTypeId)) {
             set.status = 404
             return { error: "Object not found" }
           }
           const parsedQuery = LinkQuerySchema.parse(query)
-          const links = await sdk.objects.listLinks({
+          const links = await sixb.objects.listLinks({
             objectTypeId: params.objectTypeId,
             objectId: params.objectId,
             linkId: parsedQuery.linkId,
@@ -66,7 +66,7 @@ export function registerLinkRoutes(app: Elysia, _sixb: Sixb<readonly OntologySou
         const { params, body, set } = context
         try {
           const parsedBody = UpsertLinkBodySchema.parse(body)
-          await requireRequestSdk(context).objects.upsertLink(
+          await requireRequestSixb(context).objects.upsertLink(
             params.objectTypeId,
             params.objectId,
             params.linkId,
@@ -105,7 +105,7 @@ export function registerLinkRoutes(app: Elysia, _sixb: Sixb<readonly OntologySou
         const { params, query, set } = context
         try {
           const parsedQuery = RemoveLinkQuerySchema.parse(query)
-          await requireRequestSdk(context).objects.removeLink(
+          await requireRequestSixb(context).objects.removeLink(
             params.objectTypeId,
             params.objectId,
             params.linkId,

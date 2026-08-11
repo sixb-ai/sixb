@@ -1,22 +1,13 @@
 import type {
-  ActionsRuntime,
-  AgentsRuntime,
-  BlobsRuntime,
-  ConnectorRuntime,
-  DatasetsRuntime,
-  DomainEventLog,
-  PipelinesRuntime,
-  ProjectionsRuntime,
-  RulesRuntime,
-  SchedulesRuntime,
-  SixbRuntimeContext,
-  SyncsRuntime,
+  OntologyRegistry,
+  OntologySource,
+  Queues,
+  Sixb,
+  Storage,
   WorkflowRunSource,
-  WorkflowRuntimeFacade,
   WorkflowStepOutputs,
 } from "@sixb/core"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
-import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
 import type { WorkflowRunResumeCause } from "@sixb/core/queues"
 import type {
   WorkflowInterventionRecord,
@@ -28,26 +19,13 @@ import type {
 
 export type WorkflowLogSession = ReturnType<LogsRuntime["startExecution"]>
 
-export interface WorkflowWorkerContext extends SixbRuntimeContext {
+export interface WorkflowWorkerContext {
+  readonly projectId: string
+  readonly ontology: OntologyRegistry
+  readonly storage: Storage
+  readonly queues: Queues
   readonly workflowRuns: WorkflowRunStorage
-  readonly sixb: WorkflowRuntimeFacade
-  readonly logs?: LogsRuntime
-}
-
-export interface WorkflowWorkerSixb extends Omit<SixbRuntimeContext, "blobStorage" | "rules"> {
-  readonly id: string
-  readonly actions: ActionsRuntime
-  readonly agents: AgentsRuntime
-  readonly blobs: BlobsRuntime
-  readonly connector: ConnectorRuntime
-  readonly datasets: DatasetsRuntime
-  readonly events: DomainEventLog
-  readonly pipelines: PipelinesRuntime
-  readonly projections: ProjectionsRuntime
-  readonly rules: RulesRuntime
-  readonly schedules: SchedulesRuntime
-  readonly syncs: SyncsRuntime
-  readonly workflows: WorkflowsRuntime
+  readonly sixb: Sixb<readonly OntologySource[]>
   readonly logs?: LogsRuntime
 }
 

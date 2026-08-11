@@ -1,6 +1,6 @@
 import { type AtlasAppServer, createAtlasApp } from "@sixb/atlas"
 import { resolveBrowserTopology, servedUrl } from "../lib/browser-topology"
-import type { LoadedSixb } from "../lib/loadSixb"
+import type { LoadedSixbHost } from "../lib/loadSixb"
 import { builtAtlasOutdir, loadProductionSixb } from "../lib/production"
 import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
 import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
@@ -21,7 +21,7 @@ export async function runAtlas(options: AtlasOptions = {}) {
     <LoadingView title="Starting sixb atlas" subtitle={loaded.entry} status="Starting Atlas" />
   )
 
-  let sixb: LoadedSixb | null = loaded.sixb
+  let sixb: LoadedSixbHost | null = loaded.sixb
   let atlasServer: AtlasAppServer | null = null
 
   try {

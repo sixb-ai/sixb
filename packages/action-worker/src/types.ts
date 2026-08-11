@@ -1,10 +1,12 @@
 import type {
   ActionSubject,
   ActionsRuntime,
-  BlobsRuntime,
-  ConnectorRuntime,
   DomainEventLog,
-  DynamicObjectsRuntime,
+  ExecutionActionsRuntime,
+  ExecutionBlobsRuntime,
+  ExecutionConnectorRuntime,
+  ExecutionObjectsRuntime,
+  OntologySource,
   Storage,
 } from "@sixb/core"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
@@ -16,11 +18,12 @@ import type {
   ObjectRow,
 } from "@sixb/core/storage"
 
-export interface ActionWorkerSixbFacade {
-  readonly blobs: Pick<BlobsRuntime, "put" | "open" | "stat">
-  readonly connector: ConnectorRuntime
-  readonly objects: DynamicObjectsRuntime
-  readonly actions: Pick<ActionsRuntime, "listForType">
+/** Execution-bound primitives exposed to Action phase handlers. */
+export interface ActionExecutionFacade {
+  readonly objects: ExecutionObjectsRuntime<readonly OntologySource[]>
+  readonly actions: ExecutionActionsRuntime
+  readonly connector: ExecutionConnectorRuntime
+  readonly blobs: ExecutionBlobsRuntime
 }
 
 export interface ActionWorkerContext {
@@ -31,7 +34,7 @@ export interface ActionWorkerContext {
   readonly storage: Storage
   readonly actionRunsStorage: ActionRunStorage
   readonly ontologyMutations: OntologyMutationRuntime
-  readonly sixb: ActionWorkerSixbFacade
+  readonly sixb: ActionExecutionFacade
   readonly actions: Pick<ActionsRuntime, "getById">
 }
 

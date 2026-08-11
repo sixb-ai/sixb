@@ -71,6 +71,8 @@
         "./packages/core/src/storage/projection-runs/lifecycle.ts"
       ],
       "@sixb/core/internal/projections": ["./packages/core/src/projections/internal.ts"],
+      "@sixb/core/internal/agent-execution": ["./packages/core/src/execution/agent.ts"],
+      "@sixb/core/internal/primitive-execution": ["./packages/core/src/execution/primitive.ts"],
       "@sixb/core/internal/request-execution": ["./packages/core/src/execution/request.ts"],
       "@sixb/core/internal/query": ["./packages/core/src/objects/query/index.ts"],
       "@sixb/core/internal/rules": ["./packages/core/src/rules/internal.ts"],

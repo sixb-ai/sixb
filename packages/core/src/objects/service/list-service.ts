@@ -1,7 +1,7 @@
 /**
  * Cross-type object listing for dashboards and search.
  *
- * On scoped runtimes the type filter is authorized before the storage call:
+ * On principal-bound runtimes the type filter is authorized before the storage call:
  * explicitly requested types must all be viewable, and unfiltered listings
  * narrow to the principal's viewable types instead of post-filtering rows.
  */

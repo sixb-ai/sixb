@@ -18,6 +18,10 @@ import type {
   StoredTelemetryAppendedEvent,
   StoredWorkflowRunStartedEvent,
 } from "../src/events"
+import {
+  createDisabledRuntimeAuthorization,
+  createPrincipalRuntimeAuthorization,
+} from "../src/execution/authorization"
 
 function context(grants: {
   applications?: readonly string[]
@@ -51,6 +55,19 @@ function context(grants: {
       "observe:logs": new Set(grants.logs ? ["logs"] : []),
     },
   }
+}
+
+function principalRuntime(grants: Parameters<typeof context>[0]) {
+  return {
+    runtimeAuthorization: createPrincipalRuntimeAuthorization({
+      projectId: "decision-test",
+      context: context(grants),
+    }),
+  }
+}
+
+const unrestrictedRuntime = {
+  runtimeAuthorization: createDisabledRuntimeAuthorization("decision-test"),
 }
 
 describe("evaluate", () => {
@@ -213,33 +230,38 @@ describe("evaluate", () => {
 
 describe("write asserts", () => {
   test("assertCanEdit demands view as well as edit, and names the missing one", () => {
-    const both = { authorization: context({ view: ["quote"], edit: ["quote"] }) }
+    const both = principalRuntime({ view: ["quote"], edit: ["quote"] })
     expect(() => assertCanEdit(both, "quote")).not.toThrow()
 
     // Edit alone: refused, because an upsert answers with the merged row.
-    expect(() => assertCanEdit({ authorization: context({ edit: ["quote"] }) }, "quote")).toThrow(
+    expect(() => assertCanEdit(principalRuntime({ edit: ["quote"] }), "quote")).toThrow(
       /not allowed to view object type 'quote'/
     )
 
     // View alone: refused with the write message, so the operator knows which grant to add.
-    expect(() => assertCanEdit({ authorization: context({ view: ["quote"] }) }, "quote")).toThrow(
+    expect(() => assertCanEdit(principalRuntime({ view: ["quote"] }), "quote")).toThrow(
       /not allowed to write object type 'quote'/
     )
   })
 
   test("assertCanAppendTelemetry needs no view grant", () => {
     expect(() =>
-      assertCanAppendTelemetry({ authorization: context({ append: ["sensor"] }) }, "sensor")
+      assertCanAppendTelemetry(principalRuntime({ append: ["sensor"] }), "sensor")
     ).not.toThrow()
 
     expect(() =>
-      assertCanAppendTelemetry({ authorization: context({ view: ["sensor"] }) }, "sensor")
+      assertCanAppendTelemetry(principalRuntime({ view: ["sensor"] }), "sensor")
     ).toThrow(/not allowed to append telemetry for object type 'sensor'/)
   })
 
-  test("both asserts are inert for a privileged caller", () => {
-    expect(() => assertCanEdit({}, "quote")).not.toThrow()
-    expect(() => assertCanAppendTelemetry({}, "sensor")).not.toThrow()
+  test("both asserts are inert for explicitly unrestricted authority", () => {
+    expect(() => assertCanEdit(unrestrictedRuntime, "quote")).not.toThrow()
+    expect(() => assertCanAppendTelemetry(unrestrictedRuntime, "sensor")).not.toThrow()
+  })
+
+  test("both asserts fail closed without registered execution authority", () => {
+    expect(() => assertCanEdit({}, "quote")).toThrow("registered execution scope")
+    expect(() => assertCanAppendTelemetry({}, "sensor")).toThrow("registered execution scope")
   })
 })
 

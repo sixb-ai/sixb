@@ -2,7 +2,7 @@ import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
 import { resolveBrowserTopology, servedUrl } from "../lib/browser-topology"
-import type { LoadedSixb } from "../lib/loadSixb"
+import type { LoadedSixbHost } from "../lib/loadSixb"
 import { builtAppOutdir, loadProductionSixb } from "../lib/production"
 import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
 import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
@@ -23,7 +23,7 @@ export async function runApp(options: AppOptions = {}) {
     <LoadingView title="Starting sixb app" subtitle={loaded.entry} status="Starting app" />
   )
 
-  let sixb: LoadedSixb | null = loaded.sixb
+  let sixb: LoadedSixbHost | null = loaded.sixb
   let customAppServer: CustomAppDevServer | null = null
 
   try {

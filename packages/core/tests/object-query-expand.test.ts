@@ -6,7 +6,6 @@ import {
   type ObjectQuery,
   OntologyRegistry,
   prop,
-  Sixb,
 } from "../src"
 import {
   collectObjectQueryValidationIssues,
@@ -15,6 +14,7 @@ import {
   normalizeObjectQuery,
   validateObjectQuery,
 } from "../src/objects/query"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 // A faithful mirror of the real ADN graph: Project -> { opportunity, projectFolder },
@@ -87,7 +87,7 @@ const Project = defineObjectType({
 
 const sources = [Project, Opportunity, Company, Contact, Folder, ProjectFolder]
 const ontology = new OntologyRegistry({ sources })
-const sixb = new Sixb({
+const sixb = createTestSixb({
   ontology: [defineOntology({ id: "adn", version: "1.0.0", objectTypes: sources })],
   ...createTestRuntimeDeps(),
 })

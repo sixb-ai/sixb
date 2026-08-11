@@ -16,12 +16,13 @@ import {
   link,
   type OntologySource,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import {
   createAgentApiGatewayCapability,
   createAgentRunExecutionToken,
 } from "@sixb/core/internal/agents"
+import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -361,10 +362,10 @@ async function createGatewayRuntime(
   readonly executionToken: string
   readonly runId: string
   readonly storage: InMemoryStorage
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly sixb: SixbHost<readonly OntologySource[]>
 }> {
   const storage = new InMemoryStorage()
-  const sixb = new Sixb<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: PROJECT_ID,
     ontology: [Contract, Device],
     actions: [labelDevice],
@@ -379,9 +380,10 @@ async function createGatewayRuntime(
     auth: options.auth === false ? undefined : { id: "test", kind: "dev" as const },
   })
 
-  await sixb.objects.upsert("device", { id: "fan-1", label: "Fan 1" })
-  await sixb.objects.upsert("contract", { id: "contract-1" })
-  await sixb.objects.upsertLink("device", "fan-1", "contract", {
+  const setup = createTestSixb(sixb)
+  await setup.objects.upsert("device", { id: "fan-1", label: "Fan 1" })
+  await setup.objects.upsert("contract", { id: "contract-1" })
+  await setup.objects.upsertLink("device", "fan-1", "contract", {
     targetTypeId: "contract",
     targetId: "contract-1",
     properties: { relationship: "managed" },
@@ -516,7 +518,7 @@ async function createGatewayRuntime(
     executionToken: execution.token,
   })
   const app = createSixbApi(
-    new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+    new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
   )
 
   return {

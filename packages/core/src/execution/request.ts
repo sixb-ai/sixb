@@ -1,11 +1,9 @@
 import { randomUUID } from "node:crypto"
 import type { AuthorizationContext } from "../authorization"
 import type { OntologySource } from "../ontology"
-import { bindExecution } from "../runtime/execution-binding"
-import type { ExecutionSixb } from "../runtime/scoped"
-import type { Sixb } from "../runtime/sixb"
+import { isBoundSixb, type Sixb } from "../runtime/sixb"
 import { createDisabledRequestScope, createPrincipalRequestScope } from "./scopes"
-import type { AuthorizationRef } from "./types"
+import type { AuthorizationRef, ExecutionScope } from "./types"
 
 export type { ExecutionActionRunsRuntime, ExecutionActionsRuntime } from "../actions/execution"
 export type {
@@ -34,7 +32,7 @@ export type {
   ExecutionProjectionsRuntime,
 } from "../projections/execution"
 export type { ExecutionRuleStatesRuntime, ExecutionRulesRuntime } from "../rules/execution"
-export type { ExecutionSixb } from "../runtime/scoped"
+export type { Sixb } from "../runtime/sixb"
 export type { ExecutionSyncRunsRuntime, ExecutionSyncsRuntime } from "../syncs/execution"
 export type {
   ExecutionWorkflowInterventionsRuntime,
@@ -56,11 +54,16 @@ export interface BindRequestExecutionInput {
   readonly authorization: RequestExecutionAuthorization
 }
 
+export interface RequestExecutionHost {
+  readonly id: string
+  withScope(scope: ExecutionScope): object
+}
+
 /** Bind one HTTP or WebSocket request without exposing trusted or kernel capability factories. */
 export function bindRequestExecution(
-  host: Sixb<readonly OntologySource[]>,
+  host: RequestExecutionHost,
   input: BindRequestExecutionInput
-): ExecutionSixb<readonly OntologySource[]> {
+): Sixb<readonly OntologySource[]> {
   const requestId = requestIdentifier(input.request)
   const correlationId = correlationIdentifier(input.request, requestId)
   const scope =
@@ -76,7 +79,11 @@ export function bindRequestExecution(
         })
       : createDisabledRequestScope({ projectId: host.id, requestId, correlationId })
 
-  return bindExecution<readonly OntologySource[]>(host, scope)
+  const sixb = host.withScope(scope)
+  if (!isBoundSixb(sixb)) {
+    throw new Error("[Sixb] Request host did not return an execution-bound Sixb SDK.")
+  }
+  return sixb
 }
 
 function requestIdentifier(request: Request): string {

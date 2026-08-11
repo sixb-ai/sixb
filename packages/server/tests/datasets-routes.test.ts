@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { DatasetDefinition, LakeStorage, OntologySource, Sixb } from "@sixb/core"
+import type { DatasetDefinition, LakeStorage, SixbHostRuntime } from "@sixb/core"
 import { col, defineDataset } from "@sixb/core"
 import type { DatasetCatalogState } from "@sixb/core/lake-storage"
 import { Elysia } from "elysia"
@@ -46,7 +46,7 @@ function createCatalogOnlyStorage(states: readonly DatasetCatalogState[]) {
 function createSixbStub(
   lakeStorage: LakeStorage,
   definitions: readonly DatasetDefinition[]
-): Sixb<readonly OntologySource[]> {
+): SixbHostRuntime {
   return {
     lakeStorage,
     datasets: {
@@ -56,19 +56,19 @@ function createSixbStub(
     syncs: { list: () => [] },
     pipelines: { list: () => [] },
     projections: { list: () => [] },
-  } as unknown as Sixb<readonly OntologySource[]>
+  } as unknown as SixbHostRuntime
 }
 
 function createTestApp(lakeStorage: LakeStorage, definitions: readonly DatasetDefinition[]) {
   const sixb = createSixbStub(lakeStorage, definitions)
-  const sdk = {
+  const sixbExecution = {
     datasets: sixb.datasets,
     syncs: sixb.syncs,
     pipelines: sixb.pipelines,
     projections: sixb.projections,
   }
   const app = new Elysia()
-  app.derive(() => ({ sdk }))
+  app.derive(() => ({ sixb: sixbExecution }))
 
   return registerDatasetRoutes(app, sixb)
 }

@@ -1,2 +1,2 @@
-export type { PipelineWorkerSixb } from "./types"
+export type { PipelineWorkerHost } from "./types"
 export { PipelineWorker } from "./worker"

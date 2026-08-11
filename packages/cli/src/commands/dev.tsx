@@ -3,7 +3,7 @@ import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
 import { type AtlasAppServer, createAtlasApp } from "@sixb/atlas"
 import { createSixbServer, type SixbServer } from "@sixb/server"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
-import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
+import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { runUntilSignal, startSixbRuntime, stopQuietly } from "../lib/runtime"
 import { generateProjectTypes } from "../lib/typegen"
 import { DevView, LoadingView, renderCliError, renderPersistent } from "../ui"
@@ -31,12 +31,13 @@ export async function runDev(options: DevOptions = {}) {
   let server: SixbServer | null = null
   let atlasServer: AtlasAppServer | null = null
   let customAppServer: CustomAppDevServer | null = null
-  let sixb: LoadedSixb | null = null
+  let sixb: LoadedSixbHost | null = null
   let runtime: Awaited<ReturnType<typeof startSixbRuntime>> | null = null
 
   try {
     await generateProjectTypes({ entry })
-    sixb = await loadSixbFromEntry(entry)
+    const host: LoadedSixbHost = await loadSixbFromEntry(entry)
+    sixb = host
     const projectRoot = dirname(resolve(entry))
 
     const customAppProbe = await createCustomApp({ rootDir: projectRoot })
@@ -53,18 +54,18 @@ export async function runDev(options: DevOptions = {}) {
       hasCustomApp,
     })
 
-    runtime = await startSixbRuntime(sixb, {
+    runtime = await startSixbRuntime(host, {
       cohostWorkers: true,
       agentApiBaseUrl: topology.apiPublicOrigin,
     })
-    const authEnabled = sixb.auth.isEnabled()
+    const authEnabled = host.auth.isEnabled()
 
     app.rerender(<LoadingView title="Starting sixb" subtitle={entry} status="Starting server" />)
 
     server = createSixbServer({
-      sixb: sixb as unknown as never,
+      host: sixb,
       port: topology.apiPort,
-      host: topology.apiHost,
+      hostname: topology.apiHost,
       quiet: true,
       browser: {
         publicOrigin: topology.apiPublicOrigin,

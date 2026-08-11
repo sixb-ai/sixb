@@ -1,13 +1,9 @@
-import type {
-  ActionsRuntime,
-  BlobsRuntime,
-  ConnectorRuntime,
-  RulesRuntime,
-  SixbRuntimeContext,
-} from "@sixb/core"
+import type { ActionsRuntime, DomainEventLog, Queues, Storage } from "@sixb/core"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
-import { createDynamicObjectsRuntime } from "@sixb/core/internal/objects"
-import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
+import {
+  bindPrimitiveExecution,
+  type PrimitiveExecutionHost,
+} from "@sixb/core/internal/primitive-execution"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ActionRunRequestedQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
@@ -15,13 +11,12 @@ import { ActionWorkerError } from "./errors"
 import { runActionJob } from "./run-action-job"
 import type { ActionJob, ActionRunResult, ActionWorkerContext } from "./types"
 
-export interface ActionWorkerSixb extends Omit<SixbRuntimeContext, "blobStorage" | "rules"> {
-  readonly id: string
+export interface ActionWorkerHost extends PrimitiveExecutionHost {
+  readonly events: DomainEventLog
+  readonly storage: Storage
+  readonly queues: Queues
   readonly logs?: LogsRuntime
   readonly actions: Pick<ActionsRuntime, "list" | "getById" | "listForType">
-  readonly blobs: Pick<BlobsRuntime, "put" | "open" | "stat">
-  readonly connector: ConnectorRuntime
-  readonly rules: Pick<RulesRuntime, "list">
 }
 
 export interface ActionWorkerOptions {
@@ -30,27 +25,27 @@ export interface ActionWorkerOptions {
 }
 
 export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
-  private readonly context: ActionWorkerContext | null
-  private readonly sixb: ActionWorkerSixb
+  private readonly host: ActionWorkerHost
   private readonly idleWithoutDefinitions: boolean
 
-  constructor(sixb: ActionWorkerSixb, options: ActionWorkerOptions = {}) {
+  constructor(host: ActionWorkerHost, options: ActionWorkerOptions = {}) {
     super({
-      projectId: sixb.id,
-      queue: sixb.queues.actions,
-      workerId: `action-worker-${sixb.id}`,
+      projectId: host.id,
+      queue: host.queues.actions,
+      workerId: `action-worker-${host.id}`,
       claimLimit: 1,
       leaseMs: options.leaseMs,
       idlePollMs: options.idlePollMs,
     })
 
-    const actions = sixb.actions.list()
+    const actions = host.actions.list()
     if (actions.length === 0) {
       console.log("[SixbActionWorker] No action definitions registered; worker will idle.")
+    } else if (!host.storage.actionRuns) {
+      throw new ActionWorkerError("Action workers require storage.actionRuns support.")
     }
 
-    this.context = actions.length > 0 ? buildActionContext(sixb) : null
-    this.sixb = sixb
+    this.host = host
     this.idleWithoutDefinitions = actions.length === 0
   }
 
@@ -73,8 +68,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
     claimed: ClaimedQueueJob<ActionRunRequestedQueueJob>,
     signal: AbortSignal
   ): Promise<void> {
-    const context = this.context
-    if (!context) {
+    if (this.idleWithoutDefinitions) {
       throw new ActionWorkerError("No action definitions are registered.")
     }
 
@@ -88,6 +82,16 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       actionId: job.payload.actionId,
     }
 
+    const execution = bindPrimitiveExecution(this.host, {
+      primitive: {
+        kind: "action",
+        id: actionJob.actionId,
+        runId: actionJob.id,
+      },
+      source: { type: "queue", queue: "actions", jobId: job.id },
+    })
+    const context = buildActionContext(this.host, execution)
+
     const result = await runActionJob({
       runtime: context,
       job: actionJob,
@@ -99,7 +103,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       return
     }
 
-    await emitActionTerminalEvent(this.sixb, result)
+    await emitActionTerminalEvent(this.host, result)
   }
 
   protected override async onExecutionError(
@@ -118,12 +122,12 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
 }
 
 async function emitActionTerminalEvent(
-  sixb: ActionWorkerSixb,
+  host: ActionWorkerHost,
   result: Exclude<ActionRunResult, { skipped: true }>
 ): Promise<void> {
   const finishedAt = result.finishedAt.toISOString()
 
-  await sixb.events.emit(
+  await host.events.emit(
     {
       events:
         result.status === "succeeded"
@@ -157,38 +161,29 @@ async function emitActionTerminalEvent(
   )
 }
 
-function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
-  const actionRunsStorage = sixb.storage.actionRuns
+function buildActionContext(
+  host: ActionWorkerHost,
+  execution: ReturnType<typeof bindPrimitiveExecution>
+): ActionWorkerContext {
+  const actionRunsStorage = host.storage.actionRuns
   if (!actionRunsStorage) {
     throw new ActionWorkerError("Action workers require storage.actionRuns support.")
   }
-  const runtime = {
-    projectId: sixb.projectId,
-    ontology: sixb.ontology,
-    actionRegistry: sixb.actionRegistry,
-    events: sixb.events,
-    storage: sixb.storage,
-    lakeStorage: sixb.lakeStorage,
-    blobStorage: sixb.blobs,
-    queues: sixb.queues,
-    sandboxes: sixb.sandboxes,
-    rules: sixb.rules.list(),
+  const sixb = {
+    objects: execution.sixb.objects,
+    actions: execution.sixb.actions,
+    connector: execution.sixb.connector,
+    blobs: execution.sixb.blobs,
   }
-
   return {
-    id: sixb.id,
-    errorReporterHost: sixb,
-    events: sixb.events,
-    logs: sixb.logs,
-    storage: sixb.storage,
+    id: host.id,
+    errorReporterHost: host,
+    events: host.events,
+    logs: host.logs,
+    storage: host.storage,
     actionRunsStorage,
-    ontologyMutations: getOntologyMutationRuntime(sixb),
-    sixb: {
-      objects: createDynamicObjectsRuntime(runtime),
-      actions: sixb.actions,
-      connector: sixb.connector,
-      blobs: sixb.blobs,
-    },
-    actions: sixb.actions,
+    ontologyMutations: execution.ontologyMutations,
+    sixb,
+    actions: host.actions,
   }
 }

@@ -12,7 +12,7 @@ import {
 } from "./attachments"
 import { type BashSandboxHandle, createBashTool } from "./bash-tool"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
-import type { AgentTurnContext, AgentWorkerContext } from "./types"
+import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
 export interface AgentExecutionEnvironment {
@@ -21,7 +21,7 @@ export interface AgentExecutionEnvironment {
 }
 
 interface CreateAgentEnvironmentInput {
-  readonly context: AgentWorkerContext
+  readonly context: AgentExecutionContext
   readonly agent: AgentDefinition
   /**
    * Sink for a sandbox teardown that outlives dispose() (the model answered before the boot
@@ -202,7 +202,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
 }
 
 interface ProvisionSandboxInput {
-  readonly context: AgentWorkerContext
+  readonly context: AgentExecutionContext
   readonly agent: AgentDefinition
   readonly run: { readonly id: string; readonly threadId?: string }
   readonly apiBaseUrl: string
