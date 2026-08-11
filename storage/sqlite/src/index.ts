@@ -90,12 +90,19 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly migrators: readonly StorageMigrator[]
 
   private readonly connection: SqliteStoreConnection
+  private readonly readConnection: SqliteStoreConnection
   private readonly transactionScope = new AsyncLocalStorage<{ active: boolean }>()
   private transactionTail: Promise<void> = Promise.resolve()
 
   constructor(options: SqliteStorageOptions = {}) {
     const path = options.path ? sqliteStoragePath(options.path) : undefined
     this.connection = openSqliteStoreConnection({ path })
+    if (path) {
+      this.connection.db.run("PRAGMA journal_mode = WAL")
+      this.readConnection = openSqliteStoreConnection({ path, readonly: true })
+    } else {
+      this.readConnection = this.connection
+    }
 
     if (this.connection.installFreshSchema) {
       installFreshSqliteSchema(this.connection.db)
@@ -114,14 +121,26 @@ export class SqliteStorage implements MigrationCapableStorage {
       (run) => this.runRootOntologyOperation(run),
       assertRootOperationAvailable
     )
-    this.objects = createOperationScopedFacade(stores.objects, scope)
+    const readScope = path
+      ? createStorageOperationScope(async (run) => {
+          this.assertRootOperationAvailable()
+          return run()
+        }, assertRootOperationAvailable)
+      : scope
+    const readObjects = path
+      ? new SqliteObjectStorage({ connection: this.readConnection })
+      : stores.objects
+    const readTimeseries = path
+      ? new SqliteTimeseriesStorage({ connection: this.readConnection })
+      : stores.timeseries
+    this.objects = createOperationScopedFacade(readObjects, readScope)
     this.ontology = createOntologyOperationScope(stores.ontology, ontologyScope)
     this.auth = createAuthOperationScope(stores.auth, scope)
     this.executions = createOperationScopedFacade(stores.executions, scope)
     this.agents = createAgentOperationScope(stores.agents, scope)
     this.actionRuns = createOperationScopedFacade(stores.actionRuns, scope)
     this.pipelineRuns = createOperationScopedFacade(stores.pipelineRuns, scope)
-    this.timeseries = createOperationScopedFacade(stores.timeseries, scope)
+    this.timeseries = createOperationScopedFacade(readTimeseries, readScope)
     this.syncRuns = createOperationScopedFacade(stores.syncRuns, scope)
     this.projectionRuns = createOperationScopedFacade(stores.projectionRuns, scope)
     this.workflowRuns = createWorkflowRunOperationScope(stores.workflowRuns, scope)
@@ -133,17 +152,21 @@ export class SqliteStorage implements MigrationCapableStorage {
   }
 
   async ping(): Promise<void> {
+    this.assertRootOperationAvailable()
+    if (this.readConnection !== this.connection) {
+      this.readConnection.db.query("SELECT 1").get()
+      return
+    }
     await this.runRootStorageOperation(() => {
       this.connection.db.query("SELECT 1").get()
     })
   }
 
   /**
-   * The `isolation` option is intentionally ignored. SQLite runs every transaction through one
-   * shared connection serialized by {@link withTransactionLock} and a `BEGIN IMMEDIATE`, so there is
-   * no concurrent transaction to isolate against — the lock already provides serializable semantics
-   * for transaction-vs-transaction races. Postgres, which has true concurrent connections, is where
-   * `isolation: "serializable"` translates to a real isolation level.
+   * The `isolation` option is intentionally ignored. SQLite runs every write transaction through
+   * one connection serialized by {@link withTransactionLock} and a `BEGIN IMMEDIATE`, so there is no
+   * concurrent writer to isolate against. File-backed object and timeseries reads use a separate WAL
+   * snapshot connection; Postgres is where `isolation: "serializable"` maps to a real isolation level.
    */
   async transaction<T>(
     run: (tx: Storage) => Promise<T> | T,
@@ -186,6 +209,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   }
 
   close(): void {
+    if (this.readConnection !== this.connection) closeSqliteStoreConnection(this.readConnection)
     closeSqliteStoreConnection(this.connection)
   }
 

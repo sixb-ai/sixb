@@ -18,6 +18,9 @@ import workflowRunOutputSql from "./migrations/002-workflow-run-output.sql" with
 import mergeSyncRunsSql from "./migrations/003-merge-sync-runs.sql" with { type: "text" }
 import executionsSql from "./migrations/004-executions.sql" with { type: "text" }
 import workflowExecutionsSql from "./migrations/005-workflow-executions.sql" with { type: "text" }
+import narrowOntologySourceRootIndexSql from "./migrations/006-narrow-ontology-source-root-index.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -276,6 +279,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("003-merge-sync-runs", mergeSyncRunsSql),
     pgSql("004-executions", executionsSql),
     pgSql("005-workflow-executions", workflowExecutionsSql),
+    pgSql("006-narrow-ontology-source-root-index", narrowOntologySourceRootIndexSql),
   ],
 })
 

@@ -1,9 +1,5 @@
 import type { Database } from "bun:sqlite"
-import {
-  linkRefKey,
-  MaterializationConflictError,
-  objectRefKey,
-} from "@sixb/core/internal/materialization"
+import { MaterializationConflictError } from "@sixb/core/internal/materialization"
 import {
   correlateMaterializationChunk,
   duplicateMaterializationWork as duplicateWork,
@@ -25,7 +21,6 @@ import type {
   StreamMaterializationWorkInput,
 } from "@sixb/core/storage"
 import {
-  type ReplacementIdentity,
   SQLITE_MATERIALIZATION_WORK_TABLE,
   SQLITE_REPLACEMENT_WORK_TABLE,
 } from "./materialization-state"
@@ -103,8 +98,10 @@ export class SqliteMaterializationSessions {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, json(?))
       `
     )
+    let currentRecordKey: string | undefined
     try {
       for (const { record, uniqueKey, columns } of records) {
+        currentRecordKey = record.recordKey
         insert.run(
           session.id,
           record.recordKey,
@@ -120,7 +117,7 @@ export class SqliteMaterializationSessions {
       }
     } catch (error) {
       if (isSqliteConstraintError(error)) {
-        throw duplicateWork(input.records[0]?.recordKey ?? "unknown")
+        throw duplicateWork(currentRecordKey)
       }
       throw error
     }
@@ -203,29 +200,6 @@ export class SqliteMaterializationSessions {
     session.appliedOutboxCount = progress.appliedOutboxCount
   }
 
-  recordReplacementIdentities(
-    session: SqliteMaterializationSessionState,
-    identities: readonly ReplacementIdentity[]
-  ): void {
-    const upsert = this.db.query(
-      `
-        INSERT INTO ${SQLITE_REPLACEMENT_WORK_TABLE} (
-          session_id, entity_kind, identity_key, diff_required
-        ) VALUES (?, ?, ?, ?)
-        ON CONFLICT(session_id, entity_kind, identity_key) DO UPDATE SET
-          diff_required = MAX(diff_required, excluded.diff_required)
-      `
-    )
-    for (const identity of identities) {
-      upsert.run(
-        session.id,
-        identity.kind,
-        identity.kind === "object" ? objectRefKey(identity.ref) : linkRefKey(identity.ref),
-        identity.diffRequired ? 1 : 0
-      )
-    }
-  }
-
   count(session: SqliteMaterializationSessionState, kind: string): number {
     const row = this.db
       .query(
@@ -278,11 +252,19 @@ export class SqliteMaterializationSessions {
             WHERE session_id = ? AND diff_required = 1
               AND (entity_kind = 'link' OR ? = 1)
           ), actual AS (
-            SELECT json_extract(payload, '$.entityKind') AS entity_kind,
-              json_extract(payload, '$.identityKey') AS identity_key
+            SELECT CASE
+                WHEN unique_key LIKE 'classification:object:%' THEN 'object'
+                ELSE 'link'
+              END AS entity_kind,
+              CASE
+                WHEN unique_key LIKE 'classification:object:%'
+                  THEN substr(unique_key, length('classification:object:') + 1)
+                ELSE substr(unique_key, length('classification:link:') + 1)
+              END AS identity_key
             FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
             WHERE session_id = ? AND kind = 'classification'
-              AND json_extract(payload, '$.entityKind') IN ('object', 'link')
+              AND (unique_key LIKE 'classification:object:%'
+                OR unique_key LIKE 'classification:link:%')
           ), differences AS (
             SELECT * FROM expected EXCEPT SELECT * FROM actual
             UNION ALL
@@ -297,7 +279,7 @@ export class SqliteMaterializationSessions {
         `
           SELECT 1 FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
           WHERE session_id = ? AND kind = 'classification'
-            AND json_extract(payload, '$.entityKind') = 'point'
+            AND unique_key LIKE 'classification:point:%'
           LIMIT 1
         `
       )
@@ -376,9 +358,14 @@ export class SqliteMaterializationSessions {
         session_id TEXT NOT NULL,
         entity_kind TEXT NOT NULL,
         identity_key TEXT NOT NULL,
+        sort_key TEXT NOT NULL,
         diff_required INTEGER NOT NULL CHECK (diff_required IN (0, 1)),
         PRIMARY KEY (session_id, entity_kind, identity_key)
       );
+      CREATE INDEX IF NOT EXISTS idx_ontology_replacement_work_order
+        ON ${SQLITE_REPLACEMENT_WORK_TABLE}(
+          session_id, entity_kind, sort_key, identity_key
+        );
     `)
   }
 

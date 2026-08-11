@@ -33,6 +33,7 @@ import type {
   SummarizeTerminalSourceMaterializationsInput,
   TerminalSourceMaterializationSummary,
 } from "@sixb/core/storage"
+import { yieldSqliteEventLoop } from "../transactions"
 import {
   assertNonblank,
   assertNonnegativeInteger,
@@ -125,7 +126,7 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
   }
 
   async stageRows(input: StageSourceRowsInput): Promise<StageSourceRowsResult> {
-    return this.runRootOperation(() => {
+    const result = await this.runRootOperation(() => {
       assertWriteIdentity(input)
       this.assertExecution(input)
       const manifest = this.requireManifest(
@@ -146,6 +147,8 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
       this.insertStageRows(input, pending)
       return { inserted: pending.length, unchanged }
     })
+    await yieldSqliteEventLoop()
+    return result
   }
 
   async markReady(input: MarkSourceMaterializationReadyInput): Promise<OntologySourceRecord> {

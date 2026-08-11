@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { Storage } from "@sixb/core"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { migrateStorage, type Storage } from "@sixb/core"
 import { type ActionRunStorage, StorageTransactionError } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import { closeSqliteStoreConnection, openSqliteStoreConnection } from "../src/transactions"
@@ -10,6 +13,43 @@ test("SQLite storage connections enforce foreign keys", () => {
     expect(connection.db.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 })
   } finally {
     closeSqliteStoreConnection(connection)
+  }
+})
+
+test("file-backed snapshot reads remain available during a write transaction", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sixb-sqlite-concurrent-read-"))
+  const storage = new SqliteStorage({ path: directory })
+  await migrateStorage(storage)
+  let releaseTransaction!: () => void
+  const blocked = new Promise<void>((resolve) => {
+    releaseTransaction = resolve
+  })
+  let transactionEntered!: () => void
+  const entered = new Promise<void>((resolve) => {
+    transactionEntered = resolve
+  })
+  const transaction = storage.transaction(async (tx) => {
+    await requireActionRuns(tx).queue(actionRunInput("concurrent-read-writer"))
+    transactionEntered()
+    await blocked
+  })
+
+  try {
+    await entered
+    const read = storage.objects
+      .getByPrimaryId({
+        projectId: "my-app",
+        objectTypeId: "Room",
+        primaryId: "room-1",
+      })
+      .then(() => "read" as const)
+    const outcome = await Promise.race([read, Bun.sleep(500).then(() => "blocked" as const)])
+    expect(outcome).toBe("read")
+  } finally {
+    releaseTransaction()
+    await transaction
+    storage.close()
+    await rm(directory, { recursive: true, force: true })
   }
 })
 

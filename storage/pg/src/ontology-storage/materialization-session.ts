@@ -19,6 +19,7 @@ import type {
   StreamMaterializationWorkInput,
 } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
+import { isUniqueViolation } from "../storage-errors"
 import { PG_MATERIALIZATION_WORK_TABLE, PG_REPLACEMENT_WORK_TABLE } from "./materialization-state"
 import { jsonParameter } from "./shared"
 
@@ -119,21 +120,6 @@ export class PgMaterializationSessions {
     const session = this.require(input.session)
     const records = prepareMaterializationWork(session, input)
     if (records.length === 0) return
-    const keys = records.map(({ record }) => record.recordKey)
-    const uniqueKeys = records.map(({ uniqueKey }) => uniqueKey)
-
-    const [duplicate] = await this.sql<{ readonly record_key: string }[]>`
-      SELECT record_key
-      FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
-      WHERE session_id = ${session.id}
-        AND (
-          record_key = ANY(${this.sql.array(keys)}::text[])
-          OR unique_key = ANY(${this.sql.array(uniqueKeys)}::text[])
-        )
-      LIMIT 1
-    `
-    if (duplicate) throw duplicateWork(duplicate.record_key)
-
     const payload = records.map(({ record, uniqueKey, columns }) => {
       return {
         recordKey: record.recordKey,
@@ -147,19 +133,30 @@ export class PgMaterializationSessions {
         record,
       }
     })
-    await this.sql`
-      WITH staged AS (
-        SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, payload)}::jsonb)
-      )
-      INSERT INTO ${this.sql(PG_MATERIALIZATION_WORK_TABLE)} (
-        session_id, record_key, unique_key, kind, lane,
-        major_order, minor_order, sort_one, sort_two, payload
-      )
-      SELECT ${session.id}, value->>'recordKey', value->>'uniqueKey', value->>'kind',
-        value->>'lane', (value->>'majorOrder')::integer, (value->>'minorOrder')::integer,
-        value->>'sortOne', value->>'sortTwo', value->'record'
-      FROM staged
-    `
+    // This session is the only writer to its transaction-local temp rows. Let the two unique
+    // constraints arbitrate cross-chunk duplicates instead of issuing a duplicate probe before
+    // every insert; a violation aborts the enclosing materialization transaction and is mapped
+    // back to the provider contract below.
+    try {
+      await this.sql`
+        WITH staged AS (
+          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, payload)}::jsonb)
+        )
+        INSERT INTO ${this.sql(PG_MATERIALIZATION_WORK_TABLE)} (
+          session_id, record_key, unique_key, kind, lane,
+          major_order, minor_order, sort_one, sort_two, payload
+        )
+        SELECT ${session.id}, value->>'recordKey', value->>'uniqueKey', value->>'kind',
+          value->>'lane', (value->>'majorOrder')::integer, (value->>'minorOrder')::integer,
+          value->>'sortOne', value->>'sortTwo', value->'record'
+        FROM staged
+      `
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw duplicateWork()
+      }
+      throw error
+    }
   }
 
   async *stream(input: StreamMaterializationWorkInput): AsyncIterable<MaterializationWorkPage> {

@@ -530,10 +530,12 @@ function materializationPlanKindRank(kind: MaterializationPlanWorkItem["kind"]):
   }
 }
 
-export function duplicateMaterializationWork(key: string): MaterializationConflictError {
+export function duplicateMaterializationWork(key?: string): MaterializationConflictError {
   return new MaterializationConflictError(
     "effective-state",
-    `Duplicate materialization work key '${key}'.`
+    key === undefined
+      ? "Duplicate materialization work."
+      : `Duplicate materialization work key '${key}'.`
   )
 }
 

@@ -50,6 +50,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 5,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "006-narrow-ontology-source-root-index",
+    status: "applied",
+    version: 6,
+  },
 ]
 
 afterEach(async () => {
@@ -442,6 +449,31 @@ describe("SQLite storage migrations", () => {
     closeStorage(storage)
   })
 
+  test("narrows the source-root index without changing its lookup prefix", () => {
+    const db = new Database(":memory:")
+    try {
+      sqliteStorageMigrations.steps[0]?.up(db)
+      expect(readMemoryIndexColumns(db, "idx_ontology_source_rows_root")).toEqual([
+        "project_id",
+        "source_id",
+        "materialization_id",
+        "root_sort_key",
+        "staging_ordinal",
+        "entity_sort_key",
+      ])
+
+      sqliteStorageMigrations.steps[5]?.up(db)
+      expect(readMemoryIndexColumns(db, "idx_ontology_source_rows_root")).toEqual([
+        "project_id",
+        "source_id",
+        "materialization_id",
+        "root_sort_key",
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
   test("the timeseries primary key enforces the (series, at) natural key", () => {
     const db = new Database(":memory:")
     try {
@@ -541,6 +573,12 @@ function readMemoryTableColumns(db: Database, tableName: string): string[] {
   )
 }
 
+function readMemoryIndexColumns(db: Database, indexName: string): string[] {
+  return (db.query(`PRAGMA index_info(${indexName})`).all() as { readonly name: string }[]).map(
+    (row) => row.name
+  )
+}
+
 function readMemoryColumn(
   db: Database,
   tableName: string,
@@ -620,7 +658,7 @@ describe("SQLite migration status is read-only", () => {
     expect(await migrator?.status()).toMatchObject({
       adapterId: SQLITE_STORAGE_ADAPTER_ID,
       state: "current",
-      appliedVersion: 5,
+      appliedVersion: 6,
     })
 
     expect(statSync(path).mtimeMs).toBe(before)

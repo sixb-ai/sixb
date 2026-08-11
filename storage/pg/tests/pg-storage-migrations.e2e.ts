@@ -40,6 +40,7 @@ describe("Postgres storage migrations", () => {
             "003-merge-sync-runs",
             "004-executions",
             "005-workflow-executions",
+            "006-narrow-ontology-source-root-index",
           ],
         },
       ])
@@ -78,6 +79,13 @@ describe("Postgres storage migrations", () => {
           id: "005-workflow-executions",
           status: "applied",
           version: 5,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "006-narrow-ontology-source-root-index",
+          status: "applied",
+          version: 6,
         },
       ])
     })
@@ -431,7 +439,7 @@ describe("Postgres storage migrations", () => {
       expect(await migrator?.status()).toMatchObject({
         adapterId: POSTGRES_STORAGE_ADAPTER_ID,
         state: "current",
-        appliedVersion: 5,
+        appliedVersion: 6,
       })
     })
   })
@@ -488,6 +496,13 @@ describe("Postgres storage migrations", () => {
           id: "005-workflow-executions",
           status: "applied",
           version: 5,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "006-narrow-ontology-source-root-index",
+          status: "applied",
+          version: 6,
         },
       ])
     } finally {

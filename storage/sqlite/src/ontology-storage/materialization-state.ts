@@ -122,6 +122,18 @@ interface ReplacementIdentityInput {
   readonly pageRows: number
 }
 
+interface ReplacementWorkRow {
+  readonly entity_kind: "object" | "link"
+  readonly identity_key: string
+  readonly sort_key: string
+  readonly diff_required: number
+}
+
+interface ReplacementCursor {
+  readonly sortKey: string
+  readonly identityKey: string
+}
+
 export class SqliteMaterializationStateReader {
   constructor(
     private readonly db: Database,
@@ -509,29 +521,15 @@ export class SqliteMaterializationStateReader {
   }
 
   *replacementIdentities(input: ReplacementIdentityInput): Iterable<ReplacementIdentity[]> {
-    let cursor: string | null = null
+    this.prepareReplacementIdentities(input)
+    let cursor: ReplacementCursor | null = null
     while (true) {
-      if (input.kind === "object") {
-        const rows = this.replacementObjectRows(input, cursor)
-        if (rows.length === 0) break
-        yield rows.map((row) => ({
-          kind: "object",
-          ref: { objectTypeId: row.object_type_id, primaryId: row.primary_id },
-          sortKey: row.sort_key,
-          diffRequired: true,
-        }))
-        cursor = rows[rows.length - 1]?.sort_key ?? null
-        continue
-      }
-      const rows = this.replacementLinkRows(input, cursor)
+      const rows = this.replacementRows(input, cursor)
       if (rows.length === 0) break
-      yield rows.map((row) => ({
-        kind: "link",
-        ref: linkRefFromColumns(row),
-        sortKey: row.sort_key,
-        diffRequired: row.diff_required === 1,
-      }))
-      cursor = rows[rows.length - 1]?.sort_key ?? null
+      yield rows.map(replacementIdentity)
+      if (rows.length < input.pageRows) break
+      const last = rows[rows.length - 1]!
+      cursor = { sortKey: last.sort_key, identityKey: last.identity_key }
     }
   }
 
@@ -682,62 +680,48 @@ export class SqliteMaterializationStateReader {
     return { owned, byMaterialization }
   }
 
-  private replacementObjectRows(
-    input: ReplacementIdentityInput,
-    cursor: string | null
-  ): (EffectiveObjectRow & { readonly sort_key: string })[] {
-    return this.db
+  private prepareReplacementIdentities(input: ReplacementIdentityInput): void {
+    if (input.kind === "object") {
+      this.prepareReplacementObjects(input)
+      return
+    }
+    this.prepareReplacementLinks(input)
+  }
+
+  private prepareReplacementObjects(input: ReplacementIdentityInput): void {
+    this.db
       .query(
         `
-          SELECT DISTINCT object_type_id, primary_id, entity_sort_key AS sort_key
+          INSERT INTO ${SQLITE_REPLACEMENT_WORK_TABLE} (
+            session_id, entity_kind, identity_key, sort_key, diff_required
+          )
+          SELECT ?, 'object', json_array(object_type_id, primary_id),
+            MIN(entity_sort_key), 1
           FROM ontology_source_rows
           WHERE project_id = ? AND source_id = ? AND entity_kind = 'object'
             AND materialization_id IN (?, COALESCE(?, ''))
-            AND (? IS NULL OR entity_sort_key > ?)
-          ORDER BY sort_key
-          LIMIT ?
+          GROUP BY object_type_id, primary_id
         `
       )
-      .all(
+      .run(
+        input.sessionId,
         this.projectId,
         input.sourceId,
         input.candidateMaterializationId,
-        input.previousMaterializationId,
-        cursor,
-        cursor,
-        input.pageRows
-      ) as (EffectiveObjectRow & { readonly sort_key: string })[]
+        input.previousMaterializationId
+      )
   }
 
-  private replacementLinkRows(
-    input: ReplacementIdentityInput,
-    cursor: string | null
-  ): (EffectiveLinkRow & { readonly sort_key: string; readonly diff_required: number })[] {
-    return this.db
+  private prepareReplacementLinks(input: ReplacementIdentityInput): void {
+    this.db
       .query(
         `
           WITH incident_objects AS (
-            SELECT
+            SELECT DISTINCT
               json_extract(payload, '$.ref.objectTypeId') AS object_type_id,
               json_extract(payload, '$.ref.primaryId') AS primary_id
             FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
             WHERE session_id = ? AND kind = 'incident-object'
-          ), authority_links AS (
-            SELECT source_type_id, source_id, link_id, target_type_id, target_id
-            FROM links WHERE project_id = ?
-            UNION
-            SELECT source_type_id, source_primary_id, link_id, target_type_id, target_primary_id
-            FROM ontology_overrides
-            WHERE project_id = ? AND entity_kind = 'link'
-            UNION
-            SELECT rows.source_type_id, rows.source_primary_id, rows.link_id,
-              rows.target_type_id, rows.target_primary_id
-            FROM ontology_source_rows AS rows
-            JOIN ontology_sources AS sources
-              ON sources.project_id = rows.project_id
-             AND sources.source_id = rows.source_id
-             AND sources.materialization_id = rows.materialization_id
-            WHERE rows.project_id = ? AND rows.entity_kind = 'link' AND sources.status = 'active'
           ), replacement_links AS (
             SELECT source_type_id, source_primary_id AS source_id, link_id,
               target_type_id, target_primary_id AS target_id
@@ -745,14 +729,67 @@ export class SqliteMaterializationStateReader {
             WHERE project_id = ? AND source_id = ? AND entity_kind = 'link'
               AND materialization_id IN (?, COALESCE(?, ''))
           ), incident_links AS (
-            SELECT links.* FROM authority_links AS links
-            WHERE EXISTS (
-              SELECT 1 FROM incident_objects
-              WHERE (incident_objects.object_type_id = links.source_type_id
-                  AND incident_objects.primary_id = links.source_id)
-                 OR (incident_objects.object_type_id = links.target_type_id
-                  AND incident_objects.primary_id = links.target_id)
-            )
+            SELECT links.source_type_id, links.source_id, links.link_id,
+              links.target_type_id, links.target_id
+            FROM links
+            JOIN incident_objects
+              ON incident_objects.object_type_id = links.source_type_id
+             AND incident_objects.primary_id = links.source_id
+            WHERE links.project_id = ?
+            UNION
+            SELECT links.source_type_id, links.source_id, links.link_id,
+              links.target_type_id, links.target_id
+            FROM links
+            JOIN incident_objects
+              ON incident_objects.object_type_id = links.target_type_id
+             AND incident_objects.primary_id = links.target_id
+            WHERE links.project_id = ?
+            UNION
+            SELECT overrides.source_type_id,
+              overrides.source_primary_id AS source_id,
+              overrides.link_id, overrides.target_type_id,
+              overrides.target_primary_id AS target_id
+            FROM ontology_overrides AS overrides
+            JOIN incident_objects
+              ON incident_objects.object_type_id = overrides.source_type_id
+             AND incident_objects.primary_id = overrides.source_primary_id
+            WHERE overrides.project_id = ? AND overrides.entity_kind = 'link'
+            UNION
+            SELECT overrides.source_type_id,
+              overrides.source_primary_id AS source_id,
+              overrides.link_id, overrides.target_type_id,
+              overrides.target_primary_id AS target_id
+            FROM ontology_overrides AS overrides
+            JOIN incident_objects
+              ON incident_objects.object_type_id = overrides.target_type_id
+             AND incident_objects.primary_id = overrides.target_primary_id
+            WHERE overrides.project_id = ? AND overrides.entity_kind = 'link'
+            UNION
+            SELECT rows.source_type_id, rows.source_primary_id AS source_id,
+              rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
+            FROM ontology_source_rows AS rows
+            JOIN ontology_sources AS sources
+              ON sources.project_id = rows.project_id
+             AND sources.source_id = rows.source_id
+             AND sources.materialization_id = rows.materialization_id
+            JOIN incident_objects
+              ON incident_objects.object_type_id = rows.source_type_id
+             AND incident_objects.primary_id = rows.source_primary_id
+            WHERE rows.project_id = ? AND rows.entity_kind = 'link'
+              AND sources.status = 'active'
+            UNION
+            SELECT rows.source_type_id, rows.source_primary_id AS source_id,
+              rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
+            FROM ontology_source_rows AS rows
+            JOIN ontology_sources AS sources
+              ON sources.project_id = rows.project_id
+             AND sources.source_id = rows.source_id
+             AND sources.materialization_id = rows.materialization_id
+            JOIN incident_objects
+              ON incident_objects.object_type_id = rows.target_type_id
+             AND incident_objects.primary_id = rows.target_primary_id
+            WHERE rows.project_id = ? AND rows.entity_kind = 'link'
+              AND sources.status = 'active'
           ), diff_links AS (
             SELECT * FROM replacement_links
             UNION SELECT * FROM incident_links
@@ -773,26 +810,77 @@ export class SqliteMaterializationStateReader {
             FROM all_links
             GROUP BY source_type_id, source_id, link_id, target_type_id, target_id
           )
-          SELECT * FROM selected
-          WHERE (? IS NULL OR sort_key > ?)
-          ORDER BY sort_key
-          LIMIT ?
+          INSERT INTO ${SQLITE_REPLACEMENT_WORK_TABLE} (
+            session_id, entity_kind, identity_key, sort_key, diff_required
+          )
+          SELECT ?, 'link',
+            json_array(source_type_id, source_id, link_id, target_type_id, target_id),
+            sort_key, diff_required
+          FROM selected
         `
       )
-      .all(
+      .run(
         input.sessionId,
-        this.projectId,
-        this.projectId,
-        this.projectId,
         this.projectId,
         input.sourceId,
         input.candidateMaterializationId,
         input.previousMaterializationId,
         this.projectId,
-        cursor,
-        cursor,
+        this.projectId,
+        this.projectId,
+        this.projectId,
+        this.projectId,
+        this.projectId,
+        this.projectId,
+        input.sessionId
+      )
+  }
+
+  private replacementRows(
+    input: ReplacementIdentityInput,
+    cursor: ReplacementCursor | null
+  ): ReplacementWorkRow[] {
+    return this.db
+      .query(
+        `
+          SELECT entity_kind, identity_key, sort_key, diff_required
+          FROM ${SQLITE_REPLACEMENT_WORK_TABLE}
+          WHERE session_id = ? AND entity_kind = ?
+            AND (? IS NULL OR (sort_key, identity_key) > (?, ?))
+          ORDER BY sort_key, identity_key
+          LIMIT ?
+        `
+      )
+      .all(
+        input.sessionId,
+        input.kind,
+        cursor?.sortKey ?? null,
+        cursor?.sortKey ?? null,
+        cursor?.identityKey ?? null,
         input.pageRows
-      ) as (EffectiveLinkRow & { readonly sort_key: string; readonly diff_required: number })[]
+      ) as ReplacementWorkRow[]
+  }
+}
+
+function replacementIdentity(row: ReplacementWorkRow): ReplacementIdentity {
+  const parts = parseJson<string[]>(row.identity_key)
+  if (row.entity_kind === "object") {
+    return {
+      kind: "object",
+      ref: { objectTypeId: parts[0]!, primaryId: parts[1]! },
+      sortKey: row.sort_key,
+      diffRequired: true,
+    }
+  }
+  return {
+    kind: "link",
+    ref: {
+      source: { objectTypeId: parts[0]!, primaryId: parts[1]! },
+      linkId: parts[2]!,
+      target: { objectTypeId: parts[3]!, primaryId: parts[4]! },
+    },
+    sortKey: row.sort_key,
+    diffRequired: row.diff_required === 1,
   }
 }
 
