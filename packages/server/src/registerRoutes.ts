@@ -1,4 +1,4 @@
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { SixbHostRuntime } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { registerActionRunRoutes } from "./routes/action-runs"
 import { registerActionRoutes } from "./routes/actions"
@@ -22,28 +22,28 @@ import { registerTelemetryRoutes } from "./routes/telemetry"
 import { registerWebhookRunRoutes } from "./routes/webhook-runs"
 import { registerWorkflowRoutes } from "./routes/workflows"
 
-export function registerHttpRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
-  registerAgentApiGatewayRoutes(app, sixb)
-  registerProjectRoutes(app, sixb)
-  registerStatusRoutes(app, sixb)
-  registerConnectorRoutes(app, sixb)
-  registerDatasetRoutes(app, sixb)
-  registerSyncRoutes(app, sixb)
-  registerPipelineRoutes(app, sixb)
-  registerWorkflowRoutes(app, sixb)
-  registerRuleRoutes(app, sixb)
-  registerOntologyRoutes(app, sixb)
-  registerObjectRoutes(app, sixb)
-  registerActionRoutes(app, sixb)
-  registerFileRoutes(app, sixb)
-  registerActionRunRoutes(app, sixb)
-  registerAgentRoutes(app, sixb)
-  registerLinkRoutes(app, sixb)
-  registerTelemetryRoutes(app, sixb)
-  registerEventRoutes(app, sixb)
-  registerLogRoutes(app, sixb)
-  registerProjectionRoutes(app, sixb)
-  registerWebhookRunRoutes(app, sixb)
+export function registerHttpRoutes(app: Elysia, host: SixbHostRuntime) {
+  registerAgentApiGatewayRoutes(app, host)
+  registerProjectRoutes(app, host)
+  registerStatusRoutes(app, host)
+  registerConnectorRoutes(app, host)
+  registerDatasetRoutes(app, host)
+  registerSyncRoutes(app, host)
+  registerPipelineRoutes(app, host)
+  registerWorkflowRoutes(app, host)
+  registerRuleRoutes(app, host)
+  registerOntologyRoutes(app, host)
+  registerObjectRoutes(app, host)
+  registerActionRoutes(app, host)
+  registerFileRoutes(app, host)
+  registerActionRunRoutes(app, host)
+  registerAgentRoutes(app, host)
+  registerLinkRoutes(app, host)
+  registerTelemetryRoutes(app, host)
+  registerEventRoutes(app, host)
+  registerLogRoutes(app, host)
+  registerProjectionRoutes(app, host)
+  registerWebhookRunRoutes(app, host)
 
   return app
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
-import { defineObjectType, defineSchedule, prop, Sixb } from "../src"
+import { defineObjectType, defineSchedule, prop, SixbHost } from "../src"
 import type { StoredScheduleTriggeredEvent } from "../src/events"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -11,7 +11,7 @@ const Stub = defineObjectType({
 
 const MINUTE = 60_000
 
-describe("Scheduler integration with Sixb", () => {
+describe("Scheduler integration with SixbHost", () => {
   beforeEach(() => {
     jest.useFakeTimers()
   })
@@ -24,7 +24,7 @@ describe("Scheduler integration with Sixb", () => {
     const deps = createTestRuntimeDeps()
     const schedule = defineSchedule("hourly").cron("0 * * * *")
 
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [Stub],
       schedules: [schedule],
       ...deps,
@@ -48,7 +48,7 @@ describe("Scheduler integration with Sixb", () => {
     const deps = createTestRuntimeDeps()
     const schedule = defineSchedule("s1").cron("0 * * * *")
 
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [Stub],
       schedules: [schedule],
       ...deps,
@@ -68,7 +68,7 @@ describe("Scheduler integration with Sixb", () => {
   test("no schedules is a silent no-op", async () => {
     const deps = createTestRuntimeDeps()
 
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [Stub],
       ...deps,
     })
@@ -82,7 +82,7 @@ describe("Scheduler integration with Sixb", () => {
     const deps = createTestRuntimeDeps()
     const schedule = defineSchedule("s1").cron("0 * * * *")
 
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [Stub],
       schedules: [schedule],
       ...deps,
@@ -106,7 +106,7 @@ describe("Scheduler integration with Sixb", () => {
     const deps = createTestRuntimeDeps()
     const schedule = defineSchedule("every-hour").cron("0 * * * *")
 
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [Stub],
       schedules: [schedule],
       ...deps,

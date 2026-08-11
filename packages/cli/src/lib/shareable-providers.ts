@@ -1,6 +1,6 @@
 import type { Broker, Queues } from "@sixb/core"
 import { SixbCliError } from "./errors"
-import type { LoadedSixb } from "./loadSixb"
+import type { LoadedSixbHost } from "./loadSixb"
 import { type ProductionRole, productionRoleFacts } from "./production-roles"
 
 /**
@@ -13,17 +13,17 @@ import { type ProductionRole, productionRoleFacts } from "./production-roles"
 const SLOTS = [
   {
     name: "queues",
-    get: (sixb: LoadedSixb): Broker | Queues => sixb.queues,
+    get: (sixb: LoadedSixbHost): Broker | Queues => sixb.queues,
     replacements: "@sixb/bullmq",
   },
   {
     name: "broker",
-    get: (sixb: LoadedSixb): Broker | Queues => sixb.broker,
+    get: (sixb: LoadedSixbHost): Broker | Queues => sixb.broker,
     replacements: "@sixb/redis or @sixb/nats",
   },
 ] as const
 
-function isProcessLocal(slot: (typeof SLOTS)[number], sixb: LoadedSixb): boolean {
+function isProcessLocal(slot: (typeof SLOTS)[number], sixb: LoadedSixbHost): boolean {
   return slot.get(sixb).scope === "process"
 }
 
@@ -36,7 +36,7 @@ export interface ProcessLocalProvider {
 }
 
 /** The same detection as {@link assertShareableProviders}, without the refusal. */
-export function findProcessLocalProviders(sixb: LoadedSixb): readonly ProcessLocalProvider[] {
+export function findProcessLocalProviders(sixb: LoadedSixbHost): readonly ProcessLocalProvider[] {
   return SLOTS.filter((slot) => isProcessLocal(slot, sixb)).map((slot) => ({
     slot: slot.name,
     configured: slot.get(sixb).constructor?.name ?? "a process-local provider",
@@ -51,7 +51,7 @@ export function findProcessLocalProviders(sixb: LoadedSixb): readonly ProcessLoc
  * the orchestrator enqueues, the worker polls an empty queue, and nothing reports a problem.
  * Throws rather than warns, because an inert deployment is indistinguishable from an idle one.
  */
-export function assertShareableProviders(sixb: LoadedSixb, role: ProductionRole): void {
+export function assertShareableProviders(sixb: LoadedSixbHost, role: ProductionRole): void {
   if (!productionRoleFacts(role).onEventPlane) return
 
   for (const offender of findProcessLocalProviders(sixb)) {

@@ -1,4 +1,4 @@
-import { type OntologySource, resolveAuthorizationContext, type Sixb } from "@sixb/core"
+import { resolveAuthorizationContext, type SixbHostRuntime } from "@sixb/core"
 import {
   AGENT_API_GATEWAY_PREFIX,
   AGENT_API_ROUTES,
@@ -22,12 +22,12 @@ const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
   "upgrade",
 ])
 
-export function registerAgentApiGatewayRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerAgentApiGatewayRoutes(app: Elysia, host: SixbHostRuntime) {
   for (const route of AGENT_API_ROUTES) {
     const path = `${AGENT_API_GATEWAY_PREFIX}/:agentGatewayRunId/:agentGatewayCapability${route.path}`
     const handler = async (context: AgentApiGatewayRouteContext) =>
       handleAgentApiGatewayRequest({
-        sixb,
+        host,
         app,
         request: context.request,
         agentRunId: context.params.agentGatewayRunId ?? "",
@@ -53,7 +53,7 @@ interface AgentApiGatewayRouteContext {
 }
 
 async function handleAgentApiGatewayRequest(input: {
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly host: SixbHostRuntime
   readonly app: Elysia
   readonly request: Request
   readonly agentRunId: string
@@ -68,7 +68,7 @@ async function handleAgentApiGatewayRequest(input: {
     )
   }
 
-  const authState = await resolveAgentRunAuthState(input.sixb, {
+  const authState = await resolveAgentRunAuthState(input.host, {
     runId: input.agentRunId,
     capability: input.capability,
   })
@@ -115,11 +115,11 @@ async function handleAgentApiGatewayRequest(input: {
 }
 
 async function resolveAgentRunAuthState(
-  sixb: Sixb<readonly OntologySource[]>,
+  host: SixbHostRuntime,
   input: { readonly runId: string; readonly capability: string }
 ) {
-  const agentStorage = sixb.storage.agents
-  const workflowRuns = sixb.storage.workflowRuns
+  const agentStorage = host.storage.agents
+  const workflowRuns = host.storage.workflowRuns
   if (!agentStorage && !workflowRuns) {
     // 501, not 403: nothing about the caller is being refused — neither storage role
     // that could hold an agent run is configured, so no request can ever succeed here.
@@ -127,13 +127,13 @@ async function resolveAgentRunAuthState(
   }
 
   const conversationalRun = await agentStorage?.runs.getById({
-    projectId: sixb.id,
+    projectId: host.id,
     id: input.runId,
   })
   const workflowRun = conversationalRun
     ? null
     : await workflowRuns?.agentNodes.getByNodeRunId({
-        projectId: sixb.id,
+        projectId: host.id,
         nodeRunId: input.runId,
       })
   const run = conversationalRun ?? workflowRun
@@ -149,7 +149,7 @@ async function resolveAgentRunAuthState(
     !run.execution ||
     run.execution.queueLeaseExpiresAt.getTime() <= Date.now() ||
     !isValidAgentApiGatewayCapability({
-      projectId: sixb.id,
+      projectId: host.id,
       runId: input.runId,
       executionToken: run.execution.token,
       capability: input.capability,
@@ -158,7 +158,7 @@ async function resolveAgentRunAuthState(
     return jsonError(403, "Agent API gateway capability is not valid for this run.")
   }
 
-  if (!sixb.auth.isEnabled()) {
+  if (!host.auth.isEnabled()) {
     return {
       authorization: { type: "disabled" as const },
       agentExecution,
@@ -169,7 +169,7 @@ async function resolveAgentRunAuthState(
   // Two different failures shared one status. Missing auth storage is a runtime the
   // operator did not configure; a run without an execution principal is a run that
   // cannot prove an identity. Only the first is a 501.
-  const auth = sixb.storage.auth
+  const auth = host.storage.auth
   if (!auth) {
     return jsonError(501, "Agent API gateway is not configured for authenticated agent access.")
   }
@@ -178,7 +178,7 @@ async function resolveAgentRunAuthState(
   }
 
   const serviceAccount = await auth.serviceAccounts.getById({
-    projectId: sixb.id,
+    projectId: host.id,
     id: run.executionPrincipal.id,
   })
   if (!serviceAccount || serviceAccount.status !== "active") {
@@ -186,13 +186,13 @@ async function resolveAgentRunAuthState(
   }
 
   const memberships = await auth.serviceAccountGroupMemberships.listForServiceAccount({
-    projectId: sixb.id,
+    projectId: host.id,
     serviceAccountId: serviceAccount.id,
   })
   const authz = resolveAuthorizationContext({
     principal: run.executionPrincipal,
     groupIds: memberships.map((membership) => membership.groupId),
-    roles: sixb.security.listResolvedRoles(),
+    roles: host.security.listResolvedRoles(),
   })
 
   return {

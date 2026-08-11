@@ -15,10 +15,10 @@ bun add @sixb/server
 import { createSixb } from "@sixb/core"
 import { createSixbServer } from "@sixb/server"
 
-const sixb = await createSixb({ /* providers, ontology, ... */ })
+const host = await createSixb({ /* providers, ontology, ... */ })
 
 const server = createSixbServer({
-  sixb,
+  host,
   port: 3002,
   browser: {
     publicOrigin: "https://api.example.com",
@@ -102,7 +102,7 @@ import type { SixbServerOptions } from "@sixb/server"
 
 - **`createSixbServer(options)`** -- Entrypoint for starting the API/auth/ws/docs server.
 - **`SixbServer`** -- Manages the server lifecycle (`start`, `stop`).
-- **`SixbServerOptions`** -- Config: `sixb` and `browser` (required), `port` (default 3000), `host` (default `"0.0.0.0"`), `quiet`.
+- **`SixbServerOptions`** -- Config: `host` and `browser` (required), `port` (default 3000), `hostname` (default `"0.0.0.0"`), `quiet`.
 
 ## OpenAPI
 

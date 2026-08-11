@@ -1,4 +1,4 @@
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { SixbHostRuntime } from "@sixb/core"
 import type { WebhookRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { OPENAPI_TAGS } from "../openapi/tags"
@@ -31,19 +31,19 @@ function serializeWebhookRun(run: WebhookRunRecord) {
   }
 }
 
-export function registerWebhookRunRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerWebhookRunRoutes(app: Elysia, host: SixbHostRuntime) {
   return app.get(
     "/api/webhook-runs",
     async ({ query, set }) => {
       try {
         const parsed = WebhookRunsQuerySchema.parse(query)
-        const storage = sixb.storage.webhookRuns
+        const storage = host.storage.webhookRuns
         if (!storage) {
           return unconfiguredStorageResponse(set, "Webhook run storage")
         }
 
         const result = await storage.list({
-          projectId: sixb.id,
+          projectId: host.id,
           connectorId: parsed.connectorId,
           webhookId: parsed.webhookId,
           statuses: parsed.status ? [parsed.status] : undefined,

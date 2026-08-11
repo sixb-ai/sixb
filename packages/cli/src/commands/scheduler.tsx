@@ -1,4 +1,4 @@
-import type { LoadedSixb } from "../lib/loadSixb"
+import type { LoadedSixbHost } from "../lib/loadSixb"
 import { loadProductionSixb } from "../lib/production"
 import {
   type RunningSchedulerRuntime,
@@ -27,7 +27,7 @@ export async function runScheduler(options: SchedulerOptions = {}) {
     />
   )
 
-  let sixb: LoadedSixb | null = loaded.sixb
+  let sixb: LoadedSixbHost | null = loaded.sixb
   let runtime: RunningSchedulerRuntime | null = null
 
   try {

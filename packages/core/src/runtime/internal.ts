@@ -5,3 +5,4 @@ export {
   registerOntologyMutationRuntime,
   shareOntologyMutationRuntime,
 } from "./ontology-mutations"
+export type { SixbHostContext, SixbRuntimeContext } from "./types"

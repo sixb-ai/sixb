@@ -14,7 +14,7 @@ import { EventsRuntime } from "@sixb/core/internal/events"
 import type { ObjectStorage, RulesStorage } from "@sixb/core/storage"
 import { InMemoryRulesStorage } from "@sixb/core/storage"
 import { createMaterializerTestFixture, type MaterializerTestFixture } from "@sixb/core/testing"
-import type { RulesWorkerSixb } from "../src"
+import type { RulesWorkerHost } from "../src"
 import { RulesWorker } from "../src"
 
 const projectId = "project-a"
@@ -542,7 +542,7 @@ function createRuntime(
     readonly events?: EventsRuntime
     readonly storage?: Storage
   } = {}
-): RulesWorkerSixb {
+): RulesWorkerHost {
   const rules = options.rules ?? [postedRule]
   return {
     id: projectId,

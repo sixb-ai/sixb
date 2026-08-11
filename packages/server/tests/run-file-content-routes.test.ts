@@ -15,9 +15,10 @@ import {
   InMemoryStorage,
   type OntologySource,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -50,7 +51,7 @@ const runFileViewerRole = defineRole("run-file.viewer", {
 async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const blobStorage = new InMemoryBlobStorage()
-  const sixb = new Sixb<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: "test-project",
     ontology: [Document],
     actions: [extractDocument],
@@ -65,7 +66,7 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
     auth: options.auth ? { id: "test", kind: "dev" } : undefined,
   })
 
-  await sixb.objects.upsert("document", { id: "doc-1" })
+  await createTestSixb(sixb).objects.upsert("document", { id: "doc-1" })
 
   const actionPdf = await blobStorage.put({
     body: new TextEncoder().encode("action pdf"),
@@ -159,7 +160,9 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
   })
 
   return {
-    app: createSixbApi(new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })),
+    app: createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    ),
     storage,
   }
 }

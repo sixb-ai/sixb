@@ -1,16 +1,14 @@
-import type { OntologySource, Sixb } from "@sixb/core"
-import type { ExecutionSixb } from "@sixb/core/internal/request-execution"
+import type { OntologySource, SixbHostRuntime } from "@sixb/core"
+import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requireRequestSdk } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ObjectTypeParamsSchema, ObjectTypeSchema } from "../schemas/ontology"
 
 function serializeProperty(
-  property: ReturnType<
-    Sixb<readonly OntologySource[]>["objects"]["listTypes"]
-  >[number]["properties"][number]
+  property: ReturnType<SixbHostRuntime["objects"]["listTypes"]>[number]["properties"][number]
 ) {
   return {
     id: property.id,
@@ -27,7 +25,7 @@ function serializeProperty(
 }
 
 function serializeSearch(
-  search: ReturnType<Sixb<readonly OntologySource[]>["objects"]["listTypes"]>[number]["search"]
+  search: ReturnType<SixbHostRuntime["objects"]["listTypes"]>[number]["search"]
 ) {
   if (!search) return undefined
   return {
@@ -44,8 +42,8 @@ function serializeSearch(
 }
 
 function serializeObjectType(
-  sdk: ExecutionSixb<readonly OntologySource[]>,
-  objectType: ReturnType<Sixb<readonly OntologySource[]>["objects"]["listTypes"]>[number]
+  execution: Sixb<readonly OntologySource[]>,
+  objectType: ReturnType<SixbHostRuntime["objects"]["listTypes"]>[number]
 ) {
   return {
     id: objectType.id,
@@ -65,7 +63,7 @@ function serializeObjectType(
       cardinality: link.cardinality,
       properties: link.properties?.map(serializeProperty),
     })),
-    actions: sdk.actions.listForType(objectType).map((action) => ({
+    actions: execution.actions.listForType(objectType).map((action) => ({
       id: action.id,
       name: action.id,
       description: action.description,
@@ -82,13 +80,13 @@ function serializeObjectType(
   }
 }
 
-export function registerOntologyRoutes(app: Elysia, _sixb: Sixb<readonly OntologySource[]>) {
+export function registerOntologyRoutes(app: Elysia, _host: SixbHostRuntime) {
   return app
     .get(
       "/api/object-types",
       async (context) => {
-        const sdk = requireRequestSdk(context)
-        return sdk.objects.listTypes().map((objectType) => serializeObjectType(sdk, objectType))
+        const sixb = requireRequestSixb(context)
+        return sixb.objects.listTypes().map((objectType) => serializeObjectType(sixb, objectType))
       },
       {
         response: { 200: ObjectTypeSchema.array() },
@@ -104,14 +102,14 @@ export function registerOntologyRoutes(app: Elysia, _sixb: Sixb<readonly Ontolog
       "/api/object-types/:objectTypeId",
       async (context) => {
         const { params, set } = context
-        const sdk = requireRequestSdk(context)
-        const objectType = sdk.objects.getTypeById(params.objectTypeId)
+        const sixb = requireRequestSixb(context)
+        const objectType = sixb.objects.getTypeById(params.objectTypeId)
         if (!objectType) {
           set.status = 404
           return { error: "Object type not found" }
         }
 
-        return serializeObjectType(sdk, objectType)
+        return serializeObjectType(sixb, objectType)
       },
       {
         params: ObjectTypeParamsSchema,

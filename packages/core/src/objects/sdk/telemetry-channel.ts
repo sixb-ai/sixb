@@ -64,7 +64,11 @@ export function createTelemetryChannel<
             ...(input.limit !== undefined ? { limitPerSeries: input.limit } : {}),
             ...(input.order !== undefined ? { order: input.order } : {}),
           },
-          { storage: timeseries, authorization: ctx.authorization }
+          {
+            storage: timeseries,
+            runtimeAuthorization: ctx.runtimeAuthorization,
+            authorization: ctx.authorization,
+          }
         )
 
         return (result?.points ?? []).map((point) => ({

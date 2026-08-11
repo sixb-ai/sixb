@@ -8,7 +8,7 @@ import {
   InMemoryStorage,
   type OntologySource,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
 import { ACCESS_TOKEN_ROUTES } from "../src/auth/access-token-boundary"
@@ -44,7 +44,7 @@ interface OpenApiDocument {
 }
 
 function createDocsApi() {
-  const sixb = new Sixb<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: "test-project",
     ontology: [Device],
     broker: new InMemoryBroker(),
@@ -54,7 +54,9 @@ function createDocsApi() {
     queues: new InMemoryQueues(),
   })
 
-  return createSixbApi(new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() }))
+  return createSixbApi(
+    new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+  )
 }
 
 async function fetchDocsJsonWithoutWarnings(app: ReturnType<typeof createDocsApi>) {

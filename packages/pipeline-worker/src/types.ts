@@ -7,6 +7,7 @@ import type {
   Storage,
 } from "@sixb/core"
 import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { PrimitiveExecutionHost } from "@sixb/core/internal/primitive-execution"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type {
   PipelineRunRecord,
@@ -25,7 +26,7 @@ export interface PipelineWorkerContext {
   readonly pipelines: Pick<PipelinesRuntime, "getById">
 }
 
-export interface PipelineWorkerSixb {
+export interface PipelineWorkerHost extends PrimitiveExecutionHost {
   readonly id: string
   readonly events?: DomainEventLog
   readonly logs?: LogsRuntime

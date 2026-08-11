@@ -16,7 +16,7 @@ import { ProjectionWorker } from "@sixb/projection-worker"
 import { RulesWorker } from "@sixb/rules-worker"
 import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
-import type { LoadedSixb } from "./loadSixb"
+import type { LoadedSixbHost } from "./loadSixb"
 
 export function waitForWorkerFailure(worker: Worker | null | undefined): Promise<never> {
   return new Promise<never>((_resolve, reject) => {
@@ -67,18 +67,18 @@ export interface RunningOrchestratorRuntime {
   stop(): Promise<void>
 }
 
-export async function migrateRuntimeStorage(sixb: LoadedSixb): Promise<void> {
+export async function migrateRuntimeStorage(sixb: LoadedSixbHost): Promise<void> {
   await migrateStorage(sixb.storage)
 }
 
-export async function checkRuntimeLakeDefinitions(sixb: LoadedSixb): Promise<void> {
+export async function checkRuntimeLakeDefinitions(sixb: LoadedSixbHost): Promise<void> {
   await assertLakeDatasetDefinitionsCompatible({
     lakeStorage: sixb.lakeStorage,
     definitions: sixb.datasets.list(),
   })
 }
 
-export async function stopSixbProviders(sixb: LoadedSixb): Promise<void> {
+export async function stopSixbProviders(sixb: LoadedSixbHost): Promise<void> {
   await stopQuietly(() => flushSixbErrors(sixb))
   await stopQuietly(() => sixb.connectors.disconnectAll())
   await stopQuietly(() => closeProvider(sixb.queues))
@@ -92,7 +92,7 @@ export async function stopSixbProviders(sixb: LoadedSixb): Promise<void> {
   await stopQuietly(() => sixb.closeLogger())
 }
 
-export async function startRulesRuntime(sixb: LoadedSixb): Promise<RunningRulesRuntime> {
+export async function startRulesRuntime(sixb: LoadedSixbHost): Promise<RunningRulesRuntime> {
   let rulesWorker: RulesWorker | null = null
 
   if (sixb.rules.list().length > 0) {
@@ -108,7 +108,9 @@ export async function startRulesRuntime(sixb: LoadedSixb): Promise<RunningRulesR
   }
 }
 
-export async function startSchedulerRuntime(sixb: LoadedSixb): Promise<RunningSchedulerRuntime> {
+export async function startSchedulerRuntime(
+  sixb: LoadedSixbHost
+): Promise<RunningSchedulerRuntime> {
   await sixb.schedules.start()
 
   return {
@@ -119,7 +121,7 @@ export async function startSchedulerRuntime(sixb: LoadedSixb): Promise<RunningSc
 }
 
 export async function startOrchestratorRuntime(
-  sixb: LoadedSixb
+  sixb: LoadedSixbHost
 ): Promise<RunningOrchestratorRuntime> {
   const projections = getProjectionDispatchDescriptors(sixb)
   const { routes, diagnostics } = compileRoutesWithDiagnostics({
@@ -189,7 +191,7 @@ export async function startOrchestratorRuntime(
  *   10. Runtime providers (connectors, broker)
  */
 export async function startSixbRuntime(
-  sixb: LoadedSixb,
+  sixb: LoadedSixbHost,
   options: StartSixbRuntimeOptions = {}
 ): Promise<RunningSixbRuntime> {
   await migrateRuntimeStorage(sixb)

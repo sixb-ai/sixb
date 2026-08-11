@@ -1,4 +1,5 @@
-import { defineConnector, defineObjectType, Sixb } from "../src"
+import { defineConnector, defineObjectType } from "../src"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -17,7 +18,7 @@ const erpDb = defineConnector("erpDb", {
   },
 })
 
-const sixb = new Sixb({
+const sixb = createTestSixb({
   ontology: [Room],
   connectors: [erpDb],
   ...createTestRuntimeDeps(),

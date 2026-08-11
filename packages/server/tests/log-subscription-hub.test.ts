@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryBroker, type OntologySource, type Sixb } from "@sixb/core"
+import { InMemoryBroker } from "@sixb/core"
 import { LOGS_STREAM, LogsRuntime } from "@sixb/core/internal/logging"
 import { LogSubscriptionHub } from "../src/routes/ws/log-subscription-hub"
 
@@ -86,8 +86,7 @@ describe("LogSubscriptionHub", () => {
   test("does not install a client that unsubscribes while hub startup is pending", async () => {
     const broker = new DelayedSubscribeBroker()
     const logs = new LogsRuntime({ projectId: PROJECT_ID, broker })
-    const sixb = { logs } as unknown as Sixb<readonly OntologySource[]>
-    const hub = new LogSubscriptionHub(sixb)
+    const hub = new LogSubscriptionHub({ logs })
     const socket = new TestLogSocket()
     const key = {}
     let subscribed = false
@@ -110,8 +109,7 @@ describe("LogSubscriptionHub", () => {
   test("only installs the latest subscription when two requests race during startup", async () => {
     const broker = new DelayedSubscribeBroker()
     const logs = new LogsRuntime({ projectId: PROJECT_ID, broker })
-    const sixb = { logs } as unknown as Sixb<readonly OntologySource[]>
-    const hub = new LogSubscriptionHub(sixb)
+    const hub = new LogSubscriptionHub({ logs })
     const socket = new TestLogSocket()
     const key = {}
     const subscribed: string[] = []
@@ -136,8 +134,7 @@ describe("LogSubscriptionHub", () => {
   test("does not install a pending client after the hub closes", async () => {
     const broker = new DelayedSubscribeBroker()
     const logs = new LogsRuntime({ projectId: PROJECT_ID, broker })
-    const sixb = { logs } as unknown as Sixb<readonly OntologySource[]>
-    const hub = new LogSubscriptionHub(sixb)
+    const hub = new LogSubscriptionHub({ logs })
     let subscribed = false
 
     const pendingSubscribe = hub.subscribe({}, new TestLogSocket(), {}, () => {
@@ -158,8 +155,7 @@ async function createReplayHub(): Promise<{
 }> {
   const broker = new InMemoryBroker()
   const logs = new LogsRuntime({ projectId: PROJECT_ID, broker })
-  const sixb = { logs } as unknown as Sixb<readonly OntologySource[]>
-  const hub = new LogSubscriptionHub(sixb)
+  const hub = new LogSubscriptionHub({ logs })
 
   await broker.ensureStream({ projectId: PROJECT_ID, stream: LOGS_STREAM })
   const [anchor] = await broker.append({

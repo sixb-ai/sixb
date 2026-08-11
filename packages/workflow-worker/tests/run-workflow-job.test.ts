@@ -18,17 +18,19 @@ import {
   param,
   prop,
   ref,
-  Sixb,
+  SixbHost,
   SYSTEM_PRINCIPAL,
   type WorkflowDefinition,
   WorkflowValidationError,
 } from "@sixb/core"
-import { createDynamicObjectsRuntime } from "@sixb/core/internal/objects"
+import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import type { ActionRunStorage, WorkflowRunStorage } from "@sixb/core/storage"
+import { createTestSixb } from "@sixb/core/testing"
 import { WorkflowWorkerError } from "../src/errors"
 import { EventsRuntimeWorkflowRunObserver } from "../src/events"
 import { runWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"
-import type { WorkflowRunObserver, WorkflowWorkerContext, WorkflowWorkerSixb } from "../src/types"
+import type { WorkflowRunObserver, WorkflowWorkerContext } from "../src/types"
+import type { WorkflowWorkerHost } from "../src/worker"
 
 const Transaction = defineObjectType({
   id: "Transaction",
@@ -207,7 +209,7 @@ function createSixb(options: {
   readonly actions?: readonly ActionDefinition[]
   readonly agents?: readonly AgentDefinition[]
 }) {
-  return new Sixb({
+  return new SixbHost({
     id: "workflow-worker-tests",
     ontology: [Transaction, Invoice],
     broker: new InMemoryBroker(),
@@ -231,38 +233,23 @@ function requireWorkflowRunsStorage(input: {
   return workflowRuns
 }
 
-function createRuntime(sixb: WorkflowWorkerSixb) {
-  const runtime = {
-    projectId: sixb.projectId,
-    ontology: sixb.ontology,
-    actionRegistry: sixb.actionRegistry,
-    events: sixb.events,
-    storage: sixb.storage,
-    lakeStorage: sixb.lakeStorage,
-    blobStorage: sixb.blobs,
-    queues: sixb.queues,
-    rules: sixb.rules.list(),
-  }
-
+function createRuntime(host: WorkflowWorkerHost): WorkflowWorkerContext {
+  const workflowId = host.workflows.list()[0]?.id ?? "missing-workflow"
+  // Direct handler tests use one explicit trusted execution. Queue-worker tests exercise the real
+  // per-delivery workflow id and run id binding in WorkflowWorker.execute.
+  const execution = bindPrimitiveExecution(host, {
+    primitive: { kind: "workflow", id: workflowId, runId: "direct-workflow-job-test" },
+    source: { type: "queue", queue: "workflows", jobId: "direct-workflow-job-test" },
+  })
   return {
-    ...runtime,
-    workflowRuns: requireWorkflowRunsStorage(sixb),
-    sixb: {
-      objects: createDynamicObjectsRuntime(runtime),
-      actions: sixb.actions,
-      workflows: sixb.workflows,
-      agents: sixb.agents,
-      datasets: sixb.datasets,
-      syncs: sixb.syncs,
-      pipelines: sixb.pipelines,
-      projections: sixb.projections,
-      rules: sixb.rules,
-      schedules: sixb.schedules,
-      events: sixb.events,
-      connector: sixb.connector,
-      blobs: sixb.blobs,
-    },
-  } satisfies WorkflowWorkerContext
+    projectId: host.id,
+    ontology: host.ontology,
+    storage: host.storage,
+    queues: host.queues,
+    workflowRuns: requireWorkflowRunsStorage(host),
+    logs: host.logs,
+    sixb: execution.sixb,
+  }
 }
 
 async function completeRequestedActions(
@@ -1248,7 +1235,7 @@ describe("runWorkflowJob", () => {
         },
       }))
     const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
-    await sixb.objects.upsert("Transaction", { id: "txn_1" })
+    await createTestSixb(sixb).objects.upsert("Transaction", { id: "txn_1" })
     const unsubscribe = await completeRequestedActions(sixb, "succeeded")
 
     try {
@@ -1443,7 +1430,7 @@ describe("runWorkflowJob", () => {
       .then(prepareAttachInvoiceAction)
       .then(attachInvoice)
     const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
-    await sixb.objects.upsert("Transaction", { id: "txn_1" })
+    await createTestSixb(sixb).objects.upsert("Transaction", { id: "txn_1" })
     const unsubscribe = await completeRequestedActions(sixb, "succeeded")
 
     try {
@@ -1619,7 +1606,7 @@ describe("runWorkflowJob", () => {
         },
       }))
     const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
-    await sixb.objects.upsert("Transaction", { id: "txn_1" })
+    await createTestSixb(sixb).objects.upsert("Transaction", { id: "txn_1" })
     const unsubscribe = await completeRequestedActions(sixb, "failed", "attach failed")
 
     try {

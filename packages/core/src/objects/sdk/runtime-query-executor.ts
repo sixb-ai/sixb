@@ -5,6 +5,7 @@
  */
 
 import type { AuthorizationContext } from "../../authorization"
+import type { RuntimeAuthorization } from "../../execution/types"
 import type { OntologyRegistry } from "../../ontology"
 import type { Storage } from "../../storage"
 import {
@@ -23,10 +24,16 @@ export function createRuntimeQueryExecutor(params: {
   projectId: string
   ontology: OntologyRegistry
   storage: Storage
+  runtimeAuthorization?: RuntimeAuthorization
   authorization?: AuthorizationContext
 }): ObjectQueryExecutor {
-  const { projectId, ontology, storage, authorization } = params
-  const executorOptions = { ontology, storage: storage.objects, authorization }
+  const { projectId, ontology, storage, runtimeAuthorization, authorization } = params
+  const executorOptions = {
+    ontology,
+    storage: storage.objects,
+    runtimeAuthorization,
+    authorization,
+  }
 
   return {
     async list(query: ObjectQuery, options?: { includeTotal?: boolean }) {

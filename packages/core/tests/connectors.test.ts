@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { ConnectorNotFoundError, defineConnector, defineObjectType, prop, Sixb } from "../src"
+import {
+  ConnectorNotFoundError,
+  defineConnector,
+  defineObjectType,
+  type OntologySource,
+  prop,
+  SixbHost,
+} from "../src"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -23,7 +31,7 @@ describe("connectors", () => {
       },
     })
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Room],
       connectors: [erpDb],
       ...createTestRuntimeDeps(),
@@ -55,15 +63,14 @@ describe("connectors", () => {
       },
     })
 
-    const sixb = new Sixb({
+    const host = new SixbHost<readonly OntologySource[]>({
       ontology: [Room],
       connectors: [erpDb],
       ...createTestRuntimeDeps(),
     })
-
-    const first = await sixb.connector(erpDb)
-    await sixb.connectors.disconnectAll()
-    const second = await sixb.connector(erpDb)
+    const first = await host.connector(erpDb)
+    await host.connectors.disconnectAll()
+    const second = await host.connector(erpDb)
 
     expect(disconnectCount).toBe(1)
     expect(connectCount).toBe(2)
@@ -85,7 +92,7 @@ describe("connectors", () => {
       },
     })
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Room],
       connectors: [erpDb, hubspot],
       ...createTestRuntimeDeps(),
@@ -104,7 +111,7 @@ describe("connectors", () => {
       },
     })
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Room],
       connectors: [],
       ...createTestRuntimeDeps(),
@@ -129,7 +136,7 @@ describe("connectors", () => {
       },
     })
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Room],
       connectors: [registered],
       ...createTestRuntimeDeps(),

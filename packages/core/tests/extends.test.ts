@@ -6,8 +6,8 @@ import {
   MaterializationValidationError,
   OntologyValidationError,
   prop,
-  Sixb,
 } from "../src"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 // ── Fixtures ────────────────────────────────────────────────
@@ -220,12 +220,12 @@ describe("defineObjectType with parents (multi-parent)", () => {
   })
 })
 
-// ── Sixb runtime validation ────────────────────────────────
+// ── SixbHost runtime validation ────────────────────────────────
 
-describe("Sixb extends validation", () => {
+describe("SixbHost extends validation", () => {
   test("constructs successfully with valid extends chain", () => {
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Equipment, HVACEquipment, AHU, Location],
         ...createTestRuntimeDeps(),
       })
@@ -240,13 +240,13 @@ describe("Sixb extends validation", () => {
     })
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Orphan],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(OntologyValidationError)
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Orphan],
         ...createTestRuntimeDeps(),
       })
@@ -262,13 +262,13 @@ describe("Sixb extends validation", () => {
     })
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Orphan],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(OntologyValidationError)
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Orphan],
         ...createTestRuntimeDeps(),
       })
@@ -292,13 +292,13 @@ describe("Sixb extends validation", () => {
     })
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [A, B],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(OntologyValidationError)
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [A, B],
         ...createTestRuntimeDeps(),
       })
@@ -310,7 +310,7 @@ describe("Sixb extends validation", () => {
 
 describe("listSubTypes", () => {
   test("returns direct and transitive sub-types", () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
@@ -322,7 +322,7 @@ describe("listSubTypes", () => {
   })
 
   test("returns empty array for leaf types", () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
@@ -337,7 +337,7 @@ describe("listSubTypes", () => {
 describe("subclass-aware list", () => {
   test("listing by parent type includes sub-type objects", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...runtimeDeps,
     })
@@ -357,7 +357,7 @@ describe("subclass-aware list", () => {
 
   test("listing by leaf type returns only that type", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...runtimeDeps,
     })
@@ -375,7 +375,7 @@ describe("subclass-aware list", () => {
 
 describe("multi-parent subtype queries", () => {
   test("listSubTypes includes types registered via parents", () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location, WaterHeater, Boiler],
       ...createTestRuntimeDeps(),
     })
@@ -390,7 +390,7 @@ describe("multi-parent subtype queries", () => {
 
   test("listing by additional parent includes the type", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location, WaterHeater, Boiler],
       ...runtimeDeps,
     })
@@ -415,13 +415,13 @@ describe("multi-parent subtype queries", () => {
     })
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [BadParent],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(OntologyValidationError)
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [BadParent],
         ...createTestRuntimeDeps(),
       })
@@ -438,13 +438,13 @@ describe("multi-parent subtype queries", () => {
     })
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [BadParent2],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(OntologyValidationError)
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [BadParent2],
         ...createTestRuntimeDeps(),
       })
@@ -506,7 +506,7 @@ describe("quantityKind", () => {
 
 describe("link target validation", () => {
   test("upsertLink with string target: accepts exact match", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
@@ -524,7 +524,7 @@ describe("link target validation", () => {
   })
 
   test("upsertLink with string target: accepts sub-type", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
@@ -542,7 +542,7 @@ describe("link target validation", () => {
   })
 
   test("upsertLink with string target: rejects unrelated type", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
@@ -583,7 +583,7 @@ describe("link target validation", () => {
       links: [link.ref("rel", ["TypeA", "TypeB"])],
     })
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [TypeA, TypeB, Source],
       ...createTestRuntimeDeps(),
     })
@@ -615,7 +615,7 @@ describe("link target validation", () => {
       links: [link.ref("rel", ["Equipment"])],
     })
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location, Source],
       ...createTestRuntimeDeps(),
     })
@@ -640,7 +640,7 @@ describe("link target validation", () => {
       links: [link.any("anything")],
     })
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, Location, Source],
       ...createTestRuntimeDeps(),
     })
@@ -657,7 +657,7 @@ describe("link target validation", () => {
   })
 
   test("removeLink with string target: rejects unrelated type", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
@@ -681,7 +681,7 @@ describe("link target validation", () => {
 
 describe("upsert with inherited properties", () => {
   test("validates required properties from parent", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
@@ -702,7 +702,7 @@ describe("upsert with inherited properties", () => {
   })
 
   test("accepts inherited + own properties together", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })

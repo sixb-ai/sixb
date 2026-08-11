@@ -1,9 +1,4 @@
-import type {
-  BlobsRuntime,
-  DatasetsRuntime,
-  ProjectionsRuntime,
-  SixbRuntimeContext,
-} from "@sixb/core"
+import type { DatasetsRuntime, LakeStorage, OntologyRegistry, ProjectionsRuntime } from "@sixb/core"
 import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
 import type {
   ProjectionRunClaim,
@@ -11,17 +6,13 @@ import type {
   ProjectionRunStorage,
 } from "@sixb/core/storage"
 
-export interface ProjectionWorkerContext extends SixbRuntimeContext {
+export interface ProjectionWorkerContext {
+  readonly projectId: string
+  readonly ontology: OntologyRegistry
+  readonly lakeStorage: LakeStorage
   readonly projectionRunsStorage: ProjectionRunStorage
   readonly datasets: Pick<DatasetsRuntime, "getById">
   readonly projections: Pick<ProjectionsRuntime, "getById">
-}
-
-export interface ProjectionWorkerSixb extends Omit<SixbRuntimeContext, "blobStorage" | "rules"> {
-  readonly id: string
-  readonly blobs: Pick<BlobsRuntime, "put" | "open" | "stat">
-  readonly datasets: Pick<DatasetsRuntime, "getById">
-  readonly projections: Pick<ProjectionsRuntime, "list" | "getById">
 }
 
 export type ProjectionJob = ProjectionMaterializationIdentity & {

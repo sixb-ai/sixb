@@ -9,7 +9,6 @@ import {
 } from "@sixb/core"
 import { migrateSqliteStorage, SqliteStorage } from "@sixb/sqlite"
 import { securityAdmins } from "./security/groups/security-admins"
-import { seedAuthExampleObjects } from "./seed"
 
 // Switch the auth strategy with SIXB_AUTH_MODE:
 //   magic-link (default) — zero setup; the sign-in link is printed to this terminal.
@@ -27,7 +26,7 @@ export const sixb = createAuthExampleSixb()
 async function createAuthExampleSixb() {
   await migrateSqliteStorage(storagePath)
 
-  const runtime = await createSixb({
+  return createSixb({
     id: "auth-example",
     broker: new InMemoryBroker(),
     storage: new SqliteStorage({ path: storagePath }),
@@ -55,9 +54,6 @@ async function createAuthExampleSixb() {
             sendMagicLink: sendMagicLinkEmail,
           }),
   })
-
-  await seedAuthExampleObjects(runtime)
-  return runtime
 }
 
 async function sendMagicLinkEmail(message: SendMagicLinkInput): Promise<void> {

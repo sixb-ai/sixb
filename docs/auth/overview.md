@@ -12,7 +12,7 @@ A request first resolves an identity (authentication), then resolves that identi
 | Layer | Answers | Covers | Page |
 | --- | --- | --- | --- |
 | Authentication | Who you are | Login strategies (magic link, OIDC), sessions, cookies, bootstrap, invitations, member lifecycle | [Authentication](./authentication.md) |
-| Authorization | What you may do | Groups, roles, grants (`can.view` / `can.edit` / `can.apply` / `can.run`), membership policies, the scoped runtime | [Authorization](./authorization.md) |
+| Authorization | What you may do | Groups, roles, grants (`can.view` / `can.edit` / `can.apply` / `can.run`), membership policies, the protected SDK | [Authorization](./authorization.md) |
 
 ## How they connect
 
@@ -39,7 +39,7 @@ export const financeAccess = defineRole("finance-admin.access", {
   ],
 })
 
-export const sixb = await createSixb({
+export const sixb = createSixb({
   // ...storage, broker, and the rest of the runtime
   auth: magicLink({
     allowedDomains: ["acme.example"],
@@ -50,7 +50,9 @@ export const sixb = await createSixb({
 })
 ```
 
-Groups and roles are discovered from `security/` (or passed to `createSixb`) just like the rest of your runtime. Once a principal signs in, the server resolves its identity and group memberships into an authorization context and routes traffic through `sixb.as(context)`, so grants are enforced without extra wiring.
+Groups and roles are discovered from `security/` (or passed to `createSixb`) just like the rest of
+your runtime. Once a principal signs in, the server resolves its identity and group memberships,
+then enforces the resulting grants without extra wiring.
 
 ## Bootstrap
 
@@ -59,5 +61,5 @@ Bootstrap is where the two layers meet. The auth strategy's `bootstrapUsers` and
 ## Next
 
 - [Authentication](./authentication.md) — pick a strategy, set allowed domains and bootstrap, manage sessions, invitations, and members.
-- [Authorization](./authorization.md) — define groups, roles, and grants, and enforce them with the scoped runtime.
+- [Authorization](./authorization.md) — define groups, roles, and grants enforced by the SDK.
 - [Server](../server/overview.md) — how the server resolves sessions and applies the authorization context per request.

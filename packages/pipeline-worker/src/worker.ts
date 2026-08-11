@@ -1,4 +1,5 @@
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, PipelineRunRequestedQueueJob } from "@sixb/core/queues"
@@ -15,31 +16,31 @@ import type {
   PipelineJob,
   PipelineRunResult,
   PipelineWorkerContext,
-  PipelineWorkerSixb,
+  PipelineWorkerHost,
 } from "./types"
 
 export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
   private readonly context: PipelineWorkerContext
-  private readonly sixb: PipelineWorkerSixb
+  private readonly host: PipelineWorkerHost
 
-  constructor(sixb: PipelineWorkerSixb) {
-    if (sixb.pipelines.list().length === 0) {
+  constructor(host: PipelineWorkerHost) {
+    if (host.pipelines.list().length === 0) {
       throw new Error("[SixbPipelineWorker] No pipeline definitions are registered.")
     }
 
-    const pipelineRunsStorage = sixb.storage.pipelineRuns
+    const pipelineRunsStorage = host.storage.pipelineRuns
     if (!pipelineRunsStorage) {
       throw new Error("[SixbPipelineWorker] Pipeline workers require storage.pipelineRuns support.")
     }
 
     super({
-      projectId: sixb.id,
-      queue: sixb.queues.pipelines,
-      workerId: `pipeline-worker-${sixb.id}`,
+      projectId: host.id,
+      queue: host.queues.pipelines,
+      workerId: `pipeline-worker-${host.id}`,
     })
 
-    this.context = buildPipelineContext(sixb, pipelineRunsStorage)
-    this.sixb = sixb
+    this.context = buildPipelineContext(host, pipelineRunsStorage)
+    this.host = host
   }
 
   protected async execute(
@@ -51,17 +52,22 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
       id: job.payload.runId ?? `${job.id}:attempt:${job.attempt}`,
       pipelineId: job.payload.pipelineId,
     }
+    const execution = bindPrimitiveExecution(this.host, {
+      primitive: { kind: "pipeline", id: pipelineJob.pipelineId, runId: pipelineJob.id },
+      source: { type: "queue", queue: "pipelines", jobId: job.id },
+    })
+    const context = { ...this.context, id: execution.sixb.execution.projectId }
 
     let result: PipelineRunResult
     try {
       result = await runPipelineJob({
-        runtime: this.context,
+        runtime: context,
         job: pipelineJob,
         signal,
-        onRunStarted: (run) => emitPipelineRunStarted(this.sixb.events, run),
+        onRunStarted: (run) => emitPipelineRunStarted(this.host.events, run),
         onRunFailed: (error, run) => {
-          reportRunFailure(this.sixb, error, {
-            projectId: this.sixb.id,
+          reportRunFailure(this.host, error, {
+            projectId: this.host.id,
             occurredAt: run.finishedAt,
             attempt: job.attempt,
             run: {
@@ -72,17 +78,17 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
           })
         },
         onStepStarted: (step, context) =>
-          emitPipelineRunStepStarted(this.sixb.events, step, context),
+          emitPipelineRunStepStarted(this.host.events, step, context),
         onStepFinished: (step, context) =>
-          emitPipelineRunStepFinished(this.sixb.events, step, context),
-        onStepCommitted: (step) => emitDatasetVersionCommitted(this.sixb.events, pipelineJob, step),
+          emitPipelineRunStepFinished(this.host.events, step, context),
+        onStepCommitted: (step) => emitDatasetVersionCommitted(this.host.events, pipelineJob, step),
       })
     } catch (error) {
       if (error instanceof PipelineRunAlreadyStartedError) return
       throw error
     }
 
-    await emitPipelineRunFinished(this.sixb.events, {
+    await emitPipelineRunFinished(this.host.events, {
       id: pipelineJob.id,
       pipelineId: pipelineJob.pipelineId,
       status: "succeeded",
@@ -96,7 +102,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
     _error: unknown
   ): Promise<QueueWorkerFailureDecision> {
     const { job } = claimed
-    await emitPipelineRunFinished(this.sixb.events, {
+    await emitPipelineRunFinished(this.host.events, {
       id: job.payload.runId ?? `${job.id}:attempt:${job.attempt}`,
       pipelineId: job.payload.pipelineId,
       status: "failed",
@@ -122,7 +128,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
     }
 
     // After a step commit, rerunning the whole pipeline could duplicate append outputs.
-    await emitPipelineRunFinished(this.sixb.events, {
+    await emitPipelineRunFinished(this.host.events, {
       id: pipelineJob.id,
       pipelineId: pipelineJob.pipelineId,
       status: "cancelled",
@@ -133,16 +139,16 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
 }
 
 function buildPipelineContext(
-  sixb: PipelineWorkerSixb,
+  host: PipelineWorkerHost,
   pipelineRunsStorage: PipelineRunStorage
 ): PipelineWorkerContext {
   return {
-    id: sixb.id,
+    id: host.id,
     pipelineRunsStorage,
-    lakeStorage: sixb.lakeStorage,
-    logs: sixb.logs,
-    pipelines: sixb.pipelines,
-    datasets: sixb.datasets,
+    lakeStorage: host.lakeStorage,
+    logs: host.logs,
+    pipelines: host.pipelines,
+    datasets: host.datasets,
   }
 }
 

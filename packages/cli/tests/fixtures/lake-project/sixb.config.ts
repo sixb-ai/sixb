@@ -10,7 +10,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 
@@ -82,7 +82,7 @@ function createLakeStorage(): FixtureLakeStorage {
   return new MaintenanceLakeStorage()
 }
 
-export const sixb = new Sixb({
+export const sixb = new SixbHost({
   id: "cli-lake-project",
   ontology: [Room],
   broker: new InMemoryBroker(),

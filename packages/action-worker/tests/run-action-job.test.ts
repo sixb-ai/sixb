@@ -10,19 +10,20 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   link,
+  type OntologySource,
   param,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
-import type { EventsRuntime } from "@sixb/core/internal/events"
-import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
+import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import type { ActionRunParams } from "@sixb/core/storage"
+import { createTestSixb } from "@sixb/core/testing"
 import { ActionWorkerError } from "../src/errors"
 import { runActionJob } from "../src/run-action-job"
 import type { ActionWorkerContext } from "../src/types"
-import type { ActionWorkerSixb } from "../src/worker"
+import type { ActionWorkerHost } from "../src/worker"
 
 const Device = defineObjectType({
   id: "Device",
@@ -49,23 +50,15 @@ interface DeviceObjectSet {
   get(id: string): Promise<{ properties: Record<string, unknown> } | null>
 }
 
-interface TestSixb extends ActionWorkerSixb {
-  readonly events: EventsRuntime
-  readonly storage: InMemoryStorage
-  readonly objects: ActionWorkerContext["sixb"]["objects"]
-}
-
-const SixbConstructor = Sixb as unknown as new (options: Record<string, unknown>) => TestSixb
-
-function deviceObjects(sixb: TestSixb): DeviceObjectSet {
+function deviceObjects(sixb: ActionWorkerContext["sixb"]): DeviceObjectSet {
   return sixb.objects(Device)
 }
 
 function createSixb(
   actions: readonly ActionDefinition[],
-  ontology: readonly unknown[] = [Device]
-): TestSixb {
-  return new SixbConstructor({
+  ontology: readonly OntologySource[] = [Device]
+) {
+  const host = new SixbHost({
     id: "action-worker-tests",
     ontology,
     actions,
@@ -75,28 +68,37 @@ function createSixb(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
   })
+  return { host, sixb: createTestSixb(host) }
 }
 
-function createContext(sixb: TestSixb): ActionWorkerContext {
-  return {
-    id: sixb.id,
-    errorReporterHost: sixb,
-    events: sixb.events,
-    storage: sixb.storage,
-    actionRunsStorage: sixb.storage.actionRuns!,
-    ontologyMutations: getOntologyMutationRuntime(sixb),
-    sixb: {
-      objects: sixb.objects,
-      actions: sixb.actions,
-      connector: sixb.connector,
-      blobs: sixb.blobs,
+function createContext(host: ActionWorkerHost): ActionWorkerContext {
+  const execution = bindPrimitiveExecution(host, {
+    primitive: {
+      kind: "action",
+      id: host.actions.list()[0]?.id ?? "test-action",
+      runId: "direct-action-job-test",
     },
-    actions: sixb.actions,
+    source: { type: "queue", queue: "actions", jobId: "direct-action-job-test" },
+  })
+  return {
+    id: host.id,
+    errorReporterHost: host,
+    events: host.events,
+    storage: host.storage,
+    actionRunsStorage: host.storage.actionRuns!,
+    ontologyMutations: execution.ontologyMutations,
+    sixb: {
+      objects: execution.sixb.objects,
+      actions: execution.sixb.actions,
+      connector: execution.sixb.connector,
+      blobs: execution.sixb.blobs,
+    },
+    actions: host.actions,
   }
 }
 
 async function queueActionRun(
-  sixb: TestSixb,
+  host: ActionWorkerHost,
   input: {
     readonly id: string
     readonly actionId: string
@@ -104,13 +106,13 @@ async function queueActionRun(
     readonly params: ActionRunParams
   }
 ): Promise<void> {
-  await sixb.storage.actionRuns!.queue({
-    projectId: sixb.id,
+  await host.storage.actionRuns!.queue({
+    projectId: host.id,
     id: input.id,
     actionId: input.actionId,
     subject: input.subject,
     params: input.params,
-    idempotencyKey: `action:${sixb.id}:${input.id}`,
+    idempotencyKey: `action:${host.id}:${input.id}`,
   })
 }
 
@@ -119,11 +121,11 @@ describe("runActionJob", () => {
     const count = defineAction("count")
       .params({})
       .writeback(() => {})
-    const sixb = createSixb([count])
+    const { host } = createSixb([count])
 
     await expect(
       runActionJob({
-        runtime: createContext(sixb),
+        runtime: createContext(host),
         job: {
           id: "act_missing",
           actionId: "count",
@@ -139,8 +141,8 @@ describe("runActionJob", () => {
       .writeback(({ params }) => {
         received = params.reviewedAt
       })
-    const sixb = createSixb([captureNullable])
-    await queueActionRun(sixb, {
+    const { host } = createSixb([captureNullable])
+    await queueActionRun(host, {
       id: "act_nullable",
       actionId: "captureNullable",
       subject: { kind: "none" },
@@ -148,7 +150,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: { id: "act_nullable", actionId: "captureNullable" },
     })
 
@@ -165,12 +167,12 @@ describe("runActionJob", () => {
         objects(Device).byId(subject.primaryId).update({ status: params.status })
       })
 
-    const sixb = createSixb([setStatus])
+    const { host, sixb } = createSixb([setStatus])
     await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
     })
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_1",
       actionId: "setStatus",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
@@ -178,7 +180,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: {
         id: "act_1",
         actionId: "setStatus",
@@ -186,12 +188,12 @@ describe("runActionJob", () => {
     })
 
     expect(result.status).toBe("succeeded")
-    const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
+    const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
     expect(run?.status).toBe("succeeded")
     expect(run?.phase).toBe("commit")
     const commit = await findActionEditCommit({
-      storage: sixb.storage,
-      projectId: sixb.id,
+      storage: host.storage,
+      projectId: host.id,
       runId: "act_1",
     })
     expect(commit?.changes.objects.map((change) => [change.kind, change.ref.primaryId])).toEqual([
@@ -214,13 +216,13 @@ describe("runActionJob", () => {
         objects(Device).byId(subject.primaryId).update({ status: "should-not-commit" })
       })
 
-    const sixb = createSixb([failWriteback])
+    const { host, sixb } = createSixb([failWriteback])
     await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
       status: "old",
     })
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_1",
       actionId: "failWriteback",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
@@ -228,7 +230,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: {
         id: "act_1",
         actionId: "failWriteback",
@@ -244,10 +246,10 @@ describe("runActionJob", () => {
       })
     }
 
-    const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
+    const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
     expect(run?.writeback?.status).toBe("failed")
     expect(
-      await findActionEditCommit({ storage: sixb.storage, projectId: sixb.id, runId: "act_1" })
+      await findActionEditCommit({ storage: host.storage, projectId: host.id, runId: "act_1" })
     ).toBeNull()
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("old")
@@ -270,8 +272,8 @@ describe("runActionJob", () => {
         return { fileRef, stat, content }
       })
 
-    const sixb = createSixb([persistPayload])
-    await queueActionRun(sixb, {
+    const { host } = createSixb([persistPayload])
+    await queueActionRun(host, {
       id: "act_blob",
       actionId: "persistPayload",
       subject: { kind: "none" },
@@ -279,7 +281,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: {
         id: "act_blob",
         actionId: "persistPayload",
@@ -287,8 +289,8 @@ describe("runActionJob", () => {
     })
 
     expect(result.status).toBe("succeeded")
-    const run = await sixb.storage.actionRuns!.getById({
-      projectId: sixb.id,
+    const run = await host.storage.actionRuns!.getById({
+      projectId: host.id,
       id: "act_blob",
     })
     expect(run?.writeback?.result).toMatchObject({
@@ -313,13 +315,13 @@ describe("runActionJob", () => {
         invoked += 1
       })
 
-    const sixb = createSixb([count])
+    const { host, sixb } = createSixb([count])
     await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
     })
-    const context = createContext(sixb)
-    await queueActionRun(sixb, {
+    const context = createContext(host)
+    await queueActionRun(host, {
       id: "act_1",
       actionId: "count",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
@@ -358,15 +360,15 @@ describe("runActionJob", () => {
         })
       })
 
-    const sixb = createSixb([createDevice])
-    await queueActionRun(sixb, {
+    const { host, sixb } = createSixb([createDevice])
+    await queueActionRun(host, {
       id: "act_1",
       actionId: "createDevice",
       subject: { kind: "none" },
       params: { id: "device-1" },
     })
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: {
         id: "act_1",
         actionId: "createDevice",
@@ -374,7 +376,7 @@ describe("runActionJob", () => {
     })
 
     expect(result.status).toBe("succeeded")
-    const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
+    const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
     expect(run?.subject).toEqual({ kind: "none" })
 
     const created = await deviceObjects(sixb).get("device-1")
@@ -392,27 +394,30 @@ describe("runActionJob", () => {
       .edits(({ objects, params }) => {
         objects(Device).byId(params.id).update({ name: params.name, status: "updated" })
       })
-    const sixb = createSixb([createDevice as ActionDefinition, renameDevice as ActionDefinition])
+    const { host, sixb } = createSixb([
+      createDevice as ActionDefinition,
+      renameDevice as ActionDefinition,
+    ])
 
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_create",
       actionId: "createDevice",
       subject: { kind: "none" },
       params: { id: "device-1", name: "Device 1" },
     })
     const created = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: { id: "act_create", actionId: "createDevice" },
     })
 
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_rename",
       actionId: "renameDevice",
       subject: { kind: "none" },
       params: { id: "device-1", name: "Renamed Device" },
     })
     const updated = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: { id: "act_rename", actionId: "renameDevice" },
     })
 
@@ -420,7 +425,7 @@ describe("runActionJob", () => {
     expect(updated.status).toBe("succeeded")
     const commits = await Promise.all(
       ["act_create", "act_rename"].map((runId) =>
-        findActionEditCommit({ storage: sixb.storage, projectId: sixb.id, runId })
+        findActionEditCommit({ storage: host.storage, projectId: host.id, runId })
       )
     )
     expect(commits.map((commit) => commit?.changes.objects[0]?.kind)).toEqual([
@@ -433,7 +438,7 @@ describe("runActionJob", () => {
       status: "updated",
     })
 
-    const mutationEvents = await sixb.events.read({
+    const mutationEvents = await host.events.read({
       types: ["object.created", "object.updated"],
     })
     expect(mutationEvents.map((event) => event.type)).toEqual(["object.created", "object.updated"])
@@ -472,7 +477,7 @@ describe("runActionJob", () => {
           })
         }
       })
-    const sixb = createSixb(
+    const { host, sixb } = createSixb(
       [assignSensor as ActionDefinition, clearSensor as ActionDefinition],
       [Device, Sensor]
     )
@@ -495,7 +500,7 @@ describe("runActionJob", () => {
       .byId("device-1")
       .link(Device.l.sensor, { objectTypeId: "Sensor", primaryId: "sensor-1" })
 
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_assign_sensor",
       actionId: "assignSensor",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
@@ -504,13 +509,13 @@ describe("runActionJob", () => {
     expect(
       (
         await runActionJob({
-          runtime: createContext(sixb),
+          runtime: createContext(host),
           job: { id: "act_assign_sensor", actionId: "assignSensor" },
         })
       ).status
     ).toBe("succeeded")
-    let links = await sixb.storage.objects.listLinks({
-      projectId: sixb.id,
+    let links = await host.storage.objects.listLinks({
+      projectId: host.id,
       objectTypeId: "Device",
       objectId: "device-1",
       linkId: "sensor",
@@ -518,7 +523,7 @@ describe("runActionJob", () => {
     expect(links).toHaveLength(1)
     expect(links[0]?.targetId).toBe("sensor-2")
 
-    const assignmentEvents = await sixb.events.read({
+    const assignmentEvents = await host.events.read({
       types: ["link.created", "link.deleted"],
     })
     expect(assignmentEvents.slice(-2).map((event) => event.type)).toEqual([
@@ -526,7 +531,7 @@ describe("runActionJob", () => {
       "link.deleted",
     ])
 
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_clear_sensor",
       actionId: "clearSensor",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
@@ -535,13 +540,13 @@ describe("runActionJob", () => {
     expect(
       (
         await runActionJob({
-          runtime: createContext(sixb),
+          runtime: createContext(host),
           job: { id: "act_clear_sensor", actionId: "clearSensor" },
         })
       ).status
     ).toBe("succeeded")
-    links = await sixb.storage.objects.listLinks({
-      projectId: sixb.id,
+    links = await host.storage.objects.listLinks({
+      projectId: host.id,
       objectTypeId: "Device",
       objectId: "device-1",
       linkId: "sensor",
@@ -569,7 +574,7 @@ describe("runActionJob", () => {
         objects(Device).byId(subject.primaryId).update({ status: "detached" })
       })
 
-    const sixb = createSixb([detachSensor], [Device, Sensor])
+    const { host, sixb } = createSixb([detachSensor], [Device, Sensor])
     await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
@@ -593,7 +598,7 @@ describe("runActionJob", () => {
       .objects(Device)
       .byId("device-1")
       .link(Device.l.sensor, { objectTypeId: "Sensor", primaryId: "sensor-1" })
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_1",
       actionId: "detachSensor",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
@@ -601,7 +606,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: {
         id: "act_1",
         actionId: "detachSensor",
@@ -611,8 +616,8 @@ describe("runActionJob", () => {
     expect(result.status).toBe("succeeded")
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("detached")
-    const linksAfter = await sixb.storage.objects.listLinks({
-      projectId: sixb.id,
+    const linksAfter = await host.storage.objects.listLinks({
+      projectId: host.id,
       objectTypeId: "Device",
       objectId: "device-1",
       linkId: "sensor",
@@ -635,7 +640,7 @@ describe("runActionJob", () => {
         objects(Device).byId(subject.primaryId).update({ status: writeback.sensorName })
       })
 
-    const sixb = createSixb([captureSensorName], [Device, Sensor])
+    const { host, sixb } = createSixb([captureSensorName], [Device, Sensor])
     await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
@@ -659,7 +664,7 @@ describe("runActionJob", () => {
       .objects(Device)
       .byId("device-1")
       .link(Device.l.sensor, { objectTypeId: "Sensor", primaryId: "sensor-1" })
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_1",
       actionId: "captureSensorName",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
@@ -667,7 +672,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: {
         id: "act_1",
         actionId: "captureSensorName",
@@ -697,7 +702,7 @@ describe("runActionJob", () => {
         objects(Device).byId(subject.primaryId).update({ status: writeback.sensorName })
       })
 
-    const sixb = createSixb([captureSensorName], [Device, Sensor])
+    const { host, sixb } = createSixb([captureSensorName], [Device, Sensor])
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
     await sixb.objects.upsert("Sensor", { id: "sensor-1", name: "Sensor 1" })
     await (
@@ -720,7 +725,7 @@ describe("runActionJob", () => {
       await sixb.objects.upsert("Sensor", { id: "sensor-1", name: "Renamed mid-run" })
     }
 
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_1",
       actionId: "captureSensorName",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
@@ -728,7 +733,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: { id: "act_1", actionId: "captureSensorName" },
     })
 
@@ -738,8 +743,8 @@ describe("runActionJob", () => {
   })
 
   test("marks queued runs failed when the action definition is missing", async () => {
-    const sixb = createSixb([])
-    await queueActionRun(sixb, {
+    const { host } = createSixb([])
+    await queueActionRun(host, {
       id: "act_1",
       actionId: "missingAction",
       subject: { kind: "none" },
@@ -747,7 +752,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: {
         id: "act_1",
         actionId: "missingAction",
@@ -759,7 +764,7 @@ describe("runActionJob", () => {
       expect(result.error.message).toBe("[SixbActionWorker] Unknown action 'missingAction'.")
       expect(result.error.phase).toBe("validation")
     }
-    const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
+    const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
     expect(run?.status).toBe("failed")
     expect(run?.phase).toBe("validation")
   })
@@ -772,24 +777,24 @@ describe("runActionJob", () => {
         invoked += 1
       })
 
-    const sixb = createSixb([count])
+    const { host } = createSixb([count])
     let reportCount = 0
-    const reporter = attachSixbErrorReporter(sixb, () => {
+    const reporter = attachSixbErrorReporter(host, () => {
       reportCount += 1
     })
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_1",
       actionId: "count",
       subject: { kind: "none" },
       params: {},
     })
-    await sixb.storage.actionRuns!.start({
-      projectId: sixb.id,
+    await host.storage.actionRuns!.start({
+      projectId: host.id,
       id: "act_1",
     })
 
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: {
         id: "act_1",
         actionId: "count",
@@ -803,13 +808,13 @@ describe("runActionJob", () => {
     }
     expect(invoked).toBe(0)
 
-    const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
+    const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
     expect(run?.status).toBe("failed")
     expect(run?.phase).toBe("validation")
     expect(run?.finishedAt).toBeInstanceOf(Date)
 
     const redelivered = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: { id: "act_1", actionId: "count" },
       attempt: 2,
     })
@@ -831,27 +836,27 @@ describe("runActionJob", () => {
         objects(Device).byId(subject.primaryId).update({ status: writeback.status })
       })
 
-    const sixb = createSixb([setStatus])
+    const { host, sixb } = createSixb([setStatus])
     await sixb.objects.upsert("Device", {
       id: "device-1",
       name: "Device 1",
     })
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_1",
       actionId: "setStatus",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
-    await sixb.storage.actionRuns!.start({ projectId: sixb.id, id: "act_1" })
-    await sixb.storage.actionRuns!.recordWriteback({
-      projectId: sixb.id,
+    await host.storage.actionRuns!.start({ projectId: host.id, id: "act_1" })
+    await host.storage.actionRuns!.recordWriteback({
+      projectId: host.id,
       id: "act_1",
       status: "succeeded",
       result: { status: "persisted" },
     })
 
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: {
         id: "act_1",
         actionId: "setStatus",
@@ -871,16 +876,16 @@ describe("runActionJob", () => {
       .edits(({ objects, subject }) => {
         objects(Device).byId(subject.primaryId).delete()
       })
-    const sixb = createSixb([deleteDevice])
+    const { host, sixb } = createSixb([deleteDevice])
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_delete",
       actionId: "deleteDevice",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
-    await sixb.storage.actionRuns!.start({ projectId: sixb.id, id: "act_delete" })
-    await getOntologyMutationRuntime(sixb).commitEdits({
+    await host.storage.actionRuns!.start({ projectId: host.id, id: "act_delete" })
+    await createContext(host).ontologyMutations.commitEdits({
       mode: "atomic",
       source: { kind: "action", actionId: "deleteDevice", runId: "act_delete" },
       operations: [
@@ -896,7 +901,7 @@ describe("runActionJob", () => {
     })
 
     const resumed = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: { id: "act_delete", actionId: "deleteDevice" },
       attempt: 2,
     })
@@ -916,7 +921,7 @@ describe("runActionJob", () => {
         throw new Error("notification failed")
       })
 
-    const sixb = createSixb([setStatus])
+    const { host, sixb } = createSixb([setStatus])
     let reportCount = 0
     const reporter = attachSixbErrorReporter(sixb, () => {
       reportCount += 1
@@ -925,7 +930,7 @@ describe("runActionJob", () => {
       id: "device-1",
       name: "Device 1",
     })
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_1",
       actionId: "setStatus",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
@@ -933,7 +938,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: {
         id: "act_1",
         actionId: "setStatus",
@@ -941,7 +946,7 @@ describe("runActionJob", () => {
     })
 
     expect(result.status).toBe("succeeded")
-    const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
+    const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
     expect(run?.status).toBe("succeeded")
     expect(run?.effects).toMatchObject({
       status: "failed",
@@ -973,12 +978,12 @@ describe("runActionJob", () => {
             )
           })
       )
-    const sixb = createSixb([waitForCancel])
+    const { host, sixb } = createSixb([waitForCancel])
     let reportCount = 0
     const reporter = attachSixbErrorReporter(sixb, () => {
       reportCount += 1
     })
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_cancelled",
       actionId: "waitForCancel",
       subject: { kind: "none" },
@@ -987,7 +992,7 @@ describe("runActionJob", () => {
     const controller = new AbortController()
 
     const execution = runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: { id: "act_cancelled", actionId: "waitForCancel" },
       signal: controller.signal,
       attempt: 1,
@@ -1010,12 +1015,12 @@ describe("runActionJob", () => {
         invoked += 1
       })
 
-    const sixb = createSixb([setStatus], [Device, Sensor])
+    const { host, sixb } = createSixb([setStatus], [Device, Sensor])
     await sixb.objects.upsert("Sensor", {
       id: "sensor-1",
       name: "Sensor 1",
     })
-    await queueActionRun(sixb, {
+    await queueActionRun(host, {
       id: "act_1",
       actionId: "setStatus",
       subject: { kind: "object", objectTypeId: "Sensor", primaryId: "sensor-1" },
@@ -1023,7 +1028,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runActionJob({
-      runtime: createContext(sixb),
+      runtime: createContext(host),
       job: {
         id: "act_1",
         actionId: "setStatus",

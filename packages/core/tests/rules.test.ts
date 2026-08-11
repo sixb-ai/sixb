@@ -12,7 +12,7 @@ import {
   link,
   prop,
   RuleValidationError,
-  Sixb,
+  SixbHost,
 } from "../src"
 import { EventsRuntime } from "../src/events"
 import { deriveRuleEventDependencies } from "../src/rules"
@@ -294,8 +294,10 @@ async function createTempProjectRoot(): Promise<string> {
   return projectRoot
 }
 
-function createRuntimeWithRules(rules: readonly RuleDefinition[]): Sixb<readonly OntologySource[]> {
-  return new Sixb<readonly OntologySource[]>({
+function createRuntimeWithRules(
+  rules: readonly RuleDefinition[]
+): SixbHost<readonly OntologySource[]> {
+  return new SixbHost<readonly OntologySource[]>({
     ontology: [Transaction, Document],
     rules,
     ...createTestRuntimeDeps(),

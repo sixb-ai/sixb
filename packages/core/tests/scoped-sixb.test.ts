@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
+  type AuthorizationContext,
   AuthorizationError,
   can,
   col,
@@ -23,10 +24,11 @@ import {
   ref,
   resolveAuthorizationContext,
   type SecurityRegistry,
-  Sixb,
+  SixbHost,
   type StoredDomainEvent,
   type WorkflowDefinition,
 } from "../src"
+import { createTestSixb, type TestExecutionHost } from "../src/testing"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
 const Contract = defineObjectType({
@@ -114,7 +116,7 @@ const reviewContractWithAgent = defineAgentStep("review-contract-with-agent", co
   .prompt(({ input }) => `Review contract '${input.contract.primaryId}'.`)
 
 // Widened to the base type, like renewContract below: keeps the registered
-// actions array out of the deep Sixb<tuple> instantiation (TS2589).
+// actions array out of the deep SixbHost<tuple> instantiation (TS2589).
 const sendContract: ActionDefinition = defineAction("send-contract")
   .on(Contract)
   .params({})
@@ -213,10 +215,10 @@ const blindInvoiceLinker = defineRole("invoice.blind-linker", {
 const principal = { type: "user", id: "adam" } as const
 
 // No explicit instance annotations anywhere in this file: naming
-// Sixb<three-type tuple> in a type position (alias, param, ReturnType) trips
+// SixbHost<three-type tuple> in a type position (alias, param, ReturnType) trips
 // TS2589 instantiation depth. Inference handles it fine.
 function createRuntime() {
-  return new Sixb<readonly [typeof Contract, typeof SignedContract, typeof Invoice]>({
+  return new SixbHost<readonly [typeof Contract, typeof SignedContract, typeof Invoice]>({
     ontology: [Contract, SignedContract, Invoice],
     datasets: [ContractsDataset, InvoicesDataset],
     actions: [sendContract, archiveInvoice],
@@ -252,19 +254,24 @@ function createRuntime() {
   })
 }
 
-function contextFor(sixb: { security: SecurityRegistry }, groupIds: readonly string[]) {
+function bindPrincipal(host: TestExecutionHost, authorization: AuthorizationContext) {
+  return createTestSixb(host, { authorization })
+}
+
+function contextFor(host: { security: SecurityRegistry }, groupIds: readonly string[]) {
   return resolveAuthorizationContext({
     principal,
     groupIds,
-    roles: sixb.security.listResolvedRoles(),
+    roles: host.security.listResolvedRoles(),
   })
 }
 
-describe("sixb.as() object reads", () => {
+describe("bound Sixb object reads", () => {
   test("granted types support get, list, byId.get, and query", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
-    const scoped = sixb.as(contextFor(sixb, ["commercial"]))
+    const scoped = bindPrincipal(host, contextFor(host, ["commercial"]))
 
     expect(await scoped.objects(Contract).get("c1")).toMatchObject({ primaryId: "c1" })
     expect((await scoped.objects(Contract).list()).objects).toHaveLength(1)
@@ -273,16 +280,18 @@ describe("sixb.as() object reads", () => {
   })
 
   test("view grants include subtypes", async () => {
-    const sixb = createRuntime()
-    const scoped = sixb.as(contextFor(sixb, ["commercial"]))
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const scoped = bindPrincipal(host, contextFor(host, ["commercial"]))
 
     expect((await scoped.objects(SignedContract).list()).objects).toEqual([])
   })
 
   test("ungranted types deny get, list, and query", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
-    const scoped = sixb.as(contextFor(sixb, ["commercial"]))
+    const scoped = bindPrincipal(host, contextFor(host, ["commercial"]))
 
     expect(scoped.objects(Invoice).list()).rejects.toThrow(AuthorizationError)
     expect(scoped.objects(Invoice).get("i1")).rejects.toThrow(AuthorizationError)
@@ -291,8 +300,9 @@ describe("sixb.as() object reads", () => {
   })
 
   test("queries require every touched type, not just the result type", async () => {
-    const sixb = createRuntime()
-    const scoped = sixb.as(contextFor(sixb, ["commercial"]))
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const scoped = bindPrincipal(host, contextFor(host, ["commercial"]))
 
     // Starts at Invoice and ends at viewable Contract — still requires can.view(Invoice).
     const query = scoped.objects(Invoice).query()
@@ -301,17 +311,18 @@ describe("sixb.as() object reads", () => {
   })
 })
 
-describe("sixb.as() cross-type list", () => {
+describe("bound Sixb cross-type list", () => {
   async function createSeededRuntime() {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
-    return sixb
+    return { host, sixb }
   }
 
   test("broad listings narrow to viewable types", async () => {
-    const sixb = await createSeededRuntime()
-    const scoped = sixb.as(contextFor(sixb, ["commercial"]))
+    const { host } = await createSeededRuntime()
+    const scoped = bindPrincipal(host, contextFor(host, ["commercial"]))
 
     const result = await scoped.objects.list({})
 
@@ -319,8 +330,8 @@ describe("sixb.as() cross-type list", () => {
   })
 
   test("explicitly requesting a forbidden type fails", async () => {
-    const sixb = await createSeededRuntime()
-    const scoped = sixb.as(contextFor(sixb, ["commercial"]))
+    const { host } = await createSeededRuntime()
+    const scoped = bindPrincipal(host, contextFor(host, ["commercial"]))
 
     expect(scoped.objects.list({ objectTypeIds: ["invoice"] })).rejects.toThrow(AuthorizationError)
     expect(
@@ -331,19 +342,20 @@ describe("sixb.as() cross-type list", () => {
   })
 
   test("principals with no grants list nothing", async () => {
-    const sixb = await createSeededRuntime()
-    const scoped = sixb.as(contextFor(sixb, []))
+    const { host } = await createSeededRuntime()
+    const scoped = bindPrincipal(host, contextFor(host, []))
 
     expect(await scoped.objects.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
   })
 })
 
-describe("sixb.as() actions", () => {
+describe("bound Sixb actions", () => {
   test("object actions require apply and view together", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 
-    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     const { runId } = await operator
       .objects(Contract)
       .requestAction({ id: "c1", actionId: "send-contract" })
@@ -351,13 +363,13 @@ describe("sixb.as() actions", () => {
 
     // view without apply
     await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
-    const viewerOnly = sixb.as(contextFor(sixb, ["finance"]))
+    const viewerOnly = bindPrincipal(host, contextFor(host, ["finance"]))
     expect(
       viewerOnly.objects(Invoice).requestAction({ id: "i1", actionId: "archive-invoice" })
     ).rejects.toThrow(AuthorizationError)
 
     // apply without view
-    const senderOnly = sixb.as(contextFor(sixb, ["ops"]))
+    const senderOnly = bindPrincipal(host, contextFor(host, ["ops"]))
     expect(senderOnly.actions.list()).toEqual([])
     expect(senderOnly.actions.getById("send-contract")).toBeNull()
     expect(
@@ -366,41 +378,44 @@ describe("sixb.as() actions", () => {
   })
 })
 
-describe("sixb.as() operational access", () => {
+describe("bound Sixb operational access", () => {
   test("dataset catalog narrows to viewable datasets", () => {
-    const sixb = createRuntime()
-    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
 
     expect(operator.datasets.list().map((dataset) => dataset.id)).toEqual(["raw.contracts"])
     expect(operator.datasets.getById("raw.contracts")?.id).toBe("raw.contracts")
     expect(operator.datasets.getById("raw.invoices")).toBeNull()
 
-    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     expect(runner.datasets.list()).toEqual([])
   })
 
   test("workflow runs require can.run", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     const input = {
       workflowId: "renew-contract",
       input: { contract: { objectTypeId: "contract", primaryId: "c1" } },
     }
 
-    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     const result = await runner.workflows.requestById(input)
     expect(result.runId).toBeString()
 
-    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     expect(operator.workflows.requestById(input)).rejects.toThrow(AuthorizationError)
   })
 
   test("event visibility is derived from grants", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 
     // The operator can view Contract, so it sees the object's event.
-    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     const visibleEvents = await waitFor(
       () => operator.events.read(),
       (published) => published.some((event) => event.type === "object.created")
@@ -409,36 +424,48 @@ describe("sixb.as() operational access", () => {
 
     // The runner can run workflows but cannot view Contract, so the contract
     // event is filtered out (no workflow has run, so it sees nothing here).
-    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     expect((await runner.events.read()).filter((event) => event.type === "object.created")).toEqual(
       []
     )
   })
 
-  test("action metadata narrows to applicable actions", () => {
-    const sixb = createRuntime()
+  test("principal executions cannot author domain events", () => {
+    const host = createRuntime()
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
 
-    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    expect(() => operator.events.append({ events: [] })).toThrow(AuthorizationError)
+    expect(() => operator.events.emit({ events: [] }, { source: "test" })).toThrow(
+      AuthorizationError
+    )
+  })
+
+  test("action metadata narrows to applicable actions", () => {
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     expect(operator.actions.list().map((action) => action.id)).toEqual(["send-contract"])
     expect(operator.actions.getById("send-contract")?.id).toBe("send-contract")
     expect(operator.actions.getById("archive-invoice")).toBeNull()
 
-    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     expect(runner.actions.list()).toEqual([])
   })
 
   test("dynamic action requests enforce apply and view", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 
-    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     const { runId } = await operator.actions.request({
       actionId: "send-contract",
       subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
     })
     expect(runId).toBeString()
 
-    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     expect(
       runner.actions.request({
         actionId: "send-contract",
@@ -450,10 +477,11 @@ describe("sixb.as() operational access", () => {
   test("requestActionAndWait enforces the same grant as requestAction", async () => {
     // It requests through `requestAction` and then only reads the run it just created, so the flat
     // verb is safe to expose — but the assertion has to be pinned, not assumed from the call chain.
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 
-    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     await expect(
       runner.actions.requestAndWait({
         actionId: "send-contract",
@@ -463,9 +491,10 @@ describe("sixb.as() operational access", () => {
   })
 
   test("workflow catalog narrows to runnable workflows", () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
 
-    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     expect(runner.workflows.list().map((workflow) => workflow.id)).toEqual([
       "renew-contract",
       "agent-review-contract",
@@ -473,14 +502,15 @@ describe("sixb.as() operational access", () => {
     expect(runner.workflows.getById("renew-contract")?.id).toBe("renew-contract")
 
     // No run grant: the workflow is hidden from both listing and lookup.
-    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     expect(operator.workflows.list()).toEqual([])
     expect(operator.workflows.getById("renew-contract")).toBeNull()
   })
 
   test("workflow permission encapsulates agent nodes", async () => {
-    const sixb = createRuntime()
-    const workflowOnlyPrincipal = sixb.as(contextFor(sixb, ["workflow-only"]))
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const workflowOnlyPrincipal = bindPrincipal(host, contextFor(host, ["workflow-only"]))
 
     expect(workflowOnlyPrincipal.workflows.list().map((workflow) => workflow.id)).toEqual([
       "agent-review-contract",
@@ -508,21 +538,23 @@ describe("sixb.as() operational access", () => {
   })
 
   test("sync catalog narrows to runnable syncs", () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
 
-    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     expect(runner.syncs.list().map((sync) => sync.id)).toEqual(["sync-contracts"])
     expect(runner.syncs.getById("sync-contracts")?.id).toBe("sync-contracts")
     expect(runner.syncs.getById("sync-invoices")).toBeNull()
 
-    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     expect(operator.syncs.list()).toEqual([])
     expect(operator.syncs.getById("sync-contracts")).toBeNull()
   })
 
   test("a listable sync or pipeline can actually be started, and only with can.run", async () => {
-    const sixb = createRuntime()
-    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
 
     // Before `request*`, `listSyncs()` advertised runnable syncs the caller had no way to start.
     const sync = await runner.syncs.request({ syncId: "sync-contracts" })
@@ -541,42 +573,45 @@ describe("sixb.as() operational access", () => {
   })
 
   test("pipeline catalog narrows to runnable pipelines", () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
 
-    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     expect(runner.pipelines.list().map((pipeline) => pipeline.id)).toEqual(["contract-pipeline"])
     expect(runner.pipelines.getById("contract-pipeline")?.id).toBe("contract-pipeline")
     expect(runner.pipelines.getById("invoice-pipeline")).toBeNull()
 
-    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     expect(operator.pipelines.list()).toEqual([])
     expect(operator.pipelines.getById("contract-pipeline")).toBeNull()
   })
 
   test("agent catalog narrows to runnable agents", () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
 
-    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     expect(runner.agents.list().map((agent) => agent.id)).toEqual(["contract-agent"])
     expect(runner.agents.getById("contract-agent")?.id).toBe("contract-agent")
     expect(runner.agents.getById("invoice-agent")).toBeNull()
 
-    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     expect(operator.agents.list()).toEqual([])
     expect(operator.agents.getById("contract-agent")).toBeNull()
   })
 
   test("agent run requests require can.run", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
 
-    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     const result = await runner.agents.runs.request({
       agentId: "contract-agent",
       text: "Summarize this account.",
     })
     expect(result.run.id).toBeString()
 
-    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     expect(
       operator.agents.runs.request({
         agentId: "contract-agent",
@@ -586,15 +621,16 @@ describe("sixb.as() operational access", () => {
   })
 
   test("agent threads require both the run grant and ownership", async () => {
-    const sixb = createRuntime()
-    const ownerContext = contextFor(sixb, ["operations"])
-    const owner = sixb.as(ownerContext)
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const ownerContext = contextFor(host, ["operations"])
+    const owner = bindPrincipal(host, ownerContext)
     const thread = await owner.agents.threads.create({ agentId: "contract-agent" })
 
     expect(await owner.agents.threads.getById(thread.id)).toEqual(thread)
     expect((await owner.agents.threads.list()).threads).toEqual([thread])
 
-    const other = sixb.as({
+    const other = bindPrincipal(host, {
       ...ownerContext,
       principal: { type: "user", id: "other-user" },
     })
@@ -610,10 +646,11 @@ describe("sixb.as() operational access", () => {
   })
 })
 
-describe("sixb.as() object writes", () => {
+describe("bound Sixb object writes", () => {
   test("a viewer cannot write: view alone grants no edit", async () => {
-    const sixb = createRuntime()
-    const scoped = sixb.as(contextFor(sixb, ["commercial"]))
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const scoped = bindPrincipal(host, contextFor(host, ["commercial"]))
 
     expect(scoped.objects(Contract).upsert({ properties: { id: "c2" } })).rejects.toThrow(
       AuthorizationError
@@ -622,16 +659,18 @@ describe("sixb.as() object writes", () => {
   })
 
   test("view plus edit writes, and the write is readable back", async () => {
-    const sixb = createRuntime()
-    const scoped = sixb.as(contextFor(sixb, ["editors"]))
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const scoped = bindPrincipal(host, contextFor(host, ["editors"]))
 
     await scoped.objects(Contract).upsert({ properties: { id: "c1" } })
     expect(await scoped.objects(Contract).byId("c1").get()).not.toBeNull()
   })
 
   test("edit without view is refused — an upsert answers with the merged row", async () => {
-    const sixb = createRuntime()
-    const scoped = sixb.as(contextFor(sixb, ["blind-writers"]))
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const scoped = bindPrincipal(host, contextFor(host, ["blind-writers"]))
 
     expect(scoped.objects(Contract).upsert({ properties: { id: "c2" } })).rejects.toThrow(
       AuthorizationError
@@ -639,28 +678,31 @@ describe("sixb.as() object writes", () => {
   })
 
   test("delete and restore ride on the same edit grant", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 
-    const viewer = sixb.as(contextFor(sixb, ["commercial"]))
+    const viewer = bindPrincipal(host, contextFor(host, ["commercial"]))
     expect(viewer.objects(Contract).byId("c1").delete()).rejects.toThrow(AuthorizationError)
 
-    const editor = sixb.as(contextFor(sixb, ["editors"]))
+    const editor = bindPrincipal(host, contextFor(host, ["editors"]))
     await editor.objects(Contract).byId("c1").delete()
     expect(await editor.objects(Contract).byId("c1").get()).toBeNull()
     await editor.objects(Contract).byId("c1").restore()
   })
 
   test("ungranted types stay unwritable for a principal that can edit another type", async () => {
-    const sixb = createRuntime()
-    const scoped = sixb.as(contextFor(sixb, ["editors"]))
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const scoped = bindPrincipal(host, contextFor(host, ["editors"]))
 
     expect(scoped.objects.upsert("invoice", { id: "i1" })).rejects.toThrow(AuthorizationError)
   })
 
   test("edit does not expand to subtypes", async () => {
-    const sixb = createRuntime()
-    const scoped = sixb.as(contextFor(sixb, ["editors"]))
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const scoped = bindPrincipal(host, contextFor(host, ["editors"]))
 
     // `can.view(Contract)` covers `signed-contract` (view expands); `can.edit(Contract)` must not.
     expect(await scoped.objects(SignedContract).byId("s1").get()).toBeNull()
@@ -670,12 +712,13 @@ describe("sixb.as() object writes", () => {
   })
 })
 
-describe("sixb.as() link writes", () => {
+describe("bound Sixb link writes", () => {
   test("edit on the source and view on the target links", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
-    const scoped = sixb.as(contextFor(sixb, ["linkers"]))
+    const scoped = bindPrincipal(host, contextFor(host, ["linkers"]))
 
     await scoped.objects(Invoice).upsertLink({
       sourceId: "i1",
@@ -692,10 +735,11 @@ describe("sixb.as() link writes", () => {
   })
 
   test("edit on the source is not enough without view on the target", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
-    const scoped = sixb.as(contextFor(sixb, ["blind-linkers"]))
+    const scoped = bindPrincipal(host, contextFor(host, ["blind-linkers"]))
 
     expect(
       scoped.objects(Invoice).upsertLink({
@@ -708,10 +752,11 @@ describe("sixb.as() link writes", () => {
   })
 
   test("a refused item denies the whole link batch, before anything commits", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
-    const scoped = sixb.as(contextFor(sixb, ["blind-linkers"]))
+    const scoped = bindPrincipal(host, contextFor(host, ["blind-linkers"]))
 
     expect(
       scoped.objects.upsertLinkBatch([
@@ -728,11 +773,12 @@ describe("sixb.as() link writes", () => {
   })
 })
 
-describe("sixb.as() telemetry appends", () => {
+describe("bound Sixb telemetry appends", () => {
   test("append needs its own grant: an editor cannot append", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
-    const scoped = sixb.as(contextFor(sixb, ["editors"]))
+    const scoped = bindPrincipal(host, contextFor(host, ["editors"]))
 
     expect(
       scoped.objects.appendTelemetry("contract", [
@@ -746,9 +792,10 @@ describe("sixb.as() telemetry appends", () => {
   })
 
   test("append works without view — the write-only ingest principal", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
-    const scoped = sixb.as(contextFor(sixb, ["ingest"]))
+    const scoped = bindPrincipal(host, contextFor(host, ["ingest"]))
 
     await scoped.objects.appendTelemetry("contract", [
       {
@@ -760,8 +807,8 @@ describe("sixb.as() telemetry appends", () => {
 
     // Read back through the privileged runtime: this principal holds no view grant, which is the
     // whole point of the append/edit split.
-    const stored = await sixb.storage.timeseries.getHistory({
-      projectId: sixb.id,
+    const stored = await host.storage.timeseries.getHistory({
+      projectId: host.id,
       objectTypeId: "contract",
       objectId: "c1",
       propertyId: "temperature",
@@ -771,9 +818,10 @@ describe("sixb.as() telemetry appends", () => {
   })
 
   test("the per-property channel enforces the same grant as the batch", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
-    const editor = sixb.as(contextFor(sixb, ["editors"]))
+    const editor = bindPrincipal(host, contextFor(host, ["editors"]))
 
     expect(
       editor.objects(Contract).byId("c1").telemetry(Contract.p.temperature).append({
@@ -803,19 +851,20 @@ describe("direct writes are attributable", () => {
     ).find(isMatch)
   }
 
-  test("a scoped write names its principal, a privileged one names nobody", async () => {
-    const sixb = createRuntime()
+  test("a principal write names its actor, an auth-disabled one names nobody", async () => {
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
 
-    // Privileged: no authorization context, so no actor. The absence is the signal — this write
-    // came from the system, not a caller.
+    // Auth-disabled execution: no authorization context, so no actor. The absence is the signal —
+    // this write came from an explicitly unrestricted project, not a caller.
     await sixb.objects(Contract).upsert({ properties: { id: "system-write" } })
     const systemEvent = await objectCreatedEvent(sixb.events, "system-write")
     expect(systemEvent?.origin).toMatchObject({ kind: "runtime" })
     expect(systemEvent?.actor).toBeUndefined()
 
-    // Scoped: the principal travels onto the event, while `origin` still says the write bypassed an
-    // action. Governed and direct writes stay distinguishable, and a direct write is now traceable.
-    const editor = sixb.as(contextFor(sixb, ["editors"]))
+    // The principal travels onto the event, while `origin` still says the write bypassed an action.
+    // Governed and direct writes stay distinguishable, and a direct write is now traceable.
+    const editor = bindPrincipal(host, contextFor(host, ["editors"]))
     await editor.objects(Contract).upsert({ properties: { id: "user-write" } })
     const userEvent = await objectCreatedEvent(sixb.events, "user-write")
     expect(userEvent?.origin).toMatchObject({ kind: "runtime" })
@@ -823,15 +872,15 @@ describe("direct writes are attributable", () => {
   })
 
   test("a service account is recorded as a service actor", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     const serviceContext = resolveAuthorizationContext({
       principal: { type: "serviceAccount", id: "svc_ingest" },
       groupIds: ["editors"],
-      roles: sixb.security.listResolvedRoles(),
+      roles: host.security.listResolvedRoles(),
     })
 
-    await sixb
-      .as(serviceContext)
+    await bindPrincipal(host, serviceContext)
       .objects(Contract)
       .upsert({ properties: { id: "svc-write" } })
 
@@ -843,47 +892,53 @@ describe("direct writes are attributable", () => {
   })
 })
 
-describe("sixb.as() fails closed on ungranted surfaces", () => {
+describe("bound Sixb fails closed on ungranted surfaces", () => {
   test("listLinks denies even when reached at runtime", async () => {
-    const sixb = createRuntime()
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
-    const scoped = sixb.as(contextFor(sixb, ["editors"]))
+    const principalSixb = bindPrincipal(host, contextFor(host, ["editors"]))
 
-    // The scoped types hide this member; the cast simulates a scoped runtime context leaking into an
-    // unexposed code path. Link rows name target types no read grant covers, so it stays privileged
-    // even for a principal that may edit the source type.
-    const handle = scoped.objects(Contract).byId("c1") as unknown as {
-      listLinks(): Promise<unknown>
-    }
-    expect(handle.listLinks()).rejects.toThrow(AuthorizationError)
+    // Trusted executions need this method on the shared Sixb surface. A principal can reach it too,
+    // but link rows name target types no read grant covers, so the protected leaf fails closed even
+    // when the principal may edit the source type.
+    expect(principalSixb.objects(Contract).byId("c1").listLinks()).rejects.toThrow(
+      AuthorizationError
+    )
   })
 
-  test("the raw runtime stays privileged", async () => {
-    const sixb = createRuntime()
+  test("an explicit auth-disabled execution remains unrestricted", async () => {
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
 
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     expect((await sixb.objects.list({})).objects).toHaveLength(1)
   })
 })
 
-describe("ScopedSixb surface", () => {
+describe("bound Sixb surface", () => {
   // Pin the composed surface so a domain facade cannot drift silently from the SDK contract.
   test("exposes exactly the allowlisted members", () => {
-    const sixb = createRuntime()
-    const scoped = sixb.as(contextFor(sixb, ["commercial"]))
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const scoped = bindPrincipal(host, contextFor(host, ["commercial"]))
 
     expect(Object.keys(scoped).sort()).toEqual(
       [
         "actions",
         "agents",
-        "authorization",
+        "blobs",
+        "connector",
+        "connectors",
         "datasets",
         "events",
+        "execution",
         "logs",
         "objects",
         "pipelines",
         "projections",
         "rules",
+        "schedules",
         "syncs",
         "workflows",
       ].sort()
@@ -901,8 +956,11 @@ describe("ScopedSixb surface", () => {
         "getTelemetryHistory",
         "getTelemetryHistoryBatch",
         "getTypeById",
+        "getValueTypesById",
+        "isValidLinkTarget",
         "list",
         "listLinks",
+        "listSubTypes",
         "listTypes",
         "removeLink",
         "resolveType",
@@ -913,11 +971,11 @@ describe("ScopedSixb surface", () => {
       ].sort()
     )
     expect(Object.keys(scoped.actions).sort()).toEqual(
-      ["getById", "list", "listForType", "request", "requestAndWait", "runs"].sort()
+      ["getById", "list", "listForType", "listGlobal", "request", "requestAndWait", "runs"].sort()
     )
     expect(Object.keys(scoped.datasets).sort()).toEqual(["getById", "list"])
     expect(Object.keys(scoped.workflows).sort()).toEqual(
-      ["getById", "interventions", "list", "requestById", "runs"].sort()
+      ["getById", "interventions", "list", "request", "requestById", "runs"].sort()
     )
     expect(Object.keys(scoped.syncs).sort()).toEqual(["getById", "list", "request", "runs"])
     expect(Object.keys(scoped.pipelines).sort()).toEqual(
@@ -928,7 +986,9 @@ describe("ScopedSixb surface", () => {
     )
     expect(Object.keys(scoped.rules).sort()).toEqual(["getById", "list", "states"])
     expect(Object.keys(scoped.agents).sort()).toEqual(["getById", "list", "runs", "threads"])
-    expect(Object.keys(scoped.events).sort()).toEqual(["canRead", "read"])
+    expect(Object.keys(scoped.events).sort()).toEqual(
+      ["append", "canRead", "emit", "latestCursor", "read", "subscribe"].sort()
+    )
     expect(Object.keys(scoped.logs).sort()).toEqual(["assertObservable", "read", "tail"])
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { SixbHostRuntime } from "@sixb/core"
 import { Elysia } from "elysia"
 import { registerActionRunRoutes } from "../src/routes/action-runs"
 import { registerAgentRoutes } from "../src/routes/agents"
@@ -11,7 +11,7 @@ import { registerWorkflowRoutes } from "../src/routes/workflows"
 
 // A runtime whose optional run-history roles are all absent — the shape a project
 // gets from `createSixb()` without the matching storage provider.
-function sixbWithoutRunHistory(): Sixb<readonly OntologySource[]> {
+function sixbWithoutRunHistory(): SixbHostRuntime {
   return {
     id: "my-app",
     storage: {},
@@ -26,18 +26,18 @@ function sixbWithoutRunHistory(): Sixb<readonly OntologySource[]> {
     },
     workflows: { list: () => [], getById: () => null },
     agents: { list: () => [], getById: () => null },
-  } as unknown as Sixb<readonly OntologySource[]>
+  } as unknown as SixbHostRuntime
 }
 
 interface TestApp {
   handle(request: Request): Promise<Response>
 }
 
-type Register = (app: Elysia, sixb: Sixb<readonly OntologySource[]>) => TestApp
+type Register = (app: Elysia, host: SixbHostRuntime) => TestApp
 
 function appFor(register: Register): TestApp {
   const app = new Elysia()
-  app.derive(() => ({ sdk: {} }))
+  app.derive(() => ({ sixb: {} }))
   return register(app, sixbWithoutRunHistory())
 }
 

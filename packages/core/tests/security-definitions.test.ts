@@ -29,7 +29,7 @@ import {
   prop,
   type RoleDefinition,
   SecurityValidationError,
-  Sixb,
+  SixbHost,
   type SyncDefinition,
 } from "../src"
 import { canPerformMembershipOperation, resolveMembershipPolicyScope } from "../src/security"
@@ -890,8 +890,8 @@ function createRuntime(
     pipelines?: readonly PipelineDefinition[]
     agents?: readonly AgentDefinition[]
   } = {}
-): Sixb<readonly [typeof Account]> {
-  return new Sixb<readonly [typeof Account]>({
+): SixbHost<readonly [typeof Account]> {
+  return new SixbHost<readonly [typeof Account]>({
     ontology: [Account],
     ...options,
     ...createTestRuntimeDeps(),

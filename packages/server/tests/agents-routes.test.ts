@@ -13,12 +13,13 @@ import {
   InMemoryStorage,
   type OntologySource,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import { agentRunControlStreamId, agentRunStreamId } from "@sixb/core/agents/streams"
 import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import type { AgentStorage } from "@sixb/core/storage"
+import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -105,7 +106,7 @@ const agentOnlyRunner = defineRole("agent-only.runner", {
 function createRuntime(options: { readonly auth?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const queues = new InMemoryQueues()
-  const sixb = new Sixb<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: "agent-route-tests",
     ontology: [Invoice],
     agents: [assistant, ops],
@@ -125,7 +126,7 @@ function createRuntime(options: { readonly auth?: boolean } = {}) {
 function createApp(options: { readonly auth?: boolean } = {}) {
   const { sixb, storage, queues } = createRuntime(options)
   const app = createSixbApi(
-    new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+    new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
   )
 
   return { app, sixb, storage, queues }
@@ -189,9 +190,11 @@ describe("agent routes", () => {
     const { app, storage, sixb } = createApp({ auth: true })
     const support = await seedSession(storage, "usr_context", ["support-users"])
     const agentOnly = await seedSession(storage, "usr_agent_only", ["agent-only-users"])
-    await sixb.objects(Invoice).upsert({
-      properties: { id: "inv-123", name: "July maintenance" },
-    })
+    await createTestSixb(sixb)
+      .objects(Invoice)
+      .upsert({
+        properties: { id: "inv-123", name: "July maintenance" },
+      })
 
     const agentOnlyThreadResponse = await app.fetch(
       jsonRequest("/api/agent-threads", "POST", { agentId: "assistant" }, agentOnly.csrfHeaders)
@@ -538,9 +541,9 @@ describe("agent routes", () => {
     expect(second.status).toBe(409)
     const body = (await second.json()) as { error: string }
     expect(body.error).toBe("Agent thread already exists")
-    // The generic message must not leak the raw provider message (id / project / [Sixb*] prefix).
+    // The generic message must not leak the raw provider message (id / project / [SixbHost*] prefix).
     expect(body.error).not.toContain("thr-dup")
-    expect(body.error).not.toContain("[Sixb")
+    expect(body.error).not.toContain("[SixbHost")
   })
 
   test("projects run diagnostics as transcript annotations without changing message parts", async () => {
@@ -637,7 +640,10 @@ describe("agent routes", () => {
 
   test("cancels a queued run before a worker starts it", async () => {
     const { app, storage, sixb } = createApp()
-    const request = await sixb.agents.request({ agentId: "assistant", text: "wait" })
+    const request = await createTestSixb(sixb).agents.runs.request({
+      agentId: "assistant",
+      text: "wait",
+    })
 
     const response = await app.fetch(
       jsonRequest(`/api/agent-threads/${request.run.threadId}/cancel`, "POST", {
@@ -681,7 +687,10 @@ describe("agent routes", () => {
 
   test("cancels a run when worker startup races queued cancellation", async () => {
     const { app, storage, sixb } = createApp()
-    const request = await sixb.agents.request({ agentId: "assistant", text: "pick this up" })
+    const request = await createTestSixb(sixb).agents.runs.request({
+      agentId: "assistant",
+      text: "pick this up",
+    })
     const originalFinishQueued = storage.agents.runs.finishQueued.bind(storage.agents.runs)
     let raceStartup = true
     storage.agents.runs.finishQueued = async (input) => {
@@ -721,7 +730,10 @@ describe("agent routes", () => {
 
   test("retries a failed run without duplicating its trigger message", async () => {
     const { app, storage, sixb } = createApp()
-    const request = await sixb.agents.request({ agentId: "assistant", text: "try this" })
+    const request = await createTestSixb(sixb).agents.runs.request({
+      agentId: "assistant",
+      text: "try this",
+    })
     await storage.agents.runs.finishQueued({
       id: request.run.id,
       projectId: sixb.id,

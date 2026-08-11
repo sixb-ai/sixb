@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test"
-import { defineObjectType, link, prop, Sixb } from "../src"
+import { defineObjectType, link, prop, SixbHost } from "../src"
 import type { EventsRuntime } from "../src/events"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
 const Target = defineObjectType({
@@ -26,9 +27,10 @@ const Source = defineObjectType({
 
 function createRuntime() {
   const deps = createTestRuntimeDeps()
-  const sixb = new Sixb({ ontology: [Source, Target], ...deps })
+  const host = new SixbHost({ ontology: [Source, Target], ...deps })
+  const sixb = createTestSixb(host)
   // Mutations write durable outbox facts, so publication is the observable delivery boundary.
-  const events = sixb.events as EventsRuntime
+  const events = host.events as EventsRuntime
   const publish = events.publishEnvelopes.bind(events)
   const publishSpy = mock(publish)
   events.publishEnvelopes = publishSpy
@@ -54,7 +56,7 @@ describe("upsert no-op suppression", () => {
     expect(replayed).toEqual(created)
     expect(
       await deps.storage.objects.getByPrimaryId({
-        projectId: sixb.id,
+        projectId: sixb.execution.projectId,
         objectTypeId: "noop-source",
         primaryId: "source-1",
       })
@@ -94,7 +96,7 @@ describe("upsert no-op suppression", () => {
     expect(await sixb.events.read({ types: ["object.updated"] })).toHaveLength(1)
 
     const rowsBeforeReplay = await deps.storage.objects.getByPrimaryIdBatch({
-      projectId: sixb.id,
+      projectId: sixb.execution.projectId,
       items: [
         { objectTypeId: "noop-source", primaryId: "source-1" },
         { objectTypeId: "noop-source", primaryId: "source-2" },
@@ -129,7 +131,7 @@ describe("upsert no-op suppression", () => {
       properties: { role: "primary" },
     })
     const [created] = await deps.storage.objects.listLinks({
-      projectId: sixb.id,
+      projectId: sixb.execution.projectId,
       objectTypeId: "noop-source",
       objectId: "source-1",
       linkId: "targets",
@@ -149,7 +151,7 @@ describe("upsert no-op suppression", () => {
     expect(publishSpy).not.toHaveBeenCalled()
     expect(
       await deps.storage.objects.listLinks({
-        projectId: sixb.id,
+        projectId: sixb.execution.projectId,
         objectTypeId: "noop-source",
         objectId: "source-1",
         linkId: "targets",
@@ -207,7 +209,7 @@ describe("upsert no-op suppression", () => {
     expect(publishSpy.mock.calls[0]?.[0]).toHaveLength(1)
 
     const links = await deps.storage.objects.listLinks({
-      projectId: sixb.id,
+      projectId: sixb.execution.projectId,
       objectTypeId: "noop-source",
       objectId: "source-1",
       linkId: "targets",
@@ -264,7 +266,7 @@ describe("upsert no-op suppression", () => {
     expect(await sixb.events.read({ types: ["link.updated"] })).toHaveLength(0)
 
     const linksBeforeReplay = await deps.storage.objects.listLinks({
-      projectId: sixb.id,
+      projectId: sixb.execution.projectId,
       objectTypeId: "noop-source",
       objectId: "source-1",
       linkId: "targets",
@@ -278,7 +280,7 @@ describe("upsert no-op suppression", () => {
     expect(publishSpy).not.toHaveBeenCalled()
     expect(
       await deps.storage.objects.listLinks({
-        projectId: sixb.id,
+        projectId: sixb.execution.projectId,
         objectTypeId: "noop-source",
         objectId: "source-1",
         linkId: "targets",

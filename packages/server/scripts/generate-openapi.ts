@@ -1,5 +1,5 @@
 /**
- * Generates the OpenAPI spec JSON by starting a temporary Sixb server,
+ * Generates the OpenAPI spec JSON by starting a temporary SixbHost server,
  * fetching /docs/json, and writing it to packages/client/openapi.json.
  */
 
@@ -14,7 +14,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import { SixbServer } from "../src/server"
 
@@ -48,7 +48,7 @@ async function main() {
     properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
   })
 
-  const sixb: Sixb<readonly OntologySource[]> = new Sixb<readonly OntologySource[]>({
+  const host: SixbHost<readonly OntologySource[]> = new SixbHost<readonly OntologySource[]>({
     id: "openapi-gen",
     ontology: [System] as readonly OntologySource[],
     broker: new InMemoryBroker(),
@@ -61,8 +61,8 @@ async function main() {
   const port = await getFreePort()
   const publicOrigin = `http://127.0.0.1:${port}`
   const server = new SixbServer({
-    sixb,
-    host: "127.0.0.1",
+    host,
+    hostname: "127.0.0.1",
     port,
     quiet: true,
     browser: {

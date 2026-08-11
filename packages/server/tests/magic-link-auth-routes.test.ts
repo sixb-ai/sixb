@@ -11,7 +11,7 @@ import {
   InMemoryStorage,
   type OntologySource,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import { createSixbApi, SixbServer } from "../src/server"
 import { confirmCallback, createTestBrowserPolicy, linkFromLatestMessage } from "./helpers"
@@ -55,7 +55,7 @@ function createRuntime(
     rateLimit: options.rateLimit,
     sendMagicLink,
   })
-  const sixb = new Sixb<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: projectId,
     ontology: [Device],
     broker: new InMemoryBroker(),
@@ -70,7 +70,7 @@ function createRuntime(
   return {
     app: createSixbApi(
       new SixbServer({
-        sixb,
+        host: sixb,
         quiet: true,
         browser: createTestBrowserPolicy(),
       })

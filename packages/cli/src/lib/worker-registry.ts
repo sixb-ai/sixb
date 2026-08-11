@@ -6,7 +6,7 @@ import { ProjectionWorker } from "@sixb/projection-worker"
 import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
 import { SixbCliError } from "./errors"
-import type { LoadedSixb } from "./loadSixb"
+import type { LoadedSixbHost } from "./loadSixb"
 import { configuredOrigin } from "./public-origin"
 
 export interface WorkerCreationOptions {
@@ -14,7 +14,7 @@ export interface WorkerCreationOptions {
 }
 
 interface WorkerFactory {
-  readonly create: (sixb: LoadedSixb, options: WorkerCreationOptions) => Worker
+  readonly create: (sixb: LoadedSixbHost, options: WorkerCreationOptions) => Worker
   /**
    * Why this worker cannot be constructed with the given options, or `null` when it can.
    * Asked before anything is constructed, so a group names every reason at once.
@@ -55,7 +55,7 @@ const workerFactories: Record<string, WorkerFactory> = {
 }
 
 export function createWorkerForType(
-  sixb: LoadedSixb,
+  sixb: LoadedSixbHost,
   workerType: string,
   options: WorkerCreationOptions = {}
 ): Worker {
@@ -139,7 +139,7 @@ export function assertWorkerInputs(input: WorkerGroupInputs): void {
   })
 }
 
-export function resolveRegisteredWorkerTypes(sixb: LoadedSixb): readonly string[] {
+export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly string[] {
   const workerTypes: string[] = []
 
   if (sixb.syncs.list().length > 0) {

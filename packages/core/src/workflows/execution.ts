@@ -15,6 +15,7 @@ import { WorkflowValidationError } from "./errors"
 import {
   type RequestWorkflowRunInput,
   requestWorkflowRun,
+  type WorkflowRunRequestOptions,
   type WorkflowRunRequestResult,
 } from "./request"
 import type { WorkflowDefinition } from "./types"
@@ -37,6 +38,10 @@ export interface ExecutionWorkflowInterventionsRuntime {
 export interface ExecutionWorkflowsRuntime {
   list(): readonly WorkflowDefinition[]
   getById(workflowId: string): WorkflowDefinition | null
+  request(
+    workflow: WorkflowDefinition,
+    options?: WorkflowRunRequestOptions
+  ): Promise<WorkflowRunRequestResult>
   requestById(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult>
   readonly runs: ExecutionWorkflowRunsRuntime
   readonly interventions: ExecutionWorkflowInterventionsRuntime
@@ -62,6 +67,7 @@ export function createExecutionWorkflowsRuntime(
       const workflow = source.getById(workflowId)
       return workflow && allowed(workflowId) ? workflow : null
     },
+    request: (workflow, options) => requestWorkflowRun(runtime, workflow, options),
     requestById: async (input) => {
       const workflow = source.getById(input.workflowId)
       if (!workflow) {

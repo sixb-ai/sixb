@@ -12,9 +12,9 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   prop,
-  Sixb,
   type SixbErrorContext,
   type SixbErrorHandler,
+  SixbHost,
   type SyncDefinition,
 } from "@sixb/core"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
@@ -91,7 +91,7 @@ function createSixbForSync(
 ) {
   const storage = new InMemoryStorage()
 
-  return new Sixb({
+  return new SixbHost({
     id: "sync-worker-tests",
     ontology: [Room],
     connectors: [erpDb],

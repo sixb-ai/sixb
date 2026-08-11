@@ -1,37 +1,49 @@
+import type {
+  DatasetsRuntime,
+  LakeStorage,
+  OntologyRegistry,
+  ProjectionsRuntime,
+  Queues,
+  Storage,
+} from "@sixb/core"
 import { MaterializationCancellationError } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import {
+  bindPrimitiveExecution,
+  type PrimitiveExecutionHost,
+} from "@sixb/core/internal/primitive-execution"
 import { shareProjectionRegistry } from "@sixb/core/internal/projections"
-import { shareOntologyMutationRuntime } from "@sixb/core/internal/runtime"
+import { registerOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
 import type { ProjectionRunStorage } from "@sixb/core/storage"
 import { projectionRetryAvailableAt } from "./retry-backoff"
 import { isPermanentProjectionFailure, runProjectionJob } from "./run-projection-job"
-import type { ProjectionWorkerContext, ProjectionWorkerSixb } from "./types"
+import type { ProjectionWorkerContext } from "./types"
 
 export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob> {
-  private readonly context: ProjectionWorkerContext
-  private readonly sixb: ProjectionWorkerSixb
+  private readonly host: ProjectionWorkerHost
+  private readonly projectionRunsStorage: ProjectionRunStorage
 
-  constructor(sixb: ProjectionWorkerSixb) {
-    const projectionCount = sixb.projections.list().length
+  constructor(host: ProjectionWorkerHost) {
+    const projectionCount = host.projections.list().length
     if (projectionCount === 0) {
       throw new Error("[SixbProjectionWorker] No projection definitions are registered.")
     }
 
-    const projectionRunsStorage = sixb.storage.projectionRuns
+    const projectionRunsStorage = host.storage.projectionRuns
     if (!projectionRunsStorage) {
       throw new Error("[SixbProjectionWorker] Projection workers require storage.projectionRuns.")
     }
 
     super({
-      projectId: sixb.projectId,
-      queue: sixb.queues.projections,
-      workerId: `projection-worker-${sixb.id}`,
+      projectId: host.id,
+      queue: host.queues.projections,
+      workerId: `projection-worker-${host.id}`,
     })
-    this.context = buildProjectionContext(sixb, projectionRunsStorage)
-    this.sixb = sixb
+    this.host = host
+    this.projectionRunsStorage = projectionRunsStorage
   }
 
   protected async execute(
@@ -39,13 +51,22 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
     signal: AbortSignal
   ): Promise<void> {
     const { job } = claimed
+    const execution = bindPrimitiveExecution(this.host, {
+      primitive: {
+        kind: "projection",
+        id: job.payload.projectionId,
+        runId: job.id,
+      },
+      source: { type: "queue", queue: "projections", jobId: job.id },
+    })
+    const context = buildProjectionContext(this.host, this.projectionRunsStorage, execution)
     await runProjectionJob({
-      runtime: this.context,
+      runtime: context,
       job: { id: job.id, ...job.payload },
       signal,
       onRunFailed: (error, run) => {
-        reportRunFailure(this.sixb, error, {
-          projectId: this.sixb.projectId,
+        reportRunFailure(this.host, error, {
+          projectId: this.host.id,
           occurredAt: run.finishedAt,
           attempt: job.attempt,
           run: {
@@ -80,8 +101,8 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
     claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
     error: unknown
   ): Promise<QueueWorkerFailureDecision> {
-    const run = await this.context.projectionRunsStorage.getById({
-      projectId: this.context.projectId,
+    const run = await this.projectionRunsStorage.getById({
+      projectId: this.host.id,
       id: claimed.job.id,
     })
     if (run?.status === "running") return retryWithBackoff(claimed)
@@ -103,23 +124,28 @@ function retryWithBackoff(
 }
 
 function buildProjectionContext(
-  sixb: ProjectionWorkerSixb,
-  projectionRunsStorage: ProjectionRunStorage
+  host: ProjectionWorkerHost,
+  projectionRunsStorage: ProjectionRunStorage,
+  execution: ReturnType<typeof bindPrimitiveExecution>
 ): ProjectionWorkerContext {
   const context: ProjectionWorkerContext = {
-    projectId: sixb.projectId,
-    ontology: sixb.ontology,
-    actionRegistry: sixb.actionRegistry,
-    events: sixb.events,
-    storage: sixb.storage,
-    lakeStorage: sixb.lakeStorage,
-    blobStorage: sixb.blobs,
-    queues: sixb.queues,
+    projectId: host.id,
+    ontology: host.ontology,
+    lakeStorage: host.lakeStorage,
     projectionRunsStorage,
-    datasets: sixb.datasets,
-    projections: sixb.projections,
+    datasets: host.datasets,
+    projections: host.projections,
   }
-  shareOntologyMutationRuntime(sixb, context)
-  shareProjectionRegistry(sixb, context)
+  registerOntologyMutationRuntime(context, execution.ontologyMutations)
+  shareProjectionRegistry(host, context)
   return context
+}
+
+export interface ProjectionWorkerHost extends PrimitiveExecutionHost {
+  readonly ontology: OntologyRegistry
+  readonly storage: Storage
+  readonly lakeStorage: LakeStorage
+  readonly queues: Queues
+  readonly datasets: Pick<DatasetsRuntime, "getById">
+  readonly projections: Pick<ProjectionsRuntime, "list" | "getById">
 }

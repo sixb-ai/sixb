@@ -8,6 +8,7 @@ import type {
   OntologySource,
   RegisteredObjectType,
   RegisteredValueTypes,
+  SixbHostContext,
   SixbRuntimeContext,
 } from "../runtime/types"
 import type { ObjectRow } from "../storage"
@@ -15,11 +16,34 @@ import { createObjectSet } from "./sdk"
 import type { ListObjectsParams } from "./service"
 import * as objectService from "./service"
 
+/** Object and value-type definitions owned by the configured host. */
+export interface ObjectTypesRuntime {
+  listTypes(): readonly ObjectTypeWithPropertyTokens[]
+  getTypeById(objectTypeId: string): ObjectTypeWithPropertyTokens | null
+  resolveType(objectTypeId: string): ObjectTypeWithPropertyTokens
+  getValueTypesById(): ReturnType<SixbHostContext["ontology"]["getValueTypesById"]>
+  getPrimaryPropertyId(objectTypeId: string): string
+  listSubTypes(objectTypeId: string): string[]
+  isValidLinkTarget(expected: string | string[], actual: string): boolean
+}
+
+export function createObjectTypesRuntime(context: SixbHostContext): ObjectTypesRuntime {
+  return {
+    listTypes: () => context.ontology.listObjectTypes(),
+    getTypeById: (objectTypeId) => context.ontology.getObjectTypeById(objectTypeId),
+    resolveType: (objectTypeId) => context.ontology.resolveObjectType(objectTypeId),
+    getValueTypesById: () => context.ontology.getValueTypesById(),
+    getPrimaryPropertyId: (objectTypeId) => context.ontology.getPrimaryPropertyId(objectTypeId),
+    listSubTypes: (objectTypeId) => context.ontology.listSubTypes(objectTypeId),
+    isValidLinkTarget: (expected, actual) => context.ontology.isValidLinkTarget(expected, actual),
+  }
+}
+
 export interface ObjectsRuntimeOperations {
   listTypes(): readonly ObjectTypeWithPropertyTokens[]
   getTypeById(objectTypeId: string): ObjectTypeWithPropertyTokens | null
   resolveType(objectTypeId: string): ObjectTypeWithPropertyTokens
-  getValueTypesById(): ReturnType<SixbRuntimeContext["ontology"]["getValueTypesById"]>
+  getValueTypesById(): ReturnType<SixbHostContext["ontology"]["getValueTypesById"]>
   getPrimaryPropertyId(objectTypeId: string): string
   listSubTypes(objectTypeId: string): string[]
   isValidLinkTarget(expected: string | string[], actual: string): boolean

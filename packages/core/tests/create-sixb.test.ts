@@ -25,6 +25,7 @@ import {
   ref,
 } from "../src"
 import { EVENTS_STREAM } from "../src/events"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index.ts")).href
@@ -418,11 +419,12 @@ export const reviewHighValueTransaction = defineWorkflow("review-high-value-tran
     })
 
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = await createSixb({
+    const host = await createSixb({
       projectRoot,
       ontologies: [Room],
       ...runtimeDeps,
     })
+    const sixb = createTestSixb(host)
 
     const room = await sixb.objects(Room).upsert({
       properties: {
@@ -451,13 +453,14 @@ export const reviewHighValueTransaction = defineWorkflow("review-high-value-tran
     })
     const hourly = defineSchedule("hourly").cron("0 * * * *")
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = await createSixb({
+    const host = await createSixb({
       projectRoot,
       id: "broker-backed-runtime",
       ontologies: [Room],
       schedules: [hourly],
       ...runtimeDeps,
     })
+    const sixb = createTestSixb(host)
 
     try {
       await sixb.objects(Room).upsert({
@@ -473,12 +476,12 @@ export const reviewHighValueTransaction = defineWorkflow("review-high-value-tran
           at: new Date("2026-05-20T10:00:00.000Z"),
         })
 
-      await sixb.schedules.start()
+      await host.schedules.start()
       jest.advanceTimersByTime(60 * 60_000)
-      await sixb.schedules.stop()
+      await host.schedules.stop()
 
       // Runtime shutdown tracks the non-blocking outbox notifications before closing the broker.
-      await sixb.closeBroker()
+      await host.closeBroker()
       const eventTypes = (await sixb.events.read()).map((event) => event.type)
       expect(eventTypes).toEqual(
         expect.arrayContaining(["object.created", "telemetry.appended", "schedule.triggered"])
@@ -492,7 +495,7 @@ export const reviewHighValueTransaction = defineWorkflow("review-high-value-tran
       ).records.map((record) => record.name)
       expect(brokerRecordNames).toEqual(eventTypes)
     } finally {
-      await sixb.schedules.stop()
+      await host.schedules.stop()
       jest.useRealTimers()
     }
   })

@@ -1,7 +1,7 @@
-import type { OntologySource, Sixb, SyncDefinition } from "@sixb/core"
+import type { SixbHostRuntime, SyncDefinition } from "@sixb/core"
 import type { SyncRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
-import { requireRequestSdk } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
@@ -42,24 +42,24 @@ function serializeSyncRun(run: SyncRunRecord) {
 type SerializedSyncRun = ReturnType<typeof serializeSyncRun>
 
 async function getLatestSyncRun(
-  sdk: ReturnType<typeof requireRequestSdk>,
+  sixb: ReturnType<typeof requireRequestSixb>,
   syncId: string
 ): Promise<SerializedSyncRun | null> {
-  const result = await sdk.syncs.runs.listLatest([syncId])
+  const result = await sixb.syncs.runs.listLatest([syncId])
 
   const [latest] = result.runs
   return latest ? serializeSyncRun(latest) : null
 }
 
 async function getLatestSyncRuns(
-  sdk: ReturnType<typeof requireRequestSdk>,
+  sixb: ReturnType<typeof requireRequestSixb>,
   syncIds: readonly string[]
 ): Promise<Map<string, SerializedSyncRun>> {
   if (syncIds.length === 0) {
     return new Map()
   }
 
-  const result = await sdk.syncs.runs.listLatest(syncIds)
+  const result = await sixb.syncs.runs.listLatest(syncIds)
 
   return new Map(result.runs.map((run) => [run.syncId, serializeSyncRun(run)]))
 }
@@ -84,15 +84,15 @@ function serializeSync(
   })
 }
 
-export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerSyncRoutes(app: Elysia, host: SixbHostRuntime) {
   return app
     .get(
       "/api/syncs",
       async (context) => {
-        const sdk = requireRequestSdk(context)
-        const syncs = sdk.syncs.list()
+        const sixb = requireRequestSixb(context)
+        const syncs = sixb.syncs.list()
         const latestRuns = await getLatestSyncRuns(
-          sdk,
+          sixb,
           syncs.map((sync) => sync.id)
         )
 
@@ -111,14 +111,14 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/syncs/:syncId",
       async (context) => {
         const { params, set } = context
-        const sdk = requireRequestSdk(context)
-        const sync = sdk.syncs.getById(params.syncId)
+        const sixb = requireRequestSixb(context)
+        const sync = sixb.syncs.getById(params.syncId)
         if (!sync) {
           set.status = 404
           return { error: "Sync not found" }
         }
 
-        return serializeSync(sync, await getLatestSyncRun(sdk, sync.id))
+        return serializeSync(sync, await getLatestSyncRun(sixb, sync.id))
       },
       {
         params: SyncParamsSchema,
@@ -134,15 +134,15 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/sync-runs",
       async (context) => {
         const { query, set } = context
-        const sdk = requireRequestSdk(context)
+        const sixb = requireRequestSixb(context)
         try {
           const parsed = SyncRunsQuerySchema.parse(query)
-          const storage = sixb.storage.syncRuns
+          const storage = host.storage.syncRuns
           if (!storage) {
             return unconfiguredStorageResponse(set, "Sync run storage")
           }
 
-          const result = await sdk.syncs.runs.list({
+          const result = await sixb.syncs.runs.list({
             syncId: parsed.syncId,
             datasetId: parsed.datasetId,
             statuses: parsed.status ? [parsed.status] : undefined,
@@ -180,10 +180,10 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/syncs/:syncId/runs",
       async (context) => {
         const { params, body, set } = context
-        const sdk = requireRequestSdk(context)
+        const sixb = requireRequestSixb(context)
         try {
           const parsedBody = RequestSyncRunBodySchema.parse(body)
-          const result = await sdk.syncs.request({ syncId: params.syncId, ...parsedBody })
+          const result = await sixb.syncs.request({ syncId: params.syncId, ...parsedBody })
 
           set.status = 202
           return {

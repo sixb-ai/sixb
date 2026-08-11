@@ -1,18 +1,15 @@
 import type { OntologySource } from "@sixb/core"
-import type {
-  ExecutionSixb,
-  RequestExecutionAuthorization,
-} from "@sixb/core/internal/request-execution"
+import type { RequestExecutionAuthorization, Sixb } from "@sixb/core/internal/request-execution"
 import type { AgentRunRecord } from "@sixb/core/storage"
 
 /**
  * Per-request authorization state attached by the server's auth derive.
  *
- * Protected domain routes require `sdk`. It is present for authenticated and auth-disabled
+ * Protected domain routes require `sixb`. It is present for authenticated and auth-disabled
  * requests, and absent only for public routes that do not execute protected domain operations.
  */
 export interface RequestAuthState {
-  readonly sdk: ExecutionSixb<readonly OntologySource[]> | null
+  readonly sixb: Sixb<readonly OntologySource[]> | null
   /** Present for requests proxied through the run-scoped agent API gateway. */
   readonly agentRun?: AgentRunRecord
   /** Identifies which kind of active agent execution owns a gateway request. */
@@ -54,18 +51,18 @@ export function consumeInternalRequestAuthState(
  * point until route registration carries the derived context type.
  */
 export function requestAuthState(context: unknown): RequestAuthState {
-  const { sdk = null, agentRun, agentExecution } = context as Partial<RequestAuthState>
+  const { sixb = null, agentRun, agentExecution } = context as Partial<RequestAuthState>
   return {
-    sdk,
+    sixb,
     ...(agentRun === undefined ? {} : { agentRun }),
     ...(agentExecution === undefined ? {} : { agentExecution }),
   }
 }
 
-export function requireRequestSdk(context: unknown): ExecutionSixb<readonly OntologySource[]> {
-  const sdk = requestAuthState(context).sdk
-  if (!sdk) {
+export function requireRequestSixb(context: unknown): Sixb<readonly OntologySource[]> {
+  const sixb = requestAuthState(context).sixb
+  if (!sixb) {
     throw new Error("[SixbServer] Execution scope is not available for this route.")
   }
-  return sdk
+  return sixb
 }

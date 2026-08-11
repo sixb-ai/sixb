@@ -1,4 +1,5 @@
 import { type AuthorizationContext, assertAuthorized } from "../../authorization"
+import type { RuntimeAuthorization } from "../../execution"
 import type {
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
@@ -8,6 +9,7 @@ import type {
 
 export interface TelemetryHistoryOptions {
   readonly storage: TimeseriesStorage
+  readonly runtimeAuthorization?: RuntimeAuthorization
   readonly authorization?: AuthorizationContext | null
 }
 
@@ -15,17 +17,20 @@ export async function getTelemetryHistoryBatch(
   input: TimeseriesHistoryBatchInput,
   options: TelemetryHistoryOptions
 ): Promise<readonly TimeseriesHistoryBatchResult[]> {
-  assertTelemetrySeriesViewable(input.series, options.authorization)
+  assertTelemetrySeriesViewable(input.series, options)
   return options.storage.getHistoryBatch(input)
 }
 
 function assertTelemetrySeriesViewable(
   series: readonly TimeseriesHistorySeriesInput[],
-  authorization: AuthorizationContext | null | undefined
+  authorization: Pick<TelemetryHistoryOptions, "authorization" | "runtimeAuthorization">
 ): void {
   for (const objectTypeId of new Set(series.map((entry) => entry.objectTypeId))) {
     assertAuthorized(
-      { authorization: authorization ?? undefined },
+      {
+        runtimeAuthorization: authorization.runtimeAuthorization,
+        authorization: authorization.authorization ?? undefined,
+      },
       { kind: "object.view", objectTypeId }
     )
   }

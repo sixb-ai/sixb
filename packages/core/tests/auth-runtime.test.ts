@@ -4,7 +4,7 @@ import {
   type AuthStrategy,
   defineGroup,
   defineMembershipPolicy,
-  Sixb,
+  SixbHost,
 } from "../src"
 import {
   createAccessTokenCredential,
@@ -51,7 +51,7 @@ const magicLinkStrategy: MagicLinkAuthStrategy = {
 }
 
 async function seedAuthenticatedUser(
-  sixb: Sixb<readonly []>,
+  sixb: SixbHost<readonly []>,
   deps: ReturnType<typeof createTestRuntimeDeps>,
   params: { readonly userId: string; readonly email: string; readonly groupIds: readonly string[] }
 ): Promise<Request> {
@@ -113,7 +113,7 @@ function createInviteRuntime(options: { readonly strategy?: MagicLinkAuthStrateg
         throw new Error("unused")
       },
     } satisfies MagicLinkAuthStrategy)
-  const sixb = new Sixb<readonly []>({
+  const sixb = new SixbHost<readonly []>({
     id: "project-a",
     ontology: [] as const,
     ...deps,
@@ -131,7 +131,7 @@ function createInviteRuntime(options: { readonly strategy?: MagicLinkAuthStrateg
   return { deps, sixb, requests }
 }
 
-describe("Sixb auth runtime", () => {
+describe("SixbHost auth runtime", () => {
   test("formats, parses, and hashes opaque session cookie credentials", () => {
     const credential = createSessionCredential("ses_1")
 
@@ -149,7 +149,7 @@ describe("Sixb auth runtime", () => {
 
   test("resolves authenticated sessions with user groups", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [],
       ...deps,
       auth: authStrategy,
@@ -194,7 +194,7 @@ describe("Sixb auth runtime", () => {
 
   test("resolves personal access tokens with constrained user groups", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [],
       ...deps,
       auth: authStrategy,
@@ -254,7 +254,7 @@ describe("Sixb auth runtime", () => {
 
   test("resolves service account access tokens with service account groups", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [],
       ...deps,
       auth: authStrategy,
@@ -310,7 +310,7 @@ describe("Sixb auth runtime", () => {
 
   test("creates and revokes personal and service account access tokens", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [],
       ...deps,
       auth: authStrategy,
@@ -397,7 +397,7 @@ describe("Sixb auth runtime", () => {
 
   test("confines service account management to the caller's own groups", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [],
       ...deps,
       auth: authStrategy,
@@ -477,7 +477,7 @@ describe("Sixb auth runtime", () => {
 
   test("resolves sessions and cookie names by audience", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [],
       ...deps,
       auth: {
@@ -549,7 +549,7 @@ describe("Sixb auth runtime", () => {
 
   test("returns unauthenticated results for missing and suspended sessions", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [],
       ...deps,
       auth: authStrategy,
@@ -587,7 +587,7 @@ describe("Sixb auth runtime", () => {
 
   test("creates security contexts with correlation ids", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "project-a",
       ontology: [],
       ...deps,
@@ -837,7 +837,7 @@ describe("Sixb auth runtime", () => {
 
     expect(
       () =>
-        new Sixb<readonly []>({
+        new SixbHost<readonly []>({
           ontology: [] as const,
           ...deps,
           auth: strategy,
@@ -869,7 +869,7 @@ describe("Sixb auth runtime", () => {
 
   test("caches resolved sessions and re-validates after invalidation", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({ ontology: [], ...deps, auth: authStrategy })
+    const sixb = new SixbHost({ ontology: [], ...deps, auth: authStrategy })
     const credential = createSessionCredential("ses_cache")
     await deps.storage.auth.users.create({
       id: "usr_1",
@@ -912,7 +912,7 @@ describe("Sixb auth runtime", () => {
 
   test("session cache is bound to the token secret, not just the session id", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({ ontology: [], ...deps, auth: authStrategy })
+    const sixb = new SixbHost({ ontology: [], ...deps, auth: authStrategy })
     const credential = createSessionCredential("ses_bind")
     await deps.storage.auth.users.create({
       id: "usr_1",
@@ -960,7 +960,7 @@ describe("Sixb auth runtime", () => {
 
   test("creates initial session deadlines from the configured policy", () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [],
       ...deps,
       auth: {
@@ -986,7 +986,7 @@ describe("Sixb auth runtime", () => {
     setSystemTime(now)
     try {
       const deps = createTestRuntimeDeps()
-      const sixb = new Sixb({
+      const sixb = new SixbHost({
         ontology: [],
         ...deps,
         auth: {
@@ -1066,7 +1066,7 @@ describe("Sixb auth runtime", () => {
     setSystemTime(now)
     try {
       const deps = createTestRuntimeDeps()
-      const sixb = new Sixb({
+      const sixb = new SixbHost({
         ontology: [],
         ...deps,
         auth: {
@@ -1132,7 +1132,7 @@ describe("Sixb auth runtime", () => {
     setSystemTime(now)
     try {
       const deps = createTestRuntimeDeps()
-      const sixb = new Sixb({
+      const sixb = new SixbHost({
         ontology: [],
         ...deps,
         auth: {
@@ -1209,7 +1209,7 @@ describe("Sixb auth runtime", () => {
 
   test("cacheTtlMs: 0 disables session caching", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [],
       ...deps,
       auth: { strategy: authStrategy, session: { cacheTtlMs: 0 } },
@@ -1253,7 +1253,7 @@ describe("Sixb auth runtime", () => {
     const deps = createTestRuntimeDeps()
     expect(
       () =>
-        new Sixb<readonly []>({
+        new SixbHost<readonly []>({
           ontology: [] as const,
           ...deps,
           auth: { strategy: authStrategy, session: { cacheTtlMs: -1 } },
@@ -1363,7 +1363,7 @@ describe("Sixb auth runtime", () => {
 
 function createMemberRuntime() {
   const deps = createTestRuntimeDeps()
-  const sixb = new Sixb<readonly []>({
+  const sixb = new SixbHost<readonly []>({
     id: "project-a",
     ontology: [] as const,
     ...deps,
@@ -1385,7 +1385,7 @@ function createMemberRuntime() {
 
 async function seedMember(
   deps: ReturnType<typeof createTestRuntimeDeps>,
-  sixb: Sixb<readonly []>,
+  sixb: SixbHost<readonly []>,
   params: {
     readonly userId: string
     readonly email: string
@@ -1409,7 +1409,7 @@ async function seedMember(
   }
 }
 
-describe("Sixb auth member management", () => {
+describe("SixbHost auth member management", () => {
   test("membership options expose assignable groups and capabilities", async () => {
     const { deps, sixb } = createMemberRuntime()
     const request = await seedAuthenticatedUser(sixb, deps, {

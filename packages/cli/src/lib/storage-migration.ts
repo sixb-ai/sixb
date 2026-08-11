@@ -1,6 +1,6 @@
 import { migrateStorage } from "@sixb/core"
 import { SixbCliError } from "./errors"
-import type { LoadedSixb } from "./loadSixb"
+import type { LoadedSixbHost } from "./loadSixb"
 import type { StorageSchemaRole } from "./production-roles"
 
 /** Set to `1` to start a role without bringing the storage schema up to date. */
@@ -46,7 +46,7 @@ export interface RoleStorageMigration {
  * passed through raw.
  */
 export async function migrateStorageForRole(
-  sixb: LoadedSixb,
+  sixb: LoadedSixbHost,
   options: RoleStorageMigrationOptions
 ): Promise<RoleStorageMigration> {
   const { role } = options
@@ -84,7 +84,7 @@ export async function migrateStorageForRole(
   }
 }
 
-async function runMigration(sixb: LoadedSixb, role: StorageSchemaRole) {
+async function runMigration(sixb: LoadedSixbHost, role: StorageSchemaRole) {
   try {
     return await migrateStorage(sixb.storage)
   } catch (error) {

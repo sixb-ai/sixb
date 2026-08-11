@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { SixbHostRuntime } from "@sixb/core"
 import { change, col, defineConnector, defineDataset, defineSync } from "@sixb/core"
 import type { ListLatestSyncRunsInput, SyncRunStorage } from "@sixb/core/storage"
 import { Elysia } from "elysia"
@@ -40,7 +40,7 @@ const syncs = [
     .intoDataset(invoicesDataset),
 ]
 
-function createSixbStub(syncRuns: Partial<SyncRunStorage>): Sixb<readonly OntologySource[]> {
+function createSixbStub(syncRuns: Partial<SyncRunStorage>): SixbHostRuntime {
   return {
     id: "my-app",
     storage: {
@@ -50,12 +50,12 @@ function createSixbStub(syncRuns: Partial<SyncRunStorage>): Sixb<readonly Ontolo
       list: () => syncs,
       getById: (id: string) => syncs.find((sync) => sync.id === id) ?? null,
     },
-  } as unknown as Sixb<readonly OntologySource[]>
+  } as unknown as SixbHostRuntime
 }
 
 function createTestApp(syncRuns: Partial<SyncRunStorage>) {
   const sixb = createSixbStub(syncRuns)
-  const sdk = {
+  const sixbExecution = {
     syncs: {
       list: () => sixb.syncs.list(),
       getById: (syncId: string) => sixb.syncs.getById(syncId),
@@ -66,7 +66,7 @@ function createTestApp(syncRuns: Partial<SyncRunStorage>) {
     },
   }
   const app = new Elysia()
-  app.derive(() => ({ sdk }))
+  app.derive(() => ({ sixb: sixbExecution }))
 
   return registerSyncRoutes(app, sixb)
 }

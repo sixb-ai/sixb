@@ -10,7 +10,7 @@ import {
   InMemoryStorage,
   type OntologySource,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import {
   type AbortBlobUploadInput,
@@ -80,7 +80,7 @@ class TestDirectBlobStorage extends InMemoryBlobStorage implements DirectUploadB
 }
 
 function createFilesApi(blobStorage = new InMemoryBlobStorage()) {
-  const sixb = new Sixb<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: "test-project",
     ontology: [Document],
     broker: new InMemoryBroker(),
@@ -91,7 +91,9 @@ function createFilesApi(blobStorage = new InMemoryBlobStorage()) {
   })
 
   return {
-    app: createSixbApi(new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })),
+    app: createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    ),
     blobStorage,
   }
 }

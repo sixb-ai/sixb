@@ -1,7 +1,7 @@
-import type { ActionDefinition, OntologySource, Sixb } from "@sixb/core"
+import type { ActionDefinition, SixbHostRuntime } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requireRequestSdk } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   ActionCatalogItemSchema,
@@ -38,12 +38,12 @@ function serializeAction(
   })
 }
 
-export function registerActionRoutes(app: Elysia, _sixb: Sixb<readonly OntologySource[]>) {
+export function registerActionRoutes(app: Elysia, _host: SixbHostRuntime) {
   return app
     .get(
       "/api/actions",
       async (context) => {
-        const actions = requireRequestSdk(context).actions.list()
+        const actions = requireRequestSixb(context).actions.list()
         return actions.map(serializeAction)
       },
       {
@@ -60,7 +60,7 @@ export function registerActionRoutes(app: Elysia, _sixb: Sixb<readonly OntologyS
       "/api/actions/:actionId",
       async (context) => {
         const { params, set } = context
-        const action = requireRequestSdk(context).actions.getById(params.actionId)
+        const action = requireRequestSixb(context).actions.getById(params.actionId)
         if (!action) {
           set.status = 404
           return { error: "Action not found" }
@@ -83,7 +83,7 @@ export function registerActionRoutes(app: Elysia, _sixb: Sixb<readonly OntologyS
       "/api/actions/:actionId",
       async (context) => {
         const { params, body, set } = context
-        const sdk = requireRequestSdk(context)
+        const sixb = requireRequestSixb(context)
         try {
           const parsedBody = RequestActionBodySchema.parse(body)
           const input = {
@@ -92,7 +92,7 @@ export function registerActionRoutes(app: Elysia, _sixb: Sixb<readonly OntologyS
             params: parsedBody.params,
             runId: parsedBody.runId,
           }
-          const result = await sdk.actions.request(input)
+          const result = await sixb.actions.request(input)
 
           set.status = 202
           return RequestActionResponseSchema.parse(result)

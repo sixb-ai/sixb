@@ -1,65 +1,13 @@
 import { pathToFileURL } from "node:url"
-import type {
-  ActionsRuntime,
-  BlobsRuntime,
-  Broker,
-  ConnectorRuntime,
-  ConnectorsRuntime,
-  DatasetsRuntime,
-  OntologyMaintenanceHandle,
-  OntologyOperationalStatus,
-  PipelinesRuntime,
-  ProjectionsRuntime,
-  RulesRuntime,
-  SchedulesRuntime,
-  SixbReadiness,
-  SixbRuntimeContext,
-  SyncsRuntime,
-} from "@sixb/core"
-import type { AgentsRuntime } from "@sixb/core/internal/agents"
-import type { AuthRuntime } from "@sixb/core/internal/auth"
-import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
-import type { ObjectRow } from "@sixb/core/storage"
+import type { SixbHostRuntime } from "@sixb/core"
 
-interface LoadedObjectsRuntime {
-  listTypes(): readonly unknown[]
-  listSubTypes(objectTypeId: string): string[]
-  list(params: {
-    objectTypeIds?: readonly string[]
-    limit?: number
-    offset?: number
-  }): Promise<{ total: number; hasMore: boolean; objects: ObjectRow[] }>
-}
-
-export interface LoadedSixb extends Omit<SixbRuntimeContext, "blobStorage" | "rules"> {
-  readonly id: string
-  readonly broker: Broker
-  readonly auth: AuthRuntime
-  readonly objects: LoadedObjectsRuntime
-  readonly actions: ActionsRuntime
-  readonly datasets: DatasetsRuntime
-  readonly syncs: SyncsRuntime
-  readonly pipelines: PipelinesRuntime
-  readonly schedules: SchedulesRuntime
-  readonly rules: RulesRuntime
-  readonly projections: ProjectionsRuntime
-  readonly connector: ConnectorRuntime
-  readonly connectors: ConnectorsRuntime
-  readonly blobs: BlobsRuntime
-  readonly workflows: WorkflowsRuntime
-  readonly agents: AgentsRuntime
-  startOntologyMaintenance(): Promise<OntologyMaintenanceHandle>
-  getOntologyOperationalStatus(): OntologyOperationalStatus
-  checkReadiness(): Promise<SixbReadiness>
-  closeLogger(): Promise<void>
-  closeBroker(): Promise<void>
-}
+export type LoadedSixbHost = SixbHostRuntime
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return !!value && typeof value === "object" && "then" in value
 }
 
-const REQUIRED_RUNTIME_PROPERTIES = [
+const REQUIRED_HOST_PROPERTIES = [
   "ontology",
   "actionRegistry",
   "events",
@@ -73,6 +21,7 @@ const REQUIRED_RUNTIME_PROPERTIES = [
 ] as const
 
 const REQUIRED_LIFECYCLE_METHODS = [
+  "withScope",
   "startOntologyMaintenance",
   "getOntologyOperationalStatus",
   "checkReadiness",
@@ -103,8 +52,8 @@ function hasWorkflows(value: Record<PropertyKey, unknown>): boolean {
 
 function hasPrimitiveFacades(value: Record<PropertyKey, unknown>): boolean {
   return (
-    typeof value.objects === "function" &&
-    hasMethods(value.objects, ["listTypes", "listSubTypes", "list"]) &&
+    isRecord(value.objects) &&
+    hasMethods(value.objects, ["listTypes", "listSubTypes"]) &&
     isRecord(value.actions) &&
     hasMethods(value.actions, ["list", "getById"]) &&
     isRecord(value.datasets) &&
@@ -133,43 +82,43 @@ function hasPrimitiveFacades(value: Record<PropertyKey, unknown>): boolean {
   )
 }
 
-function isSixbInstance(value: unknown): value is LoadedSixb {
+function isSixbHost(value: unknown): value is LoadedSixbHost {
   if (!isRecord(value)) return false
 
   return (
     typeof value.id === "string" &&
     typeof value.projectId === "string" &&
-    hasProperties(value, REQUIRED_RUNTIME_PROPERTIES) &&
+    hasProperties(value, REQUIRED_HOST_PROPERTIES) &&
     hasMethods(value, REQUIRED_LIFECYCLE_METHODS) &&
     hasPrimitiveFacades(value) &&
     hasWorkflows(value)
   )
 }
 
-export async function loadSixbFromEntry(entry: string): Promise<LoadedSixb> {
+export async function loadSixbFromEntry(entry: string): Promise<LoadedSixbHost> {
   const module = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
   const candidate = module.sixb ?? module.default
 
-  if (isSixbInstance(candidate)) {
+  if (isSixbHost(candidate)) {
     return candidate
   }
 
   if (typeof candidate === "function") {
     const created = (candidate as () => unknown)()
     const resolved = isPromiseLike(created) ? await created : created
-    if (isSixbInstance(resolved)) {
+    if (isSixbHost(resolved)) {
       return resolved
     }
   }
 
   if (isPromiseLike(candidate)) {
     const resolved = await candidate
-    if (isSixbInstance(resolved)) {
+    if (isSixbHost(resolved)) {
       return resolved
     }
   }
 
   throw new Error(
-    "Could not load Sixb runtime from entry. Export `sixb` (or default) as a Sixb instance or Promise<Sixb>."
+    "Could not load a Sixb host from entry. Export `sixb` (or default) as a SixbHost or Promise<SixbHost>."
   )
 }

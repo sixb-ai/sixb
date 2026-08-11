@@ -1,2 +1,2 @@
-export type { ProjectionWorkerSixb } from "./types"
+export type { ProjectionWorkerHost } from "./worker"
 export { ProjectionWorker } from "./worker"

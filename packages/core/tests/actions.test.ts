@@ -9,11 +9,12 @@ import {
   param,
   prop,
   ref,
-  Sixb,
+  SixbHost,
   stringEnum,
 } from "../src"
 import { flushSixbErrors } from "../src/error-reporting/internal"
 import { ActionRunError } from "../src/storage"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -157,7 +158,7 @@ describe("defineAction", () => {
 
 describe("ActionRegistry", () => {
   test("lists actions by id and by inherited target type", () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-registry-test",
       ontology: [Room, SuiteRoom],
       actions: [
@@ -195,14 +196,14 @@ describe("ActionRegistry", () => {
       .writeback(async () => {})
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Room],
         actions: [actionDefinition(reboot), actionDefinition(duplicate)],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(ActionDefinitionError)
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Room],
         actions: [actionDefinition(reboot), actionDefinition(duplicate)],
         ...createTestRuntimeDeps(),
@@ -217,7 +218,7 @@ describe("ActionRegistry", () => {
       .writeback(async () => {})
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Room, SuiteRoom],
         actions: [actionDefinition(setTemperature), actionDefinition(suiteOverride)],
         ...createTestRuntimeDeps(),
@@ -239,7 +240,7 @@ describe("ActionRegistry", () => {
       .writeback(async () => {})
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Room],
         actions: [actionDefinition(unknownAction)],
         ...createTestRuntimeDeps(),
@@ -257,14 +258,14 @@ describe("ActionRegistry", () => {
     } as unknown as ActionDefinition
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Room],
         actions: [invalidAction],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(ActionDefinitionError)
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Room],
         actions: [invalidAction],
         ...createTestRuntimeDeps(),
@@ -286,14 +287,14 @@ describe("ActionRegistry", () => {
     } as unknown as ActionDefinition
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Room],
         actions: [invalidAction],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(ActionDefinitionError)
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Room],
         actions: [invalidAction],
         ...createTestRuntimeDeps(),
@@ -304,7 +305,7 @@ describe("ActionRegistry", () => {
 
 describe("requestAction", () => {
   test("rejects unknown action", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-test",
       ontology: [Room],
       actions: [actionDefinition(setTemperature), actionDefinition(reboot)],
@@ -330,7 +331,7 @@ describe("requestAction", () => {
   })
 
   test("rejects actions that are not valid for the object type", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-test",
       ontology: [Room, SuiteRoom],
       actions: [actionDefinition(setTemperature), actionDefinition(prepareSuite)],
@@ -350,7 +351,7 @@ describe("requestAction", () => {
   })
 
   test("rejects missing required param", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-test",
       ontology: [Room],
       actions: [actionDefinition(setTemperature)],
@@ -378,7 +379,7 @@ describe("requestAction", () => {
   })
 
   test("rejects unknown param", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-test",
       ontology: [Room],
       actions: [actionDefinition(setTemperature)],
@@ -400,7 +401,7 @@ describe("requestAction", () => {
 
   test("preserves omitted and null params as distinct values", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "nullable-action-test",
       ontology: [Room],
       actions: [actionDefinition(updateRoomCategory)],
@@ -459,7 +460,7 @@ describe("requestAction", () => {
   })
 
   test("enforces required and nullable validation independently", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "nullable-action-test",
       ontology: [Room],
       actions: [
@@ -497,7 +498,7 @@ describe("requestAction", () => {
 
   test("canonicalizes exact decimal params and rejects JS numbers", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "decimal-action-test",
       ontology: [],
       actions: [actionDefinition(recordExactAmount)],
@@ -524,7 +525,7 @@ describe("requestAction", () => {
 
   test("accepts object ref params", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-ref-test",
       ontology: [Room],
       actions: [actionDefinition(attachRelatedRoom)],
@@ -560,7 +561,7 @@ describe("requestAction", () => {
   })
 
   test("rejects object ref params with the wrong object type", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-ref-test",
       ontology: [Room],
       actions: [actionDefinition(attachRelatedRoom)],
@@ -579,7 +580,7 @@ describe("requestAction", () => {
   })
 
   test("rejects object ref params without a string primary id", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-ref-test",
       ontology: [Room],
       actions: [actionDefinition(attachRelatedRoom)],
@@ -598,7 +599,7 @@ describe("requestAction", () => {
   })
 
   test("rejects object ref params with unknown fields", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-ref-test",
       ontology: [Room],
       actions: [actionDefinition(attachRelatedRoom)],
@@ -618,7 +619,7 @@ describe("requestAction", () => {
 
   test("queues object actions without loading the target object request-side", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-test",
       ontology: [Room],
       actions: [actionDefinition(setTemperature)],
@@ -647,7 +648,7 @@ describe("requestAction", () => {
       .writeback(() => {
         invoked += 1
       })
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-test",
       ontology: [Room],
       actions: [actionDefinition(counted)],
@@ -713,16 +714,17 @@ describe("requestAction", () => {
 
   test("keeps a queued run when the action.requested observation event fails", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const host = new SixbHost({
       id: "action-event-best-effort-test",
       ontology: [Room],
       actions: [actionDefinition(createRoom)],
       ...runtimeDeps,
     })
-    const originalAppend = sixb.events.append.bind(sixb.events)
+    const sixb = createTestSixb(host)
+    const originalAppend = host.events.append.bind(host.events)
     const originalConsoleError = console.error
 
-    sixb.events.append = async (input) => {
+    host.events.append = async (input) => {
       if (input.events.some((event) => event.type === "action.requested")) {
         throw new Error("event store unavailable")
       }
@@ -764,14 +766,14 @@ describe("requestAction", () => {
       })
       expect(events).toHaveLength(0)
     } finally {
-      sixb.events.append = originalAppend
+      host.events.append = originalAppend
       console.error = originalConsoleError
     }
   })
 
   test("reuses a matching run id and rejects conflicting payloads", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-idempotency-test",
       ontology: [Room],
       actions: [actionDefinition(setTemperature)],
@@ -826,7 +828,7 @@ describe("requestAction", () => {
       return enqueue(input)
     }
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-enqueue-retry-test",
       ontology: [Room],
       actions: [actionDefinition(setTemperature)],
@@ -900,7 +902,7 @@ describe("requestAction", () => {
 
   test("queues custom validation for the worker phase", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-test",
       ontology: [Room],
       actions: [actionDefinition(setTemperature)],
@@ -926,7 +928,7 @@ describe("requestAction", () => {
 
   test("allows inherited actions on subtypes", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "action-test",
       ontology: [Room, SuiteRoom],
       actions: [actionDefinition(setTemperature)],
@@ -959,7 +961,7 @@ describe("requestAction", () => {
 
   test("requests global actions through sixb.actions", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "global-action-test",
       ontology: [Room],
       actions: [actionDefinition(createRoom)],
@@ -988,7 +990,7 @@ describe("requestAction", () => {
 
   test("rejects invalid global action param schemas before emitting an event", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "global-action-test",
       ontology: [Room],
       actions: [actionDefinition(createRoom)],
@@ -1009,7 +1011,7 @@ describe("requestAction", () => {
   })
 
   test("rejects object-scoped actions without an object subject", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "global-action-test",
       ontology: [Room],
       actions: [actionDefinition(setTemperature)],
@@ -1025,7 +1027,7 @@ describe("requestAction", () => {
   })
 
   test("rejects global actions with an object subject", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "global-action-test",
       ontology: [Room],
       actions: [actionDefinition(createRoom)],

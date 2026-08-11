@@ -6,7 +6,7 @@ export type {
 } from "../connectors"
 export { ConnectorError, ConnectorNotFoundError } from "../connectors"
 export { EventsError } from "../events"
-export type { DynamicObjectsRuntime, ObjectsRuntime, ObjectsRuntimeOperations } from "../objects"
+export type { ObjectsRuntime, ObjectTypesRuntime } from "../objects"
 export { ObjectError } from "../objects"
 export type { ObjectRef } from "../ontology"
 export { OntologyNotFoundError, OntologyValidationError } from "../ontology"
@@ -32,24 +32,9 @@ export { WebhookValidationError } from "../webhooks"
 export type { CreateSixbOptions } from "./create"
 export { createSixb } from "./create"
 export { RuntimeError } from "./errors"
-export type {
-  ScopedActionsRuntime,
-  ScopedAgentsRuntime,
-  ScopedDatasetsRuntime,
-  ScopedEventsRuntime,
-  ScopedLogsRuntime,
-  ScopedObjectByIdHandle,
-  ScopedObjectSet,
-  ScopedObjectsRuntime,
-  ScopedPipelinesRuntime,
-  ScopedProjectionsRuntime,
-  ScopedRulesRuntime,
-  ScopedSixb,
-  ScopedSyncsRuntime,
-  ScopedWorkflowsRuntime,
-} from "./scoped"
-export type { SixbOptions } from "./sixb"
-export { Sixb } from "./sixb"
+export type { SixbHostOptions, SixbHostRuntime } from "./host"
+export { SixbHost } from "./host"
+export type { Sixb } from "./sixb"
 export type {
   BatchItemResult,
   ListResult,
@@ -73,8 +58,6 @@ export type {
   OntologySource,
   RegisteredObjectType,
   RegisteredValueTypes,
-  SixbInstance,
-  SixbRuntimeContext,
   TelemetryAppendInput,
   TelemetryChannel,
   TelemetryHistoryInput,

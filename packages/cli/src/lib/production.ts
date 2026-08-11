@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises"
 import { basename, dirname, resolve, sep } from "node:path"
-import { type LoadedSixb, loadSixbFromEntry } from "./loadSixb"
+import { type LoadedSixbHost, loadSixbFromEntry } from "./loadSixb"
 import type { ProductionRole } from "./production-roles"
 import { assertShareableProviders } from "./shareable-providers"
 
@@ -36,7 +36,7 @@ export async function resolveRuntimeEntry(options: RuntimeEntryOptions = {}): Pr
 
 export async function loadProductionSixb(
   options: ProductionRuntimeOptions
-): Promise<{ entry: string; sixb: LoadedSixb; projectRoot: string; buildOutdir: string }> {
+): Promise<{ entry: string; sixb: LoadedSixbHost; projectRoot: string; buildOutdir: string }> {
   const entry = await resolveRuntimeEntry(options)
   const sixb = await loadSixbFromEntry(entry)
   assertShareableProviders(sixb, options.role)

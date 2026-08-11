@@ -1,5 +1,5 @@
 import type { Worker } from "@sixb/core/internal/workers"
-import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
+import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
 import {
   runUntilSignal,
@@ -36,7 +36,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
     <LoadingView title="Starting sixb worker group" subtitle={entry} status="Loading runtime" />
   )
 
-  let sixb: LoadedSixb | null = null
+  let sixb: LoadedSixbHost | null = null
   let workers: Worker[] = []
 
   async function stopWorkersAndProviders() {
@@ -81,8 +81,9 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
       <LoadingView title="Starting sixb worker group" subtitle={entry} status="Starting workers" />
     )
 
+    const host = sixb
     workers = workerTypes.map((workerType) =>
-      createWorkerForType(sixb as LoadedSixb, workerType, {
+      createWorkerForType(host, workerType, {
         agentApiBaseUrl: options.apiPublicOrigin,
       })
     )

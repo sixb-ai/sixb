@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, prop } from "../../src/ontology"
-import { Sixb } from "../../src/runtime"
+import { SixbHost } from "../../src/runtime"
 import type { Sandbox, SandboxFactory } from "../../src/sandboxes"
 import { createTestRuntimeDeps } from "../test-runtime-deps"
 
@@ -26,15 +26,15 @@ function makeFactory(): SandboxFactory {
   }
 }
 
-describe("Sixb sandboxes wiring", () => {
+describe("SixbHost sandboxes wiring", () => {
   test("sandboxes is undefined when not configured", () => {
-    const sixb = new Sixb({ ontology: [Room], ...createTestRuntimeDeps() })
+    const sixb = new SixbHost({ ontology: [Room], ...createTestRuntimeDeps() })
     expect(sixb.sandboxes).toBeUndefined()
   })
 
   test("sandboxes is the exact factory passed in", () => {
     const factory = makeFactory()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [Room],
       ...createTestRuntimeDeps(),
       sandboxes: factory,
@@ -44,7 +44,7 @@ describe("Sixb sandboxes wiring", () => {
 
   test("the runtime exposes the same factory", async () => {
     const factory = makeFactory()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [Room],
       ...createTestRuntimeDeps(),
       sandboxes: factory,

@@ -11,8 +11,9 @@ import {
   isAllowed,
   type OntologySource,
   resolveAuthorizationContext,
-  type Sixb,
+  type SixbHost,
 } from "@sixb/core"
+import { createTestSixb } from "@sixb/core/testing"
 import { adminAuditDataset, teamNotesDataset } from "../datasets/auth-data"
 import { securityAdmins } from "../security/groups/security-admins"
 import { teamMembers } from "../security/groups/team-members"
@@ -31,29 +32,29 @@ async function createAuthExampleRuntime() {
 }
 
 function atlasContext(
-  sixb: Sixb<readonly OntologySource[]>,
+  host: SixbHost<readonly OntologySource[]>,
   groupIds: readonly string[],
   userId = "atlas-user"
 ) {
   return resolveAuthorizationContext({
     principal: { type: "user", id: userId },
     groupIds,
-    roles: sixb.security.listResolvedRoles(),
+    roles: host.security.listResolvedRoles(),
   })
 }
 
 describe("auth example Atlas authorization", () => {
   test("team members only see and do what their roles grant", async () => {
-    const sixb = await createAuthExampleRuntime()
-    await seedAuthExampleObjects(sixb)
+    const host = await createAuthExampleRuntime()
+    await seedAuthExampleObjects(createTestSixb(host))
 
-    const roles = sixb.security.listResolvedRoles()
-    const teamMemberContext = atlasContext(sixb, [teamMembers.id])
-    const adminContext = atlasContext(sixb, [securityAdmins.id])
-    const noGroupsContext = atlasContext(sixb, [])
-    const teamMember = sixb.as(teamMemberContext)
-    const admin = sixb.as(adminContext)
-    const noGroups = sixb.as(noGroupsContext)
+    const roles = host.security.listResolvedRoles()
+    const teamMemberContext = atlasContext(host, [teamMembers.id])
+    const adminContext = atlasContext(host, [securityAdmins.id])
+    const noGroupsContext = atlasContext(host, [])
+    const teamMember = createTestSixb(host, { authorization: teamMemberContext })
+    const admin = createTestSixb(host, { authorization: adminContext })
+    const noGroups = createTestSixb(host, { authorization: noGroupsContext })
 
     expect(canAccessApplication(teamMemberContext, roles, "app")).toBe(true)
     expect(canAccessApplication(teamMemberContext, roles, "atlas")).toBe(false)
@@ -130,8 +131,8 @@ describe("auth example Atlas authorization", () => {
       })
     ).resolves.toMatchObject({ runId: expect.any(String) })
     expect((await admin.events.read()).map((event) => event.type)).toContain("object.created")
-    expect(isAllowed(atlasContext(sixb, [securityAdmins.id]), { kind: "logs.observe" })).toBe(true)
-    expect(isAllowed(atlasContext(sixb, [teamMembers.id]), { kind: "logs.observe" })).toBe(false)
+    expect(isAllowed(atlasContext(host, [securityAdmins.id]), { kind: "logs.observe" })).toBe(true)
+    expect(isAllowed(atlasContext(host, [teamMembers.id]), { kind: "logs.observe" })).toBe(false)
 
     expect(await noGroups.objects.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
     expect(noGroups.actions.list()).toEqual([])

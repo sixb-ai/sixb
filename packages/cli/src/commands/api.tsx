@@ -2,7 +2,7 @@ import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import { createSixbServer, type SixbServer } from "@sixb/server"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
-import type { LoadedSixb } from "../lib/loadSixb"
+import type { LoadedSixbHost } from "../lib/loadSixb"
 import { builtAppOutdir, loadProductionSixb } from "../lib/production"
 import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
 import { migrateStorageForRole } from "../lib/storage-migration"
@@ -28,7 +28,7 @@ export async function runApi(options: ApiOptions = {}) {
     <LoadingView title="Starting sixb api" subtitle={loaded.entry} status="Preparing runtime" />
   )
 
-  let sixb: LoadedSixb | null = loaded.sixb
+  let sixb: LoadedSixbHost | null = loaded.sixb
   let server: SixbServer | null = null
 
   try {
@@ -65,9 +65,9 @@ export async function runApi(options: ApiOptions = {}) {
     })
 
     server = createSixbServer({
-      sixb: sixb as unknown as never,
+      host: sixb,
       port: topology.apiPort,
-      host: topology.apiHost,
+      hostname: topology.apiHost,
       quiet: true,
       browser: {
         publicOrigin: topology.apiPublicOrigin,

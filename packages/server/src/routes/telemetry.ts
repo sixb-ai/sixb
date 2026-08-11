@@ -1,8 +1,8 @@
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { SixbHostRuntime } from "@sixb/core"
 import type { TimeseriesPoint } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requireRequestSdk } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
@@ -27,7 +27,7 @@ function serializeTelemetryPoint(point: TimeseriesPoint) {
   }
 }
 
-export function registerTelemetryRoutes(app: Elysia, _sixb: Sixb<readonly OntologySource[]>) {
+export function registerTelemetryRoutes(app: Elysia, _host: SixbHostRuntime) {
   return app
     .post(
       "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId",
@@ -35,7 +35,7 @@ export function registerTelemetryRoutes(app: Elysia, _sixb: Sixb<readonly Ontolo
         const { params, body, set } = context
         try {
           const parsedBody = AppendTelemetryBodySchema.parse(body)
-          await requireRequestSdk(context).objects.appendTelemetry(params.objectTypeId, [
+          await requireRequestSixb(context).objects.appendTelemetry(params.objectTypeId, [
             {
               id: params.objectId,
               properties: {
@@ -77,7 +77,7 @@ export function registerTelemetryRoutes(app: Elysia, _sixb: Sixb<readonly Ontolo
           const parsedBody = BulkTelemetryHistoryBodySchema.parse(body)
           const from = parseDate(parsedBody.from)
           const to = parseDate(parsedBody.to)
-          const history = await requireRequestSdk(context).objects.getTelemetryHistoryBatch({
+          const history = await requireRequestSixb(context).objects.getTelemetryHistoryBatch({
             series: parsedBody.series,
             from,
             to,
@@ -115,13 +115,13 @@ export function registerTelemetryRoutes(app: Elysia, _sixb: Sixb<readonly Ontolo
       async (context) => {
         const { params, query, set } = context
         try {
-          const sdk = requireRequestSdk(context)
-          if (!sdk.objects.getTypeById(params.objectTypeId)) {
+          const sixb = requireRequestSixb(context)
+          if (!sixb.objects.getTypeById(params.objectTypeId)) {
             set.status = 404
             return { error: "Object not found" }
           }
           const parsedQuery = TelemetryHistoryQuerySchema.parse(query)
-          const history = await sdk.objects.getTelemetryHistory({
+          const history = await sixb.objects.getTelemetryHistory({
             objectTypeId: params.objectTypeId,
             objectId: params.objectId,
             propertyId: params.propertyId,
@@ -157,12 +157,12 @@ export function registerTelemetryRoutes(app: Elysia, _sixb: Sixb<readonly Ontolo
       async (context) => {
         const { params, set } = context
         try {
-          const sdk = requireRequestSdk(context)
-          if (!sdk.objects.getTypeById(params.objectTypeId)) {
+          const sixb = requireRequestSixb(context)
+          if (!sixb.objects.getTypeById(params.objectTypeId)) {
             set.status = 404
             return { error: "Object not found" }
           }
-          const latest = await sdk.objects.getLatestTelemetry({
+          const latest = await sixb.objects.getLatestTelemetry({
             objectTypeId: params.objectTypeId,
             objectId: params.objectId,
             propertyId: params.propertyId,
