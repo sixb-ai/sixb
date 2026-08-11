@@ -56,7 +56,14 @@ export class RedisConnectionManager {
 
   async createSubscriptionClient(): Promise<RedisBrokerClient> {
     this.assertOpen()
-    const client = await this.openClient("Failed to connect Redis subscription client")
+    // A blocking command belongs to one connection generation. Reconnecting the same Bun client
+    // can leave its in-flight XREAD promise pending, so subscription pumps replace disposable
+    // clients themselves and resume from their retained cursor.
+    const client = await this.openClient("Failed to connect Redis subscription client", {
+      ...this.options,
+      autoReconnect: false,
+      enableOfflineQueue: false,
+    })
     if (this.closed) {
       this.closeClient(client)
       this.assertOpen()
@@ -115,8 +122,11 @@ export class RedisConnectionManager {
     }
   }
 
-  private async openClient(errorMessage: string): Promise<RedisBrokerClient> {
-    const client = new RedisClient(this.url ?? redisUrlFromEnvironment(), this.options)
+  private async openClient(
+    errorMessage: string,
+    options: RedisOptions | undefined = this.options
+  ): Promise<RedisBrokerClient> {
+    const client = new RedisClient(this.url ?? redisUrlFromEnvironment(), options)
     try {
       await client.connect()
       return client

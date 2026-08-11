@@ -101,6 +101,11 @@ broker contract: every subscriber receives every matching record independently.
 By default subscriptions start at the latest retained cursor and receive only
 new records. Use `from: "earliest"` or `afterCursor` for retained replay.
 
+Subscription clients are disposable and do not reconnect in place. An
+application-level watchdog also bounds each `XREAD BLOCK` call. If a read stalls
+or its connection fails, the broker replaces that client and resumes from the
+last observed cursor.
+
 ### Retention
 
 `maxRecords` maps to exact `XTRIM MAXLEN`, and `maxAgeMs` maps to exact

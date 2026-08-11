@@ -21,14 +21,9 @@ import {
 } from "./scripts"
 import { assertEncodableRecord, decodeRecord, encodeRecord } from "./serialization"
 import { type EnsuredStream, StreamManager } from "./stream-manager"
-import {
-  bodyFromEntry,
-  parseStreamEntries,
-  parseXReadEntries,
-  type RedisStreamEntry,
-  toText,
-} from "./stream-replies"
-import { type ActiveSubscription, SubscriptionRegistry } from "./subscription-registry"
+import { bodyFromEntry, parseStreamEntries, type RedisStreamEntry, toText } from "./stream-replies"
+import { RedisSubscriptionPump } from "./subscription-pump"
+import { SubscriptionRegistry } from "./subscription-registry"
 
 const DEFAULT_PREFIX = "sixb:broker"
 const DEFAULT_DEDUPE_TTL_MS = 120_000
@@ -392,83 +387,28 @@ export class RedisBroker implements Broker {
     }
 
     const client = await this.connectionManager.createSubscriptionClient()
-    let stopped = false
-    let pump: Promise<void> = Promise.resolve()
-    const subscription: ActiveSubscription = {
-      stop: () => {
-        if (stopped) {
-          return
-        }
-        stopped = true
-        this.connectionManager.closeClient(client)
-      },
-      drain: async () => {
-        await pump
-      },
-    }
-    const unsubscribe = this.subscriptionRegistry.register(subscription)
+    const pump = new RedisSubscriptionPump({
+      connectionManager: this.connectionManager,
+      client,
+      stream: ensured,
+      names: params.names && params.names.length > 0 ? new Set(params.names) : undefined,
+      keys: params.keys && params.keys.length > 0 ? new Set(params.keys) : undefined,
+      batchSize: this.subscribeBatchSize,
+      blockMs: this.subscribeBlockMs,
+      handler,
+    })
+    const unsubscribe = this.subscriptionRegistry.register(pump)
 
     try {
-      const names = params.names && params.names.length > 0 ? new Set(params.names) : undefined
-      const keys = params.keys && params.keys.length > 0 ? new Set(params.keys) : undefined
       // Resolve "latest" to a concrete id once. Reusing "$" after each BLOCK
       // timeout can skip records written between two XREAD calls.
-      let lastSeenId =
+      const cursor =
         params.afterCursor ??
         (params.from === "earliest"
           ? (lastTrimmedId ?? "0-0")
           : await this.subscriptionStartCursor(client, ensured))
       this.assertOpen()
-
-      pump = (async () => {
-        try {
-          while (!stopped) {
-            const entries = await this.xread(client, ensured, lastSeenId)
-            const records: BrokerRecord[] = []
-
-            for (const entry of entries) {
-              // Advance even for records filtered out by name so the loop never
-              // replays unmatched entries forever.
-              lastSeenId = entry.id
-
-              let record: BrokerRecord
-              try {
-                record = decodeRecord({
-                  streamId: ensured.streamId,
-                  body: bodyFromEntry(entry),
-                  cursor: entry.id,
-                  fallbackPublishedAt: new Date().toISOString(),
-                })
-              } catch (error) {
-                console.error("[RedisBroker] Failed to decode subscribed record:", error)
-                continue
-              }
-
-              if (!matchesFilters(record, names, keys)) {
-                continue
-              }
-              records.push(record)
-            }
-
-            if (records.length === 0) {
-              continue
-            }
-
-            try {
-              handler(records)
-            } catch {
-              // Handler failures are swallowed per the Broker subscribe contract.
-            }
-          }
-        } catch (error) {
-          if (!stopped) {
-            console.error("[RedisBroker] Subscription pump failed:", error)
-          }
-        } finally {
-          this.connectionManager.closeClient(client)
-        }
-      })()
-
+      pump.start(cursor)
       return unsubscribe
     } catch (error) {
       unsubscribe()
@@ -587,30 +527,6 @@ export class RedisBroker implements Broker {
       throw new RedisBrokerError(`Failed to read stream "${ensured.streamId}"`, { cause: error })
     }
     return parseStreamEntries(reply)
-  }
-
-  private async xread(
-    client: RedisBrokerClient,
-    ensured: EnsuredStream,
-    lastSeenId: string
-  ): Promise<readonly RedisStreamEntry[]> {
-    let reply: unknown
-    try {
-      reply = await client.send("XREAD", [
-        "COUNT",
-        String(this.subscribeBatchSize),
-        "BLOCK",
-        String(this.subscribeBlockMs),
-        "STREAMS",
-        ensured.keys.streamKey,
-        lastSeenId,
-      ])
-    } catch (error) {
-      throw new RedisBrokerError(`Failed to subscribe to stream "${ensured.streamId}"`, {
-        cause: error,
-      })
-    }
-    return parseXReadEntries(reply)
   }
 
   private async enforceAgeRetention(

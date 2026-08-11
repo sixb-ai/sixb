@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { randomUUID } from "node:crypto"
 import { runBrokerContractSuite } from "@sixb/core/testing"
+import { RedisClient } from "bun"
 import { RedisBroker } from "../src"
 import { createTestBroker, requireRedisUrl } from "./helpers"
 
@@ -129,6 +130,53 @@ describe("RedisBroker", () => {
       const retained = await broker.read({ projectId, streamId: stream.id, limit: 200 })
       expect(retained.records).toHaveLength(100)
     } finally {
+      await cleanup()
+    }
+  })
+
+  test("recreates a subscription client after its blocked XREAD connection is killed", async () => {
+    // Regression proof: with the watchdog/client replacement removed, Bun reconnects this socket
+    // but the in-flight XREAD promise never settles and delivery below times out.
+    const { broker, projectId, cleanup } = createTestBroker()
+    const admin = new RedisClient(requireRedisUrl())
+    const stream = { id: "__subscription_reconnect" }
+    const received: string[] = []
+    let unsubscribe: (() => void) | undefined
+    const originalError = console.error
+    const errors: string[] = []
+
+    try {
+      await admin.connect()
+      const existingXreadClients = await xreadClientIds(admin)
+      await broker.ensureStream({ projectId, stream })
+      unsubscribe = await broker.subscribe({ projectId, streamId: stream.id }, (records) => {
+        received.push(...records.map((record) => String(record.payload)))
+      })
+
+      let subscriptionClientId: string | undefined
+      await waitUntil(async () => {
+        const clientIds = await xreadClientIds(admin)
+        subscriptionClientId = [...clientIds].find((id) => !existingXreadClients.has(id))
+        return subscriptionClientId !== undefined
+      }, 5_000)
+
+      console.error = (...args: unknown[]) => {
+        errors.push(args.map(String).join(" "))
+      }
+      await admin.send("CLIENT", ["KILL", "ID", subscriptionClientId!])
+      await broker.append({
+        projectId,
+        streamId: stream.id,
+        records: [{ payload: "after-reconnect" }],
+      })
+
+      await waitUntil(() => received.length === 1, 5_000)
+      expect(received).toEqual(["after-reconnect"])
+      expect(errors.some((message) => message.includes("reconnecting"))).toBe(true)
+    } finally {
+      console.error = originalError
+      unsubscribe?.()
+      admin.close()
       await cleanup()
     }
   })
@@ -467,10 +515,23 @@ describe("RedisBroker", () => {
   })
 })
 
-async function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<void> {
+async function xreadClientIds(client: RedisClient): Promise<ReadonlySet<string>> {
+  const reply = await client.send("CLIENT", ["LIST"])
+  const ids = String(reply)
+    .split("\n")
+    .filter((line) => line.includes("cmd=xread"))
+    .map((line) => line.match(/(?:^| )id=([^ ]+)/)?.[1])
+    .filter((id): id is string => id !== undefined)
+  return new Set(ids)
+}
+
+async function waitUntil(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs: number
+): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (predicate()) {
+    if (await predicate()) {
       return
     }
     await Bun.sleep(25)
