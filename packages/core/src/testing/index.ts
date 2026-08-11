@@ -19,6 +19,12 @@ export {
   runEffectiveStorageContractSuite,
 } from "./effective-storage-contract"
 export {
+  type AuthorizationContext,
+  createTestExecutionScope,
+  type ExecutionScope,
+  type TestExecutionOptions,
+} from "./execution"
+export {
   type LakeMergeStorageContractSuiteOptions,
   runLakeMergeStorageContractSuite,
 } from "./lake-merge-storage-contract"

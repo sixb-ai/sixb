@@ -781,6 +781,21 @@ export {
   WorkflowValidationError,
 } from "./workflows"
 
+// ── Execution ───────────────────────────────────────────────
+
+export type {
+  AuthorizablePrincipal,
+  AuthorizationRef,
+  ExecutionContext,
+  ExecutionExecutor,
+  ExecutionScope,
+  ExecutionSource,
+  KernelOperation,
+  RuntimeAuthorization,
+  TrustedPrimitiveKind,
+  TrustedPrimitiveRef,
+} from "./execution"
+
 // ── Runtime ─────────────────────────────────────────────────
 
 export type {
