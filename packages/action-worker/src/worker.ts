@@ -8,6 +8,7 @@ import {
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ActionRunRequestedQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
+import { ACTION_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { runActionJob } from "./run-action-job"
 import type { ActionJob, ActionRunResult, ActionWorkerContext } from "./types"
 
@@ -24,7 +25,10 @@ export interface ActionWorkerOptions {
   readonly idlePollMs?: number
 }
 
-export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
+export class ActionWorker extends QueueWorker<
+  ActionRunRequestedQueueJob,
+  typeof ACTION_RUN_FAILURE_CODES
+> {
   private readonly host: ActionWorkerHost
   private readonly idleWithoutDefinitions: boolean
 
@@ -32,6 +36,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
     super({
       projectId: host.id,
       queue: host.queues.actions,
+      failureCodes: ACTION_RUN_FAILURE_CODES,
       workerId: `action-worker-${host.id}`,
       claimLimit: 1,
       leaseMs: options.leaseMs,

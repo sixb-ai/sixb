@@ -8,7 +8,7 @@ import {
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "@sixb/core/queues"
-import type { SyncRunRecord } from "@sixb/core/storage"
+import { SYNC_RUN_FAILURE_CODES, type SyncRunRecord } from "@sixb/core/storage"
 import { runSyncJob, SyncRunAlreadyStartedError } from "./run-sync-job"
 import type { SyncJob, SyncRunResult, SyncWorkerContext } from "./types"
 
@@ -23,7 +23,10 @@ export interface SyncWorkerHost extends PrimitiveExecutionHost {
   readonly definitions: Pick<SixbDefinitions, "syncs" | "datasets">
 }
 
-export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+export class SyncWorker extends QueueWorker<
+  SyncRunRequestedQueueJob,
+  typeof SYNC_RUN_FAILURE_CODES
+> {
   private readonly host: SyncWorkerHost
 
   constructor(host: SyncWorkerHost) {
@@ -34,6 +37,7 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
     super({
       projectId: host.id,
       queue: host.queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: `sync-worker-${host.id}`,
     })
 

@@ -68,7 +68,7 @@ type Reservation =
  * for redelivery when we **cannot** record the fate (storage unavailable) — acking then would leave
  * the thread silently locked forever, since nothing else reclaims a run but a redelivered job.
  */
-export class AgentWorker extends QueueWorker<AgentQueueJob> {
+export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAILURE_CODES> {
   private readonly host: AgentWorkerHost
   private readonly context: AgentWorkerContext | null
   private readonly idleWithoutAgents: boolean
@@ -83,6 +83,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     super({
       projectId: host.id,
       queue: host.queues.agents,
+      failureCodes: AGENT_RUN_FAILURE_CODES,
       workerId: `agent-worker-${host.id}`,
       claimLimit: normalizeConcurrency(options.concurrency),
       leaseMs,
@@ -141,7 +142,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
   protected async execute(
     claimed: ClaimedQueueJob<AgentQueueJob>,
     signal: AbortSignal,
-    delivery: QueueDelivery<AgentQueueJob>
+    delivery: QueueDelivery<AgentQueueJob, (typeof AGENT_RUN_FAILURE_CODES)[number]>
   ): Promise<void> {
     const context = this.requireContext()
     const { job } = claimed

@@ -1,18 +1,25 @@
 import { randomUUID } from "node:crypto"
+import type { SixbErrorCode } from "../errors/types"
 import { QueueError } from "./errors"
 import type {
+  ActionQueueJobFailureCode,
   ActionRunRequestedQueueJob,
   AgentQueueJob,
+  AgentQueueJobFailureCode,
   ClaimedQueueJob,
   NewQueueJob,
+  PipelineQueueJobFailureCode,
   PipelineRunRequestedQueueJob,
+  ProjectionQueueJobFailureCode,
   ProjectionRunRequestedQueueJob,
   Queue,
   QueueJob,
-  QueueJobError,
+  QueueJobFailure,
   Queues,
+  SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
   WorkflowQueueJob,
+  WorkflowQueueJobFailureCode,
 } from "./types"
 
 type QueueRecordState = "queued" | "completed" | "failed"
@@ -23,6 +30,7 @@ interface QueueRecord<TQueueJob extends QueueJob = QueueJob> {
   job: TQueueJob
   // A leased job stays "queued" until a worker completes or fails it.
   state: QueueRecordState
+  failure: QueueJobFailure | null
   leaseId: string | null
   claimedAt: string | null
   leaseExpiresAt: string | null
@@ -131,6 +139,7 @@ class InMemoryQueueStore {
       queueId,
       job,
       state: "queued",
+      failure: null,
       leaseId: null,
       claimedAt: null,
       leaseExpiresAt: null,
@@ -165,7 +174,9 @@ class InMemoryQueueStore {
   }
 }
 
-class InMemoryQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob> {
+class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCode>
+  implements Queue<TQueueJob, TFailureCode>
+{
   constructor(
     private readonly store: InMemoryQueueStore,
     private readonly queueId: string
@@ -260,7 +271,6 @@ class InMemoryQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob> {
     jobId: string
     leaseId: string
     availableAt?: string
-    error?: QueueJobError
   }): Promise<void> {
     const record = this.requireActiveLease(params)
     const availableAt = params.availableAt ?? new Date().toISOString()
@@ -277,10 +287,11 @@ class InMemoryQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob> {
     projectId: string
     jobId: string
     leaseId: string
-    error: QueueJobError
+    failure: QueueJobFailure<TFailureCode>
   }): Promise<void> {
     const record = this.requireActiveLease(params)
     record.state = "failed"
+    record.failure = structuredClone(params.failure)
     clearLease(record)
   }
 
@@ -347,15 +358,30 @@ export class InMemoryQueues implements Queues {
   readonly scope = "process" as const
   private readonly store = new InMemoryQueueStore()
 
-  readonly syncRuns = new InMemoryQueue<SyncRunRequestedQueueJob>(this.store, "sync.runs")
-  readonly pipelines = new InMemoryQueue<PipelineRunRequestedQueueJob>(this.store, "pipeline.runs")
-  readonly projections = new InMemoryQueue<ProjectionRunRequestedQueueJob>(
+  readonly syncRuns = new InMemoryQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>(
     this.store,
-    "projection.runs"
+    "sync.runs"
   )
-  readonly workflows = new InMemoryQueue<WorkflowQueueJob>(this.store, "workflow.runs")
-  readonly actions = new InMemoryQueue<ActionRunRequestedQueueJob>(this.store, "action.runs")
-  readonly agents = new InMemoryQueue<AgentQueueJob>(this.store, "agent.runs")
+  readonly pipelines = new InMemoryQueue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>(
+    this.store,
+    "pipeline.runs"
+  )
+  readonly projections = new InMemoryQueue<
+    ProjectionRunRequestedQueueJob,
+    ProjectionQueueJobFailureCode
+  >(this.store, "projection.runs")
+  readonly workflows = new InMemoryQueue<WorkflowQueueJob, WorkflowQueueJobFailureCode>(
+    this.store,
+    "workflow.runs"
+  )
+  readonly actions = new InMemoryQueue<ActionRunRequestedQueueJob, ActionQueueJobFailureCode>(
+    this.store,
+    "action.runs"
+  )
+  readonly agents = new InMemoryQueue<AgentQueueJob, AgentQueueJobFailureCode>(
+    this.store,
+    "agent.runs"
+  )
 
   /** Nothing to reach: the store is a field of this object. */
   health(): Promise<void> {

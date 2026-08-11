@@ -8,7 +8,11 @@ import { captureSixbFailure, createSixbError, toSixbFailure } from "@sixb/core/i
 import type { QueueDelivery } from "@sixb/core/internal/workers"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
-import type { AgentQueueJob, AgentWorkflowNodeRequestedQueueJob } from "@sixb/core/queues"
+import type {
+  AgentQueueJob,
+  AgentQueueJobFailureCode,
+  AgentWorkflowNodeRequestedQueueJob,
+} from "@sixb/core/queues"
 import type {
   ExecutionRecord,
   WorkflowAgentNodeRunExecution,
@@ -33,7 +37,7 @@ export interface ExecuteWorkflowAgentNodeInput {
   readonly host: AgentWorkerHost
   readonly job: AgentWorkflowNodeRequestedQueueJob
   readonly signal: AbortSignal
-  readonly delivery: QueueDelivery<AgentQueueJob>
+  readonly delivery: QueueDelivery<AgentQueueJob, AgentQueueJobFailureCode>
   readonly watchForCancel: (runId: string) => Promise<{
     readonly signal: AbortSignal
     readonly stop: () => void
@@ -355,7 +359,7 @@ async function reserveWorkflowAgentNode(input: {
 }
 
 function projectQueueOwnership(input: {
-  readonly delivery: QueueDelivery<AgentQueueJob>
+  readonly delivery: QueueDelivery<AgentQueueJob, AgentQueueJobFailureCode>
   readonly runs: WorkflowRunStorage
   readonly projectId: string
   readonly nodeRunId: string

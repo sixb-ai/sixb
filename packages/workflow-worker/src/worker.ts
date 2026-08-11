@@ -20,6 +20,7 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
+import { WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { EventsRuntimeWorkflowRunObserver } from "./events"
 import { runWorkflowJob, runWorkflowResumeJob } from "./run-workflow-job"
 import type { WorkflowRunObserver, WorkflowWorkerContext } from "./types"
@@ -27,7 +28,10 @@ import type { WorkflowRunObserver, WorkflowWorkerContext } from "./types"
 const MAX_WORKFLOW_DELIVERY_ATTEMPTS = 5
 const WORKFLOW_RETRY_BACKOFF_MS = 1_000
 
-export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
+export class WorkflowWorker extends QueueWorker<
+  WorkflowQueueJob,
+  typeof WORKFLOW_RUN_FAILURE_CODES
+> {
   private readonly host: WorkflowWorkerHost
   private readonly observer: WorkflowRunObserver
   private readonly workflowRuns: WorkflowRunStorage
@@ -51,6 +55,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
     super({
       projectId: host.id,
       queue: host.queues.workflows,
+      failureCodes: WORKFLOW_RUN_FAILURE_CODES,
       workerId: `workflow-worker-${host.id}`,
     })
 
@@ -62,7 +67,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
   protected async execute(
     claimed: ClaimedQueueJob<WorkflowQueueJob>,
     signal: AbortSignal,
-    delivery: QueueDelivery<WorkflowQueueJob>
+    delivery: QueueDelivery<WorkflowQueueJob, (typeof WORKFLOW_RUN_FAILURE_CODES)[number]>
   ): Promise<void> {
     const execution = freshWorkflowExecution(delivery.leaseExpiresAt)
     const runId = claimed.job.payload.runId

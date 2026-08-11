@@ -3,7 +3,7 @@ import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, PipelineRunRequestedQueueJob } from "@sixb/core/queues"
-import type { PipelineRunStorage } from "@sixb/core/storage"
+import { PIPELINE_RUN_FAILURE_CODES, type PipelineRunStorage } from "@sixb/core/storage"
 import {
   emitDatasetVersionCommitted,
   emitPipelineRunFinished,
@@ -19,7 +19,10 @@ import type {
   PipelineWorkerHost,
 } from "./types"
 
-export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
+export class PipelineWorker extends QueueWorker<
+  PipelineRunRequestedQueueJob,
+  typeof PIPELINE_RUN_FAILURE_CODES
+> {
   private readonly context: PipelineWorkerContext
   private readonly host: PipelineWorkerHost
 
@@ -36,6 +39,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
     super({
       projectId: host.id,
       queue: host.queues.pipelines,
+      failureCodes: PIPELINE_RUN_FAILURE_CODES,
       workerId: `pipeline-worker-${host.id}`,
     })
 
