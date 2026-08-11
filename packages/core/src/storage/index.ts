@@ -467,12 +467,17 @@ export type { Storage, StorageTransactionOptions } from "./types"
 export type {
   WebhookDeliveryClaimRecord,
   WebhookDeliveryClaimResult,
+  WebhookDeliveryFailure,
+  WebhookDeliveryFailureCode,
   WebhookDeliveryKey,
   WebhookDeliveryRecord,
   WebhookDeliveryStatus,
   WebhookDeliveryStorage,
 } from "./webhook-deliveries"
-export { InMemoryWebhookDeliveryStorage } from "./webhook-deliveries"
+export {
+  InMemoryWebhookDeliveryStorage,
+  WEBHOOK_DELIVERY_FAILURE_CODES,
+} from "./webhook-deliveries"
 export type {
   FinishWebhookRunInput,
   FinishWebhookRunStatus,

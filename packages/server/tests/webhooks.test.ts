@@ -16,6 +16,7 @@ import {
   type SixbHostOptions,
 } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
+import type { WebhookDeliveryFailure } from "@sixb/core/storage"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -419,9 +420,9 @@ describe("webhook routes", () => {
           status: "failed",
           responseStatus: 500,
           error: expect.objectContaining({
-            code: "internal.unexpected",
-            message: "An unexpected internal error occurred.",
-            retryable: false,
+            code: "webhook.delivery_failed",
+            message: "Webhook delivery failed.",
+            retryable: true,
           }),
         }),
       ])
@@ -433,11 +434,23 @@ describe("webhook routes", () => {
         connectorId: "github",
         webhookId: "failing",
         runId: failedRun?.id,
+        responseStatus: 500,
       },
     })
     expect(failedRun?.error?.at).toBe(failedRun?.finishedAt?.toISOString())
     expect(reports).toHaveLength(1)
-    expect(reports[0]?.error).toBe(handlerError)
+    expect(reports[0]?.error).toMatchObject({
+      code: "webhook.delivery_failed",
+      message: "Webhook handler failed",
+      retryable: true,
+      cause: handlerError,
+      details: {
+        connectorId: "github",
+        webhookId: "failing",
+        runId: failedRun?.id,
+        responseStatus: 500,
+      },
+    })
     expect(reports[0]?.context).toMatchObject({
       type: "run.failed",
       notificationId: `project:test-project:run:webhook:${failedRun?.id}:failed:${reports[0]?.context.occurredAt}`,
@@ -553,6 +566,24 @@ describe("webhook routes", () => {
     ])
     expect(reports[2]?.error.message).toBe("Webhook handler returned HTTP 503")
     expect(reports[3]?.error.message).toBe("Webhook handler returned HTTP 302")
+    expect(reports[2]?.error).toMatchObject({
+      code: "webhook.delivery_failed",
+      retryable: true,
+      details: {
+        connectorId: "github",
+        webhookId: "unavailable",
+        responseStatus: 503,
+      },
+    })
+    expect(reports[3]?.error).toMatchObject({
+      code: "webhook.delivery_failed",
+      retryable: true,
+      details: {
+        connectorId: "github",
+        webhookId: "redirected",
+        responseStatus: 302,
+      },
+    })
     const runContexts = reports.map((report) => {
       if (report.context.type !== "run.failed") {
         throw new Error(`Unexpected error context '${report.context.type}'.`)
@@ -607,7 +638,22 @@ describe("webhook routes", () => {
         return {}
       },
     })
-    const app = createWebhookApp([connector])
+    const storage = new InMemoryStorage()
+    const deliveryFailures: WebhookDeliveryFailure[] = []
+    const runFailures: unknown[] = []
+    const failDelivery = storage.webhookDeliveries.fail.bind(storage.webhookDeliveries)
+    const finishRun = storage.webhookRuns.finish.bind(storage.webhookRuns)
+    storage.webhookDeliveries.fail = async (input) => {
+      deliveryFailures.push(input.failure)
+      return failDelivery(input)
+    }
+    storage.webhookRuns.finish = async (input) => {
+      if (input.status === "failed") {
+        runFailures.push(input.error)
+      }
+      return finishRun(input)
+    }
+    const app = createWebhookRuntime([connector], storage, undefined, () => {}).app
     const dispatch = () =>
       app.fetch(
         new Request("http://localhost/api/webhooks/github/retryable", {
@@ -622,6 +668,36 @@ describe("webhook routes", () => {
     expect(first.status).toBe(503)
     expect(retry.status).toBe(503)
     expect(invocations).toBe(2)
+    expect(deliveryFailures).toHaveLength(2)
+    expect(runFailures).toHaveLength(2)
+    expect(runFailures[0]).toBe(deliveryFailures[0])
+    expect(runFailures[1]).toBe(deliveryFailures[1])
+    expect(deliveryFailures).toEqual([
+      expect.objectContaining({
+        code: "webhook.delivery_failed",
+        message: "Webhook delivery failed.",
+        retryable: true,
+        details: {
+          connectorId: "github",
+          webhookId: "retryable",
+          idempotencyKey: "delivery-1",
+          runId: expect.stringMatching(/^webhookrun_/),
+          responseStatus: 503,
+        },
+      }),
+      expect.objectContaining({
+        code: "webhook.delivery_failed",
+        message: "Webhook delivery failed.",
+        retryable: true,
+        details: {
+          connectorId: "github",
+          webhookId: "retryable",
+          idempotencyKey: "delivery-1",
+          runId: expect.stringMatching(/^webhookrun_/),
+          responseStatus: 503,
+        },
+      }),
+    ])
   })
 })
 

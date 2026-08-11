@@ -29723,7 +29723,7 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["internal.unexpected"]
+                                "enum": ["internal.unexpected", "webhook.delivery_failed"]
                               },
                               "message": {
                                 "type": "string",

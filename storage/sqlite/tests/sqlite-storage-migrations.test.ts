@@ -13,6 +13,7 @@ import {
   PIPELINE_RUN_FAILURE_CODES,
   PROJECTION_RUN_FAILURE_CODES,
   SYNC_RUN_FAILURE_CODES,
+  WEBHOOK_DELIVERY_FAILURE_CODES,
   WEBHOOK_RUN_FAILURE_CODES,
   WORKFLOW_RUN_FAILURE_CODES,
 } from "@sixb/core/storage"
@@ -152,6 +153,13 @@ const expectedStorageMigrationRows = [
     id: "018-ontology-outbox-failure-record",
     status: "applied",
     version: 18,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "019-webhook-delivery-failure-record",
+    status: "applied",
+    version: 19,
   },
 ]
 
@@ -859,6 +867,86 @@ describe("SQLite storage migrations", () => {
         },
       })
       expect(rows[1]).toEqual({ id: "event-stopped", last_failure: null })
+    } finally {
+      db.close()
+    }
+  })
+
+  test("webhook delivery failure migration replaces legacy diagnostics with a safe failure", () => {
+    const db = new Database(":memory:")
+    try {
+      const failureMigrationIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "019-webhook-delivery-failure-record"
+      )
+      const failureMigration = sqliteStorageMigrations.steps[failureMigrationIndex]
+      if (failureMigrationIndex !== 18 || !failureMigration) {
+        throw new Error("SQLite webhook delivery failure migration is missing.")
+      }
+      for (const migration of sqliteStorageMigrations.steps.slice(0, failureMigrationIndex)) {
+        migration.up(db)
+      }
+      db.query(`
+        INSERT INTO webhook_deliveries (
+          project_id, connector_id, webhook_id, idempotency_key, status,
+          received_at, completed_at, failed_at, error
+        ) VALUES (?, ?, ?, ?, 'failed', ?, NULL, ?, ?)
+      `).run(
+        "project-a",
+        "github",
+        "events",
+        "delivery-failed-at",
+        "2026-08-10T12:00:00.000Z",
+        "2026-08-10T12:01:00.000Z",
+        "Error: handler unavailable"
+      )
+      db.query(`
+        INSERT INTO webhook_deliveries (
+          project_id, connector_id, webhook_id, idempotency_key, status,
+          received_at, completed_at, failed_at, error
+        ) VALUES (?, ?, ?, ?, 'failed', ?, NULL, NULL, ?)
+      `).run(
+        "project-a",
+        "stripe",
+        "payments",
+        "delivery-received-at",
+        "2026-08-10T12:02:00.000Z",
+        "Error: legacy row without failure time"
+      )
+
+      failureMigration.up(db)
+
+      expect(readMemoryTableColumns(db, "webhook_deliveries")).toContain("failure")
+      expect(readMemoryTableColumns(db, "webhook_deliveries")).not.toContain("error")
+      const rows = db
+        .query("SELECT idempotency_key, failure FROM webhook_deliveries ORDER BY idempotency_key")
+        .all() as Array<{ readonly idempotency_key: string; readonly failure: string | null }>
+      expect(rows[0]?.idempotency_key).toBe("delivery-failed-at")
+      expect(parseSixbFailure(rows[0]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+        code: "webhook.delivery_failed",
+        message: "Webhook delivery failed.",
+        retryable: true,
+        at: "2026-08-10T12:01:00.000Z",
+        details: {
+          connectorId: "github",
+          webhookId: "events",
+          idempotencyKey: "delivery-failed-at",
+          migratedFromLegacyError: true,
+          timestampSource: "failedAt",
+        },
+      })
+      expect(parseSixbFailure(rows[1]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+        code: "webhook.delivery_failed",
+        message: "Webhook delivery failed.",
+        retryable: true,
+        at: "2026-08-10T12:02:00.000Z",
+        details: {
+          connectorId: "stripe",
+          webhookId: "payments",
+          idempotencyKey: "delivery-received-at",
+          migratedFromLegacyError: true,
+          timestampSource: "receivedAt",
+        },
+      })
     } finally {
       db.close()
     }

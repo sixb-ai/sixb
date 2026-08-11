@@ -16,9 +16,9 @@ const startedAt = new Date("2026-06-01T11:59:00.000Z")
 const finishedAt = new Date("2026-06-01T12:00:00.000Z")
 
 const failure = {
-  code: "internal.unexpected",
-  message: "Webhook failed",
-  retryable: false,
+  code: "webhook.delivery_failed",
+  message: "Webhook delivery failed.",
+  retryable: true,
   at: finishedAt.toISOString(),
   details: { connectorId: "github", webhookId: "events", runId: "failed-run" },
 } as const satisfies SixbFailure<WebhookRunFailureCode>
@@ -43,9 +43,9 @@ export function runWebhookRunStorageContractSuite<TStorage extends WebhookRunSto
       await withStorage(async (storage) => {
         await storage.start(runInput("failed-run"))
         const mutableFailure = {
-          code: "internal.unexpected" as const,
+          code: "webhook.delivery_failed" as const,
           message: String(failure.message),
-          retryable: false as const,
+          retryable: true as const,
           at: failure.at,
           details: {
             connectorId: String(failure.details.connectorId),

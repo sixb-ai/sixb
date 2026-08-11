@@ -1,10 +1,13 @@
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
 import type {
   WebhookDeliveryClaimRecord,
   WebhookDeliveryClaimResult,
+  WebhookDeliveryFailure,
   WebhookDeliveryKey,
   WebhookDeliveryRecord,
   WebhookDeliveryStorage,
 } from "@sixb/core/storage"
+import { WEBHOOK_DELIVERY_FAILURE_CODES } from "@sixb/core/storage"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
@@ -67,7 +70,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
             received_at = ${input.receivedAt},
             completed_at = ${null},
             failed_at = ${null},
-            error = ${null}
+            failure = ${null}
         WHERE project_id = ${input.projectId}
           AND connector_id = ${input.connectorId}
           AND webhook_id = ${input.webhookId}
@@ -93,7 +96,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
       SET status = ${"completed"},
           completed_at = ${input.completedAt},
           failed_at = ${null},
-          error = ${null}
+          failure = ${null}
       WHERE project_id = ${input.projectId}
         AND connector_id = ${input.connectorId}
         AND webhook_id = ${input.webhookId}
@@ -111,13 +114,14 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
   }
 
   async fail(
-    input: WebhookDeliveryKey & { failedAt: string; error: string }
+    input: WebhookDeliveryKey & { failedAt: string; failure: WebhookDeliveryFailure }
   ): Promise<WebhookDeliveryRecord> {
+    const failure = serializeSixbFailure(input.failure, WEBHOOK_DELIVERY_FAILURE_CODES)
     const [updated] = await this.sql<WebhookDeliveryRow[]>`
       UPDATE webhook_deliveries
       SET status = ${"failed"},
           failed_at = ${input.failedAt},
-          error = ${input.error}
+          failure = ${failure}::text::jsonb
       WHERE project_id = ${input.projectId}
         AND connector_id = ${input.connectorId}
         AND webhook_id = ${input.webhookId}
@@ -155,7 +159,10 @@ function toWebhookDeliveryRecord(row: WebhookDeliveryRow): WebhookDeliveryRecord
     receivedAt: toIsoString(row.received_at),
     completedAt: row.completed_at ? toIsoString(row.completed_at) : undefined,
     failedAt: row.failed_at ? toIsoString(row.failed_at) : undefined,
-    error: row.error ?? undefined,
+    failure:
+      row.failure === null
+        ? undefined
+        : parseSixbFailure(row.failure, WEBHOOK_DELIVERY_FAILURE_CODES),
   }
 }
 
@@ -176,5 +183,5 @@ interface WebhookDeliveryRow {
   readonly received_at: Date | string
   readonly completed_at: Date | string | null
   readonly failed_at: Date | string | null
-  readonly error: string | null
+  readonly failure: unknown | null
 }

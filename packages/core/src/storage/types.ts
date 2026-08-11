@@ -213,6 +213,8 @@ export type {
 export type {
   WebhookDeliveryClaimRecord,
   WebhookDeliveryClaimResult,
+  WebhookDeliveryFailure,
+  WebhookDeliveryFailureCode,
   WebhookDeliveryKey,
   WebhookDeliveryRecord,
   WebhookDeliveryStatus,
