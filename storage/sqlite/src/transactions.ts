@@ -12,6 +12,7 @@ export interface SqliteStoreConnection {
 export interface SqliteStoreConnectionOptions {
   readonly path?: string
   readonly connection?: SqliteStoreConnection
+  readonly readonly?: boolean
 }
 
 export function openSqliteStoreConnection(
@@ -26,13 +27,14 @@ export function openSqliteStoreConnection(
   }
 
   const path = options.path ?? ":memory:"
-  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true })
-  const db = new SqliteDatabase(path)
+  if (path !== ":memory:" && !options.readonly) mkdirSync(dirname(path), { recursive: true })
+  const db = new SqliteDatabase(path, options.readonly ? { readonly: true } : undefined)
   db.run("PRAGMA foreign_keys = ON")
+  db.run("PRAGMA busy_timeout = 5000")
   return {
     db,
     ownsConnection: true,
-    installFreshSchema: path === ":memory:",
+    installFreshSchema: path === ":memory:" && !options.readonly,
   }
 }
 
@@ -62,6 +64,11 @@ export function runImmediateTransaction<T>(db: Database, run: () => T): T {
   } finally {
     activeImmediateTransactions.delete(db)
   }
+}
+
+/** Lets timers and request handlers run between bounded synchronous SQLite chunks. */
+export function yieldSqliteEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
 }
 
 export async function runImmediateTransactionAsync<T>(

@@ -33,9 +33,10 @@ empty.
 With a `path`, `SqliteStorage` exposes core's `StorageMigrator` contract and the CLI runs it at
 startup. You do not write migrations — they ship inside this package.
 
-Applied migrations are checksummed. Schema changes ship as new ordered steps; changing an already
-applied step fails startup instead of silently rewriting migration history. Before 1.0, an explicitly
-breaking migration may still require deleting the database file and starting over.
+Applied migrations are checksummed and schema changes ship as new ordered steps. Keep the database
+file when upgrading normally; incompatible or dirty history fails startup instead of silently
+rewriting an unknown schema. Before 1.0, an explicitly breaking migration may still require deleting
+the database file and starting over.
 
 ## Transactions
 
@@ -45,13 +46,16 @@ await storage.transaction(async (tx) => {
 })
 ```
 
-Nested transactions are rejected. The `isolation` option is accepted and **ignored**: every
-transaction runs through one shared connection, serialized by an internal lock and a
-`BEGIN IMMEDIATE`, so there is no concurrent transaction to isolate against — the lock already gives
-serializable semantics for transaction-vs-transaction races. `isolation: "serializable"` only becomes
-meaningful on a provider with true concurrent connections, such as [`@sixb/pg`](../pg).
+Nested transactions are rejected. The `isolation` option is accepted and **ignored**: every write
+transaction runs through one connection, serialized by an internal lock and a `BEGIN IMMEDIATE`, so
+there is no concurrent writer to isolate against. `isolation: "serializable"` only becomes meaningful
+on a provider with true concurrent connections, such as [`@sixb/pg`](../pg).
 
-That single-connection design is also the reason to reach for `@sixb/pg` before you scale out: every
-process needs its own file, so replicas cannot share this storage.
+File-backed storage uses WAL mode and serves object and timeseries queries from a separate read-only
+snapshot connection. Long materializations therefore do not block those reads behind the writer.
+In-memory storage keeps one connection because SQLite in-memory databases are connection-local.
+
+Reach for `@sixb/pg` before scaling out: SQLite still has one writer and is intended for one local
+Sixb process, not shared replicas.
 
 Call `close()` on shutdown.
