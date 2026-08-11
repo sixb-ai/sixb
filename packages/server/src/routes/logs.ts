@@ -1,22 +1,18 @@
-import { isAllowed, logLevelsAtOrAbove, type OntologySource, type Sixb } from "@sixb/core"
+import { logLevelsAtOrAbove, type OntologySource, type Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requestAuthState } from "../auth/scope"
+import { requireRequestSdk } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { DEFAULT_LOGS_PAGE_LIMIT, LogsQuerySchema, LogsResponseSchema } from "../schemas/logs"
+import { handleRouteError } from "../utils/http"
 
-export function registerLogRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerLogRoutes(app: Elysia, _sixb: Sixb<readonly OntologySource[]>) {
   return app.get(
     "/api/logs",
     async (context) => {
       const { query, set } = context
-      const { authz } = requestAuthState(context)
-
-      if (!isAllowed(authz, { kind: "logs.observe" })) {
-        set.status = 403
-        return { error: "Missing required capability 'observe:logs'." }
-      }
+      const sdk = requireRequestSdk(context)
 
       try {
         const parsed = LogsQuerySchema.parse(query)
@@ -33,8 +29,8 @@ export function registerLogRoutes(app: Elysia, sixb: Sixb<readonly OntologySourc
         }
         const page =
           parsed.direction === "backward"
-            ? await sixb.logs.tail({ ...input, beforeCursor: parsed.beforeCursor })
-            : await sixb.logs.read({ ...input, afterCursor: parsed.afterCursor })
+            ? await sdk.logs.tail({ ...input, beforeCursor: parsed.beforeCursor })
+            : await sdk.logs.read({ ...input, afterCursor: parsed.afterCursor })
 
         return {
           count: page.lines.length,
@@ -43,8 +39,7 @@ export function registerLogRoutes(app: Elysia, sixb: Sixb<readonly OntologySourc
           hasMore: page.hasMore,
         }
       } catch (error) {
-        set.status = 400
-        return { error: error instanceof Error ? error.message : String(error) }
+        return handleRouteError(error, set)
       }
     },
     {

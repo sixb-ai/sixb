@@ -33,10 +33,20 @@ export type { CreateSixbOptions } from "./create"
 export { createSixb } from "./create"
 export { RuntimeError } from "./errors"
 export type {
+  ScopedActionsRuntime,
+  ScopedAgentsRuntime,
+  ScopedDatasetsRuntime,
+  ScopedEventsRuntime,
+  ScopedLogsRuntime,
   ScopedObjectByIdHandle,
   ScopedObjectSet,
   ScopedObjectsRuntime,
+  ScopedPipelinesRuntime,
+  ScopedProjectionsRuntime,
+  ScopedRulesRuntime,
   ScopedSixb,
+  ScopedSyncsRuntime,
+  ScopedWorkflowsRuntime,
 } from "./scoped"
 export type { SixbOptions } from "./sixb"
 export { Sixb } from "./sixb"

@@ -1,7 +1,7 @@
 import type { ActionDefinition, OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requestAuthState } from "../auth/scope"
+import { requireRequestSdk } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   ActionCatalogItemSchema,
@@ -38,13 +38,12 @@ function serializeAction(
   })
 }
 
-export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerActionRoutes(app: Elysia, _sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/actions",
       async (context) => {
-        const { scoped } = requestAuthState(context)
-        const actions = scoped ? scoped.actions.list() : sixb.actions.list()
+        const actions = requireRequestSdk(context).actions.list()
         return actions.map(serializeAction)
       },
       {
@@ -61,10 +60,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       "/api/actions/:actionId",
       async (context) => {
         const { params, set } = context
-        const { scoped } = requestAuthState(context)
-        const action = scoped
-          ? scoped.actions.getById(params.actionId)
-          : sixb.actions.getById(params.actionId)
+        const action = requireRequestSdk(context).actions.getById(params.actionId)
         if (!action) {
           set.status = 404
           return { error: "Action not found" }
@@ -87,7 +83,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       "/api/actions/:actionId",
       async (context) => {
         const { params, body, set } = context
-        const { scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         try {
           const parsedBody = RequestActionBodySchema.parse(body)
           const input = {
@@ -96,9 +92,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             params: parsedBody.params,
             runId: parsedBody.runId,
           }
-          const result = scoped
-            ? await scoped.actions.request(input)
-            : await sixb.actions.request(input)
+          const result = await sdk.actions.request(input)
 
           set.status = 202
           return RequestActionResponseSchema.parse(result)

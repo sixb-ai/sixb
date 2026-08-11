@@ -1,10 +1,11 @@
-import type { AuthorizationContext, OntologySource, Sixb } from "@sixb/core"
+import type { OntologySource } from "@sixb/core"
 import { agentRunStreamDefinition, agentRunStreamId } from "@sixb/core/agents/streams"
 import type { BrokerRecord } from "@sixb/core/broker"
+import type { ExecutionSixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import type { SixbServer } from "../../server"
-import { decodeWsMessage, safeSend, wsAuthz, wsStateKey } from "../../utils/ws"
+import { decodeWsMessage, safeSend, wsRequestSdk, wsStateKey } from "../../utils/ws"
 import { serializeAgentRun } from "../agents"
 
 interface AgentStreamSubscriptionState {
@@ -60,35 +61,15 @@ export function parseAgentStreamMessage(payload: unknown):
   return { ok: true, data: parsed.data }
 }
 
+/** `sdk` is transitional until slice 2C promotes the execution-bound runtime to `Sixb`. */
 export async function canAccessAgentRunStream(
-  sixb: Sixb<readonly OntologySource[]>,
-  input: {
-    readonly runId: string
-    readonly authz: AuthorizationContext | null
-  }
+  sdk: ExecutionSixb<readonly OntologySource[]>,
+  runId: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const storage = sixb.storage.agents
-  if (!storage) {
-    return { ok: false, message: "Agent storage is not configured." }
-  }
-
-  const run = await storage.runs.getById({ projectId: sixb.id, id: input.runId })
+  const run = await sdk.agents.runs.getById(runId)
   if (!run) {
     return { ok: false, message: "Agent run not found." }
   }
-
-  // Auth-disabled development runtimes are privileged, matching the existing HTTP agent routes.
-  if (!input.authz) {
-    return { ok: true }
-  }
-
-  // Reuse the one owner + `run:agent` rule instead of re-implementing it here: the scoped surface
-  // returns null for a thread the caller may not read (absent, not owner, or ungranted).
-  const thread = await sixb.as(input.authz).agents.getThread(run.threadId)
-  if (!thread) {
-    return { ok: false, message: "Agent run not found." }
-  }
-
   return { ok: true }
 }
 
@@ -136,10 +117,12 @@ async function subscribeAgentStream(
   message: SubscribeMessage
 ): Promise<void> {
   const sixb = server.getSixb()
-  const access = await canAccessAgentRunStream(sixb, {
-    runId: message.runId,
-    authz: wsAuthz(ws),
-  })
+  const sdk = wsRequestSdk(ws)
+  if (!sdk) {
+    safeSend(ws, { type: "error", message: "Execution scope is not available." })
+    return
+  }
+  const access = await canAccessAgentRunStream(sdk, message.runId)
   if (!access.ok) {
     safeSend(ws, { type: "error", message: access.message })
     return
@@ -193,7 +176,7 @@ async function subscribeAgentStream(
     afterCursor: message.afterCursor ?? null,
   })
   sendRecords(ws, buffered.splice(0))
-  if (!(await sendRunSnapshot(sixb, ws, message.runId))) {
+  if (!(await sendRunSnapshot(sdk, ws, message.runId))) {
     stopSubscription(state)
     return
   }
@@ -207,10 +190,12 @@ async function replayAgentStream(
   message: ReplayMessage
 ): Promise<void> {
   const sixb = server.getSixb()
-  const access = await canAccessAgentRunStream(sixb, {
-    runId: message.runId,
-    authz: wsAuthz(ws),
-  })
+  const sdk = wsRequestSdk(ws)
+  if (!sdk) {
+    safeSend(ws, { type: "error", message: "Execution scope is not available." })
+    return
+  }
+  const access = await canAccessAgentRunStream(sdk, message.runId)
   if (!access.ok) {
     safeSend(ws, { type: "error", message: access.message })
     return
@@ -235,7 +220,7 @@ async function replayAgentStream(
       afterCursor: page.cursor ?? message.afterCursor ?? null,
       count: page.records.length,
     })
-    await sendRunSnapshot(sixb, ws, message.runId)
+    await sendRunSnapshot(sdk, ws, message.runId)
   } catch (error) {
     safeSend(ws, { type: "error", message: errorMessage(error) })
   }
@@ -269,12 +254,12 @@ function stopSubscription(state: AgentStreamSubscriptionState | undefined): void
 }
 
 async function sendRunSnapshot(
-  sixb: Sixb<readonly OntologySource[]>,
+  sdk: ExecutionSixb<readonly OntologySource[]>,
   ws: { send: (message: string) => void },
   runId: string
 ): Promise<boolean> {
   try {
-    const run = await sixb.storage.agents?.runs.getById({ projectId: sixb.id, id: runId })
+    const run = await sdk.agents.runs.getById(runId)
     if (!run) {
       safeSend(ws, { type: "error", message: "Agent run not found." })
       return false

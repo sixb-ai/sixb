@@ -19,6 +19,7 @@ import {
 } from "@sixb/core"
 import type { BrokerRecord } from "@sixb/core/broker"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { Elysia } from "elysia"
 import { registerLogRoutes } from "../src/routes/logs"
 import { parseLogSubscriptionMessage } from "../src/routes/ws/logs"
@@ -437,8 +438,14 @@ function authzWithLogs(): AuthorizationContext {
 }
 
 function logRoutesWithAuthz(sixb: Sixb<readonly OntologySource[]>, authz: AuthorizationContext) {
-  const app = new Elysia().derive(() => ({ authz, scoped: sixb.as(authz) }))
-  return registerLogRoutes(app as unknown as Elysia, sixb)
+  const app = new Elysia()
+  app.derive(({ request }) => ({
+    sdk: bindRequestExecution(sixb, {
+      request,
+      authorization: { type: "principal", context: authz },
+    }),
+  }))
+  return registerLogRoutes(app, sixb)
 }
 
 function wsUrl(baseUrl: string): string {

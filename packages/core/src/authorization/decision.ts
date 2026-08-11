@@ -11,9 +11,9 @@
  *
  * SECURITY — this makes "privileged" the silent default: any caller that
  * reaches a leaf without an authorization context bypasses all grant checks.
- * That is intended for internal callers, but it means HTTP routes serving
- * authenticated principals must go through the scoped runtime (`sixb.as(ctx)`),
- * never the raw runtime. See `RequestAuthState` in the server for the rule.
+ * That is intended for internal callers, but it means HTTP routes serving authenticated
+ * principals must use the execution SDK bound at the request boundary, never the ambient host.
+ * See `RequestAuthState` in the server for the rule.
  */
 
 import type { AuthSessionAudience } from "../auth/audience"

@@ -4,8 +4,8 @@ import {
   type FileRef,
   InMemoryFileUploadSessions,
   type OntologySource,
-  type Principal,
   type Sixb,
+  SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import { computeBlobDigest, supportsDirectUpload } from "@sixb/core/blob-storage/server"
 import {
@@ -16,7 +16,7 @@ import {
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requestAuthState } from "../auth/scope"
+import { requireRequestSdk } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
@@ -36,8 +36,6 @@ import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/req
 // adds headroom for multipart/form-data encoding overhead on the `POST /api/files`
 // form route (it is unrelated to the removed multipart upload strategy).
 export const DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES = DEFAULT_SIMPLE_FILE_UPLOAD_BYTES + 1024 * 1024
-
-const SYSTEM_PRINCIPAL: Principal = { type: "system", id: "system" }
 
 export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   // Staged/direct-put upload sessions default to an in-memory store: they are NOT
@@ -131,10 +129,9 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/files/uploads",
       async (context) => {
         const { body, set } = context
-        const { authz } = requestAuthState(context)
         try {
           const parsed = CreateFileUploadBodySchema.parse(body)
-          const principal = authz?.principal ?? SYSTEM_PRINCIPAL
+          const principal = requireRequestSdk(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
           const uploadId = createFileUploadId()
           const expiresAt = createUploadExpiresAt()
           const expectedDigest = parsed.digest as BlobDigest | undefined
@@ -191,9 +188,8 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/files/uploads/:uploadId/content",
       async (context) => {
         const { params, request, set } = context
-        const { authz } = requestAuthState(context)
         try {
-          const principal = authz?.principal ?? SYSTEM_PRINCIPAL
+          const principal = requireRequestSdk(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
           if (session.status !== "pending") {
             throw terminalSessionError(session.status)
@@ -280,9 +276,8 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/files/uploads/:uploadId/parts/:partNumber",
       async (context) => {
         const { params, set } = context
-        const { authz } = requestAuthState(context)
         try {
-          const principal = authz?.principal ?? SYSTEM_PRINCIPAL
+          const principal = requireRequestSdk(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
           if (session.status !== "pending") {
             throw terminalSessionError(session.status)
@@ -339,9 +334,8 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/files/uploads/:uploadId/complete",
       async (context) => {
         const { body, params, set } = context
-        const { authz } = requestAuthState(context)
         try {
-          const principal = authz?.principal ?? SYSTEM_PRINCIPAL
+          const principal = requireRequestSdk(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
           const parsed = CompleteFileUploadBodySchema.parse(body ?? {})
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
 
@@ -409,9 +403,8 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/files/uploads/:uploadId/abort",
       async (context) => {
         const { params, set } = context
-        const { authz } = requestAuthState(context)
         try {
-          const principal = authz?.principal ?? SYSTEM_PRINCIPAL
+          const principal = requireRequestSdk(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
 
           if (session.status === "completed") {

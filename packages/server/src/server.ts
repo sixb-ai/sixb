@@ -2,6 +2,7 @@ import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
 import type { OntologyMaintenanceHandle, OntologySource, Sixb } from "@sixb/core"
 import { CSRF_HEADER_NAME } from "@sixb/core/internal/auth"
+import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import { zodToJsonSchema } from "zod-to-json-schema"
@@ -196,23 +197,49 @@ export function createSixbApi(server: SixbServer) {
     })
   )
 
-  // Resolve the session once per request and attach the principal's scoped SDK.
-  // The beforeHandle enforces the auth decision before any route runs; `scoped`
-  // and `authz` stay null for public routes and disabled auth (privileged mode).
+  // Resolve authentication and bind one execution SDK at the request boundary. Protected routes
+  // never choose between a principal SDK and the ambient runtime themselves.
   app
     .derive(async ({ request }) => {
       const internalAuthState = consumeInternalRequestAuthState(request)
       if (internalAuthState) {
-        return { auth: { kind: "allow" as const, session: null }, ...internalAuthState }
+        const { authorization, ...agentState } = internalAuthState
+        return {
+          auth: { kind: "allow" as const, session: null },
+          ...agentState,
+          sdk: bindRequestExecution(sixb, {
+            request,
+            authorization,
+          }),
+        }
       }
 
       const auth = await guard.resolve(request)
       if (auth.kind === "deny" || !auth.session?.authenticated) {
-        return { auth, authz: null, scoped: null }
+        return {
+          auth,
+          sdk:
+            auth.kind === "allow" && !guard.isAuthEnabled()
+              ? bindRequestExecution(sixb, {
+                  request,
+                  authorization: { type: "disabled" },
+                })
+              : null,
+        }
       }
 
       const authz = sixb.auth.contextFromSession(auth.session)
-      return { auth, authz, scoped: sixb.as(authz) }
+      const credential =
+        auth.session.credentialSource === "session"
+          ? { type: "session" as const, id: auth.session.session.id }
+          : { type: "accessToken" as const, id: auth.session.accessToken.id }
+      return {
+        auth,
+        sdk: bindRequestExecution(sixb, {
+          request,
+          authorization: { type: "principal", context: authz, credential },
+        }),
+      }
     })
     .onBeforeHandle(({ auth }) => (auth.kind === "deny" ? auth.response : undefined))
     .mapResponse(({ auth, request, set }) => {

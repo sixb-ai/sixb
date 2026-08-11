@@ -42,6 +42,10 @@ import {
   type EventsRuntime,
   OntologyOutboxDispatcher,
 } from "../events"
+import {
+  assertExecutionScopeProject,
+  resolveRuntimeAuthorization,
+} from "../execution/authorization"
 import type { LakeStorage } from "../lake-storage"
 import { type LoggerProvider, LogsRuntime, type ObservabilityOptions } from "../logging"
 import {
@@ -80,12 +84,18 @@ import type { RegisteredWebhook } from "../webhooks"
 import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webhooks"
 import type { WorkflowDefinition, WorkflowsRuntime } from "../workflows"
 import { createWorkflowsRuntime } from "../workflows"
+import { registerExecutionBinder } from "./execution-binding"
 import {
   createOntologyMutationRuntime,
   registerOntologyMutationRuntime,
 } from "./ontology-mutations"
 import { resolveRuntimeDefinitions } from "./resolve-definitions"
-import { createScopedSixb, type ScopedSixb } from "./scoped"
+import {
+  createExecutionSixb,
+  createScopedSixb,
+  type ExecutionSixbDependencies,
+  type ScopedSixb,
+} from "./scoped"
 import { StorageReadiness } from "./storage-readiness"
 import type { OntologySource, SixbInstance, SixbRuntimeContext } from "./types"
 
@@ -263,6 +273,26 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.pipelines = createPipelinesRuntime(this.runtimeContext, definitions.pipelines)
     this.workflows = createWorkflowsRuntime(this.runtimeContext, definitions.workflows)
     this.agents = createAgentsRuntime(this.runtimeContext, definitions.agents)
+    this.registerExecutionBinding()
+  }
+
+  private registerExecutionBinding(): void {
+    registerExecutionBinder(this, (scope) => {
+      assertExecutionScopeProject(this.projectId, scope)
+      const authorization = resolveRuntimeAuthorization(scope.authorization)
+      if (authorization.type === "denied") {
+        throw new Error("[Sixb] Execution scope carries unregistered runtime authorization.")
+      }
+      const runtime =
+        authorization.type === "principal"
+          ? { ...this.runtimeContext, authorization: authorization.context }
+          : this.runtimeContext
+      return createExecutionSixb<TOntologySources>(
+        runtime,
+        this.executionDependencies(),
+        scope.execution
+      )
+    })
   }
 
   get id(): string {
@@ -315,23 +345,21 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   as(context: AuthorizationContext): ScopedSixb<TOntologySources> {
     return createScopedSixb<TOntologySources>(
       { ...this.runtimeContext, authorization: context },
-      {
-        datasets: {
-          list: () => this.datasets.list(),
-          getById: (datasetId) => this.datasets.getById(datasetId),
-        },
-        syncs: {
-          list: () => this.syncs.list(),
-          getById: (syncId) => this.syncs.getById(syncId),
-        },
-        pipelines: {
-          list: () => this.pipelines.list(),
-          getById: (pipelineId) => this.pipelines.getById(pipelineId),
-        },
-        workflows: this.workflows,
-        agents: this.agents,
-      }
+      this.executionDependencies()
     )
+  }
+
+  private executionDependencies(): ExecutionSixbDependencies {
+    return {
+      datasets: this.datasets,
+      syncs: this.syncs,
+      pipelines: this.pipelines,
+      projections: this.projections,
+      rules: this.rules,
+      workflows: this.workflows,
+      agents: this.agents,
+      logs: this.logs,
+    }
   }
 }
 

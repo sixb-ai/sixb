@@ -734,7 +734,8 @@ describe("authorized object routes", () => {
         syncIds: [],
         sourcePipelineIds: [],
         targetPipelineIds: [],
-        projectionIds: ["orders-contracts", "orders-contract-invoices"],
+        // The link projection also targets invoices, so it stays hidden without invoice view access.
+        projectionIds: ["orders-contracts"],
       })
     )
 
@@ -747,7 +748,7 @@ describe("authorized object routes", () => {
         syncIds: [],
         sourcePipelineIds: [],
         targetPipelineIds: [],
-        projectionIds: ["orders-contracts", "orders-contract-invoices"],
+        projectionIds: ["orders-contracts"],
       })
     )
 

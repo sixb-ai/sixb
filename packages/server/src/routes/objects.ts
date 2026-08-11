@@ -1,6 +1,5 @@
 import {
   AuthorizationError,
-  isAllowed,
   type ObjectQuery,
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
@@ -9,12 +8,6 @@ import {
   type OntologySource,
   type Sixb,
 } from "@sixb/core"
-import {
-  countObjects,
-  executeObjectQuery,
-  existsObjects,
-  facetObjects,
-} from "@sixb/core/internal/query"
 import type {
   ExpandedLinkValue,
   ExpandedObjectRow,
@@ -24,7 +17,7 @@ import type {
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { type RequestAuthState, requestAuthState } from "../auth/scope"
+import { requireRequestSdk } from "../auth/scope"
 import {
   createContextualFileContentResponse,
   fileContentGetResponses,
@@ -106,7 +99,13 @@ function serializeLinkValue(value: ExpandedLinkValue): SerializedLinkValue {
   return serializeExpandedObject(value as ExpandedObjectRow)
 }
 
-function serializePlan(plan: Awaited<ReturnType<typeof executeObjectQuery>>["plan"]) {
+function serializePlan(plan: {
+  readonly mode: string
+  readonly providerIssues: readonly unknown[]
+  readonly fallbackIssues: readonly unknown[]
+  readonly issues: readonly unknown[]
+  readonly fallback?: { readonly maxRows: number; readonly requiresExplicitBound: boolean }
+}) {
   return {
     mode: plan.mode,
     providerIssues: plan.providerIssues,
@@ -171,19 +170,10 @@ function formatZodIssuePath(path: readonly (string | number)[]): string {
 }
 
 async function getObjectRow(
-  sixb: Sixb<readonly OntologySource[]>,
-  scoped: ReturnType<typeof requestAuthState>["scoped"],
+  sdk: ReturnType<typeof requireRequestSdk>,
   params: { objectTypeId: string; objectId: string }
 ) {
-  if (scoped) {
-    return scoped.objects.get(params.objectTypeId, params.objectId)
-  }
-
-  return sixb.storage.objects.getByPrimaryId({
-    projectId: sixb.id,
-    objectTypeId: params.objectTypeId,
-    primaryId: params.objectId,
-  })
+  return sdk.objects.get(params.objectTypeId, params.objectId)
 }
 
 interface ObjectSearchItem {
@@ -193,15 +183,13 @@ interface ObjectSearchItem {
 
 async function searchObjects(
   sixb: Sixb<readonly OntologySource[]>,
-  authState: RequestAuthState,
+  sdk: ReturnType<typeof requireRequestSdk>,
   query: string,
   limit: number
 ): Promise<readonly ObjectSearchItem[]> {
   // Primary ids are available on every object store and form the reliable fallback. Scoped.list()
   // narrows broad searches to viewable types before storage, rather than filtering rows afterwards.
-  const primaryMatches = await (authState.scoped
-    ? authState.scoped.objects.list({ idPrefix: query, limit })
-    : sixb.objects.list({ idPrefix: query, limit }))
+  const primaryMatches = await sdk.objects.list({ idPrefix: query, limit })
 
   const capabilities = sixb.storage.objects.queryCapabilities()
   const supportsTextSearch =
@@ -212,14 +200,9 @@ async function searchObjects(
     typeof sixb.storage.objects.queryObjects === "function"
 
   const searchableTypes = supportsTextSearch
-    ? sixb.objects.listTypes().filter(
-        (objectType) =>
-          Boolean(objectType.search?.defaultText?.length) &&
-          isAllowed(authState.authz, {
-            kind: "object.view",
-            objectTypeId: objectType.id,
-          })
-      )
+    ? sdk.objects
+        .listTypes()
+        .filter((objectType) => Boolean(objectType.search?.defaultText?.length))
     : []
 
   const textMatches = await Promise.all(
@@ -233,14 +216,7 @@ async function searchObjects(
           input: { kind: "start", objectTypeId: objectType.id },
         },
       }
-      const result = await executeObjectQuery(
-        { projectId: sixb.id, query: objectQuery },
-        {
-          ontology: sixb.ontology,
-          storage: sixb.storage.objects,
-          authorization: authState.authz ?? undefined,
-        }
-      )
+      const result = await sdk.objects.executeQuery({ query: objectQuery })
       return result.objects
     })
   )
@@ -250,14 +226,14 @@ async function searchObjects(
     const ref = { objectTypeId: row.objectTypeId, primaryId: row.primaryId }
     const identity = objectRefIdentity(ref)
     if (items.has(identity)) continue
-    items.set(identity, { ref, label: objectSearchLabel(sixb, row) })
+    items.set(identity, { ref, label: objectSearchLabel(sdk, row) })
     if (items.size === limit) break
   }
   return [...items.values()]
 }
 
-function objectSearchLabel(sixb: Sixb<readonly OntologySource[]>, row: ObjectRow): string {
-  const objectType = sixb.objects.resolveType(row.objectTypeId)
+function objectSearchLabel(sdk: ReturnType<typeof requireRequestSdk>, row: ObjectRow): string {
+  const objectType = sdk.objects.resolveType(row.objectTypeId)
   const titlePropertyId = objectType.search?.title
   const title = titlePropertyId ? row.properties[titlePropertyId] : undefined
   const displayTitle =
@@ -281,7 +257,7 @@ async function objectFileContentResponse(
   },
   options: { readonly head?: boolean } = {}
 ) {
-  const { scoped } = requestAuthState(context)
+  const sdk = requireRequestSdk(context)
 
   return createContextualFileContentResponse({
     blobStorage: sixb.blobs,
@@ -292,7 +268,7 @@ async function objectFileContentResponse(
     head: options.head,
     hideError: (error) => error instanceof AuthorizationError,
     resolveRoot: async () => {
-      const row = await getObjectRow(sixb, scoped, context.params)
+      const row = await getObjectRow(sdk, context.params)
       if (!row) {
         return null
       }
@@ -315,7 +291,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             set.status = 400
             return { error: "Object search limit must be positive" }
           }
-          const items = await searchObjects(sixb, requestAuthState(context), parsed.q, limit)
+          const items = await searchObjects(sixb, requireRequestSdk(context), parsed.q, limit)
           return ObjectSearchResponseSchema.parse({ items })
         } catch (error) {
           return handleObjectQueryError(error, set)
@@ -340,7 +316,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       "/api/objects",
       async (context) => {
         const { query, set } = context
-        const { scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
 
         try {
           const params = {
@@ -356,9 +332,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             orderBy: query.orderBy,
             order: query.order,
           }
-          const result = scoped
-            ? await scoped.objects.list(params)
-            : await sixb.objects.list(params)
+          const result = await sdk.objects.list(params)
 
           return {
             objects: result.objects.map(serializeObject),
@@ -405,18 +379,10 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             query: ObjectQuery
             includeTotal?: boolean
           }
-          const result = await executeObjectQuery(
-            {
-              projectId: sixb.id,
-              query: parsed.query,
-              includeTotal: parsed.includeTotal,
-            },
-            {
-              ontology: sixb.ontology,
-              storage: sixb.storage.objects,
-              authorization: requestAuthState(context).authz ?? undefined,
-            }
-          )
+          const result = await requireRequestSdk(context).objects.executeQuery({
+            query: parsed.query,
+            includeTotal: parsed.includeTotal,
+          })
 
           return {
             objects: result.objects.map(serializeExpandedObject),
@@ -488,17 +454,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           const parsed = ObjectQueryCountRequestSchema.parse(body) as {
             query: ObjectQuery
           }
-          const result = await countObjects(
-            {
-              projectId: sixb.id,
-              query: parsed.query,
-            },
-            {
-              ontology: sixb.ontology,
-              storage: sixb.storage.objects,
-              authorization: requestAuthState(context).authz ?? undefined,
-            }
-          )
+          const result = await requireRequestSdk(context).objects.count({ query: parsed.query })
 
           return {
             count: result.count,
@@ -567,17 +523,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           const parsed = ObjectQueryExistsRequestSchema.parse(body) as {
             query: ObjectQuery
           }
-          const result = await existsObjects(
-            {
-              projectId: sixb.id,
-              query: parsed.query,
-            },
-            {
-              ontology: sixb.ontology,
-              storage: sixb.storage.objects,
-              authorization: requestAuthState(context).authz ?? undefined,
-            }
-          )
+          const result = await requireRequestSdk(context).objects.exists({ query: parsed.query })
 
           return {
             exists: result.exists,
@@ -647,18 +593,10 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             query: ObjectQuery
             facets: { propertyId: string; limit: number }[]
           }
-          const result = await facetObjects(
-            {
-              projectId: sixb.id,
-              query: parsed.query,
-              facets: parsed.facets,
-            },
-            {
-              ontology: sixb.ontology,
-              storage: sixb.storage.objects,
-              authorization: requestAuthState(context).authz ?? undefined,
-            }
-          )
+          const result = await requireRequestSdk(context).objects.facet({
+            query: parsed.query,
+            facets: parsed.facets,
+          })
 
           return {
             facets: result.facets,
@@ -765,10 +703,10 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       "/api/objects/:objectTypeId/:objectId",
       async (context) => {
         const { params, set } = context
-        const { scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
 
         try {
-          const row = await getObjectRow(sixb, scoped, params)
+          const row = await getObjectRow(sdk, params)
           if (!row) {
             set.status = 404
             return { error: "Object not found" }
@@ -800,7 +738,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       "/api/objects/:objectTypeId/:objectId",
       async (context) => {
         const { params, body, set } = context
-        const { scoped } = requestAuthState(context)
+        const sdk = requireRequestSdk(context)
         try {
           const parsedBody = UpsertObjectBodySchema.parse(body)
           // Scoped when a principal is attached, privileged only when auth is off or the request is
@@ -808,10 +746,9 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           // too: on the privileged runtime it answers 404 for an unregistered type before any grant
           // is checked, which told an ungranted principal apart from a registered type (403) and so
           // handed back the type universe that `listObjectTypes` filters out.
-          const runtime = scoped ?? sixb
-          const primaryPropertyId = runtime.objects.getPrimaryPropertyId(params.objectTypeId)
+          const primaryPropertyId = sdk.objects.getPrimaryPropertyId(params.objectTypeId)
           const properties = { ...parsedBody.properties, [primaryPropertyId]: params.objectId }
-          const object = await runtime.objects.upsert(params.objectTypeId, properties)
+          const object = await sdk.objects.upsert(params.objectTypeId, properties)
           return serializeObject(object)
         } catch (error) {
           // Was a local catch mapping every error to 404/400, which turned a missing grant into

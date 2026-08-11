@@ -53,38 +53,53 @@ function createSixbStub(syncRuns: Partial<SyncRunStorage>): Sixb<readonly Ontolo
   } as unknown as Sixb<readonly OntologySource[]>
 }
 
+function createTestApp(syncRuns: Partial<SyncRunStorage>) {
+  const sixb = createSixbStub(syncRuns)
+  const sdk = {
+    syncs: {
+      list: () => sixb.syncs.list(),
+      getById: (syncId: string) => sixb.syncs.getById(syncId),
+      runs: {
+        listLatest: (syncIds: readonly string[]) =>
+          syncRuns.listLatestBySyncIds?.({ projectId: sixb.id, syncIds }),
+      },
+    },
+  }
+  const app = new Elysia()
+  app.derive(() => ({ sdk }))
+
+  return registerSyncRoutes(app, sixb)
+}
+
 describe("sync routes", () => {
   test("list route bulk loads latest sync runs once", async () => {
     let bulkCalls = 0
     let listCalls = 0
     const requestedSyncIds: string[][] = []
 
-    const app = registerSyncRoutes(
-      new Elysia(),
-      createSixbStub({
-        async list() {
-          listCalls += 1
-          throw new Error("list must not be called from the sync list route")
-        },
-        async listLatestBySyncIds(input: ListLatestSyncRunsInput) {
-          bulkCalls += 1
-          requestedSyncIds.push([...input.syncIds])
-          return {
-            runs: [
-              {
-                id: "run-invoices",
-                projectId: "my-app",
-                syncId: "sync-invoices",
-                datasetId: "raw.erp.invoices",
-                mode: "merge",
-                status: "running",
-                startedAt: new Date("2026-04-06T16:00:00.000Z"),
-              },
-            ],
-          }
-        },
-      })
-    )
+    const app = createTestApp({
+      async list() {
+        listCalls += 1
+        throw new Error("list must not be called from the sync list route")
+      },
+      async listLatestBySyncIds(input: ListLatestSyncRunsInput) {
+        bulkCalls += 1
+        requestedSyncIds.push([...input.syncIds])
+        return {
+          runs: [
+            {
+              id: "run-invoices",
+              projectId: "my-app",
+              syncId: "sync-invoices",
+              datasetId: "raw.erp.invoices",
+              mode: "merge",
+              status: "running",
+              startedAt: new Date("2026-04-06T16:00:00.000Z"),
+            },
+          ],
+        }
+      },
+    })
 
     const response = await app.handle(new Request("http://localhost/api/syncs"))
     expect(response.status).toBe(200)

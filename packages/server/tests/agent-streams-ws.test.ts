@@ -20,6 +20,7 @@ import {
   agentRunStreamDefinition,
   agentRunStreamId,
 } from "@sixb/core/agents/streams"
+import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { AgentStorage } from "@sixb/core/storage"
 import { canAccessAgentRunStream, parseAgentStreamMessage } from "../src/routes/ws/agents"
 import { SixbServer } from "../src/server"
@@ -258,19 +259,19 @@ describe("canAccessAgentRunStream", () => {
     })
 
     await expect(
-      canAccessAgentRunStream(sixb, { runId, authz: authz(owner, [agentId]) })
+      canAccessAgentRunStream(requestSdk(sixb, authz(owner, [agentId])), runId)
     ).resolves.toEqual({
       ok: true,
     })
-    await expect(canAccessAgentRunStream(sixb, { runId, authz: authz(owner) })).resolves.toEqual({
+    await expect(canAccessAgentRunStream(requestSdk(sixb, authz(owner)), runId)).resolves.toEqual({
       ok: false,
       message: "Agent run not found.",
     })
     await expect(
-      canAccessAgentRunStream(sixb, {
-        runId,
-        authz: authz({ type: "user", id: "usr_other" }, [agentId]),
-      })
+      canAccessAgentRunStream(
+        requestSdk(sixb, authz({ type: "user", id: "usr_other" }, [agentId])),
+        runId
+      )
     ).resolves.toEqual({ ok: false, message: "Agent run not found." })
   })
 
@@ -294,13 +295,19 @@ describe("canAccessAgentRunStream", () => {
     })
 
     await expect(
-      canAccessAgentRunStream(sixb, {
-        runId: "agt_run_missing",
-        authz: authz(owner, [agentId]),
-      })
+      canAccessAgentRunStream(requestSdk(sixb, authz(owner, [agentId])), "agt_run_missing")
     ).resolves.toEqual({ ok: false, message: "Agent run not found." })
   })
 })
+
+function requestSdk(sixb: Sixb<readonly OntologySource[]>, authorization: AuthorizationContext) {
+  return bindRequestExecution(sixb, {
+    request: new Request("http://localhost/ws/agents", {
+      headers: { "x-request-id": "req_agent_stream_test" },
+    }),
+    authorization: { type: "principal", context: authorization },
+  })
+}
 
 function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
   options: SixbOptions<TOntologySources>

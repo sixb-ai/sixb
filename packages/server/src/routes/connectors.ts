@@ -1,17 +1,20 @@
 import type { OntologySource, Sixb } from "@sixb/core"
+import type { ExecutionSixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
+import { requireRequestSdk } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ConnectorParamsSchema, ConnectorSchema } from "../schemas/connectors"
 
 function serializeConnector(
   connector: ReturnType<Sixb<readonly OntologySource[]>["connectors"]["list"]>[number],
-  sixb: Sixb<readonly OntologySource[]>
+  sixb: Sixb<readonly OntologySource[]>,
+  sdk: ExecutionSixb<readonly OntologySource[]>
 ) {
   return {
     id: connector.id,
     type: connector.adapter.type,
-    syncIds: sixb.syncs
+    syncIds: sdk.syncs
       .list()
       .filter((sync) => sync.connector.id === connector.id)
       .map((sync) => sync.id),
@@ -33,8 +36,9 @@ export function registerConnectorRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
   return app
     .get(
       "/api/connectors",
-      () => {
-        return sixb.connectors.list().map((connector) => serializeConnector(connector, sixb))
+      (context) => {
+        const sdk = requireRequestSdk(context)
+        return sixb.connectors.list().map((connector) => serializeConnector(connector, sixb, sdk))
       },
       {
         response: { 200: ConnectorSchema.array() },
@@ -47,14 +51,16 @@ export function registerConnectorRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
     )
     .get(
       "/api/connectors/:connectorId",
-      ({ params, set }) => {
+      (context) => {
+        const { params, set } = context
+        const sdk = requireRequestSdk(context)
         const connector = sixb.connectors.getById(params.connectorId)
         if (!connector) {
           set.status = 404
           return { error: "Connector not found" }
         }
 
-        return serializeConnector(connector, sixb)
+        return serializeConnector(connector, sixb, sdk)
       },
       {
         params: ConnectorParamsSchema,
