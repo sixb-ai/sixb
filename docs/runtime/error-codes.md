@@ -32,8 +32,9 @@ interface SixbFailure<TCode extends SixbErrorCode = SixbErrorCode> {
 Each primitive specializes `TCode` to the codes it can persist. Most migrated runs currently allow
 `internal.unexpected | runtime.cancelled`. Action failures also allow the retryable
 `queue.enqueue_failed` code and require `{ actionId, runId, phase }` in `details`.
-Webhook runs declare only `internal.unexpected`: their lifecycle has no cancellation state,
-while expected delivery outcomes remain represented by their HTTP status and delivery claim result.
+Webhook runs allow `internal.unexpected | webhook.delivery_failed`; only retryable post-claim
+failures use the delivery code. The idempotency journal and run reuse the same failure record.
+Expected non-retryable outcomes remain represented by their HTTP status and claim result.
 The ontology outbox declares `event.delivery_failed`; its durable record is retained while publication
 is retried.
 
@@ -53,3 +54,4 @@ Each storage and wire change remains independently reviewable even though every 
 | `projection.run_already_terminal` | No | A delivery targeted a projection run that had already failed or been cancelled. | Do not reuse the terminal run ID; dispatch a new semantic run if needed. |
 | `projection.run_identity_mismatch` | No | A projection run or delivery does not match its pinned semantic identity. | Discard the stale delivery and dispatch from the current projection definition. |
 | `runtime.cancelled` | No | An in-flight operation was cancelled before completion. | Confirm the cancellation was intentional before requesting another run. |
+| `webhook.delivery_failed` | Yes | A webhook handler failed with a retryable outcome. | Let the provider retry, then inspect the handler. |

@@ -58,6 +58,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Execution was cancelled.",
     retryable: false,
   },
+  "webhook.delivery_failed": {
+    publicMessage: "Webhook delivery failed.",
+    retryable: true,
+  },
 } as const satisfies Readonly<Record<string, SixbErrorDefinition>>
 
 type CatalogErrorCode = keyof typeof SIXB_ERROR_DEFINITIONS

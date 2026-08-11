@@ -11,10 +11,14 @@ import type {
   WebhookResponse,
 } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { captureSixbFailure } from "@sixb/core/internal/errors"
+import { captureSixbFailure, createSixbError, toSixbFailure } from "@sixb/core/internal/errors"
 import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
-import type { WebhookDeliveryClaimResult, WebhookDeliveryKey } from "@sixb/core/storage"
-import { WEBHOOK_RUN_FAILURE_CODES } from "@sixb/core/storage"
+import type {
+  WebhookDeliveryClaimResult,
+  WebhookDeliveryFailure,
+  WebhookDeliveryKey,
+} from "@sixb/core/storage"
+import { WEBHOOK_DELIVERY_FAILURE_CODES, WEBHOOK_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
 
@@ -45,8 +49,21 @@ interface WebhookRunFinishBaseInput {
 
 type WebhookRunFinishInput = WebhookRunFinishBaseInput &
   (
-    | { readonly status: "succeeded" | "skipped"; readonly error?: never }
-    | { readonly status: "failed"; readonly error: unknown }
+    | {
+        readonly status: "succeeded" | "skipped"
+        readonly error?: never
+        readonly failure?: never
+      }
+    | {
+        readonly status: "failed"
+        readonly error: unknown
+        readonly failure?: never
+      }
+    | {
+        readonly status: "failed"
+        readonly error?: never
+        readonly failure: WebhookDeliveryFailure
+      }
   )
 
 type DeliveryClaimResult =
@@ -281,14 +298,22 @@ async function dispatchWebhookRun(
   try {
     response = await webhook.handle(handlerContext)
   } catch (error) {
-    reportFailure(error)
+    const deliveryFailure = createWebhookDeliveryFailure({
+      registered,
+      runId,
+      idempotencyKey,
+      message: "Webhook handler failed",
+      cause: error,
+      responseStatus: 500,
+    })
+    reportFailure(deliveryFailure.error)
     // Handler failures mark the key failed so the provider's next retry can
     // attempt the delivery again.
     if (deliveryKey) {
       await host.storage.webhookDeliveries?.fail({
         ...deliveryKey,
-        failedAt: new Date().toISOString(),
-        error: error instanceof Error ? error.message : String(error),
+        failedAt: deliveryFailure.failure.at,
+        failure: deliveryFailure.failure,
       })
     }
 
@@ -302,7 +327,7 @@ async function dispatchWebhookRun(
       responseStatus: 500,
       idempotencyKey,
       deliveryClaimResult,
-      error: "Webhook handler failed",
+      failure: deliveryFailure.failure,
     })
     return { error: "Webhook handler failed" }
   }
@@ -312,15 +337,24 @@ async function dispatchWebhookRun(
   const failureMessage = `Webhook handler returned HTTP ${responseStatus}`
   const shouldRetryDelivery =
     runStatus === "failed" && (responseStatus < 400 || responseStatus >= 500)
+  const deliveryFailure = shouldRetryDelivery
+    ? createWebhookDeliveryFailure({
+        registered,
+        runId,
+        idempotencyKey,
+        message: failureMessage,
+        responseStatus,
+      })
+    : undefined
 
   try {
     if (deliveryKey) {
       const finalizedAt = new Date().toISOString()
-      if (shouldRetryDelivery) {
+      if (deliveryFailure) {
         await host.storage.webhookDeliveries?.fail({
           ...deliveryKey,
-          failedAt: finalizedAt,
-          error: failureMessage,
+          failedAt: deliveryFailure.failure.at,
+          failure: deliveryFailure.failure,
         })
       } else {
         await host.storage.webhookDeliveries?.complete({
@@ -346,8 +380,8 @@ async function dispatchWebhookRun(
     return { error: "Webhook delivery completion failed" }
   }
 
-  if (shouldRetryDelivery) {
-    reportFailure(new Error(failureMessage))
+  if (deliveryFailure) {
+    reportFailure(deliveryFailure.error)
   }
   const terminalMetadata = {
     host,
@@ -360,7 +394,9 @@ async function dispatchWebhookRun(
   }
   await finishWebhookRun(
     runStatus === "failed"
-      ? { ...terminalMetadata, status: "failed", error: failureMessage }
+      ? deliveryFailure
+        ? { ...terminalMetadata, status: "failed", failure: deliveryFailure.failure }
+        : { ...terminalMetadata, status: "failed", error: failureMessage }
       : { ...terminalMetadata, status: "succeeded" }
   )
 
@@ -400,7 +436,8 @@ async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {
   }
 
   try {
-    const finishedAt = new Date()
+    const finishedAt =
+      input.status === "failed" && input.failure ? new Date(input.failure.at) : new Date()
     const terminalMetadata = {
       id: input.runId,
       projectId: input.host.id,
@@ -415,22 +452,53 @@ async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {
         ? {
             ...terminalMetadata,
             status: "failed",
-            error: captureSixbFailure(input.error, {
-              allowedCodes: WEBHOOK_RUN_FAILURE_CODES,
-              defaultCode: "internal.unexpected",
-              details: {
-                connectorId: input.registered.connector.id,
-                webhookId: input.registered.webhook.id,
-                runId: input.runId,
-              },
-              at: finishedAt,
-            }),
+            error:
+              input.failure ??
+              captureSixbFailure(input.error, {
+                allowedCodes: WEBHOOK_RUN_FAILURE_CODES,
+                defaultCode: "internal.unexpected",
+                details: {
+                  connectorId: input.registered.connector.id,
+                  webhookId: input.registered.webhook.id,
+                  runId: input.runId,
+                },
+                at: finishedAt,
+              }),
           }
         : { ...terminalMetadata, status: input.status }
     )
   } catch {
     // Webhook run history is observability-only. Do not change provider responses
     // when history storage is unavailable or temporarily failing.
+  }
+}
+
+function createWebhookDeliveryFailure(input: {
+  readonly registered: RegisteredWebhook
+  readonly runId: string
+  readonly idempotencyKey?: string
+  readonly message: string
+  readonly cause?: unknown
+  readonly responseStatus?: number
+}): { readonly error: Error; readonly failure: WebhookDeliveryFailure } {
+  const at = new Date()
+  const error = createSixbError("webhook.delivery_failed", input.message, {
+    ...(input.cause === undefined ? {} : { cause: input.cause }),
+    details: {
+      connectorId: input.registered.connector.id,
+      webhookId: input.registered.webhook.id,
+      runId: input.runId,
+      ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+      ...(input.responseStatus === undefined ? {} : { responseStatus: input.responseStatus }),
+    },
+  })
+
+  return {
+    error,
+    failure: toSixbFailure(error, {
+      allowedCodes: WEBHOOK_DELIVERY_FAILURE_CODES,
+      at,
+    }),
   }
 }
 

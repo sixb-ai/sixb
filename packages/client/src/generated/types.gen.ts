@@ -10160,7 +10160,7 @@ export type ListWebhookRunsResponses = {
       idempotencyKey?: string
       deliveryClaimResult?: "claimed" | "duplicate" | "in_progress"
       error?: {
-        code: "internal.unexpected"
+        code: "internal.unexpected" | "webhook.delivery_failed"
         message: string
         retryable: boolean
         at: string

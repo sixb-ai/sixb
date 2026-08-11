@@ -5,10 +5,10 @@ export type WebhookRunStatus = "running" | "succeeded" | "failed" | "skipped"
 export type FinishWebhookRunStatus = Exclude<WebhookRunStatus, "running">
 
 /** Error codes a webhook run can persist and expose through its public contract. */
-export const WEBHOOK_RUN_FAILURE_CODES = ["internal.unexpected"] as const satisfies readonly [
-  SixbErrorCode,
-  ...SixbErrorCode[],
-]
+export const WEBHOOK_RUN_FAILURE_CODES = [
+  "internal.unexpected",
+  "webhook.delivery_failed",
+] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 
 export type WebhookRunFailureCode = (typeof WEBHOOK_RUN_FAILURE_CODES)[number]
 

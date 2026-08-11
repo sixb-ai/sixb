@@ -47,6 +47,9 @@ import actionFailureRecordSql from "./migrations/017-action-failure-record.sql" 
 import ontologyOutboxFailureRecordSql from "./migrations/018-ontology-outbox-failure-record.sql" with {
   type: "text",
 }
+import webhookDeliveryFailureRecordSql from "./migrations/019-webhook-delivery-failure-record.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -318,6 +321,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("016-webhook-run-failure-record", webhookRunFailureRecordSql),
     pgSql("017-action-failure-record", actionFailureRecordSql),
     pgSql("018-ontology-outbox-failure-record", ontologyOutboxFailureRecordSql),
+    pgSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
   ],
 })
 
