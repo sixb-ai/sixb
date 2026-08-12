@@ -15,6 +15,17 @@ const PIPELINE_STEP_FAILURE = {
   },
 } as const
 
+const PIPELINE_RUN_FAILURE = {
+  code: "internal.unexpected",
+  retryable: false,
+  message: "Pipeline run failed.",
+  at: "2026-05-08T10:00:03.000Z",
+  details: {
+    pipelineId: "canonical-transactions",
+    runId: "run-002",
+  },
+} as const
+
 describe("worker run lifecycle events", () => {
   test("stores sync run lifecycle events with sync topic and run partition", () => {
     const started = toStoredEvent({
@@ -168,5 +179,33 @@ describe("worker run lifecycle events", () => {
       throw new Error("Expected a pipeline step completion event.")
     }
     expect(event.payload.error).toEqual(PIPELINE_STEP_FAILURE)
+  })
+
+  test("preserves the pipeline run failure record", async () => {
+    const eventsRuntime = new DomainEventService({
+      projectId: "project-a",
+      broker: new InMemoryBroker(),
+    })
+
+    await eventsRuntime.append({
+      events: [
+        {
+          type: "pipeline.run.finished",
+          payload: {
+            pipelineId: "canonical-transactions",
+            runId: "run-002",
+            status: "failed",
+            error: PIPELINE_RUN_FAILURE,
+          },
+        },
+      ],
+    })
+
+    const [event] = await eventsRuntime.read({ types: ["pipeline.run.finished"] })
+    expect(event?.type).toBe("pipeline.run.finished")
+    if (event?.type !== "pipeline.run.finished") {
+      throw new Error("Expected a pipeline run completion event.")
+    }
+    expect(event.payload.error).toEqual(PIPELINE_RUN_FAILURE)
   })
 })

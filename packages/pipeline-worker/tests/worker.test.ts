@@ -513,12 +513,18 @@ describe("PipelineWorker", () => {
       status: string
       datasetId?: string
       versionId?: string
+      error?: unknown
     }
-    expect(finishedPayload.pipelineId).toBe("customers")
-    expect(finishedPayload.runId).toBe("run-fails-late")
-    expect(finishedPayload.status).toBe("failed")
-    expect(finishedPayload.datasetId).toBeUndefined()
-    expect(finishedPayload.versionId).toBeUndefined()
+    const failedRun = await sixb.storage.pipelineRuns!.getById({
+      projectId: sixb.id,
+      id: "run-fails-late",
+    })
+    expect(finishedPayload).toEqual({
+      pipelineId: "customers",
+      runId: "run-fails-late",
+      status: "failed",
+      error: failedRun?.error,
+    })
   })
 
   test("fails an aborted queue job after a step has committed without reporting it", async () => {
@@ -630,6 +636,7 @@ describe("PipelineWorker", () => {
       retryable: false,
     })
     expect(events[5]?.payload).toMatchObject({ error: cancelledStep?.error })
+    expect(events[6]?.payload).toMatchObject({ error: cancelledRun?.error })
     expect(reportCount).toBe(0)
   })
 })

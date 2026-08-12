@@ -286,10 +286,13 @@ events
   .pipelines()
   .run("run-1")
   .subscribe((event) => {
-    if (event.type === "pipeline.run.step.finished" && event.payload.error) {
+    if (
+      (event.type === "pipeline.run.finished" || event.type === "pipeline.run.step.finished") &&
+      event.payload.error
+    ) {
       const code: "internal.unexpected" | "runtime.cancelled" = event.payload.error.code
       const message: string = event.payload.error.message
-      // @ts-expect-error — pipeline step failures expose only their primitive's code union.
+      // @ts-expect-error — pipeline lifecycle failures expose only their primitive's code union.
       const datasetCode: "dataset.not_found" = event.payload.error.code
       void [code, message, datasetCode]
     }

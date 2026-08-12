@@ -39,6 +39,7 @@ export interface RunPipelineJobInput {
   readonly job: PipelineJob
   readonly signal?: AbortSignal
   readonly onRunStarted?: PipelineRunStartedHandler
+  readonly onRunFinished?: PipelineRunFinishedHandler
   readonly onRunFailed?: PipelineRunFailedHandler
   readonly onStepStarted?: PipelineStepStartedHandler
   readonly onStepFinished?: PipelineStepFinishedHandler
@@ -48,6 +49,8 @@ export interface RunPipelineJobInput {
 export type PipelineStepCommittedHandler = (result: PipelineStepRunResult) => Promise<void> | void
 
 export type PipelineRunStartedHandler = (run: PipelineRunRecord) => Promise<void> | void
+
+export type PipelineRunFinishedHandler = (run: PipelineRunRecord) => Promise<void> | void
 
 export type PipelineRunFailedHandler = (error: unknown, run: PipelineRunRecord) => void
 
