@@ -144,7 +144,7 @@ export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
           nodeKey: node.nodeKey,
           status: requireTerminalStatus(node.status, `Workflow node run '${node.id}'`),
           finishedAt: node.finishedAt.toISOString(),
-          ...(node.error ? { error: node.error.message } : {}),
+          ...(node.error ? { error: node.error } : {}),
         },
       },
     ])
@@ -163,7 +163,7 @@ export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
           runId: run.id,
           status: requireTerminalStatus(run.status, `Workflow run '${run.id}'`),
           finishedAt: run.finishedAt.toISOString(),
-          ...(run.error ? { error: run.error.message } : {}),
+          ...(run.error ? { error: run.error } : {}),
         },
       },
     ])

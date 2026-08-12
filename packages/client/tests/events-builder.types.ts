@@ -269,6 +269,16 @@ events
   .run("run-1")
   .subscribe((event) => {
     const runId: string = event.payload.runId
+    if (
+      (event.type === "workflow.run.finished" || event.type === "workflow.run.node.finished") &&
+      event.payload.error
+    ) {
+      const code: "internal.unexpected" | "runtime.cancelled" = event.payload.error.code
+      const message: string = event.payload.error.message
+      // @ts-expect-error — workflow lifecycle failures expose only their primitive's code union.
+      const datasetCode: "dataset.not_found" = event.payload.error.code
+      void [code, message, datasetCode]
+    }
     void runId
   })
 

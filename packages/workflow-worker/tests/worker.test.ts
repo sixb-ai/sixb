@@ -443,14 +443,34 @@ describe("WorkflowWorker", () => {
       runId: "wfrun_worker_failed",
       nodeRunId: "wfrun_worker_failed:node:0",
       status: "failed",
-      error: "An unexpected internal error occurred.",
+      error: {
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: expect.any(String),
+        details: {
+          workflowId: workflow.id,
+          workflowRunId: "wfrun_worker_failed",
+          nodeRunId: "wfrun_worker_failed:node:0",
+        },
+      },
     })
     expect(events[3]?.payload).toMatchObject({
       workflowId: workflow.id,
       runId: "wfrun_worker_failed",
       status: "failed",
       finishedAt: expect.any(String),
-      error: "An unexpected internal error occurred.",
+      error: {
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: expect.any(String),
+        details: {
+          workflowId: workflow.id,
+          workflowRunId: "wfrun_worker_failed",
+          nodeRunId: "wfrun_worker_failed:node:0",
+        },
+      },
     })
 
     await Bun.sleep(50)

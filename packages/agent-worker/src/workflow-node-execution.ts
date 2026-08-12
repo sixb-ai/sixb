@@ -544,7 +544,7 @@ async function emitNodeAndRunFailed(
             nodeKey: failed.node.nodeKey,
             status,
             finishedAt: requireFinishedAt(failed.node).toISOString(),
-            ...(failed.node.error ? { error: failed.node.error.message } : {}),
+            ...(failed.node.error ? { error: failed.node.error } : {}),
           },
         },
         {
@@ -554,7 +554,7 @@ async function emitNodeAndRunFailed(
             runId: failed.run.id,
             status,
             finishedAt: requireFinishedAt(failed.run).toISOString(),
-            ...(failed.run.error ? { error: failed.run.error.message } : {}),
+            ...(failed.run.error ? { error: failed.run.error } : {}),
           },
         },
       ],
